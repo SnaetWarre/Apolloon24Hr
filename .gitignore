@@ -1,0 +1,31 @@
+node_modules/
+dist/
+release/
+.env
+
+# Electron
+.electron-gyp/
+*.log
+
+# Build artifacts
+*.AppImage
+*.exe
+*.deb
+*.dmg
+
+# Cache
+.cache/
+.npm/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Database
+data/*.db-shm
+data/*.db-wal
+

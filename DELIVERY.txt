@@ -1,0 +1,15 @@
+How to use this app:
+
+1. Run the installer (Windows) or AppImage (Linux)
+2. The app starts automatically
+3. Find the .env file next to the app and set ADMIN_PASSWORD
+4. Let firewall through when Windows/Linux asks
+5. Other laptops on same network go to http://YOUR_IP:5173
+6. Login with the admin password
+
+Find your IP:
+- Windows: open cmd, type ipconfig
+- Linux: open terminal, type ip addr
+
+That's it.
+
