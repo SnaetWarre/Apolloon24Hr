@@ -52,7 +52,8 @@ function startServer() {
   const env = { 
     ...process.env, 
     NODE_ENV: 'production',
-    NODE_PATH: isDev ? '' : path.join(process.resourcesPath, 'app.asar.unpacked/node_modules')
+    NODE_PATH: isDev ? '' : path.join(process.resourcesPath, 'app.asar.unpacked/node_modules'),
+    DATA_PATH: app.getPath('userData')
   };
   
   if (fs.existsSync(envPath)) {

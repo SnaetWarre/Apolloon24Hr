@@ -2,7 +2,10 @@ import fs from 'fs';
 import path from 'path';
 import Database from 'better-sqlite3';
 
-const DATA_DIR = path.resolve(process.cwd(), 'data');
+// Use writable user data directory if DATA_PATH env var is set (for packaged app)
+const DATA_DIR = process.env.DATA_PATH 
+  ? path.resolve(process.env.DATA_PATH, 'data')
+  : path.resolve(process.cwd(), 'data');
 const DB_FILE = path.join(DATA_DIR, 'app.db');
 
 function ensureDataDir() {
