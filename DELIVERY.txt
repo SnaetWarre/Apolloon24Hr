@@ -1,9 +1,10 @@
 How to use:
 
 1. Run the installer
-2. Set admin password when prompted
-3. Allow firewall access
-4. Other laptops connect to http://YOUR_IP:5173
+2. Allow firewall access
+3. Other laptops connect to http://YOUR_IP:5173
+
+Default admin password: `apolloon2025`
 
 Find your IP:
 - Windows: cmd > ipconfig

@@ -25,9 +25,10 @@ Installers will be in the `release` folder.
 Using the App
 
 1. Run the installer on the host laptop
-2. Set admin password on first launch
-3. Allow firewall when prompted
-4. Other laptops connect to http://HOST_IP:5173
+2. Allow firewall when prompted
+3. Other laptops connect to http://HOST_IP:5173
+
+Default admin password: `apolloon2025`
 
 Find host IP:
 - Windows: `ipconfig`

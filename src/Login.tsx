@@ -28,7 +28,7 @@ export const Login: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) => {
       alignItems: 'center',
       minHeight: '100vh'
     }}>
-      <form onSubmit={onSubmit} style={{ 
+      <form onSubmit={onSubmit} className="login-form" style={{ 
         display: 'flex', 
         flexDirection: 'column',
         gap: 16, 
@@ -37,8 +37,7 @@ export const Login: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) => {
         background: 'rgba(0, 0, 0, 0.5)',
         borderRadius: 12,
         border: '2px solid rgba(59, 130, 246, 0.3)',
-        boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
-        minWidth: 350
+        boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)'
       }}>
         <div style={{
           textAlign: 'center',
@@ -66,39 +65,12 @@ export const Login: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) => {
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           disabled={loading}
-          style={{
-            fontSize: 16,
-            padding: '12px 16px',
-            background: 'rgba(255, 255, 255, 0.95)',
-            border: '2px solid transparent',
-            borderRadius: '6px',
-            outline: 'none',
-            transition: 'all 0.3s ease'
-          }}
-          onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
-          onBlur={(e) => e.target.style.borderColor = 'transparent'}
+          className="input"
         />
         <button 
           type="submit" 
           disabled={loading || !password.trim()}
-          style={{
-            fontSize: 16,
-            padding: '12px 24px',
-            fontWeight: 700,
-            background: loading || !password.trim() 
-              ? 'rgba(100, 100, 100, 0.5)' 
-              : 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
-            color: 'white',
-            border: 'none',
-            borderRadius: '6px',
-            cursor: loading || !password.trim() ? 'not-allowed' : 'pointer',
-            boxShadow: loading || !password.trim() 
-              ? 'none' 
-              : '0 4px 12px rgba(59, 130, 246, 0.4)',
-            transition: 'all 0.3s ease',
-            textTransform: 'uppercase',
-            letterSpacing: '0.5px'
-          }}
+          className="btn btn--primary"
         >
           {loading ? 'Bezig…' : 'Login'}
         </button>

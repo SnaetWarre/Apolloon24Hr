@@ -46,39 +46,19 @@ export const App: React.FC = () => {
   }, [selectedRunnerId, setStatus, selectNext, selectPrev, authed]);
 
   return (
-    <div style={{ 
+    <div className="app-root" style={{ 
       minHeight: '100vh',
-      background: 'linear-gradient(135deg, #1e3a8a 0%, #0f172a 100%)',
-      color: '#ffffff',
-      padding: '24px'
+      background: 'linear-gradient(135deg, #1e3a8a 0%, #0f172a 100%)'
     }}>
       {!authed ? (
         <Login onSuccess={() => setAuthed(true)} />
       ) : (
         <>
-          <div style={{
-            background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
-            padding: '20px 32px',
-            marginBottom: '24px',
-            borderRadius: '12px',
-            boxShadow: '0 8px 32px rgba(59, 130, 246, 0.4)',
-            border: '2px solid rgba(147, 197, 253, 0.3)'
-          }}>
-            <h1 style={{ 
-              fontSize: '36px', 
-              fontWeight: 700, 
-              margin: 0,
-              textShadow: '2px 2px 8px rgba(0,0,0,0.3)',
-              letterSpacing: '1px'
-            }}>
+          <div className="hero">
+            <h1 className="app-title">
               🏃 Apolloon Runner Tracker
             </h1>
-            <p style={{ 
-              margin: '8px 0 0 0', 
-              fontSize: '14px', 
-              opacity: 0.9,
-              fontStyle: 'italic'
-            }}>
+            <p className="tagline">
               You'll never walk alone
             </p>
           </div>

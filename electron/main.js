@@ -38,12 +38,12 @@ function ensureEnvFile() {
   const envPath = path.join(app.getPath('userData'), '.env');
   if (!fs.existsSync(envPath)) {
     const envContent = `PORT=5173
-ADMIN_PASSWORD=admin
+ADMIN_PASSWORD=apolloon2025
 SESSION_SECRET=${generateRandomString(32)}
 `;
     fs.writeFileSync(envPath, envContent);
     console.log('Created default .env file at:', envPath);
-    console.log('Default password is: admin');
+    console.log('Default password is: apolloon2025');
   }
 }
 
