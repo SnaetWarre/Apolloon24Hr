@@ -1,31 +1,28 @@
 import { app, BrowserWindow } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { spawn } from 'child_process';
 import fs from 'fs';
-import { createSetupServer } from './setup-server.js';
+import { fork } from 'child_process';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 let mainWindow;
 let serverProcess;
-let setupServer;
 
-function createWindow(showSetup = false) {
+function createWindow() {
+  if (mainWindow) return; // Prevent multiple windows
+  
   mainWindow = new BrowserWindow({
-    width: showSetup ? 600 : 1400,
-    height: showSetup ? 700 : 900,
+    width: 1400,
+    height: 900,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
     },
   });
 
-  if (showSetup) {
-    const setupPath = path.join(__dirname, 'setup.html');
-    mainWindow.loadFile(setupPath);
-  } else if (process.env.NODE_ENV === 'development') {
+  if (!app.isPackaged) {
     mainWindow.loadURL('http://localhost:5173');
     mainWindow.webContents.openDevTools();
   } else {
@@ -37,22 +34,38 @@ function createWindow(showSetup = false) {
   });
 }
 
-function needsSetup() {
+function ensureEnvFile() {
   const envPath = path.join(app.getPath('userData'), '.env');
-  return !fs.existsSync(envPath);
+  if (!fs.existsSync(envPath)) {
+    const envContent = `PORT=5173
+ADMIN_PASSWORD=admin
+SESSION_SECRET=${generateRandomString(32)}
+`;
+    fs.writeFileSync(envPath, envContent);
+    console.log('Created default .env file at:', envPath);
+    console.log('Default password is: admin');
+  }
 }
 
-function startServer() {
-  const isDev = process.env.NODE_ENV === 'development';
+function generateRandomString(length) {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  let result = '';
+  for (let i = 0; i < length; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return result;
+}
+
+async function startServer() {
+  const isDev = !app.isPackaged;
   const serverPath = isDev 
-    ? path.join(__dirname, '../server/index.js')
-    : path.join(process.resourcesPath, 'app.asar.unpacked/server/index.js');
+    ? path.join(__dirname, '../server/index.mjs')
+    : path.join(process.resourcesPath, 'app.asar.unpacked/server/index.mjs');
   
   const envPath = path.join(app.getPath('userData'), '.env');
   const env = { 
     ...process.env, 
     NODE_ENV: 'production',
-    NODE_PATH: isDev ? '' : path.join(process.resourcesPath, 'app.asar.unpacked/node_modules'),
     DATA_PATH: app.getPath('userData')
   };
   
@@ -64,46 +77,48 @@ function startServer() {
     });
   }
   
-  const cwd = isDev ? process.cwd() : path.join(process.resourcesPath, 'app.asar.unpacked');
+  const cwd = isDev ? path.join(__dirname, '..') : path.join(process.resourcesPath, 'app.asar.unpacked');
   
-  // Use Electron's node executable to run the server (has correct native module version)
-  const nodeExec = process.execPath;
+  console.log('Starting server:', { serverPath, cwd });
   
-  serverProcess = spawn(nodeExec, [serverPath], {
-    stdio: 'inherit',
+  // Use fork to run server in Node subprocess (not Electron)
+  // Add --input-type=module to treat the file as ES module
+  serverProcess = fork(serverPath, [], {
+    stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
     env,
     cwd,
+    execArgv: []
   });
 
   serverProcess.on('error', (err) => {
     console.error('Failed to start server:', err);
   });
+
+  serverProcess.on('exit', (code, signal) => {
+    console.log('Server exited with code:', code, 'signal:', signal);
+  });
 }
 
-app.whenReady().then(() => {
-  if (needsSetup()) {
-    setupServer = createSetupServer();
-    createWindow(true);
-    
-    const checkSetup = setInterval(() => {
-      if (!needsSetup()) {
-        clearInterval(checkSetup);
-        if (mainWindow) mainWindow.close();
-        startServer();
-        setTimeout(() => createWindow(false), 2000);
-      }
-    }, 500);
-  } else {
-    startServer();
-    setTimeout(() => createWindow(false), 2000);
-  }
+// Prevent multiple instances
+const gotTheLock = app.requestSingleInstanceLock();
 
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow(!needsSetup());
+if (!gotTheLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
     }
   });
-});
+
+  app.whenReady().then(() => {
+    console.log('App starting');
+    ensureEnvFile();
+    startServer();
+    setTimeout(() => createWindow(), 2000);
+  });
+}
 
 app.on('window-all-closed', () => {
   if (serverProcess) {
@@ -115,9 +130,6 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   if (serverProcess) {
     serverProcess.kill();
-  }
-  if (setupServer) {
-    setupServer.close();
   }
 });
 

@@ -2,9 +2,13 @@ import 'dotenv/config';
 import express from 'express';
 import session from 'express-session';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import http from 'http';
 import { Server as SocketIOServer } from 'socket.io';
 import { v4 as uuidv4 } from 'uuid';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 import {
   db,
   getAllRunners,
@@ -13,8 +17,8 @@ import {
   updateWaitingOrder,
   deleteRunner,
   getMaxQueueIndex,
-} from './db.js';
-import { ensurePasswordFromEnv, authMiddleware, registerAuthRoutes } from './auth.js';
+} from './db.mjs';
+import { ensurePasswordFromEnv, authMiddleware, registerAuthRoutes } from './auth.mjs';
 
 const app = express();
 const server = http.createServer(app);
@@ -24,7 +28,8 @@ const io = new SocketIOServer(server, {
 
 const PORT = Number(process.env.PORT || 5173);
 const SESSION_SECRET = process.env.SESSION_SECRET || 'change_me';
-const DIST_DIR = path.resolve(process.cwd(), 'dist');
+// In packaged app, cwd is the unpacked asar root, dist is at the same level
+const DIST_DIR = path.resolve(__dirname, '..', 'dist');
 
 app.use(express.json());
 app.use(

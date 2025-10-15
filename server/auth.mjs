@@ -1,5 +1,5 @@
 import bcrypt from 'bcryptjs';
-import { getSetting, setSetting } from './db.js';
+import { getSetting, setSetting } from './db.mjs';
 
 const PASSWORD_HASH_KEY = 'password_hash';
 
