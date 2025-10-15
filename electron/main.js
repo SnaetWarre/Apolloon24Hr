@@ -49,7 +49,11 @@ function startServer() {
     : path.join(process.resourcesPath, 'app.asar.unpacked/server/index.js');
   
   const envPath = path.join(app.getPath('userData'), '.env');
-  const env = { ...process.env, NODE_ENV: 'production' };
+  const env = { 
+    ...process.env, 
+    NODE_ENV: 'production',
+    NODE_PATH: isDev ? '' : path.join(process.resourcesPath, 'app.asar.unpacked/node_modules')
+  };
   
   if (fs.existsSync(envPath)) {
     const envContent = fs.readFileSync(envPath, 'utf8');
@@ -59,9 +63,12 @@ function startServer() {
     });
   }
   
+  const cwd = isDev ? process.cwd() : path.join(process.resourcesPath, 'app.asar.unpacked');
+  
   serverProcess = spawn('node', [serverPath], {
     stdio: 'inherit',
     env,
+    cwd,
   });
 
   serverProcess.on('error', (err) => {
