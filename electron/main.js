@@ -66,7 +66,10 @@ function startServer() {
   
   const cwd = isDev ? process.cwd() : path.join(process.resourcesPath, 'app.asar.unpacked');
   
-  serverProcess = spawn('node', [serverPath], {
+  // Use Electron's node executable to run the server (has correct native module version)
+  const nodeExec = process.execPath;
+  
+  serverProcess = spawn(nodeExec, [serverPath], {
     stdio: 'inherit',
     env,
     cwd,

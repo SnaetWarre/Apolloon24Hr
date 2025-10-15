@@ -1,22 +1,25 @@
-For Your Boss (Windows)
+Building for Windows
 
-You need to build the .exe on a Windows machine:
+You need a Windows machine:
 
 1. Install Node.js from nodejs.org
 2. Open PowerShell in this folder
 3. Run: `npm install` then `npm run electron:build:win`
-4. Send them the .exe file from the `release/` folder
-5. They double-click the installer and it works
+4. Installer will be in `release/` folder
 
-For Linux
+Building for Linux
 
-The AppImage is already built in `release/` folder. Just run it.
+On Linux:
+```
+npm install
+npm run electron:build:linux
+```
+AppImage will be in `release/` folder.
 
-What they do:
+For End Users
 
-1. Double-click the app
-2. Edit the .env file to set their admin password
-3. Let Windows/Linux firewall through when prompted
-4. Other laptops go to http://HOST_IP:5173
-5. Done
+1. Run the installer
+2. Set admin password on first launch
+3. Allow firewall when prompted
+4. Other laptops connect to http://HOST_IP:5173
 
