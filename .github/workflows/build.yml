@@ -11,15 +11,15 @@ jobs:
   build-windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: '20'
           
       - name: Install dependencies
-        run: npm install
+        run: npm ci --include=optional
         
       - name: Build Windows app
         run: npm run electron:build:win
@@ -33,15 +33,15 @@ jobs:
   build-linux:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: '20'
           
       - name: Install dependencies
-        run: npm install
+        run: npm ci --include=optional
         
       - name: Build Linux app
         run: npm run electron:build:linux
