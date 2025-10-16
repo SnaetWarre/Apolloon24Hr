@@ -13,28 +13,25 @@ jobs:
         os: [windows-latest, ubuntu-latest]
         
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: '20'
           
       - name: Install dependencies
-        run: npm install
+        run: npm ci --include=optional
         
       - name: Build Windows
         if: matrix.os == 'windows-latest'
         run: npm run electron:build:win
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         
       - name: Build Linux
         if: matrix.os == 'ubuntu-latest'
         run: npm run electron:build:linux
-        
-      - name: Release
-        uses: softprops/action-gh-release@v1
-        with:
-          files: release/*
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
