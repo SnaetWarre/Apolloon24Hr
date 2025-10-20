@@ -56,7 +56,7 @@ export const App: React.FC = () => {
         <>
           <div className="hero">
             <h1 className="app-title">
-              🏃 Apolloon Runner Tracker
+              🏃 Apolloon telsysteem 2
             </h1>
             <p className="tagline">
               You'll never walk alone

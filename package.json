@@ -3,8 +3,8 @@
   "private": true,
   "version": "0.1.0",
   "description": "24h runner tracker for Leuven event",
-  "author": "Appoloon",
-  "homepage": "https://github.com/appoloon/leuven-tracker",
+  "author": "Apolloon",
+  "homepage": "https://github.com/apolloon/leuven-tracker",
   "type": "module",
   "main": "electron/main.js",
   "scripts": {
