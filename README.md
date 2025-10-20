@@ -5,7 +5,7 @@ A digital board for tracking runners during the Leuven 24h event. Multiple lapto
 ## Download & Installation
 
 Download the latest version here:
-https://github.com/SnaetWarre/Apolloon24Hr/releases/download/v0.5.0/Leuven-24h-Tracker-Setup-0.1.0.exe
+https://github.com/SnaetWarre/Apolloon24Hr/releases/download/v0.6.0/Leuven-24h-Tracker-Setup-0.6.0.exe
 
 ## Setup Instructions
 

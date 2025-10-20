@@ -1,7 +1,7 @@
 {
   "name": "leuven-24h-runner-tracker",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.6.0",
   "description": "24h runner tracker for Leuven event",
   "author": "Apolloon",
   "homepage": "https://github.com/apolloon/leuven-tracker",
