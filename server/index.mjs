@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url';
 import http from 'http';
 import { Server as SocketIOServer } from 'socket.io';
 import { v4 as uuidv4 } from 'uuid';
+import Bonjour from 'bonjour-service';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -117,6 +118,15 @@ await ensurePasswordFromEnv();
 
 server.listen(PORT, () => {
   console.log(`Server listening on http://0.0.0.0:${PORT}`);
+  
+  // Start mDNS broadcasting
+  const bonjour = new Bonjour();
+  bonjour.publish({
+    name: 'Telsysteem2',
+    type: 'http',
+    port: PORT,
+  });
+  console.log(`mDNS service published as telsysteem2.local:${PORT}`);
 });
 
 
