@@ -6,7 +6,7 @@ import { fileURLToPath } from 'url';
 import http from 'http';
 import { Server as SocketIOServer } from 'socket.io';
 import { v4 as uuidv4 } from 'uuid';
-import Bonjour from 'bonjour-service';
+import os from 'os';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -52,6 +52,24 @@ app.use('/api', (req, res, next) => {
 
 app.get('/api/state', (req, res) => {
   res.json({ runners: getAllRunners() });
+});
+
+// Provide host network information to clients (useful when mDNS is unavailable)
+app.get('/api/host-info', (req, res) => {
+  try {
+    const nets = os.networkInterfaces();
+    const addresses = [];
+    for (const name of Object.keys(nets)) {
+      for (const net of nets[name]) {
+        if (net.family === 'IPv4' && !net.internal) {
+          addresses.push({ interface: name, address: net.address });
+        }
+      }
+    }
+    res.json({ addresses, port: PORT, mdnsName: 'telsysteem2.local' });
+  } catch (err) {
+    res.status(500).json({ error: 'failed to enumerate network interfaces' });
+  }
 });
 
 app.post('/api/runners', (req, res) => {
@@ -118,15 +136,27 @@ await ensurePasswordFromEnv();
 
 server.listen(PORT, () => {
   console.log(`Server listening on http://0.0.0.0:${PORT}`);
+  // Also log available non-internal IPv4 addresses to help clients connect when mDNS fails
+  try {
+    const nets = os.networkInterfaces();
+    const addresses = [];
+    for (const name of Object.keys(nets)) {
+      for (const net of nets[name]) {
+        if (net.family === 'IPv4' && !net.internal) {
+          addresses.push({ interface: name, address: net.address });
+        }
+      }
+    }
+    if (addresses.length) {
+      console.log('Available network addresses:');
+      addresses.forEach((a) => console.log(`  - ${a.interface}: http://${a.address}:${PORT}`));
+    } else {
+      console.log('No non-internal IPv4 addresses detected');
+    }
+  } catch (err) {
+    console.warn('Failed to enumerate network interfaces for display:', err && err.message ? err.message : err);
+  }
   
-  // Start mDNS broadcasting
-  const bonjour = new Bonjour();
-  bonjour.publish({
-    name: 'Telsysteem2',
-    type: 'http',
-    port: PORT,
-  });
-  console.log(`mDNS service published as telsysteem2.local:${PORT}`);
 });
 
 
