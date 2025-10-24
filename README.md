@@ -13,33 +13,40 @@ https://github.com/SnaetWarre/Apolloon24Hr/releases/download/v0.7.1/Leuven-24h-T
 2. Windows will show a security warning since this is an unofficial app. Click "More info" and then "Run anyway" to continue
 3. If you don't see the login screen after installation, close and reopen the app by pressing your windows button to open the search menu and typing in "Leuven 24h tracker"
 4. When Windows Firewall asks for permission, click "Allow" or "Yes" (this is needed for other laptops to connect)
-5. On the host laptop, click the "📱 Ander apparaat verbinden" button to see connection instructions
+5. In the app UI, you will see the connection address displayed (for example: `http://192.168.x.x:5173`). Use this address on other devices.
 
 Default admin login: `apolloon2025`
 
 ## Connecting Additional Devices
 
-**NEW in v0.7.0**: No more IP address hunting!
+Connect using the IP address shown in the app.
 
-On any additional laptop or tablet connected to the same network, simply open a web browser and go to:
+1. On the host laptop (the one running the desktop app), look at the connection address shown directly in the app UI. It will look like this:
 
-```
-http://telsysteem2.local:5173
-```
+   ```text
+   http://192.168.1.23:5173
+   ```
 
-The system now uses mDNS service discovery, which means the hostname `telsysteem2.local` will automatically resolve to the correct IP address - even if the host laptop's IP changes due to DHCP!
+2. On any other laptop or tablet on the same network, open a web browser and enter that URL.
+
+Notes:
+
+- The IP can change when your network changes (e.g., different Wi‑Fi or after reboot). Check the app UI again to get the latest address.
+- When Windows Firewall prompts, allow access so other devices can connect.
 
 ### Troubleshooting Connection Issues
 
-If `telsysteem2.local` doesn't work on some devices:
-1. Make sure both devices are on the same local network/router
-2. On the host laptop, click "📱 Ander apparaat verbinden" to see the connection URL
-3. As a fallback, you can still use the IP address method:
-   - On Windows: Open Command Prompt and type `ipconfig` (look for "IPv4 Address")
-   - On Linux: Open terminal and type `ip addr` (look for "inet")
+1. Ensure the host and the other device are on the same local network/router.
+2. Always use the URL shown directly in the app UI.
+3. Verify the host app is open and the URL shows port 5173.
+4. If connection fails, temporarily disable VPNs on both devices and try again.
+5. As a fallback to find the IP manually:
+   - On Windows: Open Command Prompt and run `ipconfig` (look for "IPv4 Address")
+   - On Linux: Open terminal and run `ip addr` (look for "inet" on your active interface)
    - Then connect to: `http://[IP_ADDRESS]:5173`
 
 ## Important Notes
+
 - Your login and tracking data are safely stored on your computer
 - All laptops must be connected to the same WiFi/network to work together
 - Press Enter after typing a runner's name to quickly add them to the warming up queue
