@@ -39,4 +39,3 @@ All notable changes to the Leuven 24h Runner Tracker will be documented in this 
 - Keyboard shortcuts for faster operations
 - Password-protected admin interface
 - Electron desktop application for Windows and Linux
-
