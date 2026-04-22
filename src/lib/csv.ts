@@ -10,7 +10,7 @@ export function exportRunnersToCsv(runners: Runner[], nowMs: number): string {
     const warmUpSec = r.status === 'warming_up' && r.statusSince ? Math.floor((nowMs - r.statusSince) / 1000) : '';
     const waitingSec = r.status === 'waiting' && r.statusSince ? Math.floor((nowMs - r.statusSince) / 1000) : '';
     const totalLaps = r.laps?.length ?? 0;
-    const lastLapMs = totalLaps > 0 ? r.laps[totalLaps - 1].durationMs : undefined;
+    const lastLapMs = totalLaps > 0 ? r.laps?.[totalLaps - 1]?.durationMs : undefined;
     const lastLapSec = lastLapMs != null ? Math.floor(lastLapMs / 1000) : '';
     return {
       name: r.name,
@@ -27,10 +27,11 @@ export function exportRunnersToCsv(runners: Runner[], nowMs: number): string {
 }
 
 export async function importNamesFromCsvText(csvText: string): Promise<string[]> {
-  const parsed = Papa.parse<{ name: string }>(csvText, { header: true, skipEmptyLines: true });
-  const names = parsed.data
+  const parsed = Papa.parse(csvText, { header: true, skipEmptyLines: true });
+  const data = (parsed.data as { name?: string }[]) || [];
+  const names = data
     .map((r) => (r && r.name ? r.name.trim() : ''))
-    .filter((n) => n.length > 0);
+    .filter((n: string) => n.length > 0);
   return names;
 }
 

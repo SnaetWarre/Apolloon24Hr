@@ -1,8 +1,9 @@
+import initSqlJs from 'sql.js';
 import fs from 'fs';
 import path from 'path';
-import Database from 'better-sqlite3';
 
-// Use writable user data directory if DATA_PATH env var is set (for packaged app)
+let db;
+
 const DATA_DIR = process.env.DATA_PATH 
   ? path.resolve(process.env.DATA_PATH, 'data')
   : path.resolve(process.cwd(), 'data');
@@ -14,68 +15,102 @@ function ensureDataDir() {
   }
 }
 
-ensureDataDir();
+function saveDb() {
+  if (db) {
+    const data = db.export();
+    const buffer = Buffer.from(data);
+    fs.writeFileSync(DB_FILE, buffer);
+  }
+}
 
-export const db = new Database(DB_FILE);
+export async function initDb() {
+  ensureDataDir();
+  
+  const SQL = await initSqlJs();
+  
+  if (fs.existsSync(DB_FILE)) {
+    const buffer = fs.readFileSync(DB_FILE);
+    db = new SQL.Database(buffer);
+  } else {
+    db = new SQL.Database();
+  }
 
-db.pragma('journal_mode = WAL');
+  db.run(`
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
 
-db.exec(`
-  CREATE TABLE IF NOT EXISTS settings (
-    key TEXT PRIMARY KEY,
-    value TEXT NOT NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS runners (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    status TEXT NOT NULL CHECK(status IN ('warming_up','waiting','ran')),
-    status_since INTEGER,
-    queue_index INTEGER
-  );
-`);
+    CREATE TABLE IF NOT EXISTS runners (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      status TEXT NOT NULL CHECK(status IN ('warming_up','waiting','ran')),
+      status_since INTEGER,
+      queue_index INTEGER
+    );
+  `);
+  
+  saveDb();
+}
 
 export function getSetting(key) {
-  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
-  return row ? row.value : null;
+  const stmt = db.prepare('SELECT value FROM settings WHERE key = ?');
+  stmt.bind([key]);
+  if (stmt.step()) {
+    const row = stmt.getAsObject();
+    stmt.free();
+    return row.value;
+  }
+  stmt.free();
+  return null;
 }
 
 export function setSetting(key, value) {
-  db.prepare('INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(key, value);
+  db.run('INSERT OR REPLACE INTO settings(key, value) VALUES(?, ?)', [key, value]);
+  saveDb();
 }
 
 export function getAllRunners() {
-  const rows = db.prepare('SELECT id, name, status, status_since as statusSince, queue_index as queueIndex FROM runners').all();
+  const stmt = db.prepare('SELECT id, name, status, status_since as statusSince, queue_index as queueIndex FROM runners');
+  const rows = [];
+  while (stmt.step()) {
+    rows.push(stmt.getAsObject());
+  }
+  stmt.free();
   return rows;
 }
 
 export function insertRunner({ id, name, status, statusSince, queueIndex }) {
-  db.prepare('INSERT INTO runners(id, name, status, status_since, queue_index) VALUES(?,?,?,?,?)')
-    .run(id, name, status, statusSince ?? null, queueIndex ?? null);
+  db.run('INSERT INTO runners(id, name, status, status_since, queue_index) VALUES(?,?,?,?,?)',
+    [id, name, status, statusSince ?? null, queueIndex ?? null]);
+  saveDb();
 }
 
 export function updateRunnerStatus({ id, status, statusSince, queueIndex }) {
-  db.prepare('UPDATE runners SET status = ?, status_since = ?, queue_index = ? WHERE id = ?')
-    .run(status, statusSince ?? null, queueIndex ?? null, id);
+  db.run('UPDATE runners SET status = ?, status_since = ?, queue_index = ? WHERE id = ?',
+    [status, statusSince ?? null, queueIndex ?? null, id]);
+  saveDb();
 }
 
 export function updateWaitingOrder(idOrder) {
-  const upd = db.prepare('UPDATE runners SET queue_index = ? WHERE id = ?');
-  const tx = db.transaction((ids) => {
-    ids.forEach((id, idx) => {
-      upd.run(idx, id);
-    });
+  idOrder.forEach((id, idx) => {
+    db.run('UPDATE runners SET queue_index = ? WHERE id = ?', [idx, id]);
   });
-  tx(idOrder);
+  saveDb();
 }
 
 export function deleteRunner(id) {
-  db.prepare('DELETE FROM runners WHERE id = ?').run(id);
+  db.run('DELETE FROM runners WHERE id = ?', [id]);
+  saveDb();
 }
 
 export function getMaxQueueIndex() {
-  const row = db.prepare("SELECT MAX(queue_index) as maxIdx FROM runners WHERE status = 'waiting'").get();
-  return typeof row?.maxIdx === 'number' ? row.maxIdx : -1;
+  const stmt = db.prepare("SELECT MAX(queue_index) as maxIdx FROM runners WHERE status = 'waiting'");
+  if (stmt.step()) {
+    const row = stmt.getAsObject();
+    stmt.free();
+    return typeof row.maxIdx === 'number' ? row.maxIdx : -1;
+  }
+  stmt.free();
+  return -1;
 }
-
-

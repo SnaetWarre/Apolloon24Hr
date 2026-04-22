@@ -11,7 +11,7 @@ import os from 'os';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 import {
-  db,
+  initDb,
   getAllRunners,
   insertRunner,
   updateRunnerStatus,
@@ -28,6 +28,8 @@ const io = new SocketIOServer(server, {
 });
 
 const PORT = Number(process.env.PORT || 5173);
+// When the UI is on another port (e.g. Vite on 5173, API on 3000), /api/host-info can report this
+const PUBLIC_PORT = process.env.PUBLIC_PORT !== undefined && process.env.PUBLIC_PORT !== '' ? Number(process.env.PUBLIC_PORT) : PORT;
 const SESSION_SECRET = process.env.SESSION_SECRET || 'change_me';
 // In packaged app, cwd is the unpacked asar root, dist is at the same level
 const DIST_DIR = path.resolve(__dirname, '..', 'dist');
@@ -66,7 +68,7 @@ app.get('/api/host-info', (req, res) => {
         }
       }
     }
-    res.json({ addresses, port: PORT, mdnsName: 'telsysteem2.local' });
+    res.json({ addresses, port: PUBLIC_PORT, mdnsName: 'telsysteem2.local' });
   } catch (err) {
     res.status(500).json({ error: 'failed to enumerate network interfaces' });
   }
@@ -119,7 +121,8 @@ app.delete('/api/runners/:id', (req, res) => {
 
 // Static dist
 app.use(express.static(DIST_DIR));
-app.get('*', (req, res) => {
+// Express 5: named wildcard (see https://expressjs.com/en/guide/migrating-5.html)
+app.get('/{*splat}', (req, res) => {
   res.sendFile(path.join(DIST_DIR, 'index.html'));
 });
 
@@ -132,6 +135,7 @@ io.on('connection', (socket) => {
   socket.emit('state:init', { runners: getAllRunners() });
 });
 
+await initDb();
 await ensurePasswordFromEnv();
 
 server.listen(PORT, () => {
@@ -149,7 +153,7 @@ server.listen(PORT, () => {
     }
     if (addresses.length) {
       console.log('Available network addresses:');
-      addresses.forEach((a) => console.log(`  - ${a.interface}: http://${a.address}:${PORT}`));
+      addresses.forEach((a) => console.log(`  - ${a.interface}: http://${a.address}:${PUBLIC_PORT}`));
     } else {
       console.log('No non-internal IPv4 addresses detected');
     }
