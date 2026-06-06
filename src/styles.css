@@ -535,10 +535,28 @@ select {
   text-transform: uppercase;
 }
 
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  background: #e8f0ff;
+  color: var(--blue-dark);
+  padding: 2px 7px;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
 .runner-search-list {
   display: grid;
   gap: 8px;
   margin-top: 14px;
+}
+
+.runner-search-summary {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
 }
 
 .runner-search-row {
@@ -834,6 +852,12 @@ td {
   text-transform: uppercase;
 }
 
+.label-picker-help {
+  margin: -4px 0 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .check-pill input {
   position: absolute;
   opacity: 0;
@@ -845,12 +869,28 @@ td {
   gap: 6px;
   min-height: 36px;
   border: 2px solid var(--line);
+  background: #ffffff;
+  color: var(--text);
   padding: 7px 11px;
   cursor: pointer;
+  font-weight: 800;
+  transition: background 120ms ease, border-color 120ms ease, box-shadow 120ms ease, color 120ms ease;
 }
 
 .check-pill input:checked + span {
-  background: #eaf3ff;
+  border-color: var(--blue) !important;
+  background: var(--blue);
+  color: #ffffff;
+  box-shadow: 0 0 0 3px rgba(40, 119, 246, 0.18);
+}
+
+.check-pill input:checked + span .label-dot {
+  outline: 2px solid rgba(255, 255, 255, 0.9);
+}
+
+.check-pill input:checked + span .label-image {
+  background: #ffffff;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.9);
 }
 
 .label-admin-list {

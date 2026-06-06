@@ -10,15 +10,18 @@ export function RunnerActivationModal({ onClose }: { onClose: () => void }) {
   const [query, setQuery] = React.useState('');
   const [activatingId, setActivatingId] = React.useState<string | null>(null);
 
-  const matches = React.useMemo(() => {
+  const availableRunners = React.useMemo(() => {
+    return runners.filter(isAvailableForActivation).sort(sortRunnerByNumberThenName);
+  }, [runners]);
+
+  const filteredMatches = React.useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return [];
-    return runners
-      .filter((runner) => runner.status === 'registered')
-      .filter((runner) => runnerMatchesQuery(runner, q))
-      .sort(sortRunnerByNumberThenName)
-      .slice(0, 60);
-  }, [query, runners]);
+    if (!q) return availableRunners;
+    return availableRunners.filter((runner) => runnerMatchesQuery(runner, q));
+  }, [availableRunners, query]);
+
+  const visibleMatches = filteredMatches.slice(0, 40);
+  const hasQuery = Boolean(query.trim());
 
   async function activate(runnerId: string) {
     setActivatingId(runnerId);
@@ -38,7 +41,7 @@ export function RunnerActivationModal({ onClose }: { onClose: () => void }) {
   return (
     <div className="modal-backdrop" role="dialog" aria-modal="true">
       <div className="modal">
-        <ModalHeader title="Ingeschrevene zoeken" onClose={onClose} />
+        <ModalHeader title="Loper zoeken" onClose={onClose} />
         <input
           autoFocus
           className="input"
@@ -48,13 +51,23 @@ export function RunnerActivationModal({ onClose }: { onClose: () => void }) {
         />
 
         <div className="runner-search-list">
-          {!query.trim() && <div className="empty-inline">Typ een naam, nummer of label om te zoeken.</div>}
-          {query.trim() && matches.length === 0 && <div className="empty-inline">Geen ingeschreven loper gevonden.</div>}
-          {matches.map((runner) => (
+          <div className="runner-search-summary">
+            {hasQuery
+              ? `${filteredMatches.length} resultaat${filteredMatches.length === 1 ? '' : 'en'}`
+              : `${availableRunners.length} lopers buiten Telsysteem 1`}
+            {filteredMatches.length > visibleMatches.length ? ` · eerste ${visibleMatches.length} getoond` : ''}
+          </div>
+          {filteredMatches.length === 0 && (
+            <div className="empty-inline">
+              {hasQuery ? 'Geen loper buiten Telsysteem 1 gevonden.' : 'Geen beschikbare lopers buiten Telsysteem 1.'}
+            </div>
+          )}
+          {visibleMatches.map((runner) => (
             <div key={runner.id} className="runner-search-row">
               <div>
                 <RunnerTitle runner={runner} />
                 <div className="runner-search-meta">
+                  <StatusBadge runner={runner} />
                   <SourceBadge source={runner.registrationSource} />
                   <LabelPills labels={runner.labels} />
                 </div>
@@ -122,9 +135,14 @@ export function RunnerAddModal({ onClose }: { onClose: () => void }) {
   }
 
   function toggleLabel(labelId: string) {
-    setSelectedLabels((current) =>
-      current.includes(labelId) ? current.filter((id) => id !== labelId) : [...current, labelId]
-    );
+    const label = labels.find((item) => item.id === labelId);
+    if (!label) return;
+    const group = exclusiveLabelGroup(label.kind);
+
+    setSelectedLabels((current) => {
+      if (current.includes(labelId)) return current.filter((id) => id !== labelId);
+      return [...current.filter((id) => exclusiveLabelGroup(labels.find((item) => item.id === id)?.kind) !== group), labelId];
+    });
   }
 
   return (
@@ -170,6 +188,7 @@ export function RunnerAddModal({ onClose }: { onClose: () => void }) {
           {groupLabels(labels).map(([kind, groupedLabels]) => (
             <section key={kind} className="label-picker-group">
               <h3>{labelKindTitle(kind)}</h3>
+              <p className="label-picker-help">Kies maximaal 1 optie.</p>
               <div className="label-picker">
                 {groupedLabels.map((label) => (
                   <label key={label.id} className="check-pill">
@@ -248,6 +267,26 @@ export function SourceBadge({ source }: { source: Runner['registrationSource'] }
   return <span className="source-badge">{source === 'import' ? 'Import' : 'Manueel'}</span>;
 }
 
+function StatusBadge({ runner }: { runner: Runner }) {
+  return <span className="status-badge">{runnerStatusLabel(runner)}</span>;
+}
+
+function isAvailableForActivation(runner: Runner) {
+  return runner.status !== 'warming_up' && runner.status !== 'waiting' && runner.status !== 'running';
+}
+
+function runnerStatusLabel(runner: Runner) {
+  if (runner.hiddenFromQueue) return 'Verborgen';
+  switch (runner.status) {
+    case 'registered':
+      return 'Ingeschreven';
+    case 'ran':
+      return 'Heeft gelopen';
+    default:
+      return runner.status;
+  }
+}
+
 function runnerMatchesQuery(runner: Runner, query: string) {
   const labelText = runner.labels.map((label) => label.name).join(' ').toLowerCase();
   return (
@@ -269,6 +308,12 @@ function secondsInputToMs(value: string) {
   if (!text) return null;
   const seconds = Number(text.replace(',', '.'));
   return Number.isFinite(seconds) ? Math.round(seconds * 1000) : null;
+}
+
+function exclusiveLabelGroup(kind: string | undefined) {
+  if (kind === 'speedteam') return 'speedteam';
+  if (kind === 'zustervereniging' || kind === 'association') return 'zustervereniging';
+  return 'andere';
 }
 
 function groupLabels(labels: Label[]) {

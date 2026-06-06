@@ -13,7 +13,7 @@ export const AppHeader: React.FC = () => {
     <>
       <div className="header-bar">
         <button onClick={() => setActivationOpen(true)} className="btn btn--primary">
-          Ingeschrevene zoeken
+          Loper zoeken
         </button>
         <button onClick={() => setAddOpen(true)} className="btn btn--ghost">
           Nieuwe loper
