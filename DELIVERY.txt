@@ -1,12 +1,10 @@
 How to use:
 
-1. Run the installer
-2. Allow firewall access
-3. Other laptops connect to http://YOUR_IP:5173
+1. Run the installer on the host laptop.
+2. Set the host laptop Ethernet IP to 192.168.24.10.
+3. Allow firewall access for TCP port 5173.
+4. On every other laptop, open http://192.168.24.10:5173.
+5. Pick the correct role from the start page.
 
-Default admin password: `apolloon2025`
-
-Find your IP:
-- Windows: cmd > ipconfig
-- Linux: terminal > ip addr
-
+Client laptops can use automatic IP addresses.
+No password is required on the event LAN.

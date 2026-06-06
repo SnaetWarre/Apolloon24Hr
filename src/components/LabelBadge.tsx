@@ -1,0 +1,29 @@
+import React from 'react';
+import type { Label } from '../types';
+
+export function LabelBadge({ label, compact = false }: { label: Label; compact?: boolean }) {
+  return (
+    <span className={`label-pill${compact ? ' label-pill--compact' : ''}`} style={{ borderColor: label.color }}>
+      {label.imageUrl ? (
+        <img src={label.imageUrl} alt="" className="label-image" />
+      ) : (
+        <span className="label-dot" style={{ background: label.color }} />
+      )}
+      {label.name}
+    </span>
+  );
+}
+
+export function labelKindTitle(kind: string) {
+  if (kind === 'speedteam') return 'Speedteams';
+  if (kind === 'zustervereniging' || kind === 'association') return 'Zusterverenigingen';
+  if (kind === 'andere' || kind === 'group') return 'Andere';
+  return 'Custom';
+}
+
+export function labelKindOrder(kind: string) {
+  if (kind === 'speedteam') return 0;
+  if (kind === 'zustervereniging' || kind === 'association') return 1;
+  if (kind === 'andere' || kind === 'group') return 2;
+  return 3;
+}

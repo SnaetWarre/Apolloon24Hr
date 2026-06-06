@@ -38,22 +38,11 @@ function ensureEnvFile() {
   const envPath = path.join(app.getPath('userData'), '.env');
   if (!fs.existsSync(envPath)) {
     const envContent = `PORT=5173
-ADMIN_PASSWORD=apolloon2025
-SESSION_SECRET=${generateRandomString(32)}
+HOST_IP_HINT=192.168.24.10
 `;
     fs.writeFileSync(envPath, envContent);
     console.log('Created default .env file at:', envPath);
-    console.log('Default password is: apolloon2025');
   }
-}
-
-function generateRandomString(length) {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  let result = '';
-  for (let i = 0; i < length; i++) {
-    result += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return result;
 }
 
 async function startServer() {
@@ -132,4 +121,3 @@ app.on('before-quit', () => {
     serverProcess.kill();
   }
 });
-

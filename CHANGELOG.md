@@ -2,6 +2,29 @@
 
 All notable changes to the Leuven 24h Runner Tracker will be documented in this file.
 
+## [0.8.0] - 2026-06-06
+
+### Added
+
+- Root role picker so every laptop can open `http://192.168.24.10:5173` and choose its role
+- Telsysteem 2 timing view with spacebar handoff and undo
+- Inside and outside TV display routes
+- Analysis dashboard with CSV/JSON exports
+- Admin CSV import from Google Forms/Sheets exports
+- Runner profiles with runner numbers, labels, targets, historical times, and notes
+- Label management and seeded Apolloon event labels
+
+### Changed
+
+- The event setup now uses a static host IP instead of hostname discovery
+- The runner database now separates runner profiles, labels, queue state, race state, and laps
+- The queue view keeps the familiar three-column flow while timing uses an internal running state
+
+### Removed
+
+- Password login and session auth
+- mDNS/hostname discovery dependency
+
 ## [0.7.1] - 2025-10-24
 
 ### Improvements

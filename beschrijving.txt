@@ -1,0 +1,81 @@
+Database, Inschrijvingen & Lopersprofielen
+
+    • Synchronisatie & Ad-hoc: Telsysteem 1 moet live gekoppeld zijn aan het online inschrijvingsformulier, zodat lopersnummers en namen direct doorzoekbaar zijn. Het moet mogelijk blijven om ter plaatse (tijdens het evenement) handmatig nieuwe lopers toe te voegen én hen direct toe te wijzen aan specifieke teams/categorieën (zoals de Speedteams). 
+
+    • Flexibel Labelsysteem (Multi-categorie): Het 'Type loper' mag geen harde, enkele keuze zijn. Een loper moet meerdere categorieën/labels kunnen krijgen (bijv. én "1e Jaars" én "Speedteam Blue", of "HILOK" én "Speedteam White"). Dit is cruciaal voor de minicompetities. 
+
+Andere	Speedteams	Zusterverenigingen
+1ste jaars	Speedteam White	HILOK
+Anciens	Speedteam blue	Mesacosa
+Dames		Kinesia
+
+
+    • Lopersprofiel Velden: Elk profiel bevat: Naam + Lopersnummer. 
+
+    • Toegekende labels/categorieën (Multi-select). 
+
+    • Visuele indicatoren: Icoontjes van gekleurde truitjes (Blue/White) of faculteitslogo's (HILOK) naast de naam op basis van de labels. 
+
+    • Doelstelling (beoogd aantal te lopen toeren). 
+
+    • Historische data: Zowel het gemiddelde tempo vorig jaar/testrondje, als de snelste tijd. (Dit om te voorkomen dat één slechte ronde door een valpartij het algemene gemiddelde vertekent). 
+
+    • Extensie/Optioneel: Een aparte module om testrondjes voorafgaand aan het event te registreren en direct aan het profiel te koppelen.
+
+
+    2. Telsysteem 1: Wachtrij & Logistiek (De 'Wisselzone')
+
+
+    • Status lopers: Overzichtelijk tonen wie er momenteel warmloopt, wie er in de wachtrij staat, en wie er al gelopen heeft. 
+
+    • Volgorde bepalen: De crew moet de volgorde van de wachtrij handmatig kunnen aanpassen/bevestigen, zodat de schermen buiten synchroon lopen
+
+. 
+    • Clean UI: Het startscherm moet minimalistisch zijn (geen information overload). 
+
+    • Lopersprofiel Tab: Pas wanneer er op een specifieke loper wordt geklikt, opent er een tab/pop-up met alle gedetailleerde info (doelstelling, aantal gelopen toeren, statistieken). 
+
+    • Speedteam-toeren Teller: Een live teller die het aantal "speedteamtoeren" bijhoudt. Het systeem berekent op basis van de planning (ingevoerde doelstellingen per speedteam-loper) hoeveel van de totale geplande speedteamtoeren er al zijn ingezet en hoeveel er nog beschikbaar zijn.
+
+    3. Telsysteem 2: Live Timing (Aan de piste)
+
+    • Bediening: De timer registreert passages via een simpele toetsaanslag (bijv. spatiebalk) via dit systeem. 
+
+    • Koppeling & Input: Dit systeem neemt de data van Telsysteem 1 over (weten wie er loopt/klaarstaat, eventueel welke tijd de komende loper normaal gaat lopen). De timer typt bij passage het lopersnummer in om de exacte rondetijd aan de juiste loper te koppelen. 
+
+    • Live Historiek: De timer ziet direct de vorige toertijd van deze loper ter referent
+
+    4. Live Displays (TV-schermen)
+
+Tijdens de wedstrijd zullen er 2 Tv-schermen zijn. 1 Tv-scherm zal zich binnen in de loperstand bevinden met looptijden en info voor lopers. Het 2de scherm zal buiten hangen met enkel informatie voor het publiek en sfeermakers.
+Er moeten twee verschillende publieke views (dashboards) gegenereerd kunnen worden: 
+TV Scherm Binnen (Minicompetities): 
+    • Moet een coëfficiëntentabel kunnen verwerken om live de standen van de interne minicompetities te tonen (die we zelf maken en waar we lopers in verdelen via de labels). 
+
+    • Fallback (als coëfficiënten te complex zijn): Sowieso een live ranking op basis van het # aantal toeren en de snelste/totale tijden. 
+
+
+TV Scherm Buiten (Publiek & Sfeermaker):
+    • Moet groot en duidelijk de naam van de huidige loper op de baan tonen.
+
+    • Moet ook de naam (met eventueel lopersnummer) van de volgende loper tonen, zodat de sfeermaker hier live op kan inspelen. Dit scherm volgt de volgorde die bij Telsysteem 1 wordt ingevoerd.
+
+    5. Live Analyse & Data Exports
+
+    • Live Analyse Dashboard: We willen een aparte, afgeschermde tab in het programma waarin de crew de data live kan analyseren (bijv. grafieken of tabellen met het verloop van de rondetijden over de tijd, de gemiddelde rondetijd, etc.). 
+
+    • Live Data Export (On-demand): Er moet een optie zijn om op elk gegeven moment de ruwe rondedata (tijdstempel, lopersnummer, naam, rondetijd, gekoppelde labels) direct te kunnen downloaden als CSV/Excel-bestand. Zo kunnen we de data achteraf makkelijk integreren en eventueel zelf nog live visualiseren. 
+
+    • Technische voorkeuren Het systeem moet real-time updates ondersteunen (bijv. via WebSockets of een snelle polling-interval), aangezien seconden tellen tijdens de ritten en wissels. 
+
+    • Responsive of geoptimaliseerd voor de specifieke tablets/laptops die we aan de startlijn gebruiken. 
+
+Extra opmerkingen WG: EERST ZIEN
+Kobe 1/06/2026 11:36
+Ik zou speedteamtoeren misschien bij analyse zetten, denk Ni dat da veel toevoegt bij telsystem 1(of wa denken jullie?)
+Voor de rest ziet er top uit
+Misschien is het sws handig om voor elk label/speedteam zo een volgbalkje te hebben van hoeveel toeren er daarvan al gelopen zijn
+(die ook >100% kan gaan natuurlijk)
+Om zo een beetje de verdeling in toeren een beetje op te volgen
+Misschien ook goe grafiek idee is % speedteamtoeren VS % niet-speedteamtoeren over tijd
+Handig voor volgende jaren om te achterhalen hoe we de tactiek hebben aangepakt en hoe die door de tijd dan verandert

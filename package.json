@@ -1,7 +1,7 @@
 {
   "name": "leuven-24h-runner-tracker",
   "private": true,
-  "version": "0.7.1",
+  "version": "0.8.0",
   "description": "24h runner tracker for Leuven event",
   "author": "Apolloon",
   "homepage": "https://github.com/apolloon/leuven-tracker",
@@ -9,7 +9,10 @@
   "main": "electron/main.js",
   "scripts": {
     "dev": "vite",
-    "dev:all": "node scripts/ensure-lan-dev-firewall.mjs && concurrently -k \"cross-env PORT=3000 PUBLIC_PORT=5173 node server/index.mjs\" \"vite\"",
+    "dev:all": "node scripts/ensure-lan-dev-firewall.mjs && concurrently -k \"cross-env PORT=3000 HOST_IP_HINT=192.168.24.10 node server/index.mjs\" \"cross-env VITE_DEV_API_PORT=3000 vite\"",
+    "dev:seeded": "node scripts/ensure-lan-dev-firewall.mjs && concurrently -k \"cross-env DATA_PATH=.test-data PORT=3000 HOST_IP_HINT=192.168.24.10 node server/index.mjs\" \"cross-env VITE_DEV_API_PORT=3000 vite\"",
+    "seed:test": "node scripts/seed-test-db.mjs --scenario=ready",
+    "seed:test:live": "node scripts/seed-test-db.mjs --scenario=live",
     "build": "vite build",
     "preview": "vite preview",
     "electron:dev": "node scripts/ensure-lan-dev-firewall.mjs && concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
@@ -19,11 +22,8 @@
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
-    "bcryptjs": "^3.0.3",
-    "bonjour-service": "^1.3.0",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
-    "express-session": "^1.19.0",
     "papaparse": "^5.5.3",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
