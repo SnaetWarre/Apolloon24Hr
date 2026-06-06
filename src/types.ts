@@ -75,5 +75,3 @@ export interface AppSnapshot {
   serverNowMs: number;
   host: HostInfo;
 }
-
-export type ViewMode = 'table' | 'kanban';

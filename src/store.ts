@@ -9,7 +9,6 @@ import type {
   RegistrationSource,
   Runner,
   RunnerStatus,
-  ViewMode,
 } from './types';
 import { fetchState } from './api';
 import { setServerNowMs, syncServerClock } from './lib/time';
@@ -27,7 +26,6 @@ export interface RunnerInput {
 }
 
 interface AppState {
-  view: ViewMode;
   runners: Runner[];
   labels: Label[];
   laps: LapRecord[];
@@ -40,7 +38,6 @@ interface AppState {
   initialize: () => Promise<void>;
   refresh: () => Promise<void>;
   applySnapshot: (snapshot: AppSnapshot) => void;
-  setView: (v: ViewMode) => void;
   setSearch: (q: string) => void;
   selectRunner: (id: string | null) => void;
   selectNext: () => void;
@@ -128,7 +125,6 @@ function sortedSearchableRunners(runners: Runner[], search: string) {
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
-  view: 'kanban',
   runners: [],
   labels: [],
   laps: [],
@@ -171,9 +167,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       host: snapshot.host || null,
       lastError: null,
     });
-  },
-  setView(v) {
-    set({ view: v });
   },
   setSearch(q) {
     set({ search: q });

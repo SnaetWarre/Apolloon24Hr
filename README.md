@@ -84,23 +84,27 @@ There is no automatic 24-hour cutoff in the software.
 
 ## Test Seed Data
 
-Create a safe seeded test database in `.test-data/`:
+Development seed commands only use `.test-data/`. They do not overwrite the normal app database in `data/app.db`.
 
 ```text
-npm run seed:test
-npm run dev:seeded
+npm run db:dev:empty       Clean empty dev DB
+npm run db:dev:seed        Clean ready-to-start dev DB
+npm run db:dev:seed:live   Clean live-race dev DB
+npm run db:dev:seed:large  Clean large stress-test dev DB
+npm run dev:seeded         Run app against .test-data
+npm run dev:fresh          Seed ready data and start dev app
+npm run dev:fresh:live     Seed live data and start dev app
+npm run dev:fresh:large    Seed large data and start dev app
 ```
 
-`seed:test` creates a ready-to-start race: runners are loaded and queued, but the race has not started yet. Use this to test the first spacebar press.
+The seeded scenarios are:
 
-For a mid-race test database with active runner, queue, lap history, displays, and analysis data:
+- `empty`: default labels only, with no runners or laps.
+- `ready`: 40 runners split across registered, warming up, and waiting. The race has not started yet.
+- `live`: 60 runners, an active race, queue data, display data, and lap history.
+- `large`: 120 runners and about 250 laps for stress-testing the board, displays, admin page, and analysis page.
 
-```text
-npm run seed:test:live
-npm run dev:seeded
-```
-
-These scripts do not overwrite the normal app database.
+The older `npm run seed:test` and `npm run seed:test:live` commands are still available as aliases for the ready and live scenarios.
 
 ## Exports
 
