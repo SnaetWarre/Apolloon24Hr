@@ -32,16 +32,12 @@ interface AppState {
   race: RaceState;
   host: HostInfo | null;
   search: string;
-  selectedRunnerId: string | null;
   initialized: boolean;
   lastError: string | null;
   initialize: () => Promise<void>;
   refresh: () => Promise<void>;
   applySnapshot: (snapshot: AppSnapshot) => void;
   setSearch: (q: string) => void;
-  selectRunner: (id: string | null) => void;
-  selectNext: () => void;
-  selectPrev: () => void;
   addRunner: (input: string | RunnerInput) => Promise<void>;
   updateRunner: (id: string, input: Partial<RunnerInput>) => Promise<void>;
   setStatus: (id: string, status: RunnerStatus) => Promise<void>;
@@ -102,28 +98,6 @@ function snapshotFromPayload(payload: any): AppSnapshot | null {
   return null;
 }
 
-function sortedSearchableRunners(runners: Runner[], search: string) {
-  const q = search.trim().toLowerCase();
-  const selectable = runners.filter(
-    (runner) => runner.status !== 'registered' && runner.status !== 'running' && !runner.hiddenFromQueue
-  );
-  const filtered = q
-    ? selectable.filter((runner) => {
-        const labelText = runner.labels.map((label) => label.name).join(' ').toLowerCase();
-        return (
-          runner.name.toLowerCase().includes(q) ||
-          (runner.runnerNumber || '').toLowerCase().includes(q) ||
-          labelText.includes(q)
-        );
-      })
-    : selectable;
-  return [...filtered].sort((a, b) => {
-    const numberA = a.runnerNumber || '';
-    const numberB = b.runnerNumber || '';
-    return numberA.localeCompare(numberB, undefined, { numeric: true }) || a.name.localeCompare(b.name);
-  });
-}
-
 export const useAppStore = create<AppState>((set, get) => ({
   runners: [],
   labels: [],
@@ -131,7 +105,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   race: emptyRace,
   host: null,
   search: '',
-  selectedRunnerId: null,
   initialized: false,
   lastError: null,
   async initialize() {
@@ -170,33 +143,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   setSearch(q) {
     set({ search: q });
-  },
-  selectRunner(id) {
-    set({ selectedRunnerId: id });
-  },
-  selectNext() {
-    const sorted = sortedSearchableRunners(get().runners, get().search);
-    if (sorted.length === 0) return;
-    const currentId = get().selectedRunnerId;
-    if (!currentId) {
-      set({ selectedRunnerId: sorted[0].id });
-      return;
-    }
-    const idx = sorted.findIndex((runner) => runner.id === currentId);
-    const nextIdx = Math.min(sorted.length - 1, idx + 1);
-    set({ selectedRunnerId: sorted[nextIdx]?.id ?? currentId });
-  },
-  selectPrev() {
-    const sorted = sortedSearchableRunners(get().runners, get().search);
-    if (sorted.length === 0) return;
-    const currentId = get().selectedRunnerId;
-    if (!currentId) {
-      set({ selectedRunnerId: sorted[0].id });
-      return;
-    }
-    const idx = sorted.findIndex((runner) => runner.id === currentId);
-    const prevIdx = Math.max(0, idx - 1);
-    set({ selectedRunnerId: sorted[prevIdx]?.id ?? currentId });
   },
   async addRunner(input) {
     const body = typeof input === 'string' ? { name: input } : input;
@@ -242,7 +188,6 @@ export const useAppStore = create<AppState>((set, get) => ({
     const payload = await apiRequest(`/api/runners/${id}`, { method: 'DELETE' });
     const snapshot = snapshotFromPayload(payload);
     if (snapshot) get().applySnapshot(snapshot);
-    if (get().selectedRunnerId === id) set({ selectedRunnerId: null });
   },
   async hideRunner(id) {
     const payload = await apiRequest('/api/queue/hide', {
@@ -251,7 +196,6 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
     const snapshot = snapshotFromPayload(payload);
     if (snapshot) get().applySnapshot(snapshot);
-    if (get().selectedRunnerId === id) set({ selectedRunnerId: null });
   },
   async unhideRunner(id) {
     const payload = await apiRequest('/api/queue/unhide', {

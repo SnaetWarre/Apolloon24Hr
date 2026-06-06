@@ -12,7 +12,6 @@ export function RunnerActivationModal({
 }) {
   const runners = useAppStore((state) => state.runners);
   const setStatus = useAppStore((state) => state.setStatus);
-  const selectRunner = useAppStore((state) => state.selectRunner);
   const [query, setQuery] = React.useState('');
   const [activatingId, setActivatingId] = React.useState<string | null>(null);
 
@@ -40,7 +39,6 @@ export function RunnerActivationModal({
   }
 
   function openProfile(runnerId: string) {
-    selectRunner(runnerId);
     onOpenProfile?.(runnerId);
     onClose();
   }
@@ -89,7 +87,6 @@ export function RunnerActivationModal({
                 <RunnerTitle runner={runner} />
                 <div className="runner-search-meta">
                   <StatusBadge runner={runner} />
-                  <SourceBadge source={runner.registrationSource} />
                   <LabelPills labels={runner.labels} />
                 </div>
               </div>

@@ -108,40 +108,15 @@ function TopNav({ onNavigate }: { onNavigate: (path: string) => void }) {
 function QueuePage() {
   const race = useAppStore((state) => state.race);
   const runners = useAppStore((state) => state.runners);
-  const selectedRunnerId = useAppStore((state) => state.selectedRunnerId);
-  const selectRunner = useAppStore((state) => state.selectRunner);
-  const selectNext = useAppStore((state) => state.selectNext);
-  const selectPrev = useAppStore((state) => state.selectPrev);
   const [profileRunnerId, setProfileRunnerId] = React.useState<string | null>(null);
 
   const activeRunner = runners.find((runner) => runner.id === race.activeRunnerId) || null;
-  const selectedRunner = runners.find((runner) => runner.id === selectedRunnerId) || null;
   const nextRunner =
     runners
       .filter((runner) => runner.status === 'waiting')
       .sort((a, b) => (a.queueIndex ?? 0) - (b.queueIndex ?? 0))[0] || null;
 
   useAnimationFrameTick(Boolean(race.activeStartedAt));
-
-  React.useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.target && (event.target as HTMLElement).tagName === 'INPUT') return;
-      if (event.target && (event.target as HTMLElement).tagName === 'TEXTAREA') return;
-      if (event.key === 'ArrowDown') {
-        event.preventDefault();
-        selectNext();
-        return;
-      }
-      if (event.key === 'ArrowUp') {
-        event.preventDefault();
-        selectPrev();
-        return;
-      }
-      if (!selectedRunnerId) return;
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [selectNext, selectPrev, selectedRunnerId]);
 
   return (
     <>
@@ -165,17 +140,10 @@ function QueuePage() {
       </div>
       <AppHeader
         onOpenProfile={(runnerId) => {
-          selectRunner(runnerId);
           setProfileRunnerId(runnerId);
         }}
       />
-      {selectedRunner && (
-        <SelectedRunnerStrip
-          runner={selectedRunner}
-          onOpenProfile={() => setProfileRunnerId(selectedRunner.id)}
-        />
-      )}
-      <KanbanBoard />
+      <KanbanBoard onOpenProfile={setProfileRunnerId} />
       {profileRunnerId && (
         <RunnerProfileModal runnerId={profileRunnerId} onClose={() => setProfileRunnerId(null)} />
       )}
@@ -185,29 +153,4 @@ function QueuePage() {
 
 function runnerLabel(runner: { runnerNumber: string | null; name: string }) {
   return runner.runnerNumber ? `${runner.runnerNumber} - ${runner.name}` : runner.name;
-}
-
-function SelectedRunnerStrip({
-  runner,
-  onOpenProfile,
-}: {
-  runner: {
-    runnerNumber: string | null;
-    name: string;
-  };
-  onOpenProfile: () => void;
-}) {
-  return (
-    <div className="operator-strip">
-      <div className="operator-strip-main">
-        <span className="muted-label">Geselecteerd</span>
-        <strong>{runnerLabel(runner)}</strong>
-      </div>
-      <div className="operator-strip-actions">
-        <button className="btn btn--ghost btn--fixed" onClick={onOpenProfile}>
-          Profiel openen
-        </button>
-      </div>
-    </div>
-  );
 }

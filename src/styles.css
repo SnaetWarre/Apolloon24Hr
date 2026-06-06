@@ -324,33 +324,6 @@ select {
   margin-bottom: 16px;
 }
 
-.operator-strip {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 14px;
-  padding: 12px;
-  background: var(--panel);
-  border-left: 5px solid var(--apolloon-blue);
-  border-bottom: 1px solid var(--line);
-}
-
-.operator-strip-main strong {
-  display: block;
-  margin-top: 3px;
-  font-size: 18px;
-}
-
-.operator-strip-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-  justify-content: flex-end;
-}
-
 .race-strip > div,
 .stat-panel,
 .panel,
@@ -457,17 +430,13 @@ select {
   box-shadow: 0 6px 16px rgba(15, 23, 42, 0.06);
 }
 
-.card--selected {
-  border-color: var(--blue);
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
-}
-
 .card--muted {
   opacity: 0.68;
 }
 
 .card-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: stretch;
   gap: 10px;
 }
@@ -481,6 +450,10 @@ select {
   padding: 0;
   text-align: left;
   cursor: grab;
+}
+
+.card-main:hover .runner-title {
+  color: var(--blue-dark);
 }
 
 .runner-title {
@@ -508,13 +481,29 @@ select {
   font-size: 12px;
 }
 
-.card-actions {
+.card-side {
   display: flex;
-  align-items: center;
-  align-content: center;
+  min-width: 112px;
+  flex-direction: column;
+  align-items: stretch;
   justify-content: flex-end;
-  flex-wrap: wrap;
-  gap: 5px;
+  gap: 6px;
+}
+
+.card-profile-btn {
+  min-height: 30px;
+  border: 1px solid #d7e3f7;
+  background: #f4f8ff;
+  color: var(--blue-dark);
+  padding: 6px 9px;
+  font-size: 12px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.card-profile-btn:hover {
+  border-color: var(--blue);
+  background: #e8f0ff;
 }
 
 .label-row,
@@ -558,16 +547,12 @@ select {
 
 .timer-badge,
 .queue-badge {
-  background: #e8f0ff;
-  color: var(--blue-dark);
+  background: #f4f8ff;
+  color: #46617f;
   padding: 5px 9px;
   font-size: 12px;
   font-weight: 900;
-}
-
-.queue-badge {
-  background: #dcfce7;
-  color: #166534;
+  text-align: center;
 }
 
 .source-badge {
@@ -845,12 +830,40 @@ td {
 }
 
 .modal {
+  position: relative;
   width: min(880px, 100%);
   max-height: min(92vh, 820px);
   overflow: auto;
   background: var(--panel);
   padding: 20px;
   box-shadow: 0 24px 70px rgba(15, 23, 42, 0.28);
+}
+
+.nested-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  background: rgba(15, 23, 42, 0.2);
+  padding: 16px;
+}
+
+.confirm-modal {
+  width: min(440px, 100%);
+  border-left: 5px solid var(--apolloon-blue);
+  background: #ffffff;
+  padding: 18px;
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.24);
+}
+
+.confirm-modal h3 {
+  margin: 0 0 8px;
+}
+
+.confirm-modal p {
+  margin: 0;
+  color: var(--muted);
 }
 
 .modal-header,
@@ -1234,10 +1247,6 @@ td {
   .runner-search-actions {
     justify-content: flex-start;
     flex-wrap: wrap;
-  }
-
-  .operator-strip-actions {
-    justify-content: flex-start;
   }
 
   .card-row,

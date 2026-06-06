@@ -4,7 +4,6 @@ import { useAppStore } from '../store';
 import { formatDurationMs, formatElapsedSeconds, nowMs } from '../lib/time';
 import type { Runner, RunnerStatus } from '../types';
 import { LabelBadge } from './LabelBadge';
-import { SourceBadge } from './RunnerEntryModals';
 
 const COLUMNS: { key: RunnerStatus; title: string }[] = [
   { key: 'warming_up', title: 'Aan het opwarmen' },
@@ -22,13 +21,11 @@ function TimerBadge({ runner }: { runner: Runner }) {
   return <span className="timer-badge">{formatElapsedSeconds(nowMs() - runner.statusSince)}</span>;
 }
 
-export const KanbanBoard: React.FC = () => {
+export const KanbanBoard: React.FC<{ onOpenProfile: (runnerId: string) => void }> = ({ onOpenProfile }) => {
   const runners = useAppStore((state) => state.runners);
   const search = useAppStore((state) => state.search);
   const setStatus = useAppStore((state) => state.setStatus);
   const moveInQueue = useAppStore((state) => state.moveInQueue);
-  const selectedRunnerId = useAppStore((state) => state.selectedRunnerId);
-  const selectRunner = useAppStore((state) => state.selectRunner);
   const hideRunner = useAppStore((state) => state.hideRunner);
   const unhideRunner = useAppStore((state) => state.unhideRunner);
   const [showHiddenRan, setShowHiddenRan] = React.useState(false);
@@ -116,11 +113,9 @@ export const KanbanBoard: React.FC = () => {
                   <DraggableCard
                     id={runner.id}
                     runner={runner}
-                    selected={selectedRunnerId === runner.id}
-                    onSelect={() => selectRunner(runner.id)}
+                    onOpenProfile={() => onOpenProfile(runner.id)}
                     columnKey={column.key}
                     queueIndex={column.key === 'waiting' ? index : undefined}
-                    onSetStatus={setStatus}
                     onHide={hideRunner}
                     onUnhide={unhideRunner}
                   />
@@ -161,21 +156,17 @@ function DroppableColumn({
 function DraggableCard({
   id,
   runner,
-  selected,
-  onSelect,
+  onOpenProfile,
   columnKey,
   queueIndex,
-  onSetStatus,
   onHide,
   onUnhide,
 }: {
   id: string;
   runner: Runner;
-  selected: boolean;
-  onSelect: () => void;
+  onOpenProfile: () => void;
   columnKey: RunnerStatus;
   queueIndex?: number;
-  onSetStatus: (id: string, status: RunnerStatus) => Promise<void>;
   onHide: (id: string) => Promise<void>;
   onUnhide: (id: string) => Promise<void>;
 }) {
@@ -195,19 +186,27 @@ function DraggableCard({
     await onUnhide(id);
   }
 
+  function handleContextMenu(event: React.MouseEvent) {
+    event.preventDefault();
+    event.stopPropagation();
+    onOpenProfile();
+  }
+
   return (
     <div
       ref={setNodeRef}
-      className={`card${selected ? ' card--selected' : ''}${runner.hiddenFromQueue ? ' card--muted' : ''}`}
+      className={`card${runner.hiddenFromQueue ? ' card--muted' : ''}`}
       style={style}
+      onContextMenu={handleContextMenu}
     >
       <div className="card-row">
         <button
           type="button"
           {...listeners}
           {...attributes}
-          onClick={onSelect}
+          onClick={onOpenProfile}
           className="card-main"
+          title="Profiel openen"
         >
           <span className="runner-title">
             {runner.runnerNumber && <span className="runner-number">{runner.runnerNumber}</span>}
@@ -219,23 +218,18 @@ function DraggableCard({
               {runner.lapCount} toeren
               {runner.bestLapMs ? ` · snelste ${formatDurationMs(runner.bestLapMs)}` : ''}
             </span>
-            <SourceBadge source={runner.registrationSource} />
           </span>
         </button>
-        <div className="card-actions">
+        <div className="card-side">
+          <button
+            className="card-profile-btn"
+            onClick={(event) => { event.stopPropagation(); onOpenProfile(); }}
+          >
+            Profiel
+          </button>
           <TimerBadge runner={runner} />
           {columnKey === 'waiting' && queueIndex !== undefined && (
             <span className="queue-badge">{queueIndex === 0 ? 'Volgende' : `#${queueIndex + 1}`}</span>
-          )}
-          {columnKey !== 'warming_up' && (
-            <button onClick={(event) => { event.stopPropagation(); onSetStatus(id, 'warming_up'); }} className="btn btn--sm btn--fixed">
-              Opwarmen
-            </button>
-          )}
-          {columnKey !== 'waiting' && (
-            <button onClick={(event) => { event.stopPropagation(); onSetStatus(id, 'waiting'); }} className="btn btn--sm btn--fixed">
-              Wachtrij
-            </button>
           )}
           {columnKey === 'ran' && !runner.hiddenFromQueue && (
             <button className="btn btn--sm btn--fixed" onClick={handleHide}>

@@ -3,11 +3,11 @@ import { useAppStore } from '../store';
 import { formatDurationMs, formatElapsedSeconds, nowMs } from '../lib/time';
 import { useAnimationFrameTick } from '../lib/useAnimationFrameTick';
 import { labelKindOrder, labelKindTitle } from './LabelBadge';
-import type { Label } from '../types';
+import type { Label, Runner } from '../types';
 
 export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; onClose: () => void }) {
   const runner = useAppStore((state) => state.runners.find((item) => item.id === runnerId));
-  const laps = useAppStore((state) => state.laps.filter((lap) => lap.runnerId === runnerId));
+  const allLaps = useAppStore((state) => state.laps);
   const labels = useAppStore((state) => state.labels);
   const updateRunner = useAppStore((state) => state.updateRunner);
   const [runnerNumber, setRunnerNumber] = React.useState('');
@@ -17,6 +17,8 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
   const [historicalBest, setHistoricalBest] = React.useState('');
   const [notes, setNotes] = React.useState('');
   const [selectedLabels, setSelectedLabels] = React.useState<string[]>([]);
+  const [closePromptOpen, setClosePromptOpen] = React.useState(false);
+  const [saving, setSaving] = React.useState(false);
 
   React.useEffect(() => {
     if (!runner) return;
@@ -30,24 +32,58 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
   }, [runner]);
 
   useAnimationFrameTick(Boolean(runner?.statusSince && ['warming_up', 'waiting', 'running'].includes(runner.status)));
+  const laps = React.useMemo(() => allLaps.filter((lap) => lap.runnerId === runnerId), [allLaps, runnerId]);
 
   if (!runner) return null;
 
   const latestLap = laps[0] || null;
   const statusTime = statusElapsedLabel(runner.status, runner.statusSince);
   const recentLaps = laps.slice(0, 5);
+  const dirty = isDirty({
+    runner,
+    runnerNumber,
+    name,
+    targetLaps,
+    historicalAvg,
+    historicalBest,
+    notes,
+    selectedLabels,
+  });
 
-  async function save() {
-    await updateRunner(runnerId, {
-      runnerNumber,
-      name,
-      targetLaps: targetLaps ? Number(targetLaps) : null,
-      historicalAvgMs: historicalAvg ? Math.round(Number(historicalAvg.replace(',', '.')) * 1000) : null,
-      historicalBestMs: historicalBest ? Math.round(Number(historicalBest.replace(',', '.')) * 1000) : null,
-      notes,
-      labels: selectedLabels,
-    });
+  async function saveAndClose() {
+    setSaving(true);
+    try {
+      await updateRunner(runnerId, {
+        runnerNumber,
+        name,
+        targetLaps: targetLaps ? Number(targetLaps) : null,
+        historicalAvgMs: historicalAvg ? Math.round(Number(historicalAvg.replace(',', '.')) * 1000) : null,
+        historicalBestMs: historicalBest ? Math.round(Number(historicalBest.replace(',', '.')) * 1000) : null,
+        notes,
+        labels: selectedLabels,
+      });
+      onClose();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function requestClose() {
+    if (dirty) {
+      setClosePromptOpen(true);
+      return;
+    }
     onClose();
+  }
+
+  function handleKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+    if (event.key !== 'Escape') return;
+    event.preventDefault();
+    if (closePromptOpen) {
+      setClosePromptOpen(false);
+      return;
+    }
+    requestClose();
   }
 
   function toggleLabel(labelId: string) {
@@ -58,7 +94,7 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
 
   return (
     <div className="modal-backdrop" role="dialog" aria-modal="true">
-      <div className="modal">
+      <div className="modal" onKeyDown={handleKeyDown}>
         <div className="modal-header">
           <div>
             <h2>Lopersprofiel</h2>
@@ -68,7 +104,7 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
               {runner.averageLapMs ? ` · gemiddeld ${formatDurationMs(runner.averageLapMs)}` : ''}
             </p>
           </div>
-          <button className="icon-btn" onClick={onClose} aria-label="Sluiten">
+          <button className="icon-btn" onClick={requestClose} aria-label="Sluiten">
             x
           </button>
         </div>
@@ -190,15 +226,67 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
         </label>
 
         <div className="modal-actions">
-          <button className="btn btn--ghost" onClick={onClose}>
+          <button className="btn btn--ghost" onClick={requestClose}>
             Annuleer
           </button>
-          <button className="btn btn--primary" onClick={save}>
-            Opslaan
+          <button className="btn btn--primary" onClick={saveAndClose} disabled={saving}>
+            {saving ? 'Opslaan...' : 'Opslaan'}
           </button>
         </div>
+
+        {closePromptOpen && (
+          <div className="nested-modal-backdrop" role="dialog" aria-modal="true">
+            <div className="confirm-modal">
+              <h3>Wijzigingen opslaan?</h3>
+              <p>Er zijn aanpassingen aan dit lopersprofiel.</p>
+              <div className="modal-actions">
+                <button className="btn btn--ghost" onClick={() => setClosePromptOpen(false)}>
+                  Verder bewerken
+                </button>
+                <button className="btn btn--ghost" onClick={onClose}>
+                  Niet opslaan
+                </button>
+                <button className="btn btn--primary" onClick={saveAndClose} disabled={saving}>
+                  {saving ? 'Opslaan...' : 'Opslaan'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
+  );
+}
+
+function isDirty({
+  runner,
+  runnerNumber,
+  name,
+  targetLaps,
+  historicalAvg,
+  historicalBest,
+  notes,
+  selectedLabels,
+}: {
+  runner: Runner;
+  runnerNumber: string;
+  name: string;
+  targetLaps: string;
+  historicalAvg: string;
+  historicalBest: string;
+  notes: string;
+  selectedLabels: string[];
+}) {
+  const currentLabels = runner.labels.map((label) => label.id).sort().join('|');
+  const nextLabels = [...selectedLabels].sort().join('|');
+  return (
+    runnerNumber.trim() !== (runner.runnerNumber || '') ||
+    name.trim() !== runner.name ||
+    targetLaps.trim() !== (runner.targetLaps?.toString() || '') ||
+    historicalAvg.trim() !== msToSecondsInput(runner.historicalAvgMs) ||
+    historicalBest.trim() !== msToSecondsInput(runner.historicalBestMs) ||
+    notes !== (runner.notes || '') ||
+    currentLabels !== nextLabels
   );
 }
 
