@@ -2,7 +2,9 @@ import React from 'react';
 import { useAppStore } from '../store';
 import { RunnerActivationModal, RunnerAddModal } from './RunnerEntryModals';
 
-export const AppHeader: React.FC = () => {
+export const AppHeader: React.FC<{ onOpenProfile?: (runnerId: string) => void }> = ({
+  onOpenProfile,
+}) => {
   const search = useAppStore((state) => state.search);
   const setSearch = useAppStore((state) => state.setSearch);
   const host = useAppStore((state) => state.host);
@@ -26,7 +28,9 @@ export const AppHeader: React.FC = () => {
         />
         {host && <div className="header-hint">{host.url}</div>}
       </div>
-      {activationOpen && <RunnerActivationModal onClose={() => setActivationOpen(false)} />}
+      {activationOpen && (
+        <RunnerActivationModal onClose={() => setActivationOpen(false)} onOpenProfile={onOpenProfile} />
+      )}
       {addOpen && <RunnerAddModal onClose={() => setAddOpen(false)} />}
     </>
   );

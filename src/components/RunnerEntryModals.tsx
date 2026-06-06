@@ -3,7 +3,13 @@ import { useAppStore } from '../store';
 import type { Label, Runner } from '../types';
 import { LabelBadge, labelKindOrder, labelKindTitle } from './LabelBadge';
 
-export function RunnerActivationModal({ onClose }: { onClose: () => void }) {
+export function RunnerActivationModal({
+  onClose,
+  onOpenProfile,
+}: {
+  onClose: () => void;
+  onOpenProfile?: (runnerId: string) => void;
+}) {
   const runners = useAppStore((state) => state.runners);
   const setStatus = useAppStore((state) => state.setStatus);
   const selectRunner = useAppStore((state) => state.selectRunner);
@@ -35,7 +41,21 @@ export function RunnerActivationModal({ onClose }: { onClose: () => void }) {
 
   function openProfile(runnerId: string) {
     selectRunner(runnerId);
+    onOpenProfile?.(runnerId);
     onClose();
+  }
+
+  function handleSearchKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      onClose();
+      return;
+    }
+    if (event.key !== 'Enter') return;
+    const firstMatch = visibleMatches[0];
+    if (!firstMatch || activatingId) return;
+    event.preventDefault();
+    void activate(firstMatch.id);
   }
 
   return (
@@ -47,6 +67,7 @@ export function RunnerActivationModal({ onClose }: { onClose: () => void }) {
           className="input"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
+          onKeyDown={handleSearchKeyDown}
           placeholder="Zoek op nummer, naam of label..."
         />
 
@@ -106,6 +127,7 @@ export function RunnerAddModal({ onClose }: { onClose: () => void }) {
   const [error, setError] = React.useState<string | null>(null);
 
   async function save() {
+    if (saving) return;
     const cleanName = name.trim();
     if (!cleanName) {
       setError('Naam is verplicht');
@@ -134,6 +156,18 @@ export function RunnerAddModal({ onClose }: { onClose: () => void }) {
     }
   }
 
+  function handleKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      onClose();
+      return;
+    }
+    if (event.key === 'Enter' && event.ctrlKey) {
+      event.preventDefault();
+      void save();
+    }
+  }
+
   function toggleLabel(labelId: string) {
     const label = labels.find((item) => item.id === labelId);
     if (!label) return;
@@ -147,7 +181,7 @@ export function RunnerAddModal({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="modal-backdrop" role="dialog" aria-modal="true">
-      <div className="modal">
+      <div className="modal" onKeyDown={handleKeyDown}>
         <ModalHeader title="Nieuwe loper" onClose={onClose} />
 
         <div className="form-grid">

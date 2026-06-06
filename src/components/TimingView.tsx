@@ -14,23 +14,36 @@ export function TimingView() {
   const undoLastHandoff = useAppStore((state) => state.undoLastHandoff);
   const finishRace = useAppStore((state) => state.finishRace);
   const [message, setMessage] = React.useState<string | null>(null);
+  const [handoffBusy, setHandoffBusy] = React.useState(false);
+  const [lastAction, setLastAction] = React.useState<string | null>(null);
+  const handoffBusyRef = React.useRef(false);
 
   const activeRunner = runners.find((runner) => runner.id === race.activeRunnerId) || null;
   const nextRunner = getNextRunner(runners);
   const recentLaps = laps.slice(0, 10);
   const activePreviousLap = activeRunner ? laps.find((lap) => lap.runnerId === activeRunner.id) || null : null;
+  const handoffPreview = buildHandoffPreview(activeRunner, nextRunner);
 
   useAnimationFrameTick(Boolean(activeRunner && race.activeStartedAt));
 
-  async function runHandoff() {
+  const runHandoff = React.useCallback(async () => {
+    if (handoffBusyRef.current) return;
+    handoffBusyRef.current = true;
+    const hadActiveRunner = Boolean(activeRunner);
+    setHandoffBusy(true);
     setMessage(null);
+    setLastAction(null);
     try {
       if (activeRunner) await handoff();
       else await startNext();
+      setLastAction(hadActiveRunner ? 'Ronde opgeslagen. Volgende loper gestart.' : 'Race gestart. Eerste loper loopt.');
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Timing actie mislukt');
+    } finally {
+      handoffBusyRef.current = false;
+      setHandoffBusy(false);
     }
-  }
+  }, [activeRunner, handoff, startNext]);
 
   React.useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -38,16 +51,18 @@ export function TimingView() {
       if (target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || target?.isContentEditable) return;
       if (event.code === 'Space') {
         event.preventDefault();
+        if (event.repeat || handoffBusy) return;
         runHandoff();
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [activeRunner]);
+  }, [handoffBusy, runHandoff]);
 
   async function undo() {
     if (!window.confirm('Laatste handoff ongedaan maken?')) return;
     setMessage(null);
+    setLastAction(null);
     try {
       await undoLastHandoff();
     } catch (err) {
@@ -56,8 +71,16 @@ export function TimingView() {
   }
 
   async function finish() {
+    if (handoffBusyRef.current) return;
     if (!window.confirm('Race beeindigen? De actieve loper wordt gestopt zonder extra lap.')) return;
-    await finishRace();
+    setMessage(null);
+    setLastAction(null);
+    try {
+      await finishRace();
+      setLastAction('Race beeindigd.');
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Race beeindigen mislukt');
+    }
   }
 
   return (
@@ -84,19 +107,25 @@ export function TimingView() {
         <TimingCard title="Volgende loper" runner={nextRunner} empty="Geen loper in wachtrij" />
       </div>
 
+      <div className="handoff-preview">
+        <span className="muted-label">Bij volgende spatie</span>
+        <strong>{handoffPreview}</strong>
+      </div>
+
       <div className="timing-actions">
-        <button className="btn btn--primary btn--xl" onClick={runHandoff}>
-          {activeRunner ? 'Spatie: handoff' : 'Start eerste loper'}
+        <button className="btn btn--primary btn--xl" onClick={runHandoff} disabled={handoffBusy}>
+          {handoffBusy ? 'Bezig...' : activeRunner ? 'Spatie: handoff' : 'Start eerste loper'}
         </button>
-        <button className="btn btn--ghost" onClick={undo}>
+        <button className="btn btn--ghost" onClick={undo} disabled={handoffBusy}>
           Undo laatste handoff
         </button>
-        <button className="btn btn--danger" onClick={finish}>
+        <button className="btn btn--danger" onClick={finish} disabled={handoffBusy}>
           Race beeindigen
         </button>
       </div>
 
       {message && <div className="warning-banner">{message}</div>}
+      {lastAction && <div className="success-banner">{lastAction}</div>}
 
       <div className="stats-grid">
         <div className="stat-panel">
@@ -190,4 +219,21 @@ function getNextRunner(runners: Runner[]) {
       .filter((runner) => runner.status === 'waiting')
       .sort((a, b) => (a.queueIndex ?? 0) - (b.queueIndex ?? 0))[0] || null
   );
+}
+
+function buildHandoffPreview(activeRunner: Runner | null, nextRunner: Runner | null) {
+  if (activeRunner && nextRunner) {
+    return `${runnerLabel(activeRunner)} wordt afgeklokt -> ${runnerLabel(nextRunner)} start`;
+  }
+  if (!activeRunner && nextRunner) {
+    return `${runnerLabel(nextRunner)} start`;
+  }
+  if (activeRunner && !nextRunner) {
+    return 'Huidige loper wordt afgeklokt; geen volgende loper klaar';
+  }
+  return 'Geen loper klaar in de wachtrij';
+}
+
+function runnerLabel(runner: Runner) {
+  return runner.runnerNumber ? `${runner.runnerNumber} - ${runner.name}` : runner.name;
 }

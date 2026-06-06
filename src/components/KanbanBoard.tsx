@@ -66,6 +66,7 @@ export const KanbanBoard: React.FC = () => {
 
     if (overId.startsWith('column-')) {
       const targetStatus = overId.replace('column-', '') as RunnerStatus;
+      if (targetStatus === 'ran') return;
       const runner = filteredRunners.find((item) => item.id === activeId);
       if (runner && runner.status !== targetStatus) {
         setStatus(activeId, targetStatus);
@@ -85,7 +86,7 @@ export const KanbanBoard: React.FC = () => {
       return;
     }
 
-    if (overRunner && activeRunner && activeRunner.status !== overRunner.status) {
+    if (overRunner && activeRunner && activeRunner.status !== overRunner.status && overRunner.status !== 'ran') {
       setStatus(activeId, overRunner.status);
     }
   }
@@ -109,7 +110,7 @@ export const KanbanBoard: React.FC = () => {
               ? waitingSorted
               : filteredRunners.filter((runner) => runner.status === column.key);
           return (
-            <DroppableColumn key={column.key} id={`column-${column.key}`} title={column.title}>
+            <DroppableColumn key={column.key} id={`column-${column.key}`} title={column.title} count={items.length}>
               {items.map((runner, index) => (
                 <DroppableCard key={runner.id} id={runner.id}>
                   <DraggableCard
@@ -134,11 +135,24 @@ export const KanbanBoard: React.FC = () => {
   );
 };
 
-function DroppableColumn({ id, title, children }: { id: string; title: string; children: React.ReactNode }) {
+function DroppableColumn({
+  id,
+  title,
+  count,
+  children,
+}: {
+  id: string;
+  title: string;
+  count: number;
+  children: React.ReactNode;
+}) {
   const { setNodeRef, isOver } = useDroppable({ id });
   return (
     <div ref={setNodeRef} className={`column${isOver ? ' column--over' : ''}`}>
-      <div className="column-title">{title}</div>
+      <div className="column-title">
+        <span>{title}</span>
+        <span className="column-count">{count}</span>
+      </div>
       <div className="column-body">{children}</div>
     </div>
   );
@@ -221,11 +235,6 @@ function DraggableCard({
           {columnKey !== 'waiting' && (
             <button onClick={(event) => { event.stopPropagation(); onSetStatus(id, 'waiting'); }} className="btn btn--sm btn--fixed">
               Wachtrij
-            </button>
-          )}
-          {columnKey !== 'ran' && (
-            <button onClick={(event) => { event.stopPropagation(); onSetStatus(id, 'ran'); }} className="btn btn--sm btn--fixed">
-              Gelopen
             </button>
           )}
           {columnKey === 'ran' && !runner.hiddenFromQueue && (

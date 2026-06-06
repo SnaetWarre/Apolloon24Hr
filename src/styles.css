@@ -158,6 +158,15 @@ select {
   font-weight: 700;
 }
 
+.success-banner {
+  background: #ecfdf5;
+  border-left: 5px solid var(--green);
+  color: #166534;
+  font-weight: 800;
+  margin-top: 14px;
+  padding: 12px 14px;
+}
+
 .header-bar,
 .export-row,
 .form-row {
@@ -315,6 +324,33 @@ select {
   margin-bottom: 16px;
 }
 
+.operator-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+  padding: 12px;
+  background: var(--panel);
+  border-left: 5px solid var(--apolloon-blue);
+  border-bottom: 1px solid var(--line);
+}
+
+.operator-strip-main strong {
+  display: block;
+  margin-top: 3px;
+  font-size: 18px;
+}
+
+.operator-strip-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
 .race-strip > div,
 .stat-panel,
 .panel,
@@ -381,11 +417,23 @@ select {
 }
 
 .column-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
   margin-bottom: 12px;
   color: var(--blue-dark);
   font-size: 15px;
   font-weight: 900;
   text-transform: uppercase;
+}
+
+.column-count {
+  background: #e8f0ff;
+  color: var(--blue-dark);
+  padding: 3px 8px;
+  font-size: 12px;
+  font-weight: 900;
 }
 
 .column-body {
@@ -627,6 +675,19 @@ select {
   font-weight: 900;
 }
 
+.handoff-preview {
+  margin-top: 14px;
+  padding: 14px 16px;
+  background: var(--panel);
+  border-left: 5px solid var(--green);
+}
+
+.handoff-preview strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 18px;
+}
+
 .timing-actions {
   display: flex;
   flex-wrap: wrap;
@@ -811,6 +872,37 @@ td {
 .modal-header p {
   margin: 6px 0 0;
   color: var(--muted);
+}
+
+.profile-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+  margin: 18px 0;
+}
+
+.profile-stat {
+  min-height: 76px;
+  border-left: 4px solid var(--apolloon-blue);
+  background: var(--panel-soft);
+  padding: 12px;
+}
+
+.profile-stat strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 20px;
+}
+
+.profile-laps {
+  margin: 18px 0;
+}
+
+.profile-laps h3 {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 13px;
+  text-transform: uppercase;
 }
 
 .form-grid {
@@ -1142,6 +1234,10 @@ td {
   .runner-search-actions {
     justify-content: flex-start;
     flex-wrap: wrap;
+  }
+
+  .operator-strip-actions {
+    justify-content: flex-start;
   }
 
   .card-row,

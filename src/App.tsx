@@ -110,11 +110,12 @@ function QueuePage() {
   const runners = useAppStore((state) => state.runners);
   const selectedRunnerId = useAppStore((state) => state.selectedRunnerId);
   const selectRunner = useAppStore((state) => state.selectRunner);
-  const setStatus = useAppStore((state) => state.setStatus);
   const selectNext = useAppStore((state) => state.selectNext);
   const selectPrev = useAppStore((state) => state.selectPrev);
+  const [profileRunnerId, setProfileRunnerId] = React.useState<string | null>(null);
 
   const activeRunner = runners.find((runner) => runner.id === race.activeRunnerId) || null;
+  const selectedRunner = runners.find((runner) => runner.id === selectedRunnerId) || null;
   const nextRunner =
     runners
       .filter((runner) => runner.status === 'waiting')
@@ -137,13 +138,10 @@ function QueuePage() {
         return;
       }
       if (!selectedRunnerId) return;
-      if (event.key === 'w' || event.key === 'W') setStatus(selectedRunnerId, 'warming_up');
-      if (event.key === 'q' || event.key === 'Q') setStatus(selectedRunnerId, 'waiting');
-      if (event.key === 'Backspace') setStatus(selectedRunnerId, 'ran');
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [selectNext, selectPrev, selectedRunnerId, setStatus]);
+  }, [selectNext, selectPrev, selectedRunnerId]);
 
   return (
     <>
@@ -165,13 +163,51 @@ function QueuePage() {
           <strong>{nextRunner ? runnerLabel(nextRunner) : 'Geen loper in wachtrij'}</strong>
         </div>
       </div>
-      <AppHeader />
+      <AppHeader
+        onOpenProfile={(runnerId) => {
+          selectRunner(runnerId);
+          setProfileRunnerId(runnerId);
+        }}
+      />
+      {selectedRunner && (
+        <SelectedRunnerStrip
+          runner={selectedRunner}
+          onOpenProfile={() => setProfileRunnerId(selectedRunner.id)}
+        />
+      )}
       <KanbanBoard />
-      {selectedRunnerId && <RunnerProfileModal runnerId={selectedRunnerId} onClose={() => selectRunner(null)} />}
+      {profileRunnerId && (
+        <RunnerProfileModal runnerId={profileRunnerId} onClose={() => setProfileRunnerId(null)} />
+      )}
     </>
   );
 }
 
 function runnerLabel(runner: { runnerNumber: string | null; name: string }) {
   return runner.runnerNumber ? `${runner.runnerNumber} - ${runner.name}` : runner.name;
+}
+
+function SelectedRunnerStrip({
+  runner,
+  onOpenProfile,
+}: {
+  runner: {
+    runnerNumber: string | null;
+    name: string;
+  };
+  onOpenProfile: () => void;
+}) {
+  return (
+    <div className="operator-strip">
+      <div className="operator-strip-main">
+        <span className="muted-label">Geselecteerd</span>
+        <strong>{runnerLabel(runner)}</strong>
+      </div>
+      <div className="operator-strip-actions">
+        <button className="btn btn--ghost btn--fixed" onClick={onOpenProfile}>
+          Profiel openen
+        </button>
+      </div>
+    </div>
+  );
 }

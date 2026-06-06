@@ -1,11 +1,13 @@
 import React from 'react';
 import { useAppStore } from '../store';
-import { formatDurationMs } from '../lib/time';
+import { formatDurationMs, formatElapsedSeconds, nowMs } from '../lib/time';
+import { useAnimationFrameTick } from '../lib/useAnimationFrameTick';
 import { labelKindOrder, labelKindTitle } from './LabelBadge';
 import type { Label } from '../types';
 
 export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; onClose: () => void }) {
   const runner = useAppStore((state) => state.runners.find((item) => item.id === runnerId));
+  const laps = useAppStore((state) => state.laps.filter((lap) => lap.runnerId === runnerId));
   const labels = useAppStore((state) => state.labels);
   const updateRunner = useAppStore((state) => state.updateRunner);
   const [runnerNumber, setRunnerNumber] = React.useState('');
@@ -27,7 +29,13 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
     setSelectedLabels(runner.labels.map((label) => label.id));
   }, [runner]);
 
+  useAnimationFrameTick(Boolean(runner?.statusSince && ['warming_up', 'waiting', 'running'].includes(runner.status)));
+
   if (!runner) return null;
+
+  const latestLap = laps[0] || null;
+  const statusTime = statusElapsedLabel(runner.status, runner.statusSince);
+  const recentLaps = laps.slice(0, 5);
 
   async function save() {
     await updateRunner(runnerId, {
@@ -64,6 +72,61 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
             x
           </button>
         </div>
+
+        <div className="profile-stats">
+          <div className="profile-stat">
+            <span className="muted-label">Status</span>
+            <strong>{runnerStatusLabel(runner.status)}</strong>
+          </div>
+          <div className="profile-stat">
+            <span className="muted-label">Tijd in status</span>
+            <strong>{statusTime}</strong>
+          </div>
+          <div className="profile-stat">
+            <span className="muted-label">Totaal toeren</span>
+            <strong>{runner.lapCount}</strong>
+          </div>
+          <div className="profile-stat">
+            <span className="muted-label">Vorige ronde</span>
+            <strong>{latestLap ? formatDurationMs(latestLap.durationMs) : 'Nog geen ronde'}</strong>
+          </div>
+          <div className="profile-stat">
+            <span className="muted-label">Snelste ronde</span>
+            <strong>{formatDurationMs(runner.bestLapMs)}</strong>
+          </div>
+          <div className="profile-stat">
+            <span className="muted-label">Gemiddelde</span>
+            <strong>{formatDurationMs(runner.averageLapMs)}</strong>
+          </div>
+        </div>
+
+        <section className="profile-laps">
+          <h3>Laatste rondes</h3>
+          {recentLaps.length ? (
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Ronde</th>
+                    <th>Tijd</th>
+                    <th>Rondetijd</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {recentLaps.map((lap) => (
+                    <tr key={lap.id}>
+                      <td>{lap.lapNumber}</td>
+                      <td>{new Date(lap.finishedAt).toLocaleTimeString()}</td>
+                      <td>{formatDurationMs(lap.durationMs)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="empty-inline">Nog geen rondes geregistreerd.</div>
+          )}
+        </section>
 
         <div className="form-grid">
           <label>
@@ -142,6 +205,28 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
 function msToSecondsInput(ms: number | null) {
   if (ms === null || ms === undefined) return '';
   return String(Math.round(ms / 1000));
+}
+
+function statusElapsedLabel(status: string, statusSince: number | null) {
+  if (!statusSince || status === 'registered' || status === 'ran') return '—';
+  return formatElapsedSeconds(nowMs() - statusSince);
+}
+
+function runnerStatusLabel(status: string) {
+  switch (status) {
+    case 'registered':
+      return 'Ingeschreven';
+    case 'warming_up':
+      return 'Aan het opwarmen';
+    case 'waiting':
+      return 'In de wachtrij';
+    case 'running':
+      return 'Loopt nu';
+    case 'ran':
+      return 'Heeft gelopen';
+    default:
+      return status;
+  }
 }
 
 function groupLabels(labels: Label[]) {
