@@ -21,18 +21,27 @@ export function OutsideDisplay({ onNavigate }: { onNavigate: (path: string) => v
       <button className="display-home" onClick={() => onNavigate('/')}>
         Start
       </button>
-      <section className="outside-current">
-        <span>Nu op de piste</span>
-        <strong>{activeRunner ? runnerName(activeRunner) : 'Nog niemand gestart'}</strong>
-        {activeRunner && race.activeStartedAt && (
-          <em>{formatDurationMs(nowMs() - race.activeStartedAt)}</em>
-        )}
-        {activeRunner && <DisplayLabels labels={activeRunner.labels} />}
+      <section className="outside-band outside-band--current">
+        <DisplayBrand tone="light" />
+        <div className="outside-runner">
+          <span className="display-kicker">Nu op de piste</span>
+          <strong className="display-runner-name">
+            {activeRunner ? runnerName(activeRunner) : 'Nog niemand gestart'}
+          </strong>
+          {activeRunner && race.activeStartedAt && (
+            <em className="display-time">{formatDurationMs(nowMs() - race.activeStartedAt)}</em>
+          )}
+          {activeRunner && <DisplayLabels labels={activeRunner.labels} />}
+        </div>
       </section>
-      <section className="outside-next">
-        <span>Volgende loper</span>
-        <strong>{nextRunner ? runnerName(nextRunner) : 'Geen loper in wachtrij'}</strong>
-        {nextRunner && <DisplayLabels labels={nextRunner.labels} />}
+      <section className="outside-band outside-band--next">
+        <div className="outside-runner outside-runner--next">
+          <span className="display-kicker">Volgende loper</span>
+          <strong className="display-runner-name">
+            {nextRunner ? runnerName(nextRunner) : 'Geen loper in wachtrij'}
+          </strong>
+          {nextRunner && <DisplayLabels labels={nextRunner.labels} />}
+        </div>
       </section>
     </main>
   );
@@ -65,8 +74,11 @@ export function InsideDisplay({ onNavigate }: { onNavigate: (path: string) => vo
         Start
       </button>
       <header className="inside-header">
-        <h1>Live standen</h1>
-        <span>{laps.length} rondes geregistreerd</span>
+        <DisplayBrand tone="light" />
+        <div>
+          <h1>Live standen</h1>
+          <span>{laps.length} rondes geregistreerd</span>
+        </div>
       </header>
       <div className="inside-grid">
         <section className="display-panel">
@@ -110,6 +122,15 @@ export function InsideDisplay({ onNavigate }: { onNavigate: (path: string) => vo
         </section>
       </div>
     </main>
+  );
+}
+
+function DisplayBrand({ tone }: { tone: 'light' | 'dark' }) {
+  return (
+    <div className={`display-brand display-brand--${tone}`}>
+      <img src="/brand/apolloon-logo.png" alt="Apolloon" />
+      <span>you&apos;ll never walk alone</span>
+    </div>
   );
 }
 

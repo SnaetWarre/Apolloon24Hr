@@ -118,11 +118,19 @@ function getRowValue(row, names) {
 
 function formatDurationMs(ms) {
   if (ms === undefined || ms === null || Number.isNaN(Number(ms))) return '';
-  const totalSeconds = Math.max(0, Math.floor(Number(ms) / 1000));
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-  return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+  const totalCentiseconds = Math.max(0, Math.floor(Number(ms) / 10));
+  const centiseconds = totalCentiseconds % 100;
+  const totalWholeSeconds = Math.floor(totalCentiseconds / 100);
+  const hours = Math.floor(totalWholeSeconds / 3600);
+  const minutes = Math.floor((totalWholeSeconds % 3600) / 60);
+  const seconds = totalWholeSeconds % 60;
+  const fraction = String(centiseconds).padStart(2, '0');
+
+  if (hours > 0) {
+    return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}.${fraction}`;
+  }
+
+  return `${minutes}:${String(seconds).padStart(2, '0')}.${fraction}`;
 }
 
 function lapExportRows() {

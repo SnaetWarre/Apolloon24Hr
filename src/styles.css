@@ -5,8 +5,9 @@
   --text: #162033;
   --muted: #64748b;
   --line: #d7e0ee;
-  --blue: #2563eb;
-  --blue-dark: #1d4ed8;
+  --blue: #2877F6;
+  --blue-dark: #1d5ec4;
+  --apolloon-blue: #2877F6;
   --green: #16a34a;
   --red: #dc2626;
   --amber: #d97706;
@@ -669,8 +670,7 @@ th {
 
 .display-root {
   min-height: 100vh;
-  padding: clamp(18px, 3vw, 36px);
-  background: #f8fbff;
+  background: #ffffff;
   color: var(--text);
 }
 
@@ -679,8 +679,8 @@ th {
   top: 12px;
   right: 12px;
   z-index: 5;
-  border: 1px solid rgba(255, 255, 255, 0.35);
-  border-radius: 6px;
+  border: 1px solid rgba(22, 32, 51, 0.16);
+  border-radius: 0;
   background: rgba(255, 255, 255, 0.85);
   padding: 8px 10px;
   cursor: pointer;
@@ -688,60 +688,152 @@ th {
 
 .display-root--outside {
   display: grid;
-  grid-template-rows: 2fr 1fr;
-  gap: 22px;
-  background: #07111f;
+  grid-template-rows: minmax(0, 64fr) minmax(0, 36fr);
+  min-height: 100vh;
   color: #ffffff;
 }
 
-.outside-current,
-.outside-next {
+.outside-band {
+  position: relative;
   display: flex;
+  min-height: 0;
   flex-direction: column;
   justify-content: center;
-  border-radius: 8px;
-  padding: clamp(24px, 5vw, 60px);
-  background: #123064;
+  padding: clamp(28px, 4.5vw, 76px);
+  overflow: hidden;
 }
 
-.outside-next {
-  background: #17433a;
+.outside-band--current {
+  background: var(--apolloon-blue);
+  color: #ffffff;
 }
 
-.outside-current span,
-.outside-next span {
-  font-size: clamp(28px, 4vw, 56px);
+.outside-band--next {
+  background: #ffffff;
+  color: var(--apolloon-blue);
+  border-top: 8px solid var(--apolloon-blue);
+}
+
+.outside-runner {
+  width: min(100%, 1500px);
+}
+
+.outside-runner--next {
+  margin-top: 18px;
+}
+
+.display-kicker {
+  display: block;
+  font-size: clamp(30px, 3.6vw, 62px);
   font-weight: 900;
 }
 
-.outside-current strong,
-.outside-next strong {
-  margin: 14px 0;
-  font-size: clamp(58px, 10vw, 150px);
+.display-runner-name {
+  display: block;
+  margin: clamp(10px, 1.2vw, 18px) 0;
+  font-size: clamp(66px, 7.8vw, 142px);
   line-height: 0.95;
+  font-weight: 900;
+  letter-spacing: 0;
 }
 
-.outside-current em {
-  font-size: clamp(38px, 7vw, 90px);
+.display-time {
+  display: block;
+  font-size: clamp(42px, 5.5vw, 96px);
   font-style: normal;
   font-weight: 900;
 }
 
 .display-root--inside {
-  background: #f5f7fb;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  min-height: 100vh;
+  background: #ffffff;
 }
 
 .inside-header {
   display: flex;
   justify-content: space-between;
   gap: 12px;
-  align-items: end;
-  margin-bottom: 18px;
+  align-items: center;
+  margin: 0;
+  padding: clamp(20px, 3vw, 42px) clamp(28px, 4vw, 64px);
+  background: var(--apolloon-blue);
+  color: #ffffff;
 }
 
 .inside-header h1 {
   margin: 0;
-  font-size: clamp(42px, 7vw, 92px);
+  font-size: clamp(38px, 5vw, 82px);
+}
+
+.inside-grid {
+  padding: clamp(24px, 3vw, 46px) clamp(28px, 4vw, 64px);
+}
+
+.display-root--inside .display-panel {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.display-brand {
+  display: flex;
+  align-items: center;
+  gap: clamp(12px, 1.4vw, 22px);
+}
+
+.display-brand img {
+  display: block;
+  width: clamp(180px, 20vw, 390px);
+  height: auto;
+  object-fit: contain;
+}
+
+.display-brand--light img {
+  filter: brightness(0) invert(1);
+}
+
+.display-brand span {
+  font-size: clamp(17px, 1.6vw, 30px);
+  font-weight: 900;
+  font-style: italic;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+
+.outside-band .display-brand {
+  position: absolute;
+  top: clamp(18px, 2.2vw, 36px);
+  right: clamp(28px, 4.5vw, 76px);
+}
+
+.display-root .display-labels {
+  margin-top: clamp(10px, 1.3vw, 18px);
+  gap: clamp(8px, 0.9vw, 14px);
+}
+
+.display-root .display-labels .label-pill {
+  border-width: 2px;
+  padding: clamp(5px, 0.6vw, 9px) clamp(10px, 1vw, 16px);
+  font-size: clamp(16px, 1.7vw, 32px);
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.outside-band--next .display-labels .label-pill {
+  background: #ffffff;
+}
+
+.display-root .display-labels .label-dot {
+  width: clamp(9px, 0.8vw, 14px);
+  height: clamp(9px, 0.8vw, 14px);
+}
+
+.display-root .display-labels .label-image {
+  width: clamp(24px, 2vw, 42px);
+  height: clamp(24px, 2vw, 42px);
+  border-radius: 0;
 }
 
 .ranking-list {
