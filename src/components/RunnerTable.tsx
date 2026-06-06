@@ -1,6 +1,6 @@
 import React from 'react';
 import { useAppStore } from '../store';
-import { formatDurationMs, nowMs } from '../lib/time';
+import { formatElapsedSeconds, nowMs } from '../lib/time';
 import type { Runner } from '../types';
 
 function TimerCell({ runner }: { runner: Runner }) {
@@ -8,13 +8,13 @@ function TimerCell({ runner }: { runner: Runner }) {
   if (!runner.statusSince) return <span>—</span>;
   if (runner.status !== 'warming_up' && runner.status !== 'waiting') return <span>—</span>;
   const ms = nowMs() - runner.statusSince + tick;
-  return <span>{formatDurationMs(ms)}</span>;
+  return <span>{formatElapsedSeconds(ms)}</span>;
 }
 
 function useSecondTick() {
   const [, setN] = React.useState(0);
   React.useEffect(() => {
-    const id = setInterval(() => setN((n) => (n + 1) % 1_000_000), 100);
+    const id = setInterval(() => setN((n) => (n + 1) % 1_000_000), 1000);
     return () => clearInterval(id);
   }, []);
   return 0; // used to force re-render
@@ -29,7 +29,8 @@ export const RunnerTable: React.FC = () => {
 
   const sorted = React.useMemo(() => {
     const q = search.trim().toLowerCase();
-    const filtered = q ? runners.filter((r) => r.name.toLowerCase().includes(q)) : runners;
+    const visible = runners.filter((runner) => runner.status !== 'registered' && runner.status !== 'running');
+    const filtered = q ? visible.filter((r) => r.name.toLowerCase().includes(q)) : visible;
     return [...filtered].sort((a, b) => a.name.localeCompare(b.name));
   }, [runners, search]);
 
@@ -68,4 +69,3 @@ export const RunnerTable: React.FC = () => {
 };
 
 // manual run time removed in 3-column workflow
-

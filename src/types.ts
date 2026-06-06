@@ -1,4 +1,5 @@
-export type RunnerStatus = 'warming_up' | 'waiting' | 'running' | 'ran';
+export type RunnerStatus = 'registered' | 'warming_up' | 'waiting' | 'running' | 'ran';
+export type RegistrationSource = 'import' | 'manual';
 
 export interface Label {
   id: string;
@@ -34,12 +35,15 @@ export interface Runner {
   targetLaps: number | null;
   historicalAvgMs: number | null;
   historicalBestMs: number | null;
+  registrationSource: RegistrationSource;
   notes: string;
   createdAt: number;
   updatedAt: number;
   status: RunnerStatus;
   statusSince: number | null;
   queueIndex: number | null;
+  hiddenFromQueue: boolean;
+  queueHiddenAt: number | null;
   labels: Label[];
   lapCount: number;
   lastLapMs: number | null;

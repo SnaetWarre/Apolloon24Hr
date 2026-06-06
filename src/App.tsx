@@ -90,10 +90,10 @@ function TopNav({ onNavigate }: { onNavigate: (path: string) => void }) {
         Start
       </button>
       <button className="nav-link" onClick={() => onNavigate('/queue')}>
-        Wachtrij
+        Telsysteem 1
       </button>
       <button className="nav-link" onClick={() => onNavigate('/timing')}>
-        Timing
+        Telsysteem 2
       </button>
       <button className="nav-link" onClick={() => onNavigate('/analysis')}>
         Analyse

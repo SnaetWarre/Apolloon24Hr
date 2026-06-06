@@ -1,6 +1,16 @@
 import { create } from 'zustand';
 import { io } from 'socket.io-client';
-import type { AppSnapshot, HostInfo, Label, LapRecord, RaceState, Runner, RunnerStatus, ViewMode } from './types';
+import type {
+  AppSnapshot,
+  HostInfo,
+  Label,
+  LapRecord,
+  RaceState,
+  RegistrationSource,
+  Runner,
+  RunnerStatus,
+  ViewMode,
+} from './types';
 import { fetchState } from './api';
 import { setServerNowMs, syncServerClock } from './lib/time';
 
@@ -10,8 +20,10 @@ export interface RunnerInput {
   targetLaps?: number | null;
   historicalAvgMs?: number | null;
   historicalBestMs?: number | null;
+  registrationSource?: RegistrationSource;
   notes?: string;
   labels?: string[];
+  status?: RunnerStatus;
 }
 
 interface AppState {
@@ -38,6 +50,8 @@ interface AppState {
   setStatus: (id: string, status: RunnerStatus) => Promise<void>;
   moveInQueue: (id: string, newIndex: number) => Promise<void>;
   deleteRunner: (id: string) => Promise<void>;
+  hideRunner: (id: string) => Promise<void>;
+  unhideRunner: (id: string) => Promise<void>;
   createLabel: (
     input: Pick<Label, 'name' | 'color' | 'icon' | 'kind'> & {
       imageUrl?: string | null;
@@ -93,8 +107,11 @@ function snapshotFromPayload(payload: any): AppSnapshot | null {
 
 function sortedSearchableRunners(runners: Runner[], search: string) {
   const q = search.trim().toLowerCase();
+  const selectable = runners.filter(
+    (runner) => runner.status !== 'registered' && runner.status !== 'running' && !runner.hiddenFromQueue
+  );
   const filtered = q
-    ? runners.filter((runner) => {
+    ? selectable.filter((runner) => {
         const labelText = runner.labels.map((label) => label.name).join(' ').toLowerCase();
         return (
           runner.name.toLowerCase().includes(q) ||
@@ -102,7 +119,7 @@ function sortedSearchableRunners(runners: Runner[], search: string) {
           labelText.includes(q)
         );
       })
-    : runners;
+    : selectable;
   return [...filtered].sort((a, b) => {
     const numberA = a.runnerNumber || '';
     const numberB = b.runnerNumber || '';
@@ -233,6 +250,23 @@ export const useAppStore = create<AppState>((set, get) => ({
     const snapshot = snapshotFromPayload(payload);
     if (snapshot) get().applySnapshot(snapshot);
     if (get().selectedRunnerId === id) set({ selectedRunnerId: null });
+  },
+  async hideRunner(id) {
+    const payload = await apiRequest('/api/queue/hide', {
+      method: 'POST',
+      body: JSON.stringify({ id }),
+    });
+    const snapshot = snapshotFromPayload(payload);
+    if (snapshot) get().applySnapshot(snapshot);
+    if (get().selectedRunnerId === id) set({ selectedRunnerId: null });
+  },
+  async unhideRunner(id) {
+    const payload = await apiRequest('/api/queue/unhide', {
+      method: 'POST',
+      body: JSON.stringify({ id }),
+    });
+    const snapshot = snapshotFromPayload(payload);
+    if (snapshot) get().applySnapshot(snapshot);
   },
   async createLabel(input) {
     const payload = await apiRequest('/api/labels', {

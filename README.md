@@ -37,6 +37,7 @@ There is no password login. The physical local network is the trust boundary.
 ## Registration Import
 
 Export Google Forms/Sheets data to CSV before the event and import it through `Admin / Import / Labels`.
+The import creates the full registration database. Imported runners stay in the `Ingeschreven` state and do not appear on the queue board until Telsysteem 1 activates them for warm-up.
 
 Default label categories:
 
@@ -54,12 +55,20 @@ Expected CSV columns:
 runner_number,name,labels,target_laps,historical_avg,historical_best
 ```
 
+The importer also reads common Google Forms columns such as `zustervereniging`, `vereniging`, `club`, `team`, `speedteam`, `jaar`, and `groep` as labels.
+
 Notes:
 
 - `runner_number` and `name` are required.
 - `labels` can contain comma, semicolon, or pipe separated labels.
 - Existing runner numbers are updated instead of duplicated.
 - Missing labels are created automatically.
+- Re-importing does not reset live statuses such as warm-up, waiting, running, or ran.
+
+Telsysteem 1 has two entry actions:
+
+- `Ingeschrevene zoeken`: find an imported runner and move them to warm-up.
+- `Nieuwe loper`: create an onsite runner manually and put them directly in warm-up.
 
 ## Timing Flow
 

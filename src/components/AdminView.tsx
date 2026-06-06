@@ -1,7 +1,8 @@
 import React from 'react';
 import { useAppStore } from '../store';
 import { LabelBadge, labelKindOrder, labelKindTitle } from './LabelBadge';
-import type { Label } from '../types';
+import { SourceBadge } from './RunnerEntryModals';
+import type { Label, Runner, RunnerStatus } from '../types';
 
 export function AdminView() {
   const labels = useAppStore((state) => state.labels);
@@ -10,8 +11,13 @@ export function AdminView() {
   const createLabel = useAppStore((state) => state.createLabel);
   const updateLabel = useAppStore((state) => state.updateLabel);
   const deleteLabel = useAppStore((state) => state.deleteLabel);
+  const deleteRunner = useAppStore((state) => state.deleteRunner);
+  const unhideRunner = useAppStore((state) => state.unhideRunner);
   const [csvText, setCsvText] = React.useState('');
+  const [csvFileName, setCsvFileName] = React.useState('');
   const [message, setMessage] = React.useState<string | null>(null);
+  const [runnerMessage, setRunnerMessage] = React.useState<string | null>(null);
+  const [runnerQuery, setRunnerQuery] = React.useState('');
   const [labelName, setLabelName] = React.useState('');
   const [labelColor, setLabelColor] = React.useState('#3b82f6');
   const [labelKind, setLabelKind] = React.useState('andere');
@@ -33,6 +39,8 @@ export function AdminView() {
   async function onFileChange(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
+    setMessage(null);
+    setCsvFileName(file.name);
     setCsvText(await file.text());
   }
 
@@ -59,6 +67,52 @@ export function AdminView() {
     await deleteLabel(id);
   }
 
+  const adminRunners = React.useMemo(() => {
+    const q = runnerQuery.trim().toLowerCase();
+    const filtered = q
+      ? runners.filter((runner) => {
+          const labelText = runner.labels.map((label) => label.name).join(' ').toLowerCase();
+          return (
+            runner.name.toLowerCase().includes(q) ||
+            (runner.runnerNumber || '').toLowerCase().includes(q) ||
+            runner.status.toLowerCase().includes(q) ||
+            runner.registrationSource.toLowerCase().includes(q) ||
+            labelText.includes(q)
+          );
+        })
+      : runners;
+    return [...filtered]
+      .sort(
+        (a, b) =>
+          statusOrder(a.status) - statusOrder(b.status) ||
+          (a.runnerNumber || '').localeCompare(b.runnerNumber || '', undefined, { numeric: true }) ||
+          a.name.localeCompare(b.name)
+      )
+      .slice(0, 150);
+  }, [runnerQuery, runners]);
+
+  async function restoreRunner(runner: Runner) {
+    setRunnerMessage(null);
+    try {
+      await unhideRunner(runner.id);
+      setRunnerMessage(`${runner.name} is terug zichtbaar.`);
+    } catch (err) {
+      setRunnerMessage(err instanceof Error ? err.message : 'Loper terug tonen mislukt');
+    }
+  }
+
+  async function removeRunner(runner: Runner) {
+    if (runner.lapCount > 0 || runner.status === 'running') return;
+    if (!window.confirm(`Loper ${runner.name} definitief verwijderen?`)) return;
+    setRunnerMessage(null);
+    try {
+      await deleteRunner(runner.id);
+      setRunnerMessage(`${runner.name} is definitief verwijderd.`);
+    } catch (err) {
+      setRunnerMessage(err instanceof Error ? err.message : 'Loper verwijderen mislukt');
+    }
+  }
+
   return (
     <>
       <div className="hero hero--compact">
@@ -73,18 +127,19 @@ export function AdminView() {
         <section className="panel">
           <h2>Google Sheets CSV import</h2>
           <p className="panel-copy">
-            Verwachte kolommen: runner_number, name, labels, target_laps, historical_avg, historical_best.
+            Import zet nieuwe lopers in de ingeschreven databank. Ze verschijnen pas op het bord wanneer je ze
+            activeert in Telsysteem 1.
           </p>
-          <input className="input" type="file" accept=".csv,text/csv" onChange={onFileChange} />
-          <textarea
-            className="input textarea textarea--large"
-            value={csvText}
-            onChange={(event) => setCsvText(event.target.value)}
-            placeholder="Plak hier CSV data..."
-          />
-          <button className="btn btn--primary" onClick={importCsv}>
-            Importeren
-          </button>
+          <div className="file-import-row">
+            <label className="file-picker">
+              <input type="file" accept=".csv,text/csv" onChange={onFileChange} />
+              <span>CSV-bestand kiezen</span>
+            </label>
+            <span className="file-name">{csvFileName || 'Geen bestand gekozen'}</span>
+            <button className="btn btn--primary btn--fixed" onClick={importCsv} disabled={!csvText.trim()}>
+              Importeren
+            </button>
+          </div>
           {message && <div className="host-hint">{message}</div>}
         </section>
 
@@ -155,6 +210,81 @@ export function AdminView() {
       </div>
 
       <section className="panel">
+        <h2>Lopers beheren</h2>
+        <p className="panel-copy">
+          Definitief verwijderen kan alleen voor lopers zonder rondes. Gelopen data blijft bewaard voor analyse.
+        </p>
+        <div className="form-row form-row--plain">
+          <input
+            className="input input--stretch"
+            value={runnerQuery}
+            onChange={(event) => setRunnerQuery(event.target.value)}
+            placeholder="Zoek op nummer, naam, label, status of bron..."
+          />
+        </div>
+        {runnerMessage && <div className="host-hint">{runnerMessage}</div>}
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Nr.</th>
+                <th>Naam</th>
+                <th>Status</th>
+                <th>Bron</th>
+                <th>Labels</th>
+                <th>Toeren</th>
+                <th>Acties</th>
+              </tr>
+            </thead>
+            <tbody>
+              {adminRunners.map((runner) => (
+                <tr key={runner.id}>
+                  <td>{runner.runnerNumber || '-'}</td>
+                  <td>{runner.name}</td>
+                  <td>
+                    {statusLabel(runner.status)}
+                    {runner.hiddenFromQueue ? ' · verborgen' : ''}
+                  </td>
+                  <td>
+                    <SourceBadge source={runner.registrationSource} />
+                  </td>
+                  <td>
+                    <div className="label-row">
+                      {runner.labels.map((label) => (
+                        <LabelBadge key={label.id} label={label} compact />
+                      ))}
+                    </div>
+                  </td>
+                  <td>{runner.lapCount}</td>
+                  <td>
+                    <div className="runner-admin-actions">
+                      {runner.hiddenFromQueue && (
+                        <button className="btn btn--sm btn--fixed" onClick={() => restoreRunner(runner)}>
+                          Terug tonen
+                        </button>
+                      )}
+                      <button
+                        className="btn btn--danger btn--fixed"
+                        onClick={() => removeRunner(runner)}
+                        disabled={runner.lapCount > 0 || runner.status === 'running'}
+                      >
+                        Verwijder
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {adminRunners.length === 0 && (
+                <tr>
+                  <td colSpan={7}>Geen lopers gevonden.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="panel">
         <h2>Database status</h2>
         <div className="stats-grid">
           <div className="stat-panel">
@@ -173,6 +303,40 @@ export function AdminView() {
       </section>
     </>
   );
+}
+
+function statusOrder(status: RunnerStatus) {
+  switch (status) {
+    case 'running':
+      return 0;
+    case 'waiting':
+      return 1;
+    case 'warming_up':
+      return 2;
+    case 'ran':
+      return 3;
+    case 'registered':
+      return 4;
+    default:
+      return 5;
+  }
+}
+
+function statusLabel(status: RunnerStatus) {
+  switch (status) {
+    case 'registered':
+      return 'Ingeschreven';
+    case 'warming_up':
+      return 'Aan het opwarmen';
+    case 'waiting':
+      return 'In de wachtrij';
+    case 'running':
+      return 'Loopt';
+    case 'ran':
+      return 'Heeft gelopen';
+    default:
+      return status;
+  }
 }
 
 function groupLabels(labels: Label[]) {

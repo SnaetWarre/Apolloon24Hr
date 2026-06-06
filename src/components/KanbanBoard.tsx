@@ -1,9 +1,10 @@
 import React from 'react';
 import { DndContext, closestCenter, useDraggable, useDroppable, DragEndEvent } from '@dnd-kit/core';
 import { useAppStore } from '../store';
-import { formatDurationMs, nowMs } from '../lib/time';
+import { formatDurationMs, formatElapsedSeconds, nowMs } from '../lib/time';
 import type { Runner, RunnerStatus } from '../types';
 import { LabelBadge } from './LabelBadge';
+import { SourceBadge } from './RunnerEntryModals';
 
 const COLUMNS: { key: RunnerStatus; title: string }[] = [
   { key: 'warming_up', title: 'Aan het opwarmen' },
@@ -14,11 +15,11 @@ const COLUMNS: { key: RunnerStatus; title: string }[] = [
 function TimerBadge({ runner }: { runner: Runner }) {
   const [, setTick] = React.useState(0);
   React.useEffect(() => {
-    const id = window.setInterval(() => setTick((tick) => (tick + 1) % 1_000_000), 100);
+    const id = window.setInterval(() => setTick((tick) => (tick + 1) % 1_000_000), 1000);
     return () => window.clearInterval(id);
   }, []);
   if (!runner.statusSince || runner.status === 'ran') return null;
-  return <span className="timer-badge">{formatDurationMs(nowMs() - runner.statusSince)}</span>;
+  return <span className="timer-badge">{formatElapsedSeconds(nowMs() - runner.statusSince)}</span>;
 }
 
 export const KanbanBoard: React.FC = () => {
@@ -28,11 +29,17 @@ export const KanbanBoard: React.FC = () => {
   const moveInQueue = useAppStore((state) => state.moveInQueue);
   const selectedRunnerId = useAppStore((state) => state.selectedRunnerId);
   const selectRunner = useAppStore((state) => state.selectRunner);
-  const deleteRunner = useAppStore((state) => state.deleteRunner);
+  const hideRunner = useAppStore((state) => state.hideRunner);
+  const unhideRunner = useAppStore((state) => state.unhideRunner);
+  const [showHiddenRan, setShowHiddenRan] = React.useState(false);
 
   const filteredRunners = React.useMemo(() => {
     const q = search.trim().toLowerCase();
-    const visible = runners.filter((runner) => runner.status !== 'running');
+    const visible = runners.filter((runner) => {
+      if (runner.status === 'registered' || runner.status === 'running') return false;
+      if (runner.hiddenFromQueue && !(showHiddenRan && runner.status === 'ran')) return false;
+      return true;
+    });
     if (!q) return visible;
     return visible.filter((runner) => {
       const labelText = runner.labels.map((label) => label.name).join(' ').toLowerCase();
@@ -42,7 +49,7 @@ export const KanbanBoard: React.FC = () => {
         labelText.includes(q)
       );
     });
-  }, [runners, search]);
+  }, [runners, search, showHiddenRan]);
 
   const waitingSorted = React.useMemo(() => {
     return filteredRunners
@@ -85,6 +92,16 @@ export const KanbanBoard: React.FC = () => {
 
   return (
     <DndContext collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+      <div className="board-toolbar">
+        <label className="toggle-row">
+          <input
+            type="checkbox"
+            checked={showHiddenRan}
+            onChange={(event) => setShowHiddenRan(event.target.checked)}
+          />
+          Verborgen gelopen tonen
+        </label>
+      </div>
       <div className="kanban">
         {COLUMNS.map((column) => {
           const items =
@@ -103,7 +120,8 @@ export const KanbanBoard: React.FC = () => {
                     columnKey={column.key}
                     queueIndex={column.key === 'waiting' ? index : undefined}
                     onSetStatus={setStatus}
-                    onDelete={deleteRunner}
+                    onHide={hideRunner}
+                    onUnhide={unhideRunner}
                   />
                 </DroppableCard>
               ))}
@@ -134,7 +152,8 @@ function DraggableCard({
   columnKey,
   queueIndex,
   onSetStatus,
-  onDelete,
+  onHide,
+  onUnhide,
 }: {
   id: string;
   runner: Runner;
@@ -143,7 +162,8 @@ function DraggableCard({
   columnKey: RunnerStatus;
   queueIndex?: number;
   onSetStatus: (id: string, status: RunnerStatus) => Promise<void>;
-  onDelete: (id: string) => Promise<void>;
+  onHide: (id: string) => Promise<void>;
+  onUnhide: (id: string) => Promise<void>;
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id });
   const style: React.CSSProperties = {
@@ -151,14 +171,22 @@ function DraggableCard({
     opacity: isDragging ? 0.5 : 1,
   };
 
-  async function handleDelete(event: React.MouseEvent) {
+  async function handleHide(event: React.MouseEvent) {
     event.stopPropagation();
-    if (!window.confirm(`Loper ${runner.name} verwijderen?`)) return;
-    await onDelete(id);
+    await onHide(id);
+  }
+
+  async function handleUnhide(event: React.MouseEvent) {
+    event.stopPropagation();
+    await onUnhide(id);
   }
 
   return (
-    <div ref={setNodeRef} className={`card${selected ? ' card--selected' : ''}`} style={style}>
+    <div
+      ref={setNodeRef}
+      className={`card${selected ? ' card--selected' : ''}${runner.hiddenFromQueue ? ' card--muted' : ''}`}
+      style={style}
+    >
       <div className="card-row">
         <button
           type="button"
@@ -173,8 +201,11 @@ function DraggableCard({
           </span>
           <LabelPills labels={runner.labels} />
           <span className="card-meta">
-            {runner.lapCount} toeren
-            {runner.bestLapMs ? ` · snelste ${formatDurationMs(runner.bestLapMs)}` : ''}
+            <span>
+              {runner.lapCount} toeren
+              {runner.bestLapMs ? ` · snelste ${formatDurationMs(runner.bestLapMs)}` : ''}
+            </span>
+            <SourceBadge source={runner.registrationSource} />
           </span>
         </button>
         <div className="card-actions">
@@ -183,23 +214,28 @@ function DraggableCard({
             <span className="queue-badge">{queueIndex === 0 ? 'Volgende' : `#${queueIndex + 1}`}</span>
           )}
           {columnKey !== 'warming_up' && (
-            <button onClick={(event) => { event.stopPropagation(); onSetStatus(id, 'warming_up'); }} className="btn btn--sm">
+            <button onClick={(event) => { event.stopPropagation(); onSetStatus(id, 'warming_up'); }} className="btn btn--sm btn--fixed">
               Opwarmen
             </button>
           )}
           {columnKey !== 'waiting' && (
-            <button onClick={(event) => { event.stopPropagation(); onSetStatus(id, 'waiting'); }} className="btn btn--sm">
+            <button onClick={(event) => { event.stopPropagation(); onSetStatus(id, 'waiting'); }} className="btn btn--sm btn--fixed">
               Wachtrij
             </button>
           )}
           {columnKey !== 'ran' && (
-            <button onClick={(event) => { event.stopPropagation(); onSetStatus(id, 'ran'); }} className="btn btn--sm">
+            <button onClick={(event) => { event.stopPropagation(); onSetStatus(id, 'ran'); }} className="btn btn--sm btn--fixed">
               Gelopen
             </button>
           )}
-          {columnKey === 'ran' && (
-            <button className="btn btn--danger" onClick={handleDelete}>
-              Verwijder
+          {columnKey === 'ran' && !runner.hiddenFromQueue && (
+            <button className="btn btn--sm btn--fixed" onClick={handleHide}>
+              Verberg
+            </button>
+          )}
+          {columnKey === 'ran' && runner.hiddenFromQueue && (
+            <button className="btn btn--sm btn--fixed" onClick={handleUnhide}>
+              Terug tonen
             </button>
           )}
         </div>

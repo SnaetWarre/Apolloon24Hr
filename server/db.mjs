@@ -10,7 +10,8 @@ const DATA_DIR = process.env.DATA_PATH
   : path.resolve(process.cwd(), 'data');
 const DB_FILE = path.join(DATA_DIR, 'app.db');
 
-const VALID_STATUSES = new Set(['warming_up', 'waiting', 'running', 'ran']);
+const VALID_STATUSES = new Set(['registered', 'warming_up', 'waiting', 'running', 'ran']);
+const VALID_REGISTRATION_SOURCES = new Set(['import', 'manual']);
 
 const DEFAULT_LABELS = [
   {
@@ -125,6 +126,11 @@ function getTableColumns(tableName) {
   return all(`PRAGMA table_info(${tableName})`).map((row) => String(row.name));
 }
 
+function getTableSql(tableName) {
+  const row = one("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?", [tableName]);
+  return String(row?.sql || '');
+}
+
 function cleanText(value) {
   if (value === undefined || value === null) return null;
   const text = String(value).trim();
@@ -138,7 +144,11 @@ function cleanInt(value) {
 }
 
 function cleanStatus(status) {
-  return VALID_STATUSES.has(status) ? status : 'warming_up';
+  return VALID_STATUSES.has(status) ? status : 'registered';
+}
+
+function cleanRegistrationSource(source) {
+  return VALID_REGISTRATION_SOURCES.has(source) ? source : 'manual';
 }
 
 function normalizeName(name) {
@@ -168,6 +178,7 @@ function createSchema() {
       target_laps INTEGER,
       historical_avg_ms INTEGER,
       historical_best_ms INTEGER,
+      registration_source TEXT NOT NULL DEFAULT 'manual' CHECK(registration_source IN ('import','manual')),
       notes TEXT DEFAULT '',
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
@@ -196,9 +207,10 @@ function createSchema() {
 
     CREATE TABLE IF NOT EXISTS queue_entries (
       runner_id TEXT PRIMARY KEY,
-      status TEXT NOT NULL CHECK(status IN ('warming_up','waiting','running','ran')),
+      status TEXT NOT NULL CHECK(status IN ('registered','warming_up','waiting','running','ran')),
       queue_index INTEGER,
       status_since INTEGER,
+      hidden_at INTEGER,
       FOREIGN KEY (runner_id) REFERENCES runners(id) ON DELETE CASCADE
     );
 
@@ -269,10 +281,11 @@ function migrateLegacyRunnersIfNeeded() {
         target_laps,
         historical_avg_ms,
         historical_best_ms,
+        registration_source,
         notes,
         created_at,
         updated_at
-      ) VALUES (?, NULL, ?, NULL, NULL, NULL, '', ?, ?)`,
+      ) VALUES (?, NULL, ?, NULL, NULL, NULL, 'manual', '', ?, ?)`,
       [id, name, now, now]
     );
     db.run(
@@ -294,7 +307,61 @@ function ensureColumn(tableName, columnName, ddl) {
   db.run(`ALTER TABLE ${tableName} ADD COLUMN ${ddl}`);
 }
 
+function migrateQueueEntriesSchema() {
+  if (!tableExists('queue_entries')) return;
+
+  const sql = getTableSql('queue_entries');
+  const columns = getTableColumns('queue_entries');
+  const needsRegisteredStatus = !sql.includes("'registered'");
+  const needsHiddenAt = !columns.includes('hidden_at');
+
+  if (!needsRegisteredStatus && !needsHiddenAt) return;
+
+  const legacyTable = `queue_entries_legacy_${Date.now()}`;
+  db.run(`ALTER TABLE queue_entries RENAME TO ${legacyTable}`);
+  db.run(`
+    CREATE TABLE queue_entries (
+      runner_id TEXT PRIMARY KEY,
+      status TEXT NOT NULL CHECK(status IN ('registered','warming_up','waiting','running','ran')),
+      queue_index INTEGER,
+      status_since INTEGER,
+      hidden_at INTEGER,
+      FOREIGN KEY (runner_id) REFERENCES runners(id) ON DELETE CASCADE
+    )
+  `);
+
+  const legacyColumns = getTableColumns(legacyTable);
+  const hiddenAtExpression = legacyColumns.includes('hidden_at') ? 'hidden_at' : 'NULL AS hidden_at';
+
+  db.run(`
+    INSERT OR REPLACE INTO queue_entries (
+      runner_id,
+      status,
+      queue_index,
+      status_since,
+      hidden_at
+    )
+    SELECT
+      runner_id,
+      CASE
+        WHEN status IN ('registered','warming_up','waiting','running','ran') THEN status
+        ELSE 'registered'
+      END,
+      CASE WHEN status = 'waiting' THEN queue_index ELSE NULL END,
+      status_since,
+      ${hiddenAtExpression}
+    FROM ${legacyTable}
+  `);
+  db.run(`DROP TABLE ${legacyTable}`);
+}
+
 function migrateSchemaColumns() {
+  ensureColumn(
+    'runners',
+    'registration_source',
+    "registration_source TEXT NOT NULL DEFAULT 'manual' CHECK(registration_source IN ('import','manual'))"
+  );
+  migrateQueueEntriesSchema();
   ensureColumn('labels', 'image_url', 'image_url TEXT');
   ensureColumn('labels', 'target_laps', 'target_laps INTEGER');
   ensureColumn('labels', 'sort_order', 'sort_order INTEGER');
@@ -623,12 +690,14 @@ export function getAllRunners() {
       r.target_laps AS targetLaps,
       r.historical_avg_ms AS historicalAvgMs,
       r.historical_best_ms AS historicalBestMs,
+      r.registration_source AS registrationSource,
       r.notes,
       r.created_at AS createdAt,
       r.updated_at AS updatedAt,
-      COALESCE(q.status, 'warming_up') AS status,
+      COALESCE(q.status, 'registered') AS status,
       q.status_since AS statusSince,
       q.queue_index AS queueIndex,
+      q.hidden_at AS queueHiddenAt,
       COUNT(l.id) AS lapCount,
       MAX(l.duration_ms) AS slowestLapMs,
       MIN(l.duration_ms) AS bestLapMs,
@@ -646,11 +715,12 @@ export function getAllRunners() {
     LEFT JOIN laps l ON l.runner_id = r.id
     GROUP BY r.id
     ORDER BY
-      CASE COALESCE(q.status, 'warming_up')
+      CASE COALESCE(q.status, 'registered')
         WHEN 'running' THEN 0
         WHEN 'waiting' THEN 1
         WHEN 'warming_up' THEN 2
-        ELSE 3
+        WHEN 'ran' THEN 3
+        ELSE 4
       END,
       q.queue_index,
       r.name`
@@ -663,12 +733,15 @@ export function getAllRunners() {
     targetLaps: row.targetLaps ?? null,
     historicalAvgMs: row.historicalAvgMs ?? null,
     historicalBestMs: row.historicalBestMs ?? null,
+    registrationSource: cleanRegistrationSource(row.registrationSource),
     notes: row.notes ?? '',
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     status: cleanStatus(row.status),
     statusSince: row.statusSince ?? null,
     queueIndex: row.queueIndex ?? null,
+    hiddenFromQueue: row.queueHiddenAt !== null && row.queueHiddenAt !== undefined,
+    queueHiddenAt: row.queueHiddenAt ?? null,
     labels: labelsByRunner.get(row.id) ?? [],
     lapCount: Number(row.lapCount || 0),
     lastLapMs: row.lastLapMs ?? null,
@@ -719,10 +792,11 @@ export function insertRunner(input) {
       target_laps,
       historical_avg_ms,
       historical_best_ms,
+      registration_source,
       notes,
       created_at,
       updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id,
       cleanText(input.runnerNumber),
@@ -730,15 +804,16 @@ export function insertRunner(input) {
       cleanInt(input.targetLaps),
       cleanInt(input.historicalAvgMs),
       cleanInt(input.historicalBestMs),
+      cleanRegistrationSource(input.registrationSource),
       cleanText(input.notes) || '',
       now,
       now,
     ]
   );
   db.run(
-    `INSERT INTO queue_entries (runner_id, status, queue_index, status_since)
-     VALUES (?, ?, NULL, ?)`,
-    [id, cleanStatus(input.status || 'warming_up'), cleanInt(input.statusSince) ?? now]
+    `INSERT INTO queue_entries (runner_id, status, queue_index, status_since, hidden_at)
+     VALUES (?, ?, NULL, ?, NULL)`,
+    [id, cleanStatus(input.status), cleanInt(input.statusSince) ?? now]
   );
   setRunnerLabels(id, input.labels || []);
   saveDb();
@@ -761,6 +836,10 @@ export function updateRunner(id, fields) {
       fields.historicalBestMs !== undefined
         ? cleanInt(fields.historicalBestMs)
         : current.historical_best_ms,
+    registrationSource:
+      fields.registrationSource !== undefined
+        ? cleanRegistrationSource(fields.registrationSource)
+        : cleanRegistrationSource(current.registration_source),
     notes: fields.notes !== undefined ? cleanText(fields.notes) || '' : current.notes || '',
     updatedAt: Date.now(),
   };
@@ -771,6 +850,7 @@ export function updateRunner(id, fields) {
          target_laps = ?,
          historical_avg_ms = ?,
          historical_best_ms = ?,
+         registration_source = ?,
          notes = ?,
          updated_at = ?
      WHERE id = ?`,
@@ -780,6 +860,7 @@ export function updateRunner(id, fields) {
       next.targetLaps,
       next.historicalAvgMs,
       next.historicalBestMs,
+      next.registrationSource,
       next.notes,
       next.updatedAt,
       id,
@@ -796,14 +877,19 @@ export function upsertRunnerFromImport(input) {
   const runnerNumber = cleanText(input.runnerNumber);
   const existing = runnerNumber ? findRunnerByNumber(runnerNumber) : null;
   if (existing) {
+    const { status, statusSince, queueIndex, registrationSource, ...profileFields } = input;
     return {
       action: 'updated',
-      runner: updateRunner(existing.id, input),
+      runner: updateRunner(existing.id, profileFields),
     };
   }
   return {
     action: 'created',
-    runner: insertRunner(input),
+    runner: insertRunner({
+      ...input,
+      status: 'registered',
+      registrationSource: 'import',
+    }),
   };
 }
 
@@ -818,6 +904,31 @@ export function deleteRunner(id) {
   saveDb();
 }
 
+export function hideRunnerInQueue(id, hiddenAt = Date.now()) {
+  const now = cleanInt(hiddenAt) ?? Date.now();
+  db.run(
+    `INSERT INTO queue_entries (runner_id, status, queue_index, status_since, hidden_at)
+     VALUES (?, 'registered', NULL, ?, ?)
+     ON CONFLICT(runner_id) DO UPDATE SET
+       hidden_at = excluded.hidden_at`,
+    [id, now, now]
+  );
+  saveDb();
+  return getRunnerById(id);
+}
+
+export function unhideRunnerInQueue(id) {
+  db.run(
+    `INSERT INTO queue_entries (runner_id, status, queue_index, status_since, hidden_at)
+     VALUES (?, 'registered', NULL, ?, NULL)
+     ON CONFLICT(runner_id) DO UPDATE SET
+       hidden_at = NULL`,
+    [id, Date.now()]
+  );
+  saveDb();
+  return getRunnerById(id);
+}
+
 export function updateRunnerStatus({ id, status, statusSince, queueIndex }) {
   const nextStatus = cleanStatus(status);
   const now = cleanInt(statusSince) ?? Date.now();
@@ -829,12 +940,13 @@ export function updateRunnerStatus({ id, status, statusSince, queueIndex }) {
       : null;
 
   db.run(
-    `INSERT INTO queue_entries (runner_id, status, queue_index, status_since)
-     VALUES (?, ?, ?, ?)
+    `INSERT INTO queue_entries (runner_id, status, queue_index, status_since, hidden_at)
+     VALUES (?, ?, ?, ?, NULL)
      ON CONFLICT(runner_id) DO UPDATE SET
        status = excluded.status,
        queue_index = excluded.queue_index,
-       status_since = excluded.status_since`,
+       status_since = excluded.status_since,
+       hidden_at = NULL`,
     [id, nextStatus, nextQueueIndex, now]
   );
 
@@ -865,12 +977,13 @@ export function updateWaitingOrder(idOrder) {
   const now = Date.now();
   idOrder.forEach((id, idx) => {
     db.run(
-      `INSERT INTO queue_entries (runner_id, status, queue_index, status_since)
-       VALUES (?, 'waiting', ?, ?)
+      `INSERT INTO queue_entries (runner_id, status, queue_index, status_since, hidden_at)
+       VALUES (?, 'waiting', ?, ?, NULL)
        ON CONFLICT(runner_id) DO UPDATE SET
          status = 'waiting',
          queue_index = excluded.queue_index,
-         status_since = COALESCE(queue_entries.status_since, excluded.status_since)`,
+         status_since = COALESCE(queue_entries.status_since, excluded.status_since),
+         hidden_at = NULL`,
       [id, idx, now]
     );
   });
@@ -887,7 +1000,12 @@ function getQueueEntriesByRunnerIds(ids) {
   return ids
     .map((id) =>
       one(
-        `SELECT runner_id AS runnerId, status, queue_index AS queueIndex, status_since AS statusSince
+        `SELECT
+           runner_id AS runnerId,
+           status,
+           queue_index AS queueIndex,
+           status_since AS statusSince,
+           hidden_at AS hiddenAt
          FROM queue_entries
          WHERE runner_id = ?`,
         [id]
@@ -1002,7 +1120,7 @@ export function performHandoff(nowMs = Date.now()) {
       );
       db.run(
         `UPDATE queue_entries
-         SET status = 'ran', queue_index = NULL, status_since = ?
+         SET status = 'ran', queue_index = NULL, status_since = ?, hidden_at = NULL
          WHERE runner_id = ?`,
         [nowMs, activeRunnerId]
       );
@@ -1011,7 +1129,7 @@ export function performHandoff(nowMs = Date.now()) {
     if (nextRunner) {
       db.run(
         `UPDATE queue_entries
-         SET status = 'running', queue_index = NULL, status_since = ?
+         SET status = 'running', queue_index = NULL, status_since = ?, hidden_at = NULL
          WHERE runner_id = ?`,
         [nowMs, nextRunner.id]
       );
@@ -1068,13 +1186,20 @@ export function undoLastHandoff() {
 
     for (const entry of payload.queueEntries || []) {
       db.run(
-        `INSERT INTO queue_entries (runner_id, status, queue_index, status_since)
-         VALUES (?, ?, ?, ?)
+        `INSERT INTO queue_entries (runner_id, status, queue_index, status_since, hidden_at)
+         VALUES (?, ?, ?, ?, ?)
          ON CONFLICT(runner_id) DO UPDATE SET
            status = excluded.status,
            queue_index = excluded.queue_index,
-           status_since = excluded.status_since`,
-        [entry.runnerId, cleanStatus(entry.status), entry.queueIndex ?? null, entry.statusSince ?? null]
+           status_since = excluded.status_since,
+           hidden_at = excluded.hidden_at`,
+        [
+          entry.runnerId,
+          cleanStatus(entry.status),
+          entry.queueIndex ?? null,
+          entry.statusSince ?? null,
+          entry.hiddenAt ?? null,
+        ]
       );
     }
 

@@ -8,11 +8,13 @@ export function AnalysisView() {
   const runners = useAppStore((state) => state.runners);
   const labels = useAppStore((state) => state.labels);
   const laps = useAppStore((state) => state.laps);
-  const sortedRunners = [...runners].sort(
-    (a, b) =>
-      b.lapCount - a.lapCount ||
-      (a.averageLapMs ?? Number.MAX_SAFE_INTEGER) - (b.averageLapMs ?? Number.MAX_SAFE_INTEGER)
-  );
+  const sortedRunners = runners
+    .filter((runner) => runner.lapCount > 0 || runner.status !== 'registered')
+    .sort(
+      (a, b) =>
+        b.lapCount - a.lapCount ||
+        (a.averageLapMs ?? Number.MAX_SAFE_INTEGER) - (b.averageLapMs ?? Number.MAX_SAFE_INTEGER)
+    );
   const labelStats = labels
     .map((label) => buildLabelStat(label, runners))
     .filter((stat) => stat.runnerCount > 0)
@@ -69,13 +71,10 @@ export function AnalysisView() {
           <div className="progress-list">
             {labelStats.map((stat) => (
               <div key={stat.label.id} className="progress-item">
-                <div>
-                  <strong>
-                    <LabelBadge label={stat.label} />
-                  </strong>
-                  <span>
-                    {stat.laps} toeren
-                    {stat.target > 0 ? ` / doel ${stat.target}` : ''}
+                <div className="progress-label-cell">
+                  <LabelBadge label={stat.label} />
+                  <span className="progress-value">
+                    {stat.laps} toeren{stat.target > 0 ? ` / doel ${stat.target}` : ''}
                   </span>
                 </div>
                 <div className="progress-track">

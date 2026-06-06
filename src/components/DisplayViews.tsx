@@ -48,7 +48,8 @@ export function InsideDisplay({ onNavigate }: { onNavigate: (path: string) => vo
   const runners = useAppStore((state) => state.runners);
   const labels = useAppStore((state) => state.labels);
   const laps = useAppStore((state) => state.laps);
-  const ranking = [...runners]
+  const ranking = runners
+    .filter((runner) => runner.lapCount > 0 || runner.status !== 'registered')
     .sort(
       (a, b) =>
         b.lapCount - a.lapCount ||

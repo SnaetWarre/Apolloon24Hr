@@ -9,11 +9,14 @@ import Papa from 'papaparse';
 import {
   initDb,
   getAllRunners,
+  getRunnerById,
   insertRunner,
   updateRunner,
   updateRunnerStatus,
   updateWaitingOrder,
   deleteRunner,
+  hideRunnerInQueue,
+  unhideRunnerInQueue,
   getLabels,
   createLabel,
   updateLabel,
@@ -96,12 +99,15 @@ function parseDurationMs(value) {
 }
 
 function splitLabels(value) {
-  const text = cleanText(value);
-  if (!text) return [];
-  return text
-    .split(/[,;|]/)
+  const values = Array.isArray(value) ? value : [value];
+  return values
+    .flatMap((item) => cleanText(item).split(/[,;|]/))
     .map((label) => label.trim())
-    .filter(Boolean);
+    .filter((label) => {
+      if (!label) return false;
+      const normalized = label.toLowerCase();
+      return !['nee', 'neen', 'geen', 'n/a', 'na', 'none', '-', 'ja'].includes(normalized);
+    });
 }
 
 function getRowValue(row, names) {
@@ -224,6 +230,14 @@ app.post('/api/runners/:id/status', (req, res) => {
 });
 
 app.delete('/api/runners/:id', (req, res) => {
+  const runner = getRunnerById(req.params.id);
+  if (!runner) return res.status(404).json({ error: 'runner not found' });
+  if (runner.status === 'running') {
+    return res.status(409).json({ error: 'Actieve loper kan niet verwijderd worden' });
+  }
+  if (runner.lapCount > 0) {
+    return res.status(409).json({ error: 'Lopers met rondes blijven bewaard voor analyse' });
+  }
   deleteRunner(req.params.id);
   const state = emitState('runner:deleted', req.params.id);
   res.json({ ok: true, state });
@@ -291,10 +305,16 @@ app.post('/api/import/runners-csv', (req, res) => {
     }
 
     try {
+      const labelValues = [
+        getRowValue(row, ['labels', 'label', 'categorie', 'categories', 'type']),
+        getRowValue(row, ['zustervereniging', 'vereniging', 'club']),
+        getRowValue(row, ['team', 'speedteam']),
+        getRowValue(row, ['jaar', 'groep']),
+      ];
       const result = upsertRunnerFromImport({
         runnerNumber,
         name,
-        labels: splitLabels(getRowValue(row, ['labels', 'label', 'categorie', 'categories', 'type'])),
+        labels: splitLabels(labelValues),
         targetLaps: parsePositiveInt(getRowValue(row, ['target_laps', 'doelstelling', 'target'])),
         historicalAvgMs: parseDurationMs(
           getRowValue(row, ['historical_avg', 'gemiddelde', 'avg', 'average'])
@@ -302,6 +322,8 @@ app.post('/api/import/runners-csv', (req, res) => {
         historicalBestMs: parseDurationMs(
           getRowValue(row, ['historical_best', 'snelste', 'best', 'fastest'])
         ),
+        status: 'registered',
+        registrationSource: 'import',
       });
       if (result.action === 'updated') summary.updated += 1;
       else summary.created += 1;
@@ -343,6 +365,37 @@ app.post('/api/queue/status', (req, res) => {
     res.json({ runner, state });
   } catch (err) {
     res.status(400).json({ error: err instanceof Error ? err.message : 'failed to update status' });
+  }
+});
+
+app.post('/api/queue/hide', (req, res) => {
+  try {
+    const id = cleanText(req.body?.id);
+    if (!id) return res.status(400).json({ error: 'id required' });
+    const current = getRunnerById(id);
+    if (!current) return res.status(404).json({ error: 'runner not found' });
+    if (current.status !== 'ran') {
+      return res.status(409).json({ error: 'Alleen gelopen lopers kunnen verborgen worden' });
+    }
+    const runner = hideRunnerInQueue(id, Date.now());
+    const state = emitState('queue:updated', { runnerId: id, hidden: true });
+    res.json({ runner, state });
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : 'failed to hide runner' });
+  }
+});
+
+app.post('/api/queue/unhide', (req, res) => {
+  try {
+    const id = cleanText(req.body?.id);
+    if (!id) return res.status(400).json({ error: 'id required' });
+    const current = getRunnerById(id);
+    if (!current) return res.status(404).json({ error: 'runner not found' });
+    const runner = unhideRunnerInQueue(id);
+    const state = emitState('queue:updated', { runnerId: id, hidden: false });
+    res.json({ runner, state });
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : 'failed to unhide runner' });
   }
 });
 
