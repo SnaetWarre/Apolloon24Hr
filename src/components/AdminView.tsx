@@ -62,8 +62,11 @@ export function AdminView() {
   return (
     <>
       <div className="hero hero--compact">
-        <h1 className="app-title">Admin / Import / Labels</h1>
-        <p className="tagline">Voorbereiding voor de lokale wedstrijddatabase.</p>
+        <div>
+          <img className="hero-logo" src="/brand/apolloon-logo.png" alt="Apolloon" />
+          <h1 className="app-title">Admin / Import / Labels</h1>
+          <p className="tagline">Voorbereiding voor de lokale wedstrijddatabase.</p>
+        </div>
       </div>
 
       <div className="analysis-grid">

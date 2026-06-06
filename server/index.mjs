@@ -47,6 +47,7 @@ function appState() {
     labels: getLabels(),
     race: getRaceState(),
     laps: getAllLaps(),
+    serverNowMs: Date.now(),
     host: {
       hostIpHint: HOST_IP_HINT,
       port: PORT,
@@ -172,6 +173,10 @@ const LAP_EXPORT_COLUMNS = [
 
 app.get('/api/state', (req, res) => {
   res.json(appState());
+});
+
+app.get('/api/time', (req, res) => {
+  res.json({ serverNowMs: Date.now() });
 });
 
 app.get('/api/host-info', (req, res) => {

@@ -68,6 +68,7 @@ export interface AppSnapshot {
   labels: Label[];
   race: RaceState;
   laps: LapRecord[];
+  serverNowMs: number;
   host: HostInfo;
 }
 

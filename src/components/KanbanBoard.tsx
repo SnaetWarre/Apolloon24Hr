@@ -14,7 +14,7 @@ const COLUMNS: { key: RunnerStatus; title: string }[] = [
 function TimerBadge({ runner }: { runner: Runner }) {
   const [, setTick] = React.useState(0);
   React.useEffect(() => {
-    const id = window.setInterval(() => setTick((tick) => (tick + 1) % 1_000_000), 1000);
+    const id = window.setInterval(() => setTick((tick) => (tick + 1) % 1_000_000), 100);
     return () => window.clearInterval(id);
   }, []);
   if (!runner.statusSince || runner.status === 'ran') return null;

@@ -9,6 +9,7 @@ import { RunnerProfileModal } from './components/RunnerProfileModal';
 import { TimingView } from './components/TimingView';
 import { useAppStore } from './store';
 import { formatDurationMs, nowMs } from './lib/time';
+import { useAnimationFrameTick } from './lib/useAnimationFrameTick';
 
 export const App: React.FC = () => {
   const initialize = useAppStore((state) => state.initialize);
@@ -119,6 +120,8 @@ function QueuePage() {
       .filter((runner) => runner.status === 'waiting')
       .sort((a, b) => (a.queueIndex ?? 0) - (b.queueIndex ?? 0))[0] || null;
 
+  useAnimationFrameTick(Boolean(race.activeStartedAt));
+
   React.useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.target && (event.target as HTMLElement).tagName === 'INPUT') return;
@@ -146,6 +149,7 @@ function QueuePage() {
     <>
       <div className="hero hero--compact">
         <div>
+          <img className="hero-logo" src="/brand/apolloon-logo.png" alt="Apolloon" />
           <h1 className="app-title">Apolloon telsysteem</h1>
           <p className="tagline">Telsysteem 1 - wachtrij en wisselzone</p>
         </div>

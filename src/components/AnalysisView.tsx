@@ -29,8 +29,11 @@ export function AnalysisView() {
   return (
     <>
       <div className="hero hero--compact">
-        <h1 className="app-title">Analyse & Export</h1>
-        <p className="tagline">Live rondedata voor crew en tactische opvolging.</p>
+        <div>
+          <img className="hero-logo" src="/brand/apolloon-logo.png" alt="Apolloon" />
+          <h1 className="app-title">Analyse & Export</h1>
+          <p className="tagline">Live rondedata voor crew en tactische opvolging.</p>
+        </div>
       </div>
 
       <div className="export-row">

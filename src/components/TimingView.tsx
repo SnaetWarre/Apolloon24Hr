@@ -1,6 +1,7 @@
 import React from 'react';
 import { useAppStore } from '../store';
 import { formatDurationMs, nowMs } from '../lib/time';
+import { useAnimationFrameTick } from '../lib/useAnimationFrameTick';
 import type { Runner } from '../types';
 import { LabelBadge } from './LabelBadge';
 
@@ -13,17 +14,13 @@ export function TimingView() {
   const undoLastHandoff = useAppStore((state) => state.undoLastHandoff);
   const finishRace = useAppStore((state) => state.finishRace);
   const [message, setMessage] = React.useState<string | null>(null);
-  const [, setTick] = React.useState(0);
-
-  React.useEffect(() => {
-    const id = window.setInterval(() => setTick((tick) => (tick + 1) % 1_000_000), 250);
-    return () => window.clearInterval(id);
-  }, []);
 
   const activeRunner = runners.find((runner) => runner.id === race.activeRunnerId) || null;
   const nextRunner = getNextRunner(runners);
   const recentLaps = laps.slice(0, 10);
   const activePreviousLap = activeRunner ? laps.find((lap) => lap.runnerId === activeRunner.id) || null : null;
+
+  useAnimationFrameTick(Boolean(activeRunner && race.activeStartedAt));
 
   async function runHandoff() {
     setMessage(null);
@@ -66,7 +63,10 @@ export function TimingView() {
   return (
     <>
       <div className="hero hero--compact">
-        <h1 className="app-title">Telsysteem 2 - Timing</h1>
+        <div>
+          <img className="hero-logo" src="/brand/apolloon-logo.png" alt="Apolloon" />
+          <h1 className="app-title">Telsysteem 2 - Timing</h1>
+        </div>
       </div>
 
       <div className="timing-grid">

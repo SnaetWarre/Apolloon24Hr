@@ -1,6 +1,7 @@
 import React from 'react';
 import { useAppStore } from '../store';
 import { formatDurationMs, nowMs } from '../lib/time';
+import { useAnimationFrameTick } from '../lib/useAnimationFrameTick';
 import type { Label, Runner } from '../types';
 import { LabelBadge } from './LabelBadge';
 
@@ -9,12 +10,8 @@ export function OutsideDisplay({ onNavigate }: { onNavigate: (path: string) => v
   const race = useAppStore((state) => state.race);
   const activeRunner = runners.find((runner) => runner.id === race.activeRunnerId) || null;
   const nextRunner = getNextRunner(runners);
-  const [, setTick] = React.useState(0);
 
-  React.useEffect(() => {
-    const id = window.setInterval(() => setTick((tick) => (tick + 1) % 1_000_000), 1000);
-    return () => window.clearInterval(id);
-  }, []);
+  useAnimationFrameTick(Boolean(activeRunner && race.activeStartedAt));
 
   return (
     <main className="display-root display-root--outside">

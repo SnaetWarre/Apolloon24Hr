@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { io } from 'socket.io-client';
 import type { AppSnapshot, HostInfo, Label, LapRecord, RaceState, Runner, RunnerStatus, ViewMode } from './types';
 import { fetchState } from './api';
+import { setServerNowMs, syncServerClock } from './lib/time';
 
 export interface RunnerInput {
   name: string;
@@ -65,6 +66,7 @@ const emptyRace: RaceState = {
 };
 
 let socket: any | null = null;
+let clockSyncInterval: number | null = null;
 
 async function apiRequest<T = any>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
@@ -121,6 +123,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   lastError: null,
   async initialize() {
     if (get().initialized) return;
+    await syncServerClock().catch(() => undefined);
     const state = await fetchState<AppSnapshot>();
     get().applySnapshot(state);
     set({ initialized: true });
@@ -129,12 +132,20 @@ export const useAppStore = create<AppState>((set, get) => ({
       socket.on('state:init', (snapshot: AppSnapshot) => get().applySnapshot(snapshot));
       socket.on('state:changed', (snapshot: AppSnapshot) => get().applySnapshot(snapshot));
     }
+    if (clockSyncInterval === null) {
+      clockSyncInterval = window.setInterval(() => {
+        syncServerClock().catch(() => undefined);
+      }, 30_000);
+    }
   },
   async refresh() {
     const state = await fetchState<AppSnapshot>();
     get().applySnapshot(state);
   },
   applySnapshot(snapshot) {
+    if (typeof snapshot.serverNowMs === 'number') {
+      setServerNowMs(snapshot.serverNowMs);
+    }
     set({
       runners: snapshot.runners || [],
       labels: snapshot.labels || [],

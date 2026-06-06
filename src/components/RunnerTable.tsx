@@ -14,7 +14,7 @@ function TimerCell({ runner }: { runner: Runner }) {
 function useSecondTick() {
   const [, setN] = React.useState(0);
   React.useEffect(() => {
-    const id = setInterval(() => setN((n) => (n + 1) % 1_000_000), 1000);
+    const id = setInterval(() => setN((n) => (n + 1) % 1_000_000), 100);
     return () => clearInterval(id);
   }, []);
   return 0; // used to force re-render
@@ -68,5 +68,4 @@ export const RunnerTable: React.FC = () => {
 };
 
 // manual run time removed in 3-column workflow
-
 
