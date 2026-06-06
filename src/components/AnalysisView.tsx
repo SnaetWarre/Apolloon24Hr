@@ -2,6 +2,7 @@ import React from 'react';
 import { useAppStore } from '../store';
 import { formatDurationMs } from '../lib/time';
 import type { Label, Runner } from '../types';
+import { LabelBadge } from './LabelBadge';
 
 export function AnalysisView() {
   const runners = useAppStore((state) => state.runners);
@@ -15,7 +16,11 @@ export function AnalysisView() {
   const labelStats = labels
     .map((label) => buildLabelStat(label, runners))
     .filter((stat) => stat.runnerCount > 0)
-    .sort((a, b) => b.laps - a.laps);
+    .sort(
+      (a, b) =>
+        (a.label.sortOrder ?? 9999) - (b.label.sortOrder ?? 9999) ||
+        a.label.name.localeCompare(b.label.name)
+    );
   const speedteamLaps = labelStats
     .filter((stat) => stat.label.kind === 'speedteam' || stat.label.name.toLowerCase().includes('speedteam'))
     .reduce((sum, stat) => sum + stat.laps, 0);
@@ -62,7 +67,9 @@ export function AnalysisView() {
             {labelStats.map((stat) => (
               <div key={stat.label.id} className="progress-item">
                 <div>
-                  <strong>{stat.label.name}</strong>
+                  <strong>
+                    <LabelBadge label={stat.label} />
+                  </strong>
                   <span>
                     {stat.laps} toeren
                     {stat.target > 0 ? ` / doel ${stat.target}` : ''}
@@ -147,7 +154,8 @@ export function AnalysisView() {
 function buildLabelStat(label: Label, runners: Runner[]) {
   const labelRunners = runners.filter((runner) => runner.labels.some((item) => item.id === label.id));
   const laps = labelRunners.reduce((sum, runner) => sum + runner.lapCount, 0);
-  const target = labelRunners.reduce((sum, runner) => sum + (runner.targetLaps || 0), 0);
+  const calculatedTarget = labelRunners.reduce((sum, runner) => sum + (runner.targetLaps || 0), 0);
+  const target = label.targetLaps ?? calculatedTarget;
   return {
     label,
     runnerCount: labelRunners.length,

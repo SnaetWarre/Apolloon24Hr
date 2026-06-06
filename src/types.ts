@@ -7,6 +7,8 @@ export interface Label {
   icon: string;
   kind: string;
   imageUrl: string | null;
+  targetLaps: number | null;
+  sortOrder: number | null;
   createdAt?: number;
   updatedAt?: number;
 }

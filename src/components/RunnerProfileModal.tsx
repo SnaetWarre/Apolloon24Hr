@@ -147,7 +147,12 @@ function msToSecondsInput(ms: number | null) {
 function groupLabels(labels: Label[]) {
   const grouped = new Map<string, typeof labels>();
   [...labels]
-    .sort((a, b) => labelKindOrder(a.kind) - labelKindOrder(b.kind) || a.name.localeCompare(b.name))
+    .sort(
+      (a, b) =>
+        labelKindOrder(a.kind) - labelKindOrder(b.kind) ||
+        (a.sortOrder ?? 9999) - (b.sortOrder ?? 9999) ||
+        a.name.localeCompare(b.name)
+    )
     .forEach((label) => {
       if (!grouped.has(label.kind)) grouped.set(label.kind, []);
       grouped.get(label.kind)?.push(label);

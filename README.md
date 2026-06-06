@@ -46,6 +46,8 @@ Default label categories:
 
 The zustervereniging labels use the logo files in `public/labels/`.
 
+Label progress goals can be adjusted in `Admin / Import / Labels` through the `Doel toeren` field per label. If a label goal is empty, the app automatically uses the sum of the target laps of all runners with that label. The `Positie` field controls the order in which labels appear in progress lists.
+
 Expected CSV columns:
 
 ```text

@@ -22,7 +22,7 @@ export function TimingView() {
 
   const activeRunner = runners.find((runner) => runner.id === race.activeRunnerId) || null;
   const nextRunner = getNextRunner(runners);
-  const lastLap = laps[0] || null;
+  const recentLaps = laps.slice(0, 10);
   const activePreviousLap = activeRunner ? laps.find((lap) => lap.runnerId === activeRunner.id) || null : null;
 
   async function runHandoff() {
@@ -67,10 +67,6 @@ export function TimingView() {
     <>
       <div className="hero hero--compact">
         <h1 className="app-title">Telsysteem 2 - Timing</h1>
-        <p className="tagline">
-          De race start niet automatisch. De eerste spatie start de race en de eerste loper; daarna klokt
-          spatie de huidige loper af en start meteen de volgende.
-        </p>
       </div>
 
       <div className="timing-grid">
@@ -90,7 +86,7 @@ export function TimingView() {
 
       <div className="timing-actions">
         <button className="btn btn--primary btn--xl" onClick={runHandoff}>
-          {activeRunner ? 'Spatie: handoff' : 'Start race + eerste loper'}
+          {activeRunner ? 'Spatie: handoff' : 'Start eerste loper'}
         </button>
         <button className="btn btn--ghost" onClick={undo}>
           Undo laatste handoff
@@ -108,10 +104,6 @@ export function TimingView() {
           <strong>{race.raceStartedAt ? new Date(race.raceStartedAt).toLocaleTimeString() : 'Nog niet gestart'}</strong>
         </div>
         <div className="stat-panel">
-          <span className="muted-label">Laatste ronde</span>
-          <strong>{lastLap ? `${lastLap.runnerName} - ${formatDurationMs(lastLap.durationMs)}` : 'Nog geen ronde'}</strong>
-        </div>
-        <div className="stat-panel">
           <span className="muted-label">Vorige ronde huidige loper</span>
           <strong>{activePreviousLap ? formatDurationMs(activePreviousLap.durationMs) : 'Geen vorige ronde'}</strong>
         </div>
@@ -120,6 +112,38 @@ export function TimingView() {
           <strong>{runners.filter((runner) => runner.status === 'waiting').length} lopers klaar</strong>
         </div>
       </div>
+
+      <section className="panel">
+        <h2>Laatste 10 rondes</h2>
+        {recentLaps.length ? (
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Tijd</th>
+                  <th>Nr.</th>
+                  <th>Naam</th>
+                  <th>Ronde</th>
+                  <th>Rondetijd</th>
+                </tr>
+              </thead>
+              <tbody>
+                {recentLaps.map((lap) => (
+                  <tr key={lap.id}>
+                    <td>{new Date(lap.finishedAt).toLocaleTimeString()}</td>
+                    <td>{lap.runnerNumber || '-'}</td>
+                    <td>{lap.runnerName}</td>
+                    <td>{lap.lapNumber}</td>
+                    <td>{formatDurationMs(lap.durationMs)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="empty-inline">Nog geen rondes geregistreerd</div>
+        )}
+      </section>
     </>
   );
 }

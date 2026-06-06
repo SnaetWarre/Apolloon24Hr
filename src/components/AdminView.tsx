@@ -8,6 +8,7 @@ export function AdminView() {
   const runners = useAppStore((state) => state.runners);
   const importRunnersCsv = useAppStore((state) => state.importRunnersCsv);
   const createLabel = useAppStore((state) => state.createLabel);
+  const updateLabel = useAppStore((state) => state.updateLabel);
   const deleteLabel = useAppStore((state) => state.deleteLabel);
   const [csvText, setCsvText] = React.useState('');
   const [message, setMessage] = React.useState<string | null>(null);
@@ -15,6 +16,8 @@ export function AdminView() {
   const [labelColor, setLabelColor] = React.useState('#3b82f6');
   const [labelKind, setLabelKind] = React.useState('andere');
   const [labelImageUrl, setLabelImageUrl] = React.useState('');
+  const [labelTargetLaps, setLabelTargetLaps] = React.useState('');
+  const [labelSortOrder, setLabelSortOrder] = React.useState('');
 
   async function importCsv() {
     if (!csvText.trim()) return;
@@ -42,9 +45,13 @@ export function AdminView() {
       icon: name.slice(0, 2).toUpperCase(),
       kind: labelKind.trim() || 'custom',
       imageUrl: labelImageUrl.trim() || null,
+      targetLaps: labelTargetLaps ? Number(labelTargetLaps) : null,
+      sortOrder: labelSortOrder ? Number(labelSortOrder) : null,
     });
     setLabelName('');
     setLabelImageUrl('');
+    setLabelTargetLaps('');
+    setLabelSortOrder('');
   }
 
   async function removeLabel(id: string, name: string) {
@@ -105,6 +112,22 @@ export function AdminView() {
               onChange={(event) => setLabelImageUrl(event.target.value)}
               placeholder="/labels/logo.png optioneel"
             />
+            <input
+              className="input input--number"
+              type="number"
+              min="0"
+              value={labelTargetLaps}
+              onChange={(event) => setLabelTargetLaps(event.target.value)}
+              placeholder="Doel"
+            />
+            <input
+              className="input input--number"
+              type="number"
+              min="0"
+              value={labelSortOrder}
+              onChange={(event) => setLabelSortOrder(event.target.value)}
+              placeholder="Positie"
+            />
             <button className="btn btn--primary" onClick={addLabel}>
               Label toevoegen
             </button>
@@ -115,13 +138,12 @@ export function AdminView() {
               <section key={kind} className="label-admin-group">
                 <h3>{labelKindTitle(kind)}</h3>
                 {groupedLabels.map((label) => (
-                  <div key={label.id} className="label-admin-row">
-                    <LabelBadge label={label} />
-                    <em>{label.kind}</em>
-                    <button className="btn btn--danger" onClick={() => removeLabel(label.id, label.name)}>
-                      Verwijder
-                    </button>
-                  </div>
+                  <LabelAdminRow
+                    key={label.id}
+                    label={label}
+                    onSave={(fields) => updateLabel(label.id, fields)}
+                    onDelete={() => removeLabel(label.id, label.name)}
+                  />
                 ))}
               </section>
             ))}
@@ -153,10 +175,81 @@ export function AdminView() {
 function groupLabels(labels: Label[]) {
   const grouped = new Map<string, typeof labels>();
   [...labels]
-    .sort((a, b) => labelKindOrder(a.kind) - labelKindOrder(b.kind) || a.name.localeCompare(b.name))
+    .sort(
+      (a, b) =>
+        labelKindOrder(a.kind) - labelKindOrder(b.kind) ||
+        (a.sortOrder ?? 9999) - (b.sortOrder ?? 9999) ||
+        a.name.localeCompare(b.name)
+    )
     .forEach((label) => {
       if (!grouped.has(label.kind)) grouped.set(label.kind, []);
       grouped.get(label.kind)?.push(label);
     });
   return [...grouped.entries()];
+}
+
+function LabelAdminRow({
+  label,
+  onSave,
+  onDelete,
+}: {
+  label: Label;
+  onSave: (fields: { targetLaps: number | null; sortOrder: number | null }) => Promise<void>;
+  onDelete: () => Promise<void>;
+}) {
+  const [target, setTarget] = React.useState(label.targetLaps?.toString() || '');
+  const [sortOrder, setSortOrder] = React.useState(label.sortOrder?.toString() || '');
+  const [saving, setSaving] = React.useState(false);
+
+  React.useEffect(() => {
+    setTarget(label.targetLaps?.toString() || '');
+    setSortOrder(label.sortOrder?.toString() || '');
+  }, [label.targetLaps, label.sortOrder]);
+
+  async function saveLabelSettings() {
+    setSaving(true);
+    try {
+      await onSave({
+        targetLaps: target ? Number(target) : null,
+        sortOrder: sortOrder ? Number(sortOrder) : null,
+      });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="label-admin-row">
+      <LabelBadge label={label} />
+      <em>{label.kind}</em>
+      <label className="label-target-editor">
+        Doel toeren
+        <input
+          className="input input--number"
+          type="number"
+          min="0"
+          value={target}
+          onChange={(event) => setTarget(event.target.value)}
+          placeholder="Auto"
+        />
+      </label>
+      <label className="label-target-editor">
+        Positie
+        <input
+          className="input input--number"
+          type="number"
+          min="0"
+          value={sortOrder}
+          onChange={(event) => setSortOrder(event.target.value)}
+          placeholder="Auto"
+        />
+      </label>
+      <button className="btn btn--sm" onClick={saveLabelSettings} disabled={saving}>
+        {saving ? 'Opslaan...' : 'Opslaan'}
+      </button>
+      <button className="btn btn--danger" onClick={onDelete}>
+        Verwijder
+      </button>
+    </div>
+  );
 }

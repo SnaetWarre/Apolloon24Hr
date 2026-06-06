@@ -13,20 +13,78 @@ const DB_FILE = path.join(DATA_DIR, 'app.db');
 const VALID_STATUSES = new Set(['warming_up', 'waiting', 'running', 'ran']);
 
 const DEFAULT_LABELS = [
-  { name: 'Speedteam White', color: '#e5e7eb', icon: 'SW', kind: 'speedteam', imageUrl: null },
-  { name: 'Speedteam Blue', color: '#1d4ed8', icon: 'SB', kind: 'speedteam', imageUrl: null },
-  { name: 'HILOK', color: '#16a34a', icon: 'HI', kind: 'zustervereniging', imageUrl: '/labels/hilok.png' },
+  {
+    name: 'Speedteam White',
+    color: '#e5e7eb',
+    icon: 'SW',
+    kind: 'speedteam',
+    imageUrl: null,
+    targetLaps: null,
+    sortOrder: 10,
+  },
+  {
+    name: 'Speedteam Blue',
+    color: '#1d4ed8',
+    icon: 'SB',
+    kind: 'speedteam',
+    imageUrl: null,
+    targetLaps: null,
+    sortOrder: 20,
+  },
+  {
+    name: 'HILOK',
+    color: '#16a34a',
+    icon: 'HI',
+    kind: 'zustervereniging',
+    imageUrl: '/labels/hilok.png',
+    targetLaps: null,
+    sortOrder: 30,
+  },
   {
     name: 'Mesacosa',
     color: '#f97316',
     icon: 'ME',
     kind: 'zustervereniging',
     imageUrl: '/labels/mesacosa.jpg',
+    targetLaps: null,
+    sortOrder: 40,
   },
-  { name: 'Kinesia', color: '#7c3aed', icon: 'KI', kind: 'zustervereniging', imageUrl: '/labels/kinesia.png' },
-  { name: '1ste jaar', color: '#2563eb', icon: '1J', kind: 'andere', imageUrl: null },
-  { name: 'Anciens', color: '#64748b', icon: 'AN', kind: 'andere', imageUrl: null },
-  { name: 'Dames', color: '#db2777', icon: 'DA', kind: 'andere', imageUrl: null },
+  {
+    name: 'Kinesia',
+    color: '#7c3aed',
+    icon: 'KI',
+    kind: 'zustervereniging',
+    imageUrl: '/labels/kinesia.png',
+    targetLaps: null,
+    sortOrder: 50,
+  },
+  {
+    name: '1ste jaar',
+    color: '#2563eb',
+    icon: '1J',
+    kind: 'andere',
+    imageUrl: null,
+    targetLaps: null,
+    sortOrder: 60,
+  },
+  {
+    name: 'Anciens',
+    color: '#64748b',
+    icon: 'AN',
+    kind: 'andere',
+    imageUrl: null,
+    targetLaps: null,
+    sortOrder: 70,
+  },
+  {
+    name: 'Dames',
+    color: '#db2777',
+    icon: 'DA',
+    kind: 'andere',
+    imageUrl: null,
+    targetLaps: null,
+    sortOrder: 80,
+  },
 ];
 
 function ensureDataDir() {
@@ -122,6 +180,8 @@ function createSchema() {
       icon TEXT NOT NULL,
       kind TEXT NOT NULL,
       image_url TEXT,
+      target_laps INTEGER,
+      sort_order INTEGER,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
@@ -236,6 +296,8 @@ function ensureColumn(tableName, columnName, ddl) {
 
 function migrateSchemaColumns() {
   ensureColumn('labels', 'image_url', 'image_url TEXT');
+  ensureColumn('labels', 'target_laps', 'target_laps INTEGER');
+  ensureColumn('labels', 'sort_order', 'sort_order INTEGER');
 }
 
 function normalizeDefaultLabelAliases() {
@@ -269,15 +331,47 @@ function seedDefaultLabels() {
              icon = ?,
              kind = ?,
              image_url = ?,
+             target_laps = COALESCE(target_laps, ?),
+             sort_order = COALESCE(sort_order, ?),
              updated_at = ?
          WHERE id = ?`,
-        [label.color, label.icon, label.kind, label.imageUrl, now, existing.id]
+        [
+          label.color,
+          label.icon,
+          label.kind,
+          label.imageUrl,
+          label.targetLaps,
+          label.sortOrder,
+          now,
+          existing.id,
+        ]
       );
     } else {
       db.run(
-        `INSERT INTO labels (id, name, color, icon, kind, image_url, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [uuidv4(), label.name, label.color, label.icon, label.kind, label.imageUrl, now, now]
+        `INSERT INTO labels (
+          id,
+          name,
+          color,
+          icon,
+          kind,
+          image_url,
+          target_laps,
+          sort_order,
+          created_at,
+          updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          uuidv4(),
+          label.name,
+          label.color,
+          label.icon,
+          label.kind,
+          label.imageUrl,
+          label.targetLaps,
+          label.sortOrder,
+          now,
+          now,
+        ]
       );
     }
   }
@@ -329,16 +423,13 @@ export function getLabels() {
        icon,
        kind,
        image_url AS imageUrl,
+       target_laps AS targetLaps,
+       sort_order AS sortOrder,
        created_at AS createdAt,
        updated_at AS updatedAt
      FROM labels
      ORDER BY
-       CASE kind
-         WHEN 'speedteam' THEN 0
-         WHEN 'zustervereniging' THEN 1
-         WHEN 'andere' THEN 2
-         ELSE 3
-       END,
+       COALESCE(sort_order, 9999),
        name`
   );
 }
@@ -354,6 +445,8 @@ export function findLabelByName(name) {
        icon,
        kind,
        image_url AS imageUrl,
+       target_laps AS targetLaps,
+       sort_order AS sortOrder,
        created_at AS createdAt,
        updated_at AS updatedAt
      FROM labels
@@ -373,10 +466,12 @@ export function ensureLabel(name, options = {}) {
     icon: options.icon || labelName.slice(0, 2).toUpperCase(),
     kind: options.kind || 'custom',
     imageUrl: options.imageUrl || null,
+    targetLaps: options.targetLaps ?? null,
+    sortOrder: options.sortOrder ?? null,
   });
 }
 
-export function createLabel({ name, color, icon, kind, imageUrl }) {
+export function createLabel({ name, color, icon, kind, imageUrl, targetLaps, sortOrder }) {
   const labelName = cleanText(name);
   if (!labelName) {
     throw new Error('label name required');
@@ -389,11 +484,34 @@ export function createLabel({ name, color, icon, kind, imageUrl }) {
     icon: cleanText(icon) || labelName.slice(0, 2).toUpperCase(),
     kind: cleanText(kind) || 'custom',
     imageUrl: cleanText(imageUrl),
+    targetLaps: cleanInt(targetLaps),
+    sortOrder: cleanInt(sortOrder),
   };
   db.run(
-    `INSERT INTO labels (id, name, color, icon, kind, image_url, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [label.id, label.name, label.color, label.icon, label.kind, label.imageUrl, now, now]
+    `INSERT INTO labels (
+      id,
+      name,
+      color,
+      icon,
+      kind,
+      image_url,
+      target_laps,
+      sort_order,
+      created_at,
+      updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      label.id,
+      label.name,
+      label.color,
+      label.icon,
+      label.kind,
+      label.imageUrl,
+      label.targetLaps,
+      label.sortOrder,
+      now,
+      now,
+    ]
   );
   saveDb();
   return { ...label, createdAt: now, updatedAt: now };
@@ -402,13 +520,27 @@ export function createLabel({ name, color, icon, kind, imageUrl }) {
 export function updateLabel(id, fields) {
   const current = one('SELECT id FROM labels WHERE id = ?', [id]);
   if (!current) return null;
-  const existing = one('SELECT name, color, icon, kind, image_url AS imageUrl FROM labels WHERE id = ?', [id]);
+  const existing = one(
+    `SELECT
+       name,
+       color,
+       icon,
+       kind,
+       image_url AS imageUrl,
+       target_laps AS targetLaps,
+       sort_order AS sortOrder
+     FROM labels
+     WHERE id = ?`,
+    [id]
+  );
   const next = {
     name: cleanText(fields.name) || existing.name,
     color: cleanText(fields.color) || existing.color,
     icon: cleanText(fields.icon) || existing.icon,
     kind: cleanText(fields.kind) || existing.kind,
     imageUrl: fields.imageUrl !== undefined ? cleanText(fields.imageUrl) || null : existing.imageUrl,
+    targetLaps: fields.targetLaps !== undefined ? cleanInt(fields.targetLaps) : existing.targetLaps,
+    sortOrder: fields.sortOrder !== undefined ? cleanInt(fields.sortOrder) : existing.sortOrder,
     updatedAt: Date.now(),
   };
   db.run(
@@ -418,9 +550,21 @@ export function updateLabel(id, fields) {
          icon = ?,
          kind = ?,
          image_url = ?,
+         target_laps = ?,
+         sort_order = ?,
          updated_at = ?
      WHERE id = ?`,
-    [next.name, next.color, next.icon, next.kind, next.imageUrl, next.updatedAt, id]
+    [
+      next.name,
+      next.color,
+      next.icon,
+      next.kind,
+      next.imageUrl,
+      next.targetLaps,
+      next.sortOrder,
+      next.updatedAt,
+      id,
+    ]
   );
   saveDb();
   return getLabels().find((label) => label.id === id) ?? null;
@@ -442,11 +586,13 @@ function getRunnerLabelsMap() {
       l.icon,
       l.kind,
       l.image_url AS imageUrl,
+      l.target_laps AS targetLaps,
+      l.sort_order AS sortOrder,
       l.created_at AS createdAt,
       l.updated_at AS updatedAt
     FROM runner_labels rl
     JOIN labels l ON l.id = rl.label_id
-    ORDER BY l.kind, l.name`
+    ORDER BY COALESCE(l.sort_order, 9999), l.name`
   );
   const map = new Map();
   for (const row of rows) {
@@ -458,6 +604,8 @@ function getRunnerLabelsMap() {
       icon: row.icon,
       kind: row.kind,
       imageUrl: row.imageUrl ?? null,
+      targetLaps: row.targetLaps ?? null,
+      sortOrder: row.sortOrder ?? null,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     });

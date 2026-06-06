@@ -37,10 +37,16 @@ interface AppState {
   setStatus: (id: string, status: RunnerStatus) => Promise<void>;
   moveInQueue: (id: string, newIndex: number) => Promise<void>;
   deleteRunner: (id: string) => Promise<void>;
-  createLabel: (input: Pick<Label, 'name' | 'color' | 'icon' | 'kind'> & { imageUrl?: string | null }) => Promise<void>;
+  createLabel: (
+    input: Pick<Label, 'name' | 'color' | 'icon' | 'kind'> & {
+      imageUrl?: string | null;
+      targetLaps?: number | null;
+      sortOrder?: number | null;
+    }
+  ) => Promise<void>;
   updateLabel: (
     id: string,
-    input: Partial<Pick<Label, 'name' | 'color' | 'icon' | 'kind' | 'imageUrl'>>
+    input: Partial<Pick<Label, 'name' | 'color' | 'icon' | 'kind' | 'imageUrl' | 'targetLaps' | 'sortOrder'>>
   ) => Promise<void>;
   deleteLabel: (id: string) => Promise<void>;
   importRunnersCsv: (csvText: string) => Promise<string>;
