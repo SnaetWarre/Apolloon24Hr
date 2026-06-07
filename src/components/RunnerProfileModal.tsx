@@ -1,5 +1,5 @@
 import React from 'react';
-import { useAppActions, useAppData } from '../app';
+import { useAppActions, useAppData } from '../app/index';
 import { formatClockTimeMs, formatDurationMs, formatElapsedSeconds, nowMs } from '../lib/time';
 import { useAnimationFrameTick } from '../lib/useAnimationFrameTick';
 import { labelKindOrder, labelKindTitle } from './LabelBadge';

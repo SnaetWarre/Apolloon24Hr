@@ -1,6 +1,6 @@
 import React from 'react';
 import { flexRender, getCoreRowModel, useReactTable, type ColumnDef } from '@tanstack/react-table';
-import { useAppData } from '../app';
+import { useAppData } from '../app/index';
 import { formatClockTimeMs, formatDurationMs } from '../lib/time';
 import type { Label, Runner } from '../types';
 import { LabelBadge } from './LabelBadge';

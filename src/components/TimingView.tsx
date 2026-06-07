@@ -1,5 +1,5 @@
 import React from 'react';
-import { useAppActions, useAppData } from '../app';
+import { useAppActions, useAppData } from '../app/index';
 import { formatClockTimeMs, formatDurationMs, nowMs } from '../lib/time';
 import { getNextWaitingRunner, runnerLabel } from '../lib/runners';
 import { useAnimationFrameTick } from '../lib/useAnimationFrameTick';

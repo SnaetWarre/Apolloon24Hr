@@ -1,5 +1,5 @@
 import React from 'react';
-import { useAppData } from '../app';
+import { useAppData } from '../app/index';
 
 const ROLES = [
   {

@@ -1,5 +1,5 @@
 import React from 'react';
-import { useAppData } from '../app';
+import { useAppData } from '../app/index';
 import { useAppStore } from '../store';
 import { RunnerActivationModal, RunnerAddModal } from './RunnerEntryModals';
 

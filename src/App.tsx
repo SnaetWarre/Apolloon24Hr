@@ -8,7 +8,7 @@ import { KanbanBoard } from './components/KanbanBoard';
 import { RolePicker } from './components/RolePicker';
 import { RunnerProfileModal } from './components/RunnerProfileModal';
 import { TimingView } from './components/TimingView';
-import { useAppData, useRealtimeBridge } from './app';
+import { useAppData, useRealtimeBridge } from './app/index';
 import { formatDurationMs, nowMs } from './lib/time';
 import { getNextWaitingRunner, runnerLabel } from './lib/runners';
 import { useAnimationFrameTick } from './lib/useAnimationFrameTick';

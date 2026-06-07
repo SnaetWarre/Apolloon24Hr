@@ -1,5 +1,5 @@
 import React from 'react';
-import { useAppData } from '../app';
+import { useAppData } from '../app/index';
 import { formatClockTimeMs, formatDurationMs } from '../lib/time';
 import { getNextWaitingRunner, lapRunnerLabel, runnerLabel } from '../lib/runners';
 import type { Label, LapRecord, Runner } from '../types';
