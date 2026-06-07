@@ -9,11 +9,10 @@ const repoRoot = path.resolve(__dirname, '..');
 
 const args = parseArgs(process.argv.slice(2));
 const scenario = args.scenario || 'ready';
-const dataPath = path.resolve(repoRoot, args.dataPath || '.test-data');
+const dataPath = path.resolve(repoRoot, args.dataPath || '.dev-data');
 const keepExisting = Boolean(args.keep);
 
 const SCENARIOS = new Set(['empty', 'ready', 'live', 'large']);
-const DEFAULT_HOST_IP = '192.168.24.10';
 const BASE_NUMBER = 101;
 const RUNNER_NAMES = [
   'Noor Verbruggen',
@@ -98,8 +97,6 @@ if (!keepExisting) {
 fs.mkdirSync(dataPath, { recursive: true });
 
 process.env.DATA_PATH = dataPath;
-process.env.HOST_IP_HINT = process.env.HOST_IP_HINT || DEFAULT_HOST_IP;
-
 const db = await import('../server/db.mjs');
 
 await db.initDb();

@@ -13,9 +13,10 @@
   },
   "main": "electron/main.js",
   "scripts": {
-    "dev": "vite",
-    "dev:all": "node scripts/ensure-lan-dev-firewall.mjs && concurrently -k \"cross-env PORT=3000 HOST_IP_HINT=192.168.24.10 node server/index.mjs\" \"cross-env VITE_DEV_API_PORT=3000 vite\"",
-    "dev:seeded": "node scripts/ensure-lan-dev-firewall.mjs && concurrently -k \"cross-env DATA_PATH=.test-data PORT=3000 HOST_IP_HINT=192.168.24.10 node server/index.mjs\" \"cross-env VITE_DEV_API_PORT=3000 vite\"",
+    "dev": "npm run dev:fresh",
+    "dev:vite": "vite",
+    "dev:all": "node scripts/ensure-lan-dev-firewall.mjs && concurrently -k \"cross-env PORT=3000 PUBLIC_APP_PORT=5173 node server/index.mjs\" \"cross-env VITE_DEV_API_PORT=3000 vite\"",
+    "dev:seeded": "node scripts/ensure-lan-dev-firewall.mjs && concurrently -k \"cross-env DATA_PATH=.dev-data PORT=3000 PUBLIC_APP_PORT=5173 node server/index.mjs\" \"cross-env VITE_DEV_API_PORT=3000 vite\"",
     "dev:fresh": "npm run db:dev:seed && npm run dev:seeded",
     "dev:fresh:live": "npm run db:dev:seed:live && npm run dev:seeded",
     "dev:fresh:large": "npm run db:dev:seed:large && npm run dev:seeded",

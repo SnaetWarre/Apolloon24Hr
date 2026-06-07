@@ -1,17 +1,50 @@
 import React from 'react';
 import { useAppStore } from '../store';
-import { formatClockTimeMs, formatDurationMs, nowMs } from '../lib/time';
-import { useAnimationFrameTick } from '../lib/useAnimationFrameTick';
+import { formatClockTimeMs, formatDurationMs } from '../lib/time';
 import type { Label, LapRecord, Runner } from '../types';
 import { LabelBadge } from './LabelBadge';
+
+const OUTSIDE_RECORD_VISIBLE_MS = 17_000;
 
 export function OutsideDisplay({ onNavigate }: { onNavigate: (path: string) => void }) {
   const runners = useAppStore((state) => state.runners);
   const race = useAppStore((state) => state.race);
+  const laps = useAppStore((state) => state.laps);
   const activeRunner = runners.find((runner) => runner.id === race.activeRunnerId) || null;
   const nextRunner = getNextRunner(runners);
+  const [recordLap, setRecordLap] = React.useState<LapRecord | null>(null);
+  const knownLapIdsRef = React.useRef<Set<string> | null>(null);
+  const recordTimeoutRef = React.useRef<number | null>(null);
 
-  useAnimationFrameTick(Boolean(activeRunner && race.activeStartedAt));
+  React.useEffect(() => {
+    const knownLapIds = knownLapIdsRef.current;
+    const latestLap = laps[0] || null;
+
+    if (knownLapIds && latestLap && !knownLapIds.has(latestLap.id) && isNewFastestLap(latestLap, laps.slice(1))) {
+      setRecordLap(latestLap);
+      if (recordTimeoutRef.current !== null) {
+        window.clearTimeout(recordTimeoutRef.current);
+      }
+      recordTimeoutRef.current = window.setTimeout(() => {
+        setRecordLap(null);
+        recordTimeoutRef.current = null;
+      }, OUTSIDE_RECORD_VISIBLE_MS);
+    }
+
+    setRecordLap((currentRecordLap) => {
+      if (!currentRecordLap) return currentRecordLap;
+      return laps.some((lap) => lap.id === currentRecordLap.id) ? currentRecordLap : null;
+    });
+    knownLapIdsRef.current = new Set(laps.map((lap) => lap.id));
+  }, [laps]);
+
+  React.useEffect(() => {
+    return () => {
+      if (recordTimeoutRef.current !== null) {
+        window.clearTimeout(recordTimeoutRef.current);
+      }
+    };
+  }, []);
 
   return (
     <main className="display-root display-root--outside">
@@ -25,9 +58,6 @@ export function OutsideDisplay({ onNavigate }: { onNavigate: (path: string) => v
           <strong className="display-runner-name">
             {activeRunner ? runnerName(activeRunner) : 'Nog niemand gestart'}
           </strong>
-          {activeRunner && race.activeStartedAt && (
-            <em className="display-time">{formatDurationMs(nowMs() - race.activeStartedAt)}</em>
-          )}
           {activeRunner && <DisplayLabels labels={activeRunner.labels} />}
         </div>
       </section>
@@ -40,6 +70,7 @@ export function OutsideDisplay({ onNavigate }: { onNavigate: (path: string) => v
           {nextRunner && <DisplayLabels labels={nextRunner.labels} />}
         </div>
       </section>
+      {recordLap && <OutsideRecordFlash lap={recordLap} />}
     </main>
   );
 }
@@ -166,6 +197,18 @@ function DisplayLabels({ labels }: { labels: Label[] }) {
   );
 }
 
+function OutsideRecordFlash({ lap }: { lap: LapRecord }) {
+  return (
+    <section className="outside-record-flash" aria-live="polite">
+      <div className="record-flash-content">
+        <span>NEW RECORD</span>
+        <strong>{formatDurationMs(lap.durationMs)}</strong>
+        <em>{lapRunnerName(lap)}</em>
+      </div>
+    </section>
+  );
+}
+
 function getNextRunner(runners: Runner[]) {
   return (
     runners
@@ -180,6 +223,10 @@ function runnerName(runner: Runner) {
 
 function lapRunnerName(lap: LapRecord) {
   return lap.runnerNumber ? `${lap.runnerNumber} - ${lap.runnerName}` : lap.runnerName;
+}
+
+function isNewFastestLap(latestLap: LapRecord, previousLaps: LapRecord[]) {
+  return previousLaps.every((lap) => latestLap.durationMs < lap.durationMs);
 }
 
 function buildLabelStat(label: Label, runners: Runner[]) {

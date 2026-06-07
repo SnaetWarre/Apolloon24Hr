@@ -38,7 +38,6 @@ function ensureEnvFile() {
   const envPath = path.join(app.getPath('userData'), '.env');
   if (!fs.existsSync(envPath)) {
     const envContent = `PORT=5173
-HOST_IP_HINT=192.168.24.10
 `;
     fs.writeFileSync(envPath, envContent);
     console.log('Created default .env file at:', envPath);

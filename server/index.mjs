@@ -3,6 +3,7 @@ import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import http from 'http';
+import os from 'os';
 import { Server as SocketIOServer } from 'socket.io';
 import Papa from 'papaparse';
 
@@ -38,11 +39,69 @@ const io = new SocketIOServer(server, {
   cors: { origin: true, credentials: false },
 });
 
-const PORT = Number(process.env.PORT || 5173);
-const HOST_IP_HINT = process.env.HOST_IP_HINT || '192.168.24.10';
+const PORT = readPort(process.env.PORT, 5173);
+const PUBLIC_APP_PORT = readPort(process.env.PUBLIC_APP_PORT, PORT);
+const PUBLIC_HOST = resolvePublicHost();
 const DIST_DIR = path.resolve(__dirname, '..', 'dist');
 
 app.use(express.json({ limit: '10mb' }));
+
+function readPort(value, fallback) {
+  const port = Number(value);
+  return Number.isInteger(port) && port > 0 && port < 65536 ? port : fallback;
+}
+
+function resolvePublicHost() {
+  if (process.env.PUBLIC_HOST) return process.env.PUBLIC_HOST;
+  return detectLanIp() || 'localhost';
+}
+
+function detectLanIp() {
+  let interfaces;
+  try {
+    interfaces = os.networkInterfaces();
+  } catch {
+    return null;
+  }
+
+  const candidates = [];
+  for (const [name, addresses] of Object.entries(interfaces)) {
+    for (const addressInfo of addresses || []) {
+      const family = addressInfo.family === 'IPv4' || addressInfo.family === 4;
+      if (!family || addressInfo.internal || !addressInfo.address) continue;
+      const score = scoreInterfaceAddress(name, addressInfo.address);
+      if (score > 0) candidates.push({ address: addressInfo.address, score });
+    }
+  }
+
+  candidates.sort((a, b) => b.score - a.score);
+  return candidates[0]?.address || null;
+}
+
+function scoreInterfaceAddress(name, address) {
+  if (/^(lo|docker|br-|veth|virbr|zt|tailscale|tun|tap|wg|vmnet|vboxnet)/i.test(name)) {
+    return -1;
+  }
+
+  const [firstPart, secondPart] = address.split('.').map((part) => Number(part));
+  let score = 10;
+
+  if (firstPart === 192 && secondPart === 168) score += 100;
+  else if (firstPart === 10) score += 90;
+  else if (firstPart === 172 && secondPart >= 16 && secondPart <= 31) score += 90;
+  else if (firstPart === 169 && secondPart === 254) score += 5;
+
+  if (/^(en|eth|eno|ens|enp|wl|wlan|wifi|wi-fi)/i.test(name)) score += 20;
+  return score;
+}
+
+function hostInfo() {
+  return {
+    hostIpHint: PUBLIC_HOST,
+    port: PUBLIC_APP_PORT,
+    url: `http://${PUBLIC_HOST}:${PUBLIC_APP_PORT}`,
+  };
+}
 
 function appState() {
   return {
@@ -51,11 +110,7 @@ function appState() {
     race: getRaceState(),
     laps: getAllLaps(),
     serverNowMs: Date.now(),
-    host: {
-      hostIpHint: HOST_IP_HINT,
-      port: PORT,
-      url: `http://${HOST_IP_HINT}:${PORT}`,
-    },
+    host: hostInfo(),
   };
 }
 
@@ -186,11 +241,7 @@ app.get('/api/time', (req, res) => {
 });
 
 app.get('/api/host-info', (req, res) => {
-  res.json({
-    hostIpHint: HOST_IP_HINT,
-    port: PORT,
-    url: `http://${HOST_IP_HINT}:${PORT}`,
-  });
+  res.json(hostInfo());
 });
 
 app.post('/api/runners', (req, res) => {
@@ -466,5 +517,5 @@ await initDb();
 
 server.listen(PORT, () => {
   console.log(`Server listening on http://0.0.0.0:${PORT}`);
-  console.log(`Static event URL: http://${HOST_IP_HINT}:${PORT}`);
+  console.log(`Event URL for laptops: ${hostInfo().url}`);
 });

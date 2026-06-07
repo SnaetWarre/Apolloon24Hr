@@ -4,15 +4,13 @@ Local-first telsysteem for the Apolloon 24 Urenloop setup. One host laptop runs 
 
 ## Event Network
 
-Only the host laptop needs a fixed IP address.
+Only the host laptop needs to be reachable on the local network.
 
 Recommended defaults:
 
 ```text
-Router/gateway: 192.168.24.1
-Host laptop:    192.168.24.10
-Server port:    5173
-Event URL:      http://192.168.24.10:5173
+Server port: 5173
+Event URL:   shown by the app, for example http://<host-lan-ip>:5173
 ```
 
 Client laptops and TV laptops can use automatic DHCP. Their IP addresses do not matter because they only connect to the host.
@@ -20,10 +18,10 @@ Client laptops and TV laptops can use automatic DHCP. Their IP addresses do not 
 ## Running The Event
 
 1. Connect the host laptop to the local router/switch by Ethernet.
-2. Set the host laptop Ethernet adapter to `192.168.24.10`.
-3. Start the Electron app on the host laptop.
-4. Allow the firewall prompt for port `5173` if Windows asks.
-5. On every other laptop, open `http://192.168.24.10:5173`.
+2. Start the Electron app on the host laptop.
+3. Allow the firewall prompt for port `5173` if Windows asks.
+4. Copy the Event URL shown on the host laptop.
+5. On every other laptop, open that Event URL. Do not use `localhost` on client laptops.
 6. Choose the role from the start page:
    - Telsysteem 1 - Wachtrij
    - Telsysteem 2 - Timing
@@ -84,14 +82,15 @@ There is no automatic 24-hour cutoff in the software.
 
 ## Test Seed Data
 
-Development seed commands only use `.test-data/`. They do not overwrite the normal app database in `data/app.db`.
+Development seed commands only use `.dev-data/`. They do not overwrite the normal app database in `data/app.db`.
 
 ```text
+npm run dev                Clean ready data and start dev app
 npm run db:dev:empty       Clean empty dev DB
 npm run db:dev:seed        Clean ready-to-start dev DB
 npm run db:dev:seed:live   Clean live-race dev DB
 npm run db:dev:seed:large  Clean large stress-test dev DB
-npm run dev:seeded         Run app against .test-data
+npm run dev:seeded         Run app against .dev-data
 npm run dev:fresh          Seed ready data and start dev app
 npm run dev:fresh:live     Seed live data and start dev app
 npm run dev:fresh:large    Seed large data and start dev app

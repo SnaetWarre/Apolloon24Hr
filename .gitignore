@@ -17,6 +17,7 @@ release/
 # Cache
 .cache/
 .npm/
+.vite-cache/
 
 # IDE
 .vscode/
@@ -30,3 +31,4 @@ Thumbs.db
 data/*.db-shm
 data/*.db-wal
 .test-data/
+.dev-data/

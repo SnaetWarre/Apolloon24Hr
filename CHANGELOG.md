@@ -6,7 +6,7 @@ All notable changes to the Leuven 24h Runner Tracker will be documented in this 
 
 ### Added
 
-- Root role picker so every laptop can open `http://192.168.24.10:5173` and choose its role
+- Root role picker so every laptop can open the displayed Event URL and choose its role
 - Telsysteem 2 timing view with spacebar handoff and undo
 - Inside and outside TV display routes
 - Analysis dashboard with CSV/JSON exports
@@ -16,7 +16,7 @@ All notable changes to the Leuven 24h Runner Tracker will be documented in this 
 
 ### Changed
 
-- The event setup now uses a static host IP instead of hostname discovery
+- The event setup now shows the detected host LAN URL instead of relying on a static host IP
 - The runner database now separates runner profiles, labels, queue state, race state, and laps
 - The queue view keeps the familiar three-column flow while timing uses an internal running state
 

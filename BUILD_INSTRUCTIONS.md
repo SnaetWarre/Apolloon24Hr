@@ -25,8 +25,8 @@ The AppImage will be written to `release/`.
 ## Event Setup
 
 1. Install and run the app on the host laptop.
-2. Set the host laptop Ethernet IP to `192.168.24.10`.
-3. Allow firewall access for TCP port `5173`.
-4. Open `http://192.168.24.10:5173` on every client laptop.
+2. Allow firewall access for TCP port `5173`.
+3. Copy the Event URL shown by the app on the host laptop.
+4. Open that Event URL on every client laptop. Do not use `localhost` on client laptops.
 
 No password is required. Client IP addresses can stay automatic.
