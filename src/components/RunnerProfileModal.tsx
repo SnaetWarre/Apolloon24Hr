@@ -12,50 +12,33 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
   const [runnerNumber, setRunnerNumber] = React.useState('');
   const [name, setName] = React.useState('');
   const [targetLaps, setTargetLaps] = React.useState('');
-  const [historicalAvgMinutes, setHistoricalAvgMinutes] = React.useState('');
-  const [historicalAvgSeconds, setHistoricalAvgSeconds] = React.useState('');
-  const [historicalBestMinutes, setHistoricalBestMinutes] = React.useState('');
-  const [historicalBestSeconds, setHistoricalBestSeconds] = React.useState('');
   const [notes, setNotes] = React.useState('');
   const [selectedLabels, setSelectedLabels] = React.useState<string[]>([]);
   const [closePromptOpen, setClosePromptOpen] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
+  const editableRunnerKey = runner ? getEditableRunnerKey(runner) : '';
 
   React.useEffect(() => {
     if (!runner) return;
     setRunnerNumber(runner.runnerNumber || '');
     setName(runner.name);
     setTargetLaps(runner.targetLaps?.toString() || '');
-    const avgInput = msToMinuteSecondInput(runner.historicalAvgMs);
-    const bestInput = msToMinuteSecondInput(runner.historicalBestMs);
-    setHistoricalAvgMinutes(avgInput.minutes);
-    setHistoricalAvgSeconds(avgInput.seconds);
-    setHistoricalBestMinutes(bestInput.minutes);
-    setHistoricalBestSeconds(bestInput.seconds);
     setNotes(runner.notes || '');
     setSelectedLabels(runner.labels.map((label) => label.id));
-  }, [runner]);
+  }, [editableRunnerKey]);
 
   useAnimationFrameTick(Boolean(runner?.statusSince && ['warming_up', 'waiting', 'running'].includes(runner.status)));
   const laps = React.useMemo(() => allLaps.filter((lap) => lap.runnerId === runnerId), [allLaps, runnerId]);
-
-  if (!runner) return null;
-
-  const latestLap = laps[0] || null;
-  const statusSummary = runnerStatusSummary(runner.status, runner.statusSince);
-  const recentLaps = laps.slice(0, 10);
-  const dirty = isDirty({
-    runner,
-    runnerNumber,
-    name,
-    targetLaps,
-    historicalAvgMinutes,
-    historicalAvgSeconds,
-    historicalBestMinutes,
-    historicalBestSeconds,
-    notes,
-    selectedLabels,
-  });
+  const dirty = runner
+    ? isDirty({
+        runner,
+        runnerNumber,
+        name,
+        targetLaps,
+        notes,
+        selectedLabels,
+      })
+    : false;
 
   async function saveAndClose() {
     setSaving(true);
@@ -64,8 +47,6 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
         runnerNumber,
         name,
         targetLaps: targetLaps ? Number(targetLaps) : null,
-        historicalAvgMs: minuteSecondInputToMs(historicalAvgMinutes, historicalAvgSeconds),
-        historicalBestMs: minuteSecondInputToMs(historicalBestMinutes, historicalBestSeconds),
         notes,
         labels: selectedLabels,
       });
@@ -83,15 +64,22 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
     onClose();
   }
 
-  function handleKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
-    if (event.key !== 'Escape') return;
-    event.preventDefault();
-    if (closePromptOpen) {
-      setClosePromptOpen(false);
-      return;
+  React.useEffect(() => {
+    if (!runner) return undefined;
+
+    function handleDocumentKeyDown(event: KeyboardEvent) {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      if (closePromptOpen) {
+        setClosePromptOpen(false);
+        return;
+      }
+      requestClose();
     }
-    requestClose();
-  }
+
+    document.addEventListener('keydown', handleDocumentKeyDown);
+    return () => document.removeEventListener('keydown', handleDocumentKeyDown);
+  }, [closePromptOpen, dirty, runner]);
 
   function toggleLabel(labelId: string) {
     setSelectedLabels((current) =>
@@ -99,9 +87,15 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
     );
   }
 
+  if (!runner) return null;
+
+  const latestLap = laps[0] || null;
+  const statusSummary = runnerStatusSummary(runner.status, runner.statusSince);
+  const recentLaps = laps.slice(0, 10);
+
   return (
     <div className="modal-backdrop" role="dialog" aria-modal="true">
-      <div className="modal" onKeyDown={handleKeyDown}>
+      <div className="modal">
         <div className="modal-header">
           <div>
             <h2>Lopersprofiel</h2>
@@ -178,52 +172,6 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
               onChange={(event) => setTargetLaps(event.target.value)}
             />
           </label>
-          <label>
-            Historisch gemiddelde
-            <div className="duration-input">
-              <input
-                className="input"
-                type="number"
-                min="0"
-                value={historicalAvgMinutes}
-                onChange={(event) => setHistoricalAvgMinutes(event.target.value)}
-                placeholder="min"
-              />
-              <input
-                className="input"
-                type="number"
-                min="0"
-                max="59"
-                value={historicalAvgSeconds}
-                onBlur={() => setHistoricalAvgSeconds(normalizeSecondsInput(historicalAvgSeconds))}
-                onChange={(event) => setHistoricalAvgSeconds(event.target.value)}
-                placeholder="sec"
-              />
-            </div>
-          </label>
-          <label>
-            Historisch snelste
-            <div className="duration-input">
-              <input
-                className="input"
-                type="number"
-                min="0"
-                value={historicalBestMinutes}
-                onChange={(event) => setHistoricalBestMinutes(event.target.value)}
-                placeholder="min"
-              />
-              <input
-                className="input"
-                type="number"
-                min="0"
-                max="59"
-                value={historicalBestSeconds}
-                onBlur={() => setHistoricalBestSeconds(normalizeSecondsInput(historicalBestSeconds))}
-                onChange={(event) => setHistoricalBestSeconds(event.target.value)}
-                placeholder="sec"
-              />
-            </div>
-          </label>
         </div>
 
         <div className="label-picker-groups">
@@ -296,10 +244,6 @@ function isDirty({
   runnerNumber,
   name,
   targetLaps,
-  historicalAvgMinutes,
-  historicalAvgSeconds,
-  historicalBestMinutes,
-  historicalBestSeconds,
   notes,
   selectedLabels,
 }: {
@@ -307,51 +251,29 @@ function isDirty({
   runnerNumber: string;
   name: string;
   targetLaps: string;
-  historicalAvgMinutes: string;
-  historicalAvgSeconds: string;
-  historicalBestMinutes: string;
-  historicalBestSeconds: string;
   notes: string;
   selectedLabels: string[];
 }) {
   const currentLabels = runner.labels.map((label) => label.id).sort().join('|');
   const nextLabels = [...selectedLabels].sort().join('|');
-  const nextAvgMs = minuteSecondInputToMs(historicalAvgMinutes, historicalAvgSeconds);
-  const nextBestMs = minuteSecondInputToMs(historicalBestMinutes, historicalBestSeconds);
   return (
     runnerNumber.trim() !== (runner.runnerNumber || '') ||
     name.trim() !== runner.name ||
     targetLaps.trim() !== (runner.targetLaps?.toString() || '') ||
-    nextAvgMs !== (runner.historicalAvgMs ?? null) ||
-    nextBestMs !== (runner.historicalBestMs ?? null) ||
     notes !== (runner.notes || '') ||
     currentLabels !== nextLabels
   );
 }
 
-function msToMinuteSecondInput(ms: number | null) {
-  if (ms === null || ms === undefined) return { minutes: '', seconds: '' };
-  const totalSeconds = Math.max(0, Math.round(ms / 1000));
-  return {
-    minutes: String(Math.floor(totalSeconds / 60)),
-    seconds: String(totalSeconds % 60),
-  };
-}
-
-function minuteSecondInputToMs(minutes: string, seconds: string) {
-  const cleanMinutes = minutes.trim();
-  const cleanSeconds = seconds.trim();
-  if (!cleanMinutes && !cleanSeconds) return null;
-  const minuteValue = Number(cleanMinutes || 0);
-  const secondValue = Number(normalizeSecondsInput(cleanSeconds || '0'));
-  if (!Number.isFinite(minuteValue) || !Number.isFinite(secondValue)) return null;
-  return (Math.max(0, Math.round(minuteValue)) * 60 + secondValue) * 1000;
-}
-
-function normalizeSecondsInput(value: string) {
-  const seconds = Number(value.trim() || 0);
-  if (!Number.isFinite(seconds)) return '';
-  return String(Math.min(59, Math.max(0, Math.round(seconds))));
+function getEditableRunnerKey(runner: Runner) {
+  return [
+    runner.id,
+    runner.runnerNumber || '',
+    runner.name,
+    runner.targetLaps ?? '',
+    runner.notes || '',
+    runner.labels.map((label) => label.id).sort().join('|'),
+  ].join('\u0001');
 }
 
 function runnerStatusSummary(status: RunnerStatus, statusSince: number | null) {
