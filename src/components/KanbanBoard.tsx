@@ -21,6 +21,21 @@ function TimerBadge({ runner }: { runner: Runner }) {
   return <span className="timer-badge">{formatElapsedSeconds(nowMs() - runner.statusSince)}</span>;
 }
 
+const LAST_IN_ORDER = Number.MAX_SAFE_INTEGER;
+
+function runnerNumberValue(runner: Runner) {
+  const parsed = Number.parseInt(runner.runnerNumber ?? '', 10);
+  return Number.isFinite(parsed) ? parsed : LAST_IN_ORDER;
+}
+
+function compareByStatusSinceAsc(a: Runner, b: Runner) {
+  return (a.statusSince ?? LAST_IN_ORDER) - (b.statusSince ?? LAST_IN_ORDER);
+}
+
+function compareByStatusSinceDesc(a: Runner, b: Runner) {
+  return (b.statusSince ?? 0) - (a.statusSince ?? 0);
+}
+
 export const KanbanBoard: React.FC<{ onOpenProfile: (runnerId: string) => void }> = ({ onOpenProfile }) => {
   const runners = useAppStore((state) => state.runners);
   const search = useAppStore((state) => state.search);
@@ -48,10 +63,32 @@ export const KanbanBoard: React.FC<{ onOpenProfile: (runnerId: string) => void }
     });
   }, [runners, search, showHiddenRan]);
 
+  const warmingUpSorted = React.useMemo(() => {
+    return filteredRunners
+      .filter((runner) => runner.status === 'warming_up')
+      .sort((a, b) => compareByStatusSinceAsc(a, b) || runnerNumberValue(a) - runnerNumberValue(b));
+  }, [filteredRunners]);
+
   const waitingSorted = React.useMemo(() => {
     return filteredRunners
       .filter((runner) => runner.status === 'waiting')
-      .sort((a, b) => (a.queueIndex ?? 0) - (b.queueIndex ?? 0));
+      .sort(
+        (a, b) =>
+          (a.queueIndex ?? LAST_IN_ORDER) - (b.queueIndex ?? LAST_IN_ORDER) ||
+          compareByStatusSinceAsc(a, b) ||
+          runnerNumberValue(a) - runnerNumberValue(b)
+      );
+  }, [filteredRunners]);
+
+  const ranSorted = React.useMemo(() => {
+    return filteredRunners
+      .filter((runner) => runner.status === 'ran')
+      .sort(
+        (a, b) =>
+          compareByStatusSinceDesc(a, b) ||
+          (b.createdAt ?? 0) - (a.createdAt ?? 0) ||
+          runnerNumberValue(b) - runnerNumberValue(a)
+      );
   }, [filteredRunners]);
 
   function onDragEnd(event: DragEndEvent) {
@@ -103,9 +140,7 @@ export const KanbanBoard: React.FC<{ onOpenProfile: (runnerId: string) => void }
       <div className="kanban">
         {COLUMNS.map((column) => {
           const items =
-            column.key === 'waiting'
-              ? waitingSorted
-              : filteredRunners.filter((runner) => runner.status === column.key);
+            column.key === 'warming_up' ? warmingUpSorted : column.key === 'waiting' ? waitingSorted : ranSorted;
           return (
             <DroppableColumn key={column.key} id={`column-${column.key}`} title={column.title} count={items.length}>
               {items.map((runner, index) => (

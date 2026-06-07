@@ -2,7 +2,7 @@ import React from 'react';
 import { useAppStore } from '../store';
 import { formatDurationMs, nowMs } from '../lib/time';
 import { useAnimationFrameTick } from '../lib/useAnimationFrameTick';
-import type { Label, Runner } from '../types';
+import type { Label, LapRecord, Runner } from '../types';
 import { LabelBadge } from './LabelBadge';
 
 export function OutsideDisplay({ onNavigate }: { onNavigate: (path: string) => void }) {
@@ -48,6 +48,7 @@ export function InsideDisplay({ onNavigate }: { onNavigate: (path: string) => vo
   const runners = useAppStore((state) => state.runners);
   const labels = useAppStore((state) => state.labels);
   const laps = useAppStore((state) => state.laps);
+  const latestLap = laps[0] || null;
   const ranking = runners
     .filter((runner) => runner.lapCount > 0 || runner.status !== 'registered')
     .sort(
@@ -79,6 +80,28 @@ export function InsideDisplay({ onNavigate }: { onNavigate: (path: string) => vo
         </div>
       </header>
       <div className="inside-grid">
+        <section className="display-panel inside-latest-lap">
+          {latestLap ? (
+            <>
+              <div className="latest-lap-main">
+                <h2>Net gelopen</h2>
+                <strong className="latest-lap-runner">{lapRunnerName(latestLap)}</strong>
+                <DisplayLabels labels={latestLap.labels} />
+              </div>
+              <div className="latest-lap-result">
+                <em className="latest-lap-time">{formatDurationMs(latestLap.durationMs)}</em>
+                <span className="latest-lap-meta">
+                  Ronde {latestLap.lapNumber} · {new Date(latestLap.finishedAt).toLocaleTimeString()}
+                </span>
+              </div>
+            </>
+          ) : (
+            <>
+              <h2>Net gelopen</h2>
+              <div className="empty-inline">Nog geen rondes geregistreerd</div>
+            </>
+          )}
+        </section>
         <section className="display-panel">
           <h2>Ranking</h2>
           <div className="ranking-list">
@@ -153,6 +176,10 @@ function getNextRunner(runners: Runner[]) {
 
 function runnerName(runner: Runner) {
   return runner.runnerNumber ? `${runner.runnerNumber} - ${runner.name}` : runner.name;
+}
+
+function lapRunnerName(lap: LapRecord) {
+  return lap.runnerNumber ? `${lap.runnerNumber} - ${lap.runnerName}` : lap.runnerName;
 }
 
 function buildLabelStat(label: Label, runners: Runner[]) {
