@@ -1,19 +1,32 @@
-import initSqlJs from 'sql.js';
+import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
+import type {
+  Label,
+  LabelInput,
+  LabelPatch,
+  LapRecord,
+  RaceState,
+  RegistrationSource,
+  Runner,
+  RunnerInput,
+  RunnerPatch,
+  RunnerStatus,
+} from '../shared/schemas.js';
 
-let db;
+type SqlValue = string | number | null;
+type Db = Database.Database;
 
 const DATA_DIR = process.env.DATA_PATH
   ? path.resolve(process.env.DATA_PATH, 'data')
   : path.resolve(process.cwd(), 'data');
 const DB_FILE = path.join(DATA_DIR, 'app.db');
 
-const VALID_STATUSES = new Set(['registered', 'warming_up', 'waiting', 'running', 'ran']);
-const VALID_REGISTRATION_SOURCES = new Set(['import', 'manual']);
+const VALID_STATUSES = new Set<RunnerStatus>(['registered', 'warming_up', 'waiting', 'running', 'ran']);
+const VALID_REGISTRATION_SOURCES = new Set<RegistrationSource>(['import', 'manual']);
 
-const DEFAULT_LABELS = [
+const DEFAULT_LABELS: LabelInput[] = [
   {
     name: 'Speedteam White',
     color: '#e5e7eb',
@@ -88,74 +101,62 @@ const DEFAULT_LABELS = [
   },
 ];
 
-function ensureDataDir() {
+let database: Db | null = null;
+
+function getDb(): Db {
+  if (!database) throw new Error('database not initialized');
+  return database;
+}
+
+function ensureDataDir(): void {
   if (!fs.existsSync(DATA_DIR)) {
     fs.mkdirSync(DATA_DIR, { recursive: true });
   }
 }
 
-function saveDb() {
-  if (!db) return;
-  const data = db.export();
-  fs.writeFileSync(DB_FILE, Buffer.from(data));
+function run(sql: string, params: SqlValue[] = []): Database.RunResult {
+  return getDb().prepare(sql).run(...params);
 }
 
-function all(sql, params = []) {
-  const stmt = db.prepare(sql);
-  stmt.bind(params);
-  const rows = [];
-  while (stmt.step()) {
-    rows.push(stmt.getAsObject());
-  }
-  stmt.free();
-  return rows;
+function all<T>(sql: string, params: SqlValue[] = []): T[] {
+  return getDb().prepare(sql).all(...params) as T[];
 }
 
-function one(sql, params = []) {
-  const rows = all(sql, params);
-  return rows[0] ?? null;
+function one<T>(sql: string, params: SqlValue[] = []): T | null {
+  return getDb().prepare(sql).get(...params) as T | undefined ?? null;
 }
 
-function tableExists(tableName) {
-  const row = one("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?", [tableName]);
-  return Boolean(row);
+function transaction<T>(callback: () => T): T {
+  return getDb().transaction(callback)();
 }
 
-function getTableColumns(tableName) {
-  if (!tableExists(tableName)) return [];
-  return all(`PRAGMA table_info(${tableName})`).map((row) => String(row.name));
-}
-
-function getTableSql(tableName) {
-  const row = one("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?", [tableName]);
-  return String(row?.sql || '');
-}
-
-function cleanText(value) {
+function cleanText(value: unknown): string | null {
   if (value === undefined || value === null) return null;
   const text = String(value).trim();
   return text.length ? text : null;
 }
 
-function cleanInt(value) {
+function cleanInt(value: unknown): number | null {
   if (value === undefined || value === null || value === '') return null;
   const n = Number(value);
   return Number.isFinite(n) ? Math.max(0, Math.round(n)) : null;
 }
 
-function cleanStatus(status) {
-  return VALID_STATUSES.has(status) ? status : 'registered';
+function cleanStatus(status: unknown): RunnerStatus {
+  return VALID_STATUSES.has(status as RunnerStatus) ? (status as RunnerStatus) : 'registered';
 }
 
-function cleanRegistrationSource(source) {
-  return VALID_REGISTRATION_SOURCES.has(source) ? source : 'manual';
+function cleanRegistrationSource(source: unknown): RegistrationSource {
+  return VALID_REGISTRATION_SOURCES.has(source as RegistrationSource)
+    ? (source as RegistrationSource)
+    : 'manual';
 }
 
-function normalizeName(name) {
+function normalizeName(name: unknown): string {
   return String(name || '').trim().toLowerCase();
 }
 
-function canonicalLabelName(name) {
+function canonicalLabelName(name: unknown): string | null {
   const text = cleanText(name);
   const normalized = normalizeName(text);
   if (['1ste jaars', '1e jaar', '1e jaars', 'eerste jaar', 'eerste jaars'].includes(normalized)) {
@@ -164,8 +165,8 @@ function canonicalLabelName(name) {
   return text;
 }
 
-function createSchema() {
-  db.run(`
+function createSchema(): void {
+  getDb().exec(`
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
@@ -243,156 +244,23 @@ function createSchema() {
     );
   `);
 
-  db.run(`
-    INSERT OR IGNORE INTO race_state (
+  run(
+    `INSERT OR IGNORE INTO race_state (
       id,
       active_runner_id,
       active_started_at,
       race_started_at,
       race_finished_at
-    ) VALUES (1, NULL, NULL, NULL, NULL)
-  `);
-}
-
-function migrateLegacyRunnersIfNeeded() {
-  const columns = getTableColumns('runners');
-  if (!columns.length || !columns.includes('status') || columns.includes('runner_number')) {
-    return;
-  }
-
-  const legacyTable = `runners_legacy_${Date.now()}`;
-  db.run(`ALTER TABLE runners RENAME TO ${legacyTable}`);
-  createSchema();
-
-  const now = Date.now();
-  const legacyRows = all(
-    `SELECT id, name, status, status_since AS statusSince, queue_index AS queueIndex FROM ${legacyTable}`
+    ) VALUES (1, NULL, NULL, NULL, NULL)`
   );
-
-  for (const row of legacyRows) {
-    const id = cleanText(row.id) || uuidv4();
-    const name = cleanText(row.name) || 'Onbekende loper';
-    const status = cleanStatus(row.status);
-    db.run(
-      `INSERT OR IGNORE INTO runners (
-        id,
-        runner_number,
-        name,
-        target_laps,
-        historical_avg_ms,
-        historical_best_ms,
-        registration_source,
-        notes,
-        created_at,
-        updated_at
-      ) VALUES (?, NULL, ?, NULL, NULL, NULL, 'manual', '', ?, ?)`,
-      [id, name, now, now]
-    );
-    db.run(
-      `INSERT OR REPLACE INTO queue_entries (runner_id, status, queue_index, status_since)
-       VALUES (?, ?, ?, ?)`,
-      [
-        id,
-        status,
-        status === 'waiting' ? cleanInt(row.queueIndex) : null,
-        cleanInt(row.statusSince) ?? now,
-      ]
-    );
-  }
 }
 
-function ensureColumn(tableName, columnName, ddl) {
-  const columns = getTableColumns(tableName);
-  if (!columns.length || columns.includes(columnName)) return;
-  db.run(`ALTER TABLE ${tableName} ADD COLUMN ${ddl}`);
-}
-
-function migrateQueueEntriesSchema() {
-  if (!tableExists('queue_entries')) return;
-
-  const sql = getTableSql('queue_entries');
-  const columns = getTableColumns('queue_entries');
-  const needsRegisteredStatus = !sql.includes("'registered'");
-  const needsHiddenAt = !columns.includes('hidden_at');
-
-  if (!needsRegisteredStatus && !needsHiddenAt) return;
-
-  const legacyTable = `queue_entries_legacy_${Date.now()}`;
-  db.run(`ALTER TABLE queue_entries RENAME TO ${legacyTable}`);
-  db.run(`
-    CREATE TABLE queue_entries (
-      runner_id TEXT PRIMARY KEY,
-      status TEXT NOT NULL CHECK(status IN ('registered','warming_up','waiting','running','ran')),
-      queue_index INTEGER,
-      status_since INTEGER,
-      hidden_at INTEGER,
-      FOREIGN KEY (runner_id) REFERENCES runners(id) ON DELETE CASCADE
-    )
-  `);
-
-  const legacyColumns = getTableColumns(legacyTable);
-  const hiddenAtExpression = legacyColumns.includes('hidden_at') ? 'hidden_at' : 'NULL AS hidden_at';
-
-  db.run(`
-    INSERT OR REPLACE INTO queue_entries (
-      runner_id,
-      status,
-      queue_index,
-      status_since,
-      hidden_at
-    )
-    SELECT
-      runner_id,
-      CASE
-        WHEN status IN ('registered','warming_up','waiting','running','ran') THEN status
-        ELSE 'registered'
-      END,
-      CASE WHEN status = 'waiting' THEN queue_index ELSE NULL END,
-      status_since,
-      ${hiddenAtExpression}
-    FROM ${legacyTable}
-  `);
-  db.run(`DROP TABLE ${legacyTable}`);
-}
-
-function migrateSchemaColumns() {
-  ensureColumn(
-    'runners',
-    'registration_source',
-    "registration_source TEXT NOT NULL DEFAULT 'manual' CHECK(registration_source IN ('import','manual'))"
-  );
-  migrateQueueEntriesSchema();
-  ensureColumn('labels', 'image_url', 'image_url TEXT');
-  ensureColumn('labels', 'target_laps', 'target_laps INTEGER');
-  ensureColumn('labels', 'sort_order', 'sort_order INTEGER');
-}
-
-function normalizeDefaultLabelAliases() {
-  const oldFirstYear = one(
-    `SELECT id FROM labels WHERE lower(name) IN ('1ste jaars', '1e jaar', '1e jaars', 'eerste jaar', 'eerste jaars')`
-  );
-  const newFirstYear = one(`SELECT id FROM labels WHERE lower(name) = '1ste jaar'`);
-  if (oldFirstYear && !newFirstYear) {
-    db.run('UPDATE labels SET name = ?, updated_at = ? WHERE id = ?', [
-      '1ste jaar',
-      Date.now(),
-      oldFirstYear.id,
-    ]);
-  } else if (oldFirstYear && newFirstYear && oldFirstYear.id !== newFirstYear.id) {
-    db.run('UPDATE OR IGNORE runner_labels SET label_id = ? WHERE label_id = ?', [
-      newFirstYear.id,
-      oldFirstYear.id,
-    ]);
-    db.run('DELETE FROM labels WHERE id = ?', [oldFirstYear.id]);
-  }
-}
-
-function seedDefaultLabels() {
+function seedDefaultLabels(): void {
   const now = Date.now();
   for (const label of DEFAULT_LABELS) {
     const existing = findLabelByName(label.name);
     if (existing) {
-      db.run(
+      run(
         `UPDATE labels
          SET color = ?,
              icon = ?,
@@ -403,86 +271,45 @@ function seedDefaultLabels() {
              updated_at = ?
          WHERE id = ?`,
         [
-          label.color,
-          label.icon,
-          label.kind,
-          label.imageUrl,
-          label.targetLaps,
-          label.sortOrder,
+          label.color ?? '#3b82f6',
+          label.icon ?? label.name.slice(0, 2).toUpperCase(),
+          label.kind ?? 'custom',
+          label.imageUrl ?? null,
+          label.targetLaps ?? null,
+          label.sortOrder ?? null,
           now,
           existing.id,
         ]
       );
-    } else {
-      db.run(
-        `INSERT INTO labels (
-          id,
-          name,
-          color,
-          icon,
-          kind,
-          image_url,
-          target_laps,
-          sort_order,
-          created_at,
-          updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          uuidv4(),
-          label.name,
-          label.color,
-          label.icon,
-          label.kind,
-          label.imageUrl,
-          label.targetLaps,
-          label.sortOrder,
-          now,
-          now,
-        ]
-      );
+      continue;
     }
+    createLabel(label);
   }
 }
 
-export async function initDb() {
+export async function initDb(): Promise<void> {
   ensureDataDir();
-
-  const SQL = await initSqlJs();
-
-  if (fs.existsSync(DB_FILE)) {
-    db = new SQL.Database(fs.readFileSync(DB_FILE));
-  } else {
-    db = new SQL.Database();
-  }
-
-  db.run('PRAGMA foreign_keys = ON');
-  db.run(`
-    CREATE TABLE IF NOT EXISTS settings (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL
-    )
-  `);
-  migrateLegacyRunnersIfNeeded();
+  if (database) database.close();
+  database = new Database(DB_FILE);
+  database.pragma('foreign_keys = ON');
+  database.pragma('journal_mode = WAL');
+  database.pragma('busy_timeout = 5000');
   createSchema();
-  migrateSchemaColumns();
-  normalizeDefaultLabelAliases();
   seedDefaultLabels();
-  setSetting('schema_version', '2');
-  saveDb();
+  setSetting('schema_version', '3');
 }
 
-export function getSetting(key) {
-  const row = one('SELECT value FROM settings WHERE key = ?', [key]);
+export function getSetting(key: string): string | null {
+  const row = one<{ value: string }>('SELECT value FROM settings WHERE key = ?', [key]);
   return row ? row.value : null;
 }
 
-export function setSetting(key, value) {
-  db.run('INSERT OR REPLACE INTO settings(key, value) VALUES(?, ?)', [key, String(value)]);
-  saveDb();
+export function setSetting(key: string, value: string): void {
+  run('INSERT OR REPLACE INTO settings(key, value) VALUES(?, ?)', [key, String(value)]);
 }
 
-export function getLabels() {
-  return all(
+export function getLabels(): Label[] {
+  return all<Label>(
     `SELECT
        id,
        name,
@@ -501,10 +328,10 @@ export function getLabels() {
   );
 }
 
-export function findLabelByName(name) {
+export function findLabelByName(name: unknown): Label | null {
   const normalized = normalizeName(canonicalLabelName(name));
   if (!normalized) return null;
-  return one(
+  return one<Label>(
     `SELECT
        id,
        name,
@@ -522,7 +349,7 @@ export function findLabelByName(name) {
   );
 }
 
-export function ensureLabel(name, options = {}) {
+export function ensureLabel(name: unknown, options: Partial<LabelInput> = {}): Label | null {
   const labelName = canonicalLabelName(name);
   if (!labelName) return null;
   const existing = findLabelByName(labelName);
@@ -538,23 +365,21 @@ export function ensureLabel(name, options = {}) {
   });
 }
 
-export function createLabel({ name, color, icon, kind, imageUrl, targetLaps, sortOrder }) {
-  const labelName = cleanText(name);
-  if (!labelName) {
-    throw new Error('label name required');
-  }
+export function createLabel(input: LabelInput): Label {
+  const labelName = cleanText(input.name);
+  if (!labelName) throw new Error('label name required');
   const now = Date.now();
   const label = {
     id: uuidv4(),
     name: labelName,
-    color: cleanText(color) || '#3b82f6',
-    icon: cleanText(icon) || labelName.slice(0, 2).toUpperCase(),
-    kind: cleanText(kind) || 'custom',
-    imageUrl: cleanText(imageUrl),
-    targetLaps: cleanInt(targetLaps),
-    sortOrder: cleanInt(sortOrder),
+    color: cleanText(input.color) || '#3b82f6',
+    icon: cleanText(input.icon) || labelName.slice(0, 2).toUpperCase(),
+    kind: cleanText(input.kind) || 'custom',
+    imageUrl: cleanText(input.imageUrl),
+    targetLaps: cleanInt(input.targetLaps),
+    sortOrder: cleanInt(input.sortOrder),
   };
-  db.run(
+  run(
     `INSERT INTO labels (
       id,
       name,
@@ -580,14 +405,19 @@ export function createLabel({ name, color, icon, kind, imageUrl, targetLaps, sor
       now,
     ]
   );
-  saveDb();
   return { ...label, createdAt: now, updatedAt: now };
 }
 
-export function updateLabel(id, fields) {
-  const current = one('SELECT id FROM labels WHERE id = ?', [id]);
-  if (!current) return null;
-  const existing = one(
+export function updateLabel(id: string, fields: LabelPatch): Label | null {
+  const existing = one<{
+    name: string;
+    color: string;
+    icon: string;
+    kind: string;
+    imageUrl: string | null;
+    targetLaps: number | null;
+    sortOrder: number | null;
+  }>(
     `SELECT
        name,
        color,
@@ -600,17 +430,20 @@ export function updateLabel(id, fields) {
      WHERE id = ?`,
     [id]
   );
+  if (!existing) return null;
+
   const next = {
-    name: cleanText(fields.name) || existing.name,
-    color: cleanText(fields.color) || existing.color,
-    icon: cleanText(fields.icon) || existing.icon,
-    kind: cleanText(fields.kind) || existing.kind,
+    name: fields.name !== undefined ? cleanText(fields.name) || existing.name : existing.name,
+    color: fields.color !== undefined ? cleanText(fields.color) || existing.color : existing.color,
+    icon: fields.icon !== undefined ? cleanText(fields.icon) || existing.icon : existing.icon,
+    kind: fields.kind !== undefined ? cleanText(fields.kind) || existing.kind : existing.kind,
     imageUrl: fields.imageUrl !== undefined ? cleanText(fields.imageUrl) || null : existing.imageUrl,
     targetLaps: fields.targetLaps !== undefined ? cleanInt(fields.targetLaps) : existing.targetLaps,
     sortOrder: fields.sortOrder !== undefined ? cleanInt(fields.sortOrder) : existing.sortOrder,
     updatedAt: Date.now(),
   };
-  db.run(
+
+  run(
     `UPDATE labels
      SET name = ?,
          color = ?,
@@ -633,18 +466,19 @@ export function updateLabel(id, fields) {
       id,
     ]
   );
-  saveDb();
+
   return getLabels().find((label) => label.id === id) ?? null;
 }
 
-export function deleteLabel(id) {
-  db.run('DELETE FROM runner_labels WHERE label_id = ?', [id]);
-  db.run('DELETE FROM labels WHERE id = ?', [id]);
-  saveDb();
+export function deleteLabel(id: string): void {
+  transaction(() => {
+    run('DELETE FROM runner_labels WHERE label_id = ?', [id]);
+    run('DELETE FROM labels WHERE id = ?', [id]);
+  });
 }
 
-function getRunnerLabelsMap() {
-  const rows = all(
+function getRunnerLabelsMap(): Map<string, Label[]> {
+  const rows = all<Label & { runnerId: string }>(
     `SELECT
       rl.runner_id AS runnerId,
       l.id,
@@ -661,10 +495,10 @@ function getRunnerLabelsMap() {
     JOIN labels l ON l.id = rl.label_id
     ORDER BY COALESCE(l.sort_order, 9999), l.name`
   );
-  const map = new Map();
+  const map = new Map<string, Label[]>();
   for (const row of rows) {
     if (!map.has(row.runnerId)) map.set(row.runnerId, []);
-    map.get(row.runnerId).push({
+    map.get(row.runnerId)?.push({
       id: row.id,
       name: row.name,
       color: row.color,
@@ -680,9 +514,9 @@ function getRunnerLabelsMap() {
   return map;
 }
 
-export function getAllRunners() {
+export function getAllRunners(): Runner[] {
   const labelsByRunner = getRunnerLabelsMap();
-  const rows = all(
+  const rows = all<Omit<Runner, 'labels' | 'hiddenFromQueue'> & { queueHiddenAt: number | null }>(
     `SELECT
       r.id,
       r.runner_number AS runnerNumber,
@@ -752,90 +586,94 @@ export function getAllRunners() {
   }));
 }
 
-export function getRunnerById(id) {
+export function getRunnerById(id: string): Runner | null {
   return getAllRunners().find((runner) => runner.id === id) ?? null;
 }
 
-function findRunnerByNumber(runnerNumber) {
+function findRunnerByNumber(runnerNumber: unknown): { id: string } | null {
   const number = cleanText(runnerNumber);
   if (!number) return null;
-  return one('SELECT id FROM runners WHERE runner_number = ?', [number]);
+  return one<{ id: string }>('SELECT id FROM runners WHERE runner_number = ?', [number]);
 }
 
-export function setRunnerLabels(runnerId, labelNamesOrIds) {
-  db.run('DELETE FROM runner_labels WHERE runner_id = ?', [runnerId]);
+export function setRunnerLabels(runnerId: string, labelNamesOrIds: unknown): void {
+  run('DELETE FROM runner_labels WHERE runner_id = ?', [runnerId]);
   const labels = Array.isArray(labelNamesOrIds) ? labelNamesOrIds : [];
   for (const labelValue of labels) {
     const labelText = cleanText(labelValue);
     if (!labelText) continue;
-    const existingById = one('SELECT id FROM labels WHERE id = ?', [labelText]);
+    const existingById = one<{ id: string }>('SELECT id FROM labels WHERE id = ?', [labelText]);
     const label = existingById || ensureLabel(labelText);
     if (!label) continue;
-    db.run('INSERT OR IGNORE INTO runner_labels (runner_id, label_id) VALUES (?, ?)', [
-      runnerId,
-      label.id,
-    ]);
+    run('INSERT OR IGNORE INTO runner_labels (runner_id, label_id) VALUES (?, ?)', [runnerId, label.id]);
   }
 }
 
-export function insertRunner(input) {
+export function insertRunner(input: RunnerInput): Runner {
   const name = cleanText(input.name);
   if (!name) throw new Error('runner name required');
 
   const now = Date.now();
   const id = input.id || uuidv4();
-  db.run(
-    `INSERT INTO runners (
-      id,
-      runner_number,
-      name,
-      target_laps,
-      historical_avg_ms,
-      historical_best_ms,
-      registration_source,
-      notes,
-      created_at,
-      updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      id,
-      cleanText(input.runnerNumber),
-      name,
-      cleanInt(input.targetLaps),
-      cleanInt(input.historicalAvgMs),
-      cleanInt(input.historicalBestMs),
-      cleanRegistrationSource(input.registrationSource),
-      cleanText(input.notes) || '',
-      now,
-      now,
-    ]
-  );
-  db.run(
-    `INSERT INTO queue_entries (runner_id, status, queue_index, status_since, hidden_at)
-     VALUES (?, ?, NULL, ?, NULL)`,
-    [id, cleanStatus(input.status), cleanInt(input.statusSince) ?? now]
-  );
-  setRunnerLabels(id, input.labels || []);
-  saveDb();
-  return getRunnerById(id);
+  transaction(() => {
+    run(
+      `INSERT INTO runners (
+        id,
+        runner_number,
+        name,
+        target_laps,
+        historical_avg_ms,
+        historical_best_ms,
+        registration_source,
+        notes,
+        created_at,
+        updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        id,
+        cleanText(input.runnerNumber),
+        name,
+        cleanInt(input.targetLaps),
+        cleanInt(input.historicalAvgMs),
+        cleanInt(input.historicalBestMs),
+        cleanRegistrationSource(input.registrationSource),
+        cleanText(input.notes) || '',
+        now,
+        now,
+      ]
+    );
+    run(
+      `INSERT INTO queue_entries (runner_id, status, queue_index, status_since, hidden_at)
+       VALUES (?, ?, NULL, ?, NULL)`,
+      [id, cleanStatus(input.status), cleanInt(input.statusSince) ?? now]
+    );
+    setRunnerLabels(id, input.labels || []);
+  });
+  const runner = getRunnerById(id);
+  if (!runner) throw new Error('runner insert failed');
+  return runner;
 }
 
-export function updateRunner(id, fields) {
-  const current = one('SELECT * FROM runners WHERE id = ?', [id]);
+export function updateRunner(id: string, fields: RunnerPatch): Runner | null {
+  const current = one<{
+    runner_number: string | null;
+    name: string;
+    target_laps: number | null;
+    historical_avg_ms: number | null;
+    historical_best_ms: number | null;
+    registration_source: RegistrationSource;
+    notes: string | null;
+  }>('SELECT * FROM runners WHERE id = ?', [id]);
   if (!current) return null;
+
   const next = {
-    runnerNumber:
-      fields.runnerNumber !== undefined ? cleanText(fields.runnerNumber) : current.runner_number,
+    runnerNumber: fields.runnerNumber !== undefined ? cleanText(fields.runnerNumber) : current.runner_number,
     name: fields.name !== undefined ? cleanText(fields.name) || current.name : current.name,
     targetLaps: fields.targetLaps !== undefined ? cleanInt(fields.targetLaps) : current.target_laps,
     historicalAvgMs:
-      fields.historicalAvgMs !== undefined
-        ? cleanInt(fields.historicalAvgMs)
-        : current.historical_avg_ms,
+      fields.historicalAvgMs !== undefined ? cleanInt(fields.historicalAvgMs) : current.historical_avg_ms,
     historicalBestMs:
-      fields.historicalBestMs !== undefined
-        ? cleanInt(fields.historicalBestMs)
-        : current.historical_best_ms,
+      fields.historicalBestMs !== undefined ? cleanInt(fields.historicalBestMs) : current.historical_best_ms,
     registrationSource:
       fields.registrationSource !== undefined
         ? cleanRegistrationSource(fields.registrationSource)
@@ -843,45 +681,47 @@ export function updateRunner(id, fields) {
     notes: fields.notes !== undefined ? cleanText(fields.notes) || '' : current.notes || '',
     updatedAt: Date.now(),
   };
-  db.run(
-    `UPDATE runners
-     SET runner_number = ?,
-         name = ?,
-         target_laps = ?,
-         historical_avg_ms = ?,
-         historical_best_ms = ?,
-         registration_source = ?,
-         notes = ?,
-         updated_at = ?
-     WHERE id = ?`,
-    [
-      next.runnerNumber,
-      next.name,
-      next.targetLaps,
-      next.historicalAvgMs,
-      next.historicalBestMs,
-      next.registrationSource,
-      next.notes,
-      next.updatedAt,
-      id,
-    ]
-  );
-  if (fields.labels !== undefined) {
-    setRunnerLabels(id, fields.labels);
-  }
-  saveDb();
+
+  transaction(() => {
+    run(
+      `UPDATE runners
+       SET runner_number = ?,
+           name = ?,
+           target_laps = ?,
+           historical_avg_ms = ?,
+           historical_best_ms = ?,
+           registration_source = ?,
+           notes = ?,
+           updated_at = ?
+       WHERE id = ?`,
+      [
+        next.runnerNumber,
+        next.name,
+        next.targetLaps,
+        next.historicalAvgMs,
+        next.historicalBestMs,
+        next.registrationSource,
+        next.notes,
+        next.updatedAt,
+        id,
+      ]
+    );
+    if (fields.labels !== undefined) {
+      setRunnerLabels(id, fields.labels);
+    }
+  });
+
   return getRunnerById(id);
 }
 
-export function upsertRunnerFromImport(input) {
+export function upsertRunnerFromImport(input: RunnerInput): { action: 'created' | 'updated'; runner: Runner } {
   const runnerNumber = cleanText(input.runnerNumber);
   const existing = runnerNumber ? findRunnerByNumber(runnerNumber) : null;
   if (existing) {
-    const { status, statusSince, queueIndex, registrationSource, ...profileFields } = input;
-    return {
-      action: 'updated',
-      runner: updateRunner(existing.id, profileFields),
-    };
+    const { status: _status, statusSince: _statusSince, ...profileFields } = input;
+    const runner = updateRunner(existing.id, profileFields);
+    if (!runner) throw new Error('runner update failed');
+    return { action: 'updated', runner };
   }
   return {
     action: 'created',
@@ -893,43 +733,52 @@ export function upsertRunnerFromImport(input) {
   };
 }
 
-export function deleteRunner(id) {
-  db.run('DELETE FROM runner_labels WHERE runner_id = ?', [id]);
-  db.run('DELETE FROM laps WHERE runner_id = ?', [id]);
-  db.run('DELETE FROM queue_entries WHERE runner_id = ?', [id]);
-  db.run('UPDATE race_state SET active_runner_id = NULL, active_started_at = NULL WHERE active_runner_id = ?', [
-    id,
-  ]);
-  db.run('DELETE FROM runners WHERE id = ?', [id]);
-  saveDb();
+export function deleteRunner(id: string): void {
+  transaction(() => {
+    run('DELETE FROM runner_labels WHERE runner_id = ?', [id]);
+    run('DELETE FROM laps WHERE runner_id = ?', [id]);
+    run('DELETE FROM queue_entries WHERE runner_id = ?', [id]);
+    run('UPDATE race_state SET active_runner_id = NULL, active_started_at = NULL WHERE active_runner_id = ?', [
+      id,
+    ]);
+    run('DELETE FROM runners WHERE id = ?', [id]);
+  });
 }
 
-export function hideRunnerInQueue(id, hiddenAt = Date.now()) {
+export function hideRunnerInQueue(id: string, hiddenAt = Date.now()): Runner | null {
   const now = cleanInt(hiddenAt) ?? Date.now();
-  db.run(
+  run(
     `INSERT INTO queue_entries (runner_id, status, queue_index, status_since, hidden_at)
      VALUES (?, 'registered', NULL, ?, ?)
      ON CONFLICT(runner_id) DO UPDATE SET
        hidden_at = excluded.hidden_at`,
     [id, now, now]
   );
-  saveDb();
   return getRunnerById(id);
 }
 
-export function unhideRunnerInQueue(id) {
-  db.run(
+export function unhideRunnerInQueue(id: string): Runner | null {
+  run(
     `INSERT INTO queue_entries (runner_id, status, queue_index, status_since, hidden_at)
      VALUES (?, 'registered', NULL, ?, NULL)
      ON CONFLICT(runner_id) DO UPDATE SET
        hidden_at = NULL`,
     [id, Date.now()]
   );
-  saveDb();
   return getRunnerById(id);
 }
 
-export function updateRunnerStatus({ id, status, statusSince, queueIndex }) {
+export function updateRunnerStatus({
+  id,
+  status,
+  statusSince,
+  queueIndex,
+}: {
+  id: string;
+  status: RunnerStatus;
+  statusSince?: number | null;
+  queueIndex?: number | null;
+}): Runner | null {
   const nextStatus = cleanStatus(status);
   const now = cleanInt(statusSince) ?? Date.now();
   const nextQueueIndex =
@@ -939,67 +788,70 @@ export function updateRunnerStatus({ id, status, statusSince, queueIndex }) {
         : getMaxQueueIndex() + 1
       : null;
 
-  db.run(
-    `INSERT INTO queue_entries (runner_id, status, queue_index, status_since, hidden_at)
-     VALUES (?, ?, ?, ?, NULL)
-     ON CONFLICT(runner_id) DO UPDATE SET
-       status = excluded.status,
-       queue_index = excluded.queue_index,
-       status_since = excluded.status_since,
-       hidden_at = NULL`,
-    [id, nextStatus, nextQueueIndex, now]
-  );
+  transaction(() => {
+    run(
+      `INSERT INTO queue_entries (runner_id, status, queue_index, status_since, hidden_at)
+       VALUES (?, ?, ?, ?, NULL)
+       ON CONFLICT(runner_id) DO UPDATE SET
+         status = excluded.status,
+         queue_index = excluded.queue_index,
+         status_since = excluded.status_since,
+         hidden_at = NULL`,
+      [id, nextStatus, nextQueueIndex, now]
+    );
 
-  if (nextStatus === 'running') {
-    db.run(
-      `UPDATE race_state
-       SET active_runner_id = ?,
-           active_started_at = ?,
-           race_started_at = COALESCE(race_started_at, ?),
-           race_finished_at = NULL
-       WHERE id = 1`,
-      [id, now, now]
-    );
-  } else {
-    db.run(
-      `UPDATE race_state
-       SET active_runner_id = NULL,
-           active_started_at = NULL
-       WHERE id = 1 AND active_runner_id = ?`,
-      [id]
-    );
-  }
-  saveDb();
+    if (nextStatus === 'running') {
+      run(
+        `UPDATE race_state
+         SET active_runner_id = ?,
+             active_started_at = ?,
+             race_started_at = COALESCE(race_started_at, ?),
+             race_finished_at = NULL
+         WHERE id = 1`,
+        [id, now, now]
+      );
+    } else {
+      run(
+        `UPDATE race_state
+         SET active_runner_id = NULL,
+             active_started_at = NULL
+         WHERE id = 1 AND active_runner_id = ?`,
+        [id]
+      );
+    }
+  });
+
   return getRunnerById(id);
 }
 
-export function updateWaitingOrder(idOrder) {
+export function updateWaitingOrder(idOrder: string[]): void {
   const now = Date.now();
-  idOrder.forEach((id, idx) => {
-    db.run(
-      `INSERT INTO queue_entries (runner_id, status, queue_index, status_since, hidden_at)
-       VALUES (?, 'waiting', ?, ?, NULL)
-       ON CONFLICT(runner_id) DO UPDATE SET
-         status = 'waiting',
-         queue_index = excluded.queue_index,
-         status_since = COALESCE(queue_entries.status_since, excluded.status_since),
-         hidden_at = NULL`,
-      [id, idx, now]
-    );
+  transaction(() => {
+    idOrder.forEach((id, idx) => {
+      run(
+        `INSERT INTO queue_entries (runner_id, status, queue_index, status_since, hidden_at)
+         VALUES (?, 'waiting', ?, ?, NULL)
+         ON CONFLICT(runner_id) DO UPDATE SET
+           status = 'waiting',
+           queue_index = excluded.queue_index,
+           status_since = COALESCE(queue_entries.status_since, excluded.status_since),
+           hidden_at = NULL`,
+        [id, idx, now]
+      );
+    });
   });
-  saveDb();
 }
 
-export function getMaxQueueIndex() {
-  const row = one("SELECT MAX(queue_index) AS maxIdx FROM queue_entries WHERE status = 'waiting'");
+export function getMaxQueueIndex(): number {
+  const row = one<{ maxIdx: number | null }>("SELECT MAX(queue_index) AS maxIdx FROM queue_entries WHERE status = 'waiting'");
   return typeof row?.maxIdx === 'number' ? row.maxIdx : -1;
 }
 
-function getQueueEntriesByRunnerIds(ids) {
+function getQueueEntriesByRunnerIds(ids: string[]): QueueEntrySnapshot[] {
   if (!ids.length) return [];
   return ids
     .map((id) =>
-      one(
+      one<QueueEntrySnapshot>(
         `SELECT
            runner_id AS runnerId,
            status,
@@ -1011,11 +863,11 @@ function getQueueEntriesByRunnerIds(ids) {
         [id]
       )
     )
-    .filter(Boolean);
+    .filter((entry): entry is QueueEntrySnapshot => Boolean(entry));
 }
 
-function getNextWaitingRunner() {
-  return one(
+function getNextWaitingRunner(): { id: string; name: string } | null {
+  return one<{ id: string; name: string }>(
     `SELECT r.id, r.name
      FROM runners r
      JOIN queue_entries q ON q.runner_id = r.id
@@ -1025,35 +877,34 @@ function getNextWaitingRunner() {
   );
 }
 
-function getLapCount(runnerId) {
-  const row = one('SELECT COUNT(*) AS count FROM laps WHERE runner_id = ?', [runnerId]);
+function getLapCount(runnerId: string): number {
+  const row = one<{ count: number }>('SELECT COUNT(*) AS count FROM laps WHERE runner_id = ?', [runnerId]);
   return Number(row?.count || 0);
 }
 
-export function getRaceState() {
-  const row =
-    one(
-      `SELECT
-        id,
-        active_runner_id AS activeRunnerId,
-        active_started_at AS activeStartedAt,
-        race_started_at AS raceStartedAt,
-        race_finished_at AS raceFinishedAt
-       FROM race_state
-       WHERE id = 1`
-    ) || {};
+export function getRaceState(): RaceState {
+  const row = one<Omit<RaceState, 'id'> & { id: 1 }>(
+    `SELECT
+      id,
+      active_runner_id AS activeRunnerId,
+      active_started_at AS activeStartedAt,
+      race_started_at AS raceStartedAt,
+      race_finished_at AS raceFinishedAt
+     FROM race_state
+     WHERE id = 1`
+  );
   return {
     id: 1,
-    activeRunnerId: row.activeRunnerId ?? null,
-    activeStartedAt: row.activeStartedAt ?? null,
-    raceStartedAt: row.raceStartedAt ?? null,
-    raceFinishedAt: row.raceFinishedAt ?? null,
+    activeRunnerId: row?.activeRunnerId ?? null,
+    activeStartedAt: row?.activeStartedAt ?? null,
+    raceStartedAt: row?.raceStartedAt ?? null,
+    raceFinishedAt: row?.raceFinishedAt ?? null,
   };
 }
 
-export function getAllLaps() {
+export function getAllLaps(): LapRecord[] {
   const labelsByRunner = getRunnerLabelsMap();
-  return all(
+  return all<Omit<LapRecord, 'labels'>>(
     `SELECT
       l.id,
       l.runner_id AS runnerId,
@@ -1074,29 +925,46 @@ export function getAllLaps() {
   }));
 }
 
-export function performHandoff(nowMs = Date.now()) {
+export function getLapById(id: string): LapRecord | null {
+  return getAllLaps().find((lap) => lap.id === id) ?? null;
+}
+
+type QueueEntrySnapshot = {
+  runnerId: string;
+  status: RunnerStatus;
+  queueIndex: number | null;
+  statusSince: number | null;
+  hiddenAt: number | null;
+};
+
+type HandoffSnapshot = {
+  raceState: RaceState;
+  queueEntries: QueueEntrySnapshot[];
+  lapIds: string[];
+};
+
+export function performHandoff(nowMs = Date.now()):
+  | { ok: true; lapId: string | null; startedRunnerId: string | null }
+  | { ok: false; error: 'empty_queue' } {
   const raceState = getRaceState();
   const activeRunnerId = raceState.activeRunnerId;
   const nextRunner = getNextWaitingRunner();
 
-  // Opening the app never starts the race. The first timing handoff starts the race clock
-  // and marks the first queued runner as active; later handoffs record laps and advance.
   if (!activeRunnerId && !nextRunner) {
     return { ok: false, error: 'empty_queue' };
   }
 
   const lapId = activeRunnerId ? uuidv4() : null;
-  const affectedIds = [activeRunnerId, nextRunner?.id].filter(Boolean);
-  const snapshot = {
+  const affectedIds = [activeRunnerId, nextRunner?.id].filter((id): id is string => Boolean(id));
+  const snapshot: HandoffSnapshot = {
     raceState,
     queueEntries: getQueueEntriesByRunnerIds(affectedIds),
     lapIds: lapId ? [lapId] : [],
   };
   const historyId = uuidv4();
 
-  try {
-    db.run('BEGIN TRANSACTION');
-    db.run(
+  transaction(() => {
+    run(
       `INSERT INTO handoff_history (id, created_at, payload_json, undone)
        VALUES (?, ?, ?, 0)`,
       [historyId, nowMs, JSON.stringify(snapshot)]
@@ -1105,7 +973,7 @@ export function performHandoff(nowMs = Date.now()) {
     if (activeRunnerId) {
       const startedAt = raceState.activeStartedAt ?? nowMs;
       const lapNumber = getLapCount(activeRunnerId) + 1;
-      db.run(
+      run(
         `INSERT INTO laps (
           id,
           runner_id,
@@ -1118,7 +986,7 @@ export function performHandoff(nowMs = Date.now()) {
         ) VALUES (?, ?, ?, ?, ?, ?, 'spacebar', ?)`,
         [lapId, activeRunnerId, lapNumber, startedAt, nowMs, Math.max(0, nowMs - startedAt), nowMs]
       );
-      db.run(
+      run(
         `UPDATE queue_entries
          SET status = 'ran', queue_index = NULL, status_since = ?, hidden_at = NULL
          WHERE runner_id = ?`,
@@ -1127,13 +995,13 @@ export function performHandoff(nowMs = Date.now()) {
     }
 
     if (nextRunner) {
-      db.run(
+      run(
         `UPDATE queue_entries
          SET status = 'running', queue_index = NULL, status_since = ?, hidden_at = NULL
          WHERE runner_id = ?`,
         [nowMs, nextRunner.id]
       );
-      db.run(
+      run(
         `UPDATE race_state
          SET active_runner_id = ?,
              active_started_at = ?,
@@ -1143,29 +1011,20 @@ export function performHandoff(nowMs = Date.now()) {
         [nextRunner.id, nowMs, nowMs]
       );
     } else {
-      db.run(
+      run(
         `UPDATE race_state
          SET active_runner_id = NULL,
              active_started_at = NULL
          WHERE id = 1`
       );
     }
+  });
 
-    db.run('COMMIT');
-    saveDb();
-    return { ok: true, lapId, startedRunnerId: nextRunner?.id ?? null };
-  } catch (err) {
-    try {
-      db.run('ROLLBACK');
-    } catch {
-      // ignore rollback failure
-    }
-    throw err;
-  }
+  return { ok: true, lapId, startedRunnerId: nextRunner?.id ?? null };
 }
 
-export function undoLastHandoff() {
-  const row = one(
+export function undoLastHandoff(): { ok: true; deletedLapIds: string[] } | { ok: false; error: 'nothing_to_undo' } {
+  const row = one<{ id: string; payloadJson: string }>(
     `SELECT id, payload_json AS payloadJson
      FROM handoff_history
      WHERE undone = 0
@@ -1176,16 +1035,15 @@ export function undoLastHandoff() {
     return { ok: false, error: 'nothing_to_undo' };
   }
 
-  const payload = JSON.parse(row.payloadJson);
-  try {
-    db.run('BEGIN TRANSACTION');
-
-    for (const lapId of payload.lapIds || []) {
-      db.run('DELETE FROM laps WHERE id = ?', [lapId]);
+  const payload = JSON.parse(row.payloadJson) as HandoffSnapshot;
+  const deletedLapIds = payload.lapIds || [];
+  transaction(() => {
+    for (const lapId of deletedLapIds) {
+      run('DELETE FROM laps WHERE id = ?', [lapId]);
     }
 
     for (const entry of payload.queueEntries || []) {
-      db.run(
+      run(
         `INSERT INTO queue_entries (runner_id, status, queue_index, status_since, hidden_at)
          VALUES (?, ?, ?, ?, ?)
          ON CONFLICT(runner_id) DO UPDATE SET
@@ -1204,7 +1062,7 @@ export function undoLastHandoff() {
     }
 
     const raceState = payload.raceState || {};
-    db.run(
+    run(
       `UPDATE race_state
        SET active_runner_id = ?,
            active_started_at = ?,
@@ -1218,22 +1076,14 @@ export function undoLastHandoff() {
         raceState.raceFinishedAt ?? null,
       ]
     );
-    db.run('UPDATE handoff_history SET undone = 1 WHERE id = ?', [row.id]);
-    db.run('COMMIT');
-    saveDb();
-    return { ok: true };
-  } catch (err) {
-    try {
-      db.run('ROLLBACK');
-    } catch {
-      // ignore rollback failure
-    }
-    throw err;
-  }
+    run('UPDATE handoff_history SET undone = 1 WHERE id = ?', [row.id]);
+  });
+
+  return { ok: true, deletedLapIds };
 }
 
-export function finishRace(nowMs = Date.now()) {
-  db.run(
+export function finishRace(nowMs = Date.now()): void {
+  run(
     `UPDATE race_state
      SET active_runner_id = NULL,
          active_started_at = NULL,
@@ -1241,5 +1091,4 @@ export function finishRace(nowMs = Date.now()) {
      WHERE id = 1`,
     [nowMs]
   );
-  saveDb();
 }

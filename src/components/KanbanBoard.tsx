@@ -1,5 +1,6 @@
 import React from 'react';
 import { DndContext, closestCenter, useDraggable, useDroppable, DragEndEvent } from '@dnd-kit/core';
+import { useAppActions, useAppData } from '../appData';
 import { useAppStore } from '../store';
 import { formatDurationMs, formatElapsedSeconds, nowMs } from '../lib/time';
 import type { Runner, RunnerStatus } from '../types';
@@ -37,12 +38,9 @@ function compareByStatusSinceDesc(a: Runner, b: Runner) {
 }
 
 export const KanbanBoard: React.FC<{ onOpenProfile: (runnerId: string) => void }> = ({ onOpenProfile }) => {
-  const runners = useAppStore((state) => state.runners);
+  const { runners } = useAppData();
   const search = useAppStore((state) => state.search);
-  const setStatus = useAppStore((state) => state.setStatus);
-  const moveInQueue = useAppStore((state) => state.moveInQueue);
-  const hideRunner = useAppStore((state) => state.hideRunner);
-  const unhideRunner = useAppStore((state) => state.unhideRunner);
+  const { setStatus, moveInQueue, hideRunner, unhideRunner } = useAppActions();
   const [showHiddenRan, setShowHiddenRan] = React.useState(false);
 
   const filteredRunners = React.useMemo(() => {

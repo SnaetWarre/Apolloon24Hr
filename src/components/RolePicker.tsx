@@ -1,5 +1,5 @@
 import React from 'react';
-import { useAppStore } from '../store';
+import { useAppData } from '../appData';
 
 const ROLES = [
   {
@@ -35,7 +35,7 @@ const ROLES = [
 ];
 
 export function RolePicker({ onNavigate }: { onNavigate: (path: string) => void }) {
-  const host = useAppStore((state) => state.host);
+  const { host } = useAppData();
 
   return (
     <>

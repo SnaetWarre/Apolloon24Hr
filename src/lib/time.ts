@@ -14,17 +14,25 @@ export function getServerTimeOffsetMs(): number {
   return serverTimeOffsetMs;
 }
 
-export async function syncServerClock(samples = 5): Promise<{ offsetMs: number; roundTripMs: number }> {
+async function fetchServerNowOverHttp(startedAt: number): Promise<number> {
+  const res = await fetch(`/api/time?t=${startedAt}`, { cache: 'no-store' });
+  const payload = (await res.json()) as { serverNowMs: number };
+  return payload.serverNowMs;
+}
+
+export async function syncServerClock(
+  samples = 5,
+  fetchServerNow: (startedAt: number) => Promise<number> = fetchServerNowOverHttp
+): Promise<{ offsetMs: number; roundTripMs: number }> {
   let best: { offsetMs: number; roundTripMs: number } | null = null;
 
   for (let i = 0; i < samples; i += 1) {
     const startedAt = Date.now();
-    const res = await fetch(`/api/time?t=${startedAt}`, { cache: 'no-store' });
-    const payload = (await res.json()) as { serverNowMs: number };
+    const serverNowMs = await fetchServerNow(startedAt);
     const endedAt = Date.now();
     const roundTripMs = endedAt - startedAt;
     const clientMidpointMs = startedAt + roundTripMs / 2;
-    const offsetMs = payload.serverNowMs - clientMidpointMs;
+    const offsetMs = serverNowMs - clientMidpointMs;
 
     if (!best || roundTripMs < best.roundTripMs) {
       best = { offsetMs, roundTripMs };

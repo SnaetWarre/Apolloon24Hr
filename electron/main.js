@@ -12,7 +12,7 @@ let serverProcess;
 
 function createWindow() {
   if (mainWindow) return; // Prevent multiple windows
-  
+
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
@@ -45,18 +45,27 @@ function ensureEnvFile() {
 }
 
 async function startServer() {
-  const isDev = !app.isPackaged;
-  const serverPath = isDev 
-    ? path.join(__dirname, '../server/index.mjs')
-    : path.join(process.resourcesPath, 'app.asar.unpacked/server/index.mjs');
-  
+  if (!app.isPackaged) {
+    console.log('Development mode: using the external Vite/backend dev server.');
+    return;
+  }
+
+  const serverPath = path.join(
+    process.resourcesPath,
+    'app.asar.unpacked',
+    'dist-server',
+    'server',
+    'index.js'
+  );
+
   const envPath = path.join(app.getPath('userData'), '.env');
-  const env = { 
-    ...process.env, 
+  const env = {
+    ...process.env,
     NODE_ENV: 'production',
-    DATA_PATH: app.getPath('userData')
+    DATA_PATH: app.getPath('userData'),
+    PUBLIC_APP_PORT: process.env.PUBLIC_APP_PORT || '5173',
   };
-  
+
   if (fs.existsSync(envPath)) {
     const envContent = fs.readFileSync(envPath, 'utf8');
     envContent.split('\n').forEach(line => {
@@ -64,13 +73,11 @@ async function startServer() {
       if (key && value) env[key.trim()] = value.trim();
     });
   }
-  
-  const cwd = isDev ? path.join(__dirname, '..') : path.join(process.resourcesPath, 'app.asar.unpacked');
-  
+
+  const cwd = path.join(process.resourcesPath, 'app.asar.unpacked');
+
   console.log('Starting server:', { serverPath, cwd });
-  
-  // Use fork to run server in Node subprocess (not Electron)
-  // Add --input-type=module to treat the file as ES module
+
   serverProcess = fork(serverPath, [], {
     stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
     env,
@@ -104,7 +111,11 @@ if (!gotTheLock) {
     console.log('App starting');
     ensureEnvFile();
     startServer();
-    setTimeout(() => createWindow(), 2000);
+    if (app.isPackaged) {
+      setTimeout(() => createWindow(), 2000);
+    } else {
+      createWindow();
+    }
   });
 }
 

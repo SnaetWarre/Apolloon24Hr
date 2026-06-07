@@ -1,5 +1,6 @@
 import React from 'react';
-import { useAppStore } from '../store';
+import { flexRender, getCoreRowModel, useReactTable, type ColumnDef } from '@tanstack/react-table';
+import { useAppData } from '../appData';
 import { formatClockTimeMs, formatDurationMs } from '../lib/time';
 import type { Label, Runner } from '../types';
 import { LabelBadge } from './LabelBadge';
@@ -7,9 +8,7 @@ import { LabelBadge } from './LabelBadge';
 type RankingMode = 'laps' | 'fastest' | 'slowest';
 
 export function AnalysisView() {
-  const runners = useAppStore((state) => state.runners);
-  const labels = useAppStore((state) => state.labels);
-  const laps = useAppStore((state) => state.laps);
+  const { runners, labels, laps } = useAppData();
   const [rankingMode, setRankingMode] = React.useState<RankingMode>('laps');
   const sortedRunners = runners
     .filter((runner) => runner.lapCount > 0 || runner.status !== 'registered')
@@ -164,50 +163,61 @@ export function AnalysisView() {
 }
 
 function LapRankingTable({ runners }: { runners: Runner[] }) {
-  return (
-    <table>
-      <thead>
-        <tr>
-          <th>Nr.</th>
-          <th>Naam</th>
-          <th>Toeren</th>
-          <th>Snelste</th>
-          <th>Gem.</th>
-        </tr>
-      </thead>
-      <tbody>
-        {runners.map((runner) => (
-          <tr key={runner.id}>
-            <td>{runner.runnerNumber || '-'}</td>
-            <td>{runner.name}</td>
-            <td>{runner.lapCount}</td>
-            <td>{formatDurationMs(runner.bestLapMs)}</td>
-            <td>{formatDurationMs(runner.averageLapMs)}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+  const columns = React.useMemo<ColumnDef<Runner>[]>(
+    () => [
+      { header: 'Nr.', accessorFn: (runner) => runner.runnerNumber || '-' },
+      { header: 'Naam', accessorKey: 'name' },
+      { header: 'Toeren', accessorKey: 'lapCount' },
+      { header: 'Snelste', cell: ({ row }) => formatDurationMs(row.original.bestLapMs) },
+      { header: 'Gem.', cell: ({ row }) => formatDurationMs(row.original.averageLapMs) },
+    ],
+    []
   );
+  return <DataTable data={runners} columns={columns} />;
 }
 
 function LapTimeRankingTable({ runners, mode }: { runners: Runner[]; mode: 'fastest' | 'slowest' }) {
+  const columns = React.useMemo<ColumnDef<Runner>[]>(
+    () => [
+      { header: 'Nr.', accessorFn: (runner) => runner.runnerNumber || '-' },
+      { header: 'Naam', accessorKey: 'name' },
+      { header: 'Toeren', accessorKey: 'lapCount' },
+      {
+        header: mode === 'fastest' ? 'Snelste' : 'Traagste',
+        cell: ({ row }) => formatDurationMs(mode === 'fastest' ? row.original.bestLapMs : row.original.slowestLapMs),
+      },
+    ],
+    [mode]
+  );
+  return <DataTable data={runners} columns={columns} />;
+}
+
+function DataTable<T>({ data, columns }: { data: T[]; columns: ColumnDef<T>[] }) {
+  const table = useReactTable({
+    data,
+    columns,
+    getCoreRowModel: getCoreRowModel(),
+  });
+
   return (
     <table>
       <thead>
-        <tr>
-          <th>Nr.</th>
-          <th>Naam</th>
-          <th>Toeren</th>
-          <th>{mode === 'fastest' ? 'Snelste' : 'Traagste'}</th>
-        </tr>
+        {table.getHeaderGroups().map((headerGroup) => (
+          <tr key={headerGroup.id}>
+            {headerGroup.headers.map((header) => (
+              <th key={header.id}>
+                {header.isPlaceholder ? null : flexRender(header.column.columnDef.header, header.getContext())}
+              </th>
+            ))}
+          </tr>
+        ))}
       </thead>
       <tbody>
-        {runners.map((runner) => (
-          <tr key={runner.id}>
-            <td>{runner.runnerNumber || '-'}</td>
-            <td>{runner.name}</td>
-            <td>{runner.lapCount}</td>
-            <td>{formatDurationMs(mode === 'fastest' ? runner.bestLapMs : runner.slowestLapMs)}</td>
+        {table.getRowModel().rows.map((row) => (
+          <tr key={row.id}>
+            {row.getVisibleCells().map((cell) => (
+              <td key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</td>
+            ))}
           </tr>
         ))}
       </tbody>

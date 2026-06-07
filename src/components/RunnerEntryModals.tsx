@@ -1,5 +1,5 @@
 import React from 'react';
-import { useAppStore } from '../store';
+import { useAppActions, useAppData } from '../appData';
 import type { Label, Runner } from '../types';
 import { LabelBadge, labelKindOrder, labelKindTitle } from './LabelBadge';
 
@@ -10,8 +10,8 @@ export function RunnerActivationModal({
   onClose: () => void;
   onOpenProfile?: (runnerId: string) => void;
 }) {
-  const runners = useAppStore((state) => state.runners);
-  const setStatus = useAppStore((state) => state.setStatus);
+  const { runners } = useAppData();
+  const { setStatus } = useAppActions();
   const [query, setQuery] = React.useState('');
   const [activatingId, setActivatingId] = React.useState<string | null>(null);
 
@@ -111,8 +111,8 @@ export function RunnerActivationModal({
 }
 
 export function RunnerAddModal({ onClose }: { onClose: () => void }) {
-  const labels = useAppStore((state) => state.labels);
-  const addRunner = useAppStore((state) => state.addRunner);
+  const { labels } = useAppData();
+  const { addRunner } = useAppActions();
   const [runnerNumber, setRunnerNumber] = React.useState('');
   const [name, setName] = React.useState('');
   const [targetLaps, setTargetLaps] = React.useState('');

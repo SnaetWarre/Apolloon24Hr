@@ -1,5 +1,10 @@
-export async function fetchState<T = unknown>(): Promise<T> {
-  const res = await fetch('/api/state');
-  if (!res.ok) throw new Error('state fetch failed');
-  return (await res.json()) as T;
-}
+import { createTRPCClient, httpBatchLink } from '@trpc/client';
+import type { AppRouter } from '../server/router';
+
+export const trpc = createTRPCClient<AppRouter>({
+  links: [
+    httpBatchLink({
+      url: '/trpc',
+    }),
+  ],
+});

@@ -1,4 +1,5 @@
 import React from 'react';
+import { useAppData } from '../appData';
 import { useAppStore } from '../store';
 import { RunnerActivationModal, RunnerAddModal } from './RunnerEntryModals';
 
@@ -7,7 +8,7 @@ export const AppHeader: React.FC<{ onOpenProfile?: (runnerId: string) => void }>
 }) => {
   const search = useAppStore((state) => state.search);
   const setSearch = useAppStore((state) => state.setSearch);
-  const host = useAppStore((state) => state.host);
+  const { host } = useAppData();
   const [activationOpen, setActivationOpen] = React.useState(false);
   const [addOpen, setAddOpen] = React.useState(false);
 

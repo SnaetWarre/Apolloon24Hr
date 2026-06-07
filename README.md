@@ -15,6 +15,15 @@ Event URL:   shown by the app, for example http://<host-lan-ip>:5173
 
 Client laptops and TV laptops can use automatic DHCP. Their IP addresses do not matter because they only connect to the host.
 
+## Tech Stack
+
+- Frontend: React 19, Vite 8, TanStack Router, TanStack Query, TanStack Table, and small Zustand UI state.
+- Backend: Express 5 with tRPC on `/trpc`, Socket.IO realtime events, and native SQLite via `better-sqlite3`.
+- Packaging: Electron + electron-builder. Production builds compile the backend to `dist-server/` and serve the Vite build from the local server.
+- Exports: plain HTTP endpoints under `/api/export/*` for browser downloads and external tools.
+
+In development, Vite serves the frontend on `5173` and proxies `/trpc`, `/api`, and `/socket.io` to the backend on `3000`. `npm run dev` starts both after seeding `.dev-data/`.
+
 ## Running The Event
 
 1. Connect the host laptop to the local router/switch by Ethernet.

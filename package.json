@@ -15,27 +15,35 @@
   "scripts": {
     "dev": "npm run dev:fresh",
     "dev:vite": "vite",
-    "dev:all": "node scripts/ensure-lan-dev-firewall.mjs && concurrently -k \"cross-env PORT=3000 PUBLIC_APP_PORT=5173 node server/index.mjs\" \"cross-env VITE_DEV_API_PORT=3000 vite\"",
-    "dev:seeded": "node scripts/ensure-lan-dev-firewall.mjs && concurrently -k \"cross-env DATA_PATH=.dev-data PORT=3000 PUBLIC_APP_PORT=5173 node server/index.mjs\" \"cross-env VITE_DEV_API_PORT=3000 vite\"",
+    "dev:api": "cross-env PORT=3000 PUBLIC_APP_PORT=5173 tsx server/index.ts",
+    "dev:all": "node scripts/ensure-lan-dev-firewall.mjs && concurrently -k \"npm run dev:api\" \"cross-env VITE_DEV_API_PORT=3000 vite\"",
+    "dev:seeded": "node scripts/ensure-lan-dev-firewall.mjs && concurrently -k \"cross-env DATA_PATH=.dev-data PORT=3000 PUBLIC_APP_PORT=5173 tsx server/index.ts\" \"cross-env VITE_DEV_API_PORT=3000 vite\"",
     "dev:fresh": "npm run db:dev:seed && npm run dev:seeded",
     "dev:fresh:live": "npm run db:dev:seed:live && npm run dev:seeded",
     "dev:fresh:large": "npm run db:dev:seed:large && npm run dev:seeded",
-    "db:dev:empty": "node scripts/seed-test-db.mjs --scenario=empty",
-    "db:dev:seed": "node scripts/seed-test-db.mjs --scenario=ready",
-    "db:dev:seed:ready": "node scripts/seed-test-db.mjs --scenario=ready",
-    "db:dev:seed:live": "node scripts/seed-test-db.mjs --scenario=live",
-    "db:dev:seed:large": "node scripts/seed-test-db.mjs --scenario=large",
-    "seed:test": "node scripts/seed-test-db.mjs --scenario=ready",
-    "seed:test:live": "node scripts/seed-test-db.mjs --scenario=live",
-    "build": "vite build",
+    "db:dev:empty": "tsx scripts/seed-test-db.mjs --scenario=empty",
+    "db:dev:seed": "tsx scripts/seed-test-db.mjs --scenario=ready",
+    "db:dev:seed:ready": "tsx scripts/seed-test-db.mjs --scenario=ready",
+    "db:dev:seed:live": "tsx scripts/seed-test-db.mjs --scenario=live",
+    "db:dev:seed:large": "tsx scripts/seed-test-db.mjs --scenario=large",
+    "seed:test": "tsx scripts/seed-test-db.mjs --scenario=ready",
+    "seed:test:live": "tsx scripts/seed-test-db.mjs --scenario=live",
+    "server:build": "tsc -p tsconfig.server.json",
+    "build": "vite build && npm run server:build",
     "preview": "vite preview",
-    "electron:dev": "node scripts/ensure-lan-dev-firewall.mjs && concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
-    "electron:build": "vite build && electron-builder",
-    "electron:build:win": "vite build && electron-builder --win",
-    "electron:build:linux": "vite build && electron-builder --linux"
+    "electron:dev": "node scripts/ensure-lan-dev-firewall.mjs && concurrently -k \"npm run dev:seeded\" \"wait-on http://localhost:5173 && electron .\"",
+    "electron:build": "npm run build && node scripts/electron-build.mjs",
+    "electron:build:win": "npm run build && node scripts/electron-build.mjs --win",
+    "electron:build:linux": "npm run build && node scripts/electron-build.mjs --linux"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
+    "@tanstack/react-query": "^5.101.0",
+    "@tanstack/react-router": "^1.170.15",
+    "@tanstack/react-table": "^8.21.3",
+    "@trpc/client": "^11.17.0",
+    "@trpc/server": "^11.17.0",
+    "better-sqlite3": "^12.10.0",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "papaparse": "^5.5.3",
@@ -43,18 +51,23 @@
     "react-dom": "^19.2.7",
     "socket.io": "^4.8.3",
     "socket.io-client": "^4.8.3",
-    "sql.js": "^1.14.1",
     "uuid": "^14.0.0",
+    "zod": "^4.4.3",
     "zustand": "^5.0.14"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/express": "^5.0.6",
+    "@types/node": "^25.9.2",
+    "@types/papaparse": "^5.5.2",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.2",
     "concurrently": "^10.0.3",
     "cross-env": "^10.1.0",
-    "electron": "^42.3.3",
+    "electron": "^41.2.2",
     "electron-builder": "^26.15.0",
+    "tsx": "^4.22.4",
     "typescript": "^6.0.3",
     "vite": "^8.0.16",
     "wait-on": "^9.0.10"
@@ -67,8 +80,8 @@
     },
     "files": [
       "dist/**/*",
+      "dist-server/**/*",
       "electron/**/*",
-      "server/**/*",
       "public/**/*",
       ".env.example",
       "!node_modules/**/{CHANGELOG.md,README.md,README,readme.md,readme}",
@@ -83,7 +96,7 @@
       "!**/{npm-debug.log,yarn.lock,.yarn-integrity,.yarn-metadata.json}"
     ],
     "asarUnpack": [
-      "server/**/*",
+      "dist-server/**/*",
       "node_modules/**/*",
       "dist/**/*"
     ],
@@ -103,5 +116,11 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
     }
+  },
+  "allowScripts": {
+    "better-sqlite3@12.10.0": true,
+    "electron@41.2.2": true,
+    "electron-winstaller@5.4.0": true,
+    "esbuild@0.28.0": true
   }
 }

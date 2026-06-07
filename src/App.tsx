@@ -1,4 +1,5 @@
 import React from 'react';
+import { Outlet, useNavigate, useRouterState } from '@tanstack/react-router';
 import { AppHeader } from './components/AppHeader';
 import { AnalysisView } from './components/AnalysisView';
 import { AdminView } from './components/AdminView';
@@ -7,39 +8,22 @@ import { KanbanBoard } from './components/KanbanBoard';
 import { RolePicker } from './components/RolePicker';
 import { RunnerProfileModal } from './components/RunnerProfileModal';
 import { TimingView } from './components/TimingView';
-import { useAppStore } from './store';
+import { useAppData, useRealtimeBridge } from './appData';
 import { formatDurationMs, nowMs } from './lib/time';
 import { useAnimationFrameTick } from './lib/useAnimationFrameTick';
 
-export const App: React.FC = () => {
-  const initialize = useAppStore((state) => state.initialize);
-  const initialized = useAppStore((state) => state.initialized);
-  const [path, setPath] = React.useState(() => window.location.pathname);
-  const [initError, setInitError] = React.useState<string | null>(null);
+export function AppRoot() {
+  useRealtimeBridge();
+  const { initialized, error } = useAppData();
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const displayRoute = pathname.startsWith('/display/');
 
-  React.useEffect(() => {
-    initialize().catch((err) => {
-      setInitError(err instanceof Error ? err.message : 'Opstarten mislukt');
-    });
-  }, [initialize]);
-
-  React.useEffect(() => {
-    const onPopState = () => setPath(window.location.pathname);
-    window.addEventListener('popstate', onPopState);
-    return () => window.removeEventListener('popstate', onPopState);
-  }, []);
-
-  function navigate(nextPath: string) {
-    window.history.pushState(null, '', nextPath);
-    setPath(nextPath);
-  }
-
-  if (initError) {
+  if (error) {
     return (
       <Shell>
         <div className="empty-state">
           <h1>Kan niet verbinden met de lokale server</h1>
-          <p>{initError}</p>
+          <p>{error.message}</p>
         </div>
       </Shell>
     );
@@ -56,58 +40,23 @@ export const App: React.FC = () => {
     );
   }
 
-  if (path === '/display/outside') return <OutsideDisplay onNavigate={navigate} />;
-  if (path === '/display/inside') return <InsideDisplay onNavigate={navigate} />;
+  if (displayRoute) return <Outlet />;
 
   return (
     <Shell>
-      {path !== '/' && <TopNav onNavigate={navigate} />}
-      {path === '/' && <RolePicker onNavigate={navigate} />}
-      {path === '/queue' && <QueuePage />}
-      {path === '/timing' && <TimingView />}
-      {path === '/analysis' && <AnalysisView />}
-      {path === '/admin' && <AdminView />}
-      {!['/', '/queue', '/timing', '/analysis', '/admin'].includes(path) && (
-        <div className="empty-state">
-          <h1>Onbekende pagina</h1>
-          <button className="btn btn--primary" onClick={() => navigate('/')}>
-            Terug naar start
-          </button>
-        </div>
-      )}
+      {pathname !== '/' && <TopNav />}
+      <Outlet />
     </Shell>
   );
-};
-
-function Shell({ children }: { children: React.ReactNode }) {
-  return <div className="app-root">{children}</div>;
 }
 
-function TopNav({ onNavigate }: { onNavigate: (path: string) => void }) {
-  return (
-    <nav className="top-nav">
-      <button className="nav-link" onClick={() => onNavigate('/')}>
-        Start
-      </button>
-      <button className="nav-link" onClick={() => onNavigate('/queue')}>
-        Telsysteem 1
-      </button>
-      <button className="nav-link" onClick={() => onNavigate('/timing')}>
-        Telsysteem 2
-      </button>
-      <button className="nav-link" onClick={() => onNavigate('/analysis')}>
-        Analyse
-      </button>
-      <button className="nav-link" onClick={() => onNavigate('/admin')}>
-        Admin
-      </button>
-    </nav>
-  );
+export function HomePage() {
+  const navigate = useNavigate();
+  return <RolePicker onNavigate={(path) => void navigate({ to: path as never })} />;
 }
 
-function QueuePage() {
-  const race = useAppStore((state) => state.race);
-  const runners = useAppStore((state) => state.runners);
+export function QueuePage() {
+  const { race, runners } = useAppData();
   const [profileRunnerId, setProfileRunnerId] = React.useState<string | null>(null);
 
   const activeRunner = runners.find((runner) => runner.id === race.activeRunnerId) || null;
@@ -148,6 +97,67 @@ function QueuePage() {
         <RunnerProfileModal runnerId={profileRunnerId} onClose={() => setProfileRunnerId(null)} />
       )}
     </>
+  );
+}
+
+export function TimingPage() {
+  return <TimingView />;
+}
+
+export function AnalysisPage() {
+  return <AnalysisView />;
+}
+
+export function AdminPage() {
+  return <AdminView />;
+}
+
+export function OutsideDisplayPage() {
+  const navigate = useNavigate();
+  return <OutsideDisplay onNavigate={(path) => void navigate({ to: path as never })} />;
+}
+
+export function InsideDisplayPage() {
+  const navigate = useNavigate();
+  return <InsideDisplay onNavigate={(path) => void navigate({ to: path as never })} />;
+}
+
+export function NotFoundPage() {
+  const navigate = useNavigate();
+  return (
+    <div className="empty-state">
+      <h1>Onbekende pagina</h1>
+      <button className="btn btn--primary" onClick={() => void navigate({ to: '/' })}>
+        Terug naar start
+      </button>
+    </div>
+  );
+}
+
+function Shell({ children }: { children: React.ReactNode }) {
+  return <div className="app-root">{children}</div>;
+}
+
+function TopNav() {
+  const navigate = useNavigate();
+  return (
+    <nav className="top-nav">
+      <button className="nav-link" onClick={() => void navigate({ to: '/' })}>
+        Start
+      </button>
+      <button className="nav-link" onClick={() => void navigate({ to: '/queue' })}>
+        Telsysteem 1
+      </button>
+      <button className="nav-link" onClick={() => void navigate({ to: '/timing' })}>
+        Telsysteem 2
+      </button>
+      <button className="nav-link" onClick={() => void navigate({ to: '/analysis' })}>
+        Analyse
+      </button>
+      <button className="nav-link" onClick={() => void navigate({ to: '/admin' })}>
+        Admin
+      </button>
+    </nav>
   );
 }
 

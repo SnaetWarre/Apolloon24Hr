@@ -1,15 +1,14 @@
 import React from 'react';
-import { useAppStore } from '../store';
+import { useAppActions, useAppData } from '../appData';
 import { formatClockTimeMs, formatDurationMs, formatElapsedSeconds, nowMs } from '../lib/time';
 import { useAnimationFrameTick } from '../lib/useAnimationFrameTick';
 import { labelKindOrder, labelKindTitle } from './LabelBadge';
 import type { Label, Runner, RunnerStatus } from '../types';
 
 export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; onClose: () => void }) {
-  const runner = useAppStore((state) => state.runners.find((item) => item.id === runnerId));
-  const allLaps = useAppStore((state) => state.laps);
-  const labels = useAppStore((state) => state.labels);
-  const updateRunner = useAppStore((state) => state.updateRunner);
+  const { runners, laps: allLaps, labels } = useAppData();
+  const { updateRunner } = useAppActions();
+  const runner = runners.find((item) => item.id === runnerId);
   const [runnerNumber, setRunnerNumber] = React.useState('');
   const [name, setName] = React.useState('');
   const [targetLaps, setTargetLaps] = React.useState('');

@@ -1,19 +1,14 @@
 import React from 'react';
-import { useAppStore } from '../store';
+import { flexRender, getCoreRowModel, useReactTable, type ColumnDef } from '@tanstack/react-table';
+import { useAppActions, useAppData } from '../appData';
 import { LabelBadge, labelKindOrder, labelKindTitle } from './LabelBadge';
 import { SourceBadge } from './RunnerEntryModals';
 import { RunnerProfileModal } from './RunnerProfileModal';
 import type { Label, Runner, RunnerStatus } from '../types';
 
 export function AdminView() {
-  const labels = useAppStore((state) => state.labels);
-  const runners = useAppStore((state) => state.runners);
-  const importRunnersCsv = useAppStore((state) => state.importRunnersCsv);
-  const createLabel = useAppStore((state) => state.createLabel);
-  const updateLabel = useAppStore((state) => state.updateLabel);
-  const deleteLabel = useAppStore((state) => state.deleteLabel);
-  const deleteRunner = useAppStore((state) => state.deleteRunner);
-  const unhideRunner = useAppStore((state) => state.unhideRunner);
+  const { labels, runners } = useAppData();
+  const { importRunnersCsv, createLabel, updateLabel, deleteLabel, deleteRunner, unhideRunner } = useAppActions();
   const [csvText, setCsvText] = React.useState('');
   const [csvFileName, setCsvFileName] = React.useState('');
   const [message, setMessage] = React.useState<string | null>(null);
@@ -226,66 +221,12 @@ export function AdminView() {
         </div>
         {runnerMessage && <div className="host-hint">{runnerMessage}</div>}
         <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Nr.</th>
-                <th>Naam</th>
-                <th>Status</th>
-                <th>Bron</th>
-                <th>Labels</th>
-                <th>Toeren</th>
-                <th>Acties</th>
-              </tr>
-            </thead>
-            <tbody>
-              {adminRunners.map((runner) => (
-                <tr key={runner.id}>
-                  <td>{runner.runnerNumber || '-'}</td>
-                  <td>{runner.name}</td>
-                  <td>
-                    {statusLabel(runner.status)}
-                    {runner.hiddenFromQueue ? ' · verborgen' : ''}
-                  </td>
-                  <td>
-                    <SourceBadge source={runner.registrationSource} />
-                  </td>
-                  <td>
-                    <div className="label-row">
-                      {runner.labels.map((label) => (
-                        <LabelBadge key={label.id} label={label} compact />
-                      ))}
-                    </div>
-                  </td>
-                  <td>{runner.lapCount}</td>
-                  <td>
-                    <div className="runner-admin-actions">
-                      <button className="btn btn--sm btn--fixed" onClick={() => setProfileRunnerId(runner.id)}>
-                        Profiel
-                      </button>
-                      {runner.hiddenFromQueue && (
-                        <button className="btn btn--sm btn--fixed" onClick={() => restoreRunner(runner)}>
-                          Terug tonen
-                        </button>
-                      )}
-                      <button
-                        className="btn btn--danger btn--fixed"
-                        onClick={() => removeRunner(runner)}
-                        disabled={runner.lapCount > 0 || runner.status === 'running'}
-                      >
-                        Verwijder
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-              {adminRunners.length === 0 && (
-                <tr>
-                  <td colSpan={7}>Geen lopers gevonden.</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+          <AdminRunnerTable
+            runners={adminRunners}
+            onOpenProfile={setProfileRunnerId}
+            onRestore={restoreRunner}
+            onRemove={removeRunner}
+          />
         </div>
       </section>
 
@@ -311,6 +252,111 @@ export function AdminView() {
         </div>
       </section>
     </>
+  );
+}
+
+function AdminRunnerTable({
+  runners,
+  onOpenProfile,
+  onRestore,
+  onRemove,
+}: {
+  runners: Runner[];
+  onOpenProfile: (runnerId: string) => void;
+  onRestore: (runner: Runner) => Promise<void>;
+  onRemove: (runner: Runner) => Promise<void>;
+}) {
+  const columns = React.useMemo<ColumnDef<Runner>[]>(
+    () => [
+      { header: 'Nr.', accessorFn: (runner) => runner.runnerNumber || '-' },
+      { header: 'Naam', accessorKey: 'name' },
+      {
+        header: 'Status',
+        cell: ({ row }) => (
+          <>
+            {statusLabel(row.original.status)}
+            {row.original.hiddenFromQueue ? ' · verborgen' : ''}
+          </>
+        ),
+      },
+      {
+        header: 'Bron',
+        cell: ({ row }) => <SourceBadge source={row.original.registrationSource} />,
+      },
+      {
+        header: 'Labels',
+        cell: ({ row }) => (
+          <div className="label-row">
+            {row.original.labels.map((label) => (
+              <LabelBadge key={label.id} label={label} compact />
+            ))}
+          </div>
+        ),
+      },
+      { header: 'Toeren', accessorKey: 'lapCount' },
+      {
+        header: 'Acties',
+        cell: ({ row }) => {
+          const runner = row.original;
+          return (
+            <div className="runner-admin-actions">
+              <button className="btn btn--sm btn--fixed" onClick={() => onOpenProfile(runner.id)}>
+                Profiel
+              </button>
+              {runner.hiddenFromQueue && (
+                <button className="btn btn--sm btn--fixed" onClick={() => void onRestore(runner)}>
+                  Terug tonen
+                </button>
+              )}
+              <button
+                className="btn btn--danger btn--fixed"
+                onClick={() => void onRemove(runner)}
+                disabled={runner.lapCount > 0 || runner.status === 'running'}
+              >
+                Verwijder
+              </button>
+            </div>
+          );
+        },
+      },
+    ],
+    [onOpenProfile, onRemove, onRestore]
+  );
+
+  const table = useReactTable({
+    data: runners,
+    columns,
+    getCoreRowModel: getCoreRowModel(),
+  });
+
+  return (
+    <table>
+      <thead>
+        {table.getHeaderGroups().map((headerGroup) => (
+          <tr key={headerGroup.id}>
+            {headerGroup.headers.map((header) => (
+              <th key={header.id}>
+                {header.isPlaceholder ? null : flexRender(header.column.columnDef.header, header.getContext())}
+              </th>
+            ))}
+          </tr>
+        ))}
+      </thead>
+      <tbody>
+        {table.getRowModel().rows.map((row) => (
+          <tr key={row.original.id}>
+            {row.getVisibleCells().map((cell) => (
+              <td key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</td>
+            ))}
+          </tr>
+        ))}
+        {table.getRowModel().rows.length === 0 && (
+          <tr>
+            <td colSpan={columns.length}>Geen lopers gevonden.</td>
+          </tr>
+        )}
+      </tbody>
+    </table>
   );
 }
 

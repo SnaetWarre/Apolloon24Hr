@@ -97,7 +97,7 @@ if (!keepExisting) {
 fs.mkdirSync(dataPath, { recursive: true });
 
 process.env.DATA_PATH = dataPath;
-const db = await import('../server/db.mjs');
+const db = await import('../server/db.ts');
 
 await db.initDb();
 

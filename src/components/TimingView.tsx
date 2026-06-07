@@ -1,18 +1,13 @@
 import React from 'react';
-import { useAppStore } from '../store';
+import { useAppActions, useAppData } from '../appData';
 import { formatClockTimeMs, formatDurationMs, nowMs } from '../lib/time';
 import { useAnimationFrameTick } from '../lib/useAnimationFrameTick';
 import type { Runner } from '../types';
 import { LabelBadge } from './LabelBadge';
 
 export function TimingView() {
-  const runners = useAppStore((state) => state.runners);
-  const laps = useAppStore((state) => state.laps);
-  const race = useAppStore((state) => state.race);
-  const handoff = useAppStore((state) => state.handoff);
-  const startNext = useAppStore((state) => state.startNext);
-  const undoLastHandoff = useAppStore((state) => state.undoLastHandoff);
-  const finishRace = useAppStore((state) => state.finishRace);
+  const { runners, laps, race } = useAppData();
+  const { handoff, startNext, undoLastHandoff, finishRace } = useAppActions();
   const [message, setMessage] = React.useState<string | null>(null);
   const [handoffBusy, setHandoffBusy] = React.useState(false);
   const [lastAction, setLastAction] = React.useState<string | null>(null);

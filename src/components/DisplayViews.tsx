@@ -1,5 +1,5 @@
 import React from 'react';
-import { useAppStore } from '../store';
+import { useAppData } from '../appData';
 import { formatClockTimeMs, formatDurationMs } from '../lib/time';
 import type { Label, LapRecord, Runner } from '../types';
 import { LabelBadge } from './LabelBadge';
@@ -7,9 +7,7 @@ import { LabelBadge } from './LabelBadge';
 const OUTSIDE_RECORD_VISIBLE_MS = 17_000;
 
 export function OutsideDisplay({ onNavigate }: { onNavigate: (path: string) => void }) {
-  const runners = useAppStore((state) => state.runners);
-  const race = useAppStore((state) => state.race);
-  const laps = useAppStore((state) => state.laps);
+  const { runners, race, laps } = useAppData();
   const activeRunner = runners.find((runner) => runner.id === race.activeRunnerId) || null;
   const nextRunner = getNextRunner(runners);
   const [recordLap, setRecordLap] = React.useState<LapRecord | null>(null);
@@ -76,9 +74,7 @@ export function OutsideDisplay({ onNavigate }: { onNavigate: (path: string) => v
 }
 
 export function InsideDisplay({ onNavigate }: { onNavigate: (path: string) => void }) {
-  const runners = useAppStore((state) => state.runners);
-  const labels = useAppStore((state) => state.labels);
-  const laps = useAppStore((state) => state.laps);
+  const { runners, labels, laps } = useAppData();
   const latestLap = laps[0] || null;
   const ranking = runners
     .filter((runner) => runner.lapCount > 0 || runner.status !== 'registered')

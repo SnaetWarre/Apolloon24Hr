@@ -11,6 +11,7 @@ export default defineConfig({
     // Default is loopback only; without this, http://<LAN-IP>:5173 fails on this machine and on other devices
     host: true,
     proxy: {
+      '/trpc': { target: apiTarget, changeOrigin: true },
       '/api': { target: apiTarget, changeOrigin: true },
       '/socket.io': { target: apiTarget, ws: true, changeOrigin: true },
     },
@@ -19,4 +20,3 @@ export default defineConfig({
     host: true,
   },
 });
-
