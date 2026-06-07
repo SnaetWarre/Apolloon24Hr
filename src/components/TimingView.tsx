@@ -1,6 +1,7 @@
 import React from 'react';
-import { useAppActions, useAppData } from '../appData';
+import { useAppActions, useAppData } from '../app';
 import { formatClockTimeMs, formatDurationMs, nowMs } from '../lib/time';
+import { getNextWaitingRunner, runnerLabel } from '../lib/runners';
 import { useAnimationFrameTick } from '../lib/useAnimationFrameTick';
 import type { Runner } from '../types';
 import { LabelBadge } from './LabelBadge';
@@ -15,7 +16,7 @@ export function TimingView() {
   const handoffBusyRef = React.useRef(false);
 
   const activeRunner = runners.find((runner) => runner.id === race.activeRunnerId) || null;
-  const nextRunner = getNextRunner(runners);
+  const nextRunner = getNextWaitingRunner(runners);
   const recentLaps = laps.slice(0, 10);
   const activePreviousLap = activeRunner ? laps.find((lap) => lap.runnerId === activeRunner.id) || null : null;
   const handoffPreview = buildHandoffPreview(activeRunner, nextRunner);
@@ -247,14 +248,6 @@ function TimingCard({
   );
 }
 
-function getNextRunner(runners: Runner[]) {
-  return (
-    runners
-      .filter((runner) => runner.status === 'waiting')
-      .sort((a, b) => (a.queueIndex ?? 0) - (b.queueIndex ?? 0))[0] || null
-  );
-}
-
 function buildHandoffPreview(activeRunner: Runner | null, nextRunner: Runner | null) {
   if (activeRunner && nextRunner) {
     return `${runnerLabel(activeRunner)} wordt afgeklokt -> ${runnerLabel(nextRunner)} start`;
@@ -266,8 +259,4 @@ function buildHandoffPreview(activeRunner: Runner | null, nextRunner: Runner | n
     return 'Huidige loper wordt afgeklokt; geen volgende loper klaar';
   }
   return 'Geen loper klaar in de wachtrij';
-}
-
-function runnerLabel(runner: Runner) {
-  return runner.runnerNumber ? `${runner.runnerNumber} - ${runner.name}` : runner.name;
 }

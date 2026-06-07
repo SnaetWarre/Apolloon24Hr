@@ -8,8 +8,9 @@ import { KanbanBoard } from './components/KanbanBoard';
 import { RolePicker } from './components/RolePicker';
 import { RunnerProfileModal } from './components/RunnerProfileModal';
 import { TimingView } from './components/TimingView';
-import { useAppData, useRealtimeBridge } from './appData';
+import { useAppData, useRealtimeBridge } from './app';
 import { formatDurationMs, nowMs } from './lib/time';
+import { getNextWaitingRunner, runnerLabel } from './lib/runners';
 import { useAnimationFrameTick } from './lib/useAnimationFrameTick';
 
 export function AppRoot() {
@@ -60,10 +61,7 @@ export function QueuePage() {
   const [profileRunnerId, setProfileRunnerId] = React.useState<string | null>(null);
 
   const activeRunner = runners.find((runner) => runner.id === race.activeRunnerId) || null;
-  const nextRunner =
-    runners
-      .filter((runner) => runner.status === 'waiting')
-      .sort((a, b) => (a.queueIndex ?? 0) - (b.queueIndex ?? 0))[0] || null;
+  const nextRunner = getNextWaitingRunner(runners);
 
   useAnimationFrameTick(Boolean(race.activeStartedAt));
 
@@ -159,8 +157,4 @@ function TopNav() {
       </button>
     </nav>
   );
-}
-
-function runnerLabel(runner: { runnerNumber: string | null; name: string }) {
-  return runner.runnerNumber ? `${runner.runnerNumber} - ${runner.name}` : runner.name;
 }

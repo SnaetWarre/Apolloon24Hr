@@ -1,6 +1,7 @@
 import React from 'react';
-import { useAppData } from '../appData';
+import { useAppData } from '../app';
 import { formatClockTimeMs, formatDurationMs } from '../lib/time';
+import { getNextWaitingRunner, lapRunnerLabel, runnerLabel } from '../lib/runners';
 import type { Label, LapRecord, Runner } from '../types';
 import { LabelBadge } from './LabelBadge';
 
@@ -9,7 +10,7 @@ const OUTSIDE_RECORD_VISIBLE_MS = 17_000;
 export function OutsideDisplay({ onNavigate }: { onNavigate: (path: string) => void }) {
   const { runners, race, laps } = useAppData();
   const activeRunner = runners.find((runner) => runner.id === race.activeRunnerId) || null;
-  const nextRunner = getNextRunner(runners);
+  const nextRunner = getNextWaitingRunner(runners);
   const [recordLap, setRecordLap] = React.useState<LapRecord | null>(null);
   const knownLapIdsRef = React.useRef<Set<string> | null>(null);
   const recordTimeoutRef = React.useRef<number | null>(null);
@@ -54,7 +55,7 @@ export function OutsideDisplay({ onNavigate }: { onNavigate: (path: string) => v
         <div className="outside-runner">
           <span className="display-kicker">Nu op de piste</span>
           <strong className="display-runner-name">
-            {activeRunner ? runnerName(activeRunner) : 'Nog niemand gestart'}
+            {activeRunner ? runnerLabel(activeRunner) : 'Nog niemand gestart'}
           </strong>
           {activeRunner && <DisplayLabels labels={activeRunner.labels} />}
         </div>
@@ -63,7 +64,7 @@ export function OutsideDisplay({ onNavigate }: { onNavigate: (path: string) => v
         <div className="outside-runner outside-runner--next">
           <span className="display-kicker">Volgende loper</span>
           <strong className="display-runner-name">
-            {nextRunner ? runnerName(nextRunner) : 'Geen loper in wachtrij'}
+            {nextRunner ? runnerLabel(nextRunner) : 'Geen loper in wachtrij'}
           </strong>
           {nextRunner && <DisplayLabels labels={nextRunner.labels} />}
         </div>
@@ -112,7 +113,7 @@ export function InsideDisplay({ onNavigate }: { onNavigate: (path: string) => vo
             <>
               <div className="latest-lap-main">
                 <h2>Net gelopen</h2>
-                <strong className="latest-lap-runner">{lapRunnerName(latestLap)}</strong>
+                <strong className="latest-lap-runner">{lapRunnerLabel(latestLap)}</strong>
                 <DisplayLabels labels={latestLap.labels} />
               </div>
               <div className="latest-lap-result">
@@ -135,7 +136,7 @@ export function InsideDisplay({ onNavigate }: { onNavigate: (path: string) => vo
             {ranking.map((runner, index) => (
               <div key={runner.id} className="ranking-row">
                 <span>{index + 1}</span>
-                <strong>{runnerName(runner)}</strong>
+                <strong>{runnerLabel(runner)}</strong>
                 <em>{runner.lapCount} toeren</em>
               </div>
             ))}
@@ -199,26 +200,10 @@ function OutsideRecordFlash({ lap }: { lap: LapRecord }) {
       <div className="record-flash-content">
         <span>NEW RECORD</span>
         <strong>{formatDurationMs(lap.durationMs)}</strong>
-        <em>{lapRunnerName(lap)}</em>
+        <em>{lapRunnerLabel(lap)}</em>
       </div>
     </section>
   );
-}
-
-function getNextRunner(runners: Runner[]) {
-  return (
-    runners
-      .filter((runner) => runner.status === 'waiting')
-      .sort((a, b) => (a.queueIndex ?? 0) - (b.queueIndex ?? 0))[0] || null
-  );
-}
-
-function runnerName(runner: Runner) {
-  return runner.runnerNumber ? `${runner.runnerNumber} - ${runner.name}` : runner.name;
-}
-
-function lapRunnerName(lap: LapRecord) {
-  return lap.runnerNumber ? `${lap.runnerNumber} - ${lap.runnerName}` : lap.runnerName;
 }
 
 function isNewFastestLap(latestLap: LapRecord, previousLaps: LapRecord[]) {

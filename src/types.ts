@@ -2,6 +2,8 @@ export type {
   AppSnapshot,
   HostInfo,
   Label,
+  LabelInput,
+  LabelPatch,
   LapRecord,
   RaceState,
   RegistrationSource,

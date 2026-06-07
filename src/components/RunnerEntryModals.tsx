@@ -1,5 +1,5 @@
 import React from 'react';
-import { useAppActions, useAppData } from '../appData';
+import { useAppActions, useAppData } from '../app';
 import type { Label, Runner } from '../types';
 import { LabelBadge, labelKindOrder, labelKindTitle } from './LabelBadge';
 

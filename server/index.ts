@@ -7,6 +7,7 @@ import { fileURLToPath } from 'url';
 import { createExpressMiddleware } from '@trpc/server/adapters/express';
 import Papa from 'papaparse';
 import { Server as SocketIOServer } from 'socket.io';
+import { formatDurationMs } from '../shared/time.js';
 import { appSnapshot } from './app-state.js';
 import { getAllLaps, getAllRunners, initDb } from './db.js';
 import { hostInfo, SERVER_PORT } from './host.js';
@@ -25,23 +26,6 @@ const server = http.createServer(app);
 const io = new SocketIOServer(server, {
   cors: { origin: true, credentials: false },
 });
-
-function formatDurationMs(ms: number | undefined | null): string {
-  if (ms === undefined || ms === null || Number.isNaN(Number(ms))) return '';
-  const totalMilliseconds = Math.max(0, Math.floor(Number(ms)));
-  const milliseconds = totalMilliseconds % 1000;
-  const totalWholeSeconds = Math.floor(totalMilliseconds / 1000);
-  const hours = Math.floor(totalWholeSeconds / 3600);
-  const minutes = Math.floor((totalWholeSeconds % 3600) / 60);
-  const seconds = totalWholeSeconds % 60;
-  const fraction = String(milliseconds).padStart(3, '0');
-
-  if (hours > 0) {
-    return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}.${fraction}`;
-  }
-
-  return `${minutes}:${String(seconds).padStart(2, '0')}.${fraction}`;
-}
 
 function lapExportRows(): Array<Record<string, string | number>> {
   const runnersById = new Map(getAllRunners().map((runner) => [runner.id, runner]));

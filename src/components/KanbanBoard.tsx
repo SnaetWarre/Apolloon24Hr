@@ -1,6 +1,6 @@
 import React from 'react';
 import { DndContext, closestCenter, useDraggable, useDroppable, DragEndEvent } from '@dnd-kit/core';
-import { useAppActions, useAppData } from '../appData';
+import { useAppActions, useAppData } from '../app';
 import { useAppStore } from '../store';
 import { formatDurationMs, formatElapsedSeconds, nowMs } from '../lib/time';
 import type { Runner, RunnerStatus } from '../types';

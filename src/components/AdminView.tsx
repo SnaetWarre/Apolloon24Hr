@@ -1,6 +1,6 @@
 import React from 'react';
 import { flexRender, getCoreRowModel, useReactTable, type ColumnDef } from '@tanstack/react-table';
-import { useAppActions, useAppData } from '../appData';
+import { useAppActions, useAppData } from '../app';
 import { LabelBadge, labelKindOrder, labelKindTitle } from './LabelBadge';
 import { SourceBadge } from './RunnerEntryModals';
 import { RunnerProfileModal } from './RunnerProfileModal';

@@ -24,6 +24,8 @@ Client laptops and TV laptops can use automatic DHCP. Their IP addresses do not 
 
 In development, Vite serves the frontend on `5173` and proxies `/trpc`, `/api`, and `/socket.io` to the backend on `3000`. `npm run dev` starts both after seeding `.dev-data/`.
 
+For the repository layout, runtime boundaries, and validation commands, see `docs/codebase-map.md`.
+
 ## Running The Event
 
 1. Connect the host laptop to the local router/switch by Ethernet.
@@ -92,6 +94,14 @@ There is no automatic 24-hour cutoff in the software.
 ## Test Seed Data
 
 Development seed commands only use `.dev-data/`. They do not overwrite the normal app database in `data/app.db`.
+
+Useful development checks:
+
+```text
+npm run typecheck       Type-check client and server without packaging
+npm run check           Type-check everything and build the Vite client
+npm run build           Type-check the client, build Vite, and compile the server
+```
 
 ```text
 npm run dev                Clean ready data and start dev app
