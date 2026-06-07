@@ -1,6 +1,6 @@
 import React from 'react';
 import { useAppStore } from '../store';
-import { formatDurationMs, formatElapsedSeconds, nowMs } from '../lib/time';
+import { formatClockTimeMs, formatDurationMs, formatElapsedSeconds, nowMs } from '../lib/time';
 import { useAnimationFrameTick } from '../lib/useAnimationFrameTick';
 import { labelKindOrder, labelKindTitle } from './LabelBadge';
 import type { Label, Runner, RunnerStatus } from '../types';
@@ -148,7 +148,7 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
                   {recentLaps.map((lap) => (
                     <tr key={lap.id}>
                       <td>{lap.lapNumber}</td>
-                      <td>{new Date(lap.finishedAt).toLocaleTimeString()}</td>
+                      <td>{formatClockTimeMs(lap.finishedAt)}</td>
                       <td>{formatDurationMs(lap.durationMs)}</td>
                     </tr>
                   ))}

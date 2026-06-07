@@ -1,6 +1,6 @@
 import React from 'react';
 import { useAppStore } from '../store';
-import { formatDurationMs, nowMs } from '../lib/time';
+import { formatClockTimeMs, formatDurationMs, nowMs } from '../lib/time';
 import { useAnimationFrameTick } from '../lib/useAnimationFrameTick';
 import type { Label, LapRecord, Runner } from '../types';
 import { LabelBadge } from './LabelBadge';
@@ -91,7 +91,7 @@ export function InsideDisplay({ onNavigate }: { onNavigate: (path: string) => vo
               <div className="latest-lap-result">
                 <em className="latest-lap-time">{formatDurationMs(latestLap.durationMs)}</em>
                 <span className="latest-lap-meta">
-                  Ronde {latestLap.lapNumber} · {new Date(latestLap.finishedAt).toLocaleTimeString()}
+                  Ronde {latestLap.lapNumber} · {formatClockTimeMs(latestLap.finishedAt)}
                 </span>
               </div>
             </>

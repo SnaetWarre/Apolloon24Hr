@@ -1,6 +1,6 @@
 import React from 'react';
 import { useAppStore } from '../store';
-import { formatDurationMs } from '../lib/time';
+import { formatClockTimeMs, formatDurationMs } from '../lib/time';
 import type { Label, Runner } from '../types';
 import { LabelBadge } from './LabelBadge';
 
@@ -147,7 +147,7 @@ export function AnalysisView() {
             <tbody>
               {laps.slice(0, 30).map((lap) => (
                 <tr key={lap.id}>
-                  <td>{new Date(lap.finishedAt).toLocaleTimeString()}</td>
+                  <td>{formatClockTimeMs(lap.finishedAt)}</td>
                   <td>{lap.runnerNumber || '-'}</td>
                   <td>{lap.runnerName}</td>
                   <td>{lap.lapNumber}</td>

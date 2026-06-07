@@ -1,6 +1,6 @@
 import React from 'react';
 import { useAppStore } from '../store';
-import { formatDurationMs, nowMs } from '../lib/time';
+import { formatClockTimeMs, formatDurationMs, nowMs } from '../lib/time';
 import { useAnimationFrameTick } from '../lib/useAnimationFrameTick';
 import type { Runner } from '../types';
 import { LabelBadge } from './LabelBadge';
@@ -128,7 +128,7 @@ export function TimingView() {
       <div className="stats-grid">
         <div className="stat-panel">
           <span className="muted-label">Race start</span>
-          <strong>{race.raceStartedAt ? new Date(race.raceStartedAt).toLocaleTimeString() : 'Nog niet gestart'}</strong>
+          <strong>{race.raceStartedAt ? formatClockTimeMs(race.raceStartedAt) : 'Nog niet gestart'}</strong>
         </div>
         <div className="stat-panel">
           <span className="muted-label">Vorige ronde huidige loper</span>
@@ -157,7 +157,7 @@ export function TimingView() {
               <tbody>
                 {recentLaps.map((lap) => (
                   <tr key={lap.id}>
-                    <td>{new Date(lap.finishedAt).toLocaleTimeString()}</td>
+                    <td>{formatClockTimeMs(lap.finishedAt)}</td>
                     <td>{lap.runnerNumber || '-'}</td>
                     <td>{lap.runnerName}</td>
                     <td>{lap.lapNumber}</td>
