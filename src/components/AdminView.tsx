@@ -2,6 +2,7 @@ import React from 'react';
 import { useAppStore } from '../store';
 import { LabelBadge, labelKindOrder, labelKindTitle } from './LabelBadge';
 import { SourceBadge } from './RunnerEntryModals';
+import { RunnerProfileModal } from './RunnerProfileModal';
 import type { Label, Runner, RunnerStatus } from '../types';
 
 export function AdminView() {
@@ -24,6 +25,7 @@ export function AdminView() {
   const [labelImageUrl, setLabelImageUrl] = React.useState('');
   const [labelTargetLaps, setLabelTargetLaps] = React.useState('');
   const [labelSortOrder, setLabelSortOrder] = React.useState('');
+  const [profileRunnerId, setProfileRunnerId] = React.useState<string | null>(null);
 
   async function importCsv() {
     if (!csvText.trim()) return;
@@ -258,6 +260,9 @@ export function AdminView() {
                   <td>{runner.lapCount}</td>
                   <td>
                     <div className="runner-admin-actions">
+                      <button className="btn btn--sm btn--fixed" onClick={() => setProfileRunnerId(runner.id)}>
+                        Profiel
+                      </button>
                       {runner.hiddenFromQueue && (
                         <button className="btn btn--sm btn--fixed" onClick={() => restoreRunner(runner)}>
                           Terug tonen
@@ -283,6 +288,10 @@ export function AdminView() {
           </table>
         </div>
       </section>
+
+      {profileRunnerId && (
+        <RunnerProfileModal runnerId={profileRunnerId} onClose={() => setProfileRunnerId(null)} />
+      )}
 
       <section className="panel">
         <h2>Database status</h2>

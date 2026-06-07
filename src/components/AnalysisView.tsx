@@ -4,10 +4,13 @@ import { formatDurationMs } from '../lib/time';
 import type { Label, Runner } from '../types';
 import { LabelBadge } from './LabelBadge';
 
+type RankingMode = 'laps' | 'fastest' | 'slowest';
+
 export function AnalysisView() {
   const runners = useAppStore((state) => state.runners);
   const labels = useAppStore((state) => state.labels);
   const laps = useAppStore((state) => state.laps);
+  const [rankingMode, setRankingMode] = React.useState<RankingMode>('laps');
   const sortedRunners = runners
     .filter((runner) => runner.lapCount > 0 || runner.status !== 'registered')
     .sort(
@@ -15,6 +18,12 @@ export function AnalysisView() {
         b.lapCount - a.lapCount ||
         (a.averageLapMs ?? Number.MAX_SAFE_INTEGER) - (b.averageLapMs ?? Number.MAX_SAFE_INTEGER)
     );
+  const fastestRunners = runners
+    .filter((runner) => runner.bestLapMs != null)
+    .sort((a, b) => (a.bestLapMs ?? Number.MAX_SAFE_INTEGER) - (b.bestLapMs ?? Number.MAX_SAFE_INTEGER));
+  const slowestRunners = runners
+    .filter((runner) => runner.slowestLapMs != null)
+    .sort((a, b) => (b.slowestLapMs ?? 0) - (a.slowestLapMs ?? 0));
   const labelStats = labels
     .map((label) => buildLabelStat(label, runners))
     .filter((stat) => stat.runnerCount > 0)
@@ -93,29 +102,30 @@ export function AnalysisView() {
 
         <section className="panel">
           <h2>Ranking lopers</h2>
+          <div className="segmented-control">
+            <button
+              className={rankingMode === 'laps' ? 'is-active' : ''}
+              onClick={() => setRankingMode('laps')}
+            >
+              Meeste toeren
+            </button>
+            <button
+              className={rankingMode === 'fastest' ? 'is-active' : ''}
+              onClick={() => setRankingMode('fastest')}
+            >
+              Snelste ronde
+            </button>
+            <button
+              className={rankingMode === 'slowest' ? 'is-active' : ''}
+              onClick={() => setRankingMode('slowest')}
+            >
+              Traagste ronde
+            </button>
+          </div>
           <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Nr.</th>
-                  <th>Naam</th>
-                  <th>Toeren</th>
-                  <th>Snelste</th>
-                  <th>Gem.</th>
-                </tr>
-              </thead>
-              <tbody>
-                {sortedRunners.map((runner) => (
-                  <tr key={runner.id}>
-                    <td>{runner.runnerNumber || '-'}</td>
-                    <td>{runner.name}</td>
-                    <td>{runner.lapCount}</td>
-                    <td>{formatDurationMs(runner.bestLapMs)}</td>
-                    <td>{formatDurationMs(runner.averageLapMs)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            {rankingMode === 'laps' && <LapRankingTable runners={sortedRunners} />}
+            {rankingMode === 'fastest' && <LapTimeRankingTable runners={fastestRunners} mode="fastest" />}
+            {rankingMode === 'slowest' && <LapTimeRankingTable runners={slowestRunners} mode="slowest" />}
           </div>
         </section>
       </div>
@@ -150,6 +160,58 @@ export function AnalysisView() {
         </div>
       </section>
     </>
+  );
+}
+
+function LapRankingTable({ runners }: { runners: Runner[] }) {
+  return (
+    <table>
+      <thead>
+        <tr>
+          <th>Nr.</th>
+          <th>Naam</th>
+          <th>Toeren</th>
+          <th>Snelste</th>
+          <th>Gem.</th>
+        </tr>
+      </thead>
+      <tbody>
+        {runners.map((runner) => (
+          <tr key={runner.id}>
+            <td>{runner.runnerNumber || '-'}</td>
+            <td>{runner.name}</td>
+            <td>{runner.lapCount}</td>
+            <td>{formatDurationMs(runner.bestLapMs)}</td>
+            <td>{formatDurationMs(runner.averageLapMs)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function LapTimeRankingTable({ runners, mode }: { runners: Runner[]; mode: 'fastest' | 'slowest' }) {
+  return (
+    <table>
+      <thead>
+        <tr>
+          <th>Nr.</th>
+          <th>Naam</th>
+          <th>Toeren</th>
+          <th>{mode === 'fastest' ? 'Snelste' : 'Traagste'}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {runners.map((runner) => (
+          <tr key={runner.id}>
+            <td>{runner.runnerNumber || '-'}</td>
+            <td>{runner.name}</td>
+            <td>{runner.lapCount}</td>
+            <td>{formatDurationMs(mode === 'fastest' ? runner.bestLapMs : runner.slowestLapMs)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }
 

@@ -681,6 +681,17 @@ select {
   margin: 18px 0;
 }
 
+.danger-zone {
+  margin-top: 22px;
+  padding: 16px;
+  border-left: 5px solid var(--red);
+  background: #fff7f7;
+}
+
+.danger-zone h2 {
+  margin: 0 0 12px;
+}
+
 .analysis-grid,
 .inside-grid {
   display: grid;
@@ -866,6 +877,10 @@ td {
   color: var(--muted);
 }
 
+.finish-confirm {
+  border-left-color: var(--red);
+}
+
 .modal-header,
 .modal-actions {
   display: flex;
@@ -889,7 +904,7 @@ td {
 
 .profile-stats {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
   gap: 10px;
   margin: 18px 0;
 }
@@ -923,6 +938,42 @@ td {
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 12px;
   margin: 18px 0;
+}
+
+.duration-input {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+}
+
+.duration-input input {
+  min-width: 0;
+}
+
+.segmented-control {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0 0 12px;
+  border: 1px solid var(--line);
+  background: #f8fafc;
+  padding: 4px;
+}
+
+.segmented-control button {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  min-height: 34px;
+  padding: 7px 10px;
+  font-size: 12px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.segmented-control button.is-active {
+  background: var(--apolloon-blue);
+  color: #ffffff;
 }
 
 .form-grid label,

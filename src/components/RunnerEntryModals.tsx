@@ -116,8 +116,10 @@ export function RunnerAddModal({ onClose }: { onClose: () => void }) {
   const [runnerNumber, setRunnerNumber] = React.useState('');
   const [name, setName] = React.useState('');
   const [targetLaps, setTargetLaps] = React.useState('');
-  const [historicalAvg, setHistoricalAvg] = React.useState('');
-  const [historicalBest, setHistoricalBest] = React.useState('');
+  const [historicalAvgMinutes, setHistoricalAvgMinutes] = React.useState('');
+  const [historicalAvgSeconds, setHistoricalAvgSeconds] = React.useState('');
+  const [historicalBestMinutes, setHistoricalBestMinutes] = React.useState('');
+  const [historicalBestSeconds, setHistoricalBestSeconds] = React.useState('');
   const [notes, setNotes] = React.useState('');
   const [selectedLabels, setSelectedLabels] = React.useState<string[]>([]);
   const [saving, setSaving] = React.useState(false);
@@ -138,8 +140,8 @@ export function RunnerAddModal({ onClose }: { onClose: () => void }) {
         runnerNumber: runnerNumber.trim() || null,
         name: cleanName,
         targetLaps: targetLaps ? Number(targetLaps) : null,
-        historicalAvgMs: secondsInputToMs(historicalAvg),
-        historicalBestMs: secondsInputToMs(historicalBest),
+        historicalAvgMs: minuteSecondInputToMs(historicalAvgMinutes, historicalAvgSeconds),
+        historicalBestMs: minuteSecondInputToMs(historicalBestMinutes, historicalBestSeconds),
         registrationSource: 'manual',
         notes,
         labels: selectedLabels,
@@ -206,12 +208,50 @@ export function RunnerAddModal({ onClose }: { onClose: () => void }) {
             />
           </label>
           <label>
-            Historisch gemiddelde in seconden
-            <input className="input" value={historicalAvg} onChange={(event) => setHistoricalAvg(event.target.value)} />
+            Historisch gemiddelde
+            <div className="duration-input">
+              <input
+                className="input"
+                type="number"
+                min="0"
+                value={historicalAvgMinutes}
+                onChange={(event) => setHistoricalAvgMinutes(event.target.value)}
+                placeholder="min"
+              />
+              <input
+                className="input"
+                type="number"
+                min="0"
+                max="59"
+                value={historicalAvgSeconds}
+                onBlur={() => setHistoricalAvgSeconds(normalizeSecondsInput(historicalAvgSeconds))}
+                onChange={(event) => setHistoricalAvgSeconds(event.target.value)}
+                placeholder="sec"
+              />
+            </div>
           </label>
           <label>
-            Historisch snelste in seconden
-            <input className="input" value={historicalBest} onChange={(event) => setHistoricalBest(event.target.value)} />
+            Historisch snelste
+            <div className="duration-input">
+              <input
+                className="input"
+                type="number"
+                min="0"
+                value={historicalBestMinutes}
+                onChange={(event) => setHistoricalBestMinutes(event.target.value)}
+                placeholder="min"
+              />
+              <input
+                className="input"
+                type="number"
+                min="0"
+                max="59"
+                value={historicalBestSeconds}
+                onBlur={() => setHistoricalBestSeconds(normalizeSecondsInput(historicalBestSeconds))}
+                onChange={(event) => setHistoricalBestSeconds(event.target.value)}
+                placeholder="sec"
+              />
+            </div>
           </label>
         </div>
 
@@ -334,11 +374,20 @@ function sortRunnerByNumberThenName(a: Runner, b: Runner) {
   );
 }
 
-function secondsInputToMs(value: string) {
-  const text = value.trim();
-  if (!text) return null;
-  const seconds = Number(text.replace(',', '.'));
-  return Number.isFinite(seconds) ? Math.round(seconds * 1000) : null;
+function minuteSecondInputToMs(minutes: string, seconds: string) {
+  const cleanMinutes = minutes.trim();
+  const cleanSeconds = seconds.trim();
+  if (!cleanMinutes && !cleanSeconds) return null;
+  const minuteValue = Number(cleanMinutes || 0);
+  const secondValue = Number(normalizeSecondsInput(cleanSeconds || '0'));
+  if (!Number.isFinite(minuteValue) || !Number.isFinite(secondValue)) return null;
+  return (Math.max(0, Math.round(minuteValue)) * 60 + secondValue) * 1000;
+}
+
+function normalizeSecondsInput(value: string) {
+  const seconds = Number(value.trim() || 0);
+  if (!Number.isFinite(seconds)) return '';
+  return String(Math.min(59, Math.max(0, Math.round(seconds))));
 }
 
 function exclusiveLabelGroup(kind: string | undefined) {

@@ -16,6 +16,7 @@ export function TimingView() {
   const [message, setMessage] = React.useState<string | null>(null);
   const [handoffBusy, setHandoffBusy] = React.useState(false);
   const [lastAction, setLastAction] = React.useState<string | null>(null);
+  const [finishConfirmStep, setFinishConfirmStep] = React.useState<0 | 1 | 2>(0);
   const handoffBusyRef = React.useRef(false);
 
   const activeRunner = runners.find((runner) => runner.id === race.activeRunnerId) || null;
@@ -72,11 +73,11 @@ export function TimingView() {
 
   async function finish() {
     if (handoffBusyRef.current) return;
-    if (!window.confirm('Race beeindigen? De actieve loper wordt gestopt zonder extra lap.')) return;
     setMessage(null);
     setLastAction(null);
     try {
       await finishRace();
+      setFinishConfirmStep(0);
       setLastAction('Race beeindigd.');
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Race beeindigen mislukt');
@@ -118,9 +119,6 @@ export function TimingView() {
         </button>
         <button className="btn btn--ghost" onClick={undo} disabled={handoffBusy}>
           Undo laatste handoff
-        </button>
-        <button className="btn btn--danger" onClick={finish} disabled={handoffBusy}>
-          Race beeindigen
         </button>
       </div>
 
@@ -173,6 +171,47 @@ export function TimingView() {
           <div className="empty-inline">Nog geen rondes geregistreerd</div>
         )}
       </section>
+
+      <section className="danger-zone">
+        <h2>Race afsluiten</h2>
+        <button className="btn btn--danger" onClick={() => setFinishConfirmStep(1)} disabled={handoffBusy}>
+          Race beeindigen
+        </button>
+      </section>
+
+      {finishConfirmStep > 0 && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true">
+          <div className="confirm-modal finish-confirm">
+            {finishConfirmStep === 1 ? (
+              <>
+                <h3>Race beeindigen?</h3>
+                <p>Dit stopt de actieve loper zonder extra ronde.</p>
+                <div className="modal-actions">
+                  <button className="btn btn--ghost" onClick={() => setFinishConfirmStep(0)}>
+                    Annuleer
+                  </button>
+                  <button className="btn btn--primary" onClick={() => setFinishConfirmStep(2)}>
+                    Verder
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <h3>Definitief afsluiten</h3>
+                <p>Bevestig alleen als de race echt afgerond is.</p>
+                <div className="modal-actions">
+                  <button className="btn btn--ghost" onClick={() => setFinishConfirmStep(0)}>
+                    Annuleer
+                  </button>
+                  <button className="btn btn--danger" onClick={finish} disabled={handoffBusy}>
+                    Race definitief beeindigen
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </>
   );
 }
