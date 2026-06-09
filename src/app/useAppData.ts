@@ -1,13 +1,14 @@
 import { useQuery } from '@tanstack/react-query';
 import { trpc } from '../api';
 import { setServerNowMs } from '../lib/time';
-import type { HostInfo, Label, LapRecord, RaceState, Runner } from '../types';
+import type { HostInfo, Label, LapRecord, RaceEvent, RaceState, Runner } from '../types';
 import { emptyRace, snapshotKey } from './snapshot';
 
 export function useAppData(): {
   runners: Runner[];
   labels: Label[];
   laps: LapRecord[];
+  events: RaceEvent[];
   race: RaceState;
   host: HostInfo | null;
   initialized: boolean;
@@ -28,6 +29,7 @@ export function useAppData(): {
     runners: query.data?.runners ?? [],
     labels: query.data?.labels ?? [],
     laps: query.data?.laps ?? [],
+    events: query.data?.events ?? [],
     race: query.data?.race ?? emptyRace,
     host: query.data?.host ?? null,
     initialized: query.isSuccess,

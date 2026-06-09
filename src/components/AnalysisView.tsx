@@ -2,13 +2,13 @@ import React from 'react';
 import { flexRender, getCoreRowModel, useReactTable, type ColumnDef } from '@tanstack/react-table';
 import { useAppData } from '../app/index';
 import { formatClockTimeMs, formatDurationMs } from '../lib/time';
-import type { Label, Runner } from '../types';
+import type { Label, RaceEvent, Runner } from '../types';
 import { LabelBadge } from './LabelBadge';
 
 type RankingMode = 'laps' | 'fastest' | 'slowest';
 
 export function AnalysisView() {
-  const { runners, labels, laps } = useAppData();
+  const { runners, labels, laps, events } = useAppData();
   const [rankingMode, setRankingMode] = React.useState<RankingMode>('laps');
   const sortedRunners = runners
     .filter((runner) => runner.lapCount > 0 || runner.status !== 'registered')
@@ -35,6 +35,7 @@ export function AnalysisView() {
     .filter((stat) => stat.label.kind === 'speedteam' || stat.label.name.toLowerCase().includes('speedteam'))
     .reduce((sum, stat) => sum + stat.laps, 0);
   const totalLaps = laps.length;
+  const burgieEvents = events.filter((event) => event.type === 'burgie_gepakt');
 
   return (
     <>
@@ -56,6 +57,12 @@ export function AnalysisView() {
         <a className="btn btn--ghost" href="/api/export/current-state.json">
           Download current-state.json
         </a>
+        <a className="btn btn--ghost" href="/api/export/events.csv">
+          Download events.csv
+        </a>
+        <a className="btn btn--ghost" href="/api/export/events.json">
+          Download events.json
+        </a>
       </div>
 
       <div className="stats-grid">
@@ -70,6 +77,10 @@ export function AnalysisView() {
         <div className="stat-panel">
           <span className="muted-label">Niet-speedteam toeren</span>
           <strong>{Math.max(0, totalLaps - speedteamLaps)}</strong>
+        </div>
+        <div className="stat-panel">
+          <span className="muted-label">Burgie gepakt</span>
+          <strong>{burgieEvents.length}</strong>
         </div>
       </div>
 
@@ -130,6 +141,35 @@ export function AnalysisView() {
       </div>
 
       <section className="panel">
+        <h2>Burgie momenten</h2>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Tijd</th>
+                <th>Moment</th>
+                <th>Loper</th>
+              </tr>
+            </thead>
+            <tbody>
+              {burgieEvents.slice(0, 30).map((event) => (
+                <tr key={event.id}>
+                  <td>{formatClockTimeMs(event.occurredAt)}</td>
+                  <td>{event.message}</td>
+                  <td>{eventRunnerLabel(event)}</td>
+                </tr>
+              ))}
+              {burgieEvents.length === 0 && (
+                <tr>
+                  <td colSpan={3}>Nog geen Burgie momenten.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="panel">
         <h2>Laatste rondes</h2>
         <div className="table-wrap">
           <table>
@@ -160,6 +200,11 @@ export function AnalysisView() {
       </section>
     </>
   );
+}
+
+function eventRunnerLabel(event: RaceEvent) {
+  if (!event.runnerName) return '-';
+  return event.runnerNumber ? `${event.runnerNumber} - ${event.runnerName}` : event.runnerName;
 }
 
 function LapRankingTable({ runners }: { runners: Runner[] }) {

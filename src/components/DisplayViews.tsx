@@ -2,24 +2,33 @@ import React from 'react';
 import { useAppData } from '../app/index';
 import { formatClockTimeMs, formatDurationMs } from '../lib/time';
 import { getNextWaitingRunner, lapRunnerLabel, runnerLabel } from '../lib/runners';
-import type { Label, LapRecord, Runner } from '../types';
+import type { Label, LapRecord, RaceEvent, Runner } from '../types';
 import { LabelBadge } from './LabelBadge';
 
-const OUTSIDE_RECORD_VISIBLE_MS = 8_000;
+const OUTSIDE_ALERT_VISIBLE_MS = 8_000;
 
 export function OutsideDisplay({ onNavigate }: { onNavigate: (path: string) => void }) {
-  const { runners, race, laps } = useAppData();
+  const { runners, race, laps, events } = useAppData();
   const activeRunner = runners.find((runner) => runner.id === race.activeRunnerId) || null;
   const nextRunner = getNextWaitingRunner(runners);
   const [recordLap, setRecordLap] = React.useState<LapRecord | null>(null);
+  const [burgieEvent, setBurgieEvent] = React.useState<RaceEvent | null>(null);
   const knownLapIdsRef = React.useRef<Set<string> | null>(null);
+  const knownEventIdsRef = React.useRef<Set<string> | null>(null);
   const recordTimeoutRef = React.useRef<number | null>(null);
+  const burgieTimeoutRef = React.useRef<number | null>(null);
 
   React.useEffect(() => {
     const knownLapIds = knownLapIdsRef.current;
     const latestLap = laps[0] || null;
 
-    if (knownLapIds && latestLap && !knownLapIds.has(latestLap.id) && isNewFastestLap(latestLap, laps.slice(1))) {
+    if (
+      !burgieEvent &&
+      knownLapIds &&
+      latestLap &&
+      !knownLapIds.has(latestLap.id) &&
+      isNewFastestLap(latestLap, laps.slice(1))
+    ) {
       setRecordLap(latestLap);
       if (recordTimeoutRef.current !== null) {
         window.clearTimeout(recordTimeoutRef.current);
@@ -27,7 +36,7 @@ export function OutsideDisplay({ onNavigate }: { onNavigate: (path: string) => v
       recordTimeoutRef.current = window.setTimeout(() => {
         setRecordLap(null);
         recordTimeoutRef.current = null;
-      }, OUTSIDE_RECORD_VISIBLE_MS);
+      }, OUTSIDE_ALERT_VISIBLE_MS);
     }
 
     setRecordLap((currentRecordLap) => {
@@ -35,12 +44,38 @@ export function OutsideDisplay({ onNavigate }: { onNavigate: (path: string) => v
       return laps.some((lap) => lap.id === currentRecordLap.id) ? currentRecordLap : null;
     });
     knownLapIdsRef.current = new Set(laps.map((lap) => lap.id));
-  }, [laps]);
+  }, [burgieEvent, laps]);
+
+  React.useEffect(() => {
+    const knownEventIds = knownEventIdsRef.current;
+    const latestBurgieEvent = events.find((event) => event.type === 'burgie_gepakt') || null;
+
+    if (knownEventIds && latestBurgieEvent && !knownEventIds.has(latestBurgieEvent.id)) {
+      setRecordLap(null);
+      if (recordTimeoutRef.current !== null) {
+        window.clearTimeout(recordTimeoutRef.current);
+        recordTimeoutRef.current = null;
+      }
+      setBurgieEvent(latestBurgieEvent);
+      if (burgieTimeoutRef.current !== null) {
+        window.clearTimeout(burgieTimeoutRef.current);
+      }
+      burgieTimeoutRef.current = window.setTimeout(() => {
+        setBurgieEvent(null);
+        burgieTimeoutRef.current = null;
+      }, OUTSIDE_ALERT_VISIBLE_MS);
+    }
+
+    knownEventIdsRef.current = new Set(events.map((event) => event.id));
+  }, [events]);
 
   React.useEffect(() => {
     return () => {
       if (recordTimeoutRef.current !== null) {
         window.clearTimeout(recordTimeoutRef.current);
+      }
+      if (burgieTimeoutRef.current !== null) {
+        window.clearTimeout(burgieTimeoutRef.current);
       }
     };
   }, []);
@@ -69,7 +104,7 @@ export function OutsideDisplay({ onNavigate }: { onNavigate: (path: string) => v
           {nextRunner && <DisplayLabels labels={nextRunner.labels} />}
         </div>
       </section>
-      {recordLap && <OutsideRecordFlash lap={recordLap} />}
+      {burgieEvent ? <OutsideBurgieFlash event={burgieEvent} /> : recordLap ? <OutsideRecordFlash lap={recordLap} /> : null}
     </main>
   );
 }
@@ -204,6 +239,23 @@ function OutsideRecordFlash({ lap }: { lap: LapRecord }) {
       </div>
     </section>
   );
+}
+
+function OutsideBurgieFlash({ event }: { event: RaceEvent }) {
+  return (
+    <section className="outside-record-flash outside-record-flash--burgie" aria-live="polite">
+      <div className="record-flash-content">
+        <span>Burgie gepakt</span>
+        <strong>ZINGEN</strong>
+        <em>{eventRunnerLabel(event)}</em>
+      </div>
+    </section>
+  );
+}
+
+function eventRunnerLabel(event: RaceEvent) {
+  if (!event.runnerName) return 'Publiek moment';
+  return event.runnerNumber ? `${event.runnerNumber} - ${event.runnerName}` : event.runnerName;
 }
 
 function isNewFastestLap(latestLap: LapRecord, previousLaps: LapRecord[]) {

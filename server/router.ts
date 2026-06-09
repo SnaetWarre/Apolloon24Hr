@@ -14,11 +14,13 @@ import {
 } from '../shared/schemas.js';
 import { appSnapshot } from './app-state.js';
 import {
+  createBurgieGepaktEvent,
   createLabel,
   deleteLabel,
   deleteRunner,
   finishRace,
   getAllLaps,
+  getAllRaceEvents,
   getAllRunners,
   getLabels,
   getLapById,
@@ -329,6 +331,15 @@ export const appRouter = t.router({
       finishRace(Date.now());
       emitRaceCollections();
       return { ok: true };
+    }),
+  }),
+
+  events: t.router({
+    list: t.procedure.query(() => getAllRaceEvents()),
+    burgieGepakt: t.procedure.mutation(() => {
+      const event = createBurgieGepaktEvent(Date.now());
+      emitRealtime({ type: 'race-event:created', payload: event });
+      return event;
     }),
   }),
 });

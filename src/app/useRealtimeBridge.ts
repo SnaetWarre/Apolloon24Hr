@@ -3,7 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { io } from 'socket.io-client';
 import { trpc } from '../api';
 import { setServerNowMs, syncServerClock } from '../lib/time';
-import type { AppSnapshot, Label, LapRecord, RaceState, Runner } from '../types';
+import type { AppSnapshot, Label, LapRecord, RaceEvent, RaceState, Runner } from '../types';
 import { patchSnapshot, snapshotKey, upsertById } from './snapshot';
 
 let socket: ReturnType<typeof io> | null = null;
@@ -75,6 +75,15 @@ export function useRealtimeBridge(): void {
       });
       socket.on('laps:patched', (laps: LapRecord[]) => {
         patchSnapshot(activeQueryClient, (snapshot) => ({ ...snapshot, laps }));
+      });
+      socket.on('race-event:created', (event: RaceEvent) => {
+        patchSnapshot(activeQueryClient, (snapshot) => ({
+          ...snapshot,
+          events: [event, ...(snapshot.events || []).filter((item) => item.id !== event.id)],
+        }));
+      });
+      socket.on('race-events:patched', (events: RaceEvent[]) => {
+        patchSnapshot(activeQueryClient, (snapshot) => ({ ...snapshot, events }));
       });
       socket.on('connect', () => {
         void syncClock();

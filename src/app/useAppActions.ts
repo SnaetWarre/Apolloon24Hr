@@ -84,6 +84,11 @@ export function useAppActions() {
         await trpc.race.finish.mutate();
         await refreshSnapshot();
       },
+      async burgieGepakt() {
+        const event = await trpc.events.burgieGepakt.mutate();
+        await refreshSnapshot();
+        return event;
+      },
     }),
     [refreshSnapshot, runners]
   );

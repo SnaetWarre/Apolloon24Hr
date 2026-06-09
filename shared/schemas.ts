@@ -35,6 +35,21 @@ export const lapRecordSchema = z.object({
 });
 export type LapRecord = z.infer<typeof lapRecordSchema>;
 
+export const raceEventTypeSchema = z.enum(['burgie_gepakt']);
+export type RaceEventType = z.infer<typeof raceEventTypeSchema>;
+
+export const raceEventSchema = z.object({
+  id: z.string(),
+  type: raceEventTypeSchema,
+  message: z.string(),
+  occurredAt: z.number(),
+  createdAt: z.number(),
+  runnerId: z.string().nullable(),
+  runnerNumber: z.string().nullable(),
+  runnerName: z.string().nullable(),
+});
+export type RaceEvent = z.infer<typeof raceEventSchema>;
+
 export const runnerSchema = z.object({
   id: z.string(),
   runnerNumber: z.string().nullable(),
@@ -82,6 +97,7 @@ export const appSnapshotSchema = z.object({
   labels: z.array(labelSchema),
   race: raceStateSchema,
   laps: z.array(lapRecordSchema),
+  events: z.array(raceEventSchema),
   serverNowMs: z.number(),
   host: hostInfoSchema,
 });

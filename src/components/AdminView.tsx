@@ -4,14 +4,25 @@ import { useAppActions, useAppData } from '../app/index';
 import { LabelBadge, labelKindOrder, labelKindTitle } from './LabelBadge';
 import { SourceBadge } from './RunnerEntryModals';
 import { RunnerProfileModal } from './RunnerProfileModal';
+import { formatClockTimeMs } from '../lib/time';
 import type { Label, Runner, RunnerStatus } from '../types';
 
 export function AdminView() {
   const { labels, runners } = useAppData();
-  const { importRunnersCsv, createLabel, updateLabel, deleteLabel, deleteRunner, unhideRunner } = useAppActions();
+  const {
+    importRunnersCsv,
+    createLabel,
+    updateLabel,
+    deleteLabel,
+    deleteRunner,
+    unhideRunner,
+    burgieGepakt,
+  } = useAppActions();
   const [csvText, setCsvText] = React.useState('');
   const [csvFileName, setCsvFileName] = React.useState('');
   const [message, setMessage] = React.useState<string | null>(null);
+  const [eventMessage, setEventMessage] = React.useState<string | null>(null);
+  const [eventSaving, setEventSaving] = React.useState(false);
   const [runnerMessage, setRunnerMessage] = React.useState<string | null>(null);
   const [runnerQuery, setRunnerQuery] = React.useState('');
   const [labelName, setLabelName] = React.useState('');
@@ -57,6 +68,22 @@ export function AdminView() {
     setLabelImageUrl('');
     setLabelTargetLaps('');
     setLabelSortOrder('');
+  }
+
+  async function triggerBurgieGepakt() {
+    setEventMessage(null);
+    setEventSaving(true);
+    try {
+      const event = await burgieGepakt();
+      const runnerText = event.runnerName
+        ? ` voor ${event.runnerNumber ? `${event.runnerNumber} - ` : ''}${event.runnerName}`
+        : '';
+      setEventMessage(`Burgie gepakt opgeslagen om ${formatClockTimeMs(event.occurredAt)}${runnerText}.`);
+    } catch (err) {
+      setEventMessage(err instanceof Error ? err.message : 'Burgie gepakt opslaan mislukt');
+    } finally {
+      setEventSaving(false);
+    }
   }
 
   async function removeLabel(id: string, name: string) {
@@ -121,6 +148,17 @@ export function AdminView() {
       </div>
 
       <div className="analysis-grid">
+        <section className="panel">
+          <h2>Publiek moment</h2>
+          <p className="panel-copy">
+            Slaat het moment op en toont de flash alleen op het buitenscherm.
+          </p>
+          <button className="btn btn--primary btn--xl" onClick={triggerBurgieGepakt} disabled={eventSaving}>
+            {eventSaving ? 'Opslaan...' : 'Burgie gepakt'}
+          </button>
+          {eventMessage && <div className="host-hint">{eventMessage}</div>}
+        </section>
+
         <section className="panel">
           <h2>Google Sheets CSV import</h2>
           <p className="panel-copy">

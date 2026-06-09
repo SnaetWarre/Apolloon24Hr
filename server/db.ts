@@ -7,6 +7,8 @@ import type {
   LabelInput,
   LabelPatch,
   LapRecord,
+  RaceEvent,
+  RaceEventType,
   RaceState,
   RegistrationSource,
   Runner,
@@ -25,6 +27,7 @@ const DB_FILE = path.join(DATA_DIR, 'app.db');
 
 const VALID_STATUSES = new Set<RunnerStatus>(['registered', 'warming_up', 'waiting', 'running', 'ran']);
 const VALID_REGISTRATION_SOURCES = new Set<RegistrationSource>(['import', 'manual']);
+const VALID_RACE_EVENT_TYPES = new Set<RaceEventType>(['burgie_gepakt']);
 
 const DEFAULT_LABELS: LabelInput[] = [
   {
@@ -241,6 +244,18 @@ function createSchema(): void {
       created_at INTEGER NOT NULL,
       payload_json TEXT NOT NULL,
       undone INTEGER NOT NULL DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS race_events (
+      id TEXT PRIMARY KEY,
+      type TEXT NOT NULL CHECK(type IN ('burgie_gepakt')),
+      message TEXT NOT NULL,
+      occurred_at INTEGER NOT NULL,
+      runner_id TEXT,
+      runner_number TEXT,
+      runner_name TEXT,
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY (runner_id) REFERENCES runners(id) ON DELETE SET NULL
     );
   `);
 
@@ -927,6 +942,67 @@ export function getAllLaps(): LapRecord[] {
 
 export function getLapById(id: string): LapRecord | null {
   return getAllLaps().find((lap) => lap.id === id) ?? null;
+}
+
+function cleanRaceEventType(type: unknown): RaceEventType {
+  return VALID_RACE_EVENT_TYPES.has(type as RaceEventType) ? (type as RaceEventType) : 'burgie_gepakt';
+}
+
+export function getAllRaceEvents(): RaceEvent[] {
+  return all<RaceEvent>(
+    `SELECT
+      id,
+      type,
+      message,
+      occurred_at AS occurredAt,
+      created_at AS createdAt,
+      runner_id AS runnerId,
+      runner_number AS runnerNumber,
+      runner_name AS runnerName
+    FROM race_events
+    ORDER BY occurred_at DESC, created_at DESC`
+  ).map((event) => ({
+    ...event,
+    type: cleanRaceEventType(event.type),
+    runnerId: event.runnerId ?? null,
+    runnerNumber: event.runnerNumber ?? null,
+    runnerName: event.runnerName ?? null,
+  }));
+}
+
+export function getRaceEventById(id: string): RaceEvent | null {
+  return getAllRaceEvents().find((event) => event.id === id) ?? null;
+}
+
+export function createBurgieGepaktEvent(nowMs = Date.now()): RaceEvent {
+  const activeRunnerId = getRaceState().activeRunnerId;
+  const activeRunner = activeRunnerId ? getRunnerById(activeRunnerId) : null;
+  const id = uuidv4();
+  const message = 'Burgie gepakt';
+  run(
+    `INSERT INTO race_events (
+      id,
+      type,
+      message,
+      occurred_at,
+      runner_id,
+      runner_number,
+      runner_name,
+      created_at
+    ) VALUES (?, 'burgie_gepakt', ?, ?, ?, ?, ?, ?)`,
+    [
+      id,
+      message,
+      nowMs,
+      activeRunner?.id ?? null,
+      activeRunner?.runnerNumber ?? null,
+      activeRunner?.name ?? null,
+      nowMs,
+    ]
+  );
+  const event = getRaceEventById(id);
+  if (!event) throw new Error('race event insert failed');
+  return event;
 }
 
 type QueueEntrySnapshot = {

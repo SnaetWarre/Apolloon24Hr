@@ -5,6 +5,8 @@ export type {
   LabelInput,
   LabelPatch,
   LapRecord,
+  RaceEvent,
+  RaceEventType,
   RaceState,
   RegistrationSource,
   Runner,

@@ -9,7 +9,7 @@ import Papa from 'papaparse';
 import { Server as SocketIOServer } from 'socket.io';
 import { formatDurationMs } from '../shared/time.js';
 import { appSnapshot } from './app-state.js';
-import { getAllLaps, getAllRunners, initDb } from './db.js';
+import { getAllLaps, getAllRaceEvents, getAllRunners, initDb } from './db.js';
 import { hostInfo, SERVER_PORT } from './host.js';
 import { setRealtimeEmitter } from './realtime.js';
 import { appRouter } from './router.js';
@@ -50,6 +50,21 @@ function lapExportRows(): Array<Record<string, string | number>> {
     });
 }
 
+function eventExportRows(): Array<Record<string, string | number>> {
+  return getAllRaceEvents()
+    .slice()
+    .reverse()
+    .map((event) => ({
+      timestamp: new Date(event.occurredAt).toISOString(),
+      type: event.type,
+      message: event.message,
+      runner_id: event.runnerId || '',
+      runner_number: event.runnerNumber || '',
+      runner_name: event.runnerName || '',
+      created_at: new Date(event.createdAt).toISOString(),
+    }));
+}
+
 const LAP_EXPORT_COLUMNS = [
   'timestamp',
   'runner_number',
@@ -62,6 +77,16 @@ const LAP_EXPORT_COLUMNS = [
   'historical_avg_ms',
   'historical_best_ms',
   'source',
+];
+
+const EVENT_EXPORT_COLUMNS = [
+  'timestamp',
+  'type',
+  'message',
+  'runner_id',
+  'runner_number',
+  'runner_name',
+  'created_at',
 ];
 
 setRealtimeEmitter((event) => {
@@ -100,6 +125,21 @@ app.get('/api/export/laps.csv', (_req, res) => {
 
 app.get('/api/export/laps.json', (_req, res) => {
   res.json({ laps: getAllLaps() });
+});
+
+app.get('/api/export/events.csv', (_req, res) => {
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="apolloon-events.csv"');
+  const rows = eventExportRows();
+  res.send(
+    rows.length
+      ? Papa.unparse(rows, { header: true, columns: EVENT_EXPORT_COLUMNS })
+      : `${EVENT_EXPORT_COLUMNS.join(',')}\n`
+  );
+});
+
+app.get('/api/export/events.json', (_req, res) => {
+  res.json({ events: getAllRaceEvents() });
 });
 
 app.get('/api/export/current-state.json', (_req, res) => {
