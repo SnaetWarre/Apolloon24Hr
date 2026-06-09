@@ -5,7 +5,7 @@ import { getNextWaitingRunner, lapRunnerLabel, runnerLabel } from '../lib/runner
 import type { Label, LapRecord, Runner } from '../types';
 import { LabelBadge } from './LabelBadge';
 
-const OUTSIDE_RECORD_VISIBLE_MS = 17_000;
+const OUTSIDE_RECORD_VISIBLE_MS = 8_000;
 
 export function OutsideDisplay({ onNavigate }: { onNavigate: (path: string) => void }) {
   const { runners, race, laps } = useAppData();
@@ -198,7 +198,7 @@ function OutsideRecordFlash({ lap }: { lap: LapRecord }) {
   return (
     <section className="outside-record-flash" aria-live="polite">
       <div className="record-flash-content">
-        <span>NEW RECORD</span>
+        <span>NEW DAY RECORD</span>
         <strong>{formatDurationMs(lap.durationMs)}</strong>
         <em>{lapRunnerLabel(lap)}</em>
       </div>
