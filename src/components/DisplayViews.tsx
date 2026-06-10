@@ -97,7 +97,7 @@ export function OutsideDisplay({ onNavigate }: { onNavigate: (path: string) => v
       </section>
       <section className="outside-band outside-band--next">
         <div className="outside-runner outside-runner--next">
-          <span className="display-kicker">Volgende loper</span>
+          <span className="display-kicker">Volgende racer</span>
           <strong className="display-runner-name">
             {nextRunner ? runnerLabel(nextRunner) : 'Geen loper in wachtrij'}
           </strong>

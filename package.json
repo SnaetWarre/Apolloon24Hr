@@ -21,6 +21,8 @@
     "dev:fresh": "npm run db:dev:seed && npm run dev:seeded",
     "dev:fresh:live": "npm run db:dev:seed:live && npm run dev:seeded",
     "dev:fresh:large": "npm run db:dev:seed:large && npm run dev:seeded",
+    "tunnel:vps": "bash scripts/tunnel-vps.sh",
+    "tunnel:vps:8080": "cross-env REMOTE_PORT=8080 bash scripts/tunnel-vps.sh",
     "db:dev:empty": "tsx scripts/seed-test-db.mjs --scenario=empty",
     "db:dev:seed": "tsx scripts/seed-test-db.mjs --scenario=ready",
     "db:dev:seed:ready": "tsx scripts/seed-test-db.mjs --scenario=ready",
