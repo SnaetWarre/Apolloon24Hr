@@ -720,12 +720,247 @@ select {
 }
 
 .analysis-grid,
-.inside-grid {
+.inside-grid,
+.analysis-main-grid,
+.analysis-top-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
   gap: 14px;
   align-items: start;
   margin-bottom: 14px;
+}
+
+.analysis-top-grid {
+  grid-template-columns: minmax(520px, 1.55fr) minmax(320px, 0.75fr);
+}
+
+.analysis-main-grid {
+  grid-template-columns: minmax(320px, 0.8fr) minmax(420px, 1.2fr);
+}
+
+.stats-grid--analysis {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+.stats-grid--analysis .stat-panel {
+  min-height: 104px;
+  border-left-width: 0;
+  border-top: 5px solid var(--apolloon-blue);
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+}
+
+.stats-grid--analysis .stat-panel strong {
+  font-size: clamp(22px, 3vw, 32px);
+}
+
+.analysis-filter-panel {
+  max-height: 620px;
+  overflow: auto;
+  border-left-width: 0;
+  border-top: 5px solid var(--apolloon-blue);
+}
+
+.panel-heading-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.analysis-filter-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.label-toggle-groups {
+  display: grid;
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.label-toggle-group h3 {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 13px;
+  text-transform: uppercase;
+}
+
+.label-toggle-list {
+  display: grid;
+  gap: 7px;
+}
+
+.label-toggle-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto 34px;
+  gap: 10px;
+  align-items: center;
+  min-height: 44px;
+  border: 1px solid var(--line);
+  background: #ffffff;
+  color: var(--text);
+  cursor: pointer;
+  padding: 8px 10px;
+  text-align: left;
+}
+
+.label-toggle-row.is-on {
+  border-color: rgba(40, 119, 246, 0.55);
+  background: #f5f9ff;
+}
+
+.label-toggle-name {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  font-weight: 900;
+}
+
+.label-toggle-name .label-image,
+.label-toggle-name .label-dot {
+  flex: 0 0 auto;
+}
+
+.label-switch {
+  position: relative;
+  width: 42px;
+  height: 24px;
+  border-radius: 999px;
+  background: #cbd5e1;
+  transition: background 120ms ease;
+}
+
+.label-switch i {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: #ffffff;
+  transition: transform 120ms ease;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.24);
+}
+
+.label-toggle-row.is-on .label-switch {
+  background: var(--apolloon-blue);
+}
+
+.label-toggle-row.is-on .label-switch i {
+  transform: translateX(18px);
+}
+
+.label-toggle-row strong {
+  color: var(--muted);
+  font-size: 12px;
+  text-align: right;
+}
+
+.analysis-section-header {
+  margin-bottom: 14px;
+}
+
+.analysis-section-header h2 {
+  margin: 0 0 5px;
+}
+
+.analysis-section-header p {
+  max-width: 780px;
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.analysis-runner-search {
+  flex: 0 1 320px;
+}
+
+.analysis-sort-control {
+  margin-top: 2px;
+}
+
+.analysis-pace-panel {
+  min-height: 520px;
+  border-left-width: 0;
+  border-top: 5px solid var(--apolloon-blue);
+}
+
+.analysis-chart-card {
+  position: relative;
+  width: 100%;
+  min-height: 390px;
+}
+
+.analysis-chart-card canvas {
+  width: 100% !important;
+  height: 390px !important;
+}
+
+.histogram {
+  display: grid;
+  gap: 12px;
+}
+
+.histogram-row {
+  display: grid;
+  grid-template-columns: 80px minmax(140px, 1fr) 44px;
+  gap: 12px;
+  align-items: center;
+}
+
+.histogram-row span,
+.histogram-row strong {
+  color: var(--muted);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.histogram-row strong {
+  color: var(--text);
+  text-align: right;
+}
+
+.histogram-track {
+  height: 28px;
+  overflow: hidden;
+  background: #e8f0ff;
+  border: 1px solid #d6e4ff;
+}
+
+.histogram-track i {
+  display: block;
+  height: 100%;
+  min-width: 6px;
+  background: var(--apolloon-blue);
+}
+
+.analysis-table strong {
+  font-weight: 900;
+}
+
+.empty-analytics-state {
+  min-height: 160px;
+  display: grid;
+  place-items: center;
+  background: var(--panel-soft);
+  color: var(--muted);
+  font-weight: 800;
+  text-align: center;
+  padding: 18px;
+}
+
+.export-row--secondary {
+  margin: 0;
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.analysis-export-panel {
+  margin-top: 14px;
 }
 
 .panel h2,

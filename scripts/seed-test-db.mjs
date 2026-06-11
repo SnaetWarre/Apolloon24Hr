@@ -469,7 +469,7 @@ function randomLapDurationMs(runner, lapIndex) {
   const drift = randomInt(-9_500, 13_750);
   const fatigue = (lapIndex % 6) * randomInt(180, 925);
   const duration = base + drift + fatigue;
-  return withVisibleMilliseconds(Math.max(48_125, Math.min(132_995, duration)));
+  return withVisibleMilliseconds(Math.max(60_000, Math.min(132_995, duration)));
 }
 
 function minutes(value) {
