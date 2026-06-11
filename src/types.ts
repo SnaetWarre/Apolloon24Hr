@@ -1,5 +1,8 @@
 export type {
   AppSnapshot,
+  ClusterPeer,
+  ClusterRole,
+  ClusterStatus,
   HostInfo,
   Label,
   LabelInput,

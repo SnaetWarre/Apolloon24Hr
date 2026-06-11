@@ -9,6 +9,7 @@ import Papa from 'papaparse';
 import { Server as SocketIOServer } from 'socket.io';
 import { formatDurationMs } from '../shared/time.js';
 import { appSnapshot } from './app-state.js';
+import { proxyFollowerTrpcWrites, registerClusterRoutes, startClusterService } from './cluster.js';
 import { getAllLaps, getAllRaceEvents, getAllRunners, initDb } from './db.js';
 import { hostInfo, SERVER_PORT } from './host.js';
 import { setRealtimeEmitter } from './realtime.js';
@@ -93,6 +94,10 @@ setRealtimeEmitter((event) => {
   io.emit(event.type, event.payload);
 });
 
+app.use(express.json({ limit: '50mb' }));
+registerClusterRoutes(app);
+app.use('/trpc', proxyFollowerTrpcWrites);
+
 app.use(
   '/trpc',
   createExpressMiddleware({
@@ -160,6 +165,7 @@ io.on('connection', (socket) => {
 });
 
 await initDb();
+startClusterService();
 
 server.listen(SERVER_PORT, () => {
   console.log(`Server listening on http://0.0.0.0:${SERVER_PORT}`);

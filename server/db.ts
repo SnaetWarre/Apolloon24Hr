@@ -15,6 +15,7 @@ import type {
   RunnerInput,
   RunnerPatch,
   RunnerStatus,
+  AppSnapshot,
 } from '../shared/schemas.js';
 
 type SqlValue = string | number | null;
@@ -257,6 +258,20 @@ function createSchema(): void {
       created_at INTEGER NOT NULL,
       FOREIGN KEY (runner_id) REFERENCES runners(id) ON DELETE SET NULL
     );
+
+    CREATE TABLE IF NOT EXISTS cluster_operations (
+      seq INTEGER PRIMARY KEY AUTOINCREMENT,
+      id TEXT NOT NULL UNIQUE,
+      term INTEGER NOT NULL,
+      origin_host_id TEXT NOT NULL,
+      type TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      applied_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_cluster_operations_created_at
+      ON cluster_operations(created_at);
   `);
 
   run(
@@ -311,7 +326,8 @@ export async function initDb(): Promise<void> {
   database.pragma('busy_timeout = 5000');
   createSchema();
   seedDefaultLabels();
-  setSetting('schema_version', '3');
+  setSetting('schema_version', '4');
+  ensureHostId();
 }
 
 export function getSetting(key: string): string | null {
@@ -321,6 +337,180 @@ export function getSetting(key: string): string | null {
 
 export function setSetting(key: string, value: string): void {
   run('INSERT OR REPLACE INTO settings(key, value) VALUES(?, ?)', [key, String(value)]);
+}
+
+export function ensureHostId(): string {
+  const existing = getSetting('host_id');
+  if (existing) return existing;
+  const hostId = uuidv4();
+  setSetting('host_id', hostId);
+  return hostId;
+}
+
+export function getClusterTerm(): number {
+  return Number(getSetting('cluster_term') || 0);
+}
+
+export function setClusterTerm(term: number): void {
+  setSetting('cluster_term', String(Math.max(0, Math.floor(term))));
+}
+
+export function getClusterVotedFor(): string | null {
+  return getSetting('cluster_voted_for');
+}
+
+export function setClusterVotedFor(hostId: string | null): void {
+  if (hostId) {
+    setSetting('cluster_voted_for', hostId);
+    return;
+  }
+  run('DELETE FROM settings WHERE key = ?', ['cluster_voted_for']);
+}
+
+export type ClusterOperation = {
+  seq: number;
+  id: string;
+  term: number;
+  originHostId: string;
+  type: string;
+  payload: unknown;
+  createdAt: number;
+  appliedAt: number;
+};
+
+export function appendClusterOperation(input: {
+  seq?: number;
+  id?: string;
+  term: number;
+  originHostId: string;
+  type: string;
+  payload: unknown;
+  createdAt?: number;
+  appliedAt?: number;
+}): ClusterOperation {
+  const now = Date.now();
+  const id = input.id || uuidv4();
+  if (input.seq !== undefined) {
+    run(
+      `INSERT OR IGNORE INTO cluster_operations (
+        seq,
+        id,
+        term,
+        origin_host_id,
+        type,
+        payload_json,
+        created_at,
+        applied_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        Math.max(1, Math.floor(input.seq)),
+        id,
+        Math.max(0, Math.floor(input.term)),
+        input.originHostId,
+        input.type,
+        JSON.stringify(input.payload),
+        input.createdAt ?? now,
+        input.appliedAt ?? now,
+      ]
+    );
+  } else {
+    run(
+      `INSERT OR IGNORE INTO cluster_operations (
+        id,
+        term,
+        origin_host_id,
+        type,
+        payload_json,
+        created_at,
+        applied_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
+        id,
+        Math.max(0, Math.floor(input.term)),
+        input.originHostId,
+        input.type,
+        JSON.stringify(input.payload),
+        input.createdAt ?? now,
+        input.appliedAt ?? now,
+      ]
+    );
+  }
+  const row = one<{
+    seq: number;
+    id: string;
+    term: number;
+    originHostId: string;
+    type: string;
+    payloadJson: string;
+    createdAt: number;
+    appliedAt: number;
+  }>(
+    `SELECT
+       seq,
+       id,
+       term,
+       origin_host_id AS originHostId,
+       type,
+       payload_json AS payloadJson,
+       created_at AS createdAt,
+       applied_at AS appliedAt
+     FROM cluster_operations
+     WHERE id = ?`,
+    [id]
+  );
+  if (!row) throw new Error('cluster operation insert failed');
+  return {
+    seq: row.seq,
+    id: row.id,
+    term: row.term,
+    originHostId: row.originHostId,
+    type: row.type,
+    payload: JSON.parse(row.payloadJson) as unknown,
+    createdAt: row.createdAt,
+    appliedAt: row.appliedAt,
+  };
+}
+
+export function getLastClusterOperationSeq(): number {
+  const row = one<{ seq: number | null }>('SELECT MAX(seq) AS seq FROM cluster_operations');
+  return Number(row?.seq || 0);
+}
+
+export function getClusterOperationsAfter(seq: number, limit = 250): ClusterOperation[] {
+  return all<{
+    seq: number;
+    id: string;
+    term: number;
+    originHostId: string;
+    type: string;
+    payloadJson: string;
+    createdAt: number;
+    appliedAt: number;
+  }>(
+    `SELECT
+       seq,
+       id,
+       term,
+       origin_host_id AS originHostId,
+       type,
+       payload_json AS payloadJson,
+       created_at AS createdAt,
+       applied_at AS appliedAt
+     FROM cluster_operations
+     WHERE seq > ?
+     ORDER BY seq ASC
+     LIMIT ?`,
+    [Math.max(0, Math.floor(seq)), Math.max(1, Math.floor(limit))]
+  ).map((row) => ({
+    seq: row.seq,
+    id: row.id,
+    term: row.term,
+    originHostId: row.originHostId,
+    type: row.type,
+    payload: JSON.parse(row.payloadJson) as unknown,
+    createdAt: row.createdAt,
+    appliedAt: row.appliedAt,
+  }));
 }
 
 export function getLabels(): Label[] {
@@ -1167,4 +1357,161 @@ export function finishRace(nowMs = Date.now()): void {
      WHERE id = 1`,
     [nowMs]
   );
+}
+
+export function applySnapshot(snapshot: AppSnapshot): void {
+  transaction(() => {
+    run('DELETE FROM handoff_history');
+    run('DELETE FROM race_events');
+    run('DELETE FROM laps');
+    run('DELETE FROM runner_labels');
+    run('DELETE FROM queue_entries');
+    run('DELETE FROM runners');
+    run('DELETE FROM labels');
+
+    for (const label of snapshot.labels) {
+      run(
+        `INSERT INTO labels (
+          id,
+          name,
+          color,
+          icon,
+          kind,
+          image_url,
+          target_laps,
+          sort_order,
+          created_at,
+          updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          label.id,
+          label.name,
+          label.color,
+          label.icon,
+          label.kind,
+          label.imageUrl ?? null,
+          label.targetLaps ?? null,
+          label.sortOrder ?? null,
+          label.createdAt ?? Date.now(),
+          label.updatedAt ?? Date.now(),
+        ]
+      );
+    }
+
+    for (const runner of snapshot.runners) {
+      run(
+        `INSERT INTO runners (
+          id,
+          runner_number,
+          name,
+          target_laps,
+          historical_avg_ms,
+          historical_best_ms,
+          registration_source,
+          notes,
+          created_at,
+          updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          runner.id,
+          runner.runnerNumber ?? null,
+          runner.name,
+          runner.targetLaps ?? null,
+          runner.historicalAvgMs ?? null,
+          runner.historicalBestMs ?? null,
+          cleanRegistrationSource(runner.registrationSource),
+          runner.notes ?? '',
+          runner.createdAt,
+          runner.updatedAt,
+        ]
+      );
+      run(
+        `INSERT INTO queue_entries (
+          runner_id,
+          status,
+          queue_index,
+          status_since,
+          hidden_at
+        ) VALUES (?, ?, ?, ?, ?)`,
+        [
+          runner.id,
+          cleanStatus(runner.status),
+          runner.queueIndex ?? null,
+          runner.statusSince ?? null,
+          runner.queueHiddenAt ?? null,
+        ]
+      );
+      for (const label of runner.labels || []) {
+        run('INSERT OR IGNORE INTO runner_labels (runner_id, label_id) VALUES (?, ?)', [
+          runner.id,
+          label.id,
+        ]);
+      }
+    }
+
+    for (const lap of snapshot.laps.slice().reverse()) {
+      run(
+        `INSERT INTO laps (
+          id,
+          runner_id,
+          lap_number,
+          started_at,
+          finished_at,
+          duration_ms,
+          source,
+          created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          lap.id,
+          lap.runnerId,
+          lap.lapNumber,
+          lap.startedAt,
+          lap.finishedAt,
+          lap.durationMs,
+          lap.source,
+          lap.createdAt,
+        ]
+      );
+    }
+
+    for (const event of snapshot.events.slice().reverse()) {
+      run(
+        `INSERT INTO race_events (
+          id,
+          type,
+          message,
+          occurred_at,
+          runner_id,
+          runner_number,
+          runner_name,
+          created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          event.id,
+          cleanRaceEventType(event.type),
+          event.message,
+          event.occurredAt,
+          event.runnerId ?? null,
+          event.runnerNumber ?? null,
+          event.runnerName ?? null,
+          event.createdAt,
+        ]
+      );
+    }
+
+    run(
+      `UPDATE race_state
+       SET active_runner_id = ?,
+           active_started_at = ?,
+           race_started_at = ?,
+           race_finished_at = ?
+       WHERE id = 1`,
+      [
+        snapshot.race.activeRunnerId ?? null,
+        snapshot.race.activeStartedAt ?? null,
+        snapshot.race.raceStartedAt ?? null,
+        snapshot.race.raceFinishedAt ?? null,
+      ]
+    );
+  });
 }

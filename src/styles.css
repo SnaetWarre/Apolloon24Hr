@@ -210,6 +210,33 @@ select {
   white-space: nowrap;
 }
 
+.cluster-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 8px 12px;
+  border-left: 5px solid var(--muted);
+  background: #f8fafc;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+.cluster-pill span {
+  color: var(--muted);
+}
+
+.cluster-pill--leader {
+  border-left-color: var(--green);
+  background: #ecfdf5;
+}
+
+.cluster-pill--standby {
+  border-left-color: var(--amber);
+  background: #fff7ed;
+}
+
 .input {
   width: 100%;
   min-width: 0;

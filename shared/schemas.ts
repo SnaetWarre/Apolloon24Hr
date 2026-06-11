@@ -92,6 +92,35 @@ export const hostInfoSchema = z.object({
 });
 export type HostInfo = z.infer<typeof hostInfoSchema>;
 
+export const clusterRoleSchema = z.enum(['standalone', 'leader', 'follower', 'candidate']);
+export type ClusterRole = z.infer<typeof clusterRoleSchema>;
+
+export const clusterPeerSchema = z.object({
+  id: z.string().nullable(),
+  url: z.string(),
+  reachable: z.boolean(),
+  lastSeenAt: z.number().nullable(),
+  lastSeq: z.number().int().nonnegative().nullable(),
+});
+export type ClusterPeer = z.infer<typeof clusterPeerSchema>;
+
+export const clusterStatusSchema = z.object({
+  enabled: z.boolean(),
+  hostId: z.string(),
+  role: clusterRoleSchema,
+  term: z.number().int().nonnegative(),
+  leaderId: z.string().nullable(),
+  leaderUrl: z.string().nullable(),
+  writable: z.boolean(),
+  quorumSize: z.number().int().positive(),
+  votingMembers: z.number().int().positive(),
+  lastAppliedSeq: z.number().int().nonnegative(),
+  lastLeaderSeenAt: z.number().nullable(),
+  failoverHint: z.string().nullable(),
+  peers: z.array(clusterPeerSchema),
+});
+export type ClusterStatus = z.infer<typeof clusterStatusSchema>;
+
 export const appSnapshotSchema = z.object({
   runners: z.array(runnerSchema),
   labels: z.array(labelSchema),
@@ -100,6 +129,7 @@ export const appSnapshotSchema = z.object({
   events: z.array(raceEventSchema),
   serverNowMs: z.number(),
   host: hostInfoSchema,
+  cluster: clusterStatusSchema.optional(),
 });
 export type AppSnapshot = z.infer<typeof appSnapshotSchema>;
 

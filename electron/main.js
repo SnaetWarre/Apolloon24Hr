@@ -62,6 +62,7 @@ async function startServer() {
   const env = {
     ...process.env,
     NODE_ENV: 'production',
+    CLUSTER_ENABLED: process.env.CLUSTER_ENABLED || 'true',
     DATA_PATH: app.getPath('userData'),
     PUBLIC_APP_PORT: process.env.PUBLIC_APP_PORT || '5173',
   };

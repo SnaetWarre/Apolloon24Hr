@@ -4,7 +4,7 @@ Local-first telsysteem for the Apolloon 24 Urenloop setup. One host laptop runs 
 
 ## Event Network
 
-Only the host laptop needs to be reachable on the local network.
+In normal single-host mode, only the host laptop needs to be reachable on the local network.
 
 Recommended defaults:
 
@@ -14,6 +14,34 @@ Event URL:   shown by the app, for example http://<host-lan-ip>:5173
 ```
 
 Client laptops and TV laptops can use automatic DHCP. Their IP addresses do not matter because they only connect to the host.
+
+### Local Hot-Standby Cluster
+
+For automatic local failover, run the packaged app on at least three host-capable laptops connected to the same wired switch. Cluster mode is enabled automatically in the packaged app. Every host keeps a full local SQLite copy. Exactly one host is the writable Primary; the others are Standby and forward write actions to the current Primary.
+
+Automatic failover needs three voting hosts. With only two hosts, the app will not safely auto-promote after a split because both sides cannot prove which database copy is authoritative.
+
+Normal event setup:
+
+```text
+1. Plug the host laptops into the same wired switch.
+2. Start Apolloon on each host laptop.
+3. Wait until the header shows one Primary and the other hosts as Standby.
+4. Use any shown Event URL from a host laptop for operator and display browsers.
+```
+
+No IP addresses or peer settings need to be entered during the event. The app announces itself on the local network and discovers the other Apolloon hosts automatically.
+
+Developer overrides:
+
+```text
+CLUSTER_ENABLED=false           # disable cluster behavior
+CLUSTER_ENABLED=true            # enable cluster behavior in development
+CLUSTER_PEERS=http://host:5173  # optional fixed peer list for tests
+CLUSTER_DISCOVERY=false         # disable UDP discovery
+```
+
+The header shows `Primary` or `Standby` plus the applied operation sequence. After the Primary dies, the remaining hosts elect a new Primary in a few seconds; browser write requests sent to a Standby are proxied to the new Primary once election has completed.
 
 ## Tech Stack
 
