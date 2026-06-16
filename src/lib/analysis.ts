@@ -27,6 +27,13 @@ export type TimeBucket = {
   averageMs: number | null;
 };
 
+export type RollingLapTrendPoint = {
+  raceHour: number;
+  label: string;
+  averageMs: number;
+  count: number;
+};
+
 export type LabelComparison = DurationStats & {
   label: Label;
 };
@@ -127,6 +134,34 @@ export function buildTimeBuckets(laps: LapRecord[], race: RaceState): TimeBucket
       count: bucketLaps.length,
       averageMs: calculateDurationStats(bucketLaps).averageMs,
     }));
+}
+
+export function buildRollingLapTrend(
+  laps: LapRecord[],
+  race: RaceState,
+  windowMinutes = 60
+): RollingLapTrendPoint[] {
+  const startedAt = race.raceStartedAt ?? oldestLapTimestamp(laps);
+  if (startedAt == null) return [];
+
+  const windowMs = Math.max(1, windowMinutes) * 60_000;
+  const sortedLaps = [...laps].sort((a, b) => a.finishedAt - b.finishedAt);
+
+  return sortedLaps.map((lap) => {
+    const windowStart = lap.finishedAt - windowMs;
+    const windowLaps = sortedLaps.filter(
+      (item) => item.finishedAt >= windowStart && item.finishedAt <= lap.finishedAt
+    );
+    const averageMs = calculateDurationStats(windowLaps).averageMs ?? lap.durationMs;
+    const raceHour = Math.max(0, (lap.finishedAt - startedAt) / 3_600_000);
+
+    return {
+      raceHour,
+      label: formatRaceHour(raceHour),
+      averageMs,
+      count: windowLaps.length,
+    };
+  });
 }
 
 export function buildLabelComparisons(labels: Label[], laps: LapRecord[]): LabelComparison[] {
@@ -267,6 +302,13 @@ function formatMinutesSeconds(ms: number): string {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+}
+
+function formatRaceHour(hour: number): string {
+  const totalMinutes = Math.round(hour * 60);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return minutes === 0 ? `${hours}u` : `${hours}u${minutes.toString().padStart(2, '0')}`;
 }
 
 function median(sortedValues: number[]): number {

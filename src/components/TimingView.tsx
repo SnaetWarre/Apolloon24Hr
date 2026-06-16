@@ -45,16 +45,14 @@ export function TimingView() {
   React.useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
-      if (target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || target?.isContentEditable) return;
-      if (event.code === 'Space') {
-        event.preventDefault();
-        if (event.repeat || handoffBusy) return;
-        runHandoff();
-      }
+      if (!isHandoffKey(event) || isInteractiveTarget(target) || finishConfirmStep > 0) return;
+      event.preventDefault();
+      if (event.repeat || handoffBusy) return;
+      runHandoff();
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [handoffBusy, runHandoff]);
+  }, [finishConfirmStep, handoffBusy, runHandoff]);
 
   async function undo() {
     if (!window.confirm('Laatste handoff ongedaan maken?')) return;
@@ -105,13 +103,13 @@ export function TimingView() {
       </div>
 
       <div className="handoff-preview">
-        <span className="muted-label">Bij volgende spatie</span>
+        <span className="muted-label">Bij volgende spatie/enter</span>
         <strong>{handoffPreview}</strong>
       </div>
 
       <div className="timing-actions">
         <button className="btn btn--primary btn--xl" onClick={runHandoff} disabled={handoffBusy}>
-          {handoffBusy ? 'Bezig...' : activeRunner ? 'Spatie: handoff' : 'Start eerste loper'}
+          {handoffBusy ? 'Bezig...' : activeRunner ? 'Spatie/Enter: handoff' : 'Start eerste loper'}
         </button>
         <button className="btn btn--ghost" onClick={undo} disabled={handoffBusy}>
           Undo laatste handoff
@@ -210,6 +208,16 @@ export function TimingView() {
       )}
     </>
   );
+}
+
+function isHandoffKey(event: KeyboardEvent) {
+  return event.code === 'Space' || event.key === 'Enter';
+}
+
+function isInteractiveTarget(target: HTMLElement | null) {
+  if (!target) return false;
+  if (target.isContentEditable) return true;
+  return Boolean(target.closest('input, textarea, select, button, a, [contenteditable="true"]'));
 }
 
 function TimingCard({

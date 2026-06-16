@@ -19,6 +19,7 @@ import {
   buildFastestLapWindows,
   buildKpis,
   buildLabelComparisons,
+  buildRollingLapTrend,
   buildRunnerInsights,
   buildTimeBuckets,
   filterLaps,
@@ -66,6 +67,7 @@ export function AnalysisView() {
   const filteredLaps = React.useMemo(() => filterLaps(laps, filters), [laps, filters]);
   const kpis = React.useMemo(() => buildKpis(filteredLaps, race), [filteredLaps, race]);
   const timeBuckets = React.useMemo(() => buildTimeBuckets(filteredLaps, race), [filteredLaps, race]);
+  const rollingLapTrend = React.useMemo(() => buildRollingLapTrend(filteredLaps, race), [filteredLaps, race]);
   const distribution = React.useMemo(() => buildDistribution(filteredLaps), [filteredLaps]);
   const fastestLapWindows = React.useMemo(
     () => buildFastestLapWindows(filteredLaps, race, fastestWindowMode),
@@ -141,6 +143,14 @@ export function AnalysisView() {
           <LabelTogglePicker labels={labels} enabledLabelIds={enabledLabelIds} onToggle={toggleLabel} />
         </section>
       </div>
+
+      <section className="panel analysis-trend-panel">
+        <SectionHeader
+          title="Rondeduurtrend"
+          text="Blauwe lijn met het rolling gemiddelde van Apolloon-rondetijden over de race."
+        />
+        <RollingLapTrendChart points={rollingLapTrend} />
+      </section>
 
       <div className="stats-grid stats-grid--analysis">
         <StatPanel label="Geselecteerde toeren" value={kpis.count.toString()} />
@@ -365,6 +375,118 @@ function LabelTogglePicker({
           </div>
         </section>
       ))}
+    </div>
+  );
+}
+
+function RollingLapTrendChart({ points }: { points: ReturnType<typeof buildRollingLapTrend> }) {
+  const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
+
+  React.useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || !points.length) return undefined;
+
+    const config: ChartConfiguration<'line'> = {
+      type: 'line',
+      data: {
+        datasets: [
+          {
+            label: 'Apolloon rolling gemiddelde',
+            data: points.map((point) => ({
+              x: point.raceHour,
+              y: point.averageMs / 1000,
+            })),
+            borderColor: '#2877F6',
+            backgroundColor: '#2877F6',
+            borderWidth: 3,
+            pointRadius: 0,
+            pointHoverRadius: 5,
+            tension: 0.32,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: {
+          mode: 'nearest',
+          intersect: false,
+        },
+        parsing: false,
+        plugins: {
+          legend: {
+            position: 'top',
+            labels: {
+              boxWidth: 14,
+              color: '#162033',
+              font: { weight: 'bold' },
+            },
+          },
+          tooltip: {
+            callbacks: {
+              title(items) {
+                const point = points[items[0]?.dataIndex ?? 0];
+                return point ? `Race-uur ${point.label}` : 'Race-uur';
+              },
+              label(context) {
+                const point = points[context.dataIndex];
+                const average = formatDurationMs(Number(context.parsed.y) * 1000);
+                return point
+                  ? [`Gemiddelde rondetijd: ${average}`, `Rondes in venster: ${point.count}`]
+                  : `Gemiddelde rondetijd: ${average}`;
+              },
+            },
+          },
+        },
+        scales: {
+          x: {
+            type: 'linear',
+            title: {
+              display: true,
+              text: 'Race-uur',
+              color: '#64748b',
+              font: { weight: 'bold' },
+            },
+            ticks: {
+              color: '#64748b',
+              callback(value) {
+                return `${formatNumber(Number(value), 1)}u`;
+              },
+            },
+            grid: {
+              color: '#eef2f7',
+            },
+          },
+          y: {
+            beginAtZero: false,
+            title: {
+              display: true,
+              text: 'Gemiddelde rondetijd',
+              color: '#64748b',
+              font: { weight: 'bold' },
+            },
+            ticks: {
+              color: '#64748b',
+              callback(value) {
+                return formatDurationMs(Number(value) * 1000);
+              },
+            },
+            grid: {
+              color: '#e2e8f0',
+            },
+          },
+        },
+      },
+    };
+
+    const chart = new Chart(canvas, config);
+    return () => chart.destroy();
+  }, [points]);
+
+  if (!points.length) return <EmptyAnalyticsState message="Geen rondes binnen deze selectie." />;
+  return (
+    <div className="analysis-chart-card">
+      <canvas ref={canvasRef} />
     </div>
   );
 }

@@ -7,7 +7,7 @@ import type { Label, Runner, RunnerStatus } from '../types';
 
 export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; onClose: () => void }) {
   const { runners, laps: allLaps, labels } = useAppData();
-  const { updateRunner } = useAppActions();
+  const { setStatus, updateRunner } = useAppActions();
   const runner = runners.find((item) => item.id === runnerId);
   const [runnerNumber, setRunnerNumber] = React.useState('');
   const [name, setName] = React.useState('');
@@ -16,6 +16,9 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
   const [selectedLabels, setSelectedLabels] = React.useState<string[]>([]);
   const [closePromptOpen, setClosePromptOpen] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
+  const [queueActionBusy, setQueueActionBusy] = React.useState(false);
+  const [queueActionMessage, setQueueActionMessage] = React.useState<string | null>(null);
+  const [queueActionError, setQueueActionError] = React.useState<string | null>(null);
   const editableRunnerKey = runner ? getEditableRunnerKey(runner) : '';
 
   React.useEffect(() => {
@@ -26,6 +29,12 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
     setNotes(runner.notes || '');
     setSelectedLabels(runner.labels.map((label) => label.id));
   }, [editableRunnerKey]);
+
+  React.useEffect(() => {
+    setQueueActionMessage(null);
+    setQueueActionError(null);
+    setQueueActionBusy(false);
+  }, [runnerId]);
 
   useAnimationFrameTick(Boolean(runner?.statusSince && ['warming_up', 'waiting', 'running'].includes(runner.status)));
   const laps = React.useMemo(() => allLaps.filter((lap) => lap.runnerId === runnerId), [allLaps, runnerId]);
@@ -87,11 +96,30 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
     );
   }
 
+  async function removeFromQueueFlow() {
+    if (!runner || !isQueueRemovalStatus(runner.status)) return;
+    if (!window.confirm('Loper terug buiten Telsysteem 1 zetten?')) return;
+
+    const runnerName = runner.name;
+    setQueueActionBusy(true);
+    setQueueActionMessage(null);
+    setQueueActionError(null);
+    try {
+      await setStatus(runner.id, 'registered');
+      setQueueActionMessage(`${runnerName} staat terug buiten Telsysteem 1.`);
+    } catch (err) {
+      setQueueActionError(err instanceof Error ? err.message : 'Loper terugzetten mislukt');
+    } finally {
+      setQueueActionBusy(false);
+    }
+  }
+
   if (!runner) return null;
 
   const latestLap = laps[0] || null;
   const statusSummary = runnerStatusSummary(runner.status, runner.statusSince);
   const recentLaps = laps.slice(0, 10);
+  const queueRemovalLabel = queueRemovalButtonLabel(runner.status);
 
   return (
     <div className="modal-backdrop" role="dialog" aria-modal="true">
@@ -206,6 +234,21 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
           <textarea className="input textarea" value={notes} onChange={(event) => setNotes(event.target.value)} />
         </label>
 
+        {queueRemovalLabel && (
+          <section className="profile-queue-action">
+            <div>
+              <h3>Telsysteem 1</h3>
+              <p>Haal deze loper uit de actieve lijst zonder profiel of rondedata te verwijderen.</p>
+            </div>
+            <button className="btn btn--ghost" onClick={removeFromQueueFlow} disabled={queueActionBusy}>
+              {queueActionBusy ? 'Bezig...' : queueRemovalLabel}
+            </button>
+          </section>
+        )}
+
+        {queueActionMessage && <div className="success-banner">{queueActionMessage}</div>}
+        {queueActionError && <div className="warning-banner">{queueActionError}</div>}
+
         <div className="modal-actions">
           <button className="btn btn--ghost" onClick={requestClose}>
             Annuleer
@@ -237,6 +280,16 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
       </div>
     </div>
   );
+}
+
+function isQueueRemovalStatus(status: RunnerStatus) {
+  return status === 'warming_up' || status === 'waiting';
+}
+
+function queueRemovalButtonLabel(status: RunnerStatus) {
+  if (status === 'warming_up') return 'Uit opwarmen halen';
+  if (status === 'waiting') return 'Uit wachtrij halen';
+  return null;
 }
 
 function isDirty({
