@@ -126,7 +126,8 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
       <div className="modal">
         <div className="modal-header">
           <div>
-            <h2>Lopersprofiel</h2>
+            <span className="modal-kicker">Lopersprofiel</span>
+            <h2>{runnerTitle(runner)}</h2>
             <p>
               {runner.lapCount} toeren
               {runner.bestLapMs ? ` · snelste ${formatDurationMs(runner.bestLapMs)}` : ''}
@@ -290,6 +291,10 @@ function queueRemovalButtonLabel(status: RunnerStatus) {
   if (status === 'warming_up') return 'Uit opwarmen halen';
   if (status === 'waiting') return 'Uit wachtrij halen';
   return null;
+}
+
+function runnerTitle(runner: Pick<Runner, 'runnerNumber' | 'name'>) {
+  return runner.runnerNumber ? `${runner.runnerNumber} - ${runner.name}` : runner.name;
 }
 
 function isDirty({

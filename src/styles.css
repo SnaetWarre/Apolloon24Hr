@@ -1178,6 +1178,15 @@ td {
   margin: 0;
 }
 
+.modal-kicker {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
 .modal-header p {
   margin: 6px 0 0;
   color: var(--muted);
