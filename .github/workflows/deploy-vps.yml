@@ -1,0 +1,56 @@
+name: Deploy VPS
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+env:
+  VPS_AUTO_DEPLOY: ${{ vars.VPS_AUTO_DEPLOY }}
+  VPS_HOST: ${{ secrets.VPS_HOST }}
+  VPS_USER: ${{ secrets.VPS_USER }}
+  VPS_APP_DIR: ${{ vars.VPS_APP_DIR }}
+  VPS_DATA_DIR: ${{ vars.VPS_DATA_DIR }}
+  VPS_SERVICE_NAME: ${{ vars.VPS_SERVICE_NAME }}
+  VPS_APP_PORT: ${{ vars.VPS_APP_PORT }}
+  VPS_PUBLIC_HOST: ${{ vars.VPS_PUBLIC_HOST }}
+  VPS_PUBLIC_APP_PORT: ${{ vars.VPS_PUBLIC_APP_PORT }}
+  VPS_NODE_VERSION: ${{ vars.VPS_NODE_VERSION }}
+
+jobs:
+  deploy:
+    if: github.event_name == 'workflow_dispatch' || vars.VPS_AUTO_DEPLOY == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --include=optional
+
+      - name: Build deploy artifact
+        run: npm run build
+
+      - name: Configure SSH
+        env:
+          VPS_SSH_PRIVATE_KEY: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
+        run: |
+          if [ -z "${VPS_SSH_PRIVATE_KEY}" ]; then
+            echo "Missing secret VPS_SSH_PRIVATE_KEY" >&2
+            exit 1
+          fi
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "${VPS_SSH_PRIVATE_KEY}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "${VPS_HOST:-185.102.172.74}" >> ~/.ssh/known_hosts
+
+      - name: Deploy to VPS
+        env:
+          DEPLOY_SKIP_BUILD: '1'
+        run: bash scripts/deploy-vps.sh

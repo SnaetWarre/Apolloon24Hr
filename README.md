@@ -53,6 +53,7 @@ The header shows `Primary` or `Standby` plus the applied operation sequence. Aft
 In development, Vite serves the frontend on `5173` and proxies `/trpc`, `/api`, and `/socket.io` to the backend on `3000`. `npm run dev` starts both after seeding `.dev-data/`.
 
 For the repository layout, runtime boundaries, and validation commands, see `docs/codebase-map.md`.
+For hosting the app directly on the VPS without a laptop tunnel, see `docs/vps-deploy.md`.
 
 ## Running The Event
 
