@@ -1,14 +1,15 @@
 import React from 'react';
 import { useAppData } from '../app/index';
+import { isFastestLapForRecordMode, publicRecordModeTitle } from '../lib/analysis';
 import { formatClockTimeMs, formatDurationMs } from '../lib/time';
 import { getNextWaitingRunner, lapRunnerLabel, runnerLabel } from '../lib/runners';
-import type { Label, LapRecord, RaceEvent, Runner } from '../types';
+import type { Label, LapRecord, PublicRecordMode, RaceEvent, Runner } from '../types';
 import { LabelBadge } from './LabelBadge';
 
 const OUTSIDE_ALERT_VISIBLE_MS = 8_000;
 
 export function OutsideDisplay({ onNavigate }: { onNavigate: (path: string) => void }) {
-  const { runners, race, laps, events } = useAppData();
+  const { runners, race, laps, events, settings } = useAppData();
   const activeRunner = runners.find((runner) => runner.id === race.activeRunnerId) || null;
   const nextRunner = getNextWaitingRunner(runners);
   const [recordLap, setRecordLap] = React.useState<LapRecord | null>(null);
@@ -21,13 +22,16 @@ export function OutsideDisplay({ onNavigate }: { onNavigate: (path: string) => v
   React.useEffect(() => {
     const knownLapIds = knownLapIdsRef.current;
     const latestLap = laps[0] || null;
+    if (settings.publicRecordMode === 'off') {
+      setRecordLap(null);
+    }
 
     if (
       !burgieEvent &&
       knownLapIds &&
       latestLap &&
       !knownLapIds.has(latestLap.id) &&
-      isNewFastestLap(latestLap, laps.slice(1))
+      isFastestLapForRecordMode(latestLap, laps.slice(1), race, settings.publicRecordMode)
     ) {
       setRecordLap(latestLap);
       if (recordTimeoutRef.current !== null) {
@@ -44,7 +48,7 @@ export function OutsideDisplay({ onNavigate }: { onNavigate: (path: string) => v
       return laps.some((lap) => lap.id === currentRecordLap.id) ? currentRecordLap : null;
     });
     knownLapIdsRef.current = new Set(laps.map((lap) => lap.id));
-  }, [burgieEvent, laps]);
+  }, [burgieEvent, laps, race, settings.publicRecordMode]);
 
   React.useEffect(() => {
     const knownEventIds = knownEventIdsRef.current;
@@ -104,7 +108,11 @@ export function OutsideDisplay({ onNavigate }: { onNavigate: (path: string) => v
           {nextRunner && <DisplayLabels labels={nextRunner.labels} />}
         </div>
       </section>
-      {burgieEvent ? <OutsideBurgieFlash event={burgieEvent} /> : recordLap ? <OutsideRecordFlash lap={recordLap} /> : null}
+      {burgieEvent ? (
+        <OutsideBurgieFlash event={burgieEvent} />
+      ) : recordLap ? (
+        <OutsideRecordFlash lap={recordLap} mode={settings.publicRecordMode} />
+      ) : null}
     </main>
   );
 }
@@ -229,11 +237,11 @@ function DisplayLabels({ labels }: { labels: Label[] }) {
   );
 }
 
-function OutsideRecordFlash({ lap }: { lap: LapRecord }) {
+function OutsideRecordFlash({ lap, mode }: { lap: LapRecord; mode: PublicRecordMode }) {
   return (
     <section className="outside-record-flash" aria-live="polite">
       <div className="record-flash-content">
-        <span>NEW DAY RECORD</span>
+        <span>{publicRecordModeTitle(mode)}</span>
         <strong>{formatDurationMs(lap.durationMs)}</strong>
         <em>{lapRunnerLabel(lap)}</em>
       </div>
@@ -256,10 +264,6 @@ function OutsideBurgieFlash({ event }: { event: RaceEvent }) {
 function eventRunnerLabel(event: RaceEvent) {
   if (!event.runnerName) return 'Publiek moment';
   return event.runnerNumber ? `${event.runnerNumber} - ${event.runnerName}` : event.runnerName;
-}
-
-function isNewFastestLap(latestLap: LapRecord, previousLaps: LapRecord[]) {
-  return previousLaps.every((lap) => latestLap.durationMs < lap.durationMs);
 }
 
 function buildLabelStat(label: Label, runners: Runner[]) {

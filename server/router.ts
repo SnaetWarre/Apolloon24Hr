@@ -4,6 +4,7 @@ import {
   importCsvSchema,
   labelInputSchema,
   labelPatchSchema,
+  publicRecordModeUpdateSchema,
   queueReorderSchema,
   runnerIdSchema,
   runnerInputSchema,
@@ -23,6 +24,7 @@ import {
   getAllLaps,
   getAllRaceEvents,
   getAllRunners,
+  getAppSettings,
   getLabels,
   getLapById,
   getRaceState,
@@ -30,6 +32,7 @@ import {
   hideRunnerInQueue,
   insertRunner,
   performHandoff,
+  setPublicRecordMode,
   undoLastHandoff,
   unhideRunnerInQueue,
   updateLabel,
@@ -367,6 +370,17 @@ export const appRouter = t.router({
         const event = createBurgieGepaktEvent(Date.now());
         emitRealtime({ type: 'race-event:created', payload: event });
         return event;
+      });
+    }),
+  }),
+
+  settings: t.router({
+    current: t.procedure.query(() => getAppSettings()),
+    updatePublicRecordMode: t.procedure.input(publicRecordModeUpdateSchema).mutation(({ input }) => {
+      return commitWrite('settings.updatePublicRecordMode', () => {
+        const settings = setPublicRecordMode(input.publicRecordMode);
+        emitRealtime({ type: 'settings:changed', payload: settings });
+        return settings;
       });
     }),
   }),

@@ -204,6 +204,19 @@ select {
   flex: 0 0 58px;
 }
 
+.public-record-mode-row {
+  align-items: center;
+  margin: 14px 0 0;
+}
+
+.public-record-mode-row label {
+  font-weight: 900;
+}
+
+.public-record-mode-row .input {
+  max-width: 220px;
+}
+
 .header-hint {
   margin: 0;
   margin-left: auto;

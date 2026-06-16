@@ -1,7 +1,7 @@
 import React from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { trpc } from '../api';
-import type { LabelInput, LabelPatch, RunnerInput, RunnerPatch, RunnerStatus } from '../types';
+import type { LabelInput, LabelPatch, PublicRecordMode, RunnerInput, RunnerPatch, RunnerStatus } from '../types';
 import { snapshotKey } from './snapshot';
 import { useAppData } from './useAppData';
 
@@ -88,6 +88,11 @@ export function useAppActions() {
         const event = await trpc.events.burgieGepakt.mutate();
         await refreshSnapshot();
         return event;
+      },
+      async updatePublicRecordMode(publicRecordMode: PublicRecordMode) {
+        const settings = await trpc.settings.updatePublicRecordMode.mutate({ publicRecordMode });
+        await refreshSnapshot();
+        return settings;
       },
     }),
     [refreshSnapshot, runners]

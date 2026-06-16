@@ -1,4 +1,5 @@
 export type {
+  AppSettings,
   AppSnapshot,
   ClusterPeer,
   ClusterRole,
@@ -8,6 +9,7 @@ export type {
   LabelInput,
   LabelPatch,
   LapRecord,
+  PublicRecordMode,
   RaceEvent,
   RaceEventType,
   RaceState,

@@ -1,4 +1,4 @@
-import type { AppSnapshot, Label, LapRecord, RaceEvent, RaceState, Runner } from '../shared/schemas.js';
+import type { AppSettings, AppSnapshot, Label, LapRecord, RaceEvent, RaceState, Runner } from '../shared/schemas.js';
 
 export type RealtimeEvent =
   | { type: 'bootstrap'; payload: AppSnapshot }
@@ -14,7 +14,8 @@ export type RealtimeEvent =
   | { type: 'lap:deleted'; payload: string }
   | { type: 'laps:patched'; payload: LapRecord[] }
   | { type: 'race-event:created'; payload: RaceEvent }
-  | { type: 'race-events:patched'; payload: RaceEvent[] };
+  | { type: 'race-events:patched'; payload: RaceEvent[] }
+  | { type: 'settings:changed'; payload: AppSettings };
 
 let emitter: ((event: RealtimeEvent) => void) | null = null;
 

@@ -1,8 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
 import { trpc } from '../api';
 import { setServerNowMs } from '../lib/time';
-import type { HostInfo, Label, LapRecord, RaceEvent, RaceState, Runner } from '../types';
-import { emptyRace, snapshotKey } from './snapshot';
+import type { AppSettings, HostInfo, Label, LapRecord, RaceEvent, RaceState, Runner } from '../types';
+import { defaultSettings, emptyRace, snapshotKey } from './snapshot';
 
 export function useAppData(): {
   runners: Runner[];
@@ -10,6 +10,7 @@ export function useAppData(): {
   laps: LapRecord[];
   events: RaceEvent[];
   race: RaceState;
+  settings: AppSettings;
   host: HostInfo | null;
   initialized: boolean;
   loading: boolean;
@@ -31,6 +32,7 @@ export function useAppData(): {
     laps: query.data?.laps ?? [],
     events: query.data?.events ?? [],
     race: query.data?.race ?? emptyRace,
+    settings: query.data?.settings ?? defaultSettings,
     host: query.data?.host ?? null,
     initialized: query.isSuccess,
     loading: query.isPending,

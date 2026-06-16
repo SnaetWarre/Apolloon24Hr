@@ -16,6 +16,7 @@ import { flexRender, getCoreRowModel, useReactTable, type ColumnDef } from '@tan
 import { useAppData } from '../app/index';
 import {
   buildDistribution,
+  buildFastestLapWindows,
   buildKpis,
   buildLabelComparisons,
   buildRunnerInsights,
@@ -23,14 +24,16 @@ import {
   filterLaps,
   type AnalysisFilters,
   type DistributionBin,
+  type FastestLapWindow,
   type LabelComparison,
   type RunnerInsight,
 } from '../lib/analysis';
-import { formatDurationMs } from '../lib/time';
-import type { Label } from '../types';
+import { formatClockTimeMs, formatDurationMs } from '../lib/time';
+import type { Label, PublicRecordMode } from '../types';
 import { LabelBadge, labelKindOrder, labelKindTitle } from './LabelBadge';
 
-type RunnerInsightSort = 'laps' | 'average' | 'best' | 'consistency' | 'improvement';
+type RunnerInsightSort = 'laps' | 'average' | 'best' | 'consistency';
+type AnalysisRecordWindowMode = Exclude<PublicRecordMode, 'off'>;
 
 Chart.register(
   BarController,
@@ -53,6 +56,7 @@ export function AnalysisView() {
   const [filters, setFilters] = React.useState<AnalysisFilters>(allLabelsEnabled);
   const [runnerSearch, setRunnerSearch] = React.useState('');
   const [runnerSort, setRunnerSort] = React.useState<RunnerInsightSort>('laps');
+  const [fastestWindowMode, setFastestWindowMode] = React.useState<AnalysisRecordWindowMode>('day');
 
   const enabledLabelIds = filters.enabledLabelIds ?? labels.map((label) => label.id);
   const enabledLabels = React.useMemo(
@@ -63,6 +67,10 @@ export function AnalysisView() {
   const kpis = React.useMemo(() => buildKpis(filteredLaps, race), [filteredLaps, race]);
   const timeBuckets = React.useMemo(() => buildTimeBuckets(filteredLaps, race), [filteredLaps, race]);
   const distribution = React.useMemo(() => buildDistribution(filteredLaps), [filteredLaps]);
+  const fastestLapWindows = React.useMemo(
+    () => buildFastestLapWindows(filteredLaps, race, fastestWindowMode),
+    [fastestWindowMode, filteredLaps, race]
+  );
   const labelComparisons = React.useMemo(
     () => buildLabelComparisons(enabledLabels, filteredLaps),
     [enabledLabels, filteredLaps]
@@ -155,25 +163,37 @@ export function AnalysisView() {
         <section className="panel">
           <SectionHeader
             title="Rondeverdeling"
-            text="Vaste zones van 10 seconden, van 1:00 tot 2:00+."
+            text="Vaste zones van 5 seconden, van 1:00 tot 1:30+."
           />
           <DistributionChart bins={distribution} />
         </section>
 
         <section className="panel">
           <SectionHeader
-            title="Gemiddelde per label"
-            text="Een loper kan in meerdere labels zitten; labels kunnen dus overlappen."
+            title="Snelste rondes"
+            text="Bekijk de snelste ronde binnen de huidige selectie per dag, per 2 uur of per uur."
           />
-          <LabelComparisonList comparisons={labelComparisons} />
+          <FastestLapWindowList
+            mode={fastestWindowMode}
+            windows={fastestLapWindows}
+            onModeChange={setFastestWindowMode}
+          />
         </section>
       </div>
+
+      <section className="panel">
+        <SectionHeader
+          title="Gemiddelde per label"
+          text="Een loper kan in meerdere labels zitten; labels kunnen dus overlappen."
+        />
+        <LabelComparisonList comparisons={labelComparisons} />
+      </section>
 
       <section className="panel">
         <div className="panel-heading-row">
           <SectionHeader
             title="Loper inzichten"
-            text="Zoek op nummer of naam. Trend vergelijkt de laatste ronde met de eerste ronde binnen de selectie."
+            text="Zoek op nummer of naam. Sorteer op aantallen, tempo of consistentie binnen de selectie."
           />
           <input
             className="input input--search analysis-runner-search"
@@ -197,12 +217,6 @@ export function AnalysisView() {
             onClick={() => setRunnerSort('consistency')}
           >
             Consistent
-          </button>
-          <button
-            className={runnerSort === 'improvement' ? 'is-active' : ''}
-            onClick={() => setRunnerSort('improvement')}
-          >
-            Grootste winst
           </button>
         </div>
         <div className="table-wrap">
@@ -249,6 +263,62 @@ function SectionHeader({ title, text }: { title: string; text: string }) {
       <h2>{title}</h2>
       <p>{text}</p>
     </div>
+  );
+}
+
+function FastestLapWindowList({
+  mode,
+  windows,
+  onModeChange,
+}: {
+  mode: AnalysisRecordWindowMode;
+  windows: FastestLapWindow[];
+  onModeChange: (mode: AnalysisRecordWindowMode) => void;
+}) {
+  return (
+    <>
+      <div className="segmented-control analysis-sort-control">
+        <button className={mode === 'day' ? 'is-active' : ''} onClick={() => onModeChange('day')}>
+          Dag
+        </button>
+        <button className={mode === 'two_hour' ? 'is-active' : ''} onClick={() => onModeChange('two_hour')}>
+          Per 2 uur
+        </button>
+        <button className={mode === 'hour' ? 'is-active' : ''} onClick={() => onModeChange('hour')}>
+          Per uur
+        </button>
+      </div>
+      {windows.length ? (
+        <div className="table-wrap">
+          <table className="analysis-table">
+            <thead>
+              <tr>
+                <th>Periode</th>
+                <th>Loper</th>
+                <th>Ronde</th>
+                <th>Tijd</th>
+                <th>Moment</th>
+              </tr>
+            </thead>
+            <tbody>
+              {windows.map((window) => (
+                <tr key={window.key}>
+                  <td>{window.label}</td>
+                  <td>{formatLapRunner(window.lap)}</td>
+                  <td>{window.lap.lapNumber}</td>
+                  <td>
+                    <strong>{formatDurationMs(window.lap.durationMs)}</strong>
+                  </td>
+                  <td>{formatClockTimeMs(window.lap.finishedAt)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <EmptyAnalyticsState message="Geen rondes binnen deze selectie." />
+      )}
+    </>
   );
 }
 
@@ -490,7 +560,6 @@ function RunnerInsightsTable({ insights }: { insights: RunnerInsight[] }) {
       { header: 'Snelste', cell: ({ row }) => formatDurationMs(row.original.bestMs) },
       { header: 'Traagste', cell: ({ row }) => formatDurationMs(row.original.slowestMs) },
       { header: 'Spreiding', cell: ({ row }) => formatDurationMs(row.original.standardDeviationMs) },
-      { header: 'Trend', cell: ({ row }) => formatTrend(row.original.latestVsFirstMs) },
     ],
     []
   );
@@ -568,12 +637,6 @@ function formatNumber(value: number | null, digits: number) {
   });
 }
 
-function formatTrend(value: number | null) {
-  if (value == null) return '-';
-  if (value === 0) return 'gelijk';
-  return `${value > 0 ? '+' : '-'}${formatDurationMs(Math.abs(value))}`;
-}
-
 function runnerInsightMatches(insight: RunnerInsight, query: string) {
   const normalized = query.trim().toLowerCase();
   if (!normalized) return true;
@@ -594,13 +657,14 @@ function sortRunnerInsight(mode: RunnerInsightSort) {
     if (mode === 'consistency') {
       return nullableAsc(a.standardDeviationMs, b.standardDeviationMs) || b.count - a.count;
     }
-    if (mode === 'improvement') {
-      return nullableAsc(a.latestVsFirstMs, b.latestVsFirstMs) || b.count - a.count;
-    }
     return b.count - a.count || nullableAsc(a.averageMs, b.averageMs);
   };
 }
 
 function nullableAsc(a: number | null, b: number | null) {
   return (a ?? Number.MAX_SAFE_INTEGER) - (b ?? Number.MAX_SAFE_INTEGER);
+}
+
+function formatLapRunner(lap: Pick<FastestLapWindow['lap'], 'runnerName' | 'runnerNumber'>) {
+  return lap.runnerNumber ? `${lap.runnerNumber} - ${lap.runnerName}` : lap.runnerName;
 }

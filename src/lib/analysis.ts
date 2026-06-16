@@ -1,4 +1,4 @@
-import type { Label, LapRecord, RaceState, Runner } from '../types';
+import type { Label, LapRecord, PublicRecordMode, RaceState, Runner } from '../types';
 
 export type AnalysisFilters = {
   enabledLabelIds: string[] | null;
@@ -42,7 +42,13 @@ export type RunnerInsight = DurationStats & {
   runnerId: string;
   runnerNumber: string | null;
   runnerName: string;
-  latestVsFirstMs: number | null;
+};
+
+export type FastestLapWindow = {
+  key: string;
+  label: string;
+  lap: LapRecord;
+  windowIndex: number;
 };
 
 export function isSpeedteamLabel(label: Pick<Label, 'kind' | 'name'>): boolean {
@@ -138,15 +144,17 @@ export function buildLabelComparisons(labels: Label[], laps: LapRecord[]): Label
 }
 
 export function buildDistribution(laps: LapRecord[]): DistributionBin[] {
-  const bins = [
-    { label: '1:00-1:10', minMs: 60_000, maxMs: 70_000, count: 0 },
-    { label: '1:10-1:20', minMs: 70_000, maxMs: 80_000, count: 0 },
-    { label: '1:20-1:30', minMs: 80_000, maxMs: 90_000, count: 0 },
-    { label: '1:30-1:40', minMs: 90_000, maxMs: 100_000, count: 0 },
-    { label: '1:40-1:50', minMs: 100_000, maxMs: 110_000, count: 0 },
-    { label: '1:50-2:00', minMs: 110_000, maxMs: 120_000, count: 0 },
-    { label: '2:00+', minMs: 120_000, maxMs: null, count: 0 },
-  ];
+  const bins: DistributionBin[] = [];
+  for (let minMs = 60_000; minMs < 90_000; minMs += 5_000) {
+    const maxMs = minMs + 5_000;
+    bins.push({
+      label: `${formatMinutesSeconds(minMs)}-${formatMinutesSeconds(maxMs)}`,
+      minMs,
+      maxMs,
+      count: 0,
+    });
+  }
+  bins.push({ label: '1:30+', minMs: 90_000, maxMs: null, count: 0 });
 
   for (const lap of laps) {
     const bin = bins.find((item) => lap.durationMs >= item.minMs && (item.maxMs == null || lap.durationMs < item.maxMs));
@@ -169,17 +177,96 @@ export function buildRunnerInsights(runners: Runner[], laps: LapRecord[]): Runne
       const sortedLaps = [...runnerLaps].sort((a, b) => a.finishedAt - b.finishedAt);
       const runner = runnersById.get(runnerId);
       const firstLap = sortedLaps[0] ?? null;
-      const latestLap = sortedLaps[sortedLaps.length - 1] ?? null;
       return {
         runnerId,
         runnerNumber: runner?.runnerNumber ?? firstLap?.runnerNumber ?? null,
         runnerName: runner?.name ?? firstLap?.runnerName ?? 'Onbekende loper',
-        latestVsFirstMs:
-          firstLap && latestLap && firstLap.id !== latestLap.id ? latestLap.durationMs - firstLap.durationMs : null,
         ...calculateDurationStats(sortedLaps),
       };
     })
     .sort((a, b) => b.count - a.count || (a.averageMs ?? Number.MAX_SAFE_INTEGER) - (b.averageMs ?? Number.MAX_SAFE_INTEGER));
+}
+
+export function buildFastestLapWindows(
+  laps: LapRecord[],
+  race: RaceState,
+  mode: Exclude<PublicRecordMode, 'off'>
+): FastestLapWindow[] {
+  if (!laps.length) return [];
+
+  if (mode === 'day') {
+    const bestLap = fastestLap(laps);
+    return bestLap ? [{ key: 'day', label: 'Dagrecord', lap: bestLap, windowIndex: 0 }] : [];
+  }
+
+  const startedAt = race.raceStartedAt ?? oldestLapTimestamp(laps);
+  if (startedAt == null) return [];
+
+  const windowMs = recordWindowMs(mode);
+  const buckets = new Map<number, LapRecord[]>();
+  for (const lap of laps) {
+    const index = recordWindowIndex(lap.finishedAt, startedAt, windowMs);
+    buckets.set(index, [...(buckets.get(index) ?? []), lap]);
+  }
+
+  return [...buckets.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([windowIndex, bucketLaps]) => ({
+      key: `${mode}-${windowIndex}`,
+      label: recordWindowLabel(windowIndex, mode),
+      lap: fastestLap(bucketLaps) as LapRecord,
+      windowIndex,
+    }));
+}
+
+export function isFastestLapForRecordMode(
+  latestLap: LapRecord,
+  previousLaps: LapRecord[],
+  race: RaceState,
+  mode: PublicRecordMode
+): boolean {
+  if (mode === 'off') return false;
+  if (mode === 'day') return previousLaps.every((lap) => latestLap.durationMs < lap.durationMs);
+
+  const startedAt = race.raceStartedAt ?? oldestLapTimestamp([latestLap, ...previousLaps]);
+  if (startedAt == null) return false;
+  const windowMs = recordWindowMs(mode);
+  const latestWindow = recordWindowIndex(latestLap.finishedAt, startedAt, windowMs);
+  return previousLaps
+    .filter((lap) => recordWindowIndex(lap.finishedAt, startedAt, windowMs) === latestWindow)
+    .every((lap) => latestLap.durationMs < lap.durationMs);
+}
+
+export function publicRecordModeTitle(mode: PublicRecordMode): string {
+  if (mode === 'hour') return 'NEW HOUR RECORD';
+  if (mode === 'two_hour') return 'NEW 2H RECORD';
+  return 'NEW DAY RECORD';
+}
+
+function fastestLap(laps: LapRecord[]): LapRecord | null {
+  return [...laps].sort((a, b) => a.durationMs - b.durationMs || a.finishedAt - b.finishedAt)[0] ?? null;
+}
+
+function recordWindowMs(mode: Exclude<PublicRecordMode, 'off' | 'day'>): number {
+  return mode === 'hour' ? 3_600_000 : 7_200_000;
+}
+
+function recordWindowIndex(timestamp: number, startedAt: number, windowMs: number): number {
+  return Math.max(0, Math.floor((timestamp - startedAt) / windowMs));
+}
+
+function recordWindowLabel(index: number, mode: Exclude<PublicRecordMode, 'off'>): string {
+  if (mode === 'day') return 'Dagrecord';
+  const hoursPerWindow = mode === 'hour' ? 1 : 2;
+  const startHour = index * hoursPerWindow;
+  return `${startHour}u-${startHour + hoursPerWindow}u`;
+}
+
+function formatMinutesSeconds(ms: number): string {
+  const totalSeconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 }
 
 function median(sortedValues: number[]): number {

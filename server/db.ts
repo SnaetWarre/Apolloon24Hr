@@ -3,10 +3,12 @@ import fs from 'fs';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import type {
+  AppSettings,
   Label,
   LabelInput,
   LabelPatch,
   LapRecord,
+  PublicRecordMode,
   RaceEvent,
   RaceEventType,
   RaceState,
@@ -29,6 +31,8 @@ const DB_FILE = path.join(DATA_DIR, 'app.db');
 const VALID_STATUSES = new Set<RunnerStatus>(['registered', 'warming_up', 'waiting', 'running', 'ran']);
 const VALID_REGISTRATION_SOURCES = new Set<RegistrationSource>(['import', 'manual']);
 const VALID_RACE_EVENT_TYPES = new Set<RaceEventType>(['burgie_gepakt']);
+const VALID_PUBLIC_RECORD_MODES = new Set<PublicRecordMode>(['off', 'day', 'two_hour', 'hour']);
+const DEFAULT_PUBLIC_RECORD_MODE: PublicRecordMode = 'day';
 
 const DEFAULT_LABELS: LabelInput[] = [
   {
@@ -337,6 +341,23 @@ export function getSetting(key: string): string | null {
 
 export function setSetting(key: string, value: string): void {
   run('INSERT OR REPLACE INTO settings(key, value) VALUES(?, ?)', [key, String(value)]);
+}
+
+function cleanPublicRecordMode(value: unknown): PublicRecordMode {
+  return VALID_PUBLIC_RECORD_MODES.has(value as PublicRecordMode)
+    ? (value as PublicRecordMode)
+    : DEFAULT_PUBLIC_RECORD_MODE;
+}
+
+export function getAppSettings(): AppSettings {
+  return {
+    publicRecordMode: cleanPublicRecordMode(getSetting('public_record_mode')),
+  };
+}
+
+export function setPublicRecordMode(mode: PublicRecordMode): AppSettings {
+  setSetting('public_record_mode', cleanPublicRecordMode(mode));
+  return getAppSettings();
 }
 
 export function ensureHostId(): string {
@@ -1513,5 +1534,6 @@ export function applySnapshot(snapshot: AppSnapshot): void {
         snapshot.race.raceFinishedAt ?? null,
       ]
     );
+    setPublicRecordMode(snapshot.settings?.publicRecordMode ?? DEFAULT_PUBLIC_RECORD_MODE);
   });
 }

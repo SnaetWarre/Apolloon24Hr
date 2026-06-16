@@ -50,6 +50,14 @@ export const raceEventSchema = z.object({
 });
 export type RaceEvent = z.infer<typeof raceEventSchema>;
 
+export const publicRecordModeSchema = z.enum(['off', 'day', 'two_hour', 'hour']);
+export type PublicRecordMode = z.infer<typeof publicRecordModeSchema>;
+
+export const appSettingsSchema = z.object({
+  publicRecordMode: publicRecordModeSchema,
+});
+export type AppSettings = z.infer<typeof appSettingsSchema>;
+
 export const runnerSchema = z.object({
   id: z.string(),
   runnerNumber: z.string().nullable(),
@@ -127,11 +135,16 @@ export const appSnapshotSchema = z.object({
   race: raceStateSchema,
   laps: z.array(lapRecordSchema),
   events: z.array(raceEventSchema),
+  settings: appSettingsSchema,
   serverNowMs: z.number(),
   host: hostInfoSchema,
   cluster: clusterStatusSchema.optional(),
 });
 export type AppSnapshot = z.infer<typeof appSnapshotSchema>;
+
+export const publicRecordModeUpdateSchema = z.object({
+  publicRecordMode: publicRecordModeSchema,
+});
 
 export const runnerInputSchema = z.object({
   id: z.string().optional(),

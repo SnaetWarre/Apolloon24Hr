@@ -5,10 +5,10 @@ import { LabelBadge, labelKindOrder, labelKindTitle } from './LabelBadge';
 import { SourceBadge } from './RunnerEntryModals';
 import { RunnerProfileModal } from './RunnerProfileModal';
 import { formatClockTimeMs } from '../lib/time';
-import type { Label, Runner, RunnerStatus } from '../types';
+import type { Label, PublicRecordMode, Runner, RunnerStatus } from '../types';
 
 export function AdminView() {
-  const { labels, runners } = useAppData();
+  const { labels, runners, settings } = useAppData();
   const {
     importRunnersCsv,
     createLabel,
@@ -17,12 +17,14 @@ export function AdminView() {
     deleteRunner,
     unhideRunner,
     burgieGepakt,
+    updatePublicRecordMode,
   } = useAppActions();
   const [csvText, setCsvText] = React.useState('');
   const [csvFileName, setCsvFileName] = React.useState('');
   const [message, setMessage] = React.useState<string | null>(null);
   const [eventMessage, setEventMessage] = React.useState<string | null>(null);
   const [eventSaving, setEventSaving] = React.useState(false);
+  const [recordModeSaving, setRecordModeSaving] = React.useState(false);
   const [runnerMessage, setRunnerMessage] = React.useState<string | null>(null);
   const [runnerQuery, setRunnerQuery] = React.useState('');
   const [labelName, setLabelName] = React.useState('');
@@ -83,6 +85,19 @@ export function AdminView() {
       setEventMessage(err instanceof Error ? err.message : 'Burgie gepakt opslaan mislukt');
     } finally {
       setEventSaving(false);
+    }
+  }
+
+  async function changePublicRecordMode(publicRecordMode: PublicRecordMode) {
+    setEventMessage(null);
+    setRecordModeSaving(true);
+    try {
+      const nextSettings = await updatePublicRecordMode(publicRecordMode);
+      setEventMessage(`Recordflits staat op ${publicRecordModeLabel(nextSettings.publicRecordMode)}.`);
+    } catch (err) {
+      setEventMessage(err instanceof Error ? err.message : 'Recordflits aanpassen mislukt');
+    } finally {
+      setRecordModeSaving(false);
     }
   }
 
@@ -156,6 +171,23 @@ export function AdminView() {
           <button className="btn btn--primary btn--xl" onClick={triggerBurgieGepakt} disabled={eventSaving}>
             {eventSaving ? 'Opslaan...' : 'Burgie gepakt'}
           </button>
+          <div className="form-row form-row--plain public-record-mode-row">
+            <label htmlFor="public-record-mode">
+              <strong>Recordflits</strong>
+            </label>
+            <select
+              id="public-record-mode"
+              className="input"
+              value={settings.publicRecordMode}
+              onChange={(event) => void changePublicRecordMode(event.target.value as PublicRecordMode)}
+              disabled={recordModeSaving}
+            >
+              <option value="off">Uit</option>
+              <option value="day">Dagrecord</option>
+              <option value="two_hour">Per 2 uur</option>
+              <option value="hour">Per uur</option>
+            </select>
+          </div>
           {eventMessage && <div className="host-hint">{eventMessage}</div>}
         </section>
 
@@ -430,6 +462,13 @@ function statusLabel(status: RunnerStatus) {
     default:
       return status;
   }
+}
+
+function publicRecordModeLabel(mode: PublicRecordMode) {
+  if (mode === 'off') return 'uit';
+  if (mode === 'hour') return 'per uur';
+  if (mode === 'two_hour') return 'per 2 uur';
+  return 'dagrecord';
 }
 
 function groupLabels(labels: Label[]) {

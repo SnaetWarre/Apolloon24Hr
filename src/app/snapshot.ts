@@ -1,5 +1,5 @@
 import type { QueryClient } from '@tanstack/react-query';
-import type { AppSnapshot, RaceState } from '../types';
+import type { AppSettings, AppSnapshot, RaceState } from '../types';
 
 export const snapshotKey = ['app', 'snapshot'] as const;
 
@@ -9,6 +9,10 @@ export const emptyRace: RaceState = {
   activeStartedAt: null,
   raceStartedAt: null,
   raceFinishedAt: null,
+};
+
+export const defaultSettings: AppSettings = {
+  publicRecordMode: 'day',
 };
 
 export function patchSnapshot(
