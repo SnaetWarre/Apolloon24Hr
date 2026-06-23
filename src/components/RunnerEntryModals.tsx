@@ -256,7 +256,7 @@ export function RunnerAddModal({ onClose }: { onClose: () => void }) {
         </div>
 
         <div className="label-picker-groups">
-          {groupLabels(labels).map(([kind, groupedLabels]) => (
+          {groupLabels(labels.filter((label) => label.kind !== 'temporary_team')).map(([kind, groupedLabels]) => (
             <section key={kind} className="label-picker-group">
               <h3>{labelKindTitle(kind)}</h3>
               <p className="label-picker-help">Kies maximaal 1 optie.</p>

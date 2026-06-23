@@ -30,7 +30,7 @@ import {
   type RunnerInsight,
 } from '../lib/analysis';
 import { formatClockTimeMs, formatDurationMs } from '../lib/time';
-import type { Label, PublicRecordMode } from '../types';
+import type { Label, LapRecord, PublicRecordMode } from '../types';
 import { LabelBadge, labelKindOrder, labelKindTitle } from './LabelBadge';
 
 type RunnerInsightSort = 'laps' | 'average' | 'best' | 'consistency';
@@ -59,10 +59,11 @@ export function AnalysisView() {
   const [runnerSort, setRunnerSort] = React.useState<RunnerInsightSort>('laps');
   const [fastestWindowMode, setFastestWindowMode] = React.useState<AnalysisRecordWindowMode>('day');
 
-  const enabledLabelIds = filters.enabledLabelIds ?? labels.map((label) => label.id);
+  const analysisLabels = React.useMemo(() => mergeAnalysisLabels(labels, laps), [labels, laps]);
+  const enabledLabelIds = filters.enabledLabelIds ?? analysisLabels.map((label) => label.id);
   const enabledLabels = React.useMemo(
-    () => labels.filter((label) => enabledLabelIds.includes(label.id)),
-    [labels, enabledLabelIds]
+    () => analysisLabels.filter((label) => enabledLabelIds.includes(label.id)),
+    [analysisLabels, enabledLabelIds]
   );
   const filteredLaps = React.useMemo(() => filterLaps(laps, filters), [laps, filters]);
   const kpis = React.useMemo(() => buildKpis(filteredLaps, race), [filteredLaps, race]);
@@ -97,7 +98,7 @@ export function AnalysisView() {
 
   function toggleLabel(labelId: string) {
     setFilters((current) => {
-      const currentIds = current.enabledLabelIds ?? labels.map((label) => label.id);
+      const currentIds = current.enabledLabelIds ?? analysisLabels.map((label) => label.id);
       return {
         enabledLabelIds: currentIds.includes(labelId)
           ? currentIds.filter((id) => id !== labelId)
@@ -140,7 +141,7 @@ export function AnalysisView() {
               </button>
             </div>
           </div>
-          <LabelTogglePicker labels={labels} enabledLabelIds={enabledLabelIds} onToggle={toggleLabel} />
+          <LabelTogglePicker labels={analysisLabels} enabledLabelIds={enabledLabelIds} onToggle={toggleLabel} />
         </section>
       </div>
 
@@ -255,6 +256,20 @@ export function AnalysisView() {
         </div>
       </section>
     </>
+  );
+}
+
+function mergeAnalysisLabels(currentLabels: Label[], laps: LapRecord[]): Label[] {
+  const byId = new Map<string, Label>();
+  for (const lap of laps) {
+    for (const label of lap.labels) byId.set(label.id, label);
+  }
+  for (const label of currentLabels) byId.set(label.id, label);
+  return [...byId.values()].sort(
+    (a, b) =>
+      labelKindOrder(a.kind) - labelKindOrder(b.kind) ||
+      (a.sortOrder ?? 9999) - (b.sortOrder ?? 9999) ||
+      a.name.localeCompare(b.name)
   );
 }
 

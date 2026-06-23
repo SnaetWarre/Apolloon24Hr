@@ -63,6 +63,16 @@ export function useAppActions() {
         await trpc.labels.delete.mutate({ id });
         await refreshSnapshot();
       },
+      async setTemporaryTeamMembers(labelId: string, runnerIds: string[]) {
+        const team = await trpc.temporaryTeams.setMembers.mutate({ labelId, runnerIds });
+        await refreshSnapshot();
+        return team;
+      },
+      async setTemporaryTeamActive(labelId: string, active: boolean) {
+        const team = await trpc.temporaryTeams.setActive.mutate({ labelId, active });
+        await refreshSnapshot();
+        return team;
+      },
       async importRunnersCsv(csvText: string) {
         const summary = await trpc.runners.importCsv.mutate({ csvText });
         await refreshSnapshot();

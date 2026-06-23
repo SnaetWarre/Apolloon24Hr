@@ -5,10 +5,10 @@ import { LabelBadge, labelKindOrder, labelKindTitle } from './LabelBadge';
 import { SourceBadge } from './RunnerEntryModals';
 import { RunnerProfileModal } from './RunnerProfileModal';
 import { formatClockTimeMs } from '../lib/time';
-import type { Label, PublicRecordMode, Runner, RunnerStatus } from '../types';
+import type { Label, PublicRecordMode, Runner, RunnerStatus, TemporaryTeam } from '../types';
 
 export function AdminView() {
-  const { labels, runners, settings } = useAppData();
+  const { labels, runners, settings, temporaryTeams } = useAppData();
   const {
     importRunnersCsv,
     createLabel,
@@ -18,6 +18,8 @@ export function AdminView() {
     unhideRunner,
     burgieGepakt,
     updatePublicRecordMode,
+    setTemporaryTeamMembers,
+    setTemporaryTeamActive,
   } = useAppActions();
   const [csvText, setCsvText] = React.useState('');
   const [csvFileName, setCsvFileName] = React.useState('');
@@ -227,6 +229,7 @@ export function AdminView() {
             />
             <select className="input" value={labelKind} onChange={(event) => setLabelKind(event.target.value)}>
               <option value="speedteam">Speedteam</option>
+              <option value="temporary_team">Tijdelijke nachtploeg</option>
               <option value="zustervereniging">Zustervereniging</option>
               <option value="andere">Andere</option>
               <option value="custom">Custom</option>
@@ -275,6 +278,33 @@ export function AdminView() {
           </div>
         </section>
       </div>
+
+      <section className="panel">
+        <h2>Tijdelijke nachtploegen</h2>
+        <p className="panel-copy">
+          Stel de leden vooraf in. Activeren vervangt hun gewone speedteam tijdelijk; deactiveren zet die automatisch terug.
+        </p>
+        {temporaryTeams.length ? (
+          <div className="temporary-team-list">
+            {temporaryTeams.map((team) => {
+              const label = labels.find((item) => item.id === team.labelId);
+              return label ? (
+                <TemporaryTeamAdminCard
+                  key={team.labelId}
+                  label={label}
+                  team={team}
+                  allTeams={temporaryTeams}
+                  runners={runners}
+                  onSaveMembers={setTemporaryTeamMembers}
+                  onSetActive={setTemporaryTeamActive}
+                />
+              ) : null;
+            })}
+          </div>
+        ) : (
+          <div className="empty-inline">Maak hierboven eerst een label van het type Tijdelijke nachtploeg.</div>
+        )}
+      </section>
 
       <section className="panel">
         <h2>Lopers beheren</h2>
@@ -469,6 +499,143 @@ function publicRecordModeLabel(mode: PublicRecordMode) {
   if (mode === 'hour') return 'per uur';
   if (mode === 'two_hour') return 'per 2 uur';
   return 'dagrecord';
+}
+
+function TemporaryTeamAdminCard({
+  label,
+  team,
+  allTeams,
+  runners,
+  onSaveMembers,
+  onSetActive,
+}: {
+  label: Label;
+  team: TemporaryTeam;
+  allTeams: TemporaryTeam[];
+  runners: Runner[];
+  onSaveMembers: (labelId: string, runnerIds: string[]) => Promise<TemporaryTeam>;
+  onSetActive: (labelId: string, active: boolean) => Promise<TemporaryTeam>;
+}) {
+  const [selectedIds, setSelectedIds] = React.useState<string[]>(team.memberRunnerIds);
+  const [query, setQuery] = React.useState('');
+  const [busy, setBusy] = React.useState(false);
+  const [feedback, setFeedback] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    setSelectedIds(team.memberRunnerIds);
+  }, [team.memberRunnerIds.join('|')]);
+
+  const otherMemberIds = new Set(
+    allTeams.filter((item) => item.labelId !== team.labelId).flatMap((item) => item.memberRunnerIds)
+  );
+  const normalizedQuery = query.trim().toLowerCase();
+  const visibleRunners = runners
+    .filter((runner) => {
+      if (!normalizedQuery) return true;
+      return (
+        runner.name.toLowerCase().includes(normalizedQuery) ||
+        (runner.runnerNumber || '').toLowerCase().includes(normalizedQuery) ||
+        runner.labels.some((item) => item.name.toLowerCase().includes(normalizedQuery))
+      );
+    })
+    .sort(
+      (a, b) =>
+        (a.runnerNumber || '').localeCompare(b.runnerNumber || '', undefined, { numeric: true }) ||
+        a.name.localeCompare(b.name)
+    );
+
+  function toggleRunner(runnerId: string) {
+    if (team.active || otherMemberIds.has(runnerId)) return;
+    setSelectedIds((current) =>
+      current.includes(runnerId) ? current.filter((id) => id !== runnerId) : [...current, runnerId]
+    );
+  }
+
+  async function saveMembers() {
+    setBusy(true);
+    setFeedback(null);
+    try {
+      await onSaveMembers(team.labelId, selectedIds);
+      setFeedback(`${selectedIds.length} leden opgeslagen.`);
+    } catch (err) {
+      setFeedback(err instanceof Error ? err.message : 'Ledenlijst opslaan mislukt');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function changeActive() {
+    const action = team.active ? 'deactiveren' : 'activeren';
+    if (!window.confirm(`${label.name} ${action} voor ${team.memberRunnerIds.length} lopers?`)) return;
+    setBusy(true);
+    setFeedback(null);
+    try {
+      await onSetActive(team.labelId, !team.active);
+      setFeedback(team.active ? 'Gewone speedteams zijn hersteld.' : `${label.name} is actief.`);
+    } catch (err) {
+      setFeedback(err instanceof Error ? err.message : `${label.name} ${action} mislukt`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <article className={`temporary-team-card${team.active ? ' is-active' : ''}`}>
+      <div className="panel-heading-row">
+        <div>
+          <LabelBadge label={label} />
+          <p className="panel-copy">
+            {team.active
+              ? `Actief sinds ${team.activatedAt ? formatClockTimeMs(team.activatedAt) : 'onbekend'}`
+              : `${team.memberRunnerIds.length} leden ingesteld`}
+          </p>
+        </div>
+        <span className={`status-badge${team.active ? ' status-badge--running' : ''}`}>
+          {team.active ? 'Actief' : 'Niet actief'}
+        </span>
+      </div>
+
+      <input
+        className="input input--search"
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+        placeholder="Zoek loper op nummer, naam of ploeg..."
+      />
+      <div className="temporary-team-members">
+        {visibleRunners.map((runner) => {
+          const assignedElsewhere = otherMemberIds.has(runner.id);
+          const baseTeam = runner.labels.find((item) => item.kind === 'speedteam');
+          return (
+            <label key={runner.id} className="temporary-team-member">
+              <input
+                type="checkbox"
+                checked={selectedIds.includes(runner.id)}
+                disabled={team.active || assignedElsewhere}
+                onChange={() => toggleRunner(runner.id)}
+              />
+              <span>
+                <strong>{runner.runnerNumber ? `${runner.runnerNumber} - ` : ''}{runner.name}</strong>
+                <em>{assignedElsewhere ? 'Andere nachtploeg' : baseTeam?.name || 'Geen speedteam'}</em>
+              </span>
+            </label>
+          );
+        })}
+      </div>
+      <div className="form-row form-row--plain">
+        <button className="btn btn--ghost" onClick={saveMembers} disabled={busy || team.active}>
+          Leden opslaan
+        </button>
+        <button
+          className={`btn ${team.active ? 'btn--danger' : 'btn--primary'}`}
+          onClick={changeActive}
+          disabled={busy || (!team.active && team.memberRunnerIds.length === 0)}
+        >
+          {busy ? 'Bezig...' : team.active ? 'Deactiveren' : 'Activeren'}
+        </button>
+      </div>
+      {feedback && <div className="host-hint">{feedback}</div>}
+    </article>
+  );
 }
 
 function groupLabels(labels: Label[]) {

@@ -90,8 +90,18 @@ export const raceStateSchema = z.object({
   activeStartedAt: z.number().nullable(),
   raceStartedAt: z.number().nullable(),
   raceFinishedAt: z.number().nullable(),
+  activeLabels: z.array(labelSchema),
 });
 export type RaceState = z.infer<typeof raceStateSchema>;
+
+export const temporaryTeamSchema = z.object({
+  labelId: z.string(),
+  active: z.boolean(),
+  activatedAt: z.number().nullable(),
+  memberRunnerIds: z.array(z.string()),
+  restoreLabelIdsByRunner: z.record(z.string(), z.array(z.string())),
+});
+export type TemporaryTeam = z.infer<typeof temporaryTeamSchema>;
 
 export const hostInfoSchema = z.object({
   hostIpHint: z.string(),
@@ -135,6 +145,7 @@ export const appSnapshotSchema = z.object({
   race: raceStateSchema,
   laps: z.array(lapRecordSchema),
   events: z.array(raceEventSchema),
+  temporaryTeams: z.array(temporaryTeamSchema),
   settings: appSettingsSchema,
   serverNowMs: z.number(),
   host: hostInfoSchema,
@@ -182,6 +193,16 @@ export type LabelPatch = z.infer<typeof labelPatchSchema>;
 
 export const queueReorderSchema = z.object({
   ids: z.array(z.string()).min(1),
+});
+
+export const temporaryTeamMembersSchema = z.object({
+  labelId: z.string().min(1),
+  runnerIds: z.array(z.string()),
+});
+
+export const temporaryTeamActiveSchema = z.object({
+  labelId: z.string().min(1),
+  active: z.boolean(),
 });
 
 export const runnerIdSchema = z.object({

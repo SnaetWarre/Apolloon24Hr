@@ -9,6 +9,7 @@ export const emptyRace: RaceState = {
   activeStartedAt: null,
   raceStartedAt: null,
   raceFinishedAt: null,
+  activeLabels: [],
 };
 
 export const defaultSettings: AppSettings = {

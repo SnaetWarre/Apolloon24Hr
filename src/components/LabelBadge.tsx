@@ -16,6 +16,7 @@ export function LabelBadge({ label, compact = false }: { label: Label; compact?:
 
 export function labelKindTitle(kind: string) {
   if (kind === 'speedteam') return 'Speedteams';
+  if (kind === 'temporary_team') return 'Tijdelijke nachtploegen';
   if (kind === 'zustervereniging' || kind === 'association') return 'Zusterverenigingen';
   if (kind === 'andere' || kind === 'group') return 'Andere';
   return 'Custom';
@@ -23,7 +24,8 @@ export function labelKindTitle(kind: string) {
 
 export function labelKindOrder(kind: string) {
   if (kind === 'speedteam') return 0;
-  if (kind === 'zustervereniging' || kind === 'association') return 1;
-  if (kind === 'andere' || kind === 'group') return 2;
-  return 3;
+  if (kind === 'temporary_team') return 1;
+  if (kind === 'zustervereniging' || kind === 'association') return 2;
+  if (kind === 'andere' || kind === 'group') return 3;
+  return 4;
 }

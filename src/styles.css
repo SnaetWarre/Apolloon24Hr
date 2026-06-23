@@ -1377,6 +1377,59 @@ td {
   padding: 10px 0;
 }
 
+.temporary-team-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 1rem;
+}
+
+.temporary-team-card {
+  border: 2px solid var(--line);
+  border-radius: 14px;
+  padding: 1rem;
+  background: var(--panel);
+}
+
+.temporary-team-card.is-active {
+  border-color: var(--apolloon-blue);
+  box-shadow: 0 0 0 3px rgb(40 119 246 / 12%);
+}
+
+.temporary-team-members {
+  max-height: 320px;
+  overflow: auto;
+  display: grid;
+  gap: 0.4rem;
+  margin: 0.75rem 0;
+  padding-right: 0.25rem;
+}
+
+.temporary-team-member {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  cursor: pointer;
+}
+
+.temporary-team-member:has(input:disabled) {
+  opacity: 0.58;
+  cursor: not-allowed;
+}
+
+.temporary-team-member span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.temporary-team-member em {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
 .label-target-editor {
   display: grid;
   gap: 4px;

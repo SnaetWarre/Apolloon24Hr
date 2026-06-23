@@ -18,6 +18,7 @@ import type {
   RunnerPatch,
   RunnerStatus,
   AppSnapshot,
+  TemporaryTeam,
 } from '../shared/schemas.js';
 
 type SqlValue = string | number | null;
@@ -33,6 +34,8 @@ const VALID_REGISTRATION_SOURCES = new Set<RegistrationSource>(['import', 'manua
 const VALID_RACE_EVENT_TYPES = new Set<RaceEventType>(['burgie_gepakt']);
 const VALID_PUBLIC_RECORD_MODES = new Set<PublicRecordMode>(['off', 'day', 'two_hour', 'hour']);
 const DEFAULT_PUBLIC_RECORD_MODE: PublicRecordMode = 'day';
+const TEMPORARY_TEAM_KIND = 'temporary_team';
+const SCHEMA_VERSION = 5;
 
 const DEFAULT_LABELS: LabelInput[] = [
   {
@@ -160,6 +163,16 @@ function cleanRegistrationSource(source: unknown): RegistrationSource {
     : 'manual';
 }
 
+function parseLabelsJson(value: unknown): Label[] {
+  if (typeof value !== 'string' || !value.trim()) return [];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return Array.isArray(parsed) ? (parsed as Label[]) : [];
+  } catch {
+    return [];
+  }
+}
+
 function normalizeName(name: unknown): string {
   return String(name || '').trim().toLowerCase();
 }
@@ -229,6 +242,7 @@ function createSchema(): void {
       active_started_at INTEGER,
       race_started_at INTEGER,
       race_finished_at INTEGER,
+      active_labels_json TEXT,
       FOREIGN KEY (active_runner_id) REFERENCES runners(id) ON DELETE SET NULL
     );
 
@@ -241,6 +255,7 @@ function createSchema(): void {
       duration_ms INTEGER NOT NULL,
       source TEXT NOT NULL,
       created_at INTEGER NOT NULL,
+      labels_json TEXT NOT NULL DEFAULT '[]',
       FOREIGN KEY (runner_id) REFERENCES runners(id) ON DELETE CASCADE
     );
 
@@ -261,6 +276,22 @@ function createSchema(): void {
       runner_name TEXT,
       created_at INTEGER NOT NULL,
       FOREIGN KEY (runner_id) REFERENCES runners(id) ON DELETE SET NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS temporary_teams (
+      label_id TEXT PRIMARY KEY,
+      active INTEGER NOT NULL DEFAULT 0,
+      activated_at INTEGER,
+      FOREIGN KEY (label_id) REFERENCES labels(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS temporary_team_members (
+      team_label_id TEXT NOT NULL,
+      runner_id TEXT NOT NULL UNIQUE,
+      restore_label_ids_json TEXT,
+      PRIMARY KEY (team_label_id, runner_id),
+      FOREIGN KEY (team_label_id) REFERENCES temporary_teams(label_id) ON DELETE CASCADE,
+      FOREIGN KEY (runner_id) REFERENCES runners(id) ON DELETE CASCADE
     );
 
     CREATE TABLE IF NOT EXISTS cluster_operations (
@@ -287,6 +318,39 @@ function createSchema(): void {
       race_finished_at
     ) VALUES (1, NULL, NULL, NULL, NULL)`
   );
+}
+
+function tableHasColumn(table: string, column: string): boolean {
+  return all<{ name: string }>(`PRAGMA table_info(${table})`).some((row) => row.name === column);
+}
+
+function migrateSchema(): void {
+  const previousVersion = Number(getSetting('schema_version') || 0);
+  if (!tableHasColumn('race_state', 'active_labels_json')) {
+    run('ALTER TABLE race_state ADD COLUMN active_labels_json TEXT');
+  }
+  if (!tableHasColumn('laps', 'labels_json')) {
+    run("ALTER TABLE laps ADD COLUMN labels_json TEXT NOT NULL DEFAULT '[]'");
+  }
+
+  if (previousVersion < 5) {
+    const labelsByRunner = getRunnerLabelsMap();
+    for (const lap of all<{ id: string; runnerId: string }>('SELECT id, runner_id AS runnerId FROM laps')) {
+      run('UPDATE laps SET labels_json = ? WHERE id = ?', [
+        JSON.stringify(labelsByRunner.get(lap.runnerId) ?? []),
+        lap.id,
+      ]);
+    }
+    const active = one<{ runnerId: string | null }>(
+      'SELECT active_runner_id AS runnerId FROM race_state WHERE id = 1'
+    );
+    if (active?.runnerId) {
+      run('UPDATE race_state SET active_labels_json = ? WHERE id = 1', [
+        JSON.stringify(labelsByRunner.get(active.runnerId) ?? []),
+      ]);
+    }
+  }
+  setSetting('schema_version', String(SCHEMA_VERSION));
 }
 
 function seedDefaultLabels(): void {
@@ -329,8 +393,8 @@ export async function initDb(): Promise<void> {
   database.pragma('journal_mode = WAL');
   database.pragma('busy_timeout = 5000');
   createSchema();
+  migrateSchema();
   seedDefaultLabels();
-  setSetting('schema_version', '4');
   ensureHostId();
 }
 
@@ -631,6 +695,11 @@ export function createLabel(input: LabelInput): Label {
       now,
     ]
   );
+  if (label.kind === TEMPORARY_TEAM_KIND) {
+    run('INSERT OR IGNORE INTO temporary_teams (label_id, active, activated_at) VALUES (?, 0, NULL)', [
+      label.id,
+    ]);
+  }
   return { ...label, createdAt: now, updatedAt: now };
 }
 
@@ -657,6 +726,10 @@ export function updateLabel(id: string, fields: LabelPatch): Label | null {
     [id]
   );
   if (!existing) return null;
+  const temporaryState = one<{ active: number }>('SELECT active FROM temporary_teams WHERE label_id = ?', [id]);
+  if (temporaryState?.active && fields.kind !== undefined && fields.kind !== TEMPORARY_TEAM_KIND) {
+    throw new Error('Een actieve tijdelijke nachtploeg kan niet van type veranderen');
+  }
 
   const next = {
     name: fields.name !== undefined ? cleanText(fields.name) || existing.name : existing.name,
@@ -693,10 +766,18 @@ export function updateLabel(id: string, fields: LabelPatch): Label | null {
     ]
   );
 
+  if (next.kind === TEMPORARY_TEAM_KIND) {
+    run('INSERT OR IGNORE INTO temporary_teams (label_id, active, activated_at) VALUES (?, 0, NULL)', [id]);
+  } else {
+    run('DELETE FROM temporary_teams WHERE label_id = ? AND active = 0', [id]);
+  }
+
   return getLabels().find((label) => label.id === id) ?? null;
 }
 
 export function deleteLabel(id: string): void {
+  const temporaryState = one<{ active: number }>('SELECT active FROM temporary_teams WHERE label_id = ?', [id]);
+  if (temporaryState?.active) throw new Error('Deactiveer deze tijdelijke nachtploeg voor je ze verwijdert');
   transaction(() => {
     run('DELETE FROM runner_labels WHERE label_id = ?', [id]);
     run('DELETE FROM labels WHERE id = ?', [id]);
@@ -738,6 +819,142 @@ function getRunnerLabelsMap(): Map<string, Label[]> {
     });
   }
   return map;
+}
+
+function getRunnerLabels(runnerId: string): Label[] {
+  return getRunnerLabelsMap().get(runnerId) ?? [];
+}
+
+export function getTemporaryTeams(): TemporaryTeam[] {
+  run(
+    `INSERT OR IGNORE INTO temporary_teams (label_id, active, activated_at)
+     SELECT id, 0, NULL FROM labels WHERE kind = ?`,
+    [TEMPORARY_TEAM_KIND]
+  );
+  const members = all<{ labelId: string; runnerId: string; restoreJson: string | null }>(
+    `SELECT team_label_id AS labelId, runner_id AS runnerId, restore_label_ids_json AS restoreJson
+     FROM temporary_team_members
+     ORDER BY runner_id`
+  );
+  const membersByTeam = new Map<string, string[]>();
+  const restoresByTeam = new Map<string, Record<string, string[]>>();
+  for (const member of members) {
+    membersByTeam.set(member.labelId, [...(membersByTeam.get(member.labelId) ?? []), member.runnerId]);
+    const restores = restoresByTeam.get(member.labelId) ?? {};
+    restores[member.runnerId] = parseStringArray(member.restoreJson);
+    restoresByTeam.set(member.labelId, restores);
+  }
+  return all<{ labelId: string; active: number; activatedAt: number | null }>(
+    `SELECT tt.label_id AS labelId, tt.active, tt.activated_at AS activatedAt
+     FROM temporary_teams tt
+     JOIN labels l ON l.id = tt.label_id
+     WHERE l.kind = ?
+     ORDER BY COALESCE(l.sort_order, 9999), l.name`,
+    [TEMPORARY_TEAM_KIND]
+  ).map((team) => ({
+    labelId: team.labelId,
+    active: Boolean(team.active),
+    activatedAt: team.activatedAt ?? null,
+    memberRunnerIds: membersByTeam.get(team.labelId) ?? [],
+    restoreLabelIdsByRunner: restoresByTeam.get(team.labelId) ?? {},
+  }));
+}
+
+export function setTemporaryTeamMembers(labelId: string, runnerIds: string[]): TemporaryTeam {
+  const label = getLabels().find((item) => item.id === labelId);
+  if (!label || label.kind !== TEMPORARY_TEAM_KIND) throw new Error('Tijdelijke nachtploeg niet gevonden');
+  const state = one<{ active: number }>('SELECT active FROM temporary_teams WHERE label_id = ?', [labelId]);
+  if (state?.active) throw new Error('Deactiveer de ploeg voordat je de ledenlijst wijzigt');
+  const uniqueRunnerIds = [...new Set(runnerIds)];
+  for (const runnerId of uniqueRunnerIds) {
+    if (!getRunnerById(runnerId)) throw new Error('Een geselecteerde loper bestaat niet meer');
+    const other = one<{ labelId: string }>(
+      `SELECT team_label_id AS labelId FROM temporary_team_members
+       WHERE runner_id = ? AND team_label_id <> ?`,
+      [runnerId, labelId]
+    );
+    if (other) throw new Error('Een loper kan maar in een tijdelijke nachtploeg zitten');
+  }
+
+  transaction(() => {
+    run('INSERT OR IGNORE INTO temporary_teams (label_id, active, activated_at) VALUES (?, 0, NULL)', [labelId]);
+    run('DELETE FROM temporary_team_members WHERE team_label_id = ?', [labelId]);
+    for (const runnerId of uniqueRunnerIds) {
+      run(
+        `INSERT INTO temporary_team_members (team_label_id, runner_id, restore_label_ids_json)
+         VALUES (?, ?, NULL)`,
+        [labelId, runnerId]
+      );
+    }
+  });
+  const team = getTemporaryTeams().find((item) => item.labelId === labelId);
+  if (!team) throw new Error('Tijdelijke nachtploeg opslaan mislukt');
+  return team;
+}
+
+export function setTemporaryTeamActive(labelId: string, active: boolean, nowMs = Date.now()): TemporaryTeam {
+  const team = getTemporaryTeams().find((item) => item.labelId === labelId);
+  if (!team) throw new Error('Tijdelijke nachtploeg niet gevonden');
+  if (team.active === active) return team;
+  if (active && team.memberRunnerIds.length === 0) throw new Error('Voeg eerst minstens een loper toe');
+
+  transaction(() => {
+    if (active) {
+      for (const runnerId of team.memberRunnerIds) {
+        const baseTeams = getRunnerLabels(runnerId).filter((label) => label.kind === 'speedteam');
+        if (baseTeams.length !== 1) {
+          const runner = getRunnerById(runnerId);
+          throw new Error(`${runner?.name ?? 'Loper'} moet exact een gewone speedteamploeg hebben`);
+        }
+        run(
+          `UPDATE temporary_team_members SET restore_label_ids_json = ?
+           WHERE team_label_id = ? AND runner_id = ?`,
+          [JSON.stringify(baseTeams.map((label) => label.id)), labelId, runnerId]
+        );
+        run(
+          `DELETE FROM runner_labels
+           WHERE runner_id = ? AND label_id IN (
+             SELECT id FROM labels WHERE kind IN ('speedteam', 'temporary_team')
+           )`,
+          [runnerId]
+        );
+        run('INSERT OR IGNORE INTO runner_labels (runner_id, label_id) VALUES (?, ?)', [runnerId, labelId]);
+      }
+      run('UPDATE temporary_teams SET active = 1, activated_at = ? WHERE label_id = ?', [nowMs, labelId]);
+    } else {
+      const restores = all<{ runnerId: string; restoreJson: string | null }>(
+        `SELECT runner_id AS runnerId, restore_label_ids_json AS restoreJson
+         FROM temporary_team_members WHERE team_label_id = ?`,
+        [labelId]
+      );
+      for (const restore of restores) {
+        run('DELETE FROM runner_labels WHERE runner_id = ? AND label_id = ?', [restore.runnerId, labelId]);
+        const ids = parseStringArray(restore.restoreJson);
+        for (const restoreLabelId of ids) {
+          run(
+            `INSERT OR IGNORE INTO runner_labels (runner_id, label_id)
+             SELECT ?, id FROM labels WHERE id = ?`,
+            [restore.runnerId, restoreLabelId]
+          );
+        }
+      }
+      run('UPDATE temporary_team_members SET restore_label_ids_json = NULL WHERE team_label_id = ?', [labelId]);
+      run('UPDATE temporary_teams SET active = 0, activated_at = NULL WHERE label_id = ?', [labelId]);
+    }
+  });
+  const updated = getTemporaryTeams().find((item) => item.labelId === labelId);
+  if (!updated) throw new Error('Tijdelijke nachtploeg aanpassen mislukt');
+  return updated;
+}
+
+function parseStringArray(value: string | null): string[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : [];
+  } catch {
+    return [];
+  }
 }
 
 export function getAllRunners(): Runner[] {
@@ -816,6 +1033,17 @@ export function getRunnerById(id: string): Runner | null {
   return getAllRunners().find((runner) => runner.id === id) ?? null;
 }
 
+function getActiveTemporaryTeamLabelIdForRunner(runnerId: string): string | null {
+  const row = one<{ labelId: string }>(
+    `SELECT ttm.team_label_id AS labelId
+     FROM temporary_team_members ttm
+     JOIN temporary_teams tt ON tt.label_id = ttm.team_label_id
+     WHERE ttm.runner_id = ? AND tt.active = 1`,
+    [runnerId]
+  );
+  return row?.labelId ?? null;
+}
+
 function findRunnerByNumber(runnerNumber: unknown): { id: string } | null {
   const number = cleanText(runnerNumber);
   if (!number) return null;
@@ -825,12 +1053,14 @@ function findRunnerByNumber(runnerNumber: unknown): { id: string } | null {
 export function setRunnerLabels(runnerId: string, labelNamesOrIds: unknown): void {
   run('DELETE FROM runner_labels WHERE runner_id = ?', [runnerId]);
   const labels = Array.isArray(labelNamesOrIds) ? labelNamesOrIds : [];
+  const activeTemporaryLabelId = getActiveTemporaryTeamLabelIdForRunner(runnerId);
   for (const labelValue of labels) {
     const labelText = cleanText(labelValue);
     if (!labelText) continue;
-    const existingById = one<{ id: string }>('SELECT id FROM labels WHERE id = ?', [labelText]);
+    const existingById = one<{ id: string; kind: string }>('SELECT id, kind FROM labels WHERE id = ?', [labelText]);
     const label = existingById || ensureLabel(labelText);
     if (!label) continue;
+    if (label.kind === TEMPORARY_TEAM_KIND && label.id !== activeTemporaryLabelId) continue;
     run('INSERT OR IGNORE INTO runner_labels (runner_id, label_id) VALUES (?, ?)', [runnerId, label.id]);
   }
 }
@@ -891,6 +1121,19 @@ export function updateRunner(id: string, fields: RunnerPatch): Runner | null {
     notes: string | null;
   }>('SELECT * FROM runners WHERE id = ?', [id]);
   if (!current) return null;
+
+  if (fields.labels !== undefined) {
+    const activeTemporaryLabelId = getActiveTemporaryTeamLabelIdForRunner(id);
+    if (activeTemporaryLabelId) {
+      const requested = new Set(fields.labels.map((value) => String(value)));
+      const hasOrdinarySpeedteam = getLabels().some(
+        (label) => label.kind === 'speedteam' && requested.has(label.id)
+      );
+      if (!requested.has(activeTemporaryLabelId) || hasOrdinarySpeedteam) {
+        throw new Error('De speedteamploeg ligt vast zolang de tijdelijke nachtploeg actief is');
+      }
+    }
+  }
 
   const next = {
     runnerNumber: fields.runnerNumber !== undefined ? cleanText(fields.runnerNumber) : current.runner_number,
@@ -964,9 +1207,12 @@ export function deleteRunner(id: string): void {
     run('DELETE FROM runner_labels WHERE runner_id = ?', [id]);
     run('DELETE FROM laps WHERE runner_id = ?', [id]);
     run('DELETE FROM queue_entries WHERE runner_id = ?', [id]);
-    run('UPDATE race_state SET active_runner_id = NULL, active_started_at = NULL WHERE active_runner_id = ?', [
-      id,
-    ]);
+    run(
+      `UPDATE race_state
+       SET active_runner_id = NULL, active_started_at = NULL, active_labels_json = NULL
+       WHERE active_runner_id = ?`,
+      [id]
+    );
     run('DELETE FROM runners WHERE id = ?', [id]);
   });
 }
@@ -1032,15 +1278,17 @@ export function updateRunnerStatus({
          SET active_runner_id = ?,
              active_started_at = ?,
              race_started_at = COALESCE(race_started_at, ?),
-             race_finished_at = NULL
+             race_finished_at = NULL,
+             active_labels_json = ?
          WHERE id = 1`,
-        [id, now, now]
+        [id, now, now, JSON.stringify(getRunnerLabels(id))]
       );
     } else {
       run(
         `UPDATE race_state
          SET active_runner_id = NULL,
-             active_started_at = NULL
+             active_started_at = NULL,
+             active_labels_json = NULL
          WHERE id = 1 AND active_runner_id = ?`,
         [id]
       );
@@ -1109,13 +1357,14 @@ function getLapCount(runnerId: string): number {
 }
 
 export function getRaceState(): RaceState {
-  const row = one<Omit<RaceState, 'id'> & { id: 1 }>(
+  const row = one<Omit<RaceState, 'id' | 'activeLabels'> & { id: 1; activeLabelsJson: string | null }>(
     `SELECT
       id,
       active_runner_id AS activeRunnerId,
       active_started_at AS activeStartedAt,
       race_started_at AS raceStartedAt,
-      race_finished_at AS raceFinishedAt
+      race_finished_at AS raceFinishedAt,
+      active_labels_json AS activeLabelsJson
      FROM race_state
      WHERE id = 1`
   );
@@ -1125,12 +1374,12 @@ export function getRaceState(): RaceState {
     activeStartedAt: row?.activeStartedAt ?? null,
     raceStartedAt: row?.raceStartedAt ?? null,
     raceFinishedAt: row?.raceFinishedAt ?? null,
+    activeLabels: parseLabelsJson(row?.activeLabelsJson),
   };
 }
 
 export function getAllLaps(): LapRecord[] {
-  const labelsByRunner = getRunnerLabelsMap();
-  return all<Omit<LapRecord, 'labels'>>(
+  return all<Omit<LapRecord, 'labels'> & { labelsJson: string }>(
     `SELECT
       l.id,
       l.runner_id AS runnerId,
@@ -1141,14 +1390,12 @@ export function getAllLaps(): LapRecord[] {
       l.finished_at AS finishedAt,
       l.duration_ms AS durationMs,
       l.source,
-      l.created_at AS createdAt
+      l.created_at AS createdAt,
+      l.labels_json AS labelsJson
     FROM laps l
     JOIN runners r ON r.id = l.runner_id
     ORDER BY l.finished_at DESC`
-  ).map((lap) => ({
-    ...lap,
-    labels: labelsByRunner.get(lap.runnerId) ?? [],
-  }));
+  ).map(({ labelsJson, ...lap }) => ({ ...lap, labels: parseLabelsJson(labelsJson) }));
 }
 
 export function getLapById(id: string): LapRecord | null {
@@ -1269,9 +1516,19 @@ export function performHandoff(nowMs = Date.now()):
           finished_at,
           duration_ms,
           source,
-          created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, 'spacebar', ?)`,
-        [lapId, activeRunnerId, lapNumber, startedAt, nowMs, Math.max(0, nowMs - startedAt), nowMs]
+          created_at,
+          labels_json
+        ) VALUES (?, ?, ?, ?, ?, ?, 'spacebar', ?, ?)`,
+        [
+          lapId,
+          activeRunnerId,
+          lapNumber,
+          startedAt,
+          nowMs,
+          Math.max(0, nowMs - startedAt),
+          nowMs,
+          JSON.stringify(raceState.activeLabels.length ? raceState.activeLabels : getRunnerLabels(activeRunnerId)),
+        ]
       );
       run(
         `UPDATE queue_entries
@@ -1293,15 +1550,17 @@ export function performHandoff(nowMs = Date.now()):
          SET active_runner_id = ?,
              active_started_at = ?,
              race_started_at = COALESCE(race_started_at, ?),
-             race_finished_at = NULL
+             race_finished_at = NULL,
+             active_labels_json = ?
          WHERE id = 1`,
-        [nextRunner.id, nowMs, nowMs]
+        [nextRunner.id, nowMs, nowMs, JSON.stringify(getRunnerLabels(nextRunner.id))]
       );
     } else {
       run(
         `UPDATE race_state
          SET active_runner_id = NULL,
-             active_started_at = NULL
+             active_started_at = NULL,
+             active_labels_json = NULL
          WHERE id = 1`
       );
     }
@@ -1354,13 +1613,15 @@ export function undoLastHandoff(): { ok: true; deletedLapIds: string[] } | { ok:
        SET active_runner_id = ?,
            active_started_at = ?,
            race_started_at = ?,
-           race_finished_at = ?
+           race_finished_at = ?,
+           active_labels_json = ?
        WHERE id = 1`,
       [
         raceState.activeRunnerId ?? null,
         raceState.activeStartedAt ?? null,
         raceState.raceStartedAt ?? null,
         raceState.raceFinishedAt ?? null,
+        JSON.stringify(raceState.activeLabels ?? []),
       ]
     );
     run('UPDATE handoff_history SET undone = 1 WHERE id = ?', [row.id]);
@@ -1374,6 +1635,7 @@ export function finishRace(nowMs = Date.now()): void {
     `UPDATE race_state
      SET active_runner_id = NULL,
          active_started_at = NULL,
+         active_labels_json = NULL,
          race_finished_at = ?
      WHERE id = 1`,
     [nowMs]
@@ -1385,6 +1647,8 @@ export function applySnapshot(snapshot: AppSnapshot): void {
     run('DELETE FROM handoff_history');
     run('DELETE FROM race_events');
     run('DELETE FROM laps');
+    run('DELETE FROM temporary_team_members');
+    run('DELETE FROM temporary_teams');
     run('DELETE FROM runner_labels');
     run('DELETE FROM queue_entries');
     run('DELETE FROM runners');
@@ -1480,8 +1744,9 @@ export function applySnapshot(snapshot: AppSnapshot): void {
           finished_at,
           duration_ms,
           source,
-          created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          created_at,
+          labels_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           lap.id,
           lap.runnerId,
@@ -1491,8 +1756,25 @@ export function applySnapshot(snapshot: AppSnapshot): void {
           lap.durationMs,
           lap.source,
           lap.createdAt,
+          JSON.stringify(lap.labels ?? []),
         ]
       );
+    }
+
+    for (const team of snapshot.temporaryTeams ?? []) {
+      run(
+        `INSERT INTO temporary_teams (label_id, active, activated_at)
+         VALUES (?, ?, ?)`,
+        [team.labelId, team.active ? 1 : 0, team.activatedAt ?? null]
+      );
+      for (const runnerId of team.memberRunnerIds) {
+        run(
+          `INSERT INTO temporary_team_members (
+             team_label_id, runner_id, restore_label_ids_json
+           ) VALUES (?, ?, ?)`,
+          [team.labelId, runnerId, JSON.stringify(team.restoreLabelIdsByRunner?.[runnerId] ?? [])]
+        );
+      }
     }
 
     for (const event of snapshot.events.slice().reverse()) {
@@ -1525,13 +1807,15 @@ export function applySnapshot(snapshot: AppSnapshot): void {
        SET active_runner_id = ?,
            active_started_at = ?,
            race_started_at = ?,
-           race_finished_at = ?
+           race_finished_at = ?,
+           active_labels_json = ?
        WHERE id = 1`,
       [
         snapshot.race.activeRunnerId ?? null,
         snapshot.race.activeStartedAt ?? null,
         snapshot.race.raceStartedAt ?? null,
         snapshot.race.raceFinishedAt ?? null,
+        JSON.stringify(snapshot.race.activeLabels ?? []),
       ]
     );
     setPublicRecordMode(snapshot.settings?.publicRecordMode ?? DEFAULT_PUBLIC_RECORD_MODE);

@@ -36,6 +36,8 @@
     "typecheck:client": "tsc -p tsconfig.json",
     "typecheck:server": "tsc -p tsconfig.server.json --noEmit",
     "typecheck": "npm run typecheck:client && npm run typecheck:server",
+    "test": "node --import tsx --test tests/temporary-teams.test.ts",
+    "test:e2e": "npm run build && node --import tsx --test tests/temporary-teams.e2e.test.ts",
     "check": "npm run typecheck && npm run client:build",
     "build": "npm run typecheck:client && npm run client:build && npm run server:build",
     "preview": "vite preview",

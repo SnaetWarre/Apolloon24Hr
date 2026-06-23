@@ -10,6 +10,8 @@ import {
   runnerInputSchema,
   runnerPatchSchema,
   runnerStatusUpdateSchema,
+  temporaryTeamActiveSchema,
+  temporaryTeamMembersSchema,
   type ImportSummary,
   type RunnerInput,
 } from '../shared/schemas.js';
@@ -29,10 +31,13 @@ import {
   getLapById,
   getRaceState,
   getRunnerById,
+  getTemporaryTeams,
   hideRunnerInQueue,
   insertRunner,
   performHandoff,
   setPublicRecordMode,
+  setTemporaryTeamActive,
+  setTemporaryTeamMembers,
   undoLastHandoff,
   unhideRunnerInQueue,
   updateLabel,
@@ -295,6 +300,7 @@ export const appRouter = t.router({
       return commitWrite('labels.create', () => {
         const label = createLabel(input);
         emitRealtime({ type: 'label:upserted', payload: label });
+        emitRealtime({ type: 'temporary-teams:patched', payload: getTemporaryTeams() });
         return label;
       });
     }),
@@ -305,6 +311,7 @@ export const appRouter = t.router({
           const label = updateLabel(input.id, input.fields);
           if (!label) notFound('label not found');
           emitRealtime({ type: 'label:upserted', payload: label });
+          emitRealtime({ type: 'temporary-teams:patched', payload: getTemporaryTeams() });
           emitRunnerCollections();
           return label;
         });
@@ -313,8 +320,28 @@ export const appRouter = t.router({
       return commitWrite('labels.delete', () => {
         deleteLabel(input.id);
         emitRealtime({ type: 'label:deleted', payload: input.id });
+        emitRealtime({ type: 'temporary-teams:patched', payload: getTemporaryTeams() });
         emitRunnerCollections();
         return { ok: true };
+      });
+    }),
+  }),
+
+  temporaryTeams: t.router({
+    list: t.procedure.query(() => getTemporaryTeams()),
+    setMembers: t.procedure.input(temporaryTeamMembersSchema).mutation(({ input }) => {
+      return commitWrite('temporaryTeams.setMembers', () => {
+        const team = setTemporaryTeamMembers(input.labelId, input.runnerIds);
+        emitRealtime({ type: 'temporary-teams:patched', payload: getTemporaryTeams() });
+        return team;
+      });
+    }),
+    setActive: t.procedure.input(temporaryTeamActiveSchema).mutation(({ input }) => {
+      return commitWrite('temporaryTeams.setActive', () => {
+        const team = setTemporaryTeamActive(input.labelId, input.active, Date.now());
+        emitRunnerCollections();
+        emitRealtime({ type: 'temporary-teams:patched', payload: getTemporaryTeams() });
+        return team;
       });
     }),
   }),

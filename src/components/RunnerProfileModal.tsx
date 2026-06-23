@@ -6,7 +6,7 @@ import { labelKindOrder, labelKindTitle } from './LabelBadge';
 import type { Label, Runner, RunnerStatus } from '../types';
 
 export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; onClose: () => void }) {
-  const { runners, laps: allLaps, labels } = useAppData();
+  const { runners, laps: allLaps, labels, temporaryTeams } = useAppData();
   const { setStatus, updateRunner } = useAppActions();
   const runner = runners.find((item) => item.id === runnerId);
   const [runnerNumber, setRunnerNumber] = React.useState('');
@@ -20,6 +20,9 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
   const [queueActionMessage, setQueueActionMessage] = React.useState<string | null>(null);
   const [queueActionError, setQueueActionError] = React.useState<string | null>(null);
   const editableRunnerKey = runner ? getEditableRunnerKey(runner) : '';
+  const activeTemporaryTeam = temporaryTeams.find(
+    (team) => team.active && team.memberRunnerIds.includes(runnerId)
+  );
 
   React.useEffect(() => {
     if (!runner) return;
@@ -91,9 +94,15 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
   }, [closePromptOpen, dirty, runner]);
 
   function toggleLabel(labelId: string) {
-    setSelectedLabels((current) =>
-      current.includes(labelId) ? current.filter((id) => id !== labelId) : [...current, labelId]
-    );
+    const label = labels.find((item) => item.id === labelId);
+    if (!label || label.kind === 'temporary_team') return;
+    setSelectedLabels((current) => {
+      if (current.includes(labelId)) return current.filter((id) => id !== labelId);
+      if (label.kind === 'speedteam') {
+        return [...current.filter((id) => labels.find((item) => item.id === id)?.kind !== 'speedteam'), labelId];
+      }
+      return [...current, labelId];
+    });
   }
 
   async function removeFromQueueFlow() {
@@ -204,6 +213,11 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
         </div>
 
         <div className="label-picker-groups">
+          {activeTemporaryTeam && (
+            <div className="host-hint">
+              De speedteamploeg wordt beheerd door de actieve tijdelijke nachtploeg en kan hier niet gewijzigd worden.
+            </div>
+          )}
           {groupLabels(labels).map(([kind, groupedLabels]) => (
             <section key={kind} className="label-picker-group">
               <h3>{labelKindTitle(kind)}</h3>
@@ -213,6 +227,7 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
                     <input
                       type="checkbox"
                       checked={selectedLabels.includes(label.id)}
+                      disabled={label.kind === 'temporary_team' || (Boolean(activeTemporaryTeam) && label.kind === 'speedteam')}
                       onChange={() => toggleLabel(label.id)}
                     />
                     <span style={{ borderColor: label.color }}>

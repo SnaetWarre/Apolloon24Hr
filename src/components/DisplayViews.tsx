@@ -130,8 +130,8 @@ export function InsideDisplay({ onNavigate }: { onNavigate: (path: string) => vo
     .slice(0, 10);
 
   const labelStats = labels
-    .map((label) => buildLabelStat(label, runners))
-    .filter((stat) => stat.runnerCount > 0)
+    .map((label) => buildLabelStat(label, runners, laps))
+    .filter((stat) => stat.runnerCount > 0 || stat.laps > 0)
     .sort(
       (a, b) =>
         (a.label.sortOrder ?? 9999) - (b.label.sortOrder ?? 9999) ||
@@ -266,16 +266,17 @@ function eventRunnerLabel(event: RaceEvent) {
   return event.runnerNumber ? `${event.runnerNumber} - ${event.runnerName}` : event.runnerName;
 }
 
-function buildLabelStat(label: Label, runners: Runner[]) {
+function buildLabelStat(label: Label, runners: Runner[], laps: LapRecord[]) {
   const labelRunners = runners.filter((runner) => runner.labels.some((item) => item.id === label.id));
-  const laps = labelRunners.reduce((sum, runner) => sum + runner.lapCount, 0);
+  const labelLaps = laps.filter((lap) => lap.labels.some((item) => item.id === label.id));
+  const historicalRunnerIds = new Set(labelLaps.map((lap) => lap.runnerId));
   const calculatedTarget = labelRunners.reduce((sum, runner) => sum + (runner.targetLaps || 0), 0);
   const target = label.targetLaps ?? calculatedTarget;
   return {
     label,
-    runnerCount: labelRunners.length,
-    laps,
+    runnerCount: new Set([...labelRunners.map((runner) => runner.id), ...historicalRunnerIds]).size,
+    laps: labelLaps.length,
     target,
-    percent: target > 0 ? (laps / target) * 100 : 0,
+    percent: target > 0 ? (labelLaps.length / target) * 100 : 0,
   };
 }
