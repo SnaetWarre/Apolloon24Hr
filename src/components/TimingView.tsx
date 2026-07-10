@@ -23,58 +23,63 @@ export function TimingView() {
 
   useAnimationFrameTick(Boolean(activeRunner && race.activeStartedAt));
 
+  const runExclusiveRaceAction = React.useCallback(
+    async (action: () => Promise<unknown>, successMessage: string | null): Promise<boolean> => {
+      if (handoffBusyRef.current) return false;
+      handoffBusyRef.current = true;
+      setHandoffBusy(true);
+      setMessage(null);
+      setLastAction(null);
+      try {
+        await action();
+        if (successMessage) setLastAction(successMessage);
+        return true;
+      } catch (err) {
+        setMessage(err instanceof Error ? err.message : 'Timing actie mislukt');
+        return false;
+      } finally {
+        handoffBusyRef.current = false;
+        setHandoffBusy(false);
+      }
+    },
+    []
+  );
+
   const runHandoff = React.useCallback(async () => {
-    if (handoffBusyRef.current) return;
-    handoffBusyRef.current = true;
     const hadActiveRunner = Boolean(activeRunner);
-    setHandoffBusy(true);
-    setMessage(null);
-    setLastAction(null);
-    try {
-      if (activeRunner) await handoff();
-      else await startNext();
-      setLastAction(hadActiveRunner ? 'Ronde opgeslagen. Volgende loper gestart.' : 'Race gestart. Eerste loper loopt.');
-    } catch (err) {
-      setMessage(err instanceof Error ? err.message : 'Timing actie mislukt');
-    } finally {
-      handoffBusyRef.current = false;
-      setHandoffBusy(false);
-    }
-  }, [activeRunner, handoff, startNext]);
+    await runExclusiveRaceAction(
+      () => (activeRunner ? handoff() : startNext()),
+      hadActiveRunner ? 'Ronde opgeslagen. Volgende loper gestart.' : 'Race gestart. Eerste loper loopt.'
+    );
+  }, [activeRunner, handoff, runExclusiveRaceAction, startNext]);
 
   React.useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
+      if (event.key === 'Escape' && finishConfirmStep > 0) {
+        event.preventDefault();
+        setFinishConfirmStep(0);
+        return;
+      }
       if (!isHandoffKey(event) || isInteractiveTarget(target) || finishConfirmStep > 0) return;
       event.preventDefault();
       if (event.repeat || handoffBusy) return;
-      runHandoff();
+      void runHandoff();
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [finishConfirmStep, handoffBusy, runHandoff]);
 
   async function undo() {
+    if (handoffBusyRef.current) return;
     if (!window.confirm('Laatste handoff ongedaan maken?')) return;
-    setMessage(null);
-    setLastAction(null);
-    try {
-      await undoLastHandoff();
-    } catch (err) {
-      setMessage(err instanceof Error ? err.message : 'Undo mislukt');
-    }
+    await runExclusiveRaceAction(undoLastHandoff, null);
   }
 
   async function finish() {
-    if (handoffBusyRef.current) return;
-    setMessage(null);
-    setLastAction(null);
-    try {
-      await finishRace();
+    const succeeded = await runExclusiveRaceAction(finishRace, 'Race beeindigd.');
+    if (succeeded) {
       setFinishConfirmStep(0);
-      setLastAction('Race beeindigd.');
-    } catch (err) {
-      setMessage(err instanceof Error ? err.message : 'Race beeindigen mislukt');
     }
   }
 

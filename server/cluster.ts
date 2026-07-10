@@ -15,6 +15,7 @@ import {
   type ClusterOperation,
 } from './db.js';
 import { hostInfo } from './host.js';
+import { emitRealtime } from './realtime.js';
 import type { AppSnapshot, ClusterPeer, ClusterRole, ClusterStatus } from '../shared/schemas.js';
 
 type PeerState = {
@@ -535,6 +536,7 @@ function applyClusterOperation(operation: ClusterOperation): void {
   const payload = operation.payload as Partial<SnapshotOperationPayload>;
   if (payload.snapshot) {
     applySnapshot(payload.snapshot);
+    emitRealtime({ type: 'bootstrap', payload: appSnapshot() });
   }
   appendClusterOperation({
     seq: operation.seq,

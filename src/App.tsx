@@ -1,21 +1,54 @@
 import React from 'react';
 import { Outlet, useNavigate, useRouterState } from '@tanstack/react-router';
-import { AppHeader } from './components/AppHeader';
-import { AnalysisView } from './components/AnalysisView';
-import { AdminView } from './components/AdminView';
-import { InsideDisplay, OutsideDisplay } from './components/DisplayViews';
-import { KanbanBoard } from './components/KanbanBoard';
 import { RolePicker } from './components/RolePicker';
-import { RunnerProfileModal } from './components/RunnerProfileModal';
-import { TimingView } from './components/TimingView';
 import { useAppData, useRealtimeBridge } from './app/index';
 import { formatDurationMs, nowMs } from './lib/time';
 import { getNextWaitingRunner, runnerLabel } from './lib/runners';
 import { useAnimationFrameTick } from './lib/useAnimationFrameTick';
 
+const AnalysisView = React.lazy(async () => {
+  const module = await import('./components/AnalysisView');
+  return { default: module.AnalysisView };
+});
+
+const AppHeader = React.lazy(async () => {
+  const module = await import('./components/AppHeader');
+  return { default: module.AppHeader };
+});
+
+const AdminView = React.lazy(async () => {
+  const module = await import('./components/AdminView');
+  return { default: module.AdminView };
+});
+
+const InsideDisplay = React.lazy(async () => {
+  const module = await import('./components/DisplayViews');
+  return { default: module.InsideDisplay };
+});
+
+const OutsideDisplay = React.lazy(async () => {
+  const module = await import('./components/DisplayViews');
+  return { default: module.OutsideDisplay };
+});
+
+const KanbanBoard = React.lazy(async () => {
+  const module = await import('./components/KanbanBoard');
+  return { default: module.KanbanBoard };
+});
+
+const RunnerProfileModal = React.lazy(async () => {
+  const module = await import('./components/RunnerProfileModal');
+  return { default: module.RunnerProfileModal };
+});
+
+const TimingView = React.lazy(async () => {
+  const module = await import('./components/TimingView');
+  return { default: module.TimingView };
+});
+
 export function AppRoot() {
   useRealtimeBridge();
-  const { initialized, error } = useAppData();
+  const { initialized, error, refresh } = useAppData();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const displayRoute = pathname.startsWith('/display/');
 
@@ -25,6 +58,9 @@ export function AppRoot() {
         <div className="empty-state">
           <h1>Kan niet verbinden met de lokale server</h1>
           <p>{error.message}</p>
+          <button className="btn btn--primary" onClick={() => void refresh()}>
+            Opnieuw proberen
+          </button>
         </div>
       </Shell>
     );
@@ -41,12 +77,25 @@ export function AppRoot() {
     );
   }
 
-  if (displayRoute) return <Outlet />;
+  const outlet = (
+    <React.Suspense
+      fallback={
+        <div className="empty-state">
+          <h1>Apolloon telsysteem</h1>
+          <p>Pagina wordt geladen...</p>
+        </div>
+      }
+    >
+      <Outlet />
+    </React.Suspense>
+  );
+
+  if (displayRoute) return outlet;
 
   return (
     <Shell>
       {pathname !== '/' && <TopNav />}
-      <Outlet />
+      {outlet}
     </Shell>
   );
 }

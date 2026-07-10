@@ -16,3 +16,13 @@ export function useAnimationFrameTick(enabled = true) {
     return () => window.cancelAnimationFrame(frameId);
   }, [enabled]);
 }
+
+export function useSecondTick(enabled = true): void {
+  const [, setTick] = React.useState(0);
+
+  React.useEffect(() => {
+    if (!enabled) return undefined;
+    const intervalId = window.setInterval(() => setTick((value) => (value + 1) % 1_000_000), 1_000);
+    return () => window.clearInterval(intervalId);
+  }, [enabled]);
+}

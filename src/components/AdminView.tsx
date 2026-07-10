@@ -24,6 +24,7 @@ export function AdminView() {
   const [csvText, setCsvText] = React.useState('');
   const [csvFileName, setCsvFileName] = React.useState('');
   const [message, setMessage] = React.useState<string | null>(null);
+  const [importing, setImporting] = React.useState(false);
   const [eventMessage, setEventMessage] = React.useState<string | null>(null);
   const [eventSaving, setEventSaving] = React.useState(false);
   const [recordModeSaving, setRecordModeSaving] = React.useState(false);
@@ -35,16 +36,21 @@ export function AdminView() {
   const [labelImageUrl, setLabelImageUrl] = React.useState('');
   const [labelTargetLaps, setLabelTargetLaps] = React.useState('');
   const [labelSortOrder, setLabelSortOrder] = React.useState('');
+  const [labelMessage, setLabelMessage] = React.useState<string | null>(null);
+  const [addingLabel, setAddingLabel] = React.useState(false);
   const [profileRunnerId, setProfileRunnerId] = React.useState<string | null>(null);
 
   async function importCsv() {
-    if (!csvText.trim()) return;
+    if (!csvText.trim() || importing) return;
     setMessage(null);
+    setImporting(true);
     try {
       const summary = await importRunnersCsv(csvText);
       setMessage(summary);
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Import mislukt');
+    } finally {
+      setImporting(false);
     }
   }
 
@@ -58,20 +64,28 @@ export function AdminView() {
 
   async function addLabel() {
     const name = labelName.trim();
-    if (!name) return;
-    await createLabel({
-      name,
-      color: labelColor,
-      icon: name.slice(0, 2).toUpperCase(),
-      kind: labelKind.trim() || 'custom',
-      imageUrl: labelImageUrl.trim() || null,
-      targetLaps: labelTargetLaps ? Number(labelTargetLaps) : null,
-      sortOrder: labelSortOrder ? Number(labelSortOrder) : null,
-    });
-    setLabelName('');
-    setLabelImageUrl('');
-    setLabelTargetLaps('');
-    setLabelSortOrder('');
+    if (!name || addingLabel) return;
+    setAddingLabel(true);
+    setLabelMessage(null);
+    try {
+      await createLabel({
+        name,
+        color: labelColor,
+        icon: name.slice(0, 2).toUpperCase(),
+        kind: labelKind.trim() || 'custom',
+        imageUrl: labelImageUrl.trim() || null,
+        targetLaps: labelTargetLaps ? Number(labelTargetLaps) : null,
+        sortOrder: labelSortOrder ? Number(labelSortOrder) : null,
+      });
+      setLabelName('');
+      setLabelImageUrl('');
+      setLabelTargetLaps('');
+      setLabelSortOrder('');
+    } catch (err) {
+      setLabelMessage(err instanceof Error ? err.message : 'Label toevoegen mislukt');
+    } finally {
+      setAddingLabel(false);
+    }
   }
 
   async function triggerBurgieGepakt() {
@@ -105,7 +119,13 @@ export function AdminView() {
 
   async function removeLabel(id: string, name: string) {
     if (!window.confirm(`Label ${name} verwijderen? Dit verwijdert het label ook van lopers.`)) return;
-    await deleteLabel(id);
+    setLabelMessage(null);
+    try {
+      await deleteLabel(id);
+      setLabelMessage(`${name} is verwijderd.`);
+    } catch (err) {
+      setLabelMessage(err instanceof Error ? err.message : 'Label verwijderen mislukt');
+    }
   }
 
   const adminRunners = React.useMemo(() => {
@@ -205,8 +225,12 @@ export function AdminView() {
               <span>CSV-bestand kiezen</span>
             </label>
             <span className="file-name">{csvFileName || 'Geen bestand gekozen'}</span>
-            <button className="btn btn--primary btn--fixed" onClick={importCsv} disabled={!csvText.trim()}>
-              Importeren
+            <button
+              className="btn btn--primary btn--fixed"
+              onClick={importCsv}
+              disabled={!csvText.trim() || importing}
+            >
+              {importing ? 'Importeren...' : 'Importeren'}
             </button>
           </div>
           {message && <div className="host-hint">{message}</div>}
@@ -256,10 +280,12 @@ export function AdminView() {
               onChange={(event) => setLabelSortOrder(event.target.value)}
               placeholder="Positie"
             />
-            <button className="btn btn--primary" onClick={addLabel}>
-              Label toevoegen
+            <button className="btn btn--primary" onClick={addLabel} disabled={!labelName.trim() || addingLabel}>
+              {addingLabel ? 'Toevoegen...' : 'Label toevoegen'}
             </button>
           </div>
+
+          {labelMessage && <div className="host-hint">{labelMessage}</div>}
 
           <div className="label-admin-list">
             {groupLabels(labels).map(([kind, groupedLabels]) => (
@@ -560,6 +586,7 @@ function TemporaryTeamAdminCard({
   }
 
   async function saveMembers() {
+    if (busy) return;
     setBusy(true);
     setFeedback(null);
     try {
@@ -585,6 +612,7 @@ function TemporaryTeamAdminCard({
   }, [membersOpen, dirty]);
 
   async function changeActive() {
+    if (busy) return;
     const action = team.active ? 'deactiveren' : 'activeren';
     if (!window.confirm(`${label.name} ${action} voor ${team.memberRunnerIds.length} lopers?`)) return;
     setBusy(true);
@@ -723,7 +751,11 @@ function TemporaryTeamAdminCard({
                         <button
                           className="btn btn--primary btn--sm"
                           disabled={team.active || assignedElsewhere || invalidBaseTeam}
-                          onClick={() => setSelectedIds((current) => [...current, runner.id])}
+                          onClick={() =>
+                            setSelectedIds((current) =>
+                              current.includes(runner.id) ? current : [...current, runner.id]
+                            )
+                          }
                         >
                           Voeg toe
                         </button>
@@ -794,6 +826,7 @@ function LabelAdminRow({
   const [target, setTarget] = React.useState(label.targetLaps?.toString() || '');
   const [sortOrder, setSortOrder] = React.useState(label.sortOrder?.toString() || '');
   const [saving, setSaving] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     setTarget(label.targetLaps?.toString() || '');
@@ -801,12 +834,16 @@ function LabelAdminRow({
   }, [label.targetLaps, label.sortOrder]);
 
   async function saveLabelSettings() {
+    if (saving) return;
     setSaving(true);
+    setError(null);
     try {
       await onSave({
         targetLaps: target ? Number(target) : null,
         sortOrder: sortOrder ? Number(sortOrder) : null,
       });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Label opslaan mislukt');
     } finally {
       setSaving(false);
     }
@@ -844,6 +881,7 @@ function LabelAdminRow({
       <button className="btn btn--danger" onClick={onDelete}>
         Verwijder
       </button>
+      {error && <span className="warning-inline">{error}</span>}
     </div>
   );
 }

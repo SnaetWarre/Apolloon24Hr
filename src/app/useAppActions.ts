@@ -1,16 +1,32 @@
 import React from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { trpc } from '../api';
-import type { LabelInput, LabelPatch, PublicRecordMode, RunnerInput, RunnerPatch, RunnerStatus } from '../types';
+import type {
+  AppSnapshot,
+  LabelInput,
+  LabelPatch,
+  PublicRecordMode,
+  RaceStateExpectation,
+  RunnerInput,
+  RunnerPatch,
+  RunnerStatus,
+} from '../types';
 import { snapshotKey } from './snapshot';
-import { useAppData } from './useAppData';
 
 export function useAppActions() {
   const activeQueryClient = useQueryClient();
-  const { runners } = useAppData();
 
   const refreshSnapshot = React.useCallback(async () => {
     await activeQueryClient.invalidateQueries({ queryKey: snapshotKey });
+  }, [activeQueryClient]);
+
+  const currentRaceExpectation = React.useCallback((): RaceStateExpectation => {
+    const snapshot = activeQueryClient.getQueryData<AppSnapshot>(snapshotKey);
+    if (!snapshot) throw new Error('Timingstatus wordt nog geladen');
+    return {
+      activeRunnerId: snapshot.race.activeRunnerId,
+      activeStartedAt: snapshot.race.activeStartedAt,
+    };
   }, [activeQueryClient]);
 
   return React.useMemo(
@@ -28,14 +44,20 @@ export function useAppActions() {
         await trpc.runners.setStatus.mutate({ id, status });
         await refreshSnapshot();
       },
-      async moveInQueue(id: string, newIndex: number) {
-        const waiting = runners
+      async moveInQueue(id: string, targetId: string) {
+        const snapshot = activeQueryClient.getQueryData<AppSnapshot>(snapshotKey);
+        const waiting = (snapshot?.runners ?? [])
           .filter((runner) => runner.status === 'waiting')
-          .sort((a, b) => (a.queueIndex ?? 0) - (b.queueIndex ?? 0));
+          .sort(
+            (a, b) =>
+              (a.queueIndex ?? Number.MAX_SAFE_INTEGER) - (b.queueIndex ?? Number.MAX_SAFE_INTEGER) ||
+              (a.statusSince ?? Number.MAX_SAFE_INTEGER) - (b.statusSince ?? Number.MAX_SAFE_INTEGER)
+          );
         const oldIndex = waiting.findIndex((runner) => runner.id === id);
-        if (oldIndex === -1) return;
+        const targetIndex = waiting.findIndex((runner) => runner.id === targetId);
+        if (oldIndex === -1 || targetIndex === -1 || oldIndex === targetIndex) return;
         const [moved] = waiting.splice(oldIndex, 1);
-        waiting.splice(newIndex, 0, moved);
+        waiting.splice(targetIndex, 0, moved);
         await trpc.runners.reorder.mutate({ ids: waiting.map((runner) => runner.id) });
         await refreshSnapshot();
       },
@@ -79,19 +101,19 @@ export function useAppActions() {
         return `${summary.created} aangemaakt, ${summary.updated} bijgewerkt, ${summary.skipped} overgeslagen`;
       },
       async handoff() {
-        await trpc.race.handoff.mutate();
+        await trpc.race.handoff.mutate(currentRaceExpectation());
         await refreshSnapshot();
       },
       async startNext() {
-        await trpc.race.startNext.mutate();
+        await trpc.race.startNext.mutate(currentRaceExpectation());
         await refreshSnapshot();
       },
       async undoLastHandoff() {
-        await trpc.race.undoLastHandoff.mutate();
+        await trpc.race.undoLastHandoff.mutate(currentRaceExpectation());
         await refreshSnapshot();
       },
       async finishRace() {
-        await trpc.race.finish.mutate();
+        await trpc.race.finish.mutate(currentRaceExpectation());
         await refreshSnapshot();
       },
       async burgieGepakt() {
@@ -105,6 +127,6 @@ export function useAppActions() {
         return settings;
       },
     }),
-    [refreshSnapshot, runners]
+    [activeQueryClient, currentRaceExpectation, refreshSnapshot]
   );
 }

@@ -3,6 +3,7 @@ import { DndContext, closestCenter, useDraggable, useDroppable, DragEndEvent } f
 import { useAppActions, useAppData } from '../app/index';
 import { useAppStore } from '../store';
 import { formatDurationMs, formatElapsedSeconds, nowMs } from '../lib/time';
+import { useSecondTick } from '../lib/useAnimationFrameTick';
 import type { Runner, RunnerStatus } from '../types';
 import { LabelBadge } from './LabelBadge';
 
@@ -12,14 +13,9 @@ const COLUMNS: { key: RunnerStatus; title: string }[] = [
   { key: 'ran', title: 'Heeft gelopen' },
 ];
 
-function TimerBadge({ runner }: { runner: Runner }) {
-  const [, setTick] = React.useState(0);
-  React.useEffect(() => {
-    const id = window.setInterval(() => setTick((tick) => (tick + 1) % 1_000_000), 1000);
-    return () => window.clearInterval(id);
-  }, []);
+function TimerBadge({ runner, currentNowMs }: { runner: Runner; currentNowMs: number }) {
   if (!runner.statusSince || runner.status === 'ran') return null;
-  return <span className="timer-badge">{formatElapsedSeconds(nowMs() - runner.statusSince)}</span>;
+  return <span className="timer-badge">{formatElapsedSeconds(currentNowMs - runner.statusSince)}</span>;
 }
 
 const LAST_IN_ORDER = Number.MAX_SAFE_INTEGER;
@@ -42,6 +38,27 @@ export const KanbanBoard: React.FC<{ onOpenProfile: (runnerId: string) => void }
   const search = useAppStore((state) => state.search);
   const { setStatus, moveInQueue, hideRunner, unhideRunner } = useAppActions();
   const [showHiddenRan, setShowHiddenRan] = React.useState(false);
+  const [actionError, setActionError] = React.useState<string | null>(null);
+  const [actionBusy, setActionBusy] = React.useState(false);
+  const actionBusyRef = React.useRef(false);
+
+  useSecondTick();
+  const currentNowMs = nowMs();
+
+  const runQueueAction = React.useCallback(async (action: () => Promise<unknown>) => {
+    if (actionBusyRef.current) return;
+    actionBusyRef.current = true;
+    setActionBusy(true);
+    setActionError(null);
+    try {
+      await action();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Wachtrijactie mislukt');
+    } finally {
+      actionBusyRef.current = false;
+      setActionBusy(false);
+    }
+  }, []);
 
   const filteredRunners = React.useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -101,7 +118,7 @@ export const KanbanBoard: React.FC<{ onOpenProfile: (runnerId: string) => void }
       if (targetStatus === 'ran') return;
       const runner = filteredRunners.find((item) => item.id === activeId);
       if (runner && runner.status !== targetStatus) {
-        setStatus(activeId, targetStatus);
+        void runQueueAction(() => setStatus(activeId, targetStatus));
       }
       return;
     }
@@ -113,13 +130,13 @@ export const KanbanBoard: React.FC<{ onOpenProfile: (runnerId: string) => void }
       const oldIndex = waitingSorted.findIndex((runner) => runner.id === activeId);
       const newIndex = waitingSorted.findIndex((runner) => runner.id === overId);
       if (oldIndex !== -1 && newIndex !== -1 && oldIndex !== newIndex) {
-        moveInQueue(activeId, newIndex);
+        void runQueueAction(() => moveInQueue(activeId, overId));
       }
       return;
     }
 
     if (overRunner && activeRunner && activeRunner.status !== overRunner.status && overRunner.status !== 'ran') {
-      setStatus(activeId, overRunner.status);
+      void runQueueAction(() => setStatus(activeId, overRunner.status));
     }
   }
 
@@ -135,6 +152,7 @@ export const KanbanBoard: React.FC<{ onOpenProfile: (runnerId: string) => void }
           Verborgen gelopen tonen
         </label>
       </div>
+      {actionError && <div className="warning-banner">{actionError}</div>}
       <div className="kanban">
         {COLUMNS.map((column) => {
           const items =
@@ -149,8 +167,10 @@ export const KanbanBoard: React.FC<{ onOpenProfile: (runnerId: string) => void }
                     onOpenProfile={() => onOpenProfile(runner.id)}
                     columnKey={column.key}
                     queueIndex={column.key === 'waiting' ? index : undefined}
-                    onHide={hideRunner}
-                    onUnhide={unhideRunner}
+                    currentNowMs={currentNowMs}
+                    actionBusy={actionBusy}
+                    onHide={(id) => runQueueAction(() => hideRunner(id))}
+                    onUnhide={(id) => runQueueAction(() => unhideRunner(id))}
                   />
                 </DroppableCard>
               ))}
@@ -192,6 +212,8 @@ function DraggableCard({
   onOpenProfile,
   columnKey,
   queueIndex,
+  currentNowMs,
+  actionBusy,
   onHide,
   onUnhide,
 }: {
@@ -200,10 +222,12 @@ function DraggableCard({
   onOpenProfile: () => void;
   columnKey: RunnerStatus;
   queueIndex?: number;
+  currentNowMs: number;
+  actionBusy: boolean;
   onHide: (id: string) => Promise<void>;
   onUnhide: (id: string) => Promise<void>;
 }) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id });
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id, disabled: actionBusy });
   const style: React.CSSProperties = {
     transform: transform ? `translate3d(${transform.x}px, ${transform.y}px, 0)` : undefined,
     opacity: isDragging ? 0.5 : 1,
@@ -260,17 +284,17 @@ function DraggableCard({
           >
             Profiel
           </button>
-          <TimerBadge runner={runner} />
+          <TimerBadge runner={runner} currentNowMs={currentNowMs} />
           {columnKey === 'waiting' && queueIndex !== undefined && (
             <span className="queue-badge">{queueIndex === 0 ? 'Volgende' : `#${queueIndex + 1}`}</span>
           )}
           {columnKey === 'ran' && !runner.hiddenFromQueue && (
-            <button className="btn btn--sm btn--fixed" onClick={handleHide}>
+            <button className="btn btn--sm btn--fixed" onClick={handleHide} disabled={actionBusy}>
               Verberg
             </button>
           )}
           {columnKey === 'ran' && runner.hiddenFromQueue && (
-            <button className="btn btn--sm btn--fixed" onClick={handleUnhide}>
+            <button className="btn btn--sm btn--fixed" onClick={handleUnhide} disabled={actionBusy}>
               Terug tonen
             </button>
           )}

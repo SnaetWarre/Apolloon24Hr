@@ -74,17 +74,17 @@ test('temporary night teams work through HTTP, realtime, analysis, exports, and 
     assert.deepEqual(currentTeamIds(state, bob.id), [trojanV2.id]);
 
     await client.runners.setStatus.mutate({ id: alice.id, status: 'waiting' });
-    await client.race.startNext.mutate();
+    await client.race.startNext.mutate(raceExpectation(await fetchState(baseUrl)));
     await client.runners.setStatus.mutate({ id: bob.id, status: 'waiting' });
-    await client.race.handoff.mutate();
+    await client.race.handoff.mutate(raceExpectation(await fetchState(baseUrl)));
 
     await client.temporaryTeams.setActive.mutate({ labelId: trojan.id, active: false });
     await client.runners.setStatus.mutate({ id: alice.id, status: 'waiting' });
-    await client.race.handoff.mutate();
+    await client.race.handoff.mutate(raceExpectation(await fetchState(baseUrl)));
 
     await client.temporaryTeams.setActive.mutate({ labelId: trojanV2.id, active: false });
     await client.runners.setStatus.mutate({ id: bob.id, status: 'waiting' });
-    await client.race.handoff.mutate();
+    await client.race.handoff.mutate(raceExpectation(await fetchState(baseUrl)));
 
     state = await fetchState(baseUrl);
     assert.deepEqual(currentTeamIds(state, alice.id), [blue.id]);
@@ -169,6 +169,13 @@ function currentTeamIds(state: AppSnapshot, runnerId: string): string[] {
     .find((runner) => runner.id === runnerId)?.labels
     .filter((label) => label.kind === 'speedteam' || label.kind === 'temporary_team')
     .map((label) => label.id) ?? [];
+}
+
+function raceExpectation(state: AppSnapshot) {
+  return {
+    activeRunnerId: state.race.activeRunnerId,
+    activeStartedAt: state.race.activeStartedAt,
+  };
 }
 
 async function fetchState(baseUrl: string): Promise<AppSnapshot> {

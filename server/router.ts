@@ -6,6 +6,7 @@ import {
   labelPatchSchema,
   publicRecordModeUpdateSchema,
   queueReorderSchema,
+  raceStateExpectationSchema,
   runnerIdSchema,
   runnerInputSchema,
   runnerPatchSchema,
@@ -131,6 +132,13 @@ function conflict(message: string): never {
   throw new TRPCError({ code: 'CONFLICT', message });
 }
 
+function assertExpectedRaceState(expected: { activeRunnerId: string | null; activeStartedAt: number | null }): void {
+  const actual = getRaceState();
+  if (actual.activeRunnerId !== expected.activeRunnerId || actual.activeStartedAt !== expected.activeStartedAt) {
+    conflict('Timingstatus is gewijzigd. Controleer de huidige loper en probeer opnieuw.');
+  }
+}
+
 function commitWrite<T>(type: string, action: () => T): T {
   try {
     assertWritable();
@@ -181,11 +189,16 @@ export const appRouter = t.router({
     }),
     setStatus: t.procedure.input(runnerStatusUpdateSchema).mutation(({ input }) => {
       return commitWrite('runners.setStatus', () => {
-        const runner = updateRunnerStatus({
-          id: input.id,
-          status: input.status,
-          statusSince: input.statusSince ?? Date.now(),
-        });
+        let runner: ReturnType<typeof updateRunnerStatus>;
+        try {
+          runner = updateRunnerStatus({
+            id: input.id,
+            status: input.status,
+            statusSince: input.statusSince ?? Date.now(),
+          });
+        } catch (err) {
+          conflict(err instanceof Error ? err.message : 'Loperstatus aanpassen mislukt');
+        }
         if (!runner) notFound('runner not found');
         emitRealtime({ type: 'runner:upserted', payload: runner });
         emitRealtime({ type: 'queue:patched', payload: getAllRunners() });
@@ -195,7 +208,11 @@ export const appRouter = t.router({
     }),
     reorder: t.procedure.input(queueReorderSchema).mutation(({ input }) => {
       return commitWrite('runners.reorder', () => {
-        updateWaitingOrder(input.ids);
+        try {
+          updateWaitingOrder(input.ids);
+        } catch (err) {
+          badRequest(err instanceof Error ? err.message : 'Wachtrij herschikken mislukt');
+        }
         emitRealtime({ type: 'queue:patched', payload: getAllRunners() });
         return { ok: true };
       });
@@ -318,7 +335,7 @@ export const appRouter = t.router({
       }),
     delete: t.procedure.input(runnerIdSchema).mutation(({ input }) => {
       return commitWrite('labels.delete', () => {
-        deleteLabel(input.id);
+        if (!deleteLabel(input.id)) notFound('label not found');
         emitRealtime({ type: 'label:deleted', payload: input.id });
         emitRealtime({ type: 'temporary-teams:patched', payload: getTemporaryTeams() });
         emitRunnerCollections();
@@ -349,17 +366,19 @@ export const appRouter = t.router({
   race: t.router({
     state: t.procedure.query(() => getRaceState()),
     laps: t.procedure.query(() => getAllLaps()),
-    startNext: t.procedure.mutation(() => {
+    startNext: t.procedure.input(raceStateExpectationSchema).mutation(({ input }) => {
       return commitWrite('race.startNext', () => {
-        if (getRaceState().activeRunnerId) conflict('Er loopt al een loper');
+        assertExpectedRaceState(input);
+        if (input.activeRunnerId) conflict('Er loopt al een loper');
         const result = performHandoff(Date.now());
         if (!result.ok) conflict(result.error);
         emitRaceCollections();
         return result;
       });
     }),
-    handoff: t.procedure.mutation(() => {
+    handoff: t.procedure.input(raceStateExpectationSchema).mutation(({ input }) => {
       return commitWrite('race.handoff', () => {
+        assertExpectedRaceState(input);
         const result = performHandoff(Date.now());
         if (!result.ok) conflict(result.error);
         emitRaceCollections();
@@ -370,8 +389,9 @@ export const appRouter = t.router({
         return result;
       });
     }),
-    undoLastHandoff: t.procedure.mutation(() => {
+    undoLastHandoff: t.procedure.input(raceStateExpectationSchema).mutation(({ input }) => {
       return commitWrite('race.undoLastHandoff', () => {
+        assertExpectedRaceState(input);
         const result = undoLastHandoff();
         if (!result.ok) conflict(result.error);
         emitRaceCollections();
@@ -381,8 +401,9 @@ export const appRouter = t.router({
         return result;
       });
     }),
-    finish: t.procedure.mutation(() => {
+    finish: t.procedure.input(raceStateExpectationSchema).mutation(({ input }) => {
       return commitWrite('race.finish', () => {
+        assertExpectedRaceState(input);
         finishRace(Date.now());
         emitRaceCollections();
         return { ok: true };

@@ -775,12 +775,12 @@ export function updateLabel(id: string, fields: LabelPatch): Label | null {
   return getLabels().find((label) => label.id === id) ?? null;
 }
 
-export function deleteLabel(id: string): void {
+export function deleteLabel(id: string): boolean {
   const temporaryState = one<{ active: number }>('SELECT active FROM temporary_teams WHERE label_id = ?', [id]);
   if (temporaryState?.active) throw new Error('Deactiveer deze tijdelijke nachtploeg voor je ze verwijdert');
-  transaction(() => {
+  return transaction(() => {
     run('DELETE FROM runner_labels WHERE label_id = ?', [id]);
-    run('DELETE FROM labels WHERE id = ?', [id]);
+    return run('DELETE FROM labels WHERE id = ?', [id]).changes > 0;
   });
 }
 
@@ -1251,7 +1251,14 @@ export function updateRunnerStatus({
   statusSince?: number | null;
   queueIndex?: number | null;
 }): Runner | null {
+  if (!one<{ id: string }>('SELECT id FROM runners WHERE id = ?', [id])) return null;
   const nextStatus = cleanStatus(status);
+  if (nextStatus === 'running') {
+    const activeRunnerId = getRaceState().activeRunnerId;
+    if (activeRunnerId && activeRunnerId !== id) {
+      throw new Error('Er loopt al een loper');
+    }
+  }
   const now = cleanInt(statusSince) ?? Date.now();
   const nextQueueIndex =
     nextStatus === 'waiting'
@@ -1299,6 +1306,21 @@ export function updateRunnerStatus({
 }
 
 export function updateWaitingOrder(idOrder: string[]): void {
+  const uniqueIds = new Set(idOrder);
+  const waitingIds = all<{ id: string }>(
+    `SELECT runner_id AS id
+     FROM queue_entries
+     WHERE status = 'waiting'`
+  ).map((entry) => entry.id);
+
+  if (
+    uniqueIds.size !== idOrder.length ||
+    uniqueIds.size !== waitingIds.length ||
+    waitingIds.some((id) => !uniqueIds.has(id))
+  ) {
+    throw new Error('De volledige wachtrijvolgorde is vereist');
+  }
+
   const now = Date.now();
   transaction(() => {
     idOrder.forEach((id, idx) => {
@@ -1631,15 +1653,26 @@ export function undoLastHandoff(): { ok: true; deletedLapIds: string[] } | { ok:
 }
 
 export function finishRace(nowMs = Date.now()): void {
-  run(
-    `UPDATE race_state
-     SET active_runner_id = NULL,
-         active_started_at = NULL,
-         active_labels_json = NULL,
-         race_finished_at = ?
-     WHERE id = 1`,
-    [nowMs]
-  );
+  const activeRunnerId = getRaceState().activeRunnerId;
+  transaction(() => {
+    if (activeRunnerId) {
+      run(
+        `UPDATE queue_entries
+         SET status = 'ran', queue_index = NULL, status_since = ?, hidden_at = NULL
+         WHERE runner_id = ?`,
+        [nowMs, activeRunnerId]
+      );
+    }
+    run(
+      `UPDATE race_state
+       SET active_runner_id = NULL,
+           active_started_at = NULL,
+           active_labels_json = NULL,
+           race_finished_at = ?
+       WHERE id = 1`,
+      [nowMs]
+    );
+  });
 }
 
 export function applySnapshot(snapshot: AppSnapshot): void {

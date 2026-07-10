@@ -13,6 +13,7 @@ export type {
   RaceEvent,
   RaceEventType,
   RaceState,
+  RaceStateExpectation,
   RegistrationSource,
   Runner,
   RunnerInput,

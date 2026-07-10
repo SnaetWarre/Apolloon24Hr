@@ -1377,6 +1377,13 @@ td {
   padding: 10px 0;
 }
 
+.warning-inline {
+  grid-column: 1 / -1;
+  color: #9a3412;
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
 .temporary-team-list {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));

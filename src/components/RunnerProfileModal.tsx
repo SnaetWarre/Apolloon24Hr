@@ -16,6 +16,7 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
   const [selectedLabels, setSelectedLabels] = React.useState<string[]>([]);
   const [closePromptOpen, setClosePromptOpen] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
+  const [saveError, setSaveError] = React.useState<string | null>(null);
   const [queueActionBusy, setQueueActionBusy] = React.useState(false);
   const [queueActionMessage, setQueueActionMessage] = React.useState<string | null>(null);
   const [queueActionError, setQueueActionError] = React.useState<string | null>(null);
@@ -37,6 +38,7 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
     setQueueActionMessage(null);
     setQueueActionError(null);
     setQueueActionBusy(false);
+    setSaveError(null);
   }, [runnerId]);
 
   useAnimationFrameTick(Boolean(runner?.statusSince && ['warming_up', 'waiting', 'running'].includes(runner.status)));
@@ -53,7 +55,9 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
     : false;
 
   async function saveAndClose() {
+    if (saving) return;
     setSaving(true);
+    setSaveError(null);
     try {
       await updateRunner(runnerId, {
         runnerNumber,
@@ -63,6 +67,8 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
         labels: selectedLabels,
       });
       onClose();
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'Profiel opslaan mislukt');
     } finally {
       setSaving(false);
     }
@@ -264,6 +270,7 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
 
         {queueActionMessage && <div className="success-banner">{queueActionMessage}</div>}
         {queueActionError && <div className="warning-banner">{queueActionError}</div>}
+        {saveError && <div className="warning-banner">{saveError}</div>}
 
         <div className="modal-actions">
           <button className="btn btn--ghost" onClick={requestClose}>

@@ -214,6 +214,12 @@ export const runnerStatusUpdateSchema = runnerIdSchema.extend({
   statusSince: z.number().int().nonnegative().optional(),
 });
 
+export const raceStateExpectationSchema = z.object({
+  activeRunnerId: z.string().nullable(),
+  activeStartedAt: z.number().int().nonnegative().nullable(),
+});
+export type RaceStateExpectation = z.infer<typeof raceStateExpectationSchema>;
+
 export const importCsvSchema = z.object({
   csvText: z.string().min(1),
 });
