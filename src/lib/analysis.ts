@@ -130,10 +130,21 @@ export function buildTimeBuckets(laps: LapRecord[], race: RaceState): TimeBucket
     .sort(([a], [b]) => a - b)
     .map(([hour, bucketLaps]) => ({
       hour,
-      label: `${hour}u-${hour + 1}u`,
+      label: formatClockHourWindow(startedAt, hour),
       count: bucketLaps.length,
       averageMs: calculateDurationStats(bucketLaps).averageMs,
     }));
+}
+
+export function formatClockHourWindow(startedAt: number, raceHour: number): string {
+  const formatHour = (timestamp: number) =>
+    new Intl.DateTimeFormat('nl-BE', {
+      hour: '2-digit',
+      hourCycle: 'h23',
+      timeZone: 'Europe/Brussels',
+    }).format(timestamp);
+  const windowStartedAt = startedAt + raceHour * 3_600_000;
+  return `${formatHour(windowStartedAt)}u-${formatHour(windowStartedAt + 3_600_000)}u`;
 }
 
 export function buildRollingLapTrend(

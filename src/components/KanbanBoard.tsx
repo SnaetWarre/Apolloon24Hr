@@ -1,9 +1,10 @@
 import React from 'react';
-import { DndContext, closestCenter, useDraggable, useDroppable, DragEndEvent } from '@dnd-kit/core';
+import { DndContext, useDraggable, useDroppable, DragEndEvent } from '@dnd-kit/core';
 import { useAppActions, useAppData } from '../app/index';
 import { useAppStore } from '../store';
 import { formatDurationMs, formatElapsedSeconds, nowMs } from '../lib/time';
 import { useSecondTick } from '../lib/useAnimationFrameTick';
+import { kanbanCollisionDetection, resolveKanbanDrop } from '../lib/kanban';
 import type { Runner, RunnerStatus } from '../types';
 import { LabelBadge } from './LabelBadge';
 
@@ -112,36 +113,16 @@ export const KanbanBoard: React.FC<{ onOpenProfile: (runnerId: string) => void }
 
     const activeId = String(active.id);
     const overId = String(over.id);
-
-    if (overId.startsWith('column-')) {
-      const targetStatus = overId.replace('column-', '') as RunnerStatus;
-      if (targetStatus === 'ran') return;
-      const runner = filteredRunners.find((item) => item.id === activeId);
-      if (runner && runner.status !== targetStatus) {
-        void runQueueAction(() => setStatus(activeId, targetStatus));
-      }
-      return;
-    }
-
-    const activeRunner = filteredRunners.find((runner) => runner.id === activeId);
-    const overRunner = filteredRunners.find((runner) => runner.id === overId);
-
-    if (activeRunner?.status === 'waiting' && overRunner?.status === 'waiting') {
-      const oldIndex = waitingSorted.findIndex((runner) => runner.id === activeId);
-      const newIndex = waitingSorted.findIndex((runner) => runner.id === overId);
-      if (oldIndex !== -1 && newIndex !== -1 && oldIndex !== newIndex) {
-        void runQueueAction(() => moveInQueue(activeId, overId));
-      }
-      return;
-    }
-
-    if (overRunner && activeRunner && activeRunner.status !== overRunner.status && overRunner.status !== 'ran') {
-      void runQueueAction(() => setStatus(activeId, overRunner.status));
+    const action = resolveKanbanDrop(activeId, overId, filteredRunners);
+    if (action?.type === 'set-status') {
+      void runQueueAction(() => setStatus(action.runnerId, action.status));
+    } else if (action?.type === 'move-in-queue') {
+      void runQueueAction(() => moveInQueue(action.runnerId, action.targetRunnerId));
     }
   }
 
   return (
-    <DndContext collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+    <DndContext collisionDetection={kanbanCollisionDetection} onDragEnd={onDragEnd}>
       <div className="board-toolbar">
         <label className="toggle-row">
           <input

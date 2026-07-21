@@ -2,9 +2,121 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
+import type { Active, CollisionDetection, DroppableContainer } from '@dnd-kit/core';
+import { buildTimeBuckets } from '../src/lib/analysis.ts';
+import { kanbanCollisionDetection, resolveKanbanDrop } from '../src/lib/kanban.ts';
+import type { LapRecord, RaceState } from '../src/types.ts';
 
 const dataPath = path.resolve(`.tmp-test-core-regressions-${process.pid}`);
 process.env.DATA_PATH = dataPath;
+type ClientRect = Parameters<CollisionDetection>[0]['collisionRect'];
+
+test('analysis hour buckets use Brussels clock hours from the race start', () => {
+  const raceStartedAt = Date.parse('2026-10-20T20:00:00+02:00');
+  const race = {
+    id: 1,
+    activeRunnerId: null,
+    activeStartedAt: null,
+    raceStartedAt,
+    raceFinishedAt: null,
+    activeLabels: [],
+  } satisfies RaceState;
+  const lap = (id: string, finishedAt: number): LapRecord => ({
+    id,
+    runnerId: 'runner-1',
+    runnerName: 'Runner',
+    runnerNumber: '1',
+    startedAt: finishedAt - 60_000,
+    finishedAt,
+    durationMs: 60_000,
+    labels: [],
+  });
+
+  const buckets = buildTimeBuckets(
+    [
+      lap('lap-1', raceStartedAt + 30 * 60_000),
+      lap('lap-2', raceStartedAt + 3.5 * 3_600_000),
+      lap('lap-3', raceStartedAt + 4.5 * 3_600_000),
+    ],
+    race
+  );
+
+  assert.deepEqual(
+    buckets.map((bucket) => bucket.label),
+    ['20u-21u', '23u-00u', '00u-01u']
+  );
+});
+
+test('dragging a warming-up runner into an empty or populated waiting column sets waiting status', () => {
+  const warmingRunner = { id: 'warming-runner', status: 'warming_up' as const };
+  const waitingRunner = { id: 'waiting-runner', status: 'waiting' as const };
+
+  assert.deepEqual(resolveKanbanDrop(warmingRunner.id, 'column-waiting', [warmingRunner]), {
+    type: 'set-status',
+    runnerId: warmingRunner.id,
+    status: 'waiting',
+  });
+  assert.deepEqual(resolveKanbanDrop(warmingRunner.id, waitingRunner.id, [warmingRunner, waitingRunner]), {
+    type: 'set-status',
+    runnerId: warmingRunner.id,
+    status: 'waiting',
+  });
+});
+
+test('kanban collision detection targets the exact empty column or runner under the pointer', () => {
+  const active = {
+    id: 'warming-runner',
+    data: { current: undefined },
+    rect: { current: { initial: null, translated: null } },
+  } satisfies Active;
+  const rect = (left: number, top: number, width: number, height: number): ClientRect => ({
+    left,
+    top,
+    width,
+    height,
+    right: left + width,
+    bottom: top + height,
+  });
+  const container = (id: string, bounds: ClientRect): DroppableContainer => ({
+    id,
+    key: id,
+    disabled: false,
+    data: { current: undefined },
+    node: { current: null },
+    rect: { current: bounds },
+  });
+  const warmingColumnRect = rect(0, 0, 300, 800);
+  const waitingColumnRect = rect(320, 0, 300, 800);
+  const waitingRunnerRect = rect(330, 100, 280, 100);
+  const warmingColumn = container('column-warming_up', warmingColumnRect);
+  const waitingColumn = container('column-waiting', waitingColumnRect);
+
+  const emptyColumnCollision = kanbanCollisionDetection({
+    active,
+    collisionRect: rect(350, 500, 280, 100),
+    droppableContainers: [warmingColumn, waitingColumn],
+    droppableRects: new Map([
+      [warmingColumn.id, warmingColumnRect],
+      [waitingColumn.id, waitingColumnRect],
+    ]),
+    pointerCoordinates: { x: 450, y: 550 },
+  });
+  assert.equal(emptyColumnCollision[0]?.id, 'column-waiting');
+
+  const waitingRunner = container('waiting-runner', waitingRunnerRect);
+  const populatedColumnCollision = kanbanCollisionDetection({
+    active,
+    collisionRect: rect(330, 100, 280, 100),
+    droppableContainers: [warmingColumn, waitingColumn, waitingRunner],
+    droppableRects: new Map([
+      [warmingColumn.id, warmingColumnRect],
+      [waitingColumn.id, waitingColumnRect],
+      [waitingRunner.id, waitingRunnerRect],
+    ]),
+    pointerCoordinates: { x: 450, y: 150 },
+  });
+  assert.equal(populatedColumnCollision[0]?.id, 'waiting-runner');
+});
 
 test('finishing a race retires the active runner without recording an extra lap', async () => {
   fs.rmSync(dataPath, { recursive: true, force: true });
