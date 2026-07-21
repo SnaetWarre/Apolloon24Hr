@@ -54,6 +54,13 @@ export function TimingView() {
   }, [activeRunner, handoff, runExclusiveRaceAction, startNext]);
 
   React.useEffect(() => {
+    // Navigation buttons can stay focused when this route opens. In that case,
+    // the browser consumes Space as a button press instead of a timing action.
+    const activeElement = document.activeElement;
+    if (activeElement instanceof HTMLElement) activeElement.blur();
+  }, []);
+
+  React.useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       if (event.key === 'Escape' && finishConfirmStep > 0) {
@@ -61,7 +68,10 @@ export function TimingView() {
         setFinishConfirmStep(0);
         return;
       }
-      if (!isHandoffKey(event) || isInteractiveTarget(target) || finishConfirmStep > 0) return;
+      if (!isHandoffKey(event) || isTextEntryTarget(target) || finishConfirmStep > 0) return;
+      // Space is the dedicated timing control on this screen, even if a button
+      // still has focus. Keep Enter's normal button/link behaviour intact.
+      if (event.key === 'Enter' && isInteractiveTarget(target)) return;
       event.preventDefault();
       if (event.repeat || handoffBusy) return;
       void runHandoff();
@@ -221,8 +231,12 @@ function isHandoffKey(event: KeyboardEvent) {
 
 function isInteractiveTarget(target: HTMLElement | null) {
   if (!target) return false;
-  if (target.isContentEditable) return true;
   return Boolean(target.closest('input, textarea, select, button, a, [contenteditable="true"]'));
+}
+
+function isTextEntryTarget(target: HTMLElement | null) {
+  if (!target) return false;
+  return Boolean(target.closest('input, textarea, select, [contenteditable="true"]'));
 }
 
 function TimingCard({
