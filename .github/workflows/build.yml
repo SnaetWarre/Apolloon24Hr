@@ -46,6 +46,7 @@ jobs:
         with:
           name: windows-installer
           path: release/*.exe
+          retention-days: 3
 
   build-linux:
     runs-on: ubuntu-latest
@@ -81,3 +82,4 @@ jobs:
         with:
           name: linux-appimage
           path: release/*.AppImage
+          retention-days: 3
