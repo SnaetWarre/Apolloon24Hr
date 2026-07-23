@@ -15,8 +15,6 @@ permissions:
   contents: write
 
 env:
-  electron_config_cache: ${{ github.workspace }}/.cache/electron
-  ELECTRON_BUILDER_CACHE: ${{ github.workspace }}/.cache/electron-builder
   RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:
@@ -78,22 +76,32 @@ jobs:
         uses: actions/cache@v5
         with:
           path: |
-            .cache/electron
-            .cache/electron-builder
+            ${{ runner.temp }}/electron
+            ${{ runner.temp }}/electron-builder
           key: ${{ runner.os }}-${{ runner.arch }}-electron-${{ hashFiles('package-lock.json') }}
           restore-keys: |
             ${{ runner.os }}-${{ runner.arch }}-electron-
 
       - name: Install dependencies
         run: npm ci --include=optional
+        env:
+          ELECTRON_CACHE: ${{ runner.temp }}/electron
+          ELECTRON_BUILDER_CACHE: ${{ runner.temp }}/electron-builder
 
       - name: Run regression tests
+        if: runner.os != 'Windows'
         run: npm test
+
+      - name: Run Windows packaging regressions
+        if: runner.os == 'Windows'
+        run: node --import tsx --test tests/cluster-policy.test.ts tests/electron-config.test.ts
 
       - name: Build desktop package
         run: npm run ${{ matrix.script }}
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          ELECTRON_CACHE: ${{ runner.temp }}/electron
+          ELECTRON_BUILDER_CACHE: ${{ runner.temp }}/electron-builder
 
       - name: Upload installers to draft release
         shell: bash
