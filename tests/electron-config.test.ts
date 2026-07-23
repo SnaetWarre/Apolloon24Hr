@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import test from 'node:test';
 import { parseEnvText, resolveServerAddress } from '../electron/server-config.js';
 
@@ -27,4 +29,23 @@ test('Electron can advertise a different public port without opening its window 
       url: 'http://127.0.0.1:5173',
     }
   );
+});
+
+test('desktop release packaging covers every supported platform and verifies native ABI', () => {
+  const packageJson = JSON.parse(fs.readFileSync(path.resolve('package.json'), 'utf8')) as {
+    scripts: Record<string, string>;
+    build: Record<string, unknown>;
+  };
+  const buildScript = fs.readFileSync(path.resolve('scripts/electron-build.mjs'), 'utf8');
+
+  assert.match(packageJson.scripts['electron:build:win'], /--win/);
+  assert.match(packageJson.scripts['electron:build:linux'], /--linux/);
+  assert.match(packageJson.scripts['electron:build:mac'], /--mac/);
+  assert.ok(packageJson.build.win);
+  assert.ok(packageJson.build.linux);
+  assert.ok(packageJson.build.mac);
+  assert.match(buildScript, /--build-from-source/);
+  assert.match(buildScript, /--config\.npmRebuild=false/);
+  assert.match(buildScript, /node_register_module_v/);
+  assert.match(buildScript, /builderArgs\.push\('--publish', 'never'\)/);
 });

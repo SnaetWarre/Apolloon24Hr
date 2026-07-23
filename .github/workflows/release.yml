@@ -4,29 +4,75 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to build
+        required: true
+        default: v1.0.0
+
+permissions:
+  contents: write
 
 env:
   electron_config_cache: ${{ github.workspace }}/.cache/electron
   ELECTRON_BUILDER_CACHE: ${{ github.workspace }}/.cache/electron-builder
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:
-  release:
-    permissions:
-      contents: write
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [windows-latest, ubuntu-latest]
-      fail-fast: false
-        
+  prepare-release:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view "${RELEASE_TAG}" >/dev/null 2>&1 || \
+            gh release create "${RELEASE_TAG}" \
+              --draft \
+              --verify-tag \
+              --title "Apolloon ${RELEASE_TAG#v}" \
+              --notes "Unsigned Windows, Linux, and macOS desktop builds. Verify the checksums before distribution."
+
+  build:
+    needs: prepare-release
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows x64
+            os: windows-latest
+            script: electron:build:win
+            assets: release/*.exe
+          - name: Linux x64
+            os: ubuntu-latest
+            script: electron:build:linux
+            assets: release/*.AppImage
+          - name: macOS Apple Silicon
+            os: macos-latest
+            script: electron:build:mac
+            assets: release/*.dmg release/*.zip
+          - name: macOS Intel
+            os: macos-15-intel
+            script: electron:build:mac
+            assets: release/*.dmg release/*.zip
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
           node-version: '22'
-          cache: 'npm'
+          cache: npm
 
       - name: Cache Electron binaries
         uses: actions/cache@v5
@@ -34,21 +80,30 @@ jobs:
           path: |
             .cache/electron
             .cache/electron-builder
-          key: ${{ runner.os }}-electron-${{ hashFiles('package-lock.json') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-electron-${{ hashFiles('package-lock.json') }}
           restore-keys: |
-            ${{ runner.os }}-electron-
-          
+            ${{ runner.os }}-${{ runner.arch }}-electron-
+
       - name: Install dependencies
         run: npm ci --include=optional
-        
-      - name: Build Windows
-        if: matrix.os == 'windows-latest'
-        run: npm run electron:build:win
+
+      - name: Run regression tests
+        run: npm test
+
+      - name: Build desktop package
+        run: npm run ${{ matrix.script }}
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: Upload installers to draft release
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        
-      - name: Build Linux
-        if: matrix.os == 'ubuntu-latest'
-        run: npm run electron:build:linux
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          shopt -s nullglob
+          files=(${{ matrix.assets }})
+          if (( ${#files[@]} == 0 )); then
+            echo "No release files matched: ${{ matrix.assets }}" >&2
+            exit 1
+          fi
+          gh release upload "${RELEASE_TAG}" "${files[@]}" --clobber

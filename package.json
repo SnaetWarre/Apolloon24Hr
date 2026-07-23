@@ -1,7 +1,7 @@
 {
   "name": "leuven-24h-runner-tracker",
   "private": true,
-  "version": "0.8.0",
+  "version": "1.0.0",
   "description": "24h runner tracker for Leuven event",
   "author": "Apolloon",
   "homepage": "https://github.com/apolloon/leuven-tracker",
@@ -44,7 +44,8 @@
     "electron:dev": "node scripts/ensure-lan-dev-firewall.mjs && concurrently -k \"npm run dev:seeded\" \"wait-on http://localhost:5173 && electron .\"",
     "electron:build": "npm run build && node scripts/electron-build.mjs",
     "electron:build:win": "npm run build && node scripts/electron-build.mjs --win",
-    "electron:build:linux": "npm run build && node scripts/electron-build.mjs --linux"
+    "electron:build:linux": "npm run build && node scripts/electron-build.mjs --linux",
+    "electron:build:mac": "npm run build && node scripts/electron-build.mjs --mac"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
@@ -113,7 +114,8 @@
     ],
     "win": {
       "target": "nsis",
-      "icon": "build/icon.ico"
+      "icon": "build/icon.ico",
+      "artifactName": "${productName}-${version}-windows-${arch}-setup.${ext}"
     },
     "linux": {
       "target": [
@@ -122,6 +124,15 @@
       "icon": "build/icon.png",
       "category": "Utility",
       "syncDesktopName": true
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "icon": "build/icon.png",
+      "category": "public.app-category.utilities",
+      "artifactName": "${productName}-${version}-macos-${arch}.${ext}"
     },
     "nsis": {
       "oneClick": false,

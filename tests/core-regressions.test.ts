@@ -12,6 +12,7 @@ import {
   SECOND_DISPLAY_INTERVAL_MS,
 } from '../src/lib/useAnimationFrameTick.ts';
 import type { LapRecord, RaceState } from '../src/types.ts';
+import { relativeFileWithinRoot } from '../server/static-files.ts';
 
 const dataPath = path.resolve(`.tmp-test-core-regressions-${process.pid}`);
 process.env.DATA_PATH = dataPath;
@@ -34,6 +35,23 @@ test('all route modules load with the app so navigation never waits on a lazy ch
   assert.doesNotMatch(source, /React\.lazy|Pagina wordt geladen|import\(['"]\.\/components/);
   assert.match(source, /import \{ AnalysisView \} from '\.\/components\/AnalysisView'/);
   assert.match(source, /import \{ TimingView \} from '\.\/components\/TimingView'/);
+});
+
+test('packaged static files stay relative to the AppImage mount root', () => {
+  const hiddenMountRoot = path.join('/tmp', '.mount_LeuvenExample', 'resources', 'app.asar.unpacked');
+  const distRoot = path.join(hiddenMountRoot, 'dist');
+
+  assert.equal(
+    relativeFileWithinRoot(distRoot, path.join(distRoot, 'assets', 'app.js.br')),
+    path.join('assets', 'app.js.br')
+  );
+  assert.equal(relativeFileWithinRoot(distRoot, path.join(distRoot, 'index.html')), 'index.html');
+  assert.equal(relativeFileWithinRoot(distRoot, path.join(hiddenMountRoot, 'secret.txt')), null);
+
+  const serverSource = fs.readFileSync(path.resolve('server/index.ts'), 'utf8');
+  assert.doesNotMatch(serverSource, /sendFile\(compressed\.path\)/);
+  assert.match(serverSource, /sendFile\(relativePath, \{ root: DIST_DIR \}\)/);
+  assert.match(serverSource, /sendFile\('index\.html', \{ root: DIST_DIR \}\)/);
 });
 
 test('analysis hour buckets use Brussels clock hours from the race start', () => {

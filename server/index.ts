@@ -14,6 +14,7 @@ import { getAllLaps, getAllRaceEvents, getAllRunners, getAppDataRevision, initDb
 import { hostInfo, SERVER_PORT } from './host.js';
 import { setRealtimeEmitter } from './realtime.js';
 import { appRouter } from './router.js';
+import { relativeFileWithinRoot } from './static-files.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -188,7 +189,12 @@ app.use((req, res, next) => {
   res.setHeader('Content-Encoding', compressed.encoding);
   res.setHeader('Vary', 'Accept-Encoding');
   res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
-  res.sendFile(compressed.path);
+  const relativePath = relativeFileWithinRoot(DIST_DIR, compressed.path);
+  if (!relativePath) {
+    next();
+    return;
+  }
+  res.sendFile(relativePath, { root: DIST_DIR });
 });
 
 app.use(
@@ -204,7 +210,7 @@ app.use(
 );
 app.get('/{*splat}', (_req, res) => {
   if (fs.existsSync(INDEX_HTML)) {
-    res.sendFile(INDEX_HTML);
+    res.sendFile('index.html', { root: DIST_DIR });
     return;
   }
   res.status(404).send('Frontend build not found. Run vite in dev or npm run build first.');
