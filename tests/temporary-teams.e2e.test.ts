@@ -134,6 +134,7 @@ test('temporary night teams work through HTTP, realtime, analysis, exports, and 
     });
     assert.equal(compressedAsset.status, 200);
     assert.equal(compressedAsset.headers.get('content-encoding'), 'br');
+    assert.match(compressedAsset.headers.get('content-type') || '', /^text\/javascript/);
     assert.match(compressedAsset.headers.get('cache-control') || '', /immutable/);
 
     socket.close();

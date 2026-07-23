@@ -22,6 +22,12 @@ const sourceDistDir = path.resolve(__dirname, '..', 'dist');
 const DIST_DIR = fs.existsSync(compiledDistDir) ? compiledDistDir : sourceDistDir;
 const INDEX_HTML = path.join(DIST_DIR, 'index.html');
 const ASSETS_DIR = path.join(DIST_DIR, 'assets');
+const COMPRESSED_ASSET_CONTENT_TYPES = new Map([
+  ['.css', 'text/css; charset=utf-8'],
+  ['.js', 'text/javascript; charset=utf-8'],
+  ['.json', 'application/json; charset=utf-8'],
+  ['.svg', 'image/svg+xml'],
+]);
 
 const app = express();
 app.disable('x-powered-by');
@@ -177,7 +183,8 @@ app.use((req, res, next) => {
     return;
   }
 
-  res.type(originalPath);
+  const contentType = COMPRESSED_ASSET_CONTENT_TYPES.get(path.extname(originalPath));
+  if (contentType) res.setHeader('Content-Type', contentType);
   res.setHeader('Content-Encoding', compressed.encoding);
   res.setHeader('Vary', 'Accept-Encoding');
   res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
