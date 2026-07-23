@@ -2,13 +2,16 @@ import React from 'react';
 import { useAppData, useClusterStatus } from '../app/index';
 import { useAppStore } from '../store';
 import { RunnerActivationModal, RunnerAddModal } from './RunnerEntryModals';
+import type { AppSnapshot } from '../types';
+
+const selectHostData = ({ host }: AppSnapshot) => ({ host });
 
 export const AppHeader: React.FC<{ onOpenProfile?: (runnerId: string) => void }> = ({
   onOpenProfile,
 }) => {
   const search = useAppStore((state) => state.search);
   const setSearch = useAppStore((state) => state.setSearch);
-  const { host } = useAppData();
+  const { host } = useAppData(selectHostData);
   const { cluster } = useClusterStatus();
   const [activationOpen, setActivationOpen] = React.useState(false);
   const [addOpen, setAddOpen] = React.useState(false);

@@ -2,9 +2,12 @@ import React from 'react';
 import { Outlet, useNavigate, useRouterState } from '@tanstack/react-router';
 import { RolePicker } from './components/RolePicker';
 import { useAppData, useRealtimeBridge } from './app/index';
-import { formatDurationMs, nowMs } from './lib/time';
 import { getNextWaitingRunner, runnerLabel } from './lib/runners';
-import { useAnimationFrameTick } from './lib/useAnimationFrameTick';
+import { LiveDuration } from './components/LiveTime';
+import type { AppSnapshot } from './types';
+
+const selectConnectionData = () => ({});
+const selectQueuePageData = ({ race, runners }: AppSnapshot) => ({ race, runners });
 
 const AnalysisView = React.lazy(async () => {
   const module = await import('./components/AnalysisView');
@@ -47,8 +50,8 @@ const TimingView = React.lazy(async () => {
 });
 
 export function AppRoot() {
-  useRealtimeBridge();
-  const { initialized, error, refresh } = useAppData();
+  const { initialized, error, refresh } = useAppData(selectConnectionData);
+  useRealtimeBridge(initialized);
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const displayRoute = pathname.startsWith('/display/');
 
@@ -106,13 +109,11 @@ export function HomePage() {
 }
 
 export function QueuePage() {
-  const { race, runners } = useAppData();
+  const { race, runners } = useAppData(selectQueuePageData);
   const [profileRunnerId, setProfileRunnerId] = React.useState<string | null>(null);
 
   const activeRunner = runners.find((runner) => runner.id === race.activeRunnerId) || null;
   const nextRunner = getNextWaitingRunner(runners);
-
-  useAnimationFrameTick(Boolean(race.activeStartedAt));
 
   return (
     <>
@@ -127,7 +128,7 @@ export function QueuePage() {
         <div>
           <span className="muted-label">Nu op de piste</span>
           <strong>{activeRunner ? runnerLabel(activeRunner) : 'Nog niemand gestart'}</strong>
-          {race.activeStartedAt && <span>{formatDurationMs(nowMs() - race.activeStartedAt)}</span>}
+          {race.activeStartedAt && <LiveDuration startedAt={race.activeStartedAt} />}
         </div>
         <div>
           <span className="muted-label">Volgende</span>

@@ -5,8 +5,10 @@ import { useAppStore } from '../store';
 import { formatDurationMs, formatElapsedSeconds, nowMs } from '../lib/time';
 import { useSecondTick } from '../lib/useAnimationFrameTick';
 import { kanbanCollisionDetection, resolveKanbanDrop } from '../lib/kanban';
-import type { Runner, RunnerStatus } from '../types';
+import type { AppSnapshot, Runner, RunnerStatus } from '../types';
 import { LabelBadge } from './LabelBadge';
+
+const selectKanbanData = ({ runners }: AppSnapshot) => ({ runners });
 
 const COLUMNS: { key: RunnerStatus; title: string }[] = [
   { key: 'warming_up', title: 'Aan het opwarmen' },
@@ -14,9 +16,11 @@ const COLUMNS: { key: RunnerStatus; title: string }[] = [
   { key: 'ran', title: 'Heeft gelopen' },
 ];
 
-function TimerBadge({ runner, currentNowMs }: { runner: Runner; currentNowMs: number }) {
+function TimerBadge({ runner }: { runner: Runner }) {
+  const running = Boolean(runner.statusSince && runner.status !== 'ran');
+  useSecondTick(running);
   if (!runner.statusSince || runner.status === 'ran') return null;
-  return <span className="timer-badge">{formatElapsedSeconds(currentNowMs - runner.statusSince)}</span>;
+  return <span className="timer-badge">{formatElapsedSeconds(nowMs() - runner.statusSince)}</span>;
 }
 
 const LAST_IN_ORDER = Number.MAX_SAFE_INTEGER;
@@ -35,16 +39,13 @@ function compareByStatusSinceDesc(a: Runner, b: Runner) {
 }
 
 export const KanbanBoard: React.FC<{ onOpenProfile: (runnerId: string) => void }> = ({ onOpenProfile }) => {
-  const { runners } = useAppData();
+  const { runners } = useAppData(selectKanbanData);
   const search = useAppStore((state) => state.search);
   const { setStatus, moveInQueue, hideRunner, unhideRunner } = useAppActions();
   const [showHiddenRan, setShowHiddenRan] = React.useState(false);
   const [actionError, setActionError] = React.useState<string | null>(null);
   const [actionBusy, setActionBusy] = React.useState(false);
   const actionBusyRef = React.useRef(false);
-
-  useSecondTick();
-  const currentNowMs = nowMs();
 
   const runQueueAction = React.useCallback(async (action: () => Promise<unknown>) => {
     if (actionBusyRef.current) return;
@@ -60,6 +61,14 @@ export const KanbanBoard: React.FC<{ onOpenProfile: (runnerId: string) => void }
       setActionBusy(false);
     }
   }, []);
+  const handleHide = React.useCallback(
+    (id: string) => runQueueAction(() => hideRunner(id)),
+    [hideRunner, runQueueAction]
+  );
+  const handleUnhide = React.useCallback(
+    (id: string) => runQueueAction(() => unhideRunner(id)),
+    [runQueueAction, unhideRunner]
+  );
 
   const filteredRunners = React.useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -78,7 +87,6 @@ export const KanbanBoard: React.FC<{ onOpenProfile: (runnerId: string) => void }
       );
     });
   }, [runners, search, showHiddenRan]);
-
   const warmingUpSorted = React.useMemo(() => {
     return filteredRunners
       .filter((runner) => runner.status === 'warming_up')
@@ -145,13 +153,12 @@ export const KanbanBoard: React.FC<{ onOpenProfile: (runnerId: string) => void }
                   <DraggableCard
                     id={runner.id}
                     runner={runner}
-                    onOpenProfile={() => onOpenProfile(runner.id)}
+                    onOpenProfile={onOpenProfile}
                     columnKey={column.key}
                     queueIndex={column.key === 'waiting' ? index : undefined}
-                    currentNowMs={currentNowMs}
                     actionBusy={actionBusy}
-                    onHide={(id) => runQueueAction(() => hideRunner(id))}
-                    onUnhide={(id) => runQueueAction(() => unhideRunner(id))}
+                    onHide={handleHide}
+                    onUnhide={handleUnhide}
                   />
                 </DroppableCard>
               ))}
@@ -187,23 +194,21 @@ function DroppableColumn({
   );
 }
 
-function DraggableCard({
+const DraggableCard = React.memo(function DraggableCard({
   id,
   runner,
   onOpenProfile,
   columnKey,
   queueIndex,
-  currentNowMs,
   actionBusy,
   onHide,
   onUnhide,
 }: {
   id: string;
   runner: Runner;
-  onOpenProfile: () => void;
+  onOpenProfile: (id: string) => void;
   columnKey: RunnerStatus;
   queueIndex?: number;
-  currentNowMs: number;
   actionBusy: boolean;
   onHide: (id: string) => Promise<void>;
   onUnhide: (id: string) => Promise<void>;
@@ -227,7 +232,7 @@ function DraggableCard({
   function handleContextMenu(event: React.MouseEvent) {
     event.preventDefault();
     event.stopPropagation();
-    onOpenProfile();
+    onOpenProfile(id);
   }
 
   return (
@@ -242,7 +247,7 @@ function DraggableCard({
           type="button"
           {...listeners}
           {...attributes}
-          onClick={onOpenProfile}
+          onClick={() => onOpenProfile(id)}
           className="card-main"
           title="Profiel openen"
         >
@@ -261,11 +266,11 @@ function DraggableCard({
         <div className="card-side">
           <button
             className="card-profile-btn"
-            onClick={(event) => { event.stopPropagation(); onOpenProfile(); }}
+            onClick={(event) => { event.stopPropagation(); onOpenProfile(id); }}
           >
             Profiel
           </button>
-          <TimerBadge runner={runner} currentNowMs={currentNowMs} />
+          <TimerBadge runner={runner} />
           {columnKey === 'waiting' && queueIndex !== undefined && (
             <span className="queue-badge">{queueIndex === 0 ? 'Volgende' : `#${queueIndex + 1}`}</span>
           )}
@@ -283,7 +288,7 @@ function DraggableCard({
       </div>
     </div>
   );
-}
+});
 
 function LabelPills({ labels }: { labels: Runner['labels'] }) {
   if (!labels.length) return null;

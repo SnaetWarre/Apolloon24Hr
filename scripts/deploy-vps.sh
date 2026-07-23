@@ -178,6 +178,7 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=${current_dir}
 Environment=NODE_ENV=production
+Environment=CLUSTER_ENABLED=false
 Environment=DATA_PATH=${data_dir}
 Environment=PORT=${app_port}
 Environment=PUBLIC_HOST=${public_host}

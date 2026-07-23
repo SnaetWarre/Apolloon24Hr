@@ -4,12 +4,27 @@ import { io } from 'socket.io-client';
 import { trpc } from '../api';
 import { setServerNowMs, syncServerClock } from '../lib/time';
 import type { AppSettings, AppSnapshot, Label, LapRecord, RaceEvent, RaceState, Runner, TemporaryTeam } from '../types';
-import { patchSnapshot, snapshotKey, upsertById } from './snapshot';
+import {
+  patchSnapshot,
+  prependById,
+  removeById,
+  snapshotKey,
+  upsertById,
+  upsertManyById,
+} from './snapshot';
 
-export function useRealtimeBridge(): void {
+const connectedSockets = new Set<ReturnType<typeof io>>();
+
+export function hasRealtimeConnection(): boolean {
+  return connectedSockets.size > 0;
+}
+
+export function useRealtimeBridge(enabled = true): void {
   const activeQueryClient = useQueryClient();
 
   React.useEffect(() => {
+    if (!enabled) return undefined;
+
     let disposed = false;
     let clockSyncInFlight = false;
     const socket = io('/');
@@ -18,7 +33,7 @@ export function useRealtimeBridge(): void {
       if (disposed || clockSyncInFlight) return;
       clockSyncInFlight = true;
       try {
-        await syncServerClock(5, async () => {
+        await syncServerClock(3, async () => {
           const payload = await trpc.state.time.query();
           return payload.serverNowMs;
         });
@@ -33,16 +48,28 @@ export function useRealtimeBridge(): void {
       setServerNowMs(snapshot.serverNowMs);
       activeQueryClient.setQueryData(snapshotKey, snapshot);
     });
+    socket.on('state:revision', (revision: number) => {
+      const snapshot = activeQueryClient.getQueryData<AppSnapshot>(snapshotKey);
+      if (!snapshot || snapshot.revision !== revision) {
+        void activeQueryClient.invalidateQueries({ queryKey: snapshotKey });
+      }
+    });
     socket.on('runner:upserted', (runner: Runner) => {
       patchSnapshot(activeQueryClient, (snapshot) => ({
         ...snapshot,
         runners: upsertById(snapshot.runners, runner),
       }));
     });
+    socket.on('runners:upserted', (runners: Runner[]) => {
+      patchSnapshot(activeQueryClient, (snapshot) => ({
+        ...snapshot,
+        runners: upsertManyById(snapshot.runners, runners),
+      }));
+    });
     socket.on('runner:deleted', (runnerId: string) => {
       patchSnapshot(activeQueryClient, (snapshot) => ({
         ...snapshot,
-        runners: snapshot.runners.filter((runner) => runner.id !== runnerId),
+        runners: removeById(snapshot.runners, runnerId),
       }));
     });
     socket.on('runners:patched', (runners: Runner[]) => {
@@ -60,7 +87,7 @@ export function useRealtimeBridge(): void {
     socket.on('label:deleted', (labelId: string) => {
       patchSnapshot(activeQueryClient, (snapshot) => ({
         ...snapshot,
-        labels: snapshot.labels.filter((label) => label.id !== labelId),
+        labels: removeById(snapshot.labels, labelId),
       }));
     });
     socket.on('labels:patched', (labels: Label[]) => {
@@ -72,13 +99,13 @@ export function useRealtimeBridge(): void {
     socket.on('lap:created', (lap: LapRecord) => {
       patchSnapshot(activeQueryClient, (snapshot) => ({
         ...snapshot,
-        laps: [lap, ...snapshot.laps.filter((item) => item.id !== lap.id)],
+        laps: prependById(snapshot.laps, lap),
       }));
     });
     socket.on('lap:deleted', (lapId: string) => {
       patchSnapshot(activeQueryClient, (snapshot) => ({
         ...snapshot,
-        laps: snapshot.laps.filter((lap) => lap.id !== lapId),
+        laps: removeById(snapshot.laps, lapId),
       }));
     });
     socket.on('laps:patched', (laps: LapRecord[]) => {
@@ -87,7 +114,7 @@ export function useRealtimeBridge(): void {
     socket.on('race-event:created', (event: RaceEvent) => {
       patchSnapshot(activeQueryClient, (snapshot) => ({
         ...snapshot,
-        events: [event, ...(snapshot.events || []).filter((item) => item.id !== event.id)],
+        events: prependById(snapshot.events || [], event),
       }));
     });
     socket.on('race-events:patched', (events: RaceEvent[]) => {
@@ -100,17 +127,21 @@ export function useRealtimeBridge(): void {
       patchSnapshot(activeQueryClient, (snapshot) => ({ ...snapshot, temporaryTeams }));
     });
     socket.on('connect', () => {
+      connectedSockets.add(socket);
       void syncClock();
-      void activeQueryClient.invalidateQueries({ queryKey: snapshotKey });
+    });
+    socket.on('disconnect', () => {
+      connectedSockets.delete(socket);
     });
 
     void syncClock();
-    const clockSyncInterval = window.setInterval(() => void syncClock(), 30_000);
+    const clockSyncInterval = window.setInterval(() => void syncClock(), 120_000);
 
     return () => {
       disposed = true;
       window.clearInterval(clockSyncInterval);
+      connectedSockets.delete(socket);
       socket.disconnect();
     };
-  }, [activeQueryClient]);
+  }, [activeQueryClient, enabled]);
 }

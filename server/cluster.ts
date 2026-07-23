@@ -9,6 +9,7 @@ import {
   getClusterOperationsAfter,
   getClusterTerm,
   getClusterVotedFor,
+  hasPersistedAppState,
   getLastClusterOperationSeq,
   setClusterTerm,
   setClusterVotedFor,
@@ -17,6 +18,11 @@ import {
 import { hostInfo } from './host.js';
 import { emitRealtime } from './realtime.js';
 import type { AppSnapshot, ClusterPeer, ClusterRole, ClusterStatus } from '../shared/schemas.js';
+import {
+  isClusterEnabled,
+  shouldAcceptRemoteLeader,
+  shouldGrantVote,
+} from './cluster-policy.js';
 
 type PeerState = {
   id: string | null;
@@ -24,6 +30,8 @@ type PeerState = {
   reachable: boolean;
   lastSeenAt: number | null;
   lastSeq: number | null;
+  consecutiveFailures: number;
+  nextProbeAt: number;
 };
 
 type HeartbeatPayload = {
@@ -64,12 +72,7 @@ type DiscoveryPayload = {
 
 type HelloPayload = DiscoveryPayload;
 
-const enabled =
-  process.env.CLUSTER_ENABLED === 'true' ||
-  process.env.APOLLOON_CLUSTER === 'true' ||
-  (process.env.NODE_ENV === 'production' &&
-    process.env.CLUSTER_ENABLED !== 'false' &&
-    process.env.APOLLOON_CLUSTER !== 'false');
+const enabled = isClusterEnabled(process.env);
 const selfUrl = normalizeUrl(process.env.CLUSTER_SELF_URL || hostInfo().url);
 const selfHost = hostInfo().hostIpHint;
 const selfPort = hostInfo().port;
@@ -83,10 +86,26 @@ const discoveryAddress = process.env.CLUSTER_DISCOVERY_ADDRESS || '255.255.255.2
 const discoveryIntervalMs = readPositiveInt(process.env.CLUSTER_DISCOVERY_INTERVAL_MS, 1_000);
 const startupDiscoveryGraceMs = readPositiveInt(process.env.CLUSTER_STARTUP_GRACE_MS, 2_000);
 const scanEnabled = process.env.CLUSTER_SCAN !== 'false';
-const scanIntervalMs = readPositiveInt(process.env.CLUSTER_SCAN_INTERVAL_MS, 3_000);
+const scanIntervalMs = readPositiveInt(process.env.CLUSTER_SCAN_INTERVAL_MS, 30_000);
 const scanTimeoutMs = readPositiveInt(process.env.CLUSTER_SCAN_TIMEOUT_MS, 250);
+const scanConcurrency = readPositiveInt(process.env.CLUSTER_SCAN_CONCURRENCY, 16);
+const clusterRequestTimeoutMs = readPositiveInt(process.env.CLUSTER_REQUEST_TIMEOUT_MS, 1_000);
+const leaderProxyTimeoutMs = readPositiveInt(process.env.CLUSTER_PROXY_TIMEOUT_MS, 5_000);
+const peerRetryBaseMs = readPositiveInt(process.env.CLUSTER_PEER_RETRY_MS, 2_000);
 const scanPorts = readScanPorts(process.env.CLUSTER_SCAN_PORTS, selfPort);
 const peers = new Map<string, PeerState>();
+const strippedProxyResponseHeaders = new Set([
+  'connection',
+  'content-encoding',
+  'content-length',
+  'keep-alive',
+  'proxy-authenticate',
+  'proxy-authorization',
+  'te',
+  'trailer',
+  'transfer-encoding',
+  'upgrade',
+]);
 
 let role: ClusterRole = enabled ? 'candidate' : 'standalone';
 let hostId: string | null = null;
@@ -100,11 +119,25 @@ let discoverySocket: dgram.Socket | null = null;
 let discoveryHandle: NodeJS.Timeout | null = null;
 let scanHandle: NodeJS.Timeout | null = null;
 let initializedAt = Date.now();
+let electionPromise: Promise<void> | null = null;
+let heartbeatPromise: Promise<void> | null = null;
+let pullPromise: Promise<void> | null = null;
+let pullAgain = false;
+let scanPromise: Promise<void> | null = null;
+let replicationCheckpointNeeded = false;
 
 for (const peerUrl of (process.env.CLUSTER_PEERS || '').split(',')) {
   const url = normalizeUrl(peerUrl);
   if (!url || url === selfUrl) continue;
-  peers.set(url, { id: null, url, reachable: false, lastSeenAt: null, lastSeq: null });
+  peers.set(url, {
+    id: null,
+    url,
+    reachable: false,
+    lastSeenAt: null,
+    lastSeq: null,
+    consecutiveFailures: 0,
+    nextProbeAt: 0,
+  });
 }
 
 export function clusterStatus(): ClusterStatus {
@@ -153,6 +186,14 @@ export function recordLocalWrite(type: string): void {
   ensureClusterInitialized();
   if (!enabled) return;
   if (!isWritable()) return;
+  if (![...peers.values()].some((peer) => peer.reachable)) {
+    replicationCheckpointNeeded = true;
+    return;
+  }
+  appendSnapshotOperation(type);
+}
+
+function appendSnapshotOperation(type: string): void {
   appendClusterOperation({
     id: uuidv4(),
     term: currentTerm,
@@ -160,13 +201,20 @@ export function recordLocalWrite(type: string): void {
     type,
     payload: { snapshot: appSnapshot() },
   });
-  void replicateToPeers();
+  replicationCheckpointNeeded = false;
 }
 
 export function registerClusterRoutes(app: Express): void {
   app.get('/api/cluster/status', (_req, res) => {
     res.json(clusterStatus());
   });
+
+  if (!enabled) {
+    app.use('/api/cluster', (_req, res) => {
+      res.status(404).json({ ok: false, error: 'cluster mode is disabled' });
+    });
+    return;
+  }
 
   app.get('/api/cluster/hello', (_req, res) => {
     ensureClusterInitialized();
@@ -228,7 +276,14 @@ export function registerClusterRoutes(app: Express): void {
     }
     const votedFor = getClusterVotedFor();
     const candidateIsCaughtUp = (payload.lastSeq ?? 0) >= getLastClusterOperationSeq();
-    const voteGranted = candidateIsCaughtUp && (!votedFor || votedFor === payload.candidateId);
+    const voteGranted = shouldGrantVote({
+      candidateTerm: payload.term,
+      currentTerm,
+      currentLeaderId: leaderId,
+      candidateId: payload.candidateId,
+      votedFor,
+      candidateIsCaughtUp,
+    });
     if (voteGranted) {
       setClusterVotedFor(payload.candidateId);
       touchPeer(payload.candidateUrl, payload.candidateId, payload.lastSeq ?? null);
@@ -254,14 +309,17 @@ export async function proxyFollowerTrpcWrites(
       method: req.method,
       headers: {
         'content-type': req.headers['content-type'] || 'application/json',
+        ...(req.headers.accept ? { accept: req.headers.accept } : {}),
+        ...(req.headers['trpc-accept'] ? { 'trpc-accept': String(req.headers['trpc-accept']) } : {}),
       },
       body: JSON.stringify(req.body ?? {}),
+      signal: AbortSignal.timeout(leaderProxyTimeoutMs),
     });
     res.status(response.status);
     response.headers.forEach((value, key) => {
-      if (key.toLowerCase() !== 'content-encoding') res.setHeader(key, value);
+      if (!strippedProxyResponseHeaders.has(key.toLowerCase())) res.setHeader(key, value);
     });
-    res.send(await response.text());
+    res.send(Buffer.from(await response.arrayBuffer()));
   } catch (err) {
     res.status(503).json({
       error: {
@@ -277,16 +335,22 @@ export function startClusterService(): void {
   if (!enabled || tickHandle) return;
   startDiscovery();
   startLanScan();
-  tickHandle = setInterval(() => {
+  scheduleClusterTick();
+}
+
+function scheduleClusterTick(): void {
+  const idleSingleHost = role === 'leader' && peers.size === 0;
+  const delayMs = idleSingleHost ? Math.max(heartbeatMs, 1_000) : heartbeatMs;
+  tickHandle = setTimeout(() => {
+    tickHandle = null;
     promoteSingleHostAfterGrace();
     if (role === 'leader') {
-      void sendHeartbeats();
-      return;
-    }
-    if (Date.now() >= electionDeadlineAt) {
+      if (peers.size > 0) void sendHeartbeats();
+    } else if (Date.now() >= electionDeadlineAt) {
       void startElection();
     }
-  }, heartbeatMs);
+    scheduleClusterTick();
+  }, delayMs);
 }
 
 function isWritable(): boolean {
@@ -297,6 +361,7 @@ function ensureClusterInitialized(): void {
   if (hostId) return;
   hostId = ensureHostId();
   currentTerm = getClusterTerm();
+  replicationCheckpointNeeded = hasPersistedAppState();
   initializedAt = Date.now();
   if (enabled && process.env.CLUSTER_BOOTSTRAP_LEADER === 'true') {
     role = 'leader';
@@ -352,25 +417,43 @@ function startLanScan(): void {
 }
 
 async function scanForPeers(): Promise<void> {
+  if (scanPromise) return scanPromise;
+  scanPromise = scanForPeersOnce().finally(() => {
+    scanPromise = null;
+  });
+  return scanPromise;
+}
+
+async function scanForPeersOnce(): Promise<void> {
   if (!hostId) return;
+  const reachablePeerCount = [...peers.values()].filter((peer) => peer.reachable).length;
+  if (reachablePeerCount >= Math.max(1, minVotingMembers - 1)) return;
   const urls = scanCandidateUrls();
-  await Promise.all(urls.map(async (url) => {
-    try {
-      const payload = await getJson<Partial<HelloPayload>>(`${url}/api/cluster/hello`, scanTimeoutMs);
-      if (payload.app !== 'apolloon' || payload.version !== 1) return;
-      if (!payload.hostId || !payload.url || payload.hostId === hostId) return;
-      touchPeer(payload.url, payload.hostId, payload.lastSeq ?? null);
-      if (
-        payload.role === 'leader' &&
-        typeof payload.term === 'number' &&
-        isRemoteLeaderPreferred(payload.term, payload.hostId)
-      ) {
-        stepDown(payload.term, payload.hostId, normalizeUrl(payload.url));
+  let nextIndex = 0;
+  const workerCount = Math.min(scanConcurrency, urls.length);
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (nextIndex < urls.length) {
+        const url = urls[nextIndex];
+        nextIndex += 1;
+        try {
+          const payload = await getJson<Partial<HelloPayload>>(`${url}/api/cluster/hello`, scanTimeoutMs);
+          if (payload.app !== 'apolloon' || payload.version !== 1) continue;
+          if (!payload.hostId || !payload.url || payload.hostId === hostId) continue;
+          touchPeer(payload.url, payload.hostId, payload.lastSeq ?? null);
+          if (
+            payload.role === 'leader' &&
+            typeof payload.term === 'number' &&
+            isRemoteLeaderPreferred(payload.term, payload.hostId)
+          ) {
+            stepDown(payload.term, payload.hostId, normalizeUrl(payload.url));
+          }
+        } catch {
+          // Most addresses on a /24 will not run Apolloon.
+        }
       }
-    } catch {
-      // Most addresses on a /24 will not run Apolloon.
-    }
-  }));
+    })
+  );
 }
 
 function scanCandidateUrls(): string[] {
@@ -424,10 +507,18 @@ function promoteSingleHostAfterGrace(): void {
   lastLeaderSeenAt = Date.now();
 }
 
-async function startElection(): Promise<void> {
+function startElection(): Promise<void> {
+  if (electionPromise) return electionPromise;
+  electionPromise = runElection().finally(() => {
+    electionPromise = null;
+  });
+  return electionPromise;
+}
+
+async function runElection(): Promise<void> {
+  resetElectionDeadline();
   const votingMembers = peers.size + 1;
   if (votingMembers < 2) {
-    resetElectionDeadline();
     return;
   }
 
@@ -459,7 +550,7 @@ async function startElection(): Promise<void> {
       }
       if (response.voteGranted) votes += 1;
     } catch {
-      peer.reachable = false;
+      markPeerUnreachable(peer);
     }
   }));
 
@@ -470,20 +561,29 @@ async function startElection(): Promise<void> {
     lastLeaderSeenAt = Date.now();
     setClusterVotedFor(null);
     await sendHeartbeats();
-    await replicateToPeers();
     return;
   }
   resetElectionDeadline();
 }
 
-async function sendHeartbeats(): Promise<void> {
+function sendHeartbeats(): Promise<void> {
+  if (heartbeatPromise) return heartbeatPromise;
+  heartbeatPromise = sendHeartbeatsOnce().finally(() => {
+    heartbeatPromise = null;
+  });
+  return heartbeatPromise;
+}
+
+async function sendHeartbeatsOnce(): Promise<void> {
   const payload: HeartbeatPayload = {
     term: currentTerm,
     leaderId: hostId || 'unknown',
     leaderUrl: selfUrl,
     lastSeq: getLastClusterOperationSeq(),
   };
-  await Promise.all([...peers.values()].map(async (peer) => {
+  const now = Date.now();
+  const peersToProbe = [...peers.values()].filter((peer) => peer.reachable || peer.nextProbeAt <= now);
+  await Promise.all(peersToProbe.map(async (peer) => {
     try {
       const response = await postJson<{ ok: boolean; term: number; hostId?: string; lastSeq?: number }>(
         `${peer.url}/api/cluster/heartbeat`,
@@ -492,43 +592,59 @@ async function sendHeartbeats(): Promise<void> {
       touchPeer(peer.url, response.hostId ?? peer.id, response.lastSeq ?? null);
       if (response.term > currentTerm) stepDown(response.term, null, null);
     } catch {
-      peer.reachable = false;
+      markPeerUnreachable(peer);
     }
   }));
 }
 
-async function replicateToPeers(): Promise<void> {
-  if (role !== 'leader') return;
-  await Promise.all([...peers.values()].map(async (peer) => {
-    try {
-      const status = await getJson<OperationsPayload>(
-        `${peer.url}/api/cluster/operations?after=${encodeURIComponent(String(peer.lastSeq || 0))}`
-      );
-      touchPeer(peer.url, status.hostId, status.lastSeq);
-    } catch {
-      peer.reachable = false;
-    }
-  }));
+function pullFromLeader(): Promise<void> {
+  if (pullPromise) {
+    pullAgain = true;
+    return pullPromise;
+  }
+  pullPromise = drainLeaderPulls().finally(() => {
+    pullPromise = null;
+  });
+  return pullPromise;
 }
 
-async function pullFromLeader(): Promise<void> {
-  if (!leaderUrl || leaderId === hostId) return;
+async function drainLeaderPulls(): Promise<void> {
+  do {
+    pullAgain = false;
+    await pullFromLeaderOnce();
+  } while (pullAgain);
+}
+
+async function pullFromLeaderOnce(): Promise<void> {
+  const requestedLeaderUrl = leaderUrl;
+  const requestedLeaderId = leaderId;
+  if (!requestedLeaderUrl || requestedLeaderId === hostId) return;
   try {
     const localSeq = getLastClusterOperationSeq();
     const payload = await getJson<OperationsPayload>(
-      `${leaderUrl}/api/cluster/operations?after=${encodeURIComponent(String(localSeq))}`
+      `${requestedLeaderUrl}/api/cluster/operations?after=${encodeURIComponent(String(localSeq))}`
     );
+    if (leaderUrl !== requestedLeaderUrl || leaderId !== requestedLeaderId || role === 'leader') return;
+    if (payload.hostId !== requestedLeaderId || payload.role !== 'leader') {
+      throw new Error('cluster operation source is not the active leader');
+    }
     if (payload.term > currentTerm) {
       currentTerm = payload.term;
       setClusterTerm(currentTerm);
     }
     for (const operation of payload.operations) {
+      const lastAppliedSeq = getLastClusterOperationSeq();
+      if (operation.seq <= lastAppliedSeq) continue;
+      const operationPayload = operation.payload as Partial<SnapshotOperationPayload>;
+      if (operation.seq !== lastAppliedSeq + 1 && !operationPayload.snapshot) {
+        throw new Error(`cluster operation gap: expected ${lastAppliedSeq + 1}, received ${operation.seq}`);
+      }
       applyClusterOperation(operation);
     }
-    touchPeer(leaderUrl, payload.hostId, payload.lastSeq);
+    touchPeer(requestedLeaderUrl, payload.hostId, payload.lastSeq);
   } catch {
-    const peer = peers.get(leaderUrl);
-    if (peer) peer.reachable = false;
+    const peer = peers.get(requestedLeaderUrl);
+    if (peer) markPeerUnreachable(peer);
   }
 }
 
@@ -564,10 +680,14 @@ function stepDown(term: number, nextLeaderId: string | null, nextLeaderUrl: stri
 }
 
 function isRemoteLeaderPreferred(term: number, remoteLeaderId: string): boolean {
-  if (term > currentTerm) return true;
-  if (term < currentTerm) return false;
-  if (role !== 'leader') return true;
-  return Boolean(hostId && remoteLeaderId < hostId);
+  return shouldAcceptRemoteLeader({
+    currentTerm,
+    remoteTerm: term,
+    role,
+    hostId,
+    leaderId,
+    remoteLeaderId,
+  });
 }
 
 function touchPeer(url: string, id: string | null, lastSeq: number | null): void {
@@ -579,12 +699,29 @@ function touchPeer(url: string, id: string | null, lastSeq: number | null): void
     reachable: false,
     lastSeenAt: null,
     lastSeq: null,
+    consecutiveFailures: 0,
+    nextProbeAt: 0,
   };
   peer.id = id ?? peer.id;
   peer.reachable = true;
   peer.lastSeenAt = Date.now();
   peer.lastSeq = lastSeq ?? peer.lastSeq;
+  peer.consecutiveFailures = 0;
+  peer.nextProbeAt = 0;
   peers.set(normalizedUrl, peer);
+  if (role === 'leader' && replicationCheckpointNeeded) {
+    appendSnapshotOperation('cluster.checkpoint');
+  }
+}
+
+function markPeerUnreachable(peer: PeerState): void {
+  peer.reachable = false;
+  peer.consecutiveFailures += 1;
+  const retryMs =
+    peer.lastSeenAt === null
+      ? Math.min(peerRetryBaseMs, 250)
+      : Math.min(peerRetryBaseMs * 2 ** Math.min(peer.consecutiveFailures - 1, 4), 30_000);
+  peer.nextProbeAt = Date.now() + retryMs;
 }
 
 function nextElectionDeadline(): number {
@@ -632,9 +769,9 @@ function asyncJson(handler: (req: Request, res: Response) => Promise<void>) {
   };
 }
 
-async function getJson<T>(url: string, timeoutMs?: number): Promise<T> {
+async function getJson<T>(url: string, timeoutMs = clusterRequestTimeoutMs): Promise<T> {
   const response = await fetch(url, {
-    signal: timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined,
+    signal: AbortSignal.timeout(timeoutMs),
   });
   if (!response.ok) throw new Error(`GET ${url} failed: ${response.status}`);
   return response.json() as Promise<T>;
@@ -645,6 +782,7 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(clusterRequestTimeoutMs),
   });
   if (!response.ok) throw new Error(`POST ${url} failed: ${response.status}`);
   return response.json() as Promise<T>;

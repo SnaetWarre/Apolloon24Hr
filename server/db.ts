@@ -23,6 +23,7 @@ import type {
 
 type SqlValue = string | number | null;
 type Db = Database.Database;
+type PreparedStatement = Database.Statement<SqlValue[], unknown>;
 
 const DATA_DIR = process.env.DATA_PATH
   ? path.resolve(process.env.DATA_PATH, 'data')
@@ -35,7 +36,10 @@ const VALID_RACE_EVENT_TYPES = new Set<RaceEventType>(['burgie_gepakt']);
 const VALID_PUBLIC_RECORD_MODES = new Set<PublicRecordMode>(['off', 'day', 'two_hour', 'hour']);
 const DEFAULT_PUBLIC_RECORD_MODE: PublicRecordMode = 'day';
 const TEMPORARY_TEAM_KIND = 'temporary_team';
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
+const CLUSTER_OPERATION_RETENTION = 4;
+const APP_DATA_TABLE_PATTERN =
+  /\b(?:runners|labels|runner_labels|queue_entries|race_state|laps|race_events|temporary_teams|temporary_team_members)\b/i;
 
 const DEFAULT_LABELS: LabelInput[] = [
   {
@@ -113,6 +117,9 @@ const DEFAULT_LABELS: LabelInput[] = [
 ];
 
 let database: Db | null = null;
+const statementCache = new Map<string, PreparedStatement>();
+let appDataRevision = 0;
+let lastClusterOperationSeq: number | null = null;
 
 function getDb(): Db {
   if (!database) throw new Error('database not initialized');
@@ -126,19 +133,50 @@ function ensureDataDir(): void {
 }
 
 function run(sql: string, params: SqlValue[] = []): Database.RunResult {
-  return getDb().prepare(sql).run(...params);
+  const result = statement(sql).run(...params);
+  if (result.changes > 0 && APP_DATA_TABLE_PATTERN.test(sql)) {
+    appDataRevision += 1;
+  }
+  return result;
 }
 
 function all<T>(sql: string, params: SqlValue[] = []): T[] {
-  return getDb().prepare(sql).all(...params) as T[];
+  return statement(sql).all(...params) as T[];
 }
 
 function one<T>(sql: string, params: SqlValue[] = []): T | null {
-  return getDb().prepare(sql).get(...params) as T | undefined ?? null;
+  return statement(sql).get(...params) as T | undefined ?? null;
+}
+
+function statement(sql: string): PreparedStatement {
+  const cached = statementCache.get(sql);
+  if (cached) return cached;
+  const prepared = getDb().prepare(sql);
+  statementCache.set(sql, prepared);
+  return prepared;
 }
 
 function transaction<T>(callback: () => T): T {
   return getDb().transaction(callback)();
+}
+
+export function getAppDataRevision(): number {
+  return appDataRevision;
+}
+
+export function hasPersistedAppState(): boolean {
+  const row = one<{ present: number }>(
+    `SELECT (
+       EXISTS(SELECT 1 FROM runners)
+       OR EXISTS(SELECT 1 FROM laps)
+       OR EXISTS(SELECT 1 FROM race_events)
+       OR EXISTS(SELECT 1 FROM temporary_team_members)
+       OR EXISTS(SELECT 1 FROM settings WHERE key = 'public_record_mode')
+       OR (SELECT COUNT(*) FROM labels) > ?
+     ) AS present`,
+    [DEFAULT_LABELS.length]
+  );
+  return Boolean(row?.present);
 }
 
 function cleanText(value: unknown): string | null {
@@ -307,6 +345,21 @@ function createSchema(): void {
 
     CREATE INDEX IF NOT EXISTS idx_cluster_operations_created_at
       ON cluster_operations(created_at);
+
+    CREATE INDEX IF NOT EXISTS idx_laps_runner_finished
+      ON laps(runner_id, finished_at DESC);
+
+    CREATE INDEX IF NOT EXISTS idx_laps_finished
+      ON laps(finished_at DESC);
+
+    CREATE INDEX IF NOT EXISTS idx_queue_status_order
+      ON queue_entries(status, queue_index, status_since);
+
+    CREATE INDEX IF NOT EXISTS idx_race_events_occurred
+      ON race_events(occurred_at DESC, created_at DESC);
+
+    CREATE INDEX IF NOT EXISTS idx_runner_labels_label
+      ON runner_labels(label_id, runner_id);
   `);
 
   run(
@@ -350,6 +403,13 @@ function migrateSchema(): void {
       ]);
     }
   }
+  if (previousVersion < 6) {
+    run('DROP INDEX IF EXISTS idx_laps_runner_finished');
+    run(
+      `CREATE INDEX idx_laps_runner_finished
+       ON laps(runner_id, finished_at DESC, duration_ms)`
+    );
+  }
   setSetting('schema_version', String(SCHEMA_VERSION));
 }
 
@@ -387,14 +447,23 @@ function seedDefaultLabels(): void {
 
 export async function initDb(): Promise<void> {
   ensureDataDir();
+  statementCache.clear();
   if (database) database.close();
   database = new Database(DB_FILE);
+  lastClusterOperationSeq = null;
   database.pragma('foreign_keys = ON');
   database.pragma('journal_mode = WAL');
+  database.pragma('synchronous = NORMAL');
   database.pragma('busy_timeout = 5000');
+  database.pragma('cache_size = -8192');
+  database.pragma('temp_store = MEMORY');
+  database.pragma('journal_size_limit = 16777216');
   createSchema();
   migrateSchema();
+  statementCache.clear();
   seedDefaultLabels();
+  syncTemporaryTeamRows();
+  pruneClusterOperations();
   ensureHostId();
 }
 
@@ -404,7 +473,8 @@ export function getSetting(key: string): string | null {
 }
 
 export function setSetting(key: string, value: string): void {
-  run('INSERT OR REPLACE INTO settings(key, value) VALUES(?, ?)', [key, String(value)]);
+  const result = run('INSERT OR REPLACE INTO settings(key, value) VALUES(?, ?)', [key, String(value)]);
+  if (key === 'public_record_mode' && result.changes > 0) appDataRevision += 1;
 }
 
 function cleanPublicRecordMode(value: unknown): PublicRecordMode {
@@ -544,7 +614,7 @@ export function appendClusterOperation(input: {
     [id]
   );
   if (!row) throw new Error('cluster operation insert failed');
-  return {
+  const operation = {
     seq: row.seq,
     id: row.id,
     term: row.term,
@@ -554,14 +624,19 @@ export function appendClusterOperation(input: {
     createdAt: row.createdAt,
     appliedAt: row.appliedAt,
   };
+  lastClusterOperationSeq = Math.max(lastClusterOperationSeq ?? 0, operation.seq);
+  pruneClusterOperations();
+  return operation;
 }
 
 export function getLastClusterOperationSeq(): number {
+  if (lastClusterOperationSeq !== null) return lastClusterOperationSeq;
   const row = one<{ seq: number | null }>('SELECT MAX(seq) AS seq FROM cluster_operations');
-  return Number(row?.seq || 0);
+  lastClusterOperationSeq = Number(row?.seq || 0);
+  return lastClusterOperationSeq;
 }
 
-export function getClusterOperationsAfter(seq: number, limit = 250): ClusterOperation[] {
+export function getClusterOperationsAfter(seq: number): ClusterOperation[] {
   return all<{
     seq: number;
     id: string;
@@ -583,9 +658,9 @@ export function getClusterOperationsAfter(seq: number, limit = 250): ClusterOper
        applied_at AS appliedAt
      FROM cluster_operations
      WHERE seq > ?
-     ORDER BY seq ASC
-     LIMIT ?`,
-    [Math.max(0, Math.floor(seq)), Math.max(1, Math.floor(limit))]
+     ORDER BY seq DESC
+     LIMIT 1`,
+    [Math.max(0, Math.floor(seq))]
   ).map((row) => ({
     seq: row.seq,
     id: row.id,
@@ -596,6 +671,19 @@ export function getClusterOperationsAfter(seq: number, limit = 250): ClusterOper
     createdAt: row.createdAt,
     appliedAt: row.appliedAt,
   }));
+}
+
+function pruneClusterOperations(): void {
+  run(
+    `DELETE FROM cluster_operations
+     WHERE seq NOT IN (
+       SELECT seq
+       FROM cluster_operations
+       ORDER BY seq DESC
+       LIMIT ?
+     )`,
+    [CLUSTER_OPERATION_RETENTION]
+  );
 }
 
 export function getLabels(): Label[] {
@@ -634,8 +722,9 @@ export function findLabelByName(name: unknown): Label | null {
        created_at AS createdAt,
        updated_at AS updatedAt
      FROM labels
-     WHERE lower(name) = ?`,
-    [normalized]
+     WHERE name = ? COLLATE NOCASE
+     LIMIT 1`,
+    [canonicalLabelName(name)]
   );
 }
 
@@ -658,6 +747,9 @@ export function ensureLabel(name: unknown, options: Partial<LabelInput> = {}): L
 export function createLabel(input: LabelInput): Label {
   const labelName = cleanText(input.name);
   if (!labelName) throw new Error('label name required');
+  if (findLabelByName(labelName)) {
+    throw new Error('Er bestaat al een label met deze naam');
+  }
   const now = Date.now();
   const label = {
     id: uuidv4(),
@@ -741,6 +833,17 @@ export function updateLabel(id: string, fields: LabelPatch): Label | null {
     sortOrder: fields.sortOrder !== undefined ? cleanInt(fields.sortOrder) : existing.sortOrder,
     updatedAt: Date.now(),
   };
+  const conflictingLabel = findLabelByName(next.name);
+  if (conflictingLabel && conflictingLabel.id !== id) {
+    throw new Error('Er bestaat al een label met deze naam');
+  }
+  if (
+    fields.kind !== undefined &&
+    next.kind !== existing.kind &&
+    isRestoreLabelForActiveTemporaryTeam(id)
+  ) {
+    throw new Error('Deactiveer de tijdelijke nachtploeg voordat je dit speedteamtype wijzigt');
+  }
 
   run(
     `UPDATE labels
@@ -778,13 +881,26 @@ export function updateLabel(id: string, fields: LabelPatch): Label | null {
 export function deleteLabel(id: string): boolean {
   const temporaryState = one<{ active: number }>('SELECT active FROM temporary_teams WHERE label_id = ?', [id]);
   if (temporaryState?.active) throw new Error('Deactiveer deze tijdelijke nachtploeg voor je ze verwijdert');
+  if (isRestoreLabelForActiveTemporaryTeam(id)) {
+    throw new Error('Deactiveer de tijdelijke nachtploeg voordat je dit speedteamlabel verwijdert');
+  }
   return transaction(() => {
     run('DELETE FROM runner_labels WHERE label_id = ?', [id]);
     return run('DELETE FROM labels WHERE id = ?', [id]).changes > 0;
   });
 }
 
-function getRunnerLabelsMap(): Map<string, Label[]> {
+function isRestoreLabelForActiveTemporaryTeam(labelId: string): boolean {
+  return all<{ restoreJson: string | null }>(
+    `SELECT ttm.restore_label_ids_json AS restoreJson
+     FROM temporary_team_members ttm
+     JOIN temporary_teams tt ON tt.label_id = ttm.team_label_id
+     WHERE tt.active = 1
+       AND ttm.restore_label_ids_json IS NOT NULL`
+  ).some((row) => parseStringArray(row.restoreJson).includes(labelId));
+}
+
+function getRunnerLabelsMap(runnerId?: string): Map<string, Label[]> {
   const rows = all<Label & { runnerId: string }>(
     `SELECT
       rl.runner_id AS runnerId,
@@ -800,7 +916,9 @@ function getRunnerLabelsMap(): Map<string, Label[]> {
       l.updated_at AS updatedAt
     FROM runner_labels rl
     JOIN labels l ON l.id = rl.label_id
-    ORDER BY COALESCE(l.sort_order, 9999), l.name`
+    ${runnerId ? 'WHERE rl.runner_id = ?' : ''}
+    ORDER BY COALESCE(l.sort_order, 9999), l.name`,
+    runnerId ? [runnerId] : []
   );
   const map = new Map<string, Label[]>();
   for (const row of rows) {
@@ -822,15 +940,18 @@ function getRunnerLabelsMap(): Map<string, Label[]> {
 }
 
 function getRunnerLabels(runnerId: string): Label[] {
-  return getRunnerLabelsMap().get(runnerId) ?? [];
+  return getRunnerLabelsMap(runnerId).get(runnerId) ?? [];
 }
 
-export function getTemporaryTeams(): TemporaryTeam[] {
+function syncTemporaryTeamRows(): void {
   run(
     `INSERT OR IGNORE INTO temporary_teams (label_id, active, activated_at)
      SELECT id, 0, NULL FROM labels WHERE kind = ?`,
     [TEMPORARY_TEAM_KIND]
   );
+}
+
+export function getTemporaryTeams(): TemporaryTeam[] {
   const members = all<{ labelId: string; runnerId: string; restoreJson: string | null }>(
     `SELECT team_label_id AS labelId, runner_id AS runnerId, restore_label_ids_json AS restoreJson
      FROM temporary_team_members
@@ -839,7 +960,9 @@ export function getTemporaryTeams(): TemporaryTeam[] {
   const membersByTeam = new Map<string, string[]>();
   const restoresByTeam = new Map<string, Record<string, string[]>>();
   for (const member of members) {
-    membersByTeam.set(member.labelId, [...(membersByTeam.get(member.labelId) ?? []), member.runnerId]);
+    const teamMembers = membersByTeam.get(member.labelId);
+    if (teamMembers) teamMembers.push(member.runnerId);
+    else membersByTeam.set(member.labelId, [member.runnerId]);
     const restores = restoresByTeam.get(member.labelId) ?? {};
     restores[member.runnerId] = parseStringArray(member.restoreJson);
     restoresByTeam.set(member.labelId, restores);
@@ -861,13 +984,15 @@ export function getTemporaryTeams(): TemporaryTeam[] {
 }
 
 export function setTemporaryTeamMembers(labelId: string, runnerIds: string[]): TemporaryTeam {
-  const label = getLabels().find((item) => item.id === labelId);
+  const label = one<{ id: string; kind: string }>('SELECT id, kind FROM labels WHERE id = ?', [labelId]);
   if (!label || label.kind !== TEMPORARY_TEAM_KIND) throw new Error('Tijdelijke nachtploeg niet gevonden');
   const state = one<{ active: number }>('SELECT active FROM temporary_teams WHERE label_id = ?', [labelId]);
   if (state?.active) throw new Error('Deactiveer de ploeg voordat je de ledenlijst wijzigt');
   const uniqueRunnerIds = [...new Set(runnerIds)];
   for (const runnerId of uniqueRunnerIds) {
-    if (!getRunnerById(runnerId)) throw new Error('Een geselecteerde loper bestaat niet meer');
+    if (!one<{ id: string }>('SELECT id FROM runners WHERE id = ?', [runnerId])) {
+      throw new Error('Een geselecteerde loper bestaat niet meer');
+    }
     const other = one<{ labelId: string }>(
       `SELECT team_label_id AS labelId FROM temporary_team_members
        WHERE runner_id = ? AND team_label_id <> ?`,
@@ -957,53 +1082,45 @@ function parseStringArray(value: string | null): string[] {
   }
 }
 
-export function getAllRunners(): Runner[] {
-  const labelsByRunner = getRunnerLabelsMap();
-  const rows = all<Omit<Runner, 'labels' | 'hiddenFromQueue'> & { queueHiddenAt: number | null }>(
-    `SELECT
-      r.id,
-      r.runner_number AS runnerNumber,
-      r.name,
-      r.target_laps AS targetLaps,
-      r.historical_avg_ms AS historicalAvgMs,
-      r.historical_best_ms AS historicalBestMs,
-      r.registration_source AS registrationSource,
-      r.notes,
-      r.created_at AS createdAt,
-      r.updated_at AS updatedAt,
-      COALESCE(q.status, 'registered') AS status,
-      q.status_since AS statusSince,
-      q.queue_index AS queueIndex,
-      q.hidden_at AS queueHiddenAt,
-      COUNT(l.id) AS lapCount,
-      MAX(l.duration_ms) AS slowestLapMs,
-      MIN(l.duration_ms) AS bestLapMs,
-      CASE WHEN COUNT(l.id) = 0 THEN NULL ELSE ROUND(AVG(l.duration_ms)) END AS averageLapMs,
-      COALESCE(SUM(l.duration_ms), 0) AS totalTimeMs,
-      (
-        SELECT duration_ms
-        FROM laps last_lap
-        WHERE last_lap.runner_id = r.id
-        ORDER BY last_lap.finished_at DESC
-        LIMIT 1
-      ) AS lastLapMs
-    FROM runners r
-    LEFT JOIN queue_entries q ON q.runner_id = r.id
-    LEFT JOIN laps l ON l.runner_id = r.id
-    GROUP BY r.id
-    ORDER BY
-      CASE COALESCE(q.status, 'registered')
-        WHEN 'running' THEN 0
-        WHEN 'waiting' THEN 1
-        WHEN 'warming_up' THEN 2
-        WHEN 'ran' THEN 3
-        ELSE 4
-      END,
-      q.queue_index,
-      r.name`
-  );
+type RunnerRow = Omit<Runner, 'labels' | 'hiddenFromQueue'> & {
+  queueHiddenAt: number | null;
+};
 
-  return rows.map((row) => ({
+const RUNNER_SELECT_SQL = `
+  SELECT
+    r.id,
+    r.runner_number AS runnerNumber,
+    r.name,
+    r.target_laps AS targetLaps,
+    r.historical_avg_ms AS historicalAvgMs,
+    r.historical_best_ms AS historicalBestMs,
+    r.registration_source AS registrationSource,
+    r.notes,
+    r.created_at AS createdAt,
+    r.updated_at AS updatedAt,
+    COALESCE(q.status, 'registered') AS status,
+    q.status_since AS statusSince,
+    q.queue_index AS queueIndex,
+    q.hidden_at AS queueHiddenAt,
+    COUNT(l.id) AS lapCount,
+    MAX(l.duration_ms) AS slowestLapMs,
+    MIN(l.duration_ms) AS bestLapMs,
+    CASE WHEN COUNT(l.id) = 0 THEN NULL ELSE ROUND(AVG(l.duration_ms)) END AS averageLapMs,
+    COALESCE(SUM(l.duration_ms), 0) AS totalTimeMs,
+    (
+      SELECT duration_ms
+      FROM laps last_lap
+      WHERE last_lap.runner_id = r.id
+      ORDER BY last_lap.finished_at DESC
+      LIMIT 1
+    ) AS lastLapMs
+  FROM runners r
+  LEFT JOIN queue_entries q ON q.runner_id = r.id
+  LEFT JOIN laps l ON l.runner_id = r.id
+`;
+
+function runnerFromRow(row: RunnerRow, labels: Label[]): Runner {
+  return {
     id: row.id,
     runnerNumber: row.runnerNumber ?? null,
     name: row.name,
@@ -1019,18 +1136,58 @@ export function getAllRunners(): Runner[] {
     queueIndex: row.queueIndex ?? null,
     hiddenFromQueue: row.queueHiddenAt !== null && row.queueHiddenAt !== undefined,
     queueHiddenAt: row.queueHiddenAt ?? null,
-    labels: labelsByRunner.get(row.id) ?? [],
+    labels,
     lapCount: Number(row.lapCount || 0),
     lastLapMs: row.lastLapMs ?? null,
     bestLapMs: row.bestLapMs ?? null,
     slowestLapMs: row.slowestLapMs ?? null,
     averageLapMs: row.averageLapMs ?? null,
     totalTimeMs: Number(row.totalTimeMs || 0),
-  }));
+  };
+}
+
+export function getAllRunners(): Runner[] {
+  const labelsByRunner = getRunnerLabelsMap();
+  const rows = all<RunnerRow>(
+    `${RUNNER_SELECT_SQL}
+     GROUP BY r.id
+     ORDER BY
+       CASE COALESCE(q.status, 'registered')
+         WHEN 'running' THEN 0
+         WHEN 'waiting' THEN 1
+         WHEN 'warming_up' THEN 2
+         WHEN 'ran' THEN 3
+         ELSE 4
+       END,
+       q.queue_index,
+       r.name`
+  );
+
+  return rows.map((row) => runnerFromRow(row, labelsByRunner.get(row.id) ?? []));
 }
 
 export function getRunnerById(id: string): Runner | null {
-  return getAllRunners().find((runner) => runner.id === id) ?? null;
+  const row = one<RunnerRow>(
+    `${RUNNER_SELECT_SQL}
+     WHERE r.id = ?
+     GROUP BY r.id`,
+    [id]
+  );
+  return row ? runnerFromRow(row, getRunnerLabels(id)) : null;
+}
+
+export function getRunnersByIds(ids: string[]): Runner[] {
+  const uniqueIds = [...new Set(ids)];
+  if (!uniqueIds.length) return [];
+  const placeholders = uniqueIds.map(() => '?').join(', ');
+  const labelsByRunner = getRunnerLabelsMap();
+  const rows = all<RunnerRow>(
+    `${RUNNER_SELECT_SQL}
+     WHERE r.id IN (${placeholders})
+     GROUP BY r.id`,
+    uniqueIds
+  );
+  return rows.map((row) => runnerFromRow(row, labelsByRunner.get(row.id) ?? []));
 }
 
 function getActiveTemporaryTeamLabelIdForRunner(runnerId: string): string | null {
@@ -1071,6 +1228,11 @@ export function insertRunner(input: RunnerInput): Runner {
 
   const now = Date.now();
   const id = input.id || uuidv4();
+  const initialStatus = cleanStatus(input.status);
+  if (initialStatus === 'running') {
+    throw new Error('Start een nieuwe loper via het timingscherm');
+  }
+  const initialQueueIndex = initialStatus === 'waiting' ? getMaxQueueIndex() + 1 : null;
   transaction(() => {
     run(
       `INSERT INTO runners (
@@ -1100,8 +1262,8 @@ export function insertRunner(input: RunnerInput): Runner {
     );
     run(
       `INSERT INTO queue_entries (runner_id, status, queue_index, status_since, hidden_at)
-       VALUES (?, ?, NULL, ?, NULL)`,
-      [id, cleanStatus(input.status), cleanInt(input.statusSince) ?? now]
+       VALUES (?, ?, ?, ?, NULL)`,
+      [id, initialStatus, initialQueueIndex, cleanInt(input.statusSince) ?? now]
     );
     setRunnerLabels(id, input.labels || []);
   });
@@ -1400,28 +1562,36 @@ export function getRaceState(): RaceState {
   };
 }
 
+type LapRow = Omit<LapRecord, 'labels'> & { labelsJson: string };
+
+const LAP_SELECT_SQL = `
+  SELECT
+    l.id,
+    l.runner_id AS runnerId,
+    r.runner_number AS runnerNumber,
+    r.name AS runnerName,
+    l.lap_number AS lapNumber,
+    l.started_at AS startedAt,
+    l.finished_at AS finishedAt,
+    l.duration_ms AS durationMs,
+    l.source,
+    l.created_at AS createdAt,
+    l.labels_json AS labelsJson
+  FROM laps l
+  JOIN runners r ON r.id = l.runner_id
+`;
+
+function lapFromRow({ labelsJson, ...lap }: LapRow): LapRecord {
+  return { ...lap, labels: parseLabelsJson(labelsJson) };
+}
+
 export function getAllLaps(): LapRecord[] {
-  return all<Omit<LapRecord, 'labels'> & { labelsJson: string }>(
-    `SELECT
-      l.id,
-      l.runner_id AS runnerId,
-      r.runner_number AS runnerNumber,
-      r.name AS runnerName,
-      l.lap_number AS lapNumber,
-      l.started_at AS startedAt,
-      l.finished_at AS finishedAt,
-      l.duration_ms AS durationMs,
-      l.source,
-      l.created_at AS createdAt,
-      l.labels_json AS labelsJson
-    FROM laps l
-    JOIN runners r ON r.id = l.runner_id
-    ORDER BY l.finished_at DESC`
-  ).map(({ labelsJson, ...lap }) => ({ ...lap, labels: parseLabelsJson(labelsJson) }));
+  return all<LapRow>(`${LAP_SELECT_SQL} ORDER BY l.finished_at DESC`).map(lapFromRow);
 }
 
 export function getLapById(id: string): LapRecord | null {
-  return getAllLaps().find((lap) => lap.id === id) ?? null;
+  const row = one<LapRow>(`${LAP_SELECT_SQL} WHERE l.id = ?`, [id]);
+  return row ? lapFromRow(row) : null;
 }
 
 function cleanRaceEventType(type: unknown): RaceEventType {
@@ -1451,7 +1621,29 @@ export function getAllRaceEvents(): RaceEvent[] {
 }
 
 export function getRaceEventById(id: string): RaceEvent | null {
-  return getAllRaceEvents().find((event) => event.id === id) ?? null;
+  const event = one<RaceEvent>(
+    `SELECT
+       id,
+       type,
+       message,
+       occurred_at AS occurredAt,
+       created_at AS createdAt,
+       runner_id AS runnerId,
+       runner_number AS runnerNumber,
+       runner_name AS runnerName
+     FROM race_events
+     WHERE id = ?`,
+    [id]
+  );
+  return event
+    ? {
+        ...event,
+        type: cleanRaceEventType(event.type),
+        runnerId: event.runnerId ?? null,
+        runnerNumber: event.runnerNumber ?? null,
+        runnerName: event.runnerName ?? null,
+      }
+    : null;
 }
 
 export function createBurgieGepaktEvent(nowMs = Date.now()): RaceEvent {

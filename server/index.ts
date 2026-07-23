@@ -10,7 +10,7 @@ import { Server as SocketIOServer } from 'socket.io';
 import { formatDurationMs } from '../shared/time.js';
 import { appSnapshot } from './app-state.js';
 import { proxyFollowerTrpcWrites, registerClusterRoutes, startClusterService } from './cluster.js';
-import { getAllLaps, getAllRaceEvents, getAllRunners, initDb } from './db.js';
+import { getAllLaps, getAllRaceEvents, getAllRunners, getAppDataRevision, initDb } from './db.js';
 import { hostInfo, SERVER_PORT } from './host.js';
 import { setRealtimeEmitter } from './realtime.js';
 import { appRouter } from './router.js';
@@ -23,9 +23,11 @@ const DIST_DIR = fs.existsSync(compiledDistDir) ? compiledDistDir : sourceDistDi
 const INDEX_HTML = path.join(DIST_DIR, 'index.html');
 
 const app = express();
+app.disable('x-powered-by');
 const server = http.createServer(app);
 const io = new SocketIOServer(server, {
   cors: { origin: true, credentials: false },
+  serveClient: false,
 });
 
 function lapExportRows(): Array<Record<string, string | number>> {
@@ -151,7 +153,17 @@ app.get('/api/export/current-state.json', (_req, res) => {
   res.json(appSnapshot());
 });
 
-app.use(express.static(DIST_DIR));
+app.use(
+  express.static(DIST_DIR, {
+    setHeaders(res, filePath) {
+      if (filePath.includes(`${path.sep}assets${path.sep}`)) {
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      } else {
+        res.setHeader('Cache-Control', 'no-cache');
+      }
+    },
+  })
+);
 app.get('/{*splat}', (_req, res) => {
   if (fs.existsSync(INDEX_HTML)) {
     res.sendFile(INDEX_HTML);
@@ -161,7 +173,7 @@ app.get('/{*splat}', (_req, res) => {
 });
 
 io.on('connection', (socket) => {
-  socket.emit('bootstrap', appSnapshot());
+  socket.emit('state:revision', getAppDataRevision());
 });
 
 await initDb();

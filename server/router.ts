@@ -32,6 +32,7 @@ import {
   getLapById,
   getRaceState,
   getRunnerById,
+  getRunnersByIds,
   getTemporaryTeams,
   hideRunnerInQueue,
   insertRunner,
@@ -111,13 +112,19 @@ function emitRunnerCollections(): void {
   emitRealtime({ type: 'runners:patched', payload: getAllRunners() });
 }
 
+function emitRunnerDelta(runnerIds: Array<string | null | undefined>): void {
+  const ids = [...new Set(runnerIds.filter((id): id is string => Boolean(id)))];
+  const runners = getRunnersByIds(ids);
+  if (runners.length) emitRealtime({ type: 'runners:upserted', payload: runners });
+}
+
 function emitLabelCollections(): void {
   emitRealtime({ type: 'labels:patched', payload: getLabels() });
 }
 
-function emitRaceCollections(): void {
+function emitRaceDelta(runnerIds: Array<string | null | undefined>): void {
   emitRealtime({ type: 'race:changed', payload: getRaceState() });
-  emitRunnerCollections();
+  emitRunnerDelta(runnerIds);
 }
 
 function notFound(message: string): never {
@@ -201,7 +208,6 @@ export const appRouter = t.router({
         }
         if (!runner) notFound('runner not found');
         emitRealtime({ type: 'runner:upserted', payload: runner });
-        emitRealtime({ type: 'queue:patched', payload: getAllRunners() });
         emitRealtime({ type: 'race:changed', payload: getRaceState() });
         return runner;
       });
@@ -213,7 +219,7 @@ export const appRouter = t.router({
         } catch (err) {
           badRequest(err instanceof Error ? err.message : 'Wachtrij herschikken mislukt');
         }
-        emitRealtime({ type: 'queue:patched', payload: getAllRunners() });
+        emitRunnerDelta(input.ids);
         return { ok: true };
       });
     }),
@@ -225,7 +231,6 @@ export const appRouter = t.router({
         const runner = hideRunnerInQueue(input.id, Date.now());
         if (!runner) notFound('runner not found');
         emitRealtime({ type: 'runner:upserted', payload: runner });
-        emitRealtime({ type: 'queue:patched', payload: getAllRunners() });
         return runner;
       });
     }),
@@ -236,7 +241,6 @@ export const appRouter = t.router({
         const runner = unhideRunnerInQueue(input.id);
         if (!runner) notFound('runner not found');
         emitRealtime({ type: 'runner:upserted', payload: runner });
-        emitRealtime({ type: 'queue:patched', payload: getAllRunners() });
         return runner;
       });
     }),
@@ -356,7 +360,7 @@ export const appRouter = t.router({
     setActive: t.procedure.input(temporaryTeamActiveSchema).mutation(({ input }) => {
       return commitWrite('temporaryTeams.setActive', () => {
         const team = setTemporaryTeamActive(input.labelId, input.active, Date.now());
-        emitRunnerCollections();
+        emitRunnerDelta(team.memberRunnerIds);
         emitRealtime({ type: 'temporary-teams:patched', payload: getTemporaryTeams() });
         return team;
       });
@@ -372,7 +376,7 @@ export const appRouter = t.router({
         if (input.activeRunnerId) conflict('Er loopt al een loper');
         const result = performHandoff(Date.now());
         if (!result.ok) conflict(result.error);
-        emitRaceCollections();
+        emitRaceDelta([result.startedRunnerId]);
         return result;
       });
     }),
@@ -381,7 +385,7 @@ export const appRouter = t.router({
         assertExpectedRaceState(input);
         const result = performHandoff(Date.now());
         if (!result.ok) conflict(result.error);
-        emitRaceCollections();
+        emitRaceDelta([input.activeRunnerId, result.startedRunnerId]);
         if (result.lapId) {
           const lap = getLapById(result.lapId);
           if (lap) emitRealtime({ type: 'lap:created', payload: lap });
@@ -394,7 +398,7 @@ export const appRouter = t.router({
         assertExpectedRaceState(input);
         const result = undoLastHandoff();
         if (!result.ok) conflict(result.error);
-        emitRaceCollections();
+        emitRaceDelta([input.activeRunnerId, getRaceState().activeRunnerId]);
         for (const lapId of result.deletedLapIds) {
           emitRealtime({ type: 'lap:deleted', payload: lapId });
         }
@@ -405,7 +409,7 @@ export const appRouter = t.router({
       return commitWrite('race.finish', () => {
         assertExpectedRaceState(input);
         finishRace(Date.now());
-        emitRaceCollections();
+        emitRaceDelta([input.activeRunnerId]);
         return { ok: true };
       });
     }),

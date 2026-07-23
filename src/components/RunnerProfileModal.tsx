@@ -1,12 +1,19 @@
 import React from 'react';
 import { useAppActions, useAppData } from '../app/index';
-import { formatClockTimeMs, formatDurationMs, formatElapsedSeconds, nowMs } from '../lib/time';
-import { useAnimationFrameTick } from '../lib/useAnimationFrameTick';
+import { formatClockTimeMs, formatDurationMs } from '../lib/time';
 import { labelKindOrder, labelKindTitle } from './LabelBadge';
-import type { Label, Runner, RunnerStatus } from '../types';
+import type { AppSnapshot, Label, Runner, RunnerStatus } from '../types';
+import { LiveElapsed } from './LiveTime';
+
+const selectRunnerProfileData = ({ runners, laps, labels, temporaryTeams }: AppSnapshot) => ({
+  runners,
+  laps,
+  labels,
+  temporaryTeams,
+});
 
 export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; onClose: () => void }) {
-  const { runners, laps: allLaps, labels, temporaryTeams } = useAppData();
+  const { runners, laps: allLaps, labels, temporaryTeams } = useAppData(selectRunnerProfileData);
   const { setStatus, updateRunner } = useAppActions();
   const runner = runners.find((item) => item.id === runnerId);
   const [runnerNumber, setRunnerNumber] = React.useState('');
@@ -41,7 +48,6 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
     setSaveError(null);
   }, [runnerId]);
 
-  useAnimationFrameTick(Boolean(runner?.statusSince && ['warming_up', 'waiting', 'running'].includes(runner.status)));
   const laps = React.useMemo(() => allLaps.filter((lap) => lap.runnerId === runnerId), [allLaps, runnerId]);
   const dirty = runner
     ? isDirty({
@@ -132,7 +138,7 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
   if (!runner) return null;
 
   const latestLap = laps[0] || null;
-  const statusSummary = runnerStatusSummary(runner.status, runner.statusSince);
+  const statusSummary = runnerStatusSummary(runner.status);
   const recentLaps = laps.slice(0, 10);
   const queueRemovalLabel = queueRemovalButtonLabel(runner.status);
 
@@ -157,7 +163,11 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
         <div className="profile-stats">
           <div className="profile-stat">
             <span className="muted-label">{statusSummary.title}</span>
-            <strong>{statusSummary.detail || '—'}</strong>
+            <strong>
+              {statusSummary.showsElapsed && runner.statusSince
+                ? <LiveElapsed startedAt={runner.statusSince} prefix="voor " />
+                : '—'}
+            </strong>
           </div>
           <div className="profile-stat">
             <span className="muted-label">Totaal toeren</span>
@@ -356,24 +366,21 @@ function getEditableRunnerKey(runner: Runner) {
   ].join('\u0001');
 }
 
-function runnerStatusSummary(status: RunnerStatus, statusSince: number | null) {
-  const detail =
-    statusSince && !['registered', 'ran'].includes(status)
-      ? `voor ${formatElapsedSeconds(nowMs() - statusSince)}`
-      : null;
+function runnerStatusSummary(status: RunnerStatus) {
+  const showsElapsed = !['registered', 'ran'].includes(status);
   switch (status) {
     case 'registered':
-      return { title: 'Ingeschreven', detail: null };
+      return { title: 'Ingeschreven', showsElapsed };
     case 'warming_up':
-      return { title: 'Aan het opwarmen', detail };
+      return { title: 'Aan het opwarmen', showsElapsed };
     case 'waiting':
-      return { title: 'In de wachtrij', detail };
+      return { title: 'In de wachtrij', showsElapsed };
     case 'running':
-      return { title: 'Loopt nu', detail };
+      return { title: 'Loopt nu', showsElapsed };
     case 'ran':
-      return { title: 'Heeft gelopen', detail: null };
+      return { title: 'Heeft gelopen', showsElapsed };
     default:
-      return { title: status, detail };
+      return { title: status, showsElapsed };
   }
 }
 

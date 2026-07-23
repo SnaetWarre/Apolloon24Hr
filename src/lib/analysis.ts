@@ -58,6 +58,12 @@ export type FastestLapWindow = {
   windowIndex: number;
 };
 
+const BRUSSELS_HOUR_FORMATTER = new Intl.DateTimeFormat('nl-BE', {
+  hour: '2-digit',
+  hourCycle: 'h23',
+  timeZone: 'Europe/Brussels',
+});
+
 export function isSpeedteamLabel(label: Pick<Label, 'kind' | 'name'>): boolean {
   return label.kind === 'speedteam' || label.name.toLowerCase().includes('speedteam');
 }
@@ -120,31 +126,31 @@ export function buildTimeBuckets(laps: LapRecord[], race: RaceState): TimeBucket
   const startedAt = race.raceStartedAt ?? oldestLapTimestamp(laps);
   if (startedAt == null) return [];
 
-  const buckets = new Map<number, LapRecord[]>();
+  const buckets = new Map<number, { count: number; totalMs: number }>();
   for (const lap of laps) {
     const hour = Math.max(0, Math.floor((lap.finishedAt - startedAt) / 3_600_000));
-    buckets.set(hour, [...(buckets.get(hour) ?? []), lap]);
+    const bucket = buckets.get(hour);
+    if (bucket) {
+      bucket.count += 1;
+      bucket.totalMs += lap.durationMs;
+    } else {
+      buckets.set(hour, { count: 1, totalMs: lap.durationMs });
+    }
   }
 
   return [...buckets.entries()]
     .sort(([a], [b]) => a - b)
-    .map(([hour, bucketLaps]) => ({
+    .map(([hour, bucket]) => ({
       hour,
       label: formatClockHourWindow(startedAt, hour),
-      count: bucketLaps.length,
-      averageMs: calculateDurationStats(bucketLaps).averageMs,
+      count: bucket.count,
+      averageMs: Math.round(bucket.totalMs / bucket.count),
     }));
 }
 
 export function formatClockHourWindow(startedAt: number, raceHour: number): string {
-  const formatHour = (timestamp: number) =>
-    new Intl.DateTimeFormat('nl-BE', {
-      hour: '2-digit',
-      hourCycle: 'h23',
-      timeZone: 'Europe/Brussels',
-    }).format(timestamp);
   const windowStartedAt = startedAt + raceHour * 3_600_000;
-  return `${formatHour(windowStartedAt)}u-${formatHour(windowStartedAt + 3_600_000)}u`;
+  return `${BRUSSELS_HOUR_FORMATTER.format(windowStartedAt)}u-${BRUSSELS_HOUR_FORMATTER.format(windowStartedAt + 3_600_000)}u`;
 }
 
 export function buildRollingLapTrend(
@@ -157,29 +163,61 @@ export function buildRollingLapTrend(
 
   const windowMs = Math.max(1, windowMinutes) * 60_000;
   const sortedLaps = [...laps].sort((a, b) => a.finishedAt - b.finishedAt);
+  const points: RollingLapTrendPoint[] = [];
+  let windowStartIndex = 0;
+  let windowTotalMs = 0;
 
-  return sortedLaps.map((lap) => {
-    const windowStart = lap.finishedAt - windowMs;
-    const windowLaps = sortedLaps.filter(
-      (item) => item.finishedAt >= windowStart && item.finishedAt <= lap.finishedAt
-    );
-    const averageMs = calculateDurationStats(windowLaps).averageMs ?? lap.durationMs;
-    const raceHour = Math.max(0, (lap.finishedAt - startedAt) / 3_600_000);
+  for (let groupStart = 0; groupStart < sortedLaps.length;) {
+    const finishedAt = sortedLaps[groupStart].finishedAt;
+    let groupEnd = groupStart;
+    while (groupEnd < sortedLaps.length && sortedLaps[groupEnd].finishedAt === finishedAt) {
+      windowTotalMs += sortedLaps[groupEnd].durationMs;
+      groupEnd += 1;
+    }
 
-    return {
-      raceHour,
-      label: formatRaceHour(raceHour),
-      averageMs,
-      count: windowLaps.length,
-    };
-  });
+    const minimumFinishedAt = finishedAt - windowMs;
+    while (
+      windowStartIndex < groupEnd &&
+      sortedLaps[windowStartIndex].finishedAt < minimumFinishedAt
+    ) {
+      windowTotalMs -= sortedLaps[windowStartIndex].durationMs;
+      windowStartIndex += 1;
+    }
+
+    const count = groupEnd - windowStartIndex;
+    const averageMs = count > 0 ? Math.round(windowTotalMs / count) : 0;
+    for (let index = groupStart; index < groupEnd; index += 1) {
+      const lap = sortedLaps[index];
+      const raceHour = Math.max(0, (lap.finishedAt - startedAt) / 3_600_000);
+      points.push({
+        raceHour,
+        label: formatRaceHour(raceHour),
+        averageMs: count > 0 ? averageMs : lap.durationMs,
+        count,
+      });
+    }
+    groupStart = groupEnd;
+  }
+
+  return points;
 }
 
 export function buildLabelComparisons(labels: Label[], laps: LapRecord[]): LabelComparison[] {
+  const selectedLabels = new Map(labels.map((label) => [label.id, label]));
+  const lapsByLabel = new Map<string, LapRecord[]>();
+  for (const lap of laps) {
+    for (const lapLabel of lap.labels) {
+      if (!selectedLabels.has(lapLabel.id)) continue;
+      const labelLaps = lapsByLabel.get(lapLabel.id);
+      if (labelLaps) labelLaps.push(lap);
+      else lapsByLabel.set(lapLabel.id, [lap]);
+    }
+  }
+
   return labels
     .map((label) => ({
       label,
-      ...calculateDurationStats(laps.filter((lap) => lap.labels.some((item) => item.id === label.id))),
+      ...calculateDurationStats(lapsByLabel.get(label.id) ?? []),
     }))
     .filter((comparison) => comparison.count > 0)
     .sort(
@@ -203,8 +241,9 @@ export function buildDistribution(laps: LapRecord[]): DistributionBin[] {
   bins.push({ label: '1:30+', minMs: 90_000, maxMs: null, count: 0 });
 
   for (const lap of laps) {
-    const bin = bins.find((item) => lap.durationMs >= item.minMs && (item.maxMs == null || lap.durationMs < item.maxMs));
-    if (bin) bin.count += 1;
+    if (lap.durationMs < 60_000) continue;
+    const binIndex = Math.min(Math.floor((lap.durationMs - 60_000) / 5_000), bins.length - 1);
+    bins[binIndex].count += 1;
   }
 
   return bins;
@@ -213,21 +252,27 @@ export function buildDistribution(laps: LapRecord[]): DistributionBin[] {
 export function buildRunnerInsights(runners: Runner[], laps: LapRecord[]): RunnerInsight[] {
   const runnersById = new Map(runners.map((runner) => [runner.id, runner]));
   const lapsByRunner = new Map<string, LapRecord[]>();
+  const oldestLapByRunner = new Map<string, LapRecord>();
 
   for (const lap of laps) {
-    lapsByRunner.set(lap.runnerId, [...(lapsByRunner.get(lap.runnerId) ?? []), lap]);
+    const runnerLaps = lapsByRunner.get(lap.runnerId);
+    if (runnerLaps) runnerLaps.push(lap);
+    else lapsByRunner.set(lap.runnerId, [lap]);
+    const oldestLap = oldestLapByRunner.get(lap.runnerId);
+    if (!oldestLap || lap.finishedAt < oldestLap.finishedAt) {
+      oldestLapByRunner.set(lap.runnerId, lap);
+    }
   }
 
   return [...lapsByRunner.entries()]
     .map(([runnerId, runnerLaps]) => {
-      const sortedLaps = [...runnerLaps].sort((a, b) => a.finishedAt - b.finishedAt);
       const runner = runnersById.get(runnerId);
-      const firstLap = sortedLaps[0] ?? null;
+      const firstLap = oldestLapByRunner.get(runnerId) ?? null;
       return {
         runnerId,
         runnerNumber: runner?.runnerNumber ?? firstLap?.runnerNumber ?? null,
         runnerName: runner?.name ?? firstLap?.runnerName ?? 'Onbekende loper',
-        ...calculateDurationStats(sortedLaps),
+        ...calculateDurationStats(runnerLaps),
       };
     })
     .sort((a, b) => b.count - a.count || (a.averageMs ?? Number.MAX_SAFE_INTEGER) - (b.averageMs ?? Number.MAX_SAFE_INTEGER));
@@ -249,18 +294,19 @@ export function buildFastestLapWindows(
   if (startedAt == null) return [];
 
   const windowMs = recordWindowMs(mode);
-  const buckets = new Map<number, LapRecord[]>();
+  const fastestByWindow = new Map<number, LapRecord>();
   for (const lap of laps) {
     const index = recordWindowIndex(lap.finishedAt, startedAt, windowMs);
-    buckets.set(index, [...(buckets.get(index) ?? []), lap]);
+    const fastest = fastestByWindow.get(index);
+    if (!fastest || compareLapSpeed(lap, fastest) < 0) fastestByWindow.set(index, lap);
   }
 
-  return [...buckets.entries()]
+  return [...fastestByWindow.entries()]
     .sort(([a], [b]) => a - b)
-    .map(([windowIndex, bucketLaps]) => ({
+    .map(([windowIndex, lap]) => ({
       key: `${mode}-${windowIndex}`,
       label: recordWindowLabel(windowIndex, mode),
-      lap: fastestLap(bucketLaps) as LapRecord,
+      lap,
       windowIndex,
     }));
 }
@@ -290,7 +336,15 @@ export function publicRecordModeTitle(mode: PublicRecordMode): string {
 }
 
 function fastestLap(laps: LapRecord[]): LapRecord | null {
-  return [...laps].sort((a, b) => a.durationMs - b.durationMs || a.finishedAt - b.finishedAt)[0] ?? null;
+  let fastest: LapRecord | null = null;
+  for (const lap of laps) {
+    if (!fastest || compareLapSpeed(lap, fastest) < 0) fastest = lap;
+  }
+  return fastest;
+}
+
+function compareLapSpeed(a: LapRecord, b: LapRecord): number {
+  return a.durationMs - b.durationMs || a.finishedAt - b.finishedAt;
 }
 
 function recordWindowMs(mode: Exclude<PublicRecordMode, 'off' | 'day'>): number {
@@ -329,9 +383,19 @@ function median(sortedValues: number[]): number {
 }
 
 function oldestLapTimestamp(laps: LapRecord[]): number | null {
-  return laps.length ? Math.min(...laps.map((lap) => lap.finishedAt)) : null;
+  if (!laps.length) return null;
+  let oldest = laps[0].finishedAt;
+  for (let index = 1; index < laps.length; index += 1) {
+    if (laps[index].finishedAt < oldest) oldest = laps[index].finishedAt;
+  }
+  return oldest;
 }
 
 function newestLapTimestamp(laps: LapRecord[]): number | null {
-  return laps.length ? Math.max(...laps.map((lap) => lap.finishedAt)) : null;
+  if (!laps.length) return null;
+  let newest = laps[0].finishedAt;
+  for (let index = 1; index < laps.length; index += 1) {
+    if (laps[index].finishedAt > newest) newest = laps[index].finishedAt;
+  }
+  return newest;
 }

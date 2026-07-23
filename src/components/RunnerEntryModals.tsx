@@ -1,7 +1,10 @@
 import React from 'react';
 import { useAppActions, useAppData } from '../app/index';
-import type { Label, Runner } from '../types';
+import type { AppSnapshot, Label, Runner } from '../types';
 import { LabelBadge, labelKindOrder, labelKindTitle } from './LabelBadge';
+
+const selectRunners = ({ runners }: AppSnapshot) => ({ runners });
+const selectLabels = ({ labels }: AppSnapshot) => ({ labels });
 
 export function RunnerActivationModal({
   onClose,
@@ -10,10 +13,12 @@ export function RunnerActivationModal({
   onClose: () => void;
   onOpenProfile?: (runnerId: string) => void;
 }) {
-  const { runners } = useAppData();
+  const { runners } = useAppData(selectRunners);
   const { setStatus } = useAppActions();
   const [query, setQuery] = React.useState('');
   const [activatingId, setActivatingId] = React.useState<string | null>(null);
+  const [activationError, setActivationError] = React.useState<string | null>(null);
+  const activationBusyRef = React.useRef(false);
 
   const availableRunners = React.useMemo(() => {
     return runners.filter(isAvailableForActivation).sort(sortRunnerByNumberThenName);
@@ -29,11 +34,17 @@ export function RunnerActivationModal({
   const hasQuery = Boolean(query.trim());
 
   async function activate(runnerId: string) {
+    if (activationBusyRef.current) return;
+    activationBusyRef.current = true;
     setActivatingId(runnerId);
+    setActivationError(null);
     try {
       await setStatus(runnerId, 'warming_up');
       onClose();
+    } catch (err) {
+      setActivationError(err instanceof Error ? err.message : 'Loper activeren mislukt');
     } finally {
+      activationBusyRef.current = false;
       setActivatingId(null);
     }
   }
@@ -81,6 +92,7 @@ export function RunnerActivationModal({
               {hasQuery ? 'Geen loper buiten Telsysteem 1 gevonden.' : 'Geen beschikbare lopers buiten Telsysteem 1.'}
             </div>
           )}
+          {activationError && <div className="warning-banner">{activationError}</div>}
           {visibleMatches.map((runner) => (
             <div key={runner.id} className="runner-search-row">
               <div>
@@ -91,13 +103,17 @@ export function RunnerActivationModal({
                 </div>
               </div>
               <div className="runner-search-actions">
-                <button className="btn btn--ghost btn--fixed" onClick={() => openProfile(runner.id)}>
+                <button
+                  className="btn btn--ghost btn--fixed"
+                  onClick={() => openProfile(runner.id)}
+                  disabled={Boolean(activatingId)}
+                >
                   Profiel
                 </button>
                 <button
                   className="btn btn--primary btn--fixed"
                   onClick={() => activate(runner.id)}
-                  disabled={activatingId === runner.id}
+                  disabled={Boolean(activatingId)}
                 >
                   {activatingId === runner.id ? 'Bezig...' : 'Opwarmen'}
                 </button>
@@ -111,7 +127,7 @@ export function RunnerActivationModal({
 }
 
 export function RunnerAddModal({ onClose }: { onClose: () => void }) {
-  const { labels } = useAppData();
+  const { labels } = useAppData(selectLabels);
   const { addRunner } = useAppActions();
   const [runnerNumber, setRunnerNumber] = React.useState('');
   const [name, setName] = React.useState('');

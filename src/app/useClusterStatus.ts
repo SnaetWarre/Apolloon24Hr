@@ -13,7 +13,7 @@ export function useClusterStatus(): {
       if (!response.ok) throw new Error(`Cluster status failed: ${response.status}`);
       return response.json() as Promise<ClusterStatus>;
     },
-    refetchInterval: 1_000,
+    refetchInterval: (query) => (query.state.data?.enabled ? 5_000 : false),
   });
 
   return {

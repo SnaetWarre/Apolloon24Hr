@@ -5,10 +5,17 @@ import { LabelBadge, labelKindOrder, labelKindTitle } from './LabelBadge';
 import { SourceBadge } from './RunnerEntryModals';
 import { RunnerProfileModal } from './RunnerProfileModal';
 import { formatClockTimeMs } from '../lib/time';
-import type { Label, PublicRecordMode, Runner, RunnerStatus, TemporaryTeam } from '../types';
+import type { AppSnapshot, Label, PublicRecordMode, Runner, RunnerStatus, TemporaryTeam } from '../types';
+
+const selectAdminData = ({ labels, runners, settings, temporaryTeams }: AppSnapshot) => ({
+  labels,
+  runners,
+  settings,
+  temporaryTeams,
+});
 
 export function AdminView() {
-  const { labels, runners, settings, temporaryTeams } = useAppData();
+  const { labels, runners, settings, temporaryTeams } = useAppData(selectAdminData);
   const {
     importRunnersCsv,
     createLabel,

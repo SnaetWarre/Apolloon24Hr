@@ -1,14 +1,16 @@
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, dialog } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
 import { fork } from 'child_process';
+import { parseEnvText, resolveServerAddress } from './server-config.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 let mainWindow;
 let serverProcess;
+let appUrl = 'http://127.0.0.1:5173';
 
 function createWindow() {
   if (mainWindow) return; // Prevent multiple windows
@@ -19,14 +21,15 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      spellcheck: false,
     },
   });
 
   if (!app.isPackaged) {
-    mainWindow.loadURL('http://localhost:5173');
+    mainWindow.loadURL(appUrl);
     mainWindow.webContents.openDevTools();
   } else {
-    mainWindow.loadURL('http://localhost:5173');
+    mainWindow.loadURL(appUrl);
   }
 
   mainWindow.on('closed', () => {
@@ -64,16 +67,15 @@ async function startServer() {
     NODE_ENV: 'production',
     CLUSTER_ENABLED: process.env.CLUSTER_ENABLED || 'true',
     DATA_PATH: app.getPath('userData'),
-    PUBLIC_APP_PORT: process.env.PUBLIC_APP_PORT || '5173',
   };
 
   if (fs.existsSync(envPath)) {
-    const envContent = fs.readFileSync(envPath, 'utf8');
-    envContent.split('\n').forEach(line => {
-      const [key, value] = line.split('=');
-      if (key && value) env[key.trim()] = value.trim();
-    });
+    Object.assign(env, parseEnvText(fs.readFileSync(envPath, 'utf8')));
   }
+  const serverAddress = resolveServerAddress(env);
+  env.PORT = String(serverAddress.port);
+  env.PUBLIC_APP_PORT = String(serverAddress.publicPort);
+  appUrl = serverAddress.url;
 
   const cwd = path.join(process.resourcesPath, 'app.asar.unpacked');
 
@@ -93,6 +95,27 @@ async function startServer() {
   serverProcess.on('exit', (code, signal) => {
     console.log('Server exited with code:', code, 'signal:', signal);
   });
+
+  await waitForServer(appUrl, serverProcess);
+}
+
+async function waitForServer(url, child, timeoutMs = 20_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (child.exitCode !== null) {
+      throw new Error(`Local server stopped before startup completed (exit ${child.exitCode}).`);
+    }
+    try {
+      const response = await fetch(`${url}/api/host-info`, {
+        signal: AbortSignal.timeout(1_000),
+      });
+      if (response.ok) return;
+    } catch {
+      // The local server can take a moment to open SQLite and bind its port.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  throw new Error(`Local server did not become ready at ${url} within ${timeoutMs} ms.`);
 }
 
 // Prevent multiple instances
@@ -108,14 +131,17 @@ if (!gotTheLock) {
     }
   });
 
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
     console.log('App starting');
     ensureEnvFile();
-    startServer();
-    if (app.isPackaged) {
-      setTimeout(() => createWindow(), 2000);
-    } else {
+    try {
+      await startServer();
       createWindow();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('Failed to initialize Apolloon:', error);
+      dialog.showErrorBox('Apolloon kon niet starten', message);
+      app.quit();
     }
   });
 }

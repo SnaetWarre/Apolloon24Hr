@@ -3,13 +3,21 @@ import { useAppData } from '../app/index';
 import { isFastestLapForRecordMode, publicRecordModeTitle } from '../lib/analysis';
 import { formatClockTimeMs, formatDurationMs } from '../lib/time';
 import { getNextWaitingRunner, lapRunnerLabel, runnerLabel } from '../lib/runners';
-import type { Label, LapRecord, PublicRecordMode, RaceEvent, Runner } from '../types';
+import type { AppSnapshot, Label, LapRecord, PublicRecordMode, RaceEvent, Runner } from '../types';
 import { LabelBadge } from './LabelBadge';
 
 const OUTSIDE_ALERT_VISIBLE_MS = 8_000;
+const selectOutsideDisplayData = ({ runners, race, laps, events, settings }: AppSnapshot) => ({
+  runners,
+  race,
+  laps,
+  events,
+  settings,
+});
+const selectInsideDisplayData = ({ runners, labels, laps }: AppSnapshot) => ({ runners, labels, laps });
 
 export function OutsideDisplay({ onNavigate }: { onNavigate: (path: string) => void }) {
-  const { runners, race, laps, events, settings } = useAppData();
+  const { runners, race, laps, events, settings } = useAppData(selectOutsideDisplayData);
   const activeRunner = runners.find((runner) => runner.id === race.activeRunnerId) || null;
   const nextRunner = getNextWaitingRunner(runners);
   const [recordLap, setRecordLap] = React.useState<LapRecord | null>(null);
@@ -118,25 +126,24 @@ export function OutsideDisplay({ onNavigate }: { onNavigate: (path: string) => v
 }
 
 export function InsideDisplay({ onNavigate }: { onNavigate: (path: string) => void }) {
-  const { runners, labels, laps } = useAppData();
+  const { runners, labels, laps } = useAppData(selectInsideDisplayData);
   const latestLap = laps[0] || null;
-  const ranking = runners
-    .filter((runner) => runner.lapCount > 0 || runner.status !== 'registered')
-    .sort(
-      (a, b) =>
-        b.lapCount - a.lapCount ||
-        (a.averageLapMs ?? Number.MAX_SAFE_INTEGER) - (b.averageLapMs ?? Number.MAX_SAFE_INTEGER)
-    )
-    .slice(0, 10);
-
-  const labelStats = labels
-    .map((label) => buildLabelStat(label, runners, laps))
-    .filter((stat) => stat.runnerCount > 0 || stat.laps > 0)
-    .sort(
-      (a, b) =>
-        (a.label.sortOrder ?? 9999) - (b.label.sortOrder ?? 9999) ||
-        a.label.name.localeCompare(b.label.name)
-    );
+  const ranking = React.useMemo(
+    () =>
+      runners
+        .filter((runner) => runner.lapCount > 0 || runner.status !== 'registered')
+        .sort(
+          (a, b) =>
+            b.lapCount - a.lapCount ||
+            (a.averageLapMs ?? Number.MAX_SAFE_INTEGER) - (b.averageLapMs ?? Number.MAX_SAFE_INTEGER)
+        )
+        .slice(0, 10),
+    [runners]
+  );
+  const labelStats = React.useMemo(
+    () => buildLabelStats(labels, runners, laps),
+    [labels, laps, runners]
+  );
 
   return (
     <main className="display-root display-root--inside">
@@ -266,17 +273,47 @@ function eventRunnerLabel(event: RaceEvent) {
   return event.runnerNumber ? `${event.runnerNumber} - ${event.runnerName}` : event.runnerName;
 }
 
-function buildLabelStat(label: Label, runners: Runner[], laps: LapRecord[]) {
-  const labelRunners = runners.filter((runner) => runner.labels.some((item) => item.id === label.id));
-  const labelLaps = laps.filter((lap) => lap.labels.some((item) => item.id === label.id));
-  const historicalRunnerIds = new Set(labelLaps.map((lap) => lap.runnerId));
-  const calculatedTarget = labelRunners.reduce((sum, runner) => sum + (runner.targetLaps || 0), 0);
-  const target = label.targetLaps ?? calculatedTarget;
-  return {
-    label,
-    runnerCount: new Set([...labelRunners.map((runner) => runner.id), ...historicalRunnerIds]).size,
-    laps: labelLaps.length,
-    target,
-    percent: target > 0 ? (labelLaps.length / target) * 100 : 0,
-  };
+function buildLabelStats(labels: Label[], runners: Runner[], laps: LapRecord[]) {
+  const totals = new Map(
+    labels.map((label) => [
+      label.id,
+      { label, runnerIds: new Set<string>(), laps: 0, calculatedTarget: 0 },
+    ])
+  );
+
+  for (const runner of runners) {
+    for (const label of runner.labels) {
+      const total = totals.get(label.id);
+      if (!total) continue;
+      total.runnerIds.add(runner.id);
+      total.calculatedTarget += runner.targetLaps || 0;
+    }
+  }
+
+  for (const lap of laps) {
+    for (const label of lap.labels) {
+      const total = totals.get(label.id);
+      if (!total) continue;
+      total.runnerIds.add(lap.runnerId);
+      total.laps += 1;
+    }
+  }
+
+  return [...totals.values()]
+    .filter((total) => total.runnerIds.size > 0 || total.laps > 0)
+    .map((total) => {
+      const target = total.label.targetLaps ?? total.calculatedTarget;
+      return {
+        label: total.label,
+        runnerCount: total.runnerIds.size,
+        laps: total.laps,
+        target,
+        percent: target > 0 ? (total.laps / target) * 100 : 0,
+      };
+    })
+    .sort(
+      (a, b) =>
+        (a.label.sortOrder ?? 9999) - (b.label.sortOrder ?? 9999) ||
+        a.label.name.localeCompare(b.label.name)
+    );
 }

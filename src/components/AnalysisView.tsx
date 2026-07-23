@@ -30,7 +30,16 @@ import {
   type RunnerInsight,
 } from '../lib/analysis';
 import { formatClockTimeMs, formatDurationMs } from '../lib/time';
-import type { Label, LapRecord, PublicRecordMode } from '../types';
+import type { AppSnapshot, Label, LapRecord, PublicRecordMode } from '../types';
+
+const selectAnalysisData = ({ runners, labels, laps, events, race }: AppSnapshot) => ({
+  runners,
+  labels,
+  laps,
+  events,
+  race,
+});
+const MAX_CHART_PIXEL_RATIO = 1.5;
 import { LabelBadge, labelKindOrder, labelKindTitle } from './LabelBadge';
 
 type RunnerInsightSort = 'laps' | 'average' | 'best' | 'consistency';
@@ -53,14 +62,17 @@ const allLabelsEnabled: AnalysisFilters = {
 };
 
 export function AnalysisView() {
-  const { runners, labels, laps, events, race } = useAppData();
+  const { runners, labels, laps, events, race } = useAppData(selectAnalysisData);
   const [filters, setFilters] = React.useState<AnalysisFilters>(allLabelsEnabled);
   const [runnerSearch, setRunnerSearch] = React.useState('');
   const [runnerSort, setRunnerSort] = React.useState<RunnerInsightSort>('laps');
   const [fastestWindowMode, setFastestWindowMode] = React.useState<AnalysisRecordWindowMode>('day');
 
   const analysisLabels = React.useMemo(() => mergeAnalysisLabels(labels, laps), [labels, laps]);
-  const enabledLabelIds = filters.enabledLabelIds ?? analysisLabels.map((label) => label.id);
+  const enabledLabelIds = React.useMemo(
+    () => filters.enabledLabelIds ?? analysisLabels.map((label) => label.id),
+    [analysisLabels, filters.enabledLabelIds]
+  );
   const enabledLabels = React.useMemo(
     () => analysisLabels.filter((label) => enabledLabelIds.includes(label.id)),
     [analysisLabels, enabledLabelIds]
@@ -86,7 +98,10 @@ export function AnalysisView() {
     () => runnerInsights.filter((insight) => runnerInsightMatches(insight, runnerSearch)).sort(sortRunnerInsight(runnerSort)),
     [runnerInsights, runnerSearch, runnerSort]
   );
-  const burgieEvents = events.filter((event) => event.type === 'burgie_gepakt');
+  const burgieEventCount = React.useMemo(
+    () => events.reduce((count, event) => count + (event.type === 'burgie_gepakt' ? 1 : 0), 0),
+    [events]
+  );
 
   function enableAllLabels() {
     setFilters(allLabelsEnabled);
@@ -161,7 +176,7 @@ export function AnalysisView() {
         <StatPanel label="Traagste" value={formatDurationMs(kpis.slowestMs)} />
         <StatPanel label="Toeren / uur" value={formatNumber(kpis.lapsPerHour, 1)} />
         <StatPanel label="Projectie 24u" value={formatNumber(kpis.projected24hLaps, 0)} />
-        <StatPanel label="Burgie gepakt" value={burgieEvents.length.toString()} />
+        <StatPanel label="Burgie gepakt" value={burgieEventCount.toString()} />
       </div>
 
       {kpis.outlierUnderMinuteCount > 0 && (
@@ -423,6 +438,8 @@ function RollingLapTrendChart({ points }: { points: ReturnType<typeof buildRolli
       options: {
         responsive: true,
         maintainAspectRatio: false,
+        animation: false,
+        devicePixelRatio: Math.min(window.devicePixelRatio || 1, MAX_CHART_PIXEL_RATIO),
         interaction: {
           mode: 'nearest',
           intersect: false,
@@ -545,6 +562,8 @@ function RacePaceChart({ buckets }: { buckets: ReturnType<typeof buildTimeBucket
       options: {
         responsive: true,
         maintainAspectRatio: false,
+        animation: false,
+        devicePixelRatio: Math.min(window.devicePixelRatio || 1, MAX_CHART_PIXEL_RATIO),
         interaction: {
           mode: 'index',
           intersect: false,

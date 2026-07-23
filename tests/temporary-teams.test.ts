@@ -56,6 +56,15 @@ test('temporary teams restore base teams and laps retain the team from their sta
   assert.ok(db.getRunnerById(alice.id)?.labels.some((label) => label.id === blue.id));
 
   db.setTemporaryTeamActive(trojan.id, true, 220_000);
+  assert.throws(
+    () => db.deleteLabel(blue.id),
+    /Deactiveer de tijdelijke nachtploeg/
+  );
+  assert.throws(
+    () => db.updateLabel(blue.id, { kind: 'andere' }),
+    /Deactiveer de tijdelijke nachtploeg/
+  );
+  assert.equal(db.findLabelByName('Speedteam Blue')?.id, blue.id);
   const { appSnapshot } = await import('../server/app-state.ts');
   const snapshot = appSnapshot();
   db.applySnapshot(snapshot);

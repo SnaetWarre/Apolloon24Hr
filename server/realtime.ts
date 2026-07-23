@@ -11,7 +11,9 @@ import type {
 
 export type RealtimeEvent =
   | { type: 'bootstrap'; payload: AppSnapshot }
+  | { type: 'state:revision'; payload: number }
   | { type: 'runner:upserted'; payload: Runner }
+  | { type: 'runners:upserted'; payload: Runner[] }
   | { type: 'runner:deleted'; payload: string }
   | { type: 'runners:patched'; payload: Runner[] }
   | { type: 'label:upserted'; payload: Label }

@@ -1,11 +1,14 @@
 import type { LapRecord, Runner } from '../types';
 
 export function getNextWaitingRunner(runners: Runner[]): Runner | null {
-  return (
-    runners
-      .filter((runner) => runner.status === 'waiting')
-      .sort((a, b) => (a.queueIndex ?? 0) - (b.queueIndex ?? 0))[0] || null
-  );
+  let nextRunner: Runner | null = null;
+  for (const runner of runners) {
+    if (runner.status !== 'waiting') continue;
+    if (!nextRunner || (runner.queueIndex ?? 0) < (nextRunner.queueIndex ?? 0)) {
+      nextRunner = runner;
+    }
+  }
+  return nextRunner;
 }
 
 export function runnerLabel(runner: Pick<Runner, 'runnerNumber' | 'name'>): string {

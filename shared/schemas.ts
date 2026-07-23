@@ -147,6 +147,7 @@ export const appSnapshotSchema = z.object({
   events: z.array(raceEventSchema),
   temporaryTeams: z.array(temporaryTeamSchema),
   settings: appSettingsSchema,
+  revision: z.number().int().nonnegative().optional(),
   serverNowMs: z.number(),
   host: hostInfoSchema,
   cluster: clusterStatusSchema.optional(),

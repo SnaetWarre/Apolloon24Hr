@@ -2,14 +2,26 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
+import Database from 'better-sqlite3';
 import type { Active, CollisionDetection, DroppableContainer } from '@dnd-kit/core';
-import { buildTimeBuckets } from '../src/lib/analysis.ts';
+import { buildRollingLapTrend, buildTimeBuckets } from '../src/lib/analysis.ts';
 import { kanbanCollisionDetection, resolveKanbanDrop } from '../src/lib/kanban.ts';
+import { normalizeClockInterval } from '../src/lib/useAnimationFrameTick.ts';
 import type { LapRecord, RaceState } from '../src/types.ts';
 
 const dataPath = path.resolve(`.tmp-test-core-regressions-${process.pid}`);
 process.env.DATA_PATH = dataPath;
 type ClientRect = Parameters<CollisionDetection>[0]['collisionRect'];
+
+test('live clocks are cadence-limited instead of driving full-frame renders', () => {
+  assert.equal(normalizeClockInterval(0), 50);
+  assert.equal(normalizeClockInterval(16), 50);
+  assert.equal(normalizeClockInterval(100), 100);
+  assert.equal(normalizeClockInterval(Number.NaN), 1_000);
+
+  const source = fs.readFileSync(path.resolve('src/lib/useAnimationFrameTick.ts'), 'utf8');
+  assert.doesNotMatch(source, /requestAnimationFrame/);
+});
 
 test('analysis hour buckets use Brussels clock hours from the race start', () => {
   const raceStartedAt = Date.parse('2026-10-20T20:00:00+02:00');
@@ -44,6 +56,48 @@ test('analysis hour buckets use Brussels clock hours from the race start', () =>
   assert.deepEqual(
     buckets.map((bucket) => bucket.label),
     ['20u-21u', '23u-00u', '00u-01u']
+  );
+});
+
+test('rolling analysis keeps exact window semantics with a linear sliding window', () => {
+  const raceStartedAt = 1_000_000;
+  const race = {
+    id: 1,
+    activeRunnerId: null,
+    activeStartedAt: null,
+    raceStartedAt,
+    raceFinishedAt: null,
+    activeLabels: [],
+  } satisfies RaceState;
+  const lap = (id: string, finishedAt: number, durationMs: number): LapRecord => ({
+    id,
+    runnerId: 'runner-1',
+    runnerName: 'Runner',
+    runnerNumber: '1',
+    startedAt: finishedAt - durationMs,
+    finishedAt,
+    durationMs,
+    source: 'handoff',
+    createdAt: finishedAt,
+    labels: [],
+    lapNumber: 1,
+  });
+  const laps = [
+    lap('lap-4', raceStartedAt + 121_000, 80_000),
+    lap('lap-2', raceStartedAt + 60_000, 70_000),
+    lap('lap-1', raceStartedAt, 60_000),
+    lap('lap-3', raceStartedAt + 60_000, 90_000),
+  ];
+
+  const points = buildRollingLapTrend(laps, race, 1);
+  assert.deepEqual(
+    points.map((point) => ({ averageMs: point.averageMs, count: point.count })),
+    [
+      { averageMs: 60_000, count: 1 },
+      { averageMs: 73_333, count: 3 },
+      { averageMs: 73_333, count: 3 },
+      { averageMs: 80_000, count: 1 },
+    ]
   );
 });
 
@@ -221,6 +275,156 @@ test('only one runner can be marked as running', async () => {
     );
     assert.equal(db.getRaceState().activeRunnerId, first.id);
     assert.equal(db.getRunnerById(second.id)?.status, 'registered');
+  } finally {
+    fs.rmSync(dataPath, { recursive: true, force: true });
+  }
+});
+
+test('new runners cannot bypass timing state and waiting runners join the back of the queue', async () => {
+  fs.rmSync(dataPath, { recursive: true, force: true });
+  const db = await import('../server/db.ts');
+
+  try {
+    await db.initDb();
+    const first = db.insertRunner({
+      name: 'First waiting runner',
+      runnerNumber: '1',
+      status: 'waiting',
+    });
+    const second = db.insertRunner({
+      name: 'Second waiting runner',
+      runnerNumber: '2',
+      status: 'waiting',
+    });
+
+    assert.equal(db.getRunnerById(first.id)?.queueIndex, 0);
+    assert.equal(db.getRunnerById(second.id)?.queueIndex, 1);
+    assert.throws(
+      () => db.insertRunner({ name: 'Invalid active runner', status: 'running' }),
+      /timingscherm/
+    );
+    assert.equal(db.getRaceState().activeRunnerId, null);
+    assert.equal(db.getAllRunners().length, 2);
+  } finally {
+    fs.rmSync(dataPath, { recursive: true, force: true });
+  }
+});
+
+test('label names are unique regardless of capitalization', async () => {
+  fs.rmSync(dataPath, { recursive: true, force: true });
+  const db = await import('../server/db.ts');
+
+  try {
+    await db.initDb();
+    const label = db.createLabel({ name: 'Audit Team' });
+    const other = db.createLabel({ name: 'Other Team' });
+
+    assert.throws(() => db.createLabel({ name: 'audit team' }), /bestaat al/);
+    assert.throws(() => db.updateLabel(other.id, { name: 'AUDIT TEAM' }), /bestaat al/);
+    assert.equal(db.findLabelByName('aUdIt TeAm')?.id, label.id);
+    assert.equal(db.getLabels().filter((item) => item.name.toLowerCase() === 'audit team').length, 1);
+  } finally {
+    fs.rmSync(dataPath, { recursive: true, force: true });
+  }
+});
+
+test('cluster snapshot history stays bounded and serves only the latest full snapshot', async () => {
+  fs.rmSync(dataPath, { recursive: true, force: true });
+  const db = await import('../server/db.ts');
+
+  try {
+    await db.initDb();
+    for (let index = 1; index <= 12; index += 1) {
+      db.appendClusterOperation({
+        term: 1,
+        originHostId: 'test-host',
+        type: `test-operation-${index}`,
+        payload: { snapshot: { marker: index } },
+      });
+    }
+
+    assert.equal(db.getLastClusterOperationSeq(), 12);
+    assert.deepEqual(db.getClusterOperationsAfter(0).map((operation) => operation.seq), [12]);
+
+    const inspectionDb = new Database(path.join(dataPath, 'data', 'app.db'), { readonly: true });
+    try {
+      const row = inspectionDb.prepare('SELECT COUNT(*) AS count FROM cluster_operations').get() as {
+        count: number;
+      };
+      assert.equal(row.count, 4);
+    } finally {
+      inspectionDb.close();
+    }
+  } finally {
+    fs.rmSync(dataPath, { recursive: true, force: true });
+  }
+});
+
+test('operational SQLite access paths stay indexed and direct lookups preserve records', async () => {
+  fs.rmSync(dataPath, { recursive: true, force: true });
+  const db = await import('../server/db.ts');
+
+  try {
+    await db.initDb();
+    const first = db.insertRunner({ name: 'Indexed runner', runnerNumber: '501', status: 'waiting' });
+    const second = db.insertRunner({ name: 'Next runner', runnerNumber: '502', status: 'waiting' });
+    db.performHandoff(1_000);
+    db.performHandoff(61_000);
+
+    const lap = db.getAllLaps()[0];
+    assert.ok(lap);
+    assert.deepEqual(db.getLapById(lap.id), lap);
+    assert.deepEqual(db.getRunnerById(first.id), db.getAllRunners().find((runner) => runner.id === first.id));
+    assert.ok(db.getRunnerById(second.id));
+
+    const inspectionDb = new Database(path.join(dataPath, 'data', 'app.db'), { readonly: true });
+    try {
+      const indexNames = new Set(
+        [
+          ...inspectionDb.prepare("PRAGMA index_list('laps')").all(),
+          ...inspectionDb.prepare("PRAGMA index_list('queue_entries')").all(),
+          ...inspectionDb.prepare("PRAGMA index_list('race_events')").all(),
+        ].map((row) => String((row as { name: unknown }).name))
+      );
+      assert.ok(indexNames.has('idx_laps_runner_finished'));
+      assert.ok(indexNames.has('idx_laps_finished'));
+      assert.ok(indexNames.has('idx_queue_status_order'));
+      assert.ok(indexNames.has('idx_race_events_occurred'));
+    } finally {
+      inspectionDb.close();
+    }
+  } finally {
+    fs.rmSync(dataPath, { recursive: true, force: true });
+  }
+});
+
+test('full app snapshots reuse immutable collections until application data changes', async () => {
+  fs.rmSync(dataPath, { recursive: true, force: true });
+  const db = await import('../server/db.ts');
+  const { appSnapshot } = await import('../server/app-state.ts');
+
+  try {
+    await db.initDb();
+    const first = appSnapshot();
+    const second = appSnapshot();
+    assert.strictEqual(second.runners, first.runners);
+    assert.strictEqual(second.laps, first.laps);
+    assert.equal(second.revision, first.revision);
+
+    db.insertRunner({ name: 'Snapshot invalidator', runnerNumber: '900' });
+    const changed = appSnapshot();
+    assert.notStrictEqual(changed.runners, first.runners);
+    assert.ok((changed.revision ?? 0) > (first.revision ?? 0));
+
+    db.appendClusterOperation({
+      term: 1,
+      originHostId: 'test-host',
+      type: 'cache-neutral-cluster-log',
+      payload: { snapshot: changed },
+    });
+    const afterClusterLog = appSnapshot();
+    assert.strictEqual(afterClusterLog.runners, changed.runners);
+    assert.equal(afterClusterLog.revision, changed.revision);
   } finally {
     fs.rmSync(dataPath, { recursive: true, force: true });
   }

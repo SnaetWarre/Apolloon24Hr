@@ -26,8 +26,21 @@ test('temporary night teams work through HTTP, realtime, analysis, exports, and 
       links: [httpBatchLink({ url: `${baseUrl}/trpc` })],
     });
 
-    socket = io(baseUrl, { transports: ['websocket'], reconnection: false });
+    let connectedRevision: number | null = null;
+    let initialBootstrapCount = 0;
+    socket = io(baseUrl, { transports: ['websocket'], reconnection: false, autoConnect: false });
+    socket.on('state:revision', (revision: number) => {
+      connectedRevision = revision;
+    });
+    socket.on('bootstrap', () => {
+      initialBootstrapCount += 1;
+    });
+    socket.connect();
     await waitForSocket(socket);
+    await waitFor(() => connectedRevision !== null);
+    const initialState = await fetchState(baseUrl);
+    assert.equal(connectedRevision, initialState.revision);
+    assert.equal(initialBootstrapCount, 0);
     const realtimeTeams: TemporaryTeam[][] = [];
     socket.on('temporary-teams:patched', (teams: TemporaryTeam[]) => realtimeTeams.push(teams));
 

@@ -1,13 +1,15 @@
 import React from 'react';
 import { useAppActions, useAppData } from '../app/index';
-import { formatClockTimeMs, formatDurationMs, nowMs } from '../lib/time';
+import { formatClockTimeMs, formatDurationMs } from '../lib/time';
 import { getNextWaitingRunner, runnerLabel } from '../lib/runners';
-import { useAnimationFrameTick } from '../lib/useAnimationFrameTick';
-import type { Runner } from '../types';
+import type { AppSnapshot, Runner } from '../types';
 import { LabelBadge } from './LabelBadge';
+import { LiveDuration } from './LiveTime';
+
+const selectTimingData = ({ runners, laps, race }: AppSnapshot) => ({ runners, laps, race });
 
 export function TimingView() {
-  const { runners, laps, race } = useAppData();
+  const { runners, laps, race } = useAppData(selectTimingData);
   const { handoff, startNext, undoLastHandoff, finishRace } = useAppActions();
   const [message, setMessage] = React.useState<string | null>(null);
   const [handoffBusy, setHandoffBusy] = React.useState(false);
@@ -20,8 +22,6 @@ export function TimingView() {
   const recentLaps = laps.slice(0, 10);
   const activePreviousLap = activeRunner ? laps.find((lap) => lap.runnerId === activeRunner.id) || null : null;
   const handoffPreview = buildHandoffPreview(activeRunner, nextRunner);
-
-  useAnimationFrameTick(Boolean(activeRunner && race.activeStartedAt));
 
   const runExclusiveRaceAction = React.useCallback(
     async (action: () => Promise<unknown>, successMessage: string | null): Promise<boolean> => {
@@ -110,7 +110,7 @@ export function TimingView() {
           accent
           extra={
             activeRunner && race.activeStartedAt ? (
-              <span className="live-time">{formatDurationMs(nowMs() - race.activeStartedAt)}</span>
+              <LiveDuration startedAt={race.activeStartedAt} className="live-time" />
             ) : null
           }
         />

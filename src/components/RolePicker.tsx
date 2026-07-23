@@ -1,5 +1,8 @@
 import React from 'react';
 import { useAppData } from '../app/index';
+import type { AppSnapshot } from '../types';
+
+const selectHostData = ({ host }: AppSnapshot) => ({ host });
 
 const ROLES = [
   {
@@ -35,7 +38,7 @@ const ROLES = [
 ];
 
 export function RolePicker({ onNavigate }: { onNavigate: (path: string) => void }) {
-  const { host } = useAppData();
+  const { host } = useAppData(selectHostData);
 
   return (
     <>
