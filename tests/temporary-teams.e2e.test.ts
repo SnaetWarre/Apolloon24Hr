@@ -125,7 +125,16 @@ test('temporary night teams work through HTTP, realtime, analysis, exports, and 
 
     const analysisPage = await fetch(`${baseUrl}/analysis`);
     assert.equal(analysisPage.status, 200);
-    assert.match(await analysisPage.text(), /<div id="root"><\/div>/);
+    const analysisHtml = await analysisPage.text();
+    assert.match(analysisHtml, /<div id="root"><\/div>/);
+    const scriptPath = analysisHtml.match(/<script[^>]+src="([^"]+\.js)"/)?.[1];
+    assert.ok(scriptPath);
+    const compressedAsset = await fetch(`${baseUrl}${scriptPath}`, {
+      headers: { 'accept-encoding': 'br' },
+    });
+    assert.equal(compressedAsset.status, 200);
+    assert.equal(compressedAsset.headers.get('content-encoding'), 'br');
+    assert.match(compressedAsset.headers.get('cache-control') || '', /immutable/);
 
     socket.close();
     socket = null;

@@ -1,6 +1,8 @@
 import React from 'react';
 
-const MIN_CLOCK_INTERVAL_MS = 50;
+const MIN_CLOCK_INTERVAL_MS = 16;
+export const LIVE_MILLISECOND_INTERVAL_MS = 1_000 / 30;
+export const SECOND_DISPLAY_INTERVAL_MS = 500;
 type Clock = {
   cadenceMs: number;
   listeners: Set<() => void>;
@@ -30,7 +32,7 @@ export function useClockTick(intervalMs = 100, enabled = true): void {
 }
 
 export function useSecondTick(enabled = true): void {
-  useClockTick(1_000, enabled);
+  useClockTick(SECOND_DISPLAY_INTERVAL_MS, enabled);
 }
 
 function subscribeToClock(cadenceMs: number, listener: () => void): () => void {

@@ -7,6 +7,10 @@ const apiTarget = `http://127.0.0.1:${process.env.VITE_DEV_API_PORT || 3000}`;
 export default defineConfig({
   plugins: [react()],
   cacheDir: '.vite-cache',
+  build: {
+    // Route modules are intentionally eager so operator navigation never waits on a chunk.
+    chunkSizeWarningLimit: 800,
+  },
   server: {
     // Default is loopback only; without this, http://<LAN-IP>:5173 fails on this machine and on other devices
     host: true,

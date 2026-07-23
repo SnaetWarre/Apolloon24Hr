@@ -21,6 +21,7 @@ const compiledDistDir = path.resolve(__dirname, '..', '..', 'dist');
 const sourceDistDir = path.resolve(__dirname, '..', 'dist');
 const DIST_DIR = fs.existsSync(compiledDistDir) ? compiledDistDir : sourceDistDir;
 const INDEX_HTML = path.join(DIST_DIR, 'index.html');
+const ASSETS_DIR = path.join(DIST_DIR, 'assets');
 
 const app = express();
 app.disable('x-powered-by');
@@ -151,6 +152,36 @@ app.get('/api/export/events.json', (_req, res) => {
 
 app.get('/api/export/current-state.json', (_req, res) => {
   res.json(appSnapshot());
+});
+
+app.use((req, res, next) => {
+  if ((req.method !== 'GET' && req.method !== 'HEAD') || !req.path.startsWith('/assets/')) {
+    next();
+    return;
+  }
+  const originalPath = path.resolve(DIST_DIR, `.${req.path}`);
+  if (!originalPath.startsWith(`${ASSETS_DIR}${path.sep}`)) {
+    next();
+    return;
+  }
+
+  const preferredEncoding = req.acceptsEncodings('br', 'gzip');
+  const compressed =
+    preferredEncoding === 'br' && fs.existsSync(`${originalPath}.br`)
+      ? { path: `${originalPath}.br`, encoding: 'br' }
+      : preferredEncoding === 'gzip' && fs.existsSync(`${originalPath}.gz`)
+        ? { path: `${originalPath}.gz`, encoding: 'gzip' }
+        : null;
+  if (!compressed) {
+    next();
+    return;
+  }
+
+  res.type(originalPath);
+  res.setHeader('Content-Encoding', compressed.encoding);
+  res.setHeader('Vary', 'Accept-Encoding');
+  res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+  res.sendFile(compressed.path);
 });
 
 app.use(

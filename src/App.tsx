@@ -1,6 +1,13 @@
 import React from 'react';
 import { Outlet, useNavigate, useRouterState } from '@tanstack/react-router';
+import { AdminView } from './components/AdminView';
+import { AnalysisView } from './components/AnalysisView';
+import { AppHeader } from './components/AppHeader';
+import { InsideDisplay, OutsideDisplay } from './components/DisplayViews';
+import { KanbanBoard } from './components/KanbanBoard';
 import { RolePicker } from './components/RolePicker';
+import { RunnerProfileModal } from './components/RunnerProfileModal';
+import { TimingView } from './components/TimingView';
 import { useAppData, useRealtimeBridge } from './app/index';
 import { getNextWaitingRunner, runnerLabel } from './lib/runners';
 import { LiveDuration } from './components/LiveTime';
@@ -8,46 +15,6 @@ import type { AppSnapshot } from './types';
 
 const selectConnectionData = () => ({});
 const selectQueuePageData = ({ race, runners }: AppSnapshot) => ({ race, runners });
-
-const AnalysisView = React.lazy(async () => {
-  const module = await import('./components/AnalysisView');
-  return { default: module.AnalysisView };
-});
-
-const AppHeader = React.lazy(async () => {
-  const module = await import('./components/AppHeader');
-  return { default: module.AppHeader };
-});
-
-const AdminView = React.lazy(async () => {
-  const module = await import('./components/AdminView');
-  return { default: module.AdminView };
-});
-
-const InsideDisplay = React.lazy(async () => {
-  const module = await import('./components/DisplayViews');
-  return { default: module.InsideDisplay };
-});
-
-const OutsideDisplay = React.lazy(async () => {
-  const module = await import('./components/DisplayViews');
-  return { default: module.OutsideDisplay };
-});
-
-const KanbanBoard = React.lazy(async () => {
-  const module = await import('./components/KanbanBoard');
-  return { default: module.KanbanBoard };
-});
-
-const RunnerProfileModal = React.lazy(async () => {
-  const module = await import('./components/RunnerProfileModal');
-  return { default: module.RunnerProfileModal };
-});
-
-const TimingView = React.lazy(async () => {
-  const module = await import('./components/TimingView');
-  return { default: module.TimingView };
-});
 
 export function AppRoot() {
   const { initialized, error, refresh } = useAppData(selectConnectionData);
@@ -80,18 +47,7 @@ export function AppRoot() {
     );
   }
 
-  const outlet = (
-    <React.Suspense
-      fallback={
-        <div className="empty-state">
-          <h1>Apolloon telsysteem</h1>
-          <p>Pagina wordt geladen...</p>
-        </div>
-      }
-    >
-      <Outlet />
-    </React.Suspense>
-  );
+  const outlet = <Outlet />;
 
   if (displayRoute) return outlet;
 

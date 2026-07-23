@@ -31,7 +31,7 @@
     "db:dev:seed:large": "tsx scripts/seed-test-db.mjs --scenario=large",
     "seed:test": "tsx scripts/seed-test-db.mjs --scenario=ready",
     "seed:test:live": "tsx scripts/seed-test-db.mjs --scenario=live",
-    "client:build": "vite build",
+    "client:build": "vite build && node scripts/precompress-dist.mjs",
     "server:build": "tsc -p tsconfig.server.json",
     "typecheck:client": "tsc -p tsconfig.json",
     "typecheck:server": "tsc -p tsconfig.server.json --noEmit",

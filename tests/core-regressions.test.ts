@@ -6,7 +6,11 @@ import Database from 'better-sqlite3';
 import type { Active, CollisionDetection, DroppableContainer } from '@dnd-kit/core';
 import { buildRollingLapTrend, buildTimeBuckets } from '../src/lib/analysis.ts';
 import { kanbanCollisionDetection, resolveKanbanDrop } from '../src/lib/kanban.ts';
-import { normalizeClockInterval } from '../src/lib/useAnimationFrameTick.ts';
+import {
+  LIVE_MILLISECOND_INTERVAL_MS,
+  normalizeClockInterval,
+  SECOND_DISPLAY_INTERVAL_MS,
+} from '../src/lib/useAnimationFrameTick.ts';
 import type { LapRecord, RaceState } from '../src/types.ts';
 
 const dataPath = path.resolve(`.tmp-test-core-regressions-${process.pid}`);
@@ -14,13 +18,22 @@ process.env.DATA_PATH = dataPath;
 type ClientRect = Parameters<CollisionDetection>[0]['collisionRect'];
 
 test('live clocks are cadence-limited instead of driving full-frame renders', () => {
-  assert.equal(normalizeClockInterval(0), 50);
-  assert.equal(normalizeClockInterval(16), 50);
+  assert.equal(normalizeClockInterval(0), 16);
+  assert.equal(normalizeClockInterval(16), 16);
+  assert.equal(normalizeClockInterval(LIVE_MILLISECOND_INTERVAL_MS), 33);
+  assert.equal(SECOND_DISPLAY_INTERVAL_MS, 500);
   assert.equal(normalizeClockInterval(100), 100);
   assert.equal(normalizeClockInterval(Number.NaN), 1_000);
 
   const source = fs.readFileSync(path.resolve('src/lib/useAnimationFrameTick.ts'), 'utf8');
   assert.doesNotMatch(source, /requestAnimationFrame/);
+});
+
+test('all route modules load with the app so navigation never waits on a lazy chunk', () => {
+  const source = fs.readFileSync(path.resolve('src/App.tsx'), 'utf8');
+  assert.doesNotMatch(source, /React\.lazy|Pagina wordt geladen|import\(['"]\.\/components/);
+  assert.match(source, /import \{ AnalysisView \} from '\.\/components\/AnalysisView'/);
+  assert.match(source, /import \{ TimingView \} from '\.\/components\/TimingView'/);
 });
 
 test('analysis hour buckets use Brussels clock hours from the race start', () => {
