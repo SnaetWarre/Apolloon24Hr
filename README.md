@@ -1,10 +1,10 @@
 # Leuven 24h Runner Tracker
 
-Local-first telsysteem for the Apolloon 24 Urenloop setup. One host laptop runs the Electron app and local server. Every other laptop or TV screen connects to that host through a browser on the wired local network.
+Local-first telsysteem for the Apolloon 24 Urenloop setup. Every laptop running the packaged Electron app has its own complete, writable SQLite database. Browser-only laptops and TV screens connect to one of those Electron laptops through the wired local network.
 
 ## Event Network
 
-In normal single-host mode, only the host laptop needs to be reachable on the local network.
+A single Electron laptop works on its own. With multiple Electron laptops, each one remains usable when the others disconnect and synchronizes its queued operations after reconnecting.
 
 Recommended defaults:
 
@@ -13,24 +13,27 @@ Server port: 5173
 Event URL:   shown by the app, for example http://<host-lan-ip>:5173
 ```
 
-Client laptops and TV laptops can use automatic DHCP. Their IP addresses do not matter because they only connect to the host.
+Browser and TV clients can use automatic DHCP. They do not store or replicate the database.
 
-### Local Hot-Standby Cluster
+### Local-first laptop cluster
 
-For automatic local failover, run the packaged app on at least three host-capable laptops connected to the same wired switch. Cluster mode is enabled automatically in the packaged app. Every host keeps a full local SQLite copy. Exactly one host is the writable Primary; the others are Standby and forward write actions to the current Primary.
+Cluster mode is enabled automatically in the packaged app. Linux, Windows, and macOS Electron builds use the same HTTP and UDP protocol and can participate in the same cluster.
 
-Automatic failover needs three voting hosts. With only two hosts, the app will not safely auto-promote after a split because both sides cannot prove which database copy is authoritative.
+There is no Primary, quorum, promotion, Kubernetes, or external message broker. One, two, three, or more connected Electron laptops are all locally writable. Writes are committed to SQLite together with an idempotent operation record before the UI reports success. Peers exchange only missing operations and replay them in one canonical order, so reconnect order does not decide the final state.
 
 Normal event setup:
 
 ```text
-1. Plug the host laptops into the same wired switch.
-2. Start Apolloon on each host laptop.
-3. Wait until the header shows one Primary and the other hosts as Standby.
-4. Use any shown Event URL from a host laptop for operator and display browsers.
+1. Plug the Electron laptops into the same wired switch.
+2. Start Apolloon on the laptop whose database should be the initial source.
+3. Open Admin and note its Event URL and eight-character pairing code.
+4. Start Apolloon on each additional laptop.
+5. On each additional laptop, open Admin, enter the creator URL and code, and confirm.
+6. Wait until the header shows the expected number of synchronized laptops.
+7. Open any shown Event URL on browser-only operator and display devices.
 ```
 
-No IP addresses or peer settings need to be entered during the event. The app announces itself on the local network and discovers the other Apolloon hosts automatically.
+Joining deliberately replaces the additional laptop's current database with the creator's database. Before replacement, Apolloon stores a timestamped recovery copy beside its local database. After the first pairing, UDP discovery reconnects peers automatically on the local network. Fixed peer URLs remain available for tests and unusual network configurations.
 
 Developer overrides:
 
@@ -41,7 +44,7 @@ CLUSTER_PEERS=http://host:5173  # optional fixed peer list for tests
 CLUSTER_DISCOVERY=false         # disable UDP discovery
 ```
 
-The header shows `Primary` or `Standby` plus the applied operation sequence. After the Primary dies, the remaining hosts elect a new Primary in a few seconds; browser write requests sent to a Standby are proxied to the new Primary once election has completed.
+The header shows reachable copies, changes still waiting for another copy, and sync conflicts. Timing is owned by one Electron laptop. If two isolated laptops both create a timing history, timing pauses after reconnect; an operator chooses the correct laptop in Admin and that history is then synchronized to the others. Queue and registration work remains available on a single surviving laptop.
 
 ## Tech Stack
 

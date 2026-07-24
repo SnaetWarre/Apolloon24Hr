@@ -110,7 +110,7 @@ export const hostInfoSchema = z.object({
 });
 export type HostInfo = z.infer<typeof hostInfoSchema>;
 
-export const clusterRoleSchema = z.enum(['standalone', 'leader', 'follower', 'candidate']);
+export const clusterRoleSchema = z.enum(['standalone', 'local-first']);
 export type ClusterRole = z.infer<typeof clusterRoleSchema>;
 
 export const clusterPeerSchema = z.object({
@@ -119,22 +119,24 @@ export const clusterPeerSchema = z.object({
   reachable: z.boolean(),
   lastSeenAt: z.number().nullable(),
   lastSeq: z.number().int().nonnegative().nullable(),
+  operationVector: z.record(z.string(), z.number().int().nonnegative()).optional(),
 });
 export type ClusterPeer = z.infer<typeof clusterPeerSchema>;
 
 export const clusterStatusSchema = z.object({
   enabled: z.boolean(),
   hostId: z.string(),
+  clusterId: z.string(),
+  pairingCode: z.string(),
   role: clusterRoleSchema,
-  term: z.number().int().nonnegative(),
-  leaderId: z.string().nullable(),
-  leaderUrl: z.string().nullable(),
   writable: z.boolean(),
-  quorumSize: z.number().int().positive(),
-  votingMembers: z.number().int().positive(),
+  connectedHosts: z.number().int().positive(),
+  knownHosts: z.number().int().positive(),
+  pendingOperations: z.number().int().nonnegative(),
+  conflictCount: z.number().int().nonnegative(),
+  timingControllerHostId: z.string().nullable(),
+  clockSkewMs: z.number().nullable(),
   lastAppliedSeq: z.number().int().nonnegative(),
-  lastLeaderSeenAt: z.number().nullable(),
-  failoverHint: z.string().nullable(),
   peers: z.array(clusterPeerSchema),
 });
 export type ClusterStatus = z.infer<typeof clusterStatusSchema>;

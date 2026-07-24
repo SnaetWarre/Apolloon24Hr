@@ -1,415 +1,521 @@
 import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
-import http from 'node:http';
-import net, { type Socket } from 'node:net';
+import net from 'node:net';
 import path from 'node:path';
 import test from 'node:test';
 import { createTRPCClient, httpBatchLink } from '@trpc/client';
 import type { AppRouter } from '../server/router.ts';
-import type { AppSnapshot, PublicRecordMode } from '../shared/schemas.ts';
+import type { AppSnapshot, ClusterStatus } from '../shared/schemas.ts';
 
 type RunningServer = {
   process: ChildProcess;
+  port: number;
   baseUrl: string;
+  dataPath: string;
   output: () => string;
 };
 
-test('standalone servers reject cluster control and replication requests', { timeout: 10_000 }, async () => {
-  const testRoot = path.resolve(`.tmp-test-cluster-disabled-${process.pid}`);
-  fs.rmSync(testRoot, { recursive: true, force: true });
-  const port = await freePort();
-  let server: RunningServer | null = null;
+const CLUSTER_ID = 'cluster-e2e-local-first';
+const CLUSTER_SECRET = 'cluster-e2e-secret';
 
+test('standalone mode stays writable and rejects replication exchange', { timeout: 12_000 }, async () => {
+  const root = testRoot('standalone');
+  const server = await startServer({
+    port: await freePort(),
+    dataPath: root,
+    clusterEnabled: false,
+  });
   try {
-    server = await startApolloonServer({
-      port,
-      dataPath: testRoot,
-      peers: [],
-      clusterEnabled: false,
+    const runner = await createClient(server.port).runners.create.mutate({
+      name: 'Solo runner',
+      runnerNumber: 'SOLO-1',
+      _commandId: crypto.randomUUID(),
+      _clientId: 'test',
     });
-    const before = await fetchState(port);
-    const heartbeatResponse = await fetch(`http://127.0.0.1:${port}/api/cluster/heartbeat`, {
+    assert.equal(runner.runnerNumber, 'SOLO-1');
+    assert.equal((await fetchStatus(server.port)).role, 'standalone');
+    const response = await fetch(`${server.baseUrl}/api/cluster/sync/exchange`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        term: 99,
-        leaderId: 'untrusted-host',
-        leaderUrl: 'http://127.0.0.1:1',
-        lastSeq: 99,
-      }),
+      body: '{}',
     });
-    const operationsResponse = await fetch(`http://127.0.0.1:${port}/api/cluster/operations`);
-
-    assert.equal(heartbeatResponse.status, 404);
-    assert.equal(operationsResponse.status, 404);
-    assert.equal((await fetchClusterStatus(port)).role, 'standalone');
-    const after = await fetchState(port);
-    assert.deepEqual(
-      { ...after, serverNowMs: 0 },
-      { ...before, serverNowMs: 0 }
-    );
-  } catch (error) {
-    throw withServerOutput(error, server);
+    assert.equal(response.status, 404);
   } finally {
     await stopServer(server);
-    fs.rmSync(testRoot, { recursive: true, force: true });
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });
 
-test('a late standby receives one checkpoint, then proxies writes with a valid replicated response', { timeout: 20_000 }, async () => {
-  const testRoot = path.resolve(`.tmp-test-cluster-proxy-${process.pid}`);
-  fs.rmSync(testRoot, { recursive: true, force: true });
-  const leaderPort = await freePort();
-  const followerPort = await freePort();
-  let leader: RunningServer | null = null;
-  let follower: RunningServer | null = null;
-
+test('two writable Electron databases exchange operations in both directions', { timeout: 20_000 }, async () => {
+  const root = testRoot('two-way');
+  const ports = await Promise.all([freePort(), freePort()]);
+  const servers: RunningServer[] = [];
   try {
-    leader = await startApolloonServer({
-      port: leaderPort,
-      dataPath: path.join(testRoot, 'leader'),
-      peers: [followerPort],
-      bootstrapLeader: true,
-    });
-    const leaderClient = createClient(leaderPort);
-    const beforeStandby = await leaderClient.runners.create.mutate({
-      name: 'Created before standby',
-      runnerNumber: 'NET-EARLY',
-    });
-    assert.equal((await fetchClusterStatus(leaderPort)).lastAppliedSeq, 0);
-
-    follower = await startApolloonServer({
-      port: followerPort,
-      dataPath: path.join(testRoot, 'follower'),
-      peers: [leaderPort],
+    servers.push(
+      await startServer({
+        port: ports[0],
+        dataPath: path.join(root, 'a'),
+        peers: [ports[1]],
+      })
+    );
+    const first = await createClient(ports[0]).runners.create.mutate({
+      name: 'Created while alone',
+      runnerNumber: 'LOCAL-A',
+      _commandId: crypto.randomUUID(),
+      _clientId: 'browser-a',
     });
 
+    servers.push(
+      await startServer({
+        port: ports[1],
+        dataPath: path.join(root, 'b'),
+        peers: [ports[0]],
+      })
+    );
     await waitFor(async () => {
-      const [leaderStatus, followerStatus] = await Promise.all([
-        fetchClusterStatus(leaderPort),
-        fetchClusterStatus(followerPort),
-      ]);
-      return leaderStatus.role === 'leader' && followerStatus.role === 'follower';
+      const [a, b] = await Promise.all(ports.map(fetchStatus));
+      return a.connectedHosts === 2 && b.connectedHosts === 2;
     });
-    await waitFor(async () => {
-      const followerState = await fetchState(followerPort);
-      return followerState.runners.some((item) => item.id === beforeStandby.id);
-    });
+    await waitFor(async () =>
+      (await fetchState(ports[1])).runners.some((runner) => runner.id === first.id)
+    );
 
-    const followerClient = createTRPCClient<AppRouter>({
-      links: [httpBatchLink({ url: `${follower.baseUrl}/trpc` })],
+    const second = await createClient(ports[1]).runners.create.mutate({
+      name: 'Created on B',
+      runnerNumber: 'LOCAL-B',
+      _commandId: crypto.randomUUID(),
+      _clientId: 'browser-b',
     });
-    const runner = await followerClient.runners.create.mutate({
-      name: 'Standby proxy runner',
-      runnerNumber: 'NET-1',
-    });
-    assert.equal(runner.runnerNumber, 'NET-1');
+    await waitFor(async () =>
+      (await fetchState(ports[0])).runners.some((runner) => runner.id === second.id)
+    );
 
-    await waitFor(async () => {
-      const states = await Promise.all([
-        fetchState(leaderPort),
-        fetchState(followerPort),
-      ]);
-      return states.every((state) => state.runners.some((item) => item.id === runner.id));
-    });
-    assert.equal((await fetchClusterStatus(followerPort)).lastAppliedSeq, 2);
-  } catch (error) {
-    throw withServerOutput(error, leader, follower);
-  } finally {
-    await Promise.all([stopServer(leader), stopServer(follower)]);
-    fs.rmSync(testRoot, { recursive: true, force: true });
-  }
-});
-
-test('three hosts elect a replacement primary and keep accepting standby writes', { timeout: 25_000 }, async () => {
-  const testRoot = path.resolve(`.tmp-test-cluster-failover-${process.pid}`);
-  fs.rmSync(testRoot, { recursive: true, force: true });
-  const ports = await Promise.all([freePort(), freePort(), freePort()]);
-  const servers: Array<RunningServer | null> = [null, null, null];
-
-  try {
-    servers[0] = await startApolloonServer({
-      port: ports[0],
-      dataPath: path.join(testRoot, 'host-1'),
-      peers: [ports[1], ports[2]],
-      bootstrapLeader: true,
-    });
-    servers[1] = await startApolloonServer({
-      port: ports[1],
-      dataPath: path.join(testRoot, 'host-2'),
-      peers: [ports[0], ports[2]],
-    });
-    servers[2] = await startApolloonServer({
-      port: ports[2],
-      dataPath: path.join(testRoot, 'host-3'),
-      peers: [ports[0], ports[1]],
-    });
-
-    await waitFor(async () => {
-      const statuses = await Promise.all(ports.map(fetchClusterStatus));
-      return statuses.filter((status) => status.role === 'leader').length === 1
-        && statuses.filter((status) => status.role === 'follower').length === 2;
-    });
-
-    const initialStandbyClient = createClient(ports[1]);
-    const firstRunner = await initialStandbyClient.runners.create.mutate({
-      name: 'Before failover',
-      runnerNumber: 'NET-BEFORE',
-    });
-    await waitFor(async () => {
-      const states = await Promise.all(ports.map(fetchState));
-      return states.every((state) => state.runners.some((runner) => runner.id === firstRunner.id));
-    });
-
-    await stopServer(servers[0]);
-    servers[0] = null;
-    const remainingPorts = ports.slice(1);
-    await waitFor(async () => {
-      const statuses = await Promise.all(remainingPorts.map(fetchClusterStatus));
-      return statuses.filter((status) => status.role === 'leader').length === 1
-        && statuses.filter((status) => status.role === 'follower').length === 1;
-    }, 8_000);
-
-    const statuses = await Promise.all(remainingPorts.map(fetchClusterStatus));
-    const standbyIndex = statuses.findIndex((status) => status.role === 'follower');
-    assert.notEqual(standbyIndex, -1);
-    const postFailoverClient = createClient(remainingPorts[standbyIndex]);
-    const secondRunner = await postFailoverClient.runners.create.mutate({
-      name: 'After failover',
-      runnerNumber: 'NET-AFTER',
-    });
-
-    await waitFor(async () => {
-      const states = await Promise.all(remainingPorts.map(fetchState));
-      return states.every((state) =>
-        state.runners.some((runner) => runner.id === firstRunner.id)
-        && state.runners.some((runner) => runner.id === secondRunner.id)
-      );
-    });
-    const finalStatuses = await Promise.all(remainingPorts.map(fetchClusterStatus));
-    assert.ok(finalStatuses.every((status) => status.lastAppliedSeq === 2));
+    const states = await Promise.all(ports.map(fetchState));
+    assert.deepEqual(normalizeState(states[0]), normalizeState(states[1]));
   } catch (error) {
     throw withServerOutput(error, ...servers);
   } finally {
     await Promise.all(servers.map(stopServer));
-    fs.rmSync(testRoot, { recursive: true, force: true });
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });
 
-test('overlapping leader heartbeats cannot roll a follower back to an older snapshot', { timeout: 15_000 }, async () => {
-  const testRoot = path.resolve(`.tmp-test-cluster-pull-${process.pid}`);
-  fs.rmSync(testRoot, { recursive: true, force: true });
-  const followerPort = await freePort();
-  const fakeLeaderPort = await freePort();
-  let follower: RunningServer | null = null;
-  let requestCount = 0;
-  let operations: ClusterOperationFixture[] = [];
-
-  const fakeLeader = http.createServer((request, response) => {
-    if (!request.url?.startsWith('/api/cluster/operations')) {
-      response.statusCode = 404;
-      response.end();
-      return;
+test('a disconnected node writes locally and catches up after restart', { timeout: 25_000 }, async () => {
+  const root = testRoot('restart');
+  const ports = await Promise.all([freePort(), freePort(), freePort()]);
+  const servers: Array<RunningServer | null> = [null, null, null];
+  try {
+    for (let index = 0; index < ports.length; index += 1) {
+      servers[index] = await startServer({
+        port: ports[index],
+        dataPath: path.join(root, String(index)),
+        peers: ports.filter((_, peerIndex) => peerIndex !== index),
+      });
     }
+    await waitFor(async () =>
+      (await Promise.all(ports.map(fetchStatus))).every((status) => status.connectedHosts === 3)
+    );
 
-    const requestNumber = ++requestCount;
-    const after = Number(new URL(request.url, `http://127.0.0.1:${fakeLeaderPort}`).searchParams.get('after') || 0);
-    const available = operations.filter((operation) => operation.seq > after);
-    const selected = requestNumber === 1 ? available.slice(0, 2) : available;
-    const delayMs = requestNumber === 1 ? 250 : 10;
-    setTimeout(() => {
-      response.setHeader('content-type', 'application/json');
-      response.end(JSON.stringify({
-        hostId: 'fake-leader',
-        term: 1,
-        role: 'leader',
-        lastSeq: 3,
-        operations: selected,
-      }));
-    }, delayMs);
-  });
-
-  try {
-    await listen(fakeLeader, fakeLeaderPort);
-    follower = await startApolloonServer({
-      port: followerPort,
-      dataPath: testRoot,
-      peers: [fakeLeaderPort],
-      heartbeatMs: 10_000,
-      electionMinMs: 20_000,
+    await stopServer(servers[2]);
+    servers[2] = null;
+    const aRunner = await createClient(ports[0]).runners.create.mutate({
+      name: 'A while C offline',
+      runnerNumber: 'OFF-A',
+      _commandId: crypto.randomUUID(),
+      _clientId: 'a',
     });
-
-    const snapshot = await fetchState(followerPort);
-    const modes: PublicRecordMode[] = ['off', 'hour', 'two_hour'];
-    operations = modes.map((publicRecordMode, index) => ({
-      seq: index + 1,
-      id: `operation-${index + 1}`,
-      term: 1,
-      originHostId: 'fake-leader',
-      type: 'settings.updatePublicRecordMode',
-      payload: {
-        snapshot: {
-          ...snapshot,
-          settings: { publicRecordMode },
-        },
-      },
-      createdAt: 1_000 + index,
-      appliedAt: 1_000 + index,
-    }));
-
-    void sendHeartbeat(followerPort, fakeLeaderPort);
-    await waitFor(() => requestCount === 1);
-    void sendHeartbeat(followerPort, fakeLeaderPort);
-
+    const bRunner = await createClient(ports[1]).runners.create.mutate({
+      name: 'B while C offline',
+      runnerNumber: 'OFF-B',
+      _commandId: crypto.randomUUID(),
+      _clientId: 'b',
+    });
     await waitFor(async () => {
-      const [status, state] = await Promise.all([
-        fetchClusterStatus(followerPort),
-        fetchState(followerPort),
-      ]);
-      return status.lastAppliedSeq === 3 && state.settings.publicRecordMode === 'two_hour';
+      const states = await Promise.all(ports.slice(0, 2).map(fetchState));
+      return states.every(
+        (state) =>
+          state.runners.some((runner) => runner.id === aRunner.id) &&
+          state.runners.some((runner) => runner.id === bRunner.id)
+      );
     });
-    assert.equal(requestCount, 2);
+
+    servers[2] = await startServer({
+      port: ports[2],
+      dataPath: path.join(root, '2'),
+      peers: ports.slice(0, 2),
+    });
+    await waitFor(async () => {
+      const state = await fetchState(ports[2]);
+      return (
+        state.runners.some((runner) => runner.id === aRunner.id) &&
+        state.runners.some((runner) => runner.id === bRunner.id)
+      );
+    });
+    const states = await Promise.all(ports.map(fetchState));
+    assert.deepEqual(normalizeState(states[0]), normalizeState(states[1]));
+    assert.deepEqual(normalizeState(states[1]), normalizeState(states[2]));
   } catch (error) {
-    throw withServerOutput(error, follower);
+    throw withServerOutput(error, ...servers);
   } finally {
-    await stopServer(follower);
-    await closeHttpServer(fakeLeader);
-    fs.rmSync(testRoot, { recursive: true, force: true });
+    await Promise.all(servers.map(stopServer));
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });
 
-test('an unresponsive peer cannot start overlapping election storms', { timeout: 10_000 }, async () => {
-  const testRoot = path.resolve(`.tmp-test-cluster-election-${process.pid}`);
-  fs.rmSync(testRoot, { recursive: true, force: true });
-  const appPort = await freePort();
-  const stalledPeerPort = await freePort();
-  const sockets = new Set<Socket>();
-  const stalledPeer = net.createServer((socket) => {
-    sockets.add(socket);
-    socket.once('close', () => sockets.delete(socket));
-  });
-  let server: RunningServer | null = null;
-
+test('five nodes converge after concurrent low-volume writes', { timeout: 30_000 }, async () => {
+  const root = testRoot('five');
+  const ports = await Promise.all(Array.from({ length: 5 }, () => freePort()));
+  const servers: RunningServer[] = [];
   try {
-    await listen(stalledPeer, stalledPeerPort);
-    server = await startApolloonServer({
-      port: appPort,
-      dataPath: testRoot,
-      peers: [stalledPeerPort],
-      heartbeatMs: 50,
-      electionMinMs: 100,
-      requestTimeoutMs: 120,
+    for (let index = 0; index < ports.length; index += 1) {
+      servers.push(
+        await startServer({
+          port: ports[index],
+          dataPath: path.join(root, String(index)),
+          peers: ports.filter((_, peerIndex) => peerIndex !== index),
+        })
+      );
+    }
+    await waitFor(async () =>
+      (await Promise.all(ports.map(fetchStatus))).every((status) => status.connectedHosts === 5)
+    , 12_000);
+
+    await Promise.all(
+      ports.map((port, index) =>
+        createClient(port).runners.create.mutate({
+          name: `Runner ${index}`,
+          runnerNumber: `FIVE-${index}`,
+          _commandId: crypto.randomUUID(),
+          _clientId: `client-${index}`,
+        })
+      )
+    );
+    await waitFor(async () => {
+      const states = await Promise.all(ports.map(fetchState));
+      return states.every(
+        (state) => state.runners.filter((runner) => runner.runnerNumber?.startsWith('FIVE-')).length === 5
+      );
+    }, 12_000);
+    const states = await Promise.all(ports.map(fetchState));
+    for (const state of states.slice(1)) {
+      assert.deepEqual(normalizeState(states[0]), normalizeState(state));
+    }
+  } catch (error) {
+    throw withServerOutput(error, ...servers);
+  } finally {
+    await Promise.all(servers.map(stopServer));
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('joining a creator laptop imports its database and preserves a recovery backup', { timeout: 25_000 }, async () => {
+  const root = testRoot('join');
+  const creatorPort = await freePort();
+  const joinerPort = await freePort();
+  const creator = await startServer({
+    port: creatorPort,
+    dataPath: path.join(root, 'creator'),
+    clusterId: 'creator-cluster',
+    clusterSecret: 'creator-secret',
+  });
+  const joiner = await startServer({
+    port: joinerPort,
+    dataPath: path.join(root, 'joiner'),
+    clusterId: 'joiner-cluster',
+    clusterSecret: 'joiner-secret',
+  });
+  try {
+    const creatorRunner = await createClient(creatorPort).runners.create.mutate({
+      name: 'Creator database wins',
+      runnerNumber: 'CREATOR-1',
+      _commandId: crypto.randomUUID(),
+      _clientId: 'creator',
+    });
+    const replacedRunner = await createClient(joinerPort).runners.create.mutate({
+      name: 'Will be backed up',
+      runnerNumber: 'JOINER-OLD',
+      _commandId: crypto.randomUUID(),
+      _clientId: 'joiner',
+    });
+    const creatorStatus = await fetchStatus(creatorPort);
+    const response = await fetch(`${joiner.baseUrl}/api/cluster/join`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        remoteUrl: creator.baseUrl,
+        pairingCode: creatorStatus.pairingCode,
+      }),
+    });
+    const result = (await response.json()) as { ok: boolean; backupFile: string; error?: string };
+    assert.equal(response.ok, true, result.error);
+    assert.equal(result.ok, true);
+    assert.equal(
+      fs.existsSync(path.join(joiner.dataPath, 'data', result.backupFile)),
+      true
+    );
+    await waitFor(async () => {
+      const state = await fetchState(joinerPort);
+      return (
+        state.runners.some((runner) => runner.id === creatorRunner.id) &&
+        !state.runners.some((runner) => runner.id === replacedRunner.id)
+      );
+    });
+    await waitFor(async () => {
+      const [a, b] = await Promise.all([fetchStatus(creatorPort), fetchStatus(joinerPort)]);
+      return a.clusterId === b.clusterId && a.connectedHosts === 2 && b.connectedHosts === 2;
     });
 
-    await delay(450);
-    const status = await fetchClusterStatus(appPort);
-    assert.equal(status.role, 'candidate');
-    assert.ok(status.term >= 1, `expected at least one election, received term ${status.term}`);
-    assert.ok(status.term <= 3, `overlapping elections advanced the term to ${status.term}`);
+    const joinedWrite = await createClient(joinerPort).runners.create.mutate({
+      name: 'Written after joining',
+      runnerNumber: 'JOINED-1',
+      _commandId: crypto.randomUUID(),
+      _clientId: 'joiner',
+    });
+    await waitFor(async () =>
+      (await fetchState(creatorPort)).runners.some((runner) => runner.id === joinedWrite.id)
+    );
+    assert.deepEqual(
+      normalizeState(await fetchState(creatorPort)),
+      normalizeState(await fetchState(joinerPort))
+    );
   } catch (error) {
-    throw withServerOutput(error, server);
+    throw withServerOutput(error, creator, joiner);
+  } finally {
+    await Promise.all([stopServer(creator), stopServer(joiner)]);
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('concurrent offline edits of the same runner converge in canonical order', { timeout: 30_000 }, async () => {
+  const root = testRoot('same-runner');
+  const ports = await Promise.all([freePort(), freePort()]);
+  let a: RunningServer | null = null;
+  let b: RunningServer | null = null;
+  try {
+    a = await startServer({
+      port: ports[0],
+      dataPath: path.join(root, 'a'),
+      peers: [ports[1]],
+    });
+    b = await startServer({
+      port: ports[1],
+      dataPath: path.join(root, 'b'),
+      peers: [ports[0]],
+    });
+    const runner = await createClient(ports[0]).runners.create.mutate({
+      name: 'Shared original',
+      runnerNumber: 'SHARED-1',
+      _commandId: crypto.randomUUID(),
+      _clientId: 'a',
+    });
+    await waitFor(async () =>
+      (await fetchState(ports[1])).runners.some((item) => item.id === runner.id)
+    );
+
+    await stopServer(b);
+    b = null;
+    await createClient(ports[0]).runners.update.mutate({
+      id: runner.id,
+      fields: { name: 'Edited offline on A' },
+      _commandId: crypto.randomUUID(),
+      _clientId: 'a',
+    });
+    await stopServer(a);
+    a = null;
+
+    b = await startServer({
+      port: ports[1],
+      dataPath: path.join(root, 'b'),
+    });
+    await createClient(ports[1]).runners.update.mutate({
+      id: runner.id,
+      fields: { name: 'Edited offline on B' },
+      _commandId: crypto.randomUUID(),
+      _clientId: 'b',
+    });
+    await stopServer(b);
+    b = null;
+
+    a = await startServer({
+      port: ports[0],
+      dataPath: path.join(root, 'a'),
+      peers: [ports[1]],
+    });
+    b = await startServer({
+      port: ports[1],
+      dataPath: path.join(root, 'b'),
+      peers: [ports[0]],
+    });
+    await waitFor(async () => {
+      const states = await Promise.all(ports.map(fetchState));
+      const names = states.map(
+        (state) => state.runners.find((item) => item.id === runner.id)?.name
+      );
+      return Boolean(names[0] && names[0] === names[1]);
+    }, 12_000);
+    assert.deepEqual(
+      normalizeState(await fetchState(ports[0])),
+      normalizeState(await fetchState(ports[1]))
+    );
+  } catch (error) {
+    throw withServerOutput(error, a, b);
+  } finally {
+    await Promise.all([stopServer(a), stopServer(b)]);
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('split timing histories pause timing and can be resolved from the chosen laptop', { timeout: 35_000 }, async () => {
+  const root = testRoot('timing-conflict');
+  const ports = await Promise.all([freePort(), freePort()]);
+  let a: RunningServer | null = null;
+  let b: RunningServer | null = null;
+  try {
+    a = await startServer({
+      port: ports[0],
+      dataPath: path.join(root, 'a'),
+      peers: [ports[1]],
+    });
+    b = await startServer({
+      port: ports[1],
+      dataPath: path.join(root, 'b'),
+      peers: [ports[0]],
+    });
+    const clientA = createClient(ports[0]);
+    const runner = await clientA.runners.create.mutate({
+      name: 'Timing runner',
+      runnerNumber: 'TIME-1',
+      _commandId: crypto.randomUUID(),
+      _clientId: 'a',
+    });
+    await clientA.runners.setStatus.mutate({
+      id: runner.id,
+      status: 'waiting',
+      _commandId: crypto.randomUUID(),
+      _clientId: 'a',
+    });
+    await clientA.cluster.claimTimingControl.mutate({
+      _commandId: crypto.randomUUID(),
+      _clientId: 'a',
+    });
+    await waitFor(async () =>
+      (await fetchState(ports[1])).runners.some(
+        (item) => item.id === runner.id && item.status === 'waiting'
+      )
+    );
+
+    await stopServer(b);
+    b = null;
+    await clientA.race.startNext.mutate({
+      activeRunnerId: null,
+      activeStartedAt: null,
+      _commandId: crypto.randomUUID(),
+      _clientId: 'a',
+    });
+    await stopServer(a);
+    a = null;
+
+    b = await startServer({
+      port: ports[1],
+      dataPath: path.join(root, 'b'),
+    });
+    const clientB = createClient(ports[1]);
+    await clientB.cluster.claimTimingControl.mutate({
+      _commandId: crypto.randomUUID(),
+      _clientId: 'b',
+    });
+    await clientB.race.startNext.mutate({
+      activeRunnerId: null,
+      activeStartedAt: null,
+      _commandId: crypto.randomUUID(),
+      _clientId: 'b',
+    });
+    const bBranchStartedAt = (await fetchState(ports[1])).race.activeStartedAt;
+    const bHostId = (await fetchStatus(ports[1])).hostId;
+    assert.ok(bBranchStartedAt);
+    await stopServer(b);
+    b = null;
+
+    a = await startServer({
+      port: ports[0],
+      dataPath: path.join(root, 'a'),
+      peers: [ports[1]],
+    });
+    b = await startServer({
+      port: ports[1],
+      dataPath: path.join(root, 'b'),
+      peers: [ports[0]],
+    });
+    await waitFor(async () => {
+      const statuses = await Promise.all(ports.map(fetchStatus));
+      return statuses.every((status) => status.conflictCount === 1);
+    }, 12_000);
+    assert.deepEqual(
+      normalizeState(await fetchState(ports[0])),
+      normalizeState(await fetchState(ports[1]))
+    );
+
+    const conflictsResponse = await fetch(`${a.baseUrl}/api/cluster/conflicts`);
+    const conflicts = (await conflictsResponse.json()) as Array<{
+      id: string;
+      kind: string;
+      operations: Array<{ id: string; originHostId: string }>;
+    }>;
+    assert.equal(conflicts.length, 1);
+    assert.equal(conflicts[0].kind, 'timing');
+    const selectedOperationId = conflicts[0].operations.find(
+      (operation) => operation.originHostId === bHostId
+    )?.id;
+    assert.ok(selectedOperationId);
+    await createClient(ports[0]).cluster.resolveConflict.mutate({
+      conflictId: conflicts[0].id,
+      selectedOperationId,
+      _commandId: crypto.randomUUID(),
+      _clientId: 'operator',
+    });
+    await waitFor(async () =>
+      (await Promise.all(ports.map(fetchStatus))).every(
+        (status) => status.conflictCount === 0
+      )
+    , 12_000);
+    assert.deepEqual(
+      normalizeState(await fetchState(ports[0])),
+      normalizeState(await fetchState(ports[1]))
+    );
+    assert.equal((await fetchState(ports[0])).race.activeStartedAt, bBranchStartedAt);
+  } catch (error) {
+    throw withServerOutput(error, a, b);
+  } finally {
+    await Promise.all([stopServer(a), stopServer(b)]);
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('reusing a command id is exactly-once on the local database', { timeout: 12_000 }, async () => {
+  const root = testRoot('idempotent');
+  const server = await startServer({ port: await freePort(), dataPath: root });
+  try {
+    const client = createClient(server.port);
+    const commandId = crypto.randomUUID();
+    const input = {
+      name: 'Exactly once',
+      runnerNumber: 'ONCE-1',
+      _commandId: commandId,
+      _clientId: 'same-client',
+    };
+    const first = await client.runners.create.mutate(input);
+    const second = await client.runners.create.mutate(input);
+    assert.equal(first.id, second.id);
+    assert.equal(
+      (await fetchState(server.port)).runners.filter((runner) => runner.runnerNumber === 'ONCE-1').length,
+      1
+    );
   } finally {
     await stopServer(server);
-    for (const socket of sockets) socket.destroy();
-    await closeNetServer(stalledPeer);
-    fs.rmSync(testRoot, { recursive: true, force: true });
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });
-
-type ClusterOperationFixture = {
-  seq: number;
-  id: string;
-  term: number;
-  originHostId: string;
-  type: string;
-  payload: { snapshot: AppSnapshot };
-  createdAt: number;
-  appliedAt: number;
-};
-
-async function startApolloonServer(options: {
-  port: number;
-  dataPath: string;
-  peers: number[];
-  bootstrapLeader?: boolean;
-  heartbeatMs?: number;
-  electionMinMs?: number;
-  requestTimeoutMs?: number;
-  clusterEnabled?: boolean;
-}): Promise<RunningServer> {
-  const baseUrl = `http://127.0.0.1:${options.port}`;
-  const child = spawn(process.execPath, ['dist-server/server/index.js'], {
-    cwd: process.cwd(),
-    env: {
-      ...process.env,
-      DATA_PATH: options.dataPath,
-      PORT: String(options.port),
-      PUBLIC_APP_PORT: String(options.port),
-      PUBLIC_HOST: '127.0.0.1',
-      CLUSTER_ENABLED: options.clusterEnabled === false ? 'false' : 'true',
-      APOLLOON_CLUSTER: 'false',
-      CLUSTER_BOOTSTRAP_LEADER: options.bootstrapLeader ? 'true' : 'false',
-      CLUSTER_PEERS: options.peers.map((port) => `http://127.0.0.1:${port}`).join(','),
-      CLUSTER_DISCOVERY: 'false',
-      CLUSTER_SCAN: 'false',
-      CLUSTER_MIN_HOSTS: '2',
-      CLUSTER_HEARTBEAT_MS: String(options.heartbeatMs ?? 75),
-      CLUSTER_ELECTION_MIN_MS: String(options.electionMinMs ?? 400),
-      CLUSTER_ELECTION_JITTER_MS: '25',
-      CLUSTER_REQUEST_TIMEOUT_MS: String(options.requestTimeoutMs ?? 250),
-      CLUSTER_PROXY_TIMEOUT_MS: '1_000',
-      NODE_ENV: 'test',
-    },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  let output = '';
-  child.stdout?.on('data', (chunk) => { output += chunk.toString(); });
-  child.stderr?.on('data', (chunk) => { output += chunk.toString(); });
-  const running = { process: child, baseUrl, output: () => output };
-
-  await waitFor(async () => {
-    if (child.exitCode != null) {
-      throw new Error(`Server stopped with exit code ${child.exitCode}: ${output}`);
-    }
-    try {
-      return (await fetch(`${baseUrl}/api/cluster/status`)).ok;
-    } catch {
-      return false;
-    }
-  }, 8_000);
-  return running;
-}
-
-async function sendHeartbeat(followerPort: number, leaderPort: number): Promise<void> {
-  const response = await fetch(`http://127.0.0.1:${followerPort}/api/cluster/heartbeat`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      term: 1,
-      leaderId: 'fake-leader',
-      leaderUrl: `http://127.0.0.1:${leaderPort}`,
-      lastSeq: 3,
-    }),
-  });
-  assert.equal(response.status, 200);
-}
-
-async function fetchState(port: number): Promise<AppSnapshot> {
-  const response = await fetch(`http://127.0.0.1:${port}/api/state`);
-  assert.equal(response.status, 200);
-  return response.json() as Promise<AppSnapshot>;
-}
-
-async function fetchClusterStatus(port: number): Promise<{
-  role: string;
-  term: number;
-  lastAppliedSeq: number;
-}> {
-  const response = await fetch(`http://127.0.0.1:${port}/api/cluster/status`);
-  assert.equal(response.status, 200);
-  return response.json() as Promise<{ role: string; term: number; lastAppliedSeq: number }>;
-}
 
 function createClient(port: number) {
   return createTRPCClient<AppRouter>({
@@ -417,62 +523,122 @@ function createClient(port: number) {
   });
 }
 
-async function waitFor(check: () => boolean | Promise<boolean>, timeoutMs = 6_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (await check()) return;
-    await delay(25);
-  }
-  throw new Error('Condition timed out');
+async function startServer(options: {
+  port: number;
+  dataPath: string;
+  peers?: number[];
+  clusterEnabled?: boolean;
+  clusterId?: string;
+  clusterSecret?: string;
+}): Promise<RunningServer> {
+  fs.mkdirSync(options.dataPath, { recursive: true });
+  const chunks: string[] = [];
+  const child = spawn(process.execPath, ['--import', 'tsx', 'server/index.ts'], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      NODE_ENV: 'test',
+      PORT: String(options.port),
+      PUBLIC_APP_PORT: String(options.port),
+      DATA_PATH: options.dataPath,
+      CLUSTER_ENABLED: options.clusterEnabled === false ? 'false' : 'true',
+      CLUSTER_ID: options.clusterId || CLUSTER_ID,
+      CLUSTER_SECRET: options.clusterSecret || CLUSTER_SECRET,
+      CLUSTER_SELF_URL: `http://127.0.0.1:${options.port}`,
+      CLUSTER_PEERS: (options.peers || []).map((port) => `http://127.0.0.1:${port}`).join(','),
+      CLUSTER_DISCOVERY: 'false',
+      CLUSTER_SCAN: 'false',
+      CLUSTER_SYNC_INTERVAL_MS: '50',
+      CLUSTER_REQUEST_TIMEOUT_MS: '250',
+      CLUSTER_PEER_RETRY_MS: '50',
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  child.stdout?.on('data', (chunk) => chunks.push(chunk.toString()));
+  child.stderr?.on('data', (chunk) => chunks.push(chunk.toString()));
+  const server: RunningServer = {
+    process: child,
+    port: options.port,
+    baseUrl: `http://127.0.0.1:${options.port}`,
+    dataPath: options.dataPath,
+    output: () => chunks.join(''),
+  };
+  await waitFor(async () => {
+    if (child.exitCode !== null) throw new Error(`server exited ${child.exitCode}`);
+    return (await fetch(`${server.baseUrl}/api/host-info`).catch(() => null))?.ok === true;
+  });
+  return server;
+}
+
+async function stopServer(server: RunningServer | null): Promise<void> {
+  if (!server || server.process.exitCode !== null) return;
+  server.process.kill('SIGTERM');
+  await Promise.race([
+    new Promise<void>((resolve) => server.process.once('exit', () => resolve())),
+    new Promise<void>((resolve) => setTimeout(resolve, 1_000)),
+  ]);
+  if (server.process.exitCode === null) server.process.kill('SIGKILL');
+}
+
+async function fetchState(port: number): Promise<AppSnapshot> {
+  const response = await fetch(`http://127.0.0.1:${port}/api/state`);
+  assert.equal(response.ok, true);
+  return response.json() as Promise<AppSnapshot>;
+}
+
+async function fetchStatus(port: number): Promise<ClusterStatus> {
+  const response = await fetch(`http://127.0.0.1:${port}/api/cluster/status`);
+  assert.equal(response.ok, true);
+  return response.json() as Promise<ClusterStatus>;
+}
+
+function normalizeState(state: AppSnapshot): unknown {
+  return {
+    runners: state.runners.slice().sort((a, b) => a.id.localeCompare(b.id)),
+    labels: state.labels.slice().sort((a, b) => a.id.localeCompare(b.id)),
+    race: state.race,
+    laps: state.laps.slice().sort((a, b) => a.id.localeCompare(b.id)),
+    events: state.events.slice().sort((a, b) => a.id.localeCompare(b.id)),
+    temporaryTeams: state.temporaryTeams.slice().sort((a, b) => a.labelId.localeCompare(b.labelId)),
+    settings: state.settings,
+  };
 }
 
 async function freePort(): Promise<number> {
-  const server = net.createServer();
-  await listen(server, 0);
-  const address = server.address();
-  const port = typeof address === 'object' && address ? address.port : 0;
-  await closeNetServer(server);
-  return port;
-}
-
-async function listen(server: net.Server | http.Server, port: number): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer();
     server.once('error', reject);
-    server.listen(port, '127.0.0.1', () => {
-      server.off('error', reject);
-      resolve();
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      const port = typeof address === 'object' && address ? address.port : 0;
+      server.close((error) => (error ? reject(error) : resolve(port)));
     });
   });
 }
 
-async function stopServer(server: RunningServer | null): Promise<void> {
-  if (!server || server.process.exitCode != null) return;
-  server.process.kill('SIGTERM');
-  await Promise.race([
-    new Promise<void>((resolve) => server.process.once('exit', () => resolve())),
-    delay(1_500),
-  ]);
-  if (server.process.exitCode == null) server.process.kill('SIGKILL');
+async function waitFor(
+  predicate: () => Promise<boolean>,
+  timeoutMs = 8_000,
+  intervalMs = 50
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  throw new Error('Condition timed out');
 }
 
-async function closeHttpServer(server: http.Server): Promise<void> {
-  if (!server.listening) return;
-  await new Promise<void>((resolve) => server.close(() => resolve()));
-}
-
-async function closeNetServer(server: net.Server): Promise<void> {
-  if (!server.listening) return;
-  await new Promise<void>((resolve) => server.close(() => resolve()));
+function testRoot(name: string): string {
+  const root = path.resolve(`.tmp-test-cluster-${name}-${process.pid}`);
+  fs.rmSync(root, { recursive: true, force: true });
+  return root;
 }
 
 function withServerOutput(error: unknown, ...servers: Array<RunningServer | null>): Error {
-  const details = servers
+  const output = servers
     .filter((server): server is RunningServer => Boolean(server))
     .map((server) => `${server.baseUrl}\n${server.output()}`)
     .join('\n');
-  return new Error(`${error instanceof Error ? error.stack || error.message : String(error)}\n${details}`);
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return new Error(`${error instanceof Error ? error.stack || error.message : String(error)}\n${output}`);
 }

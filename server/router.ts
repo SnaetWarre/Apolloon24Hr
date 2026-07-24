@@ -1,5 +1,6 @@
 import { TRPCError, initTRPC } from '@trpc/server';
 import Papa from 'papaparse';
+import { z } from 'zod';
 import {
   importCsvSchema,
   labelInputSchema,
@@ -17,13 +18,16 @@ import {
   type RunnerInput,
 } from '../shared/schemas.js';
 import { appSnapshot } from './app-state.js';
-import { assertWritable, recordLocalWrite } from './cluster.js';
 import {
+  assertOrClaimTimingController,
+  claimTimingController,
+  commitReplicatedWrite,
   createBurgieGepaktEvent,
   createLabel,
   deleteLabel,
   deleteRunner,
   finishRace,
+  finalizeReplicationConflict,
   getAllLaps,
   getAllRaceEvents,
   getAllRunners,
@@ -37,6 +41,7 @@ import {
   hideRunnerInQueue,
   insertRunner,
   performHandoff,
+  prepareReplicationConflictChoice,
   setPublicRecordMode,
   setTemporaryTeamActive,
   setTemporaryTeamMembers,
@@ -52,6 +57,19 @@ import { hostInfo } from './host.js';
 import { emitRealtime } from './realtime.js';
 
 const t = initTRPC.create();
+const commandMetaShape = {
+  _commandId: z.string().uuid().optional(),
+  _clientId: z.string().min(1).max(128).optional(),
+};
+
+function withCommandMeta<T extends z.ZodRawShape>(schema: z.ZodObject<T>) {
+  return schema.extend(commandMetaShape);
+}
+
+type CommandMeta = {
+  _commandId?: string;
+  _clientId?: string;
+};
 
 function cleanText(value: unknown): string {
   if (value === undefined || value === null) return '';
@@ -146,15 +164,32 @@ function assertExpectedRaceState(expected: { activeRunnerId: string | null; acti
   }
 }
 
-function commitWrite<T>(type: string, action: () => T): T {
-  try {
-    assertWritable();
-  } catch (err) {
-    conflict(err instanceof Error ? err.message : 'This host cannot accept writes');
-  }
-  const result = action();
-  recordLocalWrite(type);
-  return result;
+function commitWrite<T>(type: string, input: CommandMeta | null, action: () => T): T {
+  const race = type.startsWith('race.') ? getRaceState() : null;
+  const payload = input
+    ? Object.fromEntries(
+        Object.entries(input).filter(([key]) => key !== '_commandId' && key !== '_clientId')
+      )
+    : null;
+  return commitReplicatedWrite({
+    id: input?._commandId,
+    type,
+    payload: {
+      clientId: input?._clientId ?? null,
+      input: payload,
+    },
+    raceBaseKey: race
+      ? JSON.stringify({
+          activeRunnerId: race.activeRunnerId,
+          activeStartedAt: race.activeStartedAt,
+          raceFinishedAt: race.raceFinishedAt,
+        })
+      : null,
+    action: () => {
+      if (type.startsWith('race.')) assertOrClaimTimingController();
+      return action();
+    },
+  });
 }
 
 export const appRouter = t.router({
@@ -164,27 +199,60 @@ export const appRouter = t.router({
     hostInfo: t.procedure.query(() => hostInfo()),
   }),
 
+  cluster: t.router({
+    claimTimingControl: t.procedure
+      .input(withCommandMeta(z.object({})))
+      .mutation(({ input }) =>
+        commitWrite('cluster.claimTimingControl', input, () => ({
+          hostId: claimTimingController(),
+        }))
+      ),
+    resolveConflict: t.procedure
+      .input(
+        withCommandMeta(
+          z.object({
+            conflictId: z.string().min(1),
+            selectedOperationId: z.string().min(1),
+          })
+        )
+      )
+      .mutation(({ input }) =>
+        commitWrite('cluster.resolveConflict', input, () => {
+          prepareReplicationConflictChoice(
+            input.conflictId,
+            input.selectedOperationId
+          );
+          const result = finalizeReplicationConflict(
+            input.conflictId,
+            appSnapshot()
+          );
+          emitRealtime({ type: 'state:revision', payload: Date.now() });
+          return result;
+        })
+      ),
+  }),
+
   runners: t.router({
     list: t.procedure.query(() => getAllRunners()),
-    create: t.procedure.input(runnerInputSchema).mutation(({ input }) => {
-      return commitWrite('runners.create', () => {
+    create: t.procedure.input(withCommandMeta(runnerInputSchema)).mutation(({ input }) => {
+      return commitWrite('runners.create', input, () => {
         const runner = insertRunner(input);
         emitRealtime({ type: 'runner:upserted', payload: runner });
         return runner;
       });
     }),
     update: t.procedure
-      .input(runnerIdSchema.extend({ fields: runnerPatchSchema }))
+      .input(withCommandMeta(runnerIdSchema.extend({ fields: runnerPatchSchema })))
       .mutation(({ input }) => {
-        return commitWrite('runners.update', () => {
+        return commitWrite('runners.update', input, () => {
           const runner = updateRunner(input.id, input.fields);
           if (!runner) notFound('runner not found');
           emitRealtime({ type: 'runner:upserted', payload: runner });
           return runner;
         });
       }),
-    delete: t.procedure.input(runnerIdSchema).mutation(({ input }) => {
-      return commitWrite('runners.delete', () => {
+    delete: t.procedure.input(withCommandMeta(runnerIdSchema)).mutation(({ input }) => {
+      return commitWrite('runners.delete', input, () => {
         const runner = getRunnerById(input.id);
         if (!runner) notFound('runner not found');
         if (runner.status === 'running') conflict('Actieve loper kan niet verwijderd worden');
@@ -194,8 +262,8 @@ export const appRouter = t.router({
         return { ok: true };
       });
     }),
-    setStatus: t.procedure.input(runnerStatusUpdateSchema).mutation(({ input }) => {
-      return commitWrite('runners.setStatus', () => {
+    setStatus: t.procedure.input(withCommandMeta(runnerStatusUpdateSchema)).mutation(({ input }) => {
+      return commitWrite('runners.setStatus', input, () => {
         let runner: ReturnType<typeof updateRunnerStatus>;
         try {
           runner = updateRunnerStatus({
@@ -212,8 +280,8 @@ export const appRouter = t.router({
         return runner;
       });
     }),
-    reorder: t.procedure.input(queueReorderSchema).mutation(({ input }) => {
-      return commitWrite('runners.reorder', () => {
+    reorder: t.procedure.input(withCommandMeta(queueReorderSchema)).mutation(({ input }) => {
+      return commitWrite('runners.reorder', input, () => {
         try {
           updateWaitingOrder(input.ids);
         } catch (err) {
@@ -223,8 +291,8 @@ export const appRouter = t.router({
         return { ok: true };
       });
     }),
-    hide: t.procedure.input(runnerIdSchema).mutation(({ input }) => {
-      return commitWrite('runners.hide', () => {
+    hide: t.procedure.input(withCommandMeta(runnerIdSchema)).mutation(({ input }) => {
+      return commitWrite('runners.hide', input, () => {
         const current = getRunnerById(input.id);
         if (!current) notFound('runner not found');
         if (current.status !== 'ran') conflict('Alleen gelopen lopers kunnen verborgen worden');
@@ -234,8 +302,8 @@ export const appRouter = t.router({
         return runner;
       });
     }),
-    unhide: t.procedure.input(runnerIdSchema).mutation(({ input }) => {
-      return commitWrite('runners.unhide', () => {
+    unhide: t.procedure.input(withCommandMeta(runnerIdSchema)).mutation(({ input }) => {
+      return commitWrite('runners.unhide', input, () => {
         const current = getRunnerById(input.id);
         if (!current) notFound('runner not found');
         const runner = unhideRunnerInQueue(input.id);
@@ -244,8 +312,8 @@ export const appRouter = t.router({
         return runner;
       });
     }),
-    importCsv: t.procedure.input(importCsvSchema).mutation(({ input }) => {
-      return commitWrite('runners.importCsv', () => {
+    importCsv: t.procedure.input(withCommandMeta(importCsvSchema)).mutation(({ input }) => {
+      return commitWrite('runners.importCsv', input, () => {
         const csvText = cleanText(input.csvText);
         if (!csvText) badRequest('csvText required');
 
@@ -317,8 +385,8 @@ export const appRouter = t.router({
 
   labels: t.router({
     list: t.procedure.query(() => getLabels()),
-    create: t.procedure.input(labelInputSchema).mutation(({ input }) => {
-      return commitWrite('labels.create', () => {
+    create: t.procedure.input(withCommandMeta(labelInputSchema)).mutation(({ input }) => {
+      return commitWrite('labels.create', input, () => {
         const label = createLabel(input);
         emitRealtime({ type: 'label:upserted', payload: label });
         emitRealtime({ type: 'temporary-teams:patched', payload: getTemporaryTeams() });
@@ -326,9 +394,9 @@ export const appRouter = t.router({
       });
     }),
     update: t.procedure
-      .input(runnerIdSchema.extend({ fields: labelPatchSchema }))
+      .input(withCommandMeta(runnerIdSchema.extend({ fields: labelPatchSchema })))
       .mutation(({ input }) => {
-        return commitWrite('labels.update', () => {
+        return commitWrite('labels.update', input, () => {
           const label = updateLabel(input.id, input.fields);
           if (!label) notFound('label not found');
           emitRealtime({ type: 'label:upserted', payload: label });
@@ -337,8 +405,8 @@ export const appRouter = t.router({
           return label;
         });
       }),
-    delete: t.procedure.input(runnerIdSchema).mutation(({ input }) => {
-      return commitWrite('labels.delete', () => {
+    delete: t.procedure.input(withCommandMeta(runnerIdSchema)).mutation(({ input }) => {
+      return commitWrite('labels.delete', input, () => {
         if (!deleteLabel(input.id)) notFound('label not found');
         emitRealtime({ type: 'label:deleted', payload: input.id });
         emitRealtime({ type: 'temporary-teams:patched', payload: getTemporaryTeams() });
@@ -350,15 +418,15 @@ export const appRouter = t.router({
 
   temporaryTeams: t.router({
     list: t.procedure.query(() => getTemporaryTeams()),
-    setMembers: t.procedure.input(temporaryTeamMembersSchema).mutation(({ input }) => {
-      return commitWrite('temporaryTeams.setMembers', () => {
+    setMembers: t.procedure.input(withCommandMeta(temporaryTeamMembersSchema)).mutation(({ input }) => {
+      return commitWrite('temporaryTeams.setMembers', input, () => {
         const team = setTemporaryTeamMembers(input.labelId, input.runnerIds);
         emitRealtime({ type: 'temporary-teams:patched', payload: getTemporaryTeams() });
         return team;
       });
     }),
-    setActive: t.procedure.input(temporaryTeamActiveSchema).mutation(({ input }) => {
-      return commitWrite('temporaryTeams.setActive', () => {
+    setActive: t.procedure.input(withCommandMeta(temporaryTeamActiveSchema)).mutation(({ input }) => {
+      return commitWrite('temporaryTeams.setActive', input, () => {
         const team = setTemporaryTeamActive(input.labelId, input.active, Date.now());
         emitRunnerDelta(team.memberRunnerIds);
         emitRealtime({ type: 'temporary-teams:patched', payload: getTemporaryTeams() });
@@ -370,8 +438,8 @@ export const appRouter = t.router({
   race: t.router({
     state: t.procedure.query(() => getRaceState()),
     laps: t.procedure.query(() => getAllLaps()),
-    startNext: t.procedure.input(raceStateExpectationSchema).mutation(({ input }) => {
-      return commitWrite('race.startNext', () => {
+    startNext: t.procedure.input(withCommandMeta(raceStateExpectationSchema)).mutation(({ input }) => {
+      return commitWrite('race.startNext', input, () => {
         assertExpectedRaceState(input);
         if (input.activeRunnerId) conflict('Er loopt al een loper');
         const result = performHandoff(Date.now());
@@ -380,8 +448,8 @@ export const appRouter = t.router({
         return result;
       });
     }),
-    handoff: t.procedure.input(raceStateExpectationSchema).mutation(({ input }) => {
-      return commitWrite('race.handoff', () => {
+    handoff: t.procedure.input(withCommandMeta(raceStateExpectationSchema)).mutation(({ input }) => {
+      return commitWrite('race.handoff', input, () => {
         assertExpectedRaceState(input);
         const result = performHandoff(Date.now());
         if (!result.ok) conflict(result.error);
@@ -393,8 +461,8 @@ export const appRouter = t.router({
         return result;
       });
     }),
-    undoLastHandoff: t.procedure.input(raceStateExpectationSchema).mutation(({ input }) => {
-      return commitWrite('race.undoLastHandoff', () => {
+    undoLastHandoff: t.procedure.input(withCommandMeta(raceStateExpectationSchema)).mutation(({ input }) => {
+      return commitWrite('race.undoLastHandoff', input, () => {
         assertExpectedRaceState(input);
         const result = undoLastHandoff();
         if (!result.ok) conflict(result.error);
@@ -405,8 +473,8 @@ export const appRouter = t.router({
         return result;
       });
     }),
-    finish: t.procedure.input(raceStateExpectationSchema).mutation(({ input }) => {
-      return commitWrite('race.finish', () => {
+    finish: t.procedure.input(withCommandMeta(raceStateExpectationSchema)).mutation(({ input }) => {
+      return commitWrite('race.finish', input, () => {
         assertExpectedRaceState(input);
         finishRace(Date.now());
         emitRaceDelta([input.activeRunnerId]);
@@ -417,8 +485,8 @@ export const appRouter = t.router({
 
   events: t.router({
     list: t.procedure.query(() => getAllRaceEvents()),
-    burgieGepakt: t.procedure.mutation(() => {
-      return commitWrite('events.burgieGepakt', () => {
+    burgieGepakt: t.procedure.input(withCommandMeta(z.object({}))).mutation(({ input }) => {
+      return commitWrite('events.burgieGepakt', input, () => {
         const event = createBurgieGepaktEvent(Date.now());
         emitRealtime({ type: 'race-event:created', payload: event });
         return event;
@@ -428,13 +496,15 @@ export const appRouter = t.router({
 
   settings: t.router({
     current: t.procedure.query(() => getAppSettings()),
-    updatePublicRecordMode: t.procedure.input(publicRecordModeUpdateSchema).mutation(({ input }) => {
-      return commitWrite('settings.updatePublicRecordMode', () => {
-        const settings = setPublicRecordMode(input.publicRecordMode);
-        emitRealtime({ type: 'settings:changed', payload: settings });
-        return settings;
-      });
-    }),
+    updatePublicRecordMode: t.procedure
+      .input(withCommandMeta(publicRecordModeUpdateSchema))
+      .mutation(({ input }) => {
+        return commitWrite('settings.updatePublicRecordMode', input, () => {
+          const settings = setPublicRecordMode(input.publicRecordMode);
+          emitRealtime({ type: 'settings:changed', payload: settings });
+          return settings;
+        });
+      }),
   }),
 });
 

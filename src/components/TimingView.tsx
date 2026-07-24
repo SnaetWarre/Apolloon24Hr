@@ -1,5 +1,5 @@
 import React from 'react';
-import { useAppActions, useAppData } from '../app/index';
+import { useAppActions, useAppData, useClusterStatus } from '../app/index';
 import { formatClockTimeMs, formatDurationMs } from '../lib/time';
 import { getNextWaitingRunner, runnerLabel } from '../lib/runners';
 import type { AppSnapshot, Runner } from '../types';
@@ -10,12 +10,19 @@ const selectTimingData = ({ runners, laps, race }: AppSnapshot) => ({ runners, l
 
 export function TimingView() {
   const { runners, laps, race } = useAppData(selectTimingData);
-  const { handoff, startNext, undoLastHandoff, finishRace } = useAppActions();
+  const { cluster } = useClusterStatus();
+  const { handoff, startNext, undoLastHandoff, finishRace, claimTimingControl } = useAppActions();
   const [message, setMessage] = React.useState<string | null>(null);
   const [handoffBusy, setHandoffBusy] = React.useState(false);
   const [lastAction, setLastAction] = React.useState<string | null>(null);
   const [finishConfirmStep, setFinishConfirmStep] = React.useState<0 | 1 | 2>(0);
   const handoffBusyRef = React.useRef(false);
+  const controlledElsewhere = Boolean(
+    cluster?.timingControllerHostId &&
+      cluster.timingControllerHostId !== cluster.hostId
+  );
+  const hasSyncConflict = Boolean(cluster?.conflictCount);
+  const timingBlocked = controlledElsewhere || hasSyncConflict;
 
   const activeRunner = runners.find((runner) => runner.id === race.activeRunnerId) || null;
   const nextRunner = getNextWaitingRunner(runners);
@@ -46,12 +53,13 @@ export function TimingView() {
   );
 
   const runHandoff = React.useCallback(async () => {
+      if (timingBlocked) return;
     const hadActiveRunner = Boolean(activeRunner);
     await runExclusiveRaceAction(
       () => (activeRunner ? handoff() : startNext()),
       hadActiveRunner ? 'Ronde opgeslagen. Volgende loper gestart.' : 'Race gestart. Eerste loper loopt.'
     );
-  }, [activeRunner, handoff, runExclusiveRaceAction, startNext]);
+  }, [activeRunner, handoff, runExclusiveRaceAction, startNext, timingBlocked]);
 
   React.useEffect(() => {
     // Navigation buttons can stay focused when this route opens. In that case,
@@ -68,7 +76,12 @@ export function TimingView() {
         setFinishConfirmStep(0);
         return;
       }
-      if (!isHandoffKey(event) || isTextEntryTarget(target) || finishConfirmStep > 0) return;
+      if (
+        !isHandoffKey(event) ||
+        isTextEntryTarget(target) ||
+        finishConfirmStep > 0 ||
+        timingBlocked
+      ) return;
       // Space is the dedicated timing control on this screen, even if a button
       // still has focus. Keep Enter's normal button/link behaviour intact.
       if (event.key === 'Enter' && isInteractiveTarget(target)) return;
@@ -78,7 +91,7 @@ export function TimingView() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [finishConfirmStep, handoffBusy, runHandoff]);
+  }, [finishConfirmStep, handoffBusy, runHandoff, timingBlocked]);
 
   async function undo() {
     if (handoffBusyRef.current) return;
@@ -122,11 +135,39 @@ export function TimingView() {
         <strong>{handoffPreview}</strong>
       </div>
 
+      {controlledElsewhere && (
+        <div className="warning-banner">
+          <span>De timing wordt momenteel bediend op een andere laptop.</span>
+          <button
+            className="btn btn--ghost"
+            onClick={() => void claimTimingControl()}
+            disabled={handoffBusy}
+          >
+            Neem timing over
+          </button>
+        </div>
+      )}
+
+      {hasSyncConflict && (
+        <div className="warning-banner">
+          Er zijn twee verschillende timinggeschiedenissen gevonden. Timing is veilig gepauzeerd.
+          Kies in Admin welke laptop de correcte geschiedenis bevat.
+        </div>
+      )}
+
       <div className="timing-actions">
-        <button className="btn btn--primary btn--xl" onClick={runHandoff} disabled={handoffBusy}>
+        <button
+          className="btn btn--primary btn--xl"
+          onClick={runHandoff}
+          disabled={handoffBusy || timingBlocked}
+        >
           {handoffBusy ? 'Bezig...' : activeRunner ? 'Spatie/Enter: handoff' : 'Start eerste loper'}
         </button>
-        <button className="btn btn--ghost" onClick={undo} disabled={handoffBusy}>
+        <button
+          className="btn btn--ghost"
+          onClick={undo}
+          disabled={handoffBusy || timingBlocked}
+        >
           Undo laatste handoff
         </button>
       </div>
@@ -183,7 +224,11 @@ export function TimingView() {
 
       <section className="danger-zone">
         <h2>Race afsluiten</h2>
-        <button className="btn btn--danger" onClick={() => setFinishConfirmStep(1)} disabled={handoffBusy}>
+        <button
+          className="btn btn--danger"
+          onClick={() => setFinishConfirmStep(1)}
+          disabled={handoffBusy || timingBlocked}
+        >
           Race beeindigen
         </button>
       </section>

@@ -14,6 +14,29 @@ import type {
 import { snapshotKey } from './snapshot';
 import { hasRealtimeConnection } from './useRealtimeBridge';
 
+const CLIENT_ID_KEY = 'apolloon-client-id';
+let memoryClientId: string | null = null;
+
+function command<T extends object>(input: T): T & { _commandId: string; _clientId: string } {
+  return {
+    ...input,
+    _commandId: crypto.randomUUID(),
+    _clientId: getClientId(),
+  };
+}
+
+function getClientId(): string {
+  if (memoryClientId) return memoryClientId;
+  const stored = window.localStorage.getItem(CLIENT_ID_KEY);
+  if (stored) {
+    memoryClientId = stored;
+    return stored;
+  }
+  memoryClientId = crypto.randomUUID();
+  window.localStorage.setItem(CLIENT_ID_KEY, memoryClientId);
+  return memoryClientId;
+}
+
 export function useAppActions() {
   const activeQueryClient = useQueryClient();
 
@@ -35,15 +58,15 @@ export function useAppActions() {
     () => ({
       async addRunner(input: string | RunnerInput) {
         const body = typeof input === 'string' ? { name: input } : input;
-        await trpc.runners.create.mutate(body);
+        await trpc.runners.create.mutate(command(body));
         await reconcileSnapshot();
       },
       async updateRunner(id: string, input: RunnerPatch) {
-        await trpc.runners.update.mutate({ id, fields: input });
+        await trpc.runners.update.mutate(command({ id, fields: input }));
         await reconcileSnapshot();
       },
       async setStatus(id: string, status: RunnerStatus) {
-        await trpc.runners.setStatus.mutate({ id, status });
+        await trpc.runners.setStatus.mutate(command({ id, status }));
         await reconcileSnapshot();
       },
       async moveInQueue(id: string, targetId: string) {
@@ -60,73 +83,116 @@ export function useAppActions() {
         if (oldIndex === -1 || targetIndex === -1 || oldIndex === targetIndex) return;
         const [moved] = waiting.splice(oldIndex, 1);
         waiting.splice(targetIndex, 0, moved);
-        await trpc.runners.reorder.mutate({ ids: waiting.map((runner) => runner.id) });
+        await trpc.runners.reorder.mutate(command({ ids: waiting.map((runner) => runner.id) }));
         await reconcileSnapshot();
       },
       async deleteRunner(id: string) {
-        await trpc.runners.delete.mutate({ id });
+        await trpc.runners.delete.mutate(command({ id }));
         await reconcileSnapshot();
       },
       async hideRunner(id: string) {
-        await trpc.runners.hide.mutate({ id });
+        await trpc.runners.hide.mutate(command({ id }));
         await reconcileSnapshot();
       },
       async unhideRunner(id: string) {
-        await trpc.runners.unhide.mutate({ id });
+        await trpc.runners.unhide.mutate(command({ id }));
         await reconcileSnapshot();
       },
       async createLabel(input: LabelInput) {
-        await trpc.labels.create.mutate(input);
+        await trpc.labels.create.mutate(command(input));
         await reconcileSnapshot();
       },
       async updateLabel(id: string, input: LabelPatch) {
-        await trpc.labels.update.mutate({ id, fields: input });
+        await trpc.labels.update.mutate(command({ id, fields: input }));
         await reconcileSnapshot();
       },
       async deleteLabel(id: string) {
-        await trpc.labels.delete.mutate({ id });
+        await trpc.labels.delete.mutate(command({ id }));
         await reconcileSnapshot();
       },
       async setTemporaryTeamMembers(labelId: string, runnerIds: string[]) {
-        const team = await trpc.temporaryTeams.setMembers.mutate({ labelId, runnerIds });
+        const team = await trpc.temporaryTeams.setMembers.mutate(command({ labelId, runnerIds }));
         await reconcileSnapshot();
         return team;
       },
       async setTemporaryTeamActive(labelId: string, active: boolean) {
-        const team = await trpc.temporaryTeams.setActive.mutate({ labelId, active });
+        const team = await trpc.temporaryTeams.setActive.mutate(command({ labelId, active }));
         await reconcileSnapshot();
         return team;
       },
       async importRunnersCsv(csvText: string) {
-        const summary = await trpc.runners.importCsv.mutate({ csvText });
+        const summary = await trpc.runners.importCsv.mutate(command({ csvText }));
         await reconcileSnapshot();
         return `${summary.created} aangemaakt, ${summary.updated} bijgewerkt, ${summary.skipped} overgeslagen`;
       },
       async handoff() {
-        await trpc.race.handoff.mutate(currentRaceExpectation());
+        await trpc.race.handoff.mutate(command(currentRaceExpectation()));
         await reconcileSnapshot();
       },
       async startNext() {
-        await trpc.race.startNext.mutate(currentRaceExpectation());
+        await trpc.race.startNext.mutate(command(currentRaceExpectation()));
         await reconcileSnapshot();
       },
       async undoLastHandoff() {
-        await trpc.race.undoLastHandoff.mutate(currentRaceExpectation());
+        await trpc.race.undoLastHandoff.mutate(command(currentRaceExpectation()));
         await reconcileSnapshot();
       },
       async finishRace() {
-        await trpc.race.finish.mutate(currentRaceExpectation());
+        await trpc.race.finish.mutate(command(currentRaceExpectation()));
         await reconcileSnapshot();
       },
       async burgieGepakt() {
-        const event = await trpc.events.burgieGepakt.mutate();
+        const event = await trpc.events.burgieGepakt.mutate(command({}));
         await reconcileSnapshot();
         return event;
       },
       async updatePublicRecordMode(publicRecordMode: PublicRecordMode) {
-        const settings = await trpc.settings.updatePublicRecordMode.mutate({ publicRecordMode });
+        const settings = await trpc.settings.updatePublicRecordMode.mutate(
+          command({ publicRecordMode })
+        );
         await reconcileSnapshot();
         return settings;
+      },
+      async claimTimingControl() {
+        const result = await trpc.cluster.claimTimingControl.mutate(command({}));
+        await activeQueryClient.invalidateQueries({ queryKey: ['cluster', 'status'] });
+        await reconcileSnapshot();
+        return result;
+      },
+      async joinCluster(remoteUrl: string, pairingCode: string) {
+        const response = await fetch('/api/cluster/join', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ remoteUrl, pairingCode }),
+        });
+        const responseText = await response.text();
+        let result: {
+          ok?: boolean;
+          error?: string;
+          backupFile?: string;
+        };
+        try {
+          result = JSON.parse(responseText) as typeof result;
+        } catch {
+          result = { ok: false, error: responseText || `HTTP ${response.status}` };
+        }
+        if (!response.ok || !result.ok) {
+          throw new Error(result.error || `Koppelen mislukt (${response.status})`);
+        }
+        await activeQueryClient.invalidateQueries({ queryKey: snapshotKey });
+        await activeQueryClient.invalidateQueries({ queryKey: ['cluster', 'status'] });
+        return result;
+      },
+      async resolveConflict(
+        conflictId: string,
+        selectedOperationId: string
+      ) {
+        const result = await trpc.cluster.resolveConflict.mutate(
+          command({ conflictId, selectedOperationId })
+        );
+        await activeQueryClient.invalidateQueries({ queryKey: snapshotKey });
+        await activeQueryClient.invalidateQueries({ queryKey: ['cluster', 'status'] });
+        return result;
       },
     }),
     [activeQueryClient, currentRaceExpectation, reconcileSnapshot]

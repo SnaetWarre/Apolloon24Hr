@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3';
+import crypto from 'node:crypto';
 import fs from 'fs';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
@@ -36,13 +37,16 @@ const VALID_RACE_EVENT_TYPES = new Set<RaceEventType>(['burgie_gepakt']);
 const VALID_PUBLIC_RECORD_MODES = new Set<PublicRecordMode>(['off', 'day', 'two_hour', 'hour']);
 const DEFAULT_PUBLIC_RECORD_MODE: PublicRecordMode = 'day';
 const TEMPORARY_TEAM_KIND = 'temporary_team';
-const SCHEMA_VERSION = 6;
-const CLUSTER_OPERATION_RETENTION = 4;
+const SCHEMA_VERSION = 7;
 const APP_DATA_TABLE_PATTERN =
   /\b(?:runners|labels|runner_labels|queue_entries|race_state|laps|race_events|temporary_teams|temporary_team_members)\b/i;
 
-const DEFAULT_LABELS: LabelInput[] = [
+type DefaultLabel = LabelInput & { id: string };
+
+const DEFAULT_LABEL_CREATED_AT = 1_700_000_000_000;
+const DEFAULT_LABELS: DefaultLabel[] = [
   {
+    id: '00000000-0000-5000-8000-000000000001',
     name: 'Speedteam White',
     color: '#e5e7eb',
     icon: 'SW',
@@ -52,6 +56,7 @@ const DEFAULT_LABELS: LabelInput[] = [
     sortOrder: 10,
   },
   {
+    id: '00000000-0000-5000-8000-000000000002',
     name: 'Speedteam Blue',
     color: '#1d4ed8',
     icon: 'SB',
@@ -61,6 +66,7 @@ const DEFAULT_LABELS: LabelInput[] = [
     sortOrder: 20,
   },
   {
+    id: '00000000-0000-5000-8000-000000000003',
     name: 'HILOK',
     color: '#16a34a',
     icon: 'HI',
@@ -70,6 +76,7 @@ const DEFAULT_LABELS: LabelInput[] = [
     sortOrder: 30,
   },
   {
+    id: '00000000-0000-5000-8000-000000000004',
     name: 'Mesacosa',
     color: '#f97316',
     icon: 'ME',
@@ -79,6 +86,7 @@ const DEFAULT_LABELS: LabelInput[] = [
     sortOrder: 40,
   },
   {
+    id: '00000000-0000-5000-8000-000000000005',
     name: 'Kinesia',
     color: '#7c3aed',
     icon: 'KI',
@@ -88,6 +96,7 @@ const DEFAULT_LABELS: LabelInput[] = [
     sortOrder: 50,
   },
   {
+    id: '00000000-0000-5000-8000-000000000006',
     name: '1ste jaar',
     color: '#2563eb',
     icon: '1J',
@@ -97,6 +106,7 @@ const DEFAULT_LABELS: LabelInput[] = [
     sortOrder: 60,
   },
   {
+    id: '00000000-0000-5000-8000-000000000007',
     name: 'Anciens',
     color: '#64748b',
     icon: 'AN',
@@ -106,6 +116,7 @@ const DEFAULT_LABELS: LabelInput[] = [
     sortOrder: 70,
   },
   {
+    id: '00000000-0000-5000-8000-000000000008',
     name: 'Dames',
     color: '#db2777',
     icon: 'DA',
@@ -119,7 +130,88 @@ const DEFAULT_LABELS: LabelInput[] = [
 let database: Db | null = null;
 const statementCache = new Map<string, PreparedStatement>();
 let appDataRevision = 0;
-let lastClusterOperationSeq: number | null = null;
+let writeCapture: ReplicatedSqlStatement[] | null = null;
+
+export type ReplicatedSqlStatement = {
+  sql: string;
+  params: SqlValue[];
+};
+
+export type ReplicationOperation = {
+  id: string;
+  clusterId: string;
+  originHostId: string;
+  originSeq: number;
+  hlcWallMs: number;
+  hlcCounter: number;
+  type: string;
+  payload: unknown;
+  statements: ReplicatedSqlStatement[];
+  result: unknown;
+  raceBaseKey: string | null;
+  status: 'accepted' | 'conflict' | 'rejected';
+  checksum: string;
+  createdAt: number;
+  appliedAt: number;
+};
+
+export type ReplicationIdentity = {
+  clusterId: string;
+  clusterSecret: string;
+  hostId: string;
+};
+
+export type ReplicationConflict = {
+  id: string;
+  kind: 'timing' | 'data';
+  operationIds: string[];
+  status: 'open' | 'resolved';
+  resolutionOperationId: string | null;
+  createdAt: number;
+  resolvedAt: number | null;
+  operations: Array<{
+    id: string;
+    originHostId: string;
+    type: string;
+    createdAt: number;
+  }>;
+};
+
+export type ReplicationCheckpoint = {
+  vector: Record<string, number>;
+  tables: Record<string, Array<Record<string, SqlValue>>>;
+  settings: Record<string, string>;
+};
+
+const CHECKPOINT_TABLES = [
+  'labels',
+  'runners',
+  'queue_entries',
+  'runner_labels',
+  'race_state',
+  'laps',
+  'handoff_history',
+  'race_events',
+  'temporary_teams',
+  'temporary_team_members',
+] as const;
+const CHECKPOINT_DELETE_ORDER = [
+  'handoff_history',
+  'race_events',
+  'laps',
+  'temporary_team_members',
+  'temporary_teams',
+  'runner_labels',
+  'race_state',
+  'queue_entries',
+  'runners',
+  'labels',
+] as const;
+const CHECKPOINT_SETTING_KEYS = [
+  'public_record_mode',
+  'timing_controller_host_id',
+  'timing_controller_generation',
+] as const;
 
 function getDb(): Db {
   if (!database) throw new Error('database not initialized');
@@ -133,11 +225,22 @@ function ensureDataDir(): void {
 }
 
 function run(sql: string, params: SqlValue[] = []): Database.RunResult {
+  if (writeCapture && isReplicatedMutation(sql)) {
+    writeCapture.push({ sql, params: [...params] });
+  }
   const result = statement(sql).run(...params);
   if (result.changes > 0 && APP_DATA_TABLE_PATTERN.test(sql)) {
     appDataRevision += 1;
   }
   return result;
+}
+
+function isReplicatedMutation(sql: string): boolean {
+  const normalized = sql.trim().toLowerCase();
+  return /^(insert|update|delete|replace)\b/.test(normalized)
+    && !/\b(?:replication_operations|replication_peer_progress|replication_conflicts)\b/.test(
+      normalized
+    );
 }
 
 function all<T>(sql: string, params: SqlValue[] = []): T[] {
@@ -162,21 +265,6 @@ function transaction<T>(callback: () => T): T {
 
 export function getAppDataRevision(): number {
   return appDataRevision;
-}
-
-export function hasPersistedAppState(): boolean {
-  const row = one<{ present: number }>(
-    `SELECT (
-       EXISTS(SELECT 1 FROM runners)
-       OR EXISTS(SELECT 1 FROM laps)
-       OR EXISTS(SELECT 1 FROM race_events)
-       OR EXISTS(SELECT 1 FROM temporary_team_members)
-       OR EXISTS(SELECT 1 FROM settings WHERE key = 'public_record_mode')
-       OR (SELECT COUNT(*) FROM labels) > ?
-     ) AS present`,
-    [DEFAULT_LABELS.length]
-  );
-  return Boolean(row?.present);
 }
 
 function cleanText(value: unknown): string | null {
@@ -332,19 +420,49 @@ function createSchema(): void {
       FOREIGN KEY (runner_id) REFERENCES runners(id) ON DELETE CASCADE
     );
 
-    CREATE TABLE IF NOT EXISTS cluster_operations (
-      seq INTEGER PRIMARY KEY AUTOINCREMENT,
-      id TEXT NOT NULL UNIQUE,
-      term INTEGER NOT NULL,
+    CREATE TABLE IF NOT EXISTS replication_operations (
+      id TEXT PRIMARY KEY,
+      cluster_id TEXT NOT NULL,
       origin_host_id TEXT NOT NULL,
+      origin_seq INTEGER NOT NULL,
+      hlc_wall_ms INTEGER NOT NULL,
+      hlc_counter INTEGER NOT NULL,
       type TEXT NOT NULL,
       payload_json TEXT NOT NULL,
+      statements_json TEXT NOT NULL,
+      result_json TEXT NOT NULL,
+      race_base_key TEXT,
+      status TEXT NOT NULL CHECK(status IN ('accepted','conflict','rejected')),
+      checksum TEXT NOT NULL,
       created_at INTEGER NOT NULL,
-      applied_at INTEGER NOT NULL
+      applied_at INTEGER NOT NULL,
+      UNIQUE(origin_host_id, origin_seq)
     );
 
-    CREATE INDEX IF NOT EXISTS idx_cluster_operations_created_at
-      ON cluster_operations(created_at);
+    CREATE INDEX IF NOT EXISTS idx_replication_operations_order
+      ON replication_operations(hlc_wall_ms, hlc_counter, origin_host_id, origin_seq);
+
+    CREATE INDEX IF NOT EXISTS idx_replication_operations_race_base
+      ON replication_operations(race_base_key)
+      WHERE race_base_key IS NOT NULL;
+
+    CREATE TABLE IF NOT EXISTS replication_peer_progress (
+      peer_host_id TEXT NOT NULL,
+      origin_host_id TEXT NOT NULL,
+      acknowledged_seq INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY(peer_host_id, origin_host_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS replication_conflicts (
+      id TEXT PRIMARY KEY,
+      kind TEXT NOT NULL,
+      operation_ids_json TEXT NOT NULL,
+      status TEXT NOT NULL CHECK(status IN ('open','resolved')),
+      resolution_operation_id TEXT,
+      created_at INTEGER NOT NULL,
+      resolved_at INTEGER
+    );
 
     CREATE INDEX IF NOT EXISTS idx_laps_runner_finished
       ON laps(runner_id, finished_at DESC);
@@ -414,7 +532,6 @@ function migrateSchema(): void {
 }
 
 function seedDefaultLabels(): void {
-  const now = Date.now();
   for (const label of DEFAULT_LABELS) {
     const existing = findLabelByName(label.name);
     if (existing) {
@@ -425,8 +542,7 @@ function seedDefaultLabels(): void {
              kind = ?,
              image_url = ?,
              target_laps = COALESCE(target_laps, ?),
-             sort_order = COALESCE(sort_order, ?),
-             updated_at = ?
+             sort_order = COALESCE(sort_order, ?)
          WHERE id = ?`,
         [
           label.color ?? '#3b82f6',
@@ -435,13 +551,12 @@ function seedDefaultLabels(): void {
           label.imageUrl ?? null,
           label.targetLaps ?? null,
           label.sortOrder ?? null,
-          now,
           existing.id,
         ]
       );
       continue;
     }
-    createLabel(label);
+    createLabelRecord(label, label.id, DEFAULT_LABEL_CREATED_AT);
   }
 }
 
@@ -450,21 +565,26 @@ export async function initDb(): Promise<void> {
   statementCache.clear();
   if (database) database.close();
   database = new Database(DB_FILE);
-  lastClusterOperationSeq = null;
   database.pragma('foreign_keys = ON');
   database.pragma('journal_mode = WAL');
-  database.pragma('synchronous = NORMAL');
+  database.pragma(process.env.NODE_ENV === 'test' ? 'synchronous = NORMAL' : 'synchronous = FULL');
   database.pragma('busy_timeout = 5000');
   database.pragma('cache_size = -8192');
   database.pragma('temp_store = MEMORY');
   database.pragma('journal_size_limit = 16777216');
   createSchema();
+  const previousVersion = Number(getSetting('schema_version') || 0);
+  if (previousVersion > 0 && previousVersion < 7) {
+    const backupPath = path.join(DATA_DIR, `app.pre-local-first-v2.sqlite`);
+    if (!fs.existsSync(backupPath)) {
+      await database.backup(backupPath);
+    }
+  }
   migrateSchema();
   statementCache.clear();
   seedDefaultLabels();
   syncTemporaryTeamRows();
-  pruneClusterOperations();
-  ensureHostId();
+  ensureReplicationIdentity();
 }
 
 export function getSetting(key: string): string | null {
@@ -502,188 +622,830 @@ export function ensureHostId(): string {
   return hostId;
 }
 
-export function getClusterTerm(): number {
-  return Number(getSetting('cluster_term') || 0);
+function setReplicationSetting(key: string, value: string): void {
+  getDb()
+    .prepare('INSERT OR REPLACE INTO settings(key, value) VALUES(?, ?)')
+    .run(key, value);
 }
 
-export function setClusterTerm(term: number): void {
-  setSetting('cluster_term', String(Math.max(0, Math.floor(term))));
-}
-
-export function getClusterVotedFor(): string | null {
-  return getSetting('cluster_voted_for');
-}
-
-export function setClusterVotedFor(hostId: string | null): void {
-  if (hostId) {
-    setSetting('cluster_voted_for', hostId);
-    return;
+export function ensureReplicationIdentity(): ReplicationIdentity {
+  const hostId = ensureHostId();
+  let clusterId = getSetting('replication_cluster_id');
+  let clusterSecret = getSetting('replication_cluster_secret');
+  if (!clusterId) {
+    const generatedClusterId = process.env.CLUSTER_ID?.trim() || uuidv4();
+    setReplicationSetting('replication_cluster_id', generatedClusterId);
+    clusterId = generatedClusterId;
   }
-  run('DELETE FROM settings WHERE key = ?', ['cluster_voted_for']);
+  if (!clusterSecret) {
+    const generatedClusterSecret =
+      process.env.CLUSTER_SECRET?.trim() || crypto.randomBytes(32).toString('hex');
+    setReplicationSetting('replication_cluster_secret', generatedClusterSecret);
+    clusterSecret = generatedClusterSecret;
+  }
+  return { clusterId: clusterId!, clusterSecret: clusterSecret!, hostId };
 }
 
-export type ClusterOperation = {
-  seq: number;
+export function assertOrClaimTimingController(): string {
+  if (getOpenReplicationConflictCount() > 0) {
+    throw new Error(
+      'Timing is gepauzeerd door een syncconflict. Los dit eerst op in Admin.'
+    );
+  }
+  const hostId = ensureReplicationIdentity().hostId;
+  const current = getSetting('timing_controller_host_id');
+  if (current && current !== hostId) {
+    throw new Error('De timing wordt bediend op een andere laptop');
+  }
+  if (!current) setSetting('timing_controller_host_id', hostId);
+  return hostId;
+}
+
+export function claimTimingController(): string {
+  const hostId = ensureReplicationIdentity().hostId;
+  setSetting('timing_controller_host_id', hostId);
+  const generation = Number(getSetting('timing_controller_generation') || 0) + 1;
+  setSetting('timing_controller_generation', String(generation));
+  return hostId;
+}
+
+function nextLocalHlc(): { wallMs: number; counter: number } {
+  const storedWall = Number(getSetting('replication_hlc_wall_ms') || 0);
+  const storedCounter = Number(getSetting('replication_hlc_counter') || 0);
+  const now = Date.now();
+  const wallMs = Math.max(now, storedWall);
+  const counter = wallMs === storedWall ? storedCounter + 1 : 0;
+  setReplicationSetting('replication_hlc_wall_ms', String(wallMs));
+  setReplicationSetting('replication_hlc_counter', String(counter));
+  return { wallMs, counter };
+}
+
+function observeRemoteHlc(wallMs: number, counter: number): void {
+  const storedWall = Number(getSetting('replication_hlc_wall_ms') || 0);
+  const storedCounter = Number(getSetting('replication_hlc_counter') || 0);
+  const now = Date.now();
+  const nextWall = Math.max(now, storedWall, wallMs);
+  const nextCounter =
+    nextWall === storedWall && nextWall === wallMs
+      ? Math.max(storedCounter, counter) + 1
+      : nextWall === storedWall
+        ? storedCounter + 1
+        : nextWall === wallMs
+          ? counter + 1
+          : 0;
+  setReplicationSetting('replication_hlc_wall_ms', String(nextWall));
+  setReplicationSetting('replication_hlc_counter', String(nextCounter));
+}
+
+function captureReplicationCheckpoint(): ReplicationCheckpoint {
+  const tables: ReplicationCheckpoint['tables'] = {};
+  for (const table of CHECKPOINT_TABLES) {
+    tables[table] = getDb().prepare(`SELECT * FROM "${table}"`).all() as Array<
+      Record<string, SqlValue>
+    >;
+  }
+  const settings = Object.fromEntries(
+    CHECKPOINT_SETTING_KEYS.flatMap((key) => {
+      const value = getSetting(key);
+      return value === null ? [] : [[key, value]];
+    })
+  );
+  return { vector: getReplicationVector(), tables, settings };
+}
+
+function ensureReplicationCheckpoint(): ReplicationCheckpoint {
+  const stored = getSetting('replication_checkpoint_json');
+  if (stored) return JSON.parse(stored) as ReplicationCheckpoint;
+  const checkpoint = captureReplicationCheckpoint();
+  setReplicationSetting('replication_checkpoint_json', JSON.stringify(checkpoint));
+  return checkpoint;
+}
+
+export function getReplicationCheckpoint(): ReplicationCheckpoint {
+  return ensureReplicationCheckpoint();
+}
+
+function restoreReplicationCheckpoint(checkpoint: ReplicationCheckpoint): void {
+  for (const table of CHECKPOINT_DELETE_ORDER) {
+    getDb().prepare(`DELETE FROM "${table}"`).run();
+  }
+  for (const table of CHECKPOINT_TABLES) {
+    const allowedColumns = new Set(
+      (
+        getDb().prepare(`PRAGMA table_info("${table}")`).all() as Array<{
+          name: string;
+        }>
+      ).map((column) => column.name)
+    );
+    for (const row of checkpoint.tables[table] || []) {
+      const columns = Object.keys(row).filter((column) => allowedColumns.has(column));
+      if (!columns.length) continue;
+      const quotedColumns = columns.map((column) => `"${column}"`).join(', ');
+      const placeholders = columns.map(() => '?').join(', ');
+      getDb()
+        .prepare(`INSERT INTO "${table}" (${quotedColumns}) VALUES (${placeholders})`)
+        .run(...columns.map((column) => row[column]));
+    }
+  }
+  for (const key of CHECKPOINT_SETTING_KEYS) {
+    getDb().prepare('DELETE FROM settings WHERE key = ?').run(key);
+  }
+  for (const [key, value] of Object.entries(checkpoint.settings || {})) {
+    if ((CHECKPOINT_SETTING_KEYS as readonly string[]).includes(key)) {
+      setReplicationSetting(key, value);
+    }
+  }
+}
+
+function replicationChecksum(input: Omit<ReplicationOperation, 'checksum' | 'status' | 'appliedAt'>): string {
+  return crypto
+    .createHash('sha256')
+    .update(
+      JSON.stringify({
+        id: input.id,
+        clusterId: input.clusterId,
+        originHostId: input.originHostId,
+        originSeq: input.originSeq,
+        hlcWallMs: input.hlcWallMs,
+        hlcCounter: input.hlcCounter,
+        type: input.type,
+        payload: input.payload,
+        statements: input.statements,
+        result: input.result,
+        raceBaseKey: input.raceBaseKey,
+        createdAt: input.createdAt,
+      })
+    )
+    .digest('hex');
+}
+
+function replicationOperationFromRow(row: {
   id: string;
-  term: number;
+  clusterId: string;
   originHostId: string;
+  originSeq: number;
+  hlcWallMs: number;
+  hlcCounter: number;
   type: string;
-  payload: unknown;
+  payloadJson: string;
+  statementsJson: string;
+  resultJson: string;
+  raceBaseKey: string | null;
+  status: ReplicationOperation['status'];
+  checksum: string;
   createdAt: number;
   appliedAt: number;
-};
-
-export function appendClusterOperation(input: {
-  seq?: number;
-  id?: string;
-  term: number;
-  originHostId: string;
-  type: string;
-  payload: unknown;
-  createdAt?: number;
-  appliedAt?: number;
-}): ClusterOperation {
-  const now = Date.now();
-  const id = input.id || uuidv4();
-  if (input.seq !== undefined) {
-    run(
-      `INSERT OR IGNORE INTO cluster_operations (
-        seq,
-        id,
-        term,
-        origin_host_id,
-        type,
-        payload_json,
-        created_at,
-        applied_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        Math.max(1, Math.floor(input.seq)),
-        id,
-        Math.max(0, Math.floor(input.term)),
-        input.originHostId,
-        input.type,
-        JSON.stringify(input.payload),
-        input.createdAt ?? now,
-        input.appliedAt ?? now,
-      ]
-    );
-  } else {
-    run(
-      `INSERT OR IGNORE INTO cluster_operations (
-        id,
-        term,
-        origin_host_id,
-        type,
-        payload_json,
-        created_at,
-        applied_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [
-        id,
-        Math.max(0, Math.floor(input.term)),
-        input.originHostId,
-        input.type,
-        JSON.stringify(input.payload),
-        input.createdAt ?? now,
-        input.appliedAt ?? now,
-      ]
-    );
-  }
-  const row = one<{
-    seq: number;
-    id: string;
-    term: number;
-    originHostId: string;
-    type: string;
-    payloadJson: string;
-    createdAt: number;
-    appliedAt: number;
-  }>(
-    `SELECT
-       seq,
-       id,
-       term,
-       origin_host_id AS originHostId,
-       type,
-       payload_json AS payloadJson,
-       created_at AS createdAt,
-       applied_at AS appliedAt
-     FROM cluster_operations
-     WHERE id = ?`,
-    [id]
-  );
-  if (!row) throw new Error('cluster operation insert failed');
-  const operation = {
-    seq: row.seq,
+}): ReplicationOperation {
+  return {
     id: row.id,
-    term: row.term,
+    clusterId: row.clusterId,
     originHostId: row.originHostId,
+    originSeq: row.originSeq,
+    hlcWallMs: row.hlcWallMs,
+    hlcCounter: row.hlcCounter,
     type: row.type,
     payload: JSON.parse(row.payloadJson) as unknown,
+    statements: JSON.parse(row.statementsJson) as ReplicatedSqlStatement[],
+    result: JSON.parse(row.resultJson) as unknown,
+    raceBaseKey: row.raceBaseKey,
+    status: row.status,
+    checksum: row.checksum,
     createdAt: row.createdAt,
     appliedAt: row.appliedAt,
   };
-  lastClusterOperationSeq = Math.max(lastClusterOperationSeq ?? 0, operation.seq);
-  pruneClusterOperations();
-  return operation;
 }
 
-export function getLastClusterOperationSeq(): number {
-  if (lastClusterOperationSeq !== null) return lastClusterOperationSeq;
-  const row = one<{ seq: number | null }>('SELECT MAX(seq) AS seq FROM cluster_operations');
-  lastClusterOperationSeq = Number(row?.seq || 0);
-  return lastClusterOperationSeq;
+const REPLICATION_OPERATION_SELECT = `SELECT
+  id,
+  cluster_id AS clusterId,
+  origin_host_id AS originHostId,
+  origin_seq AS originSeq,
+  hlc_wall_ms AS hlcWallMs,
+  hlc_counter AS hlcCounter,
+  type,
+  payload_json AS payloadJson,
+  statements_json AS statementsJson,
+  result_json AS resultJson,
+  race_base_key AS raceBaseKey,
+  status,
+  checksum,
+  created_at AS createdAt,
+  applied_at AS appliedAt
+FROM replication_operations`;
+
+export function commitReplicatedWrite<T>(input: {
+  id?: string;
+  type: string;
+  payload?: unknown;
+  raceBaseKey?: string | null;
+  action: () => T;
+}): T {
+  const identity = ensureReplicationIdentity();
+  const id = input.id || uuidv4();
+  const existing = one<Parameters<typeof replicationOperationFromRow>[0]>(
+    `${REPLICATION_OPERATION_SELECT} WHERE id = ?`,
+    [id]
+  );
+  if (existing) return replicationOperationFromRow(existing).result as T;
+  if (writeCapture) throw new Error('nested replicated write is not supported');
+
+  return transaction(() => {
+    ensureReplicationCheckpoint();
+    const originSeq =
+      (one<{ seq: number }>(
+        `SELECT COALESCE(MAX(origin_seq), 0) AS seq
+         FROM replication_operations
+         WHERE origin_host_id = ?`,
+        [identity.hostId]
+      )?.seq ?? 0) + 1;
+    const hlc = nextLocalHlc();
+    const statements: ReplicatedSqlStatement[] = [];
+    writeCapture = statements;
+    let result: T;
+    try {
+      result = input.action();
+    } finally {
+      writeCapture = null;
+    }
+    const createdAt = Date.now();
+    const base = {
+      id,
+      clusterId: identity.clusterId,
+      originHostId: identity.hostId,
+      originSeq,
+      hlcWallMs: hlc.wallMs,
+      hlcCounter: hlc.counter,
+      type: input.type,
+      payload: input.payload ?? null,
+      statements,
+      result: result ?? null,
+      raceBaseKey: input.raceBaseKey ?? null,
+      createdAt,
+    };
+    const checksum = replicationChecksum(base);
+    getDb()
+      .prepare(
+        `INSERT INTO replication_operations (
+          id, cluster_id, origin_host_id, origin_seq, hlc_wall_ms, hlc_counter,
+          type, payload_json, statements_json, result_json, race_base_key,
+          status, checksum, created_at, applied_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'accepted', ?, ?, ?)`
+      )
+      .run(
+        id,
+        identity.clusterId,
+        identity.hostId,
+        originSeq,
+        hlc.wallMs,
+        hlc.counter,
+        input.type,
+        JSON.stringify(base.payload),
+        JSON.stringify(statements),
+        JSON.stringify(base.result),
+        base.raceBaseKey,
+        checksum,
+        createdAt,
+        createdAt
+      );
+    return result;
+  });
 }
 
-export function getClusterOperationsAfter(seq: number): ClusterOperation[] {
+export function getReplicationVector(): Record<string, number> {
+  return Object.fromEntries(
+    all<{ hostId: string; seq: number }>(
+      `SELECT origin_host_id AS hostId, MAX(origin_seq) AS seq
+       FROM replication_operations
+       GROUP BY origin_host_id`
+    ).map((row) => [row.hostId, row.seq])
+  );
+}
+
+export function getReplicationOperationsMissing(
+  vector: Record<string, number>,
+  limit = 250
+): ReplicationOperation[] {
+  return all<Parameters<typeof replicationOperationFromRow>[0]>(
+    `${REPLICATION_OPERATION_SELECT}
+     ORDER BY hlc_wall_ms, hlc_counter, origin_host_id, origin_seq`
+  )
+    .filter((row) => row.originSeq > (vector[row.originHostId] || 0))
+    .slice(0, Math.max(1, Math.min(1_000, limit)))
+    .map(replicationOperationFromRow);
+}
+
+export function getAllReplicationOperations(): ReplicationOperation[] {
+  return all<Parameters<typeof replicationOperationFromRow>[0]>(
+    `${REPLICATION_OPERATION_SELECT}
+     ORDER BY hlc_wall_ms, hlc_counter, origin_host_id, origin_seq`
+  ).map(replicationOperationFromRow);
+}
+
+export function getReplicationOperation(id: string): ReplicationOperation | null {
+  const row = one<Parameters<typeof replicationOperationFromRow>[0]>(
+    `${REPLICATION_OPERATION_SELECT} WHERE id = ?`,
+    [id]
+  );
+  return row ? replicationOperationFromRow(row) : null;
+}
+
+export function getOpenReplicationConflictCount(): number {
+  return (
+    one<{ count: number }>(
+      `SELECT COUNT(*) AS count FROM replication_conflicts WHERE status = 'open'`
+    )?.count ?? 0
+  );
+}
+
+export function getReplicationConflicts(
+  status: ReplicationConflict['status'] | 'all' = 'open'
+): ReplicationConflict[] {
+  const where = status === 'all' ? '' : 'WHERE status = ?';
+  const params: SqlValue[] = status === 'all' ? [] : [status];
   return all<{
-    seq: number;
     id: string;
-    term: number;
-    originHostId: string;
-    type: string;
-    payloadJson: string;
+    kind: ReplicationConflict['kind'];
+    operationIdsJson: string;
+    status: ReplicationConflict['status'];
+    resolutionOperationId: string | null;
     createdAt: number;
-    appliedAt: number;
+    resolvedAt: number | null;
   }>(
     `SELECT
-       seq,
        id,
-       term,
-       origin_host_id AS originHostId,
-       type,
-       payload_json AS payloadJson,
+       kind,
+       operation_ids_json AS operationIdsJson,
+       status,
+       resolution_operation_id AS resolutionOperationId,
        created_at AS createdAt,
-       applied_at AS appliedAt
-     FROM cluster_operations
-     WHERE seq > ?
-     ORDER BY seq DESC
-     LIMIT 1`,
-    [Math.max(0, Math.floor(seq))]
+       resolved_at AS resolvedAt
+     FROM replication_conflicts
+     ${where}
+     ORDER BY created_at DESC`,
+    params
   ).map((row) => ({
-    seq: row.seq,
     id: row.id,
-    term: row.term,
-    originHostId: row.originHostId,
-    type: row.type,
-    payload: JSON.parse(row.payloadJson) as unknown,
+    kind: row.kind,
+    operationIds: JSON.parse(row.operationIdsJson) as string[],
+    status: row.status,
+    resolutionOperationId: row.resolutionOperationId,
     createdAt: row.createdAt,
-    appliedAt: row.appliedAt,
+    resolvedAt: row.resolvedAt,
+  })).map((conflict) => ({
+    ...conflict,
+    operations: conflict.operationIds.flatMap((id) => {
+      const operation = getReplicationOperation(id);
+      return operation
+        ? [{
+            id: operation.id,
+            originHostId: operation.originHostId,
+            type: operation.type,
+            createdAt: operation.createdAt,
+          }]
+        : [];
+    }),
   }));
 }
 
-function pruneClusterOperations(): void {
-  run(
-    `DELETE FROM cluster_operations
-     WHERE seq NOT IN (
-       SELECT seq
-       FROM cluster_operations
-       ORDER BY seq DESC
-       LIMIT ?
-     )`,
-    [CLUSTER_OPERATION_RETENTION]
+export function prepareReplicationConflictChoice(
+  conflictId: string,
+  selectedOperationId: string
+): void {
+  const conflict = getReplicationConflicts().find((item) => item.id === conflictId);
+  if (!conflict) throw new Error('syncconflict niet gevonden of al opgelost');
+  if (!conflict.operationIds.includes(selectedOperationId)) {
+    throw new Error('de gekozen timingversie hoort niet bij dit conflict');
+  }
+  rebuildApplicationFromReplicationLog(new Set([selectedOperationId]));
+}
+
+export function finalizeReplicationConflict(
+  conflictId: string,
+  snapshot: AppSnapshot
+): { conflictId: string; kept: 'current' } {
+  const conflict = one<{ id: string }>(
+    `SELECT id FROM replication_conflicts
+     WHERE id = ? AND status = 'open'`,
+    [conflictId]
   );
+  if (!conflict) throw new Error('syncconflict niet gevonden of al opgelost');
+  applySnapshot(snapshot);
+  getDb()
+    .prepare(
+      `UPDATE replication_conflicts
+       SET status = 'resolved', resolved_at = ?
+       WHERE id = ?`
+    )
+    .run(Date.now(), conflictId);
+  return { conflictId, kept: 'current' };
+}
+
+export function getPendingReplicationOperationCount(): number {
+  const peers = one<{ count: number }>(
+    'SELECT COUNT(DISTINCT peer_host_id) AS count FROM replication_peer_progress'
+  )?.count ?? 0;
+  if (!peers) return 0;
+  const local = ensureReplicationIdentity().hostId;
+  const acknowledged =
+    one<{ seq: number }>(
+      `SELECT COALESCE(MAX(acknowledged_seq), 0) AS seq
+       FROM replication_peer_progress
+       WHERE origin_host_id = ?`,
+      [local]
+    )?.seq ?? 0;
+  return (
+    one<{ count: number }>(
+      `SELECT COUNT(*) AS count FROM replication_operations
+       WHERE origin_host_id = ? AND origin_seq > ?`,
+      [local, acknowledged]
+    )?.count ?? 0
+  );
+}
+
+export function acknowledgeReplicationVector(
+  peerHostId: string,
+  vector: Record<string, number>
+): void {
+  const now = Date.now();
+  transaction(() => {
+    for (const [originHostId, seq] of Object.entries(vector)) {
+      getDb()
+        .prepare(
+          `INSERT INTO replication_peer_progress (
+             peer_host_id, origin_host_id, acknowledged_seq, updated_at
+           ) VALUES (?, ?, ?, ?)
+           ON CONFLICT(peer_host_id, origin_host_id) DO UPDATE SET
+             acknowledged_seq = MAX(replication_peer_progress.acknowledged_seq, excluded.acknowledged_seq),
+             updated_at = excluded.updated_at`
+        )
+        .run(peerHostId, originHostId, Math.max(0, Math.floor(seq)), now);
+    }
+  });
+}
+
+function insertReplicationOperation(operation: ReplicationOperation): void {
+  getDb()
+    .prepare(
+      `INSERT INTO replication_operations (
+        id, cluster_id, origin_host_id, origin_seq, hlc_wall_ms, hlc_counter,
+        type, payload_json, statements_json, result_json, race_base_key,
+        status, checksum, created_at, applied_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      operation.id,
+      operation.clusterId,
+      operation.originHostId,
+      operation.originSeq,
+      operation.hlcWallMs,
+      operation.hlcCounter,
+      operation.type,
+      JSON.stringify(operation.payload),
+      JSON.stringify(operation.statements),
+      JSON.stringify(operation.result),
+      operation.raceBaseKey,
+      operation.status,
+      operation.checksum,
+      operation.createdAt,
+      operation.appliedAt
+    );
+}
+
+function operationConflictId(operationIds: string[]): string {
+  return crypto
+    .createHash('sha256')
+    .update(operationIds.slice().sort().join(':'))
+    .digest('hex');
+}
+
+function saveReplicationConflict(
+  kind: ReplicationConflict['kind'],
+  operationIds: string[]
+): string {
+  const sortedIds = operationIds.slice().sort();
+  const id = operationConflictId(sortedIds);
+  getDb()
+    .prepare(
+      `INSERT INTO replication_conflicts (
+         id, kind, operation_ids_json, status, created_at
+       ) VALUES (?, ?, ?, 'open', ?)
+       ON CONFLICT(id) DO UPDATE SET
+         kind = excluded.kind,
+         operation_ids_json = excluded.operation_ids_json`
+    )
+    .run(id, kind, JSON.stringify(sortedIds), Date.now());
+  return id;
+}
+
+function resolutionConflictId(operation: ReplicationOperation): string | null {
+  if (operation.type !== 'cluster.resolveConflict') return null;
+  if (!operation.payload || typeof operation.payload !== 'object') return null;
+  const payload = operation.payload as {
+    conflictId?: unknown;
+    input?: { conflictId?: unknown };
+  };
+  const id = payload.conflictId ?? payload.input?.conflictId;
+  return typeof id === 'string' && id ? id : null;
+}
+
+function compareReplicationOperations(
+  a: ReplicationOperation,
+  b: ReplicationOperation
+): number {
+  return (
+    a.hlcWallMs - b.hlcWallMs ||
+    a.hlcCounter - b.hlcCounter ||
+    a.originHostId.localeCompare(b.originHostId) ||
+    a.originSeq - b.originSeq
+  );
+}
+
+function rebuildApplicationFromReplicationLog(
+  preferredOperationIds: ReadonlySet<string> = new Set()
+): void {
+  const checkpoint = ensureReplicationCheckpoint();
+  const operations = all<Parameters<typeof replicationOperationFromRow>[0]>(
+    `${REPLICATION_OPERATION_SELECT}
+     ORDER BY hlc_wall_ms, hlc_counter, origin_host_id, origin_seq`
+  )
+    .map(replicationOperationFromRow)
+    .filter(
+      (operation) =>
+        operation.originSeq > (checkpoint.vector[operation.originHostId] || 0)
+    );
+  const raceGroups = new Map<string, ReplicationOperation[]>();
+  for (const operation of operations) {
+    if (!operation.raceBaseKey) continue;
+    const group = raceGroups.get(operation.raceBaseKey) || [];
+    group.push(operation);
+    raceGroups.set(operation.raceBaseKey, group);
+  }
+  const raceChoices = new Map<string, string>();
+  for (const [raceBaseKey, group] of raceGroups) {
+    const preferred = group.find((operation) => preferredOperationIds.has(operation.id));
+    raceChoices.set(raceBaseKey, (preferred || group[0]).id);
+  }
+
+  transaction(() => {
+    restoreReplicationCheckpoint(checkpoint);
+    getDb()
+      .prepare(
+        `DELETE FROM replication_conflicts
+         WHERE resolution_operation_id IS NULL`
+      )
+      .run();
+
+    for (const operation of operations) {
+      let conflictKind: ReplicationConflict['kind'] | null = null;
+      let conflictOperationIds = [operation.id];
+      const raceChoice = operation.raceBaseKey
+        ? raceChoices.get(operation.raceBaseKey)
+        : null;
+      if (raceChoice && raceChoice !== operation.id) {
+        conflictKind = 'timing';
+        conflictOperationIds = [raceChoice, operation.id];
+      } else {
+        try {
+          getDb().transaction(() => {
+            for (const item of operation.statements) {
+              getDb().prepare(item.sql).run(...item.params);
+            }
+          })();
+        } catch {
+          conflictKind = operation.raceBaseKey ? 'timing' : 'data';
+        }
+      }
+
+      const status: ReplicationOperation['status'] = conflictKind
+        ? 'conflict'
+        : 'accepted';
+      getDb()
+        .prepare(
+          `UPDATE replication_operations
+           SET status = ?, applied_at = ?
+           WHERE id = ?`
+        )
+        .run(status, Date.now(), operation.id);
+
+      if (conflictKind) {
+        saveReplicationConflict(conflictKind, conflictOperationIds);
+        continue;
+      }
+      const resolvedConflictId = resolutionConflictId(operation);
+      if (resolvedConflictId) {
+        const resolution = getDb()
+          .prepare(
+            `UPDATE replication_conflicts
+             SET status = 'resolved',
+                 resolution_operation_id = ?,
+                 resolved_at = ?
+             WHERE id = ?`
+          )
+          .run(operation.id, Date.now(), resolvedConflictId);
+        if (resolution.changes === 0) {
+          console.warn(
+            `Conflict resolution ${operation.id} did not find conflict ${resolvedConflictId}`
+          );
+        }
+      }
+    }
+  });
+  appDataRevision += 1;
+}
+
+export function applyRemoteReplicationOperations(
+  operations: ReplicationOperation[]
+): { applied: number; duplicates: number; conflicts: number } {
+  const identity = ensureReplicationIdentity();
+  if (operations.length) ensureReplicationCheckpoint();
+  let duplicates = 0;
+  const insertedIds: string[] = [];
+  const insertedOperations: ReplicationOperation[] = [];
+  const existingOperations = getAllReplicationOperations();
+  const previousLastOperation =
+    existingOperations.length > 0
+      ? existingOperations[existingOperations.length - 1]
+      : null;
+  const seenRaceBases = new Set(
+    existingOperations
+      .filter((operation) => operation.status === 'accepted' && operation.raceBaseKey)
+      .map((operation) => operation.raceBaseKey as string)
+  );
+  let requiresRebuild = false;
+  const ordered = operations
+    .slice()
+    .sort(compareReplicationOperations);
+
+  for (const operation of ordered) {
+    if (operation.clusterId !== identity.clusterId) {
+      throw new Error('replication cluster mismatch');
+    }
+    if (getReplicationOperation(operation.id)) {
+      duplicates += 1;
+      continue;
+    }
+    const expectedChecksum = replicationChecksum({
+      id: operation.id,
+      clusterId: operation.clusterId,
+      originHostId: operation.originHostId,
+      originSeq: operation.originSeq,
+      hlcWallMs: operation.hlcWallMs,
+      hlcCounter: operation.hlcCounter,
+      type: operation.type,
+      payload: operation.payload,
+      statements: operation.statements,
+      result: operation.result,
+      raceBaseKey: operation.raceBaseKey,
+      createdAt: operation.createdAt,
+    });
+    if (operation.checksum !== expectedChecksum) {
+      throw new Error(`replication checksum mismatch for ${operation.id}`);
+    }
+    const knownSeq = getReplicationVector()[operation.originHostId] || 0;
+    if (operation.originSeq > knownSeq + 1) {
+      throw new Error(
+        `replication gap for ${operation.originHostId}: expected ${knownSeq + 1}, received ${operation.originSeq}`
+      );
+    }
+    insertReplicationOperation({
+      ...operation,
+      status: 'accepted',
+      appliedAt: Date.now(),
+    });
+    insertedIds.push(operation.id);
+    insertedOperations.push(operation);
+    if (
+      previousLastOperation &&
+      compareReplicationOperations(operation, previousLastOperation) < 0
+    ) {
+      requiresRebuild = true;
+    }
+    if (operation.raceBaseKey) {
+      if (seenRaceBases.has(operation.raceBaseKey)) requiresRebuild = true;
+      seenRaceBases.add(operation.raceBaseKey);
+    }
+    observeRemoteHlc(operation.hlcWallMs, operation.hlcCounter);
+  }
+  if (insertedIds.length) {
+    if (!requiresRebuild) {
+      try {
+        transaction(() => {
+          for (const operation of insertedOperations) {
+            for (const item of operation.statements) {
+              getDb().prepare(item.sql).run(...item.params);
+            }
+            const resolvedConflictId = resolutionConflictId(operation);
+            if (resolvedConflictId) {
+              getDb()
+                .prepare(
+                  `UPDATE replication_conflicts
+                   SET status = 'resolved',
+                       resolution_operation_id = ?,
+                       resolved_at = ?
+                   WHERE id = ?`
+                )
+                .run(operation.id, Date.now(), resolvedConflictId);
+            }
+          }
+        });
+        appDataRevision += 1;
+      } catch {
+        rebuildApplicationFromReplicationLog();
+      }
+    } else {
+      rebuildApplicationFromReplicationLog();
+    }
+  }
+  const conflicts = insertedIds.filter(
+    (id) => getReplicationOperation(id)?.status === 'conflict'
+  ).length;
+  const applied = insertedIds.length - conflicts;
+  return { applied, duplicates, conflicts };
+}
+
+export async function installReplicationBootstrap(input: {
+  clusterId: string;
+  clusterSecret: string;
+  snapshot: AppSnapshot;
+  checkpoint: ReplicationCheckpoint;
+  operations: ReplicationOperation[];
+  conflicts: ReplicationConflict[];
+  timingControllerHostId: string | null;
+}): Promise<{ backupPath: string }> {
+  for (const operation of input.operations) {
+    if (operation.clusterId !== input.clusterId) {
+      throw new Error('bootstrap bevat wijzigingen uit een andere cluster');
+    }
+    const expectedChecksum = replicationChecksum({
+      id: operation.id,
+      clusterId: operation.clusterId,
+      originHostId: operation.originHostId,
+      originSeq: operation.originSeq,
+      hlcWallMs: operation.hlcWallMs,
+      hlcCounter: operation.hlcCounter,
+      type: operation.type,
+      payload: operation.payload,
+      statements: operation.statements,
+      result: operation.result,
+      raceBaseKey: operation.raceBaseKey,
+      createdAt: operation.createdAt,
+    });
+    if (operation.checksum !== expectedChecksum) {
+      throw new Error(`bootstrap checksum klopt niet voor ${operation.id}`);
+    }
+  }
+
+  const backupPath = path.join(
+    DATA_DIR,
+    `app.before-cluster-join-${Date.now()}-${uuidv4().slice(0, 8)}.sqlite`
+  );
+  await getDb().backup(backupPath);
+  transaction(() => {
+    getDb().prepare('DELETE FROM replication_peer_progress').run();
+    getDb().prepare('DELETE FROM replication_conflicts').run();
+    getDb().prepare('DELETE FROM replication_operations').run();
+    applySnapshot(input.snapshot);
+    setReplicationSetting('replication_cluster_id', input.clusterId);
+    setReplicationSetting('replication_cluster_secret', input.clusterSecret);
+    setReplicationSetting(
+      'replication_checkpoint_json',
+      JSON.stringify(input.checkpoint)
+    );
+    if (input.timingControllerHostId) {
+      setReplicationSetting(
+        'timing_controller_host_id',
+        input.timingControllerHostId
+      );
+    } else {
+      getDb()
+        .prepare("DELETE FROM settings WHERE key = 'timing_controller_host_id'")
+        .run();
+    }
+    for (const operation of input.operations) {
+      insertReplicationOperation(operation);
+    }
+    for (const conflict of input.conflicts) {
+      getDb()
+        .prepare(
+          `INSERT INTO replication_conflicts (
+             id, kind, operation_ids_json, status, resolution_operation_id,
+             created_at, resolved_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?)`
+        )
+        .run(
+          conflict.id,
+          conflict.kind,
+          JSON.stringify(conflict.operationIds),
+          conflict.status,
+          conflict.resolutionOperationId,
+          conflict.createdAt,
+          conflict.resolvedAt
+        );
+    }
+  });
+  if (input.operations.length) rebuildApplicationFromReplicationLog();
+  appDataRevision += 1;
+  return { backupPath };
 }
 
 export function getLabels(): Label[] {
@@ -744,15 +1506,14 @@ export function ensureLabel(name: unknown, options: Partial<LabelInput> = {}): L
   });
 }
 
-export function createLabel(input: LabelInput): Label {
+function createLabelRecord(input: LabelInput, id: string, now: number): Label {
   const labelName = cleanText(input.name);
   if (!labelName) throw new Error('label name required');
   if (findLabelByName(labelName)) {
     throw new Error('Er bestaat al een label met deze naam');
   }
-  const now = Date.now();
   const label = {
-    id: uuidv4(),
+    id,
     name: labelName,
     color: cleanText(input.color) || '#3b82f6',
     icon: cleanText(input.icon) || labelName.slice(0, 2).toUpperCase(),
@@ -793,6 +1554,10 @@ export function createLabel(input: LabelInput): Label {
     ]);
   }
   return { ...label, createdAt: now, updatedAt: now };
+}
+
+export function createLabel(input: LabelInput): Label {
+  return createLabelRecord(input, uuidv4(), Date.now());
 }
 
 export function updateLabel(id: string, fields: LabelPatch): Label | null {

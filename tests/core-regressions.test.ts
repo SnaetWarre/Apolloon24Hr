@@ -266,6 +266,39 @@ test('reordering requires each waiting runner exactly once', async () => {
   }
 });
 
+test('a failed replicated database command leaves neither partial data nor an operation', async () => {
+  fs.rmSync(dataPath, { recursive: true, force: true });
+  const db = await import('../server/db.ts');
+
+  try {
+    await db.initDb();
+    const commandId = crypto.randomUUID();
+    assert.throws(
+      () =>
+        db.commitReplicatedWrite({
+          id: commandId,
+          type: 'test.forcedFailure',
+          payload: { runnerNumber: 'ROLLBACK-1' },
+          action: () => {
+            db.insertRunner({
+              name: 'Must roll back',
+              runnerNumber: 'ROLLBACK-1',
+            });
+            throw new Error('simulated database write failure');
+          },
+        }),
+      /simulated database write failure/
+    );
+    assert.equal(
+      db.getAllRunners().some((runner) => runner.runnerNumber === 'ROLLBACK-1'),
+      false
+    );
+    assert.equal(db.getReplicationOperation(commandId), null);
+  } finally {
+    fs.rmSync(dataPath, { recursive: true, force: true });
+  }
+});
+
 test('timing mutations reject a stale race state instead of recording an extra handoff', async () => {
   fs.rmSync(dataPath, { recursive: true, force: true });
   const db = await import('../server/db.ts');
@@ -359,30 +392,31 @@ test('label names are unique regardless of capitalization', async () => {
   }
 });
 
-test('cluster snapshot history stays bounded and serves only the latest full snapshot', async () => {
+test('the local-first operation log retains every command and advances its origin vector', async () => {
   fs.rmSync(dataPath, { recursive: true, force: true });
   const db = await import('../server/db.ts');
 
   try {
     await db.initDb();
+    const hostId = db.ensureReplicationIdentity().hostId;
     for (let index = 1; index <= 12; index += 1) {
-      db.appendClusterOperation({
-        term: 1,
-        originHostId: 'test-host',
+      db.commitReplicatedWrite({
+        id: crypto.randomUUID(),
         type: `test-operation-${index}`,
-        payload: { snapshot: { marker: index } },
+        payload: { marker: index },
+        action: () => ({ marker: index }),
       });
     }
 
-    assert.equal(db.getLastClusterOperationSeq(), 12);
-    assert.deepEqual(db.getClusterOperationsAfter(0).map((operation) => operation.seq), [12]);
+    assert.equal(db.getReplicationVector()[hostId], 12);
+    assert.equal(db.getAllReplicationOperations().length, 12);
 
     const inspectionDb = new Database(path.join(dataPath, 'data', 'app.db'), { readonly: true });
     try {
-      const row = inspectionDb.prepare('SELECT COUNT(*) AS count FROM cluster_operations').get() as {
+      const row = inspectionDb.prepare('SELECT COUNT(*) AS count FROM replication_operations').get() as {
         count: number;
       };
-      assert.equal(row.count, 4);
+      assert.equal(row.count, 12);
     } finally {
       inspectionDb.close();
     }
@@ -447,11 +481,10 @@ test('full app snapshots reuse immutable collections until application data chan
     assert.notStrictEqual(changed.runners, first.runners);
     assert.ok((changed.revision ?? 0) > (first.revision ?? 0));
 
-    db.appendClusterOperation({
-      term: 1,
-      originHostId: 'test-host',
+    db.commitReplicatedWrite({
       type: 'cache-neutral-cluster-log',
-      payload: { snapshot: changed },
+      payload: { marker: 'no app mutation' },
+      action: () => ({ ok: true }),
     });
     const afterClusterLog = appSnapshot();
     assert.strictEqual(afterClusterLog.runners, changed.runners);

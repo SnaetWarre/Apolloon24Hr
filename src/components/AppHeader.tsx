@@ -32,11 +32,32 @@ export const AppHeader: React.FC<{ onOpenProfile?: (runnerId: string) => void }>
           className="input input--search input--stretch"
         />
         {cluster?.enabled && (
-          <div className={`cluster-pill cluster-pill--${cluster.writable ? 'leader' : 'standby'}`}>
-            <strong>{cluster.writable ? 'Primary' : 'Standby'}</strong>
+          <div
+            className={`cluster-pill cluster-pill--${
+              cluster.conflictCount > 0
+                ? 'standby'
+                : (cluster.clockSkewMs ?? 0) > 2_000
+                  ? 'standby'
+                : cluster.pendingOperations > 0
+                  ? 'standby'
+                  : 'healthy'
+            }`}
+          >
+            <strong>
+              {cluster.conflictCount > 0
+                ? 'Synchronisatieconflict'
+                : (cluster.clockSkewMs ?? 0) > 2_000
+                  ? 'Klokken verschillen'
+                : cluster.connectedHosts === 1
+                  ? '1 lokale kopie'
+                  : `Op ${cluster.connectedHosts} laptops`}
+            </strong>
             <span>
-              seq {cluster.lastAppliedSeq}
-              {!cluster.writable && cluster.leaderUrl ? ` · leader ${cluster.leaderUrl}` : ''}
+              {cluster.pendingOperations > 0
+                ? `${cluster.pendingOperations} wijziging${cluster.pendingOperations === 1 ? '' : 'en'} wacht op backup`
+                : (cluster.clockSkewMs ?? 0) > 2_000
+                  ? `Controleer systeemtijd (${Math.round((cluster.clockSkewMs ?? 0) / 1_000)} s verschil)`
+                : 'Alles gesynchroniseerd'}
             </span>
           </div>
         )}

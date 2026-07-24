@@ -28,6 +28,7 @@ Shared contracts live in `shared/`. Anything imported by both client and server 
 - `server/index.ts`: HTTP, tRPC, Socket.IO, static frontend serving, and export endpoints.
 - `server/router.ts`: tRPC procedures and request validation.
 - `server/db.ts`: SQLite schema, reads, writes, and race-state transitions.
+- `server/cluster.ts`: local-first UDP discovery, authenticated delta exchange, creator bootstrap, and peer health.
 - `server/app-state.ts`: full snapshot assembly.
 - `server/host.ts`: event LAN URL/port discovery.
 - `server/realtime.ts`: typed realtime event bridge.
@@ -46,8 +47,8 @@ Use these before handing off changes:
 
 ```text
 npm run typecheck
-npm run check
-npm run build
+npm test
+npm run test:e2e
 ```
 
-`npm run build` performs the client typecheck, Vite production build, and server compilation. `npm run check` is the lighter validation loop for development.
+`npm run test:e2e` performs a production build and exercises the HTTP/runtime paths, including one-to-five-node replication, reconnects, bootstrap replacement, concurrent edits, and timing conflicts.

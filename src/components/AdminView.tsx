@@ -1,21 +1,23 @@
 import React from 'react';
 import { flexRender, getCoreRowModel, useReactTable, type ColumnDef } from '@tanstack/react-table';
-import { useAppActions, useAppData } from '../app/index';
+import { useAppActions, useAppData, useClusterStatus } from '../app/index';
 import { LabelBadge, labelKindOrder, labelKindTitle } from './LabelBadge';
 import { SourceBadge } from './RunnerEntryModals';
 import { RunnerProfileModal } from './RunnerProfileModal';
 import { formatClockTimeMs } from '../lib/time';
 import type { AppSnapshot, Label, PublicRecordMode, Runner, RunnerStatus, TemporaryTeam } from '../types';
 
-const selectAdminData = ({ labels, runners, settings, temporaryTeams }: AppSnapshot) => ({
+const selectAdminData = ({ labels, runners, settings, temporaryTeams, host }: AppSnapshot) => ({
   labels,
   runners,
   settings,
   temporaryTeams,
+  host,
 });
 
 export function AdminView() {
-  const { labels, runners, settings, temporaryTeams } = useAppData(selectAdminData);
+  const { labels, runners, settings, temporaryTeams, host } = useAppData(selectAdminData);
+  const { cluster } = useClusterStatus();
   const {
     importRunnersCsv,
     createLabel,
@@ -27,6 +29,8 @@ export function AdminView() {
     updatePublicRecordMode,
     setTemporaryTeamMembers,
     setTemporaryTeamActive,
+    joinCluster,
+    resolveConflict,
   } = useAppActions();
   const [csvText, setCsvText] = React.useState('');
   const [csvFileName, setCsvFileName] = React.useState('');
@@ -46,6 +50,94 @@ export function AdminView() {
   const [labelMessage, setLabelMessage] = React.useState<string | null>(null);
   const [addingLabel, setAddingLabel] = React.useState(false);
   const [profileRunnerId, setProfileRunnerId] = React.useState<string | null>(null);
+  const [remoteClusterUrl, setRemoteClusterUrl] = React.useState('');
+  const [remotePairingCode, setRemotePairingCode] = React.useState('');
+  const [clusterMessage, setClusterMessage] = React.useState<string | null>(null);
+  const [clusterSaving, setClusterSaving] = React.useState(false);
+  const [clusterConflicts, setClusterConflicts] = React.useState<Array<{
+    id: string;
+    kind: 'timing' | 'data';
+    operationIds: string[];
+    createdAt: number;
+    operations: Array<{
+      id: string;
+      originHostId: string;
+      type: string;
+      createdAt: number;
+    }>;
+  }>>([]);
+
+  React.useEffect(() => {
+    if (!cluster?.enabled || cluster.conflictCount === 0) {
+      setClusterConflicts([]);
+      return;
+    }
+    let active = true;
+    void fetch('/api/cluster/conflicts')
+      .then((response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return response.json();
+      })
+      .then((conflicts: typeof clusterConflicts) => {
+        if (active) setClusterConflicts(conflicts);
+      })
+      .catch(() => {
+        if (active) setClusterMessage('De lijst met syncconflicten kon niet geladen worden.');
+      });
+    return () => {
+      active = false;
+    };
+  }, [cluster?.conflictCount, cluster?.enabled]);
+
+  async function connectToCluster() {
+    const remoteUrl = remoteClusterUrl.trim();
+    const pairingCode = remotePairingCode.trim();
+    if (!remoteUrl || !pairingCode || clusterSaving) return;
+    if (
+      !window.confirm(
+        'Deze laptop neemt de volledige database van de andere laptop over. De huidige database wordt eerst als herstelkopie bewaard. Doorgaan?'
+      )
+    ) {
+      return;
+    }
+    setClusterSaving(true);
+    setClusterMessage(null);
+    try {
+      const result = await joinCluster(remoteUrl, pairingCode);
+      setRemotePairingCode('');
+      setClusterMessage(
+        `Gekoppeld. De vorige lokale database staat veilig in ${result.backupFile || 'een herstelkopie'}.`
+      );
+    } catch (err) {
+      setClusterMessage(err instanceof Error ? err.message : 'Koppelen mislukt');
+    } finally {
+      setClusterSaving(false);
+    }
+  }
+
+  async function chooseConflictVersion(
+    conflictId: string,
+    selectedOperationId: string
+  ) {
+    if (
+      !window.confirm(
+        'Deze timingversie wordt de gekozen geschiedenis voor alle laptops. Controleer het tijdstip zorgvuldig. Doorgaan?'
+      )
+    ) {
+      return;
+    }
+    setClusterSaving(true);
+    setClusterMessage(null);
+    try {
+      await resolveConflict(conflictId, selectedOperationId);
+      setClusterConflicts((current) => current.filter((item) => item.id !== conflictId));
+      setClusterMessage('Syncconflict opgelost; de gekozen timing wordt naar alle laptops gekopieerd.');
+    } catch (err) {
+      setClusterMessage(err instanceof Error ? err.message : 'Conflict oplossen mislukt');
+    } finally {
+      setClusterSaving(false);
+    }
+  }
 
   async function importCsv() {
     if (!csvText.trim() || importing) return;
@@ -192,6 +284,67 @@ export function AdminView() {
       </div>
 
       <div className="analysis-grid">
+        {cluster?.enabled && (
+          <section className="panel">
+            <h2>Laptops koppelen</h2>
+            <p className="panel-copy">
+              Op deze laptop: <strong>{host.url}</strong>. Koppelcode:{' '}
+              <strong>{cluster.pairingCode}</strong>. Geef beide aan de andere laptop.
+            </p>
+            <p className="panel-copy">
+              {cluster.connectedHosts === 1
+                ? 'Deze laptop werkt zelfstandig en blijft volledig schrijfbaar.'
+                : `${cluster.connectedHosts} laptops zijn nu bereikbaar. Iedere laptop bewaart een volledige kopie.`}
+            </p>
+            <div className="form-row">
+              <input
+                className="input"
+                value={remoteClusterUrl}
+                onChange={(event) => setRemoteClusterUrl(event.target.value)}
+                placeholder="http://192.168.1.20:5173"
+                inputMode="url"
+              />
+              <input
+                className="input"
+                value={remotePairingCode}
+                onChange={(event) => setRemotePairingCode(event.target.value.toUpperCase())}
+                placeholder="Koppelcode"
+                maxLength={8}
+              />
+              <button
+                className="btn btn--primary btn--fixed"
+                onClick={() => void connectToCluster()}
+                disabled={!remoteClusterUrl.trim() || !remotePairingCode.trim() || clusterSaving}
+              >
+                {clusterSaving ? 'Bezig...' : 'Deze laptop koppelen'}
+              </button>
+            </div>
+            {clusterConflicts.map((conflict) => (
+              <div className="host-hint" key={conflict.id}>
+                <strong>
+                  {conflict.kind === 'timing' ? 'Timingconflict' : 'Dataconflict'}
+                </strong>{' '}
+                van {new Date(conflict.createdAt).toLocaleTimeString('nl-BE')}. Kies welke actie
+                werkelijk gebeurd is.
+                {conflict.operations.map((operation, index) => (
+                  <button
+                    className="btn btn--secondary"
+                    key={operation.id}
+                    onClick={() =>
+                      void chooseConflictVersion(conflict.id, operation.id)
+                    }
+                    disabled={clusterSaving}
+                  >
+                    Versie {index + 1}: {formatConflictTime(operation.createdAt)}{' '}
+                    ({operation.originHostId === cluster.hostId ? 'deze laptop' : 'andere laptop'})
+                  </button>
+                ))}
+              </div>
+            ))}
+            {clusterMessage && <div className="host-hint">{clusterMessage}</div>}
+          </section>
+        )}
+
         <section className="panel">
           <h2>Publiek moment</h2>
           <p className="panel-copy">
@@ -386,6 +539,15 @@ export function AdminView() {
       </section>
     </>
   );
+}
+
+function formatConflictTime(timestamp: number): string {
+  const date = new Date(timestamp);
+  return `${date.toLocaleTimeString('nl-BE', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  })}.${String(date.getMilliseconds()).padStart(3, '0')}`;
 }
 
 function AdminRunnerTable({

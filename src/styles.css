@@ -240,7 +240,7 @@ select {
   color: var(--muted);
 }
 
-.cluster-pill--leader {
+.cluster-pill--healthy {
   border-left-color: var(--green);
   background: #ecfdf5;
 }
