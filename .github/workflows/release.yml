@@ -45,7 +45,9 @@ jobs:
       matrix:
         include:
           - name: Windows x64
-            os: windows-latest
+            # Node-gyp cannot currently discover a supported Visual Studio
+            # installation on windows-latest (Windows Server 2025).
+            os: windows-2022
             script: electron:build:win
             assets: release/*.exe
           - name: Linux x64
