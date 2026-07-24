@@ -49,3 +49,14 @@ test('desktop release packaging covers every supported platform and verifies nat
   assert.match(buildScript, /node_register_module_v/);
   assert.match(buildScript, /builderArgs\.push\('--publish', 'never'\)/);
 });
+
+test('packaged Electron startup clears poisoned assets and never exposes a blank window', () => {
+  const mainSource = fs.readFileSync(path.resolve('electron/main.js'), 'utf8');
+
+  assert.match(mainSource, /show: false/);
+  assert.match(mainSource, /await window\.webContents\.session\.clearCache\(\)/);
+  assert.match(mainSource, /desktopVersion/);
+  assert.match(mainSource, /rendererHasContent/);
+  assert.match(mainSource, /await createWindow\(\)/);
+  assert.match(mainSource, /if \(!window\.isDestroyed\(\)\) window\.show\(\)/);
+});

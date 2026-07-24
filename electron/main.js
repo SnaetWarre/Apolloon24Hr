@@ -12,29 +12,63 @@ let mainWindow;
 let serverProcess;
 let appUrl = 'http://127.0.0.1:5173';
 
-function createWindow() {
+async function createWindow() {
   if (mainWindow) return; // Prevent multiple windows
 
-  mainWindow = new BrowserWindow({
+  const window = new BrowserWindow({
     width: 1400,
     height: 900,
+    show: false,
+    backgroundColor: '#f5f7fb',
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
       spellcheck: false,
     },
   });
+  mainWindow = window;
 
   if (!app.isPackaged) {
-    mainWindow.loadURL(appUrl);
-    mainWindow.webContents.openDevTools();
+    await window.loadURL(appUrl);
+    window.webContents.openDevTools();
   } else {
-    mainWindow.loadURL(appUrl);
+    await loadPackagedRenderer(window);
+  }
+  if (!window.isDestroyed()) window.show();
+
+  window.on('closed', () => {
+    if (mainWindow === window) mainWindow = null;
+  });
+}
+
+async function loadPackagedRenderer(window) {
+  // A failed/older AppImage can leave cached 404 responses for the same hashed
+  // assets. Clear that persistent HTTP cache before loading the local UI.
+  await window.webContents.session.clearCache();
+
+  const versionedUrl = new URL(appUrl);
+  versionedUrl.searchParams.set('desktopVersion', app.getVersion());
+  await window.loadURL(versionedUrl.toString());
+
+  let rendered = await rendererHasContent(window);
+  if (!rendered) {
+    console.warn('Renderer was empty after its first load; retrying without cache.');
+    await window.webContents.session.clearCache();
+    versionedUrl.searchParams.set('recovery', String(Date.now()));
+    await window.loadURL(versionedUrl.toString());
+    rendered = await rendererHasContent(window);
   }
 
-  mainWindow.on('closed', () => {
-    mainWindow = null;
-  });
+  if (!rendered) {
+    throw new Error('De gebruikersinterface kon niet worden geladen.');
+  }
+}
+
+async function rendererHasContent(window) {
+  if (window.isDestroyed()) return false;
+  return window.webContents.executeJavaScript(
+    "Boolean(document.getElementById('root')?.childElementCount)"
+  );
 }
 
 function ensureEnvFile() {
@@ -136,7 +170,7 @@ if (!gotTheLock) {
     ensureEnvFile();
     try {
       await startServer();
-      createWindow();
+      await createWindow();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error('Failed to initialize Apolloon:', error);
