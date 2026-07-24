@@ -13,6 +13,7 @@ import type {
 } from '../types';
 import { snapshotKey } from './snapshot';
 import { hasRealtimeConnection } from './useRealtimeBridge';
+import { createUuid } from '../lib/uuid';
 
 const CLIENT_ID_KEY = 'apolloon-client-id';
 let memoryClientId: string | null = null;
@@ -20,7 +21,7 @@ let memoryClientId: string | null = null;
 function command<T extends object>(input: T): T & { _commandId: string; _clientId: string } {
   return {
     ...input,
-    _commandId: crypto.randomUUID(),
+    _commandId: createUuid(),
     _clientId: getClientId(),
   };
 }
@@ -32,7 +33,7 @@ function getClientId(): string {
     memoryClientId = stored;
     return stored;
   }
-  memoryClientId = crypto.randomUUID();
+  memoryClientId = createUuid();
   window.localStorage.setItem(CLIENT_ID_KEY, memoryClientId);
   return memoryClientId;
 }

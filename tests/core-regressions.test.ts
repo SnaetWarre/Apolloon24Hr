@@ -6,6 +6,7 @@ import Database from 'better-sqlite3';
 import type { Active, CollisionDetection, DroppableContainer } from '@dnd-kit/core';
 import { buildRollingLapTrend, buildTimeBuckets } from '../src/lib/analysis.ts';
 import { kanbanCollisionDetection, resolveKanbanDrop } from '../src/lib/kanban.ts';
+import { createUuid } from '../src/lib/uuid.ts';
 import {
   LIVE_MILLISECOND_INTERVAL_MS,
   normalizeClockInterval,
@@ -17,6 +18,23 @@ import { relativeFileWithinRoot } from '../server/static-files.ts';
 const dataPath = path.resolve(`.tmp-test-core-regressions-${process.pid}`);
 process.env.DATA_PATH = dataPath;
 type ClientRect = Parameters<CollisionDetection>[0]['collisionRect'];
+
+test('browser UUIDs work when randomUUID is unavailable on a LAN HTTP origin', () => {
+  const uuid = createUuid({
+    getRandomValues(bytes) {
+      for (let index = 0; index < bytes.length; index += 1) {
+        bytes[index] = index;
+      }
+      return bytes;
+    },
+  });
+
+  assert.equal(uuid, '00010203-0405-4607-8809-0a0b0c0d0e0f');
+  assert.match(uuid, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+
+  const appActions = fs.readFileSync(path.resolve('src/app/useAppActions.ts'), 'utf8');
+  assert.doesNotMatch(appActions, /\bcrypto\.randomUUID\(/);
+});
 
 test('live clocks are cadence-limited instead of driving full-frame renders', () => {
   assert.equal(normalizeClockInterval(0), 16);
