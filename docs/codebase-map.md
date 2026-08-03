@@ -29,9 +29,13 @@ Shared contracts live in `shared/`. Anything imported by both client and server 
 - `server/router.ts`: tRPC procedures and request validation.
 - `server/db.ts`: SQLite schema, reads, writes, and race-state transitions.
 - `server/cluster.ts`: local-first UDP discovery, authenticated delta exchange, creator bootstrap, and peer health.
+- `server/cluster-protocol.ts`: signed discovery envelopes and untrusted network payload validation.
 - `server/app-state.ts`: full snapshot assembly.
 - `server/host.ts`: event LAN URL/port discovery.
 - `server/realtime.ts`: typed realtime event bridge.
+
+See `docs/backend-architecture.md` for the complete process, write,
+replication, storage, and failure-handling model.
 
 ## Scripts And Data
 

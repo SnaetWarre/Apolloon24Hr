@@ -443,6 +443,77 @@ test('the local-first operation log retains every command and advances its origi
   }
 });
 
+test('command ids are idempotent only for the exact same write', async () => {
+  fs.rmSync(dataPath, { recursive: true, force: true });
+  const db = await import('../server/db.ts');
+
+  try {
+    await db.initDb();
+    const commandId = crypto.randomUUID();
+    const first = db.commitReplicatedWrite({
+      id: commandId,
+      type: 'test.idempotent',
+      payload: { marker: 1 },
+      action: () => ({ stored: 1 }),
+    });
+    const retry = db.commitReplicatedWrite({
+      id: commandId,
+      type: 'test.idempotent',
+      payload: { marker: 1 },
+      action: () => ({ stored: 999 }),
+    });
+
+    assert.deepEqual(first, { stored: 1 });
+    assert.deepEqual(retry, first);
+    assert.throws(
+      () =>
+        db.commitReplicatedWrite({
+          id: commandId,
+          type: 'test.different-write',
+          payload: { marker: 2 },
+          action: () => ({ stored: 2 }),
+        }),
+      /already used for a different write/
+    );
+    assert.equal(db.getAllReplicationOperations().length, 1);
+  } finally {
+    fs.rmSync(dataPath, { recursive: true, force: true });
+  }
+});
+
+test('delta queries page in SQL and pending writes wait for every known peer', async () => {
+  fs.rmSync(dataPath, { recursive: true, force: true });
+  const db = await import('../server/db.ts');
+
+  try {
+    await db.initDb();
+    const hostId = db.ensureReplicationIdentity().hostId;
+    for (let index = 1; index <= 6; index += 1) {
+      db.commitReplicatedWrite({
+        id: crypto.randomUUID(),
+        type: `test.delta-${index}`,
+        payload: { marker: index },
+        action: () => ({ marker: index }),
+      });
+    }
+
+    assert.deepEqual(
+      db.getReplicationOperationsMissing({ [hostId]: 2 }, 2).map((operation) => operation.originSeq),
+      [3, 4]
+    );
+
+    db.acknowledgeReplicationVector('peer-a', { [hostId]: 6 });
+    db.acknowledgeReplicationVector('peer-b', {});
+    assert.equal(db.getPendingReplicationOperationCount(), 6);
+    db.acknowledgeReplicationVector('peer-b', { [hostId]: 2 });
+    assert.equal(db.getPendingReplicationOperationCount(), 4);
+    db.acknowledgeReplicationVector('peer-b', { [hostId]: 6 });
+    assert.equal(db.getPendingReplicationOperationCount(), 0);
+  } finally {
+    fs.rmSync(dataPath, { recursive: true, force: true });
+  }
+});
+
 test('operational SQLite access paths stay indexed and direct lookups preserve records', async () => {
   fs.rmSync(dataPath, { recursive: true, force: true });
   const db = await import('../server/db.ts');

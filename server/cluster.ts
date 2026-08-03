@@ -21,7 +21,11 @@ import {
   type ReplicationOperation,
 } from './db.js';
 import { appSnapshot } from './app-state.js';
-import { hostInfo } from './host.js';
+import {
+  currentLanNetworkEndpoints,
+  hostInfo,
+  PUBLIC_APP_PORT,
+} from './host.js';
 import { emitRealtime } from './realtime.js';
 import {
   appSnapshotSchema,
@@ -29,6 +33,14 @@ import {
   type ClusterPeer,
   type ClusterStatus,
 } from '../shared/schemas.js';
+import {
+  normalizeOperationVector,
+  secureEqual,
+  signDiscoveryPayload,
+  verifyDiscoveryPayload,
+  type DiscoveryPayload,
+  type OperationVector,
+} from './cluster-protocol.js';
 import { isClusterEnabled } from './cluster-policy.js';
 
 type PeerState = {
@@ -36,20 +48,10 @@ type PeerState = {
   url: string;
   reachable: boolean;
   lastSeenAt: number | null;
-  vector: Record<string, number>;
+  vector: OperationVector;
   consecutiveFailures: number;
   nextProbeAt: number;
   clockSkewMs: number | null;
-};
-
-type DiscoveryPayload = {
-  app: 'apolloon';
-  protocol: 2;
-  clusterId: string;
-  hostId: string;
-  url: string;
-  vector: Record<string, number>;
-  sentAt: number;
 };
 
 type ExchangePayload = {
@@ -57,7 +59,7 @@ type ExchangePayload = {
   clusterId: string;
   hostId: string;
   url: string;
-  vector: Record<string, number>;
+  vector: OperationVector;
   operations: ReplicationOperation[];
   sentAt: number;
 };
@@ -76,10 +78,11 @@ type BootstrapPayload = {
 };
 
 const enabled = isClusterEnabled(process.env);
-const selfUrl = normalizeUrl(process.env.CLUSTER_SELF_URL || hostInfo().url);
+const configuredSelfUrl = normalizeUrl(process.env.CLUSTER_SELF_URL);
 const discoveryEnabled = process.env.CLUSTER_DISCOVERY !== 'false';
 const discoveryPort = readPositiveInt(process.env.CLUSTER_DISCOVERY_PORT, 45737);
-const discoveryAddress = process.env.CLUSTER_DISCOVERY_ADDRESS || '255.255.255.255';
+const configuredDiscoveryAddress =
+  process.env.CLUSTER_DISCOVERY_ADDRESS?.trim() || null;
 const discoveryIntervalMs = readPositiveInt(process.env.CLUSTER_DISCOVERY_INTERVAL_MS, 1_000);
 const syncIntervalMs = readPositiveInt(process.env.CLUSTER_SYNC_INTERVAL_MS, 350);
 const requestTimeoutMs = readPositiveInt(process.env.CLUSTER_REQUEST_TIMEOUT_MS, 1_500);
@@ -125,14 +128,6 @@ export function clusterStatus(): ClusterStatus {
   };
 }
 
-export function assertWritable(): void {
-  // Local-first nodes always commit to their own durable SQLite database.
-}
-
-export function recordLocalWrite(_type: string): void {
-  // Writes are captured transactionally by commitReplicatedWrite in db.ts.
-}
-
 export function registerClusterRoutes(app: Express): void {
   app.get('/api/cluster/status', (_req, res) => {
     res.json(clusterStatus());
@@ -160,7 +155,7 @@ export function registerClusterRoutes(app: Express): void {
       clusterId: identity.clusterId,
       clusterSecret: identity.clusterSecret,
       hostId: identity.hostId,
-      url: selfUrl,
+      url: currentSelfUrl(),
       snapshot: appSnapshot(),
       checkpoint: getReplicationCheckpoint(),
       operations: getAllReplicationOperations(),
@@ -176,7 +171,7 @@ export function registerClusterRoutes(app: Express): void {
     }
     const remoteUrl = normalizeUrl(req.body?.remoteUrl);
     const code = String(req.body?.pairingCode || '').trim().toUpperCase();
-    if (!remoteUrl || remoteUrl === selfUrl || !code) {
+    if (!remoteUrl || remoteUrl === currentSelfUrl() || !code) {
       res.status(400).json({ ok: false, error: 'vul een geldige laptop-URL en koppelcode in' });
       return;
     }
@@ -243,22 +238,32 @@ export function registerClusterRoutes(app: Express): void {
       return;
     }
     const payload = req.body as Partial<ExchangePayload>;
+    const peerUrl = normalizeUrl(payload.url);
     if (
       payload.protocol !== 2 ||
       payload.clusterId !== identity.clusterId ||
+      typeof payload.hostId !== 'string' ||
       !payload.hostId ||
-      !payload.url ||
+      payload.hostId.length > 128 ||
+      !peerUrl ||
       !payload.vector ||
-      !Array.isArray(payload.operations)
+      !Array.isArray(payload.operations) ||
+      typeof payload.sentAt !== 'number' ||
+      !Number.isSafeInteger(payload.sentAt)
     ) {
       res.status(409).json({ ok: false, error: 'cluster or protocol mismatch' });
       return;
     }
 
-    const peer = touchPeer(payload.url, payload.hostId, payload.vector);
-    peer.clockSkewMs = typeof payload.sentAt === 'number' ? payload.sentAt - Date.now() : null;
+    const vector = normalizeOperationVector(payload.vector);
+    if (!vector) {
+      res.status(409).json({ ok: false, error: 'invalid operation vector' });
+      return;
+    }
     const result = applyRemoteReplicationOperations(payload.operations);
-    acknowledgeReplicationVector(payload.hostId, payload.vector);
+    const peer = touchPeer(peerUrl, payload.hostId, vector);
+    peer.clockSkewMs = payload.sentAt - Date.now();
+    acknowledgeReplicationVector(payload.hostId, vector);
     if (result.applied > 0 || result.conflicts > 0) {
       emitRealtime({ type: 'state:revision', payload: Date.now() });
     }
@@ -268,26 +273,33 @@ export function registerClusterRoutes(app: Express): void {
       protocol: 2,
       clusterId: identity.clusterId,
       hostId: identity.hostId,
-      url: selfUrl,
+      url: currentSelfUrl(),
       vector: localVector,
-      operations: getReplicationOperationsMissing(payload.vector),
+      operations: getReplicationOperationsMissing(vector),
       sentAt: Date.now(),
     } satisfies ExchangePayload);
   }));
-}
-
-export function proxyFollowerTrpcWrites(
-  _req: Request,
-  _res: Response,
-  next: NextFunction
-): void {
-  next();
 }
 
 export function startClusterService(): void {
   if (!enabled) return;
   startDiscovery();
   scheduleSync(25);
+}
+
+export function stopClusterService(): void {
+  if (discoveryHandle) clearInterval(discoveryHandle);
+  if (syncHandle) clearTimeout(syncHandle);
+  discoveryHandle = null;
+  syncHandle = null;
+  if (discoverySocket) {
+    try {
+      discoverySocket.close();
+    } catch {
+      // The socket may still be between creation and bind during shutdown.
+    }
+    discoverySocket = null;
+  }
 }
 
 function startDiscovery(): void {
@@ -300,18 +312,19 @@ function startDiscovery(): void {
   socket.on('message', (message) => {
     try {
       const identity = currentIdentity();
-      const payload = JSON.parse(message.toString('utf8')) as Partial<DiscoveryPayload>;
+      const payload = verifyDiscoveryPayload(
+        JSON.parse(message.toString('utf8')),
+        identity.clusterSecret
+      );
       if (
-        payload.app !== 'apolloon' ||
-        payload.protocol !== 2 ||
+        !payload ||
         payload.clusterId !== identity.clusterId ||
-        !payload.hostId ||
         payload.hostId === identity.hostId ||
-        !payload.url
+        !normalizeUrl(payload.url)
       ) {
         return;
       }
-      const peer = touchPeer(payload.url, payload.hostId, payload.vector || {});
+      const peer = touchPeer(payload.url, payload.hostId, payload.vector, false);
       peer.clockSkewMs = typeof payload.sentAt === 'number' ? payload.sentAt - Date.now() : null;
     } catch {
       // Ignore unrelated UDP traffic on the discovery port.
@@ -331,23 +344,75 @@ function startDiscovery(): void {
 
 function broadcastDiscovery(): void {
   if (!discoverySocket) return;
-  const message = Buffer.from(JSON.stringify(discoveryPayload()));
-  discoverySocket.send(message, discoveryPort, discoveryAddress, (error) => {
-    if (error) console.warn('Cluster discovery broadcast failed:', error.message);
-  });
+  for (const target of discoveryTargets()) {
+    const message = Buffer.from(
+      JSON.stringify(discoveryPayload(target.advertisedUrl))
+    );
+    discoverySocket.send(
+      message,
+      discoveryPort,
+      target.broadcastAddress,
+      (error) => {
+        if (error) {
+          console.warn(
+            `Cluster discovery broadcast to ${target.broadcastAddress} failed:`,
+            error.message
+          );
+        }
+      }
+    );
+  }
 }
 
-function discoveryPayload(): DiscoveryPayload {
+function discoveryPayload(advertisedUrl = currentSelfUrl()): DiscoveryPayload {
   const identity = currentIdentity();
-  return {
-    app: 'apolloon',
-    protocol: 2,
-    clusterId: identity.clusterId,
-    hostId: identity.hostId,
-    url: selfUrl,
-    vector: getReplicationVector(),
-    sentAt: Date.now(),
-  };
+  return signDiscoveryPayload(
+    {
+      app: 'apolloon',
+      protocol: 2,
+      clusterId: identity.clusterId,
+      hostId: identity.hostId,
+      url: advertisedUrl,
+      vector: getReplicationVector(),
+      sentAt: Date.now(),
+    },
+    identity.clusterSecret
+  );
+}
+
+function discoveryTargets(): Array<{
+  broadcastAddress: string;
+  advertisedUrl: string;
+}> {
+  if (configuredDiscoveryAddress) {
+    return [
+      {
+        broadcastAddress: configuredDiscoveryAddress,
+        advertisedUrl: currentSelfUrl(),
+      },
+    ];
+  }
+  if (configuredSelfUrl || process.env.PUBLIC_HOST) {
+    return [
+      {
+        broadcastAddress: '255.255.255.255',
+        advertisedUrl: currentSelfUrl(),
+      },
+    ];
+  }
+
+  const targets = currentLanNetworkEndpoints().map((endpoint) => ({
+    broadcastAddress: endpoint.broadcastAddress,
+    advertisedUrl: `http://${endpoint.address}:${PUBLIC_APP_PORT}`,
+  }));
+  return targets.length
+    ? targets
+    : [
+        {
+          broadcastAddress: '255.255.255.255',
+          advertisedUrl: currentSelfUrl(),
+        },
+      ];
 }
 
 function scheduleSync(delayMs = syncIntervalMs): void {
@@ -381,7 +446,7 @@ async function syncPeer(peer: PeerState): Promise<void> {
     protocol: 2,
     clusterId: identity.clusterId,
     hostId: identity.hostId,
-    url: selfUrl,
+    url: currentSelfUrl(),
     vector: localVector,
     operations: getReplicationOperationsMissing(peer.vector),
     sentAt: Date.now(),
@@ -398,25 +463,32 @@ async function syncPeer(peer: PeerState): Promise<void> {
     });
     if (!response.ok) throw new Error(`sync failed: ${response.status}`);
     const remote = (await response.json()) as ExchangePayload;
+    const remoteVector = normalizeOperationVector(remote.vector);
+    const remoteUrl = normalizeUrl(remote.url);
     if (
       remote.protocol !== 2 ||
       remote.clusterId !== identity.clusterId ||
+      typeof remote.hostId !== 'string' ||
       !remote.hostId ||
-      !remote.vector ||
-      !Array.isArray(remote.operations)
+      remote.hostId.length > 128 ||
+      !remoteUrl ||
+      !remoteVector ||
+      !Array.isArray(remote.operations) ||
+      typeof remote.sentAt !== 'number' ||
+      !Number.isSafeInteger(remote.sentAt)
     ) {
       throw new Error('invalid sync response');
     }
     const result = applyRemoteReplicationOperations(remote.operations);
     peer.id = remote.hostId;
-    peer.url = normalizeUrl(remote.url) || peer.url;
-    peer.vector = remote.vector;
+    rekeyPeer(peer, remoteUrl);
+    peer.vector = remoteVector;
     peer.reachable = true;
     peer.lastSeenAt = Date.now();
     peer.consecutiveFailures = 0;
     peer.nextProbeAt = 0;
     peer.clockSkewMs = remote.sentAt - Date.now();
-    acknowledgeReplicationVector(remote.hostId, remote.vector);
+    acknowledgeReplicationVector(remote.hostId, remoteVector);
     if (result.applied > 0 || result.conflicts > 0) {
       emitRealtime({ type: 'state:revision', payload: Date.now() });
     }
@@ -436,7 +508,7 @@ async function syncPeer(peer: PeerState): Promise<void> {
 
 function addPeer(peerUrl: string): PeerState | null {
   const url = normalizeUrl(peerUrl);
-  if (!url || url === selfUrl) return null;
+  if (!url || url === currentSelfUrl()) return null;
   const existing = peers.get(url);
   if (existing) return existing;
   const peer: PeerState = {
@@ -456,23 +528,39 @@ function addPeer(peerUrl: string): PeerState | null {
 function touchPeer(
   peerUrl: string,
   peerId: string,
-  vector: Record<string, number>
+  vector: OperationVector,
+  reachable = true
 ): PeerState {
   const url = normalizeUrl(peerUrl);
-  let peer: PeerState | null | undefined = [...peers.values()].find(
-    (item) => item.id === peerId
-  );
-  if (!peer) peer = addPeer(url);
+  let peer = [...peers.values()].find((item) => item.id === peerId);
+  const peerAtUrl = peers.get(url);
+  if (!peer) peer = peerAtUrl || addPeer(url) || undefined;
   if (!peer) {
     throw new Error('peer points to this host');
   }
+  if (peerAtUrl && peerAtUrl !== peer) {
+    peers.delete(peerAtUrl.url);
+  }
+  rekeyPeer(peer, url);
   peer.id = peerId;
   peer.vector = vector;
-  peer.reachable = true;
-  peer.lastSeenAt = Date.now();
-  peer.consecutiveFailures = 0;
-  peer.nextProbeAt = 0;
+  if (reachable) {
+    peer.reachable = true;
+    peer.lastSeenAt = Date.now();
+    peer.consecutiveFailures = 0;
+    peer.nextProbeAt = 0;
+  }
   return peer;
+}
+
+function rekeyPeer(peer: PeerState, nextUrl: string): void {
+  const url = normalizeUrl(nextUrl);
+  if (!url || url === currentSelfUrl()) return;
+  for (const [key, value] of peers) {
+    if (value === peer && key !== url) peers.delete(key);
+  }
+  peer.url = url;
+  peers.set(url, peer);
 }
 
 function toClusterPeer(peer: PeerState): ClusterPeer {
@@ -487,7 +575,10 @@ function toClusterPeer(peer: PeerState): ClusterPeer {
 }
 
 function authorized(req: Request): boolean {
-  return req.header('x-apolloon-cluster-secret') === currentIdentity().clusterSecret;
+  return secureEqual(
+    req.header('x-apolloon-cluster-secret'),
+    currentIdentity().clusterSecret
+  );
 }
 
 function currentIdentity(): ReplicationIdentity {
@@ -516,6 +607,13 @@ function normalizeUrl(value: unknown): string {
   if (!raw) return '';
   try {
     const url = new URL(raw.includes('://') ? raw : `http://${raw}`);
+    if (
+      (url.protocol !== 'http:' && url.protocol !== 'https:') ||
+      url.username ||
+      url.password
+    ) {
+      return '';
+    }
     url.pathname = '';
     url.search = '';
     url.hash = '';
@@ -523,6 +621,10 @@ function normalizeUrl(value: unknown): string {
   } catch {
     return '';
   }
+}
+
+function currentSelfUrl(): string {
+  return configuredSelfUrl || normalizeUrl(hostInfo().url);
 }
 
 function readPositiveInt(value: unknown, fallback: number): number {

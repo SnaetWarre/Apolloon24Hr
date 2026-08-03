@@ -287,6 +287,121 @@ test('joining a creator laptop imports its database and preserves a recovery bac
   }
 });
 
+test('an invalid replication batch cannot strand a valid operation in the log', { timeout: 20_000 }, async () => {
+  const root = testRoot('atomic-batch');
+  const source = await startServer({
+    port: await freePort(),
+    dataPath: path.join(root, 'source'),
+  });
+  const target = await startServer({
+    port: await freePort(),
+    dataPath: path.join(root, 'target'),
+  });
+  try {
+    const sourceClient = createClient(source.port);
+    const first = await sourceClient.runners.create.mutate({
+      name: 'Atomic first',
+      runnerNumber: 'ATOMIC-1',
+      _commandId: crypto.randomUUID(),
+      _clientId: 'source',
+    });
+    const second = await sourceClient.runners.create.mutate({
+      name: 'Atomic second',
+      runnerNumber: 'ATOMIC-2',
+      _commandId: crypto.randomUUID(),
+      _clientId: 'source',
+    });
+    const sourceStatus = await fetchStatus(source.port);
+    const pullResponse = await postClusterExchange(source, {
+      hostId: 'observer',
+      url: 'http://127.0.0.1:59991',
+      vector: {},
+      operations: [],
+    });
+    assert.equal(pullResponse.ok, true);
+    const pulled = (await pullResponse.json()) as { operations: Array<Record<string, unknown>> };
+    assert.equal(pulled.operations.length, 2);
+
+    const invalidOperations = [
+      pulled.operations[0],
+      { ...pulled.operations[1], checksum: '0'.repeat(64) },
+    ];
+    const invalidResponse = await postClusterExchange(target, {
+      clusterId: sourceStatus.clusterId,
+      hostId: sourceStatus.hostId,
+      url: source.baseUrl,
+      vector: { [sourceStatus.hostId]: 2 },
+      operations: invalidOperations,
+    });
+    assert.equal(invalidResponse.status, 500);
+    assert.equal(
+      (await fetchState(target.port)).runners.some((runner) => runner.id === first.id),
+      false
+    );
+    assert.equal((await fetchStatus(target.port)).knownHosts, 1);
+
+    const retryResponse = await postClusterExchange(target, {
+      clusterId: sourceStatus.clusterId,
+      hostId: sourceStatus.hostId,
+      url: source.baseUrl,
+      vector: { [sourceStatus.hostId]: 2 },
+      operations: pulled.operations,
+    });
+    assert.equal(retryResponse.ok, true);
+    const targetRunnerIds = new Set(
+      (await fetchState(target.port)).runners.map((runner) => runner.id)
+    );
+    assert.equal(targetRunnerIds.has(first.id), true);
+    assert.equal(targetRunnerIds.has(second.id), true);
+  } catch (error) {
+    throw withServerOutput(error, source, target);
+  } finally {
+    await Promise.all([stopServer(source), stopServer(target)]);
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a known peer changing address replaces its stale URL instead of duplicating the laptop', { timeout: 20_000 }, async () => {
+  const root = testRoot('peer-address-change');
+  const ports = await Promise.all([freePort(), freePort()]);
+  const a = await startServer({
+    port: ports[0],
+    dataPath: path.join(root, 'a'),
+    peers: [ports[1]],
+  });
+  let b: RunningServer | null = await startServer({
+    port: ports[1],
+    dataPath: path.join(root, 'b'),
+    peers: [ports[0]],
+  });
+  try {
+    await waitFor(async () => (await fetchStatus(a.port)).connectedHosts === 2);
+    const bStatus = await fetchStatus(b.port);
+    await stopServer(b);
+    b = null;
+
+    const replacementUrl = `http://127.0.0.1:${await freePort()}`;
+    const response = await postClusterExchange(a, {
+      hostId: bStatus.hostId,
+      url: replacementUrl,
+      vector: {},
+      operations: [],
+    });
+    assert.equal(response.ok, true);
+
+    const status = await fetchStatus(a.port);
+    const matchingPeers = status.peers.filter((peer) => peer.id === bStatus.hostId);
+    assert.equal(matchingPeers.length, 1);
+    assert.equal(matchingPeers[0].url, replacementUrl);
+    assert.equal(status.knownHosts, 2);
+  } catch (error) {
+    throw withServerOutput(error, a, b);
+  } finally {
+    await Promise.all([stopServer(a), stopServer(b)]);
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('concurrent offline edits of the same runner converge in canonical order', { timeout: 30_000 }, async () => {
   const root = testRoot('same-runner');
   const ports = await Promise.all([freePort(), freePort()]);
@@ -520,6 +635,34 @@ test('reusing a command id is exactly-once on the local database', { timeout: 12
 function createClient(port: number) {
   return createTRPCClient<AppRouter>({
     links: [httpBatchLink({ url: `http://127.0.0.1:${port}/trpc` })],
+  });
+}
+
+function postClusterExchange(
+  server: RunningServer,
+  input: {
+    clusterId?: string;
+    hostId: string;
+    url: string;
+    vector: Record<string, number>;
+    operations: unknown[];
+  }
+): Promise<Response> {
+  return fetch(`${server.baseUrl}/api/cluster/sync/exchange`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-apolloon-cluster-secret': CLUSTER_SECRET,
+    },
+    body: JSON.stringify({
+      protocol: 2,
+      clusterId: input.clusterId || CLUSTER_ID,
+      hostId: input.hostId,
+      url: input.url,
+      vector: input.vector,
+      operations: input.operations,
+      sentAt: Date.now(),
+    }),
   });
 }
 

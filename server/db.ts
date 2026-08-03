@@ -38,6 +38,7 @@ const VALID_PUBLIC_RECORD_MODES = new Set<PublicRecordMode>(['off', 'day', 'two_
 const DEFAULT_PUBLIC_RECORD_MODE: PublicRecordMode = 'day';
 const TEMPORARY_TEAM_KIND = 'temporary_team';
 const SCHEMA_VERSION = 7;
+const MAX_REPLICATION_ORIGINS = 64;
 const APP_DATA_TABLE_PATTERN =
   /\b(?:runners|labels|runner_labels|queue_entries|race_state|laps|race_events|temporary_teams|temporary_team_members)\b/i;
 
@@ -587,6 +588,13 @@ export async function initDb(): Promise<void> {
   ensureReplicationIdentity();
 }
 
+export function closeDb(): void {
+  statementCache.clear();
+  if (!database) return;
+  database.close();
+  database = null;
+}
+
 export function getSetting(key: string): string | null {
   const row = one<{ value: string }>('SELECT value FROM settings WHERE key = ?', [key]);
   return row ? row.value : null;
@@ -779,6 +787,27 @@ function replicationChecksum(input: Omit<ReplicationOperation, 'checksum' | 'sta
     .digest('hex');
 }
 
+function stableJson(value: unknown): string {
+  return JSON.stringify(value, (_key, nestedValue) => {
+    if (
+      nestedValue &&
+      typeof nestedValue === 'object' &&
+      !Array.isArray(nestedValue)
+    ) {
+      return Object.fromEntries(
+        Object.entries(nestedValue as Record<string, unknown>).sort(([a], [b]) =>
+          a.localeCompare(b)
+        )
+      );
+    }
+    return nestedValue;
+  });
+}
+
+function hasOwn(record: object, key: PropertyKey): boolean {
+  return Object.prototype.hasOwnProperty.call(record, key);
+}
+
 function replicationOperationFromRow(row: {
   id: string;
   clusterId: string;
@@ -846,7 +875,16 @@ export function commitReplicatedWrite<T>(input: {
     `${REPLICATION_OPERATION_SELECT} WHERE id = ?`,
     [id]
   );
-  if (existing) return replicationOperationFromRow(existing).result as T;
+  if (existing) {
+    const operation = replicationOperationFromRow(existing);
+    if (
+      operation.type !== input.type ||
+      stableJson(operation.payload) !== stableJson(input.payload ?? null)
+    ) {
+      throw new Error('command id was already used for a different write');
+    }
+    return operation.result as T;
+  }
   if (writeCapture) throw new Error('nested replicated write is not supported');
 
   return transaction(() => {
@@ -925,12 +963,32 @@ export function getReplicationOperationsMissing(
   vector: Record<string, number>,
   limit = 250
 ): ReplicationOperation[] {
+  const origins = all<{ hostId: string }>(
+    `SELECT DISTINCT origin_host_id AS hostId
+     FROM replication_operations`
+  );
+  if (!origins.length) return [];
+
+  const params: SqlValue[] = [];
+  const conditions = origins.map(({ hostId }) => {
+    const acknowledged = Number(
+      hasOwn(vector, hostId) ? vector[hostId] : 0
+    );
+    params.push(
+      hostId,
+      Number.isFinite(acknowledged) ? Math.max(0, Math.floor(acknowledged)) : 0
+    );
+    return '(origin_host_id = ? AND origin_seq > ?)';
+  });
+  params.push(Math.max(1, Math.min(1_000, Math.floor(limit) || 250)));
+
   return all<Parameters<typeof replicationOperationFromRow>[0]>(
     `${REPLICATION_OPERATION_SELECT}
-     ORDER BY hlc_wall_ms, hlc_counter, origin_host_id, origin_seq`
+     WHERE ${conditions.join(' OR ')}
+     ORDER BY hlc_wall_ms, hlc_counter, origin_host_id, origin_seq
+     LIMIT ?`,
+    params
   )
-    .filter((row) => row.originSeq > (vector[row.originHostId] || 0))
-    .slice(0, Math.max(1, Math.min(1_000, limit)))
     .map(replicationOperationFromRow);
 }
 
@@ -1041,16 +1099,22 @@ export function finalizeReplicationConflict(
 }
 
 export function getPendingReplicationOperationCount(): number {
-  const peers = one<{ count: number }>(
-    'SELECT COUNT(DISTINCT peer_host_id) AS count FROM replication_peer_progress'
-  )?.count ?? 0;
+  const peers =
+    one<{ count: number }>(
+      'SELECT COUNT(DISTINCT peer_host_id) AS count FROM replication_peer_progress'
+    )?.count ?? 0;
   if (!peers) return 0;
   const local = ensureReplicationIdentity().hostId;
   const acknowledged =
     one<{ seq: number }>(
-      `SELECT COALESCE(MAX(acknowledged_seq), 0) AS seq
-       FROM replication_peer_progress
-       WHERE origin_host_id = ?`,
+      `SELECT COALESCE(MIN(COALESCE(progress.acknowledged_seq, 0)), 0) AS seq
+       FROM (
+         SELECT DISTINCT peer_host_id
+         FROM replication_peer_progress
+       ) AS peers
+       LEFT JOIN replication_peer_progress AS progress
+         ON progress.peer_host_id = peers.peer_host_id
+        AND progress.origin_host_id = ?`,
       [local]
     )?.seq ?? 0;
   return (
@@ -1067,8 +1131,12 @@ export function acknowledgeReplicationVector(
   vector: Record<string, number>
 ): void {
   const now = Date.now();
+  const origins = new Set([peerHostId, ...Object.keys(vector)]);
   transaction(() => {
-    for (const [originHostId, seq] of Object.entries(vector)) {
+    for (const originHostId of origins) {
+      const seq = Number(
+        hasOwn(vector, originHostId) ? vector[originHostId] : 0
+      );
       getDb()
         .prepare(
           `INSERT INTO replication_peer_progress (
@@ -1078,7 +1146,12 @@ export function acknowledgeReplicationVector(
              acknowledged_seq = MAX(replication_peer_progress.acknowledged_seq, excluded.acknowledged_seq),
              updated_at = excluded.updated_at`
         )
-        .run(peerHostId, originHostId, Math.max(0, Math.floor(seq)), now);
+        .run(
+          peerHostId,
+          originHostId,
+          Number.isFinite(seq) ? Math.max(0, Math.floor(seq)) : 0,
+          now
+        );
     }
   });
 }
@@ -1253,34 +1326,93 @@ function rebuildApplicationFromReplicationLog(
   appDataRevision += 1;
 }
 
+function assertValidReplicationOperation(operation: ReplicationOperation): void {
+  const validText = (value: unknown, maxLength: number): value is string =>
+    typeof value === 'string' && value.length > 0 && value.length <= maxLength;
+  if (
+    !operation ||
+    typeof operation !== 'object' ||
+    !validText(operation.id, 128) ||
+    !validText(operation.clusterId, 128) ||
+    !validText(operation.originHostId, 128) ||
+    !Number.isSafeInteger(operation.originSeq) ||
+    operation.originSeq < 1 ||
+    !Number.isSafeInteger(operation.hlcWallMs) ||
+    operation.hlcWallMs < 0 ||
+    !Number.isSafeInteger(operation.hlcCounter) ||
+    operation.hlcCounter < 0 ||
+    !validText(operation.type, 128) ||
+    !Array.isArray(operation.statements) ||
+    operation.statements.length > 100_000 ||
+    (operation.raceBaseKey !== null &&
+      !validText(operation.raceBaseKey, 1_024)) ||
+    !/^[0-9a-f]{64}$/i.test(operation.checksum) ||
+    !Number.isSafeInteger(operation.createdAt) ||
+    operation.createdAt < 0
+  ) {
+    throw new Error('invalid replication operation');
+  }
+
+  for (const item of operation.statements) {
+    if (
+      !item ||
+      typeof item.sql !== 'string' ||
+      item.sql.length === 0 ||
+      item.sql.length > 100_000 ||
+      !isReplicatedMutation(item.sql) ||
+      !Array.isArray(item.params) ||
+      item.params.length > 10_000 ||
+      item.params.some(
+        (value) =>
+          value !== null &&
+          typeof value !== 'string' &&
+          (typeof value !== 'number' || !Number.isFinite(value))
+      )
+    ) {
+      throw new Error(`invalid replicated statement for ${operation.id}`);
+    }
+  }
+}
+
 export function applyRemoteReplicationOperations(
   operations: ReplicationOperation[]
 ): { applied: number; duplicates: number; conflicts: number } {
   const identity = ensureReplicationIdentity();
-  if (operations.length) ensureReplicationCheckpoint();
+  if (!Array.isArray(operations) || operations.length > 1_000) {
+    throw new Error('invalid replication batch');
+  }
   let duplicates = 0;
   const insertedIds: string[] = [];
   const insertedOperations: ReplicationOperation[] = [];
-  const existingOperations = getAllReplicationOperations();
-  const previousLastOperation =
-    existingOperations.length > 0
-      ? existingOperations[existingOperations.length - 1]
-      : null;
+  const previousLastRow = one<Parameters<typeof replicationOperationFromRow>[0]>(
+    `${REPLICATION_OPERATION_SELECT}
+     ORDER BY hlc_wall_ms DESC, hlc_counter DESC, origin_host_id DESC, origin_seq DESC
+     LIMIT 1`
+  );
+  const previousLastOperation = previousLastRow
+    ? replicationOperationFromRow(previousLastRow)
+    : null;
   const seenRaceBases = new Set(
-    existingOperations
-      .filter((operation) => operation.status === 'accepted' && operation.raceBaseKey)
-      .map((operation) => operation.raceBaseKey as string)
+    all<{ raceBaseKey: string }>(
+      `SELECT DISTINCT race_base_key AS raceBaseKey
+       FROM replication_operations
+       WHERE status = 'accepted' AND race_base_key IS NOT NULL`
+    ).map((row) => row.raceBaseKey)
   );
   let requiresRebuild = false;
-  const ordered = operations
-    .slice()
-    .sort(compareReplicationOperations);
+  const ordered = operations.slice().sort(compareReplicationOperations);
+  const expectedVector = getReplicationVector();
 
   for (const operation of ordered) {
+    assertValidReplicationOperation(operation);
     if (operation.clusterId !== identity.clusterId) {
       throw new Error('replication cluster mismatch');
     }
-    if (getReplicationOperation(operation.id)) {
+    const existing = getReplicationOperation(operation.id);
+    if (existing) {
+      if (existing.checksum !== operation.checksum) {
+        throw new Error(`replication operation id collision for ${operation.id}`);
+      }
       duplicates += 1;
       continue;
     }
@@ -1301,17 +1433,26 @@ export function applyRemoteReplicationOperations(
     if (operation.checksum !== expectedChecksum) {
       throw new Error(`replication checksum mismatch for ${operation.id}`);
     }
-    const knownSeq = getReplicationVector()[operation.originHostId] || 0;
-    if (operation.originSeq > knownSeq + 1) {
+    const hasKnownOrigin = hasOwn(
+      expectedVector,
+      operation.originHostId
+    );
+    const knownSeq = hasKnownOrigin
+      ? expectedVector[operation.originHostId]
+      : 0;
+    if (
+      knownSeq === 0 &&
+      !hasKnownOrigin &&
+      Object.keys(expectedVector).length >= MAX_REPLICATION_ORIGINS
+    ) {
+      throw new Error('replication origin limit exceeded');
+    }
+    if (operation.originSeq !== knownSeq + 1) {
       throw new Error(
         `replication gap for ${operation.originHostId}: expected ${knownSeq + 1}, received ${operation.originSeq}`
       );
     }
-    insertReplicationOperation({
-      ...operation,
-      status: 'accepted',
-      appliedAt: Date.now(),
-    });
+    expectedVector[operation.originHostId] = operation.originSeq;
     insertedIds.push(operation.id);
     insertedOperations.push(operation);
     if (
@@ -1324,12 +1465,29 @@ export function applyRemoteReplicationOperations(
       if (seenRaceBases.has(operation.raceBaseKey)) requiresRebuild = true;
       seenRaceBases.add(operation.raceBaseKey);
     }
-    observeRemoteHlc(operation.hlcWallMs, operation.hlcCounter);
   }
   if (insertedIds.length) {
-    if (!requiresRebuild) {
+    ensureReplicationCheckpoint();
+    const insertOperations = () => {
+      for (const operation of insertedOperations) {
+        insertReplicationOperation({
+          ...operation,
+          status: 'accepted',
+          appliedAt: Date.now(),
+        });
+        observeRemoteHlc(operation.hlcWallMs, operation.hlcCounter);
+      }
+    };
+
+    if (requiresRebuild) {
+      transaction(() => {
+        insertOperations();
+        rebuildApplicationFromReplicationLog();
+      });
+    } else {
       try {
         transaction(() => {
+          insertOperations();
           for (const operation of insertedOperations) {
             for (const item of operation.statements) {
               getDb().prepare(item.sql).run(...item.params);
@@ -1350,10 +1508,11 @@ export function applyRemoteReplicationOperations(
         });
         appDataRevision += 1;
       } catch {
-        rebuildApplicationFromReplicationLog();
+        transaction(() => {
+          insertOperations();
+          rebuildApplicationFromReplicationLog();
+        });
       }
-    } else {
-      rebuildApplicationFromReplicationLog();
     }
   }
   const conflicts = insertedIds.filter(

@@ -9,8 +9,19 @@ import Papa from 'papaparse';
 import { Server as SocketIOServer } from 'socket.io';
 import { formatDurationMs } from '../shared/time.js';
 import { appSnapshot } from './app-state.js';
-import { proxyFollowerTrpcWrites, registerClusterRoutes, startClusterService } from './cluster.js';
-import { getAllLaps, getAllRaceEvents, getAllRunners, getAppDataRevision, initDb } from './db.js';
+import {
+  registerClusterRoutes,
+  startClusterService,
+  stopClusterService,
+} from './cluster.js';
+import {
+  closeDb,
+  getAllLaps,
+  getAllRaceEvents,
+  getAllRunners,
+  getAppDataRevision,
+  initDb,
+} from './db.js';
 import { hostInfo, SERVER_PORT } from './host.js';
 import { setRealtimeEmitter } from './realtime.js';
 import { appRouter } from './router.js';
@@ -37,6 +48,7 @@ const io = new SocketIOServer(server, {
   cors: { origin: true, credentials: false },
   serveClient: false,
 });
+let shuttingDown = false;
 
 function lapExportRows(): Array<Record<string, string | number>> {
   const runnersById = new Map(getAllRunners().map((runner) => [runner.id, runner]));
@@ -106,7 +118,6 @@ setRealtimeEmitter((event) => {
 
 app.use(express.json({ limit: '50mb' }));
 registerClusterRoutes(app);
-app.use('/trpc', proxyFollowerTrpcWrites);
 
 app.use(
   '/trpc',
@@ -219,6 +230,34 @@ app.get('/{*splat}', (_req, res) => {
 io.on('connection', (socket) => {
   socket.emit('state:revision', getAppDataRevision());
 });
+
+function shutdown(reason: string): void {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`Stopping server (${reason})`);
+  stopClusterService();
+
+  let finished = false;
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    closeDb();
+    process.exit(0);
+  };
+  const forceExit = setTimeout(finish, 5_000);
+  forceExit.unref?.();
+
+  if (!server.listening) {
+    finish();
+    return;
+  }
+  server.close(finish);
+  io.close(finish);
+}
+
+process.once('SIGINT', () => shutdown('SIGINT'));
+process.once('SIGTERM', () => shutdown('SIGTERM'));
+process.once('disconnect', () => shutdown('parent disconnected'));
 
 await initDb();
 startClusterService();

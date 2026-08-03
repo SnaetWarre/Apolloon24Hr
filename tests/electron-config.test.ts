@@ -60,3 +60,12 @@ test('packaged Electron startup clears poisoned assets and never exposes a blank
   assert.match(mainSource, /await createWindow\(\)/);
   assert.match(mainSource, /if \(!window\.isDestroyed\(\)\) window\.show\(\)/);
 });
+
+test('the packaged backend exits when its Electron parent disappears', () => {
+  const serverSource = fs.readFileSync(path.resolve('server/index.ts'), 'utf8');
+
+  assert.match(serverSource, /process\.once\('disconnect'/);
+  assert.match(serverSource, /stopClusterService\(\)/);
+  assert.match(serverSource, /closeDb\(\)/);
+  assert.match(serverSource, /server\.close\(finish\)/);
+});
