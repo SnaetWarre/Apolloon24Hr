@@ -66,8 +66,15 @@ five minutes. A backup is published only after all of these steps succeed:
 1. `better-sqlite3` creates a live online backup into a temporary file.
 2. A separate read-only connection runs `PRAGMA quick_check` and
    `PRAGMA foreign_key_check`.
-3. The file is flushed and atomically renamed.
-4. Apolloon calculates SHA-256 and stores metadata beside the snapshot.
+3. Apolloon compacts that private copy with `VACUUM`; the live race database is
+   never vacuumed by this step.
+4. A separate read-only connection repeats both integrity checks.
+5. The file is flushed and atomically renamed.
+6. Apolloon calculates SHA-256 and stores metadata beside the snapshot.
+
+Published snapshots remain ordinary, directly restorable SQLite files; the
+compaction only prevents deleted/free pages from being copied into every
+recovery point.
 
 Automatic retention is tiered:
 
@@ -115,6 +122,12 @@ the physical, used, and reclaimable database sizes. When at least 16 MiB and 25
 percent are reclaimable, Apolloon offers guarded compaction. It first creates a
 verified safety backup and refuses to run while a race is active. Startup may
 perform the same compaction automatically only when the race is inactive.
+
+Replication checkpoints are stored locally as versioned gzip/base64 values.
+Bootstrap and synchronization still exchange the normal structured checkpoint,
+so compression does not leak into the wire format. Lap history stores only the
+label identity and presentation fields needed to render the historical lap;
+live label targets, ordering, and edit timestamps are not duplicated per lap.
 
 ## Recovery Runbook
 

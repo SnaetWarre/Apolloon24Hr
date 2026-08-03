@@ -119,9 +119,10 @@ replication_conflicts
 
 ### Supporting modules
 
-- `server/backups.ts`: creates online SQLite snapshots, verifies their integrity,
-  calculates SHA-256, serializes overlapping manual/scheduled requests, applies
-  tiered retention, reports disk capacity, and re-verifies downloads.
+- `server/backups.ts`: creates compact online SQLite snapshots, verifies their
+  integrity, calculates SHA-256, serializes overlapping manual/scheduled
+  requests, applies tiered retention, reports disk capacity, and re-verifies
+  downloads.
 - `server/app-state.ts`: caches the small live snapshot separately from the full
   replication/export snapshot and refreshes only clock/host metadata per request.
 - `server/app-history.ts`: serves cached full, recent, or per-runner history.

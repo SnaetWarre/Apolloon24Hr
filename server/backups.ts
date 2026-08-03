@@ -291,6 +291,8 @@ async function performBackup(reasonInput: string): Promise<BackupRecord> {
   try {
     await backupDatabase(partialPath);
     verifyBackup(partialPath);
+    compactBackupCopy(partialPath);
+    verifyBackup(partialPath);
     await removeBackupSidecars(partialPath);
     await syncFile(partialPath);
     await fs.promises.rename(partialPath, finalPath);
@@ -327,6 +329,18 @@ async function performBackup(reasonInput: string): Promise<BackupRecord> {
       ]).catch(() => undefined);
     }
     throw error;
+  }
+}
+
+function compactBackupCopy(filePath: string): void {
+  const backup = new Database(filePath, { fileMustExist: true });
+  try {
+    backup.pragma('busy_timeout = 5000');
+    backup.pragma('synchronous = FULL');
+    backup.pragma('journal_mode = DELETE');
+    backup.exec('VACUUM');
+  } finally {
+    backup.close();
   }
 }
 

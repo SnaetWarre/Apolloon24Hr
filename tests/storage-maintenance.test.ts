@@ -15,17 +15,36 @@ process.env.DATABASE_COMPACTION_MIN_RATIO = '0.10';
 test('schema migration removes the retired log and compaction never runs during a race', async () => {
   fs.rmSync(dataPath, { recursive: true, force: true });
   fs.mkdirSync(databaseDirectory, { recursive: true });
+  const legacyCheckpoint = {
+    vector: { 'host-a': 12 },
+    tables: {
+      runners: Array.from({ length: 200 }, (_, index) => ({
+        id: `runner-${index}`,
+        name: `Repeated checkpoint runner ${index}`,
+        notes: 'repeated recovery context '.repeat(20),
+      })),
+    },
+    settings: { public_record_mode: 'day' },
+  };
+  const legacyCheckpointJson = JSON.stringify(legacyCheckpoint);
   const legacy = new Database(databasePath);
   try {
     legacy.exec(`
       CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
       INSERT INTO settings(key, value) VALUES ('schema_version', '7');
+      INSERT INTO settings(key, value) VALUES (
+        'replication_checkpoint_json',
+        '{"vector":{},"tables":{},"settings":{}}'
+      );
       CREATE TABLE cluster_operations (
         seq INTEGER PRIMARY KEY,
         payload_json BLOB NOT NULL
       );
       INSERT INTO cluster_operations(payload_json) VALUES (randomblob(4 * 1024 * 1024));
     `);
+    legacy
+      .prepare("UPDATE settings SET value = ? WHERE key = 'replication_checkpoint_json'")
+      .run(legacyCheckpointJson);
   } finally {
     legacy.close();
   }
@@ -42,13 +61,29 @@ test('schema migration removes the retired log and compaction never runs during 
       assert.equal(retiredTable, undefined);
       assert.equal(
         migrated.prepare("SELECT value FROM settings WHERE key = 'schema_version'").pluck().get(),
-        '8'
+        '9'
       );
-      assert.equal(migrated.pragma('user_version', { simple: true }), 8);
+      assert.equal(migrated.pragma('user_version', { simple: true }), 9);
+      const compressedCheckpoint = String(
+        migrated
+          .prepare("SELECT value FROM settings WHERE key = 'replication_checkpoint_gzip_v1'")
+          .pluck()
+          .get()
+      );
+      assert.match(compressedCheckpoint, /^gzip-base64-v1:/);
+      assert.ok(compressedCheckpoint.length < legacyCheckpointJson.length / 2);
+      assert.equal(
+        migrated
+          .prepare("SELECT value FROM settings WHERE key = 'replication_checkpoint_json'")
+          .pluck()
+          .get(),
+        undefined
+      );
       assert.equal(migrated.pragma('quick_check', { simple: true }), 'ok');
     } finally {
       migrated.close();
     }
+    assert.deepEqual(db.getReplicationCheckpoint(), legacyCheckpoint);
     const migrationStorage = db.databaseStorageStatus();
     assert.equal(migrationStorage.compactionRecommended, true);
     const startupCompaction = db.compactDatabaseIfSafe();

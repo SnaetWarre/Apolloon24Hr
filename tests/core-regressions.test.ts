@@ -74,8 +74,8 @@ test('event readiness blocks real safety failures and distinguishes standalone w
     role: 'local-first',
     compatibility: {
       protocolVersion: 3,
-      schemaVersion: 8,
-      minimumSchemaVersion: 8,
+      schemaVersion: 9,
+      minimumSchemaVersion: 9,
       replicationFormatVersion: 1,
       minimumReplicationFormatVersion: 1,
       appVersion: '1.0.0',

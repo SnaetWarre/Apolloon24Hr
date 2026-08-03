@@ -24,8 +24,8 @@ test('UDP discovery only accepts payloads authenticated by the cluster secret', 
       protocol: 3,
       compatibility: {
         protocolVersion: 3,
-        schemaVersion: 8,
-        minimumSchemaVersion: 8,
+        schemaVersion: 9,
+        minimumSchemaVersion: 9,
         replicationFormatVersion: 1,
         minimumReplicationFormatVersion: 1,
         appVersion: '1.0.0',
@@ -83,8 +83,8 @@ test('cluster operation vectors reject malformed or unbounded peer input', () =>
 test('cluster compatibility rejects unsafe version skew before SQL replication', () => {
   const local = {
     protocolVersion: 3,
-    schemaVersion: 8,
-    minimumSchemaVersion: 8,
+    schemaVersion: 9,
+    minimumSchemaVersion: 9,
     replicationFormatVersion: 1,
     minimumReplicationFormatVersion: 1,
     appVersion: '1.2.0',

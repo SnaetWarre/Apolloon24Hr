@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import crypto from 'node:crypto';
 import fs from 'fs';
 import path from 'path';
+import { gunzipSync, gzipSync } from 'node:zlib';
 import { v4 as uuidv4 } from 'uuid';
 import type {
   AppSettings,
@@ -38,7 +39,7 @@ const VALID_RACE_EVENT_TYPES = new Set<RaceEventType>(['burgie_gepakt']);
 const VALID_PUBLIC_RECORD_MODES = new Set<PublicRecordMode>(['off', 'day', 'two_hour', 'hour']);
 const DEFAULT_PUBLIC_RECORD_MODE: PublicRecordMode = 'day';
 const TEMPORARY_TEAM_KIND = 'temporary_team';
-export const DATABASE_SCHEMA_VERSION = 8;
+export const DATABASE_SCHEMA_VERSION = 9;
 const COMPACTION_MIN_RECLAIMABLE_BYTES = readPositiveNumber(
   process.env.DATABASE_COMPACTION_MIN_BYTES,
   16 * 1_024 ** 2
@@ -48,6 +49,10 @@ const COMPACTION_MIN_RECLAIMABLE_RATIO = readPositiveNumber(
   0.25
 );
 const MAX_REPLICATION_ORIGINS = 64;
+const REPLICATION_CHECKPOINT_KEY = 'replication_checkpoint_gzip_v1';
+const LEGACY_REPLICATION_CHECKPOINT_KEY = 'replication_checkpoint_json';
+const REPLICATION_CHECKPOINT_PREFIX = 'gzip-base64-v1:';
+const MAX_REPLICATION_CHECKPOINT_BYTES = 512 * 1_024 ** 2;
 const APP_DATA_TABLE_PATTERN =
   /\b(?:runners|labels|runner_labels|queue_entries|race_state|laps|race_events|temporary_teams|temporary_team_members)\b/i;
 
@@ -308,9 +313,57 @@ function parseLabelsJson(value: unknown): Label[] {
   if (typeof value !== 'string' || !value.trim()) return [];
   try {
     const parsed = JSON.parse(value) as unknown;
-    return Array.isArray(parsed) ? (parsed as Label[]) : [];
+    if (!Array.isArray(parsed)) return [];
+    return parsed.flatMap((item): Label[] => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
+      const label = item as Partial<Label>;
+      if (
+        typeof label.id !== 'string' ||
+        typeof label.name !== 'string' ||
+        typeof label.color !== 'string' ||
+        typeof label.icon !== 'string' ||
+        typeof label.kind !== 'string'
+      ) {
+        return [];
+      }
+      return [{
+        id: label.id,
+        name: label.name,
+        color: label.color,
+        icon: label.icon,
+        kind: label.kind,
+        imageUrl: typeof label.imageUrl === 'string' ? label.imageUrl : null,
+        targetLaps: Number.isSafeInteger(label.targetLaps) ? label.targetLaps! : null,
+        sortOrder: Number.isSafeInteger(label.sortOrder) ? label.sortOrder! : null,
+        ...(Number.isSafeInteger(label.createdAt) ? { createdAt: label.createdAt } : {}),
+        ...(Number.isSafeInteger(label.updatedAt) ? { updatedAt: label.updatedAt } : {}),
+      }];
+    });
   } catch {
     return [];
+  }
+}
+
+function serializeHistoricalLabels(labels: Label[]): string {
+  return JSON.stringify(
+    labels.map((label) => ({
+      id: label.id,
+      name: label.name,
+      color: label.color,
+      icon: label.icon,
+      kind: label.kind,
+      ...(label.imageUrl ? { imageUrl: label.imageUrl } : {}),
+    }))
+  );
+}
+
+function compactStoredLapLabels(): void {
+  const update = getDb().prepare('UPDATE laps SET labels_json = ? WHERE id = ?');
+  for (const lap of all<{ id: string; labelsJson: string }>(
+    'SELECT id, labels_json AS labelsJson FROM laps'
+  )) {
+    const compact = serializeHistoricalLabels(parseLabelsJson(lap.labelsJson));
+    if (compact !== lap.labelsJson) update.run(compact, lap.id);
   }
 }
 
@@ -552,6 +605,19 @@ function migrateSchema(): void {
     // `cluster_operations` belonged to the retired leader/log replication design.
     // Local-first replication has used `replication_operations` since schema 7.
     run('DROP TABLE IF EXISTS cluster_operations');
+  }
+  if (previousVersion < 9) {
+    compactStoredLapLabels();
+
+    const storedCheckpoint =
+      getSetting(REPLICATION_CHECKPOINT_KEY) ||
+      getSetting(LEGACY_REPLICATION_CHECKPOINT_KEY);
+    if (storedCheckpoint) {
+      storeReplicationCheckpoint(decodeReplicationCheckpoint(storedCheckpoint));
+    }
+    getDb()
+      .prepare('DELETE FROM settings WHERE key = ?')
+      .run(LEGACY_REPLICATION_CHECKPOINT_KEY);
   }
   setSetting('schema_version', String(DATABASE_SCHEMA_VERSION));
   getDb().pragma(`user_version = ${DATABASE_SCHEMA_VERSION}`);
@@ -880,11 +946,62 @@ function captureReplicationCheckpoint(): ReplicationCheckpoint {
   return { vector: getReplicationVector(), tables, settings };
 }
 
+function decodeReplicationCheckpoint(stored: string): ReplicationCheckpoint {
+  let serialized = stored;
+  if (stored.startsWith(REPLICATION_CHECKPOINT_PREFIX)) {
+    const encoded = stored.slice(REPLICATION_CHECKPOINT_PREFIX.length);
+    if (!encoded || !/^[a-z0-9+/]+={0,2}$/i.test(encoded)) {
+      throw new Error('replication checkpoint encoding is invalid');
+    }
+    serialized = gunzipSync(Buffer.from(encoded, 'base64'), {
+      maxOutputLength: MAX_REPLICATION_CHECKPOINT_BYTES,
+    }).toString('utf8');
+  }
+  const checkpoint = JSON.parse(serialized) as Partial<ReplicationCheckpoint>;
+  if (
+    !checkpoint ||
+    typeof checkpoint !== 'object' ||
+    !checkpoint.vector ||
+    typeof checkpoint.vector !== 'object' ||
+    Array.isArray(checkpoint.vector) ||
+    !checkpoint.tables ||
+    typeof checkpoint.tables !== 'object' ||
+    Array.isArray(checkpoint.tables) ||
+    !checkpoint.settings ||
+    typeof checkpoint.settings !== 'object' ||
+    Array.isArray(checkpoint.settings)
+  ) {
+    throw new Error('replication checkpoint is invalid');
+  }
+  return checkpoint as ReplicationCheckpoint;
+}
+
+function encodeReplicationCheckpoint(checkpoint: ReplicationCheckpoint): string {
+  const compressed = gzipSync(JSON.stringify(checkpoint), { level: 1 });
+  return `${REPLICATION_CHECKPOINT_PREFIX}${compressed.toString('base64')}`;
+}
+
+function storeReplicationCheckpoint(checkpoint: ReplicationCheckpoint): void {
+  setReplicationSetting(
+    REPLICATION_CHECKPOINT_KEY,
+    encodeReplicationCheckpoint(checkpoint)
+  );
+  getDb()
+    .prepare('DELETE FROM settings WHERE key = ?')
+    .run(LEGACY_REPLICATION_CHECKPOINT_KEY);
+}
+
 function ensureReplicationCheckpoint(): ReplicationCheckpoint {
-  const stored = getSetting('replication_checkpoint_json');
-  if (stored) return JSON.parse(stored) as ReplicationCheckpoint;
+  const stored = getSetting(REPLICATION_CHECKPOINT_KEY);
+  if (stored) return decodeReplicationCheckpoint(stored);
+  const legacy = getSetting(LEGACY_REPLICATION_CHECKPOINT_KEY);
+  if (legacy) {
+    const checkpoint = decodeReplicationCheckpoint(legacy);
+    storeReplicationCheckpoint(checkpoint);
+    return checkpoint;
+  }
   const checkpoint = captureReplicationCheckpoint();
-  setReplicationSetting('replication_checkpoint_json', JSON.stringify(checkpoint));
+  storeReplicationCheckpoint(checkpoint);
   return checkpoint;
 }
 
@@ -1481,6 +1598,7 @@ function rebuildApplicationFromReplicationLog(
         }
       }
     }
+    compactStoredLapLabels();
   });
   appDataRevision += 1;
 }
@@ -1725,10 +1843,7 @@ export async function installReplicationBootstrap(input: {
     applySnapshot(input.snapshot);
     setReplicationSetting('replication_cluster_id', input.clusterId);
     setReplicationSetting('replication_cluster_secret', input.clusterSecret);
-    setReplicationSetting(
-      'replication_checkpoint_json',
-      JSON.stringify(input.checkpoint)
-    );
+    storeReplicationCheckpoint(input.checkpoint);
     if (input.timingControllerHostId) {
       setReplicationSetting(
         'timing_controller_host_id',
@@ -2868,7 +2983,11 @@ export function performHandoff(nowMs = Date.now()):
           nowMs,
           Math.max(0, nowMs - startedAt),
           nowMs,
-          JSON.stringify(raceState.activeLabels.length ? raceState.activeLabels : getRunnerLabels(activeRunnerId)),
+          serializeHistoricalLabels(
+            raceState.activeLabels.length
+              ? raceState.activeLabels
+              : getRunnerLabels(activeRunnerId)
+          ),
         ]
       );
       run(
@@ -3108,7 +3227,7 @@ export function applySnapshot(snapshot: AppSnapshot): void {
           lap.durationMs,
           lap.source,
           lap.createdAt,
-          JSON.stringify(lap.labels ?? []),
+          serializeHistoricalLabels(lap.labels ?? []),
         ]
       );
     }

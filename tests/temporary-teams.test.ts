@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
+import Database from 'better-sqlite3';
 
 const dataPath = path.resolve('.tmp-test-temporary-teams');
 process.env.DATA_PATH = dataPath;
@@ -53,6 +54,30 @@ test('temporary teams restore base teams and laps retain the team from their sta
   assert.equal(aliceLaps.length, 2);
   assert.deepEqual(aliceLaps[0].labels.map((label) => label.id), [blue.id]);
   assert.deepEqual(aliceLaps[1].labels.map((label) => label.id), [trojan.id]);
+  assert.equal(aliceLaps[1].labels[0]?.targetLaps, null);
+  const stored = new Database(path.join(dataPath, 'data', 'app.db'), {
+    readonly: true,
+    fileMustExist: true,
+  });
+  try {
+    const rawLabels = JSON.parse(
+      String(
+        stored
+          .prepare('SELECT labels_json FROM laps WHERE id = ?')
+          .pluck()
+          .get(aliceLaps[1].id)
+      )
+    ) as Array<Record<string, unknown>>;
+    assert.deepEqual(Object.keys(rawLabels[0]).sort(), [
+      'color',
+      'icon',
+      'id',
+      'kind',
+      'name',
+    ]);
+  } finally {
+    stored.close();
+  }
   assert.ok(db.getRunnerById(alice.id)?.labels.some((label) => label.id === blue.id));
 
   db.setTemporaryTeamActive(trojan.id, true, 220_000);
@@ -76,5 +101,6 @@ test('temporary teams restore base teams and laps retain the team from their sta
     [blue.id, trojan.id]
   );
 
+  db.closeDb();
   fs.rmSync(dataPath, { recursive: true, force: true });
 });

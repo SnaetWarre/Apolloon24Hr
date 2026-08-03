@@ -27,10 +27,25 @@ test('online backups are verified, checksummed, and readable as independent SQLi
         }),
     });
 
+    db.closeDb();
+    const bloated = new Database(path.join(dataPath, 'data', 'app.db'));
+    try {
+      bloated.exec(`
+        CREATE TABLE backup_compaction_payload (payload BLOB NOT NULL);
+        INSERT INTO backup_compaction_payload(payload) VALUES (randomblob(4 * 1024 * 1024));
+        DROP TABLE backup_compaction_payload;
+      `);
+    } finally {
+      bloated.close();
+    }
+    const liveDatabaseBytes = fs.statSync(path.join(dataPath, 'data', 'app.db')).size;
+    await db.initDb();
+
     const record = await backups.createVerifiedBackup('manual');
     const backupPath = path.join(dataPath, 'backups', record.fileName);
     assert.equal(fs.existsSync(backupPath), true);
     assert.equal(fs.existsSync(`${backupPath}.json`), true);
+    assert.ok(record.sizeBytes < liveDatabaseBytes / 2);
     assert.deepEqual(
       fs.readdirSync(path.dirname(backupPath)).filter((entry) => entry.includes('.partial')),
       []
