@@ -47,6 +47,56 @@ test('standalone mode stays writable and rejects replication exchange', { timeou
   }
 });
 
+test('manual backup endpoint produces a downloadable verified SQLite snapshot', { timeout: 15_000 }, async () => {
+  const root = testRoot('manual-backup');
+  const server = await startServer({
+    port: await freePort(),
+    dataPath: root,
+    clusterEnabled: false,
+  });
+  try {
+    await createClient(server.port).runners.create.mutate({
+      name: 'Backup endpoint runner',
+      runnerNumber: 'BACKUP-HTTP-1',
+      _commandId: crypto.randomUUID(),
+      _clientId: 'backup-test',
+    });
+    const createResponse = await fetch(`${server.baseUrl}/api/backups`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ reason: 'manual' }),
+    });
+    const created = (await createResponse.json()) as {
+      ok: boolean;
+      backup: { fileName: string; sha256: string; verified: boolean };
+    };
+    assert.equal(createResponse.status, 201);
+    assert.equal(created.ok, true);
+    assert.equal(created.backup.verified, true);
+
+    const statusResponse = await fetch(`${server.baseUrl}/api/backups/status`);
+    const status = (await statusResponse.json()) as {
+      retainedCount: number;
+      latest: { fileName: string } | null;
+    };
+    assert.equal(status.retainedCount, 1);
+    assert.equal(status.latest?.fileName, created.backup.fileName);
+
+    const download = await fetch(`${server.baseUrl}/api/backups/latest`);
+    assert.equal(
+      download.ok,
+      true,
+      `HTTP ${download.status}: ${await download.clone().text()}\n${server.output()}`
+    );
+    const contents = Buffer.from(await download.arrayBuffer());
+    assert.equal(download.headers.get('x-apolloon-backup-sha256'), created.backup.sha256);
+    assert.equal(contents.subarray(0, 16).toString('binary'), 'SQLite format 3\u0000');
+  } finally {
+    await stopServer(server);
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('two writable Electron databases exchange operations in both directions', { timeout: 20_000 }, async () => {
   const root = testRoot('two-way');
   const ports = await Promise.all([freePort(), freePort()]);
@@ -254,6 +304,19 @@ test('joining a creator laptop imports its database and preserves a recovery bac
       fs.existsSync(path.join(joiner.dataPath, 'data', result.backupFile)),
       true
     );
+    const safetyMetadata = fs
+      .readdirSync(path.join(joiner.dataPath, 'backups'))
+      .filter((fileName) => fileName.endsWith('.sqlite.json'));
+    assert.equal(safetyMetadata.length, 1);
+    const safetyRecord = JSON.parse(
+      fs.readFileSync(
+        path.join(joiner.dataPath, 'backups', safetyMetadata[0]),
+        'utf8'
+      )
+    ) as { reason: string; verified: boolean; sha256: string };
+    assert.equal(safetyRecord.reason, 'pre-cluster-join');
+    assert.equal(safetyRecord.verified, true);
+    assert.match(safetyRecord.sha256, /^[0-9a-f]{64}$/);
     await waitFor(async () => {
       const state = await fetchState(joinerPort);
       return (
@@ -481,6 +544,87 @@ test('concurrent offline edits of the same runner converge in canonical order', 
   }
 });
 
+test('timing control transfers while connected and emergency takeover waits for failure confirmation', { timeout: 30_000 }, async () => {
+  const root = testRoot('timing-transfer');
+  const ports = await Promise.all([freePort(), freePort()]);
+  const a = await startServer({
+    port: ports[0],
+    dataPath: path.join(root, 'a'),
+    peers: [ports[1]],
+  });
+  let b: RunningServer | null = await startServer({
+    port: ports[1],
+    dataPath: path.join(root, 'b'),
+    peers: [ports[0]],
+  });
+  try {
+    await waitFor(async () =>
+      (await Promise.all(ports.map(fetchStatus))).every((status) => status.connectedHosts === 2)
+    );
+    const [aStatus, bStatus] = await Promise.all(ports.map(fetchStatus));
+    const clientA = createClient(a.port);
+    const clientB = createClient(b.port);
+    await clientA.cluster.claimTimingControl.mutate({
+      expectedControllerHostId: null,
+      force: false,
+      _commandId: crypto.randomUUID(),
+      _clientId: 'a',
+    });
+    await waitFor(async () =>
+      (await fetchStatus(b!.port)).timingControllerHostId === aStatus.hostId
+    );
+
+    await assert.rejects(
+      () =>
+        clientB.cluster.claimTimingControl.mutate({
+          expectedControllerHostId: aStatus.hostId,
+          force: false,
+          _commandId: crypto.randomUUID(),
+          _clientId: 'b',
+        }),
+      /nog bereikbaar|gecontroleerd over/i
+    );
+
+    await waitFor(async () => {
+      const status = await fetchStatus(a.port);
+      return status.peers.some(
+        (peer) => peer.id === bStatus.hostId && peer.synchronized
+      );
+    });
+    await clientA.cluster.transferTimingControl.mutate({
+      targetHostId: bStatus.hostId,
+      _commandId: crypto.randomUUID(),
+      _clientId: 'a',
+    });
+    await waitFor(async () => {
+      const statuses = await Promise.all(ports.map(fetchStatus));
+      return statuses.every(
+        (status) => status.timingControllerHostId === bStatus.hostId
+      );
+    });
+    assert.equal((await fetchStatus(a.port)).timingControl.state, 'remote-reachable');
+    assert.equal((await fetchStatus(b.port)).timingControl.state, 'local');
+
+    await stopServer(b);
+    b = null;
+    await waitFor(async () => (await fetchStatus(a.port)).timingControl.takeoverAllowed, 5_000);
+    const takeover = await clientA.cluster.claimTimingControl.mutate({
+      expectedControllerHostId: bStatus.hostId,
+      force: false,
+      _commandId: crypto.randomUUID(),
+      _clientId: 'a',
+    });
+    assert.equal(takeover.hostId, aStatus.hostId);
+    assert.ok(takeover.generation >= 3);
+    assert.equal((await fetchStatus(a.port)).timingControl.state, 'local');
+  } catch (error) {
+    throw withServerOutput(error, a, b);
+  } finally {
+    await Promise.all([stopServer(a), stopServer(b)]);
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('split timing histories pause timing and can be resolved from the chosen laptop', { timeout: 35_000 }, async () => {
   const root = testRoot('timing-conflict');
   const ports = await Promise.all([freePort(), freePort()]);
@@ -511,6 +655,8 @@ test('split timing histories pause timing and can be resolved from the chosen la
       _clientId: 'a',
     });
     await clientA.cluster.claimTimingControl.mutate({
+      expectedControllerHostId: null,
+      force: false,
       _commandId: crypto.randomUUID(),
       _clientId: 'a',
     });
@@ -536,7 +682,13 @@ test('split timing histories pause timing and can be resolved from the chosen la
       dataPath: path.join(root, 'b'),
     });
     const clientB = createClient(ports[1]);
+    await waitFor(
+      async () => (await fetchStatus(ports[1])).timingControl.forcedTakeoverAllowed,
+      5_000
+    );
     await clientB.cluster.claimTimingControl.mutate({
+      expectedControllerHostId: (await fetchStatus(ports[1])).timingControllerHostId,
+      force: true,
       _commandId: crypto.randomUUID(),
       _clientId: 'b',
     });
@@ -694,6 +846,9 @@ async function startServer(options: {
       CLUSTER_SYNC_INTERVAL_MS: '50',
       CLUSTER_REQUEST_TIMEOUT_MS: '250',
       CLUSTER_PEER_RETRY_MS: '50',
+      TIMING_TAKEOVER_GRACE_MS: '200',
+      TIMING_FORCED_TAKEOVER_GRACE_MS: '400',
+      BACKUP_ENABLED: 'false',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });

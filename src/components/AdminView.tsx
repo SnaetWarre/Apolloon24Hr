@@ -31,6 +31,8 @@ export function AdminView() {
     setTemporaryTeamActive,
     joinCluster,
     resolveConflict,
+    transferTimingControl,
+    createBackup,
   } = useAppActions();
   const [csvText, setCsvText] = React.useState('');
   const [csvFileName, setCsvFileName] = React.useState('');
@@ -54,6 +56,8 @@ export function AdminView() {
   const [remotePairingCode, setRemotePairingCode] = React.useState('');
   const [clusterMessage, setClusterMessage] = React.useState<string | null>(null);
   const [clusterSaving, setClusterSaving] = React.useState(false);
+  const [backupSaving, setBackupSaving] = React.useState(false);
+  const [backupMessage, setBackupMessage] = React.useState<string | null>(null);
   const [clusterConflicts, setClusterConflicts] = React.useState<Array<{
     id: string;
     kind: 'timing' | 'data';
@@ -136,6 +140,42 @@ export function AdminView() {
       setClusterMessage(err instanceof Error ? err.message : 'Conflict oplossen mislukt');
     } finally {
       setClusterSaving(false);
+    }
+  }
+
+  async function transferTiming(targetHostId: string, targetUrl: string) {
+    if (
+      !window.confirm(
+        `Timing gecontroleerd overdragen naar ${targetUrl}? Deze laptop kan daarna niet meer klokken.`
+      )
+    ) {
+      return;
+    }
+    setClusterSaving(true);
+    setClusterMessage(null);
+    try {
+      await transferTimingControl(targetHostId);
+      setClusterMessage(`Timing is overgedragen naar ${targetUrl}.`);
+    } catch (err) {
+      setClusterMessage(err instanceof Error ? err.message : 'Timing overdragen mislukt');
+    } finally {
+      setClusterSaving(false);
+    }
+  }
+
+  async function makeBackup() {
+    if (backupSaving) return;
+    setBackupSaving(true);
+    setBackupMessage(null);
+    try {
+      const backup = await createBackup();
+      setBackupMessage(
+        `Backup gecontroleerd en opgeslagen om ${formatClockTimeMs(backup.createdAt)}.`
+      );
+    } catch (err) {
+      setBackupMessage(err instanceof Error ? err.message : 'Backup maken mislukt');
+    } finally {
+      setBackupSaving(false);
     }
   }
 
@@ -294,8 +334,46 @@ export function AdminView() {
             <p className="panel-copy">
               {cluster.connectedHosts === 1
                 ? 'Deze laptop werkt zelfstandig en blijft volledig schrijfbaar.'
-                : `${cluster.connectedHosts} laptops zijn nu bereikbaar. Iedere laptop bewaart een volledige kopie.`}
+                : `${cluster.connectedHosts} laptops zijn nu bereikbaar. Iedere laptop bewaart een volledige replica.`}
             </p>
+            <div className="host-hint">
+              <strong>Timing:</strong>{' '}
+              {cluster.timingControl.state === 'unassigned'
+                ? 'nog niet toegewezen; de eerste timingactie kiest deze laptop.'
+                : cluster.timingControl.state === 'local'
+                  ? `deze laptop is controller (generatie ${cluster.timingControl.generation}).`
+                  : cluster.timingControl.state === 'remote-reachable'
+                    ? `${cluster.timingControl.controllerUrl || 'andere laptop'} is controller en bereikbaar.`
+                    : 'de timingcontroller is niet bereikbaar; gebruik alleen na fysieke controle een noodovername.'}
+            </div>
+            {cluster.peers.map((peer) => (
+              <div className="host-hint cluster-peer-row" key={peer.url}>
+                <span>
+                  <strong>{peer.url}</strong>{' '}
+                  {peer.reachable
+                    ? peer.synchronized
+                      ? 'bereikbaar en gesynchroniseerd'
+                      : 'bereikbaar; synchronisatie bezig'
+                    : peer.lastSeenAt
+                      ? `niet bereikbaar; laatst gezien om ${formatClockTimeMs(peer.lastSeenAt)}`
+                      : 'nog niet bereikbaar geweest'}
+                </span>
+                {cluster.timingControl.state === 'local' && peer.id && peer.reachable && (
+                  <button
+                    className="btn btn--secondary"
+                    onClick={() => void transferTiming(peer.id!, peer.url)}
+                    disabled={clusterSaving || !peer.synchronized}
+                    title={
+                      peer.synchronized
+                        ? 'Draag timing gecontroleerd over'
+                        : 'Wacht tot alle wijzigingen gesynchroniseerd zijn'
+                    }
+                  >
+                    Timing hierheen overdragen
+                  </button>
+                )}
+              </div>
+            ))}
             <div className="form-row">
               <input
                 className="input"
@@ -342,6 +420,51 @@ export function AdminView() {
               </div>
             ))}
             {clusterMessage && <div className="host-hint">{clusterMessage}</div>}
+          </section>
+        )}
+
+        {cluster?.backup && (
+          <section className="panel">
+            <h2>Herstelbackups</h2>
+            <p className="panel-copy">
+              Apolloon maakt tijdens gebruik automatisch gecontroleerde SQLite-snapshots. Recente
+              backups blijven fijnmazig bewaard, daarna per uur en per dag.
+            </p>
+            {cluster.backup.latest ? (
+              <div className="host-hint">
+                <strong>Laatste backup:</strong>{' '}
+                {new Date(cluster.backup.latest.createdAt).toLocaleString('nl-BE')} ·{' '}
+                {formatFileSize(cluster.backup.latest.sizeBytes)} · gecontroleerd ·{' '}
+                {cluster.backup.retainedCount} bewaard
+              </div>
+            ) : (
+              <div className="warning-banner">Er is op deze laptop nog geen herstelbackup.</div>
+            )}
+            {cluster.backup.lastError && (
+              <div className="warning-banner">
+                Laatste automatische backup mislukt: {cluster.backup.lastError}
+              </div>
+            )}
+            <div className="form-row form-row--plain backup-actions">
+              <button
+                className="btn btn--primary"
+                onClick={() => void makeBackup()}
+                disabled={backupSaving || cluster.backup.inProgress}
+              >
+                {backupSaving || cluster.backup.inProgress ? 'Backup bezig...' : 'Nu backup maken'}
+              </button>
+              {cluster.backup.latest && (
+                <a className="btn btn--secondary" href="/api/backups/latest" download>
+                  Laatste backup downloaden
+                </a>
+              )}
+            </div>
+            <p className="panel-copy">
+              Download regelmatig een kopie naar een andere laptop of USB-stick. Gesynchroniseerde
+              replica's beschermen tegen een defect toestel; deze versies beschermen ook tegen een
+              fout die naar alle laptops wordt gesynchroniseerd.
+            </p>
+            {backupMessage && <div className="success-banner">{backupMessage}</div>}
           </section>
         )}
 
@@ -548,6 +671,12 @@ function formatConflictTime(timestamp: number): string {
     minute: '2-digit',
     second: '2-digit',
   })}.${String(date.getMilliseconds()).padStart(3, '0')}`;
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1_024) return `${bytes} B`;
+  if (bytes < 1_024 ** 2) return `${(bytes / 1_024).toFixed(1)} KiB`;
+  return `${(bytes / 1_024 ** 2).toFixed(1)} MiB`;
 }
 
 function AdminRunnerTable({

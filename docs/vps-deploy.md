@@ -17,9 +17,10 @@ Live SQLite data stays outside the release:
 
 ```text
 /var/lib/apolloon/data/app.db
+/var/lib/apolloon/backups/
 ```
 
-Deploying new code does not overwrite the live database.
+Deploying new code does not overwrite the live database or its versioned backups.
 
 ## VPS Prerequisites
 

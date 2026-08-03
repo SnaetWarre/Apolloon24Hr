@@ -18,7 +18,13 @@ import {
   type RunnerInput,
 } from '../shared/schemas.js';
 import { appSnapshot } from './app-state.js';
+import { createVerifiedBackup } from './backups.js';
 import {
+  assertEmergencyTimingTakeoverAllowed,
+  assertTimingTransferAllowed,
+} from './cluster.js';
+import {
+  assignTimingController,
   assertOrClaimTimingController,
   claimTimingController,
   commitReplicatedWrite,
@@ -38,6 +44,7 @@ import {
   getRunnerById,
   getRunnersByIds,
   getTemporaryTeams,
+  getTimingControllerGeneration,
   hideRunnerInQueue,
   insertRunner,
   performHandoff,
@@ -201,11 +208,33 @@ export const appRouter = t.router({
 
   cluster: t.router({
     claimTimingControl: t.procedure
-      .input(withCommandMeta(z.object({})))
+      .input(
+        withCommandMeta(
+          z.object({
+            expectedControllerHostId: z.string().min(1).max(128).nullable(),
+            force: z.boolean().default(false),
+          })
+        )
+      )
       .mutation(({ input }) =>
-        commitWrite('cluster.claimTimingControl', input, () => ({
-          hostId: claimTimingController(),
-        }))
+        commitWrite('cluster.claimTimingControl', input, () => {
+          assertEmergencyTimingTakeoverAllowed(
+            input.expectedControllerHostId,
+            input.force
+          );
+          return {
+            hostId: claimTimingController(),
+            generation: getTimingControllerGeneration(),
+          };
+        })
+      ),
+    transferTimingControl: t.procedure
+      .input(withCommandMeta(z.object({ targetHostId: z.string().min(1).max(128) })))
+      .mutation(({ input }) =>
+        commitWrite('cluster.transferTimingControl', input, () => {
+          assertTimingTransferAllowed(input.targetHostId);
+          return assignTimingController(input.targetHostId);
+        })
       ),
     resolveConflict: t.procedure
       .input(
@@ -216,8 +245,9 @@ export const appRouter = t.router({
           })
         )
       )
-      .mutation(({ input }) =>
-        commitWrite('cluster.resolveConflict', input, () => {
+      .mutation(async ({ input }) => {
+        await createVerifiedBackup('pre-conflict-resolution');
+        return commitWrite('cluster.resolveConflict', input, () => {
           prepareReplicationConflictChoice(
             input.conflictId,
             input.selectedOperationId
@@ -228,8 +258,8 @@ export const appRouter = t.router({
           );
           emitRealtime({ type: 'state:revision', payload: Date.now() });
           return result;
-        })
-      ),
+        });
+      }),
   }),
 
   runners: t.router({

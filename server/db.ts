@@ -595,6 +595,10 @@ export function closeDb(): void {
   database = null;
 }
 
+export async function backupDatabase(destination: string): Promise<void> {
+  await getDb().backup(destination);
+}
+
 export function getSetting(key: string): string | null {
   const row = one<{ value: string }>('SELECT value FROM settings WHERE key = ?', [key]);
   return row ? row.value : null;
@@ -665,16 +669,38 @@ export function assertOrClaimTimingController(): string {
   if (current && current !== hostId) {
     throw new Error('De timing wordt bediend op een andere laptop');
   }
-  if (!current) setSetting('timing_controller_host_id', hostId);
+  assignTimingController(hostId);
   return hostId;
 }
 
 export function claimTimingController(): string {
   const hostId = ensureReplicationIdentity().hostId;
-  setSetting('timing_controller_host_id', hostId);
-  const generation = Number(getSetting('timing_controller_generation') || 0) + 1;
-  setSetting('timing_controller_generation', String(generation));
+  assignTimingController(hostId);
   return hostId;
+}
+
+export function assignTimingController(hostId: string): {
+  hostId: string;
+  generation: number;
+} {
+  const targetHostId = String(hostId || '').trim();
+  if (!targetHostId || targetHostId.length > 128) {
+    throw new Error('ongeldige timinglaptop');
+  }
+  const current = getSetting('timing_controller_host_id');
+  const storedGeneration = Number(getSetting('timing_controller_generation') || 0);
+  if (current === targetHostId && storedGeneration > 0) {
+    return { hostId: targetHostId, generation: storedGeneration };
+  }
+  const generation = Math.max(0, Math.floor(storedGeneration) || 0) + 1;
+  setSetting('timing_controller_host_id', targetHostId);
+  setSetting('timing_controller_generation', String(generation));
+  return { hostId: targetHostId, generation };
+}
+
+export function getTimingControllerGeneration(): number {
+  const generation = Number(getSetting('timing_controller_generation') || 0);
+  return Number.isSafeInteger(generation) && generation > 0 ? generation : 0;
 }
 
 function nextLocalHlc(): { wallMs: number; counter: number } {

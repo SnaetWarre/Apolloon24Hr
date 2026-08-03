@@ -1,6 +1,8 @@
 export type {
   AppSettings,
   AppSnapshot,
+  BackupRecord,
+  BackupStatus,
   ClusterPeer,
   ClusterRole,
   ClusterStatus,
@@ -20,4 +22,6 @@ export type {
   RunnerPatch,
   RunnerStatus,
   TemporaryTeam,
+  TimingControlState,
+  TimingControlStatus,
 } from '../shared/schemas';

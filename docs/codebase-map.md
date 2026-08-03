@@ -30,12 +30,15 @@ Shared contracts live in `shared/`. Anything imported by both client and server 
 - `server/db.ts`: SQLite schema, reads, writes, and race-state transitions.
 - `server/cluster.ts`: local-first UDP discovery, authenticated delta exchange, creator bootstrap, and peer health.
 - `server/cluster-protocol.ts`: signed discovery envelopes and untrusted network payload validation.
+- `server/backups.ts`: verified online snapshots, retention, scheduling, and download metadata.
 - `server/app-state.ts`: full snapshot assembly.
 - `server/host.ts`: event LAN URL/port discovery.
 - `server/realtime.ts`: typed realtime event bridge.
 
 See `docs/backend-architecture.md` for the complete process, write,
 replication, storage, and failure-handling model.
+See `docs/reliability-model.md` for timing transfer, emergency takeover,
+backup retention, and the event-day recovery runbook.
 
 ## Scripts And Data
 
@@ -44,6 +47,7 @@ replication, storage, and failure-handling model.
 - `scripts/ensure-lan-dev-firewall.mjs`: development firewall helper.
 - `.dev-data/` and `.test-data/` are disposable local databases.
 - `data/app.db` is the normal local app database.
+- `backups/` contains verified point-in-time recovery snapshots outside releases.
 
 ## Quality Gates
 

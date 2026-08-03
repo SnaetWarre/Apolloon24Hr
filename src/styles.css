@@ -250,6 +250,18 @@ select {
   background: #fff7ed;
 }
 
+.cluster-peer-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.backup-actions {
+  margin-top: 14px;
+}
+
 .input {
   width: 100%;
   min-width: 0;

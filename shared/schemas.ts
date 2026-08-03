@@ -119,9 +119,54 @@ export const clusterPeerSchema = z.object({
   reachable: z.boolean(),
   lastSeenAt: z.number().nullable(),
   lastSeq: z.number().int().nonnegative().nullable(),
+  synchronized: z.boolean(),
   operationVector: z.record(z.string(), z.number().int().nonnegative()).optional(),
 });
 export type ClusterPeer = z.infer<typeof clusterPeerSchema>;
+
+export const backupRecordSchema = z.object({
+  fileName: z.string(),
+  createdAt: z.number().int().nonnegative(),
+  reason: z.string(),
+  sizeBytes: z.number().int().nonnegative(),
+  sha256: z.string().regex(/^[0-9a-f]{64}$/),
+  verified: z.literal(true),
+});
+export type BackupRecord = z.infer<typeof backupRecordSchema>;
+
+export const backupStatusSchema = z.object({
+  enabled: z.boolean(),
+  inProgress: z.boolean(),
+  intervalMs: z.number().int().positive(),
+  nextScheduledAt: z.number().int().nonnegative().nullable(),
+  retainedCount: z.number().int().nonnegative(),
+  latest: backupRecordSchema.nullable(),
+  lastFailureAt: z.number().int().nonnegative().nullable(),
+  lastError: z.string().nullable(),
+});
+export type BackupStatus = z.infer<typeof backupStatusSchema>;
+
+export const timingControlStateSchema = z.enum([
+  'unassigned',
+  'local',
+  'remote-reachable',
+  'remote-unreachable',
+]);
+export type TimingControlState = z.infer<typeof timingControlStateSchema>;
+
+export const timingControlStatusSchema = z.object({
+  state: timingControlStateSchema,
+  controllerHostId: z.string().nullable(),
+  generation: z.number().int().nonnegative(),
+  controllerUrl: z.string().nullable(),
+  controllerLastSeenAt: z.number().int().nonnegative().nullable(),
+  localReplicaCaughtUp: z.boolean(),
+  takeoverAllowed: z.boolean(),
+  takeoverAvailableAt: z.number().int().nonnegative().nullable(),
+  forcedTakeoverAllowed: z.boolean(),
+  forcedTakeoverAvailableAt: z.number().int().nonnegative().nullable(),
+});
+export type TimingControlStatus = z.infer<typeof timingControlStatusSchema>;
 
 export const clusterStatusSchema = z.object({
   enabled: z.boolean(),
@@ -135,9 +180,11 @@ export const clusterStatusSchema = z.object({
   pendingOperations: z.number().int().nonnegative(),
   conflictCount: z.number().int().nonnegative(),
   timingControllerHostId: z.string().nullable(),
+  timingControl: timingControlStatusSchema,
   clockSkewMs: z.number().nullable(),
   lastAppliedSeq: z.number().int().nonnegative(),
   peers: z.array(clusterPeerSchema),
+  backup: backupStatusSchema,
 });
 export type ClusterStatus = z.infer<typeof clusterStatusSchema>;
 

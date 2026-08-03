@@ -24,6 +24,7 @@ server/index.ts
   |   another Electron host
   |
   |-- server/app-state.ts ----- cached full snapshot
+  |-- server/backups.ts ------- verified point-in-time snapshots
   |-- server/realtime.ts ------ typed Socket.IO events
   |-- server/host.ts ---------- LAN address selection
   `-- server/static-files.ts -- packaged frontend
@@ -47,6 +48,7 @@ server/index.ts
 - Hosts Socket.IO and emits the current state revision on connection.
 - Serves precompressed immutable Vite assets and the uncached HTML shell.
 - Initializes SQLite before listening and performs graceful shutdown.
+- Starts and stops the backup scheduler with the database lifecycle.
 
 ### `server/router.ts`
 
@@ -94,6 +96,10 @@ replication_conflicts
 - Updates peer vectors only after a valid batch has been accepted.
 - Replaces stale peer URLs when a known host moves to another address.
 - Keeps every host locally writable; timing conflicts pause only timing.
+- Allows planned timing transfer only to a reachable peer whose operation
+  vector covers the controller's full vector.
+- Delays manual emergency takeover after controller loss, distinguishes a
+  caught-up replica from an uncertain one, and never promotes automatically.
 
 ### `server/cluster-protocol.ts`
 
@@ -105,6 +111,8 @@ replication_conflicts
 
 ### Supporting modules
 
+- `server/backups.ts`: creates online SQLite snapshots, verifies their integrity,
+  calculates SHA-256, applies tiered retention, and exposes backup status.
 - `server/app-state.ts`: caches immutable application collections by database
   revision and refreshes only clock/host metadata per request.
 - `server/realtime.ts`: isolates database/router code from Socket.IO.
@@ -157,9 +165,15 @@ operations after reconnecting.
 - Page cache target: 8 MiB
 - WAL journal limit: 16 MiB
 - A creator bootstrap creates a recovery SQLite backup before replacement.
+- Production hosts create verified backups every five minutes under
+  `<DATA_PATH>/backups`, outside application releases.
 
 The operation log is intentionally retained so a laptop that was absent for a
 long time can still catch up without a central service.
+
+Replication is not backup: a valid but incorrect action can reach every replica.
+See `docs/reliability-model.md` for backup retention, download, restoration, and
+timing failover procedures.
 
 ## Trust Boundary
 

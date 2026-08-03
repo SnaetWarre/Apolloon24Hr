@@ -19,7 +19,7 @@ Browser and TV clients can use automatic DHCP. They do not store or replicate th
 
 Cluster mode is enabled automatically in the packaged app. Linux, Windows, and macOS Electron builds use the same HTTP and UDP protocol and can participate in the same cluster.
 
-There is no Primary, quorum, promotion, Kubernetes, or external message broker. One, two, three, or more connected Electron laptops are all locally writable. Writes are committed to SQLite together with an idempotent operation record before the UI reports success. Peers exchange only missing operations and replay them in one canonical order, so reconnect order does not decide the final state.
+There is no database Primary, Kubernetes, or external message broker. One, two, three, or more connected Electron laptops remain locally writable for registration, queue, and administration work. Writes are committed to SQLite together with an idempotent operation record before the UI reports success. Peers exchange only missing operations and replay them in one canonical order, so reconnect order does not decide the final state.
 
 Normal event setup:
 
@@ -44,7 +44,19 @@ CLUSTER_PEERS=http://host:5173  # optional fixed peer list for tests
 CLUSTER_DISCOVERY=false         # disable UDP discovery
 ```
 
-The header shows reachable copies, changes still waiting for another copy, and sync conflicts. Timing is owned by one Electron laptop. If two isolated laptops both create a timing history, timing pauses after reconnect; an operator chooses the correct laptop in Admin and that history is then synchronized to the others. Queue and registration work remains available on a single surviving laptop.
+The header shows reachable replicas, changes waiting for synchronization, backup health, and sync conflicts. Timing is owned by one Electron laptop. The current controller can transfer timing only to a reachable, fully synchronized peer. A caught-up replica gets a guarded emergency takeover after controller loss; an explicit, longer-delayed forced path remains available when completeness cannot be proven. If two isolated laptops still create different timing histories, timing pauses after reconnect; an operator chooses the correct history in Admin. Queue and registration work remains available on a single surviving laptop.
+
+### Recovery backups
+
+Every production host creates a verified SQLite snapshot every five minutes.
+Snapshots are integrity-checked, checksummed, retained in recent/hourly/daily
+tiers, and stored under `<DATA_PATH>/backups`. Admin can create and download a
+backup immediately. Download one to another laptop or USB storage before the
+event, because synchronized replicas and historical backups protect against
+different failures.
+
+See `docs/reliability-model.md` for the complete failover policy, retention
+rules, recovery procedure, and event-day checklist.
 
 ## Tech Stack
 

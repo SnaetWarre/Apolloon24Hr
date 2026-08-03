@@ -154,11 +154,47 @@ export function useAppActions() {
         await reconcileSnapshot();
         return settings;
       },
-      async claimTimingControl() {
-        const result = await trpc.cluster.claimTimingControl.mutate(command({}));
+      async claimTimingControl(
+        expectedControllerHostId: string | null,
+        force = false
+      ) {
+        const result = await trpc.cluster.claimTimingControl.mutate(
+          command({ expectedControllerHostId, force })
+        );
         await activeQueryClient.invalidateQueries({ queryKey: ['cluster', 'status'] });
         await reconcileSnapshot();
         return result;
+      },
+      async transferTimingControl(targetHostId: string) {
+        const result = await trpc.cluster.transferTimingControl.mutate(
+          command({ targetHostId })
+        );
+        await activeQueryClient.invalidateQueries({ queryKey: ['cluster', 'status'] });
+        await reconcileSnapshot();
+        return result;
+      },
+      async createBackup() {
+        const response = await fetch('/api/backups', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ reason: 'manual' }),
+        });
+        const responseText = await response.text();
+        let result: {
+          ok?: boolean;
+          error?: string;
+          backup?: { fileName: string; createdAt: number };
+        };
+        try {
+          result = JSON.parse(responseText) as typeof result;
+        } catch {
+          result = { ok: false, error: responseText || `HTTP ${response.status}` };
+        }
+        if (!response.ok || !result.ok || !result.backup) {
+          throw new Error(result.error || `Backup mislukt (${response.status})`);
+        }
+        await activeQueryClient.invalidateQueries({ queryKey: ['cluster', 'status'] });
+        return result.backup;
       },
       async joinCluster(remoteUrl: string, pairingCode: string) {
         const response = await fetch('/api/cluster/join', {

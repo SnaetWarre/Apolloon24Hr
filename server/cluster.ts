@@ -14,6 +14,7 @@ import {
   getReplicationOperationsMissing,
   getReplicationVector,
   getSetting,
+  getTimingControllerGeneration,
   installReplicationBootstrap,
   type ReplicationCheckpoint,
   type ReplicationConflict,
@@ -21,6 +22,7 @@ import {
   type ReplicationOperation,
 } from './db.js';
 import { appSnapshot } from './app-state.js';
+import { backupStatus, createVerifiedBackup } from './backups.js';
 import {
   currentLanNetworkEndpoints,
   hostInfo,
@@ -32,6 +34,7 @@ import {
   type AppSnapshot,
   type ClusterPeer,
   type ClusterStatus,
+  type TimingControlStatus,
 } from '../shared/schemas.js';
 import {
   normalizeOperationVector,
@@ -51,6 +54,7 @@ type PeerState = {
   vector: OperationVector;
   consecutiveFailures: number;
   nextProbeAt: number;
+  unreachableSinceAt: number | null;
   clockSkewMs: number | null;
 };
 
@@ -87,6 +91,14 @@ const discoveryIntervalMs = readPositiveInt(process.env.CLUSTER_DISCOVERY_INTERV
 const syncIntervalMs = readPositiveInt(process.env.CLUSTER_SYNC_INTERVAL_MS, 350);
 const requestTimeoutMs = readPositiveInt(process.env.CLUSTER_REQUEST_TIMEOUT_MS, 1_500);
 const peerRetryBaseMs = readPositiveInt(process.env.CLUSTER_PEER_RETRY_MS, 750);
+const timingTakeoverGraceMs = readPositiveInt(
+  process.env.TIMING_TAKEOVER_GRACE_MS,
+  10_000
+);
+const timingForcedTakeoverGraceMs = Math.max(
+  timingTakeoverGraceMs,
+  readPositiveInt(process.env.TIMING_FORCED_TAKEOVER_GRACE_MS, 30_000)
+);
 const peers = new Map<string, PeerState>();
 
 let discoverySocket: dgram.Socket | null = null;
@@ -95,6 +107,8 @@ let syncHandle: NodeJS.Timeout | null = null;
 let syncPromise: Promise<void> | null = null;
 let identityCache: ReplicationIdentity | null = null;
 let joinInProgress = false;
+let clusterStartedAt = Date.now();
+let clusterStopping = false;
 
 for (const peerUrl of (process.env.CLUSTER_PEERS || '').split(',')) {
   addPeer(peerUrl);
@@ -120,12 +134,149 @@ export function clusterStatus(): ClusterStatus {
     pendingOperations: getPendingReplicationOperationCount(),
     conflictCount: getOpenReplicationConflictCount(),
     timingControllerHostId: getSetting('timing_controller_host_id'),
+    timingControl: timingControlStatus(),
     clockSkewMs: skewSamples.length
       ? Math.max(...skewSamples.map((value) => Math.abs(value)))
       : null,
     lastAppliedSeq: Object.values(localVector).reduce((total, seq) => total + seq, 0),
-    peers: peerList.map(toClusterPeer),
+    peers: peerList.map((peer) => toClusterPeer(peer, localVector)),
+    backup: backupStatus(),
   };
+}
+
+export function timingControlStatus(): TimingControlStatus {
+  const identity = currentIdentity();
+  const controllerHostId = getSetting('timing_controller_host_id');
+  const generation = getTimingControllerGeneration();
+  if (!controllerHostId) {
+    return {
+      state: 'unassigned',
+      controllerHostId: null,
+      generation,
+      controllerUrl: null,
+      controllerLastSeenAt: null,
+      localReplicaCaughtUp: true,
+      takeoverAllowed: true,
+      takeoverAvailableAt: null,
+      forcedTakeoverAllowed: false,
+      forcedTakeoverAvailableAt: null,
+    };
+  }
+  if (controllerHostId === identity.hostId) {
+    return {
+      state: 'local',
+      controllerHostId,
+      generation,
+      controllerUrl: currentSelfUrl(),
+      controllerLastSeenAt: Date.now(),
+      localReplicaCaughtUp: true,
+      takeoverAllowed: false,
+      takeoverAvailableAt: null,
+      forcedTakeoverAllowed: false,
+      forcedTakeoverAvailableAt: null,
+    };
+  }
+
+  const controllerPeer = [...peers.values()].find(
+    (peer) => peer.id === controllerHostId
+  );
+  const localReplicaCaughtUp = Boolean(
+    controllerPeer && vectorCovers(getReplicationVector(), controllerPeer.vector)
+  );
+  if (controllerPeer?.reachable) {
+    return {
+      state: 'remote-reachable',
+      controllerHostId,
+      generation,
+      controllerUrl: controllerPeer.url,
+      controllerLastSeenAt: controllerPeer.lastSeenAt,
+      localReplicaCaughtUp,
+      takeoverAllowed: false,
+      takeoverAvailableAt: null,
+      forcedTakeoverAllowed: false,
+      forcedTakeoverAvailableAt: null,
+    };
+  }
+
+  const unreachableSince =
+    controllerPeer?.unreachableSinceAt ||
+    controllerPeer?.lastSeenAt ||
+    clusterStartedAt;
+  const takeoverAvailableAt = enabled
+    ? unreachableSince + timingTakeoverGraceMs
+    : Date.now();
+  const forcedTakeoverAvailableAt = enabled
+    ? unreachableSince + timingForcedTakeoverGraceMs
+    : Date.now();
+  return {
+    state: 'remote-unreachable',
+    controllerHostId,
+    generation,
+    controllerUrl: controllerPeer?.url || null,
+    controllerLastSeenAt: controllerPeer?.lastSeenAt || null,
+    localReplicaCaughtUp,
+    takeoverAllowed: localReplicaCaughtUp && Date.now() >= takeoverAvailableAt,
+    takeoverAvailableAt,
+    forcedTakeoverAllowed:
+      !localReplicaCaughtUp && Date.now() >= forcedTakeoverAvailableAt,
+    forcedTakeoverAvailableAt,
+  };
+}
+
+export function assertEmergencyTimingTakeoverAllowed(
+  expectedControllerHostId: string | null,
+  force: boolean
+): void {
+  const currentControllerHostId = getSetting('timing_controller_host_id');
+  if (currentControllerHostId !== expectedControllerHostId) {
+    throw new Error('De timingtoewijzing is intussen gewijzigd. Vernieuw de status.');
+  }
+  const status = timingControlStatus();
+  if (status.state === 'unassigned' || status.state === 'local') return;
+  if (status.state === 'remote-reachable') {
+    throw new Error(
+      'De huidige timinglaptop is nog bereikbaar. Draag de timing daar gecontroleerd over.'
+    );
+  }
+  if (status.takeoverAllowed || (force && status.forcedTakeoverAllowed)) return;
+  if (!status.localReplicaCaughtUp) {
+    const seconds = Math.max(
+      1,
+      Math.ceil(
+        ((status.forcedTakeoverAvailableAt || Date.now()) - Date.now()) / 1_000
+      )
+    );
+    throw new Error(
+      status.forcedTakeoverAllowed
+        ? 'De lokale replica is niet zeker volledig. Bevestig een geforceerde noodovername.'
+        : `De lokale replica mist mogelijk timingdata. Wacht nog ${seconds} seconden of herstel de verbinding.`
+    );
+  }
+  if (!status.takeoverAllowed) {
+    const seconds = Math.max(
+      1,
+      Math.ceil(((status.takeoverAvailableAt || Date.now()) - Date.now()) / 1_000)
+    );
+    throw new Error(`Wacht nog ${seconds} seconden voor een noodovername.`);
+  }
+}
+
+export function assertTimingTransferAllowed(targetHostId: string): void {
+  const identity = currentIdentity();
+  const currentControllerHostId = getSetting('timing_controller_host_id');
+  if (getOpenReplicationConflictCount() > 0) {
+    throw new Error('Los eerst het synchronisatieconflict op.');
+  }
+  if (currentControllerHostId !== identity.hostId) {
+    throw new Error('Alleen de huidige timinglaptop kan een geplande overdracht starten.');
+  }
+  const target = [...peers.values()].find((peer) => peer.id === targetHostId);
+  if (!target?.reachable) {
+    throw new Error('De gekozen laptop is niet bereikbaar.');
+  }
+  if (!vectorCovers(target.vector, getReplicationVector())) {
+    throw new Error('De gekozen laptop is nog niet volledig gesynchroniseerd. Wacht even.');
+  }
 }
 
 export function registerClusterRoutes(app: Express): void {
@@ -204,6 +355,7 @@ export function registerClusterRoutes(app: Express): void {
       ) {
         throw new Error('De andere laptop stuurde geen geldige Apolloon-database');
       }
+      await createVerifiedBackup('pre-cluster-join');
       const result = await installReplicationBootstrap({
         clusterId: payload.clusterId,
         clusterSecret: payload.clusterSecret,
@@ -283,11 +435,14 @@ export function registerClusterRoutes(app: Express): void {
 
 export function startClusterService(): void {
   if (!enabled) return;
+  clusterStopping = false;
+  clusterStartedAt = Date.now();
   startDiscovery();
   scheduleSync(25);
 }
 
 export function stopClusterService(): void {
+  clusterStopping = true;
   if (discoveryHandle) clearInterval(discoveryHandle);
   if (syncHandle) clearTimeout(syncHandle);
   discoveryHandle = null;
@@ -416,10 +571,13 @@ function discoveryTargets(): Array<{
 }
 
 function scheduleSync(delayMs = syncIntervalMs): void {
+  if (clusterStopping) return;
   if (syncHandle) clearTimeout(syncHandle);
   syncHandle = setTimeout(() => {
     syncHandle = null;
-    void syncAllPeers().finally(() => scheduleSync());
+    void syncAllPeers().finally(() => {
+      if (!clusterStopping) scheduleSync();
+    });
   }, delayMs);
   syncHandle.unref?.();
 }
@@ -487,6 +645,7 @@ async function syncPeer(peer: PeerState): Promise<void> {
     peer.lastSeenAt = Date.now();
     peer.consecutiveFailures = 0;
     peer.nextProbeAt = 0;
+    peer.unreachableSinceAt = null;
     peer.clockSkewMs = remote.sentAt - Date.now();
     acknowledgeReplicationVector(remote.hostId, remoteVector);
     if (result.applied > 0 || result.conflicts > 0) {
@@ -498,6 +657,9 @@ async function syncPeer(peer: PeerState): Promise<void> {
         `Cluster sync with ${peer.url} failed:`,
         error instanceof Error ? error.message : String(error)
       );
+    }
+    if (peer.reachable || peer.unreachableSinceAt === null) {
+      peer.unreachableSinceAt = Date.now();
     }
     peer.reachable = false;
     peer.consecutiveFailures += 1;
@@ -519,6 +681,7 @@ function addPeer(peerUrl: string): PeerState | null {
     vector: {},
     consecutiveFailures: 0,
     nextProbeAt: 0,
+    unreachableSinceAt: Date.now(),
     clockSkewMs: null,
   };
   peers.set(url, peer);
@@ -549,6 +712,7 @@ function touchPeer(
     peer.lastSeenAt = Date.now();
     peer.consecutiveFailures = 0;
     peer.nextProbeAt = 0;
+    peer.unreachableSinceAt = null;
   }
   return peer;
 }
@@ -563,15 +727,28 @@ function rekeyPeer(peer: PeerState, nextUrl: string): void {
   peers.set(url, peer);
 }
 
-function toClusterPeer(peer: PeerState): ClusterPeer {
+function toClusterPeer(
+  peer: PeerState,
+  localVector: OperationVector
+): ClusterPeer {
   return {
     id: peer.id,
     url: peer.url,
     reachable: peer.reachable,
     lastSeenAt: peer.lastSeenAt,
     lastSeq: peer.id ? peer.vector[peer.id] ?? null : null,
+    synchronized: vectorCovers(peer.vector, localVector),
     operationVector: peer.vector,
   };
+}
+
+function vectorCovers(
+  candidate: OperationVector,
+  required: OperationVector
+): boolean {
+  return Object.entries(required).every(
+    ([hostId, sequence]) => (candidate[hostId] || 0) >= sequence
+  );
 }
 
 function authorized(req: Request): boolean {

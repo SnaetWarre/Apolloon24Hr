@@ -21,6 +21,7 @@ export function TimingView() {
     cluster?.timingControllerHostId &&
       cluster.timingControllerHostId !== cluster.hostId
   );
+  const timingControl = cluster?.timingControl ?? null;
   const hasSyncConflict = Boolean(cluster?.conflictCount);
   const timingBlocked = controlledElsewhere || hasSyncConflict;
 
@@ -106,6 +107,30 @@ export function TimingView() {
     }
   }
 
+  async function emergencyTakeover() {
+    if (
+      !timingControl ||
+      !controlledElsewhere ||
+      (!timingControl.takeoverAllowed && !timingControl.forcedTakeoverAllowed)
+    ) return;
+    const force = !timingControl.localReplicaCaughtUp;
+    if (
+      !window.confirm(
+        force
+          ? 'GEFORCEERDE noodovername: deze laptop is mogelijk niet volledig gesynchroniseerd. Bevestig dat de vorige timinglaptop gestopt is en aanvaard dat de laatste timingacties kunnen ontbreken. Doorgaan?'
+          : 'Noodovername timing: bevestig dat de vorige timinglaptop gestopt of definitief losgekoppeld is. Als die laptop verder klokt, ontstaan twee timinggeschiedenissen. Doorgaan?'
+      )
+    ) {
+      return;
+    }
+    await runExclusiveRaceAction(
+      () => claimTimingControl(timingControl.controllerHostId, force),
+      force
+        ? 'Deze laptop heeft de timing geforceerd overgenomen; controleer de laatste timingacties.'
+        : 'Deze laptop heeft de timing overgenomen.'
+    );
+  }
+
   return (
     <>
       <div className="hero hero--compact">
@@ -137,14 +162,44 @@ export function TimingView() {
 
       {controlledElsewhere && (
         <div className="warning-banner">
-          <span>De timing wordt momenteel bediend op een andere laptop.</span>
-          <button
-            className="btn btn--ghost"
-            onClick={() => void claimTimingControl()}
-            disabled={handoffBusy}
-          >
-            Neem timing over
-          </button>
+          {timingControl?.state === 'remote-reachable' ? (
+            <span>
+              De timing wordt bediend op{' '}
+              <strong>{timingControl.controllerUrl || 'een andere bereikbare laptop'}</strong>.
+              Gebruik die laptop of draag de timing daar gecontroleerd over.
+            </span>
+          ) : (
+            <>
+              <span>
+                De timinglaptop is niet bereikbaar. Controleer eerst fysiek dat die app gestopt is.
+                {timingControl?.takeoverAllowed ? (
+                  ' De lokale replica bevat alles tot de laatste geslaagde synchronisatie; een noodovername is nu mogelijk.'
+                ) : timingControl?.forcedTakeoverAllowed ? (
+                  ' De lokale replica is mogelijk onvolledig. Alleen een geforceerde noodovername is beschikbaar.'
+                ) : timingControl?.localReplicaCaughtUp ? (
+                  ` Noodovername wordt beschikbaar om ${formatClockTimeMs(
+                    timingControl.takeoverAvailableAt || Date.now()
+                  )}.`
+                ) : (
+                  ` De lokale replica is mogelijk onvolledig. Herstel bij voorkeur de verbinding; geforceerde noodovername wordt beschikbaar om ${formatClockTimeMs(
+                    timingControl?.forcedTakeoverAvailableAt || Date.now()
+                  )}.`
+                )}
+              </span>
+              <button
+                className="btn btn--ghost"
+                onClick={() => void emergencyTakeover()}
+                disabled={
+                  handoffBusy ||
+                  (!timingControl?.takeoverAllowed && !timingControl?.forcedTakeoverAllowed)
+                }
+              >
+                {timingControl?.forcedTakeoverAllowed
+                  ? 'Geforceerde noodovername'
+                  : 'Noodovername starten'}
+              </button>
+            </>
+          )}
         </div>
       )}
 

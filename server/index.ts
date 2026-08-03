@@ -10,6 +10,13 @@ import { Server as SocketIOServer } from 'socket.io';
 import { formatDurationMs } from '../shared/time.js';
 import { appSnapshot } from './app-state.js';
 import {
+  backupStatus,
+  createVerifiedBackup,
+  latestBackupPath,
+  startBackupService,
+  stopBackupService,
+} from './backups.js';
+import {
   registerClusterRoutes,
   startClusterService,
   stopClusterService,
@@ -138,6 +145,36 @@ app.get('/api/host-info', (_req, res) => {
   res.json(hostInfo());
 });
 
+app.get('/api/backups/status', (_req, res) => {
+  res.json(backupStatus());
+});
+
+app.post('/api/backups', async (req, res) => {
+  try {
+    const backup = await createVerifiedBackup(
+      typeof req.body?.reason === 'string' ? req.body.reason : 'manual'
+    );
+    res.status(201).json({ ok: true, backup, status: backupStatus() });
+  } catch (error) {
+    res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'backup maken mislukt',
+    });
+  }
+});
+
+app.get('/api/backups/latest', (_req, res) => {
+  const latest = latestBackupPath();
+  if (!latest) {
+    res.status(404).json({ ok: false, error: 'nog geen backup beschikbaar' });
+    return;
+  }
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('X-Apolloon-Backup-SHA256', latest.record.sha256);
+  res.attachment(latest.record.fileName);
+  res.sendFile(latest.path, { dotfiles: 'allow' });
+});
+
 app.get('/api/export/laps.csv', (_req, res) => {
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename="apolloon-laps.csv"');
@@ -238,13 +275,23 @@ function shutdown(reason: string): void {
   stopClusterService();
 
   let finished = false;
+  let forceExit: NodeJS.Timeout;
   const finish = () => {
     if (finished) return;
     finished = true;
-    closeDb();
-    process.exit(0);
+    void stopBackupService().finally(() => {
+      clearTimeout(forceExit);
+      closeDb();
+      process.exit(0);
+    });
   };
-  const forceExit = setTimeout(finish, 5_000);
+  forceExit = setTimeout(() => {
+    try {
+      closeDb();
+    } finally {
+      process.exit(1);
+    }
+  }, 5_000);
   forceExit.unref?.();
 
   if (!server.listening) {
@@ -260,6 +307,7 @@ process.once('SIGTERM', () => shutdown('SIGTERM'));
 process.once('disconnect', () => shutdown('parent disconnected'));
 
 await initDb();
+startBackupService();
 startClusterService();
 
 server.listen(SERVER_PORT, () => {
