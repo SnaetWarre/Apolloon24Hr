@@ -227,7 +227,7 @@ export function InsideDisplay({ onNavigate }: { onNavigate: (path: string) => vo
 function DisplayBrand({ tone }: { tone: 'light' | 'dark' }) {
   return (
     <div className={`display-brand display-brand--${tone}`}>
-      <img src="/brand/apolloon-logo.png" alt="Apolloon" />
+      <img src="/brand/apolloon-logo.png" alt="Apolloon" width={560} height={169} fetchPriority="high" />
       <span>you&apos;ll never walk alone</span>
     </div>
   );

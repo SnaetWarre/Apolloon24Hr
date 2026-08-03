@@ -23,10 +23,17 @@
         min-height: 100vh;
       }
     </style>
+    <link rel="preload" as="image" href="/brand/apolloon-logo.png" fetchpriority="high" />
+    <script>
+      window.__APOLLOON_STATE_PROMISE__ = fetch('/api/state').then(function (response) {
+        if (!response.ok) throw new Error('Serverstatus laden mislukt (' + response.status + ')');
+        return response.json();
+      });
+      window.__APOLLOON_STATE_PROMISE__.catch(function () {});
+    </script>
   </head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
   </html>
-

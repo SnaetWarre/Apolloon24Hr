@@ -11,6 +11,12 @@ import type {
 } from '../types';
 import { defaultSettings, emptyRace, snapshotKey } from './snapshot';
 
+declare global {
+  interface Window {
+    __APOLLOON_STATE_PROMISE__?: Promise<LiveAppSnapshot>;
+  }
+}
+
 type AppQueryState = {
   initialized: boolean;
   loading: boolean;
@@ -42,6 +48,17 @@ const emptySnapshot: LiveAppSnapshot = {
   },
 };
 
+async function fetchSnapshot(): Promise<LiveAppSnapshot> {
+  const prefetched = window.__APOLLOON_STATE_PROMISE__;
+  if (prefetched) {
+    delete window.__APOLLOON_STATE_PROMISE__;
+    return prefetched;
+  }
+  const response = await fetch('/api/state');
+  if (!response.ok) throw new Error(`Serverstatus laden mislukt (${response.status})`);
+  return (await response.json()) as LiveAppSnapshot;
+}
+
 export function useAppData(): FullAppData & AppQueryState;
 export function useAppData<TSelected extends object>(
   selector: (snapshot: LiveAppSnapshot) => TSelected
@@ -52,9 +69,7 @@ export function useAppData<TSelected extends object>(
   const query = useQuery<LiveAppSnapshot, Error, LiveAppSnapshot | TSelected>({
     queryKey: snapshotKey,
     queryFn: async () => {
-      const response = await fetch('/api/state');
-      if (!response.ok) throw new Error(`Serverstatus laden mislukt (${response.status})`);
-      const snapshot = (await response.json()) as LiveAppSnapshot;
+      const snapshot = await fetchSnapshot();
       setServerNowMs(snapshot.serverNowMs);
       return snapshot;
     },

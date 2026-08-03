@@ -44,7 +44,7 @@ export function RolePicker({ onNavigate }: { onNavigate: (path: string) => void 
     <>
       <div className="hero">
         <div>
-          <img className="hero-logo" src="/brand/apolloon-logo.png" alt="Apolloon" />
+          <img className="hero-logo" src="/brand/apolloon-logo.png" alt="Apolloon" width={560} height={169} fetchPriority="high" />
           <h1 className="app-title">Apolloon telsysteem</h1>
           <p className="tagline">Open deze pagina op elke laptop en kies de juiste rol.</p>
         </div>

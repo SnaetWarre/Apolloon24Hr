@@ -56,6 +56,21 @@ test('all route modules load with the app so navigation never waits on a lazy ch
   assert.match(source, /import \{ TimingView \} from '\.\/components\/TimingView'/);
 });
 
+test('initial rendering overlaps state transfer and defers non-critical realtime code', () => {
+  const html = fs.readFileSync(path.resolve('index.html'), 'utf8');
+  const appData = fs.readFileSync(path.resolve('src/app/useAppData.ts'), 'utf8');
+  const realtime = fs.readFileSync(path.resolve('src/app/useRealtimeBridge.ts'), 'utf8');
+  const logo = fs.readFileSync(path.resolve('public/brand/apolloon-logo.png'));
+
+  assert.match(html, /rel="preload" as="image"[^>]+fetchpriority="high"/);
+  assert.match(html, /__APOLLOON_STATE_PROMISE__ = fetch\('\/api\/state'\)/);
+  assert.match(appData, /const prefetched = window\.__APOLLOON_STATE_PROMISE__/);
+  assert.match(realtime, /import\('\.\/realtimeClient'\)/);
+  assert.equal(logo.readUInt32BE(16), 560);
+  assert.equal(logo.readUInt32BE(20), 169);
+  assert.ok(logo.length < 15_000);
+});
+
 test('event readiness blocks real safety failures and distinguishes standalone warnings', () => {
   const now = Date.UTC(2026, 7, 3, 20, 0, 0);
   const race: RaceState = {

@@ -18,7 +18,8 @@ Shared contracts live in `shared/`. Anything imported by both client and server 
   - `useAppData.ts`: compact live-state query and loading/error state.
   - `useRaceHistory.ts`: lazy full, recent, and per-runner race history.
   - `useAppActions.ts`: tRPC mutations plus snapshot refresh.
-  - `useRealtimeBridge.ts`: Socket.IO events that patch the snapshot cache.
+  - `useRealtimeBridge.ts`: loads the realtime transport after the first state render.
+  - `realtimeClient.ts`: Socket.IO events that patch the snapshot cache.
   - `snapshot.ts`: snapshot query key and cache helpers.
 - `src/components/`: route-level screens and reusable UI pieces.
 - `src/lib/`: browser-side helpers and app-specific utility functions.

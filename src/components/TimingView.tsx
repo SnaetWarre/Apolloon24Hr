@@ -136,7 +136,7 @@ export function TimingView() {
     <>
       <div className="hero hero--compact">
         <div>
-          <img className="hero-logo" src="/brand/apolloon-logo.png" alt="Apolloon" />
+          <img className="hero-logo" src="/brand/apolloon-logo.png" alt="Apolloon" width={560} height={169} fetchPriority="high" />
           <h1 className="app-title">Telsysteem 2 - Timing</h1>
         </div>
       </div>
