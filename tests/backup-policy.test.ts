@@ -31,6 +31,10 @@ test('online backups are verified, checksummed, and readable as independent SQLi
     const backupPath = path.join(dataPath, 'backups', record.fileName);
     assert.equal(fs.existsSync(backupPath), true);
     assert.equal(fs.existsSync(`${backupPath}.json`), true);
+    assert.deepEqual(
+      fs.readdirSync(path.dirname(backupPath)).filter((entry) => entry.includes('.partial')),
+      []
+    );
     assert.equal(
       crypto.createHash('sha256').update(fs.readFileSync(backupPath)).digest('hex'),
       record.sha256

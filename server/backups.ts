@@ -146,6 +146,7 @@ async function performBackup(reasonInput: string): Promise<BackupRecord> {
   try {
     await backupDatabase(partialPath);
     verifyBackup(partialPath);
+    await removeBackupSidecars(partialPath);
     await syncFile(partialPath);
     await fs.promises.rename(partialPath, finalPath);
     const [stat, sha256] = await Promise.all([
@@ -173,7 +174,7 @@ async function performBackup(reasonInput: string): Promise<BackupRecord> {
     lastError = null;
     return record;
   } catch (error) {
-    await fs.promises.rm(partialPath, { force: true }).catch(() => undefined);
+    await removePartialBackup(partialPath).catch(() => undefined);
     if (!published) {
       await Promise.all([
         fs.promises.rm(finalPath, { force: true }),
@@ -204,7 +205,7 @@ function verifyBackup(filePath: string): void {
 function refreshBackupInventory(): void {
   fs.mkdirSync(backupDirectory, { recursive: true });
   for (const entry of fs.readdirSync(backupDirectory)) {
-    if (entry.endsWith('.partial')) {
+    if (/\.partial(?:-(?:shm|wal))?$/.test(entry)) {
       fs.rmSync(path.join(backupDirectory, entry), { force: true });
     }
   }
@@ -292,6 +293,20 @@ async function syncFile(filePath: string): Promise<void> {
   } finally {
     await handle.close();
   }
+}
+
+async function removeBackupSidecars(filePath: string): Promise<void> {
+  await Promise.all([
+    fs.promises.rm(`${filePath}-shm`, { force: true }),
+    fs.promises.rm(`${filePath}-wal`, { force: true }),
+  ]);
+}
+
+async function removePartialBackup(filePath: string): Promise<void> {
+  await Promise.all([
+    fs.promises.rm(filePath, { force: true }),
+    removeBackupSidecars(filePath),
+  ]);
 }
 
 function safeReason(value: string): string {
