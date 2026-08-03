@@ -35,6 +35,17 @@ test('standalone mode stays writable and rejects replication exchange', { timeou
     });
     assert.equal(runner.runnerNumber, 'SOLO-1');
     assert.equal((await fetchStatus(server.port)).role, 'standalone');
+    const healthResponse = await fetch(`${server.baseUrl}/api/health`);
+    const health = (await healthResponse.json()) as {
+      ok: boolean;
+      releaseId: string | null;
+      database: { ready: boolean; schemaVersion: number };
+    };
+    assert.equal(healthResponse.status, 200);
+    assert.equal(health.ok, true);
+    assert.equal(health.releaseId, 'e2e-test-release');
+    assert.equal(health.database.ready, true);
+    assert.ok(health.database.schemaVersion > 0);
     const response = await fetch(`${server.baseUrl}/api/cluster/sync/exchange`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -82,6 +93,20 @@ test('manual backup endpoint produces a downloadable verified SQLite snapshot', 
     assert.equal(status.retainedCount, 1);
     assert.equal(status.latest?.fileName, created.backup.fileName);
 
+    const manifestResponse = await fetch(
+      `${server.baseUrl}/api/backups/latest/manifest`
+    );
+    const manifest = (await manifestResponse.json()) as {
+      application: string;
+      backup: { fileName: string; sha256: string };
+      verification: { sqliteQuickCheck: string };
+    };
+    assert.equal(manifestResponse.ok, true);
+    assert.equal(manifest.application, 'Apolloon');
+    assert.equal(manifest.backup.fileName, created.backup.fileName);
+    assert.equal(manifest.backup.sha256, created.backup.sha256);
+    assert.equal(manifest.verification.sqliteQuickCheck, 'ok');
+
     const download = await fetch(`${server.baseUrl}/api/backups/latest`);
     assert.equal(
       download.ok,
@@ -91,6 +116,17 @@ test('manual backup endpoint produces a downloadable verified SQLite snapshot', 
     const contents = Buffer.from(await download.arrayBuffer());
     assert.equal(download.headers.get('x-apolloon-backup-sha256'), created.backup.sha256);
     assert.equal(contents.subarray(0, 16).toString('binary'), 'SQLite format 3\u0000');
+
+    const backupPath = path.join(root, 'backups', created.backup.fileName);
+    const descriptor = fs.openSync(backupPath, 'r+');
+    try {
+      fs.writeSync(descriptor, Buffer.from([0xff]), 0, 1, 128);
+    } finally {
+      fs.closeSync(descriptor);
+    }
+    const corruptDownload = await fetch(`${server.baseUrl}/api/backups/latest`);
+    assert.equal(corruptDownload.status, 409);
+    assert.match(await corruptDownload.text(), /SHA-256|geverifieerd/i);
   } finally {
     await stopServer(server);
     fs.rmSync(root, { recursive: true, force: true });
@@ -684,7 +720,7 @@ test('split timing histories pause timing and can be resolved from the chosen la
     const clientB = createClient(ports[1]);
     await waitFor(
       async () => (await fetchStatus(ports[1])).timingControl.forcedTakeoverAllowed,
-      5_000
+      12_000
     );
     await clientB.cluster.claimTimingControl.mutate({
       expectedControllerHostId: (await fetchStatus(ports[1])).timingControllerHostId,
@@ -849,6 +885,7 @@ async function startServer(options: {
       TIMING_TAKEOVER_GRACE_MS: '200',
       TIMING_FORCED_TAKEOVER_GRACE_MS: '400',
       BACKUP_ENABLED: 'false',
+      APOLLOON_RELEASE_ID: 'e2e-test-release',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });

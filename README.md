@@ -46,6 +46,11 @@ CLUSTER_DISCOVERY=false         # disable UDP discovery
 
 The header shows reachable replicas, changes waiting for synchronization, backup health, and sync conflicts. Timing is owned by one Electron laptop. The current controller can transfer timing only to a reachable, fully synchronized peer. A caught-up replica gets a guarded emergency takeover after controller loss; an explicit, longer-delayed forced path remains available when completeness cannot be proven. If two isolated laptops still create different timing histories, timing pauses after reconnect; an operator chooses the correct history in Admin. Queue and registration work remains available on a single surviving laptop.
 
+Admin includes a wedstrijdgereedheid checklist for backup freshness, free disk
+space, live replicas, clock skew, conflicts, and timing ownership. The system
+status continues refreshing in standalone mode, so backup failures on a VPS or
+single event laptop remain visible.
+
 ### Recovery backups
 
 Every production host creates a verified SQLite snapshot every five minutes.
@@ -54,6 +59,10 @@ tiers, and stored under `<DATA_PATH>/backups`. Admin can create and download a
 backup immediately. Download one to another laptop or USB storage before the
 event, because synchronized replicas and historical backups protect against
 different failures.
+
+Backup downloads are re-verified against SQLite integrity checks and their
+SHA-256 immediately before transfer. Download the adjacent control manifest as
+well so the off-device copy remains independently verifiable.
 
 See `docs/reliability-model.md` for the complete failover policy, retention
 rules, recovery procedure, and event-day checklist.

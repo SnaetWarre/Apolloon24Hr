@@ -16,12 +16,28 @@ export type BackupRecord = {
 export type BackupStatus = {
   enabled: boolean;
   inProgress: boolean;
+  queued: boolean;
   intervalMs: number;
   nextScheduledAt: number | null;
   retainedCount: number;
   latest: BackupRecord | null;
   lastFailureAt: number | null;
   lastError: string | null;
+  diskFreeBytes: number | null;
+  diskTotalBytes: number | null;
+  minimumFreeBytes: number;
+  diskLow: boolean;
+};
+
+export type BackupManifest = {
+  formatVersion: 1;
+  application: 'Apolloon';
+  backup: BackupRecord;
+  verification: {
+    hashAlgorithm: 'SHA-256';
+    sqliteQuickCheck: 'ok';
+    foreignKeyCheck: 'ok';
+  };
 };
 
 const dataRoot = process.env.DATA_PATH
@@ -33,9 +49,14 @@ const enabled =
   (process.env.BACKUP_ENABLED !== 'false' && process.env.NODE_ENV !== 'test');
 const intervalMs = readPositiveInt(process.env.BACKUP_INTERVAL_MS, 5 * 60_000);
 const initialDelayMs = readPositiveInt(process.env.BACKUP_INITIAL_DELAY_MS, 10_000);
+const minimumFreeBytes = readPositiveInt(
+  process.env.BACKUP_MIN_FREE_BYTES,
+  2 * 1_024 ** 3
+);
 
 let records: BackupRecord[] = [];
 let activeBackup: Promise<BackupRecord> | null = null;
+let queuedBackup: Promise<BackupRecord> | null = null;
 let scheduleHandle: NodeJS.Timeout | null = null;
 let nextScheduledAt: number | null = null;
 let stopping = false;
@@ -43,15 +64,21 @@ let lastFailureAt: number | null = null;
 let lastError: string | null = null;
 
 export function backupStatus(): BackupStatus {
+  const storage = backupStorageCapacity();
   return {
     enabled,
     inProgress: activeBackup !== null,
+    queued: queuedBackup !== null,
     intervalMs,
     nextScheduledAt,
     retainedCount: records.length,
     latest: records[0] || null,
     lastFailureAt,
     lastError,
+    diskFreeBytes: storage?.freeBytes ?? null,
+    diskTotalBytes: storage?.totalBytes ?? null,
+    minimumFreeBytes,
+    diskLow: storage ? storage.freeBytes < minimumFreeBytes : false,
   };
 }
 
@@ -67,9 +94,10 @@ export async function stopBackupService(): Promise<void> {
   if (scheduleHandle) clearTimeout(scheduleHandle);
   scheduleHandle = null;
   nextScheduledAt = null;
-  if (activeBackup) {
+  const pendingBackup = queuedBackup || activeBackup;
+  if (pendingBackup) {
     try {
-      await activeBackup;
+      await pendingBackup;
     } catch {
       // The failure is already exposed through backupStatus().
     }
@@ -77,7 +105,23 @@ export async function stopBackupService(): Promise<void> {
 }
 
 export function createVerifiedBackup(reason = 'manual'): Promise<BackupRecord> {
-  if (activeBackup) return activeBackup;
+  const normalizedReason = safeReason(reason);
+  if (activeBackup) {
+    if (normalizedReason === 'scheduled') return activeBackup;
+    if (queuedBackup) return queuedBackup;
+    const currentBackup = activeBackup;
+    queuedBackup = currentBackup
+      .catch(() => undefined)
+      .then(() => startVerifiedBackup(normalizedReason))
+      .finally(() => {
+        queuedBackup = null;
+      });
+    return queuedBackup;
+  }
+  return startVerifiedBackup(normalizedReason);
+}
+
+function startVerifiedBackup(reason: string): Promise<BackupRecord> {
   activeBackup = performBackup(reason)
     .catch((error) => {
       lastFailureAt = Date.now();
@@ -95,6 +139,44 @@ export function latestBackupPath(): { record: BackupRecord; path: string } | nul
   if (!record) return null;
   const filePath = path.join(backupDirectory, record.fileName);
   return fs.existsSync(filePath) ? { record, path: filePath } : null;
+}
+
+export function backupManifest(record: BackupRecord): BackupManifest {
+  return {
+    formatVersion: 1,
+    application: 'Apolloon',
+    backup: record,
+    verification: {
+      hashAlgorithm: 'SHA-256',
+      sqliteQuickCheck: 'ok',
+      foreignKeyCheck: 'ok',
+    },
+  };
+}
+
+export async function verifyStoredBackup(
+  record: BackupRecord,
+  filePath: string
+): Promise<void> {
+  try {
+    const stat = await fs.promises.stat(filePath);
+    if (stat.size !== record.sizeBytes) {
+      throw new Error('backup size no longer matches its manifest');
+    }
+    const sha256 = await hashFile(filePath);
+    if (!safeEqualHex(sha256, record.sha256)) {
+      throw new Error('backup SHA-256 no longer matches its manifest');
+    }
+    try {
+      verifyBackup(filePath);
+    } finally {
+      await removeBackupSidecars(filePath);
+    }
+  } catch (error) {
+    lastFailureAt = Date.now();
+    lastError = error instanceof Error ? error.message : String(error);
+    throw error;
+  }
 }
 
 export function backupsToRetain(
@@ -317,4 +399,21 @@ function safeReason(value: string): string {
 function readPositiveInt(value: unknown, fallback: number): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
+}
+
+function backupStorageCapacity(): { freeBytes: number; totalBytes: number } | null {
+  try {
+    const stats = fs.statfsSync(backupDirectory);
+    return {
+      freeBytes: Math.max(0, Math.trunc(stats.bavail * stats.bsize)),
+      totalBytes: Math.max(0, Math.trunc(stats.blocks * stats.bsize)),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function safeEqualHex(left: string, right: string): boolean {
+  if (!/^[0-9a-f]{64}$/.test(left) || !/^[0-9a-f]{64}$/.test(right)) return false;
+  return crypto.timingSafeEqual(Buffer.from(left, 'hex'), Buffer.from(right, 'hex'));
 }

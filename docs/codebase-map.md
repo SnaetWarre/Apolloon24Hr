@@ -21,6 +21,8 @@ Shared contracts live in `shared/`. Anything imported by both client and server 
   - `snapshot.ts`: snapshot query key and cache helpers.
 - `src/components/`: route-level screens and reusable UI pieces.
 - `src/lib/`: browser-side helpers and app-specific utility functions.
+  - `readiness.ts`: derives the operator-facing event readiness checklist from
+    backup, replication, clock, conflict, and timing state.
 - `src/types.ts`: client-facing re-export of shared schema types.
 
 ## Server Shape
@@ -30,7 +32,7 @@ Shared contracts live in `shared/`. Anything imported by both client and server 
 - `server/db.ts`: SQLite schema, reads, writes, and race-state transitions.
 - `server/cluster.ts`: local-first UDP discovery, authenticated delta exchange, creator bootstrap, and peer health.
 - `server/cluster-protocol.ts`: signed discovery envelopes and untrusted network payload validation.
-- `server/backups.ts`: verified online snapshots, retention, scheduling, and download metadata.
+- `server/backups.ts`: verified online snapshots, serialized scheduling, disk warnings, retention, and download manifests.
 - `server/app-state.ts`: full snapshot assembly.
 - `server/host.ts`: event LAN URL/port discovery.
 - `server/realtime.ts`: typed realtime event bridge.

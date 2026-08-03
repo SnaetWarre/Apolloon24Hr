@@ -70,9 +70,16 @@ Automatic retention is tiered:
 - one snapshot per day for 30 days;
 - the 20 newest manual or safety snapshots.
 
-Admin exposes the last verified backup, failure state, retained count, manual
-backup action, and a download of the latest snapshot. Downloading it to another
-laptop or USB storage provides the off-device copy that a local disk cannot.
+Admin exposes the last verified backup, failure state, retained count, free
+disk space, next scheduled run, manual backup action, and downloads for both the
+latest snapshot and its control manifest. Before sending a snapshot Apolloon
+recomputes SHA-256 and repeats the SQLite integrity checks; a changed or corrupt
+file is refused. Downloading both files to another laptop or USB storage
+provides the off-device copy that a local disk cannot.
+
+Overlapping work is serialized. If a manual backup is requested while the
+scheduler is active, the manual request waits and then creates a distinct
+snapshot instead of being incorrectly reported as the scheduled snapshot.
 
 Backups live outside application releases:
 
@@ -87,6 +94,7 @@ Configuration overrides:
 BACKUP_ENABLED=false
 BACKUP_INTERVAL_MS=300000
 BACKUP_INITIAL_DELAY_MS=10000
+BACKUP_MIN_FREE_BYTES=2147483648
 TIMING_TAKEOVER_GRACE_MS=10000
 TIMING_FORCED_TAKEOVER_GRACE_MS=30000
 ```
@@ -119,5 +127,6 @@ Before timing starts:
 1. Confirm at least two reachable host replicas in the header.
 2. Confirm the header says the data is synchronized and backed up.
 3. Download one verified backup to a separate device.
+   Download its control manifest beside it.
 4. Perform a planned timing transfer once and transfer it back.
 5. Confirm both laptops show the same active runner and lap count.

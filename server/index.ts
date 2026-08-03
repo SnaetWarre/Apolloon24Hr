@@ -10,11 +10,13 @@ import { Server as SocketIOServer } from 'socket.io';
 import { formatDurationMs } from '../shared/time.js';
 import { appSnapshot } from './app-state.js';
 import {
+  backupManifest,
   backupStatus,
   createVerifiedBackup,
   latestBackupPath,
   startBackupService,
   stopBackupService,
+  verifyStoredBackup,
 } from './backups.js';
 import {
   registerClusterRoutes,
@@ -23,6 +25,7 @@ import {
 } from './cluster.js';
 import {
   closeDb,
+  databaseReadiness,
   getAllLaps,
   getAllRaceEvents,
   getAllRunners,
@@ -56,6 +59,7 @@ const io = new SocketIOServer(server, {
   serveClient: false,
 });
 let shuttingDown = false;
+const processStartedAt = Date.now();
 
 function lapExportRows(): Array<Record<string, string | number>> {
   const runnersById = new Map(getAllRunners().map((runner) => [runner.id, runner]));
@@ -145,6 +149,34 @@ app.get('/api/host-info', (_req, res) => {
   res.json(hostInfo());
 });
 
+app.get('/api/health', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  try {
+    const database = databaseReadiness();
+    const backup = backupStatus();
+    res.json({
+      ok: true,
+      releaseId: process.env.APOLLOON_RELEASE_ID?.trim() || null,
+      startedAt: processStartedAt,
+      uptimeSeconds: Math.floor(process.uptime()),
+      database,
+      backup: {
+        enabled: backup.enabled,
+        latestCreatedAt: backup.latest?.createdAt || null,
+        lastError: backup.lastError,
+        diskLow: backup.diskLow,
+        diskFreeBytes: backup.diskFreeBytes,
+      },
+    });
+  } catch (error) {
+    res.status(503).json({
+      ok: false,
+      releaseId: process.env.APOLLOON_RELEASE_ID?.trim() || null,
+      error: error instanceof Error ? error.message : 'database unavailable',
+    });
+  }
+});
+
 app.get('/api/backups/status', (_req, res) => {
   res.json(backupStatus());
 });
@@ -163,16 +195,38 @@ app.post('/api/backups', async (req, res) => {
   }
 });
 
-app.get('/api/backups/latest', (_req, res) => {
+app.get('/api/backups/latest/manifest', (_req, res) => {
   const latest = latestBackupPath();
   if (!latest) {
     res.status(404).json({ ok: false, error: 'nog geen backup beschikbaar' });
     return;
   }
   res.setHeader('Cache-Control', 'no-store');
-  res.setHeader('X-Apolloon-Backup-SHA256', latest.record.sha256);
-  res.attachment(latest.record.fileName);
-  res.sendFile(latest.path, { dotfiles: 'allow' });
+  res.attachment(`${latest.record.fileName}.json`);
+  res.json(backupManifest(latest.record));
+});
+
+app.get('/api/backups/latest', async (_req, res) => {
+  const latest = latestBackupPath();
+  if (!latest) {
+    res.status(404).json({ ok: false, error: 'nog geen backup beschikbaar' });
+    return;
+  }
+  try {
+    await verifyStoredBackup(latest.record, latest.path);
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('X-Apolloon-Backup-SHA256', latest.record.sha256);
+    res.attachment(latest.record.fileName);
+    res.sendFile(latest.path, { dotfiles: 'allow' });
+  } catch (error) {
+    res.status(409).json({
+      ok: false,
+      error:
+        error instanceof Error
+          ? `backup kon niet opnieuw geverifieerd worden: ${error.message}`
+          : 'backup kon niet opnieuw geverifieerd worden',
+    });
+  }
 });
 
 app.get('/api/export/laps.csv', (_req, res) => {

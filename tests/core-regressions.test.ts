@@ -7,12 +7,13 @@ import type { Active, CollisionDetection, DroppableContainer } from '@dnd-kit/co
 import { buildRollingLapTrend, buildTimeBuckets } from '../src/lib/analysis.ts';
 import { kanbanCollisionDetection, resolveKanbanDrop } from '../src/lib/kanban.ts';
 import { createUuid } from '../src/lib/uuid.ts';
+import { buildEventReadiness, readinessSummary } from '../src/lib/readiness.ts';
 import {
   LIVE_MILLISECOND_INTERVAL_MS,
   normalizeClockInterval,
   SECOND_DISPLAY_INTERVAL_MS,
 } from '../src/lib/useAnimationFrameTick.ts';
-import type { LapRecord, RaceState } from '../src/types.ts';
+import type { ClusterStatus, LapRecord, RaceState } from '../src/types.ts';
 import { relativeFileWithinRoot } from '../server/static-files.ts';
 
 const dataPath = path.resolve(`.tmp-test-core-regressions-${process.pid}`);
@@ -53,6 +54,103 @@ test('all route modules load with the app so navigation never waits on a lazy ch
   assert.doesNotMatch(source, /React\.lazy|Pagina wordt geladen|import\(['"]\.\/components/);
   assert.match(source, /import \{ AnalysisView \} from '\.\/components\/AnalysisView'/);
   assert.match(source, /import \{ TimingView \} from '\.\/components\/TimingView'/);
+});
+
+test('event readiness blocks real safety failures and distinguishes standalone warnings', () => {
+  const now = Date.UTC(2026, 7, 3, 20, 0, 0);
+  const race: RaceState = {
+    id: 1,
+    activeRunnerId: null,
+    activeStartedAt: null,
+    raceStartedAt: null,
+    raceFinishedAt: null,
+    activeLabels: [],
+  };
+  const cluster: ClusterStatus = {
+    enabled: true,
+    hostId: 'host-a',
+    clusterId: 'cluster',
+    pairingCode: 'PAIR',
+    role: 'local-first',
+    writable: true,
+    connectedHosts: 2,
+    knownHosts: 2,
+    pendingOperations: 0,
+    conflictCount: 0,
+    timingControllerHostId: 'host-a',
+    timingControl: {
+      state: 'local',
+      controllerHostId: 'host-a',
+      generation: 1,
+      controllerUrl: 'http://host-a:5173',
+      controllerLastSeenAt: now,
+      localReplicaCaughtUp: true,
+      takeoverAllowed: false,
+      takeoverAvailableAt: null,
+      forcedTakeoverAllowed: false,
+      forcedTakeoverAvailableAt: null,
+    },
+    clockSkewMs: 50,
+    lastAppliedSeq: 3,
+    peers: [
+      {
+        id: 'host-b',
+        url: 'http://host-b:5173',
+        reachable: true,
+        lastSeenAt: now,
+        lastSeq: 3,
+        synchronized: true,
+      },
+    ],
+    backup: {
+      enabled: true,
+      inProgress: false,
+      queued: false,
+      intervalMs: 300_000,
+      nextScheduledAt: now + 300_000,
+      retainedCount: 2,
+      latest: {
+        fileName: 'backup.sqlite',
+        createdAt: now - 60_000,
+        reason: 'scheduled',
+        sizeBytes: 1_024,
+        sha256: 'a'.repeat(64),
+        verified: true,
+      },
+      lastFailureAt: null,
+      lastError: null,
+      diskFreeBytes: 10 * 1_024 ** 3,
+      diskTotalBytes: 20 * 1_024 ** 3,
+      minimumFreeBytes: 2 * 1_024 ** 3,
+      diskLow: false,
+    },
+  };
+
+  assert.equal(readinessSummary(buildEventReadiness(cluster, race, now)), 'ready');
+  assert.equal(
+    readinessSummary(
+      buildEventReadiness(
+        {
+          ...cluster,
+          conflictCount: 1,
+          backup: { ...cluster.backup, diskLow: true },
+        },
+        race,
+        now
+      )
+    ),
+    'blocked'
+  );
+  assert.equal(
+    readinessSummary(
+      buildEventReadiness(
+        { ...cluster, enabled: false, role: 'standalone', peers: [], connectedHosts: 1 },
+        race,
+        now
+      )
+    ),
+    'warning'
+  );
 });
 
 test('packaged static files stay relative to the AppImage mount root', () => {

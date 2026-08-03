@@ -5,19 +5,21 @@ import { LabelBadge, labelKindOrder, labelKindTitle } from './LabelBadge';
 import { SourceBadge } from './RunnerEntryModals';
 import { RunnerProfileModal } from './RunnerProfileModal';
 import { formatClockTimeMs } from '../lib/time';
+import { buildEventReadiness, readinessSummary } from '../lib/readiness';
 import type { AppSnapshot, Label, PublicRecordMode, Runner, RunnerStatus, TemporaryTeam } from '../types';
 
-const selectAdminData = ({ labels, runners, settings, temporaryTeams, host }: AppSnapshot) => ({
+const selectAdminData = ({ labels, runners, settings, temporaryTeams, host, race }: AppSnapshot) => ({
   labels,
   runners,
   settings,
   temporaryTeams,
   host,
+  race,
 });
 
 export function AdminView() {
-  const { labels, runners, settings, temporaryTeams, host } = useAppData(selectAdminData);
-  const { cluster } = useClusterStatus();
+  const { labels, runners, settings, temporaryTeams, host, race } = useAppData(selectAdminData);
+  const { cluster, error: clusterError } = useClusterStatus();
   const {
     importRunnersCsv,
     createLabel,
@@ -70,6 +72,11 @@ export function AdminView() {
       createdAt: number;
     }>;
   }>>([]);
+  const readinessChecks = React.useMemo(
+    () => buildEventReadiness(cluster, race),
+    [cluster, race]
+  );
+  const readiness = readinessSummary(readinessChecks);
 
   React.useEffect(() => {
     if (!cluster?.enabled || cluster.conflictCount === 0) {
@@ -324,6 +331,42 @@ export function AdminView() {
       </div>
 
       <div className="analysis-grid">
+        <section className={`panel readiness-panel readiness-panel--${readiness}`}>
+          <div className="readiness-heading">
+            <div>
+              <h2>Wedstrijdgereedheid</h2>
+              <p className="panel-copy">
+                Eén overzicht van de herstel-, synchronisatie- en timingvoorwaarden.
+              </p>
+            </div>
+            <strong className={`readiness-summary readiness-summary--${readiness}`}>
+              {readiness === 'ready'
+                ? 'Klaar'
+                : readiness === 'warning'
+                  ? 'Aandacht nodig'
+                  : 'Niet klaar'}
+            </strong>
+          </div>
+          {clusterError && (
+            <div className="warning-banner" role="alert">
+              De actuele systeemstatus kon niet worden vernieuwd: {clusterError.message}
+            </div>
+          )}
+          <ul className="readiness-list">
+            {readinessChecks.map((check) => (
+              <li className={`readiness-check readiness-check--${check.level}`} key={check.id}>
+                <span className="readiness-check__marker" aria-hidden="true">
+                  {check.level === 'ready' ? '✓' : check.level === 'warning' ? '!' : '×'}
+                </span>
+                <span>
+                  <strong>{check.label}</strong>
+                  <small>{check.detail}</small>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+
         {cluster?.enabled && (
           <section className="panel">
             <h2>Laptops koppelen</h2>
@@ -427,36 +470,88 @@ export function AdminView() {
           <section className="panel">
             <h2>Herstelbackups</h2>
             <p className="panel-copy">
-              Apolloon maakt tijdens gebruik automatisch gecontroleerde SQLite-snapshots. Recente
-              backups blijven fijnmazig bewaard, daarna per uur en per dag.
+              {cluster.backup.enabled
+                ? 'Apolloon maakt tijdens gebruik automatisch gecontroleerde SQLite-snapshots. Recente backups blijven fijnmazig bewaard, daarna per uur en per dag.'
+                : 'Automatische backups zijn op deze installatie uitgeschakeld. Handmatige backups blijven beschikbaar.'}
             </p>
+            {!cluster.backup.enabled && (
+              <div className="warning-banner" role="alert">
+                Automatische backups zijn uitgeschakeld.
+              </div>
+            )}
             {cluster.backup.latest ? (
               <div className="host-hint">
                 <strong>Laatste backup:</strong>{' '}
                 {new Date(cluster.backup.latest.createdAt).toLocaleString('nl-BE')} ·{' '}
+                {formatRelativeAge(cluster.backup.latest.createdAt)} ·{' '}
                 {formatFileSize(cluster.backup.latest.sizeBytes)} · gecontroleerd ·{' '}
                 {cluster.backup.retainedCount} bewaard
+                <div className="backup-checksum">
+                  <span>SHA-256</span>
+                  <code>{cluster.backup.latest.sha256}</code>
+                </div>
               </div>
             ) : (
-              <div className="warning-banner">Er is op deze laptop nog geen herstelbackup.</div>
+              <div className="warning-banner" role="alert">
+                Er is op deze laptop nog geen herstelbackup.
+              </div>
             )}
             {cluster.backup.lastError && (
-              <div className="warning-banner">
+              <div className="warning-banner" role="alert">
                 Laatste automatische backup mislukt: {cluster.backup.lastError}
               </div>
             )}
+            {cluster.backup.diskLow && (
+              <div className="warning-banner" role="alert">
+                Weinig opslagruimte: nog{' '}
+                {cluster.backup.diskFreeBytes === null
+                  ? 'onbekend'
+                  : formatFileSize(cluster.backup.diskFreeBytes)}{' '}
+                vrij; de veiligheidsgrens is {formatFileSize(cluster.backup.minimumFreeBytes)}.
+              </div>
+            )}
+            <div className="backup-metrics">
+              <span>
+                <strong>Volgende automatische backup</strong>
+                {cluster.backup.enabled && cluster.backup.nextScheduledAt
+                  ? new Date(cluster.backup.nextScheduledAt).toLocaleTimeString('nl-BE')
+                  : 'niet gepland'}
+              </span>
+              <span>
+                <strong>Vrije opslag</strong>
+                {cluster.backup.diskFreeBytes === null
+                  ? 'onbekend'
+                  : formatFileSize(cluster.backup.diskFreeBytes)}
+              </span>
+            </div>
             <div className="form-row form-row--plain backup-actions">
               <button
                 className="btn btn--primary"
                 onClick={() => void makeBackup()}
-                disabled={backupSaving || cluster.backup.inProgress}
+                disabled={
+                  backupSaving || cluster.backup.inProgress || cluster.backup.queued
+                }
+                aria-busy={backupSaving || cluster.backup.inProgress}
               >
-                {backupSaving || cluster.backup.inProgress ? 'Backup bezig...' : 'Nu backup maken'}
+                {cluster.backup.queued
+                  ? 'Backup wacht...'
+                  : backupSaving || cluster.backup.inProgress
+                    ? 'Backup bezig...'
+                    : 'Nu backup maken'}
               </button>
               {cluster.backup.latest && (
-                <a className="btn btn--secondary" href="/api/backups/latest" download>
-                  Laatste backup downloaden
-                </a>
+                <>
+                  <a className="btn btn--secondary" href="/api/backups/latest" download>
+                    Laatste backup downloaden
+                  </a>
+                  <a
+                    className="btn btn--secondary"
+                    href="/api/backups/latest/manifest"
+                    download
+                  >
+                    Controlebestand downloaden
+                  </a>
+                </>
               )}
             </div>
             <p className="panel-copy">
@@ -464,7 +559,11 @@ export function AdminView() {
               replica's beschermen tegen een defect toestel; deze versies beschermen ook tegen een
               fout die naar alle laptops wordt gesynchroniseerd.
             </p>
-            {backupMessage && <div className="success-banner">{backupMessage}</div>}
+            {backupMessage && (
+              <div className="success-banner" role="status" aria-live="polite">
+                {backupMessage}
+              </div>
+            )}
           </section>
         )}
 
@@ -676,7 +775,20 @@ function formatConflictTime(timestamp: number): string {
 function formatFileSize(bytes: number): string {
   if (bytes < 1_024) return `${bytes} B`;
   if (bytes < 1_024 ** 2) return `${(bytes / 1_024).toFixed(1)} KiB`;
-  return `${(bytes / 1_024 ** 2).toFixed(1)} MiB`;
+  if (bytes < 1_024 ** 3) return `${(bytes / 1_024 ** 2).toFixed(1)} MiB`;
+  return `${(bytes / 1_024 ** 3).toFixed(1)} GiB`;
+}
+
+function formatRelativeAge(timestamp: number): string {
+  const minutes = Math.max(0, Math.floor((Date.now() - timestamp) / 60_000));
+  if (minutes < 1) return 'zonet';
+  if (minutes === 1) return '1 minuut geleden';
+  if (minutes < 60) return `${minutes} minuten geleden`;
+  const hours = Math.floor(minutes / 60);
+  if (hours === 1) return '1 uur geleden';
+  if (hours < 48) return `${hours} uur geleden`;
+  const days = Math.floor(hours / 24);
+  return days === 1 ? '1 dag geleden' : `${days} dagen geleden`;
 }
 
 function AdminRunnerTable({

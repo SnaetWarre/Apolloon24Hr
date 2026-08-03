@@ -137,12 +137,17 @@ export type BackupRecord = z.infer<typeof backupRecordSchema>;
 export const backupStatusSchema = z.object({
   enabled: z.boolean(),
   inProgress: z.boolean(),
+  queued: z.boolean(),
   intervalMs: z.number().int().positive(),
   nextScheduledAt: z.number().int().nonnegative().nullable(),
   retainedCount: z.number().int().nonnegative(),
   latest: backupRecordSchema.nullable(),
   lastFailureAt: z.number().int().nonnegative().nullable(),
   lastError: z.string().nullable(),
+  diskFreeBytes: z.number().int().nonnegative().nullable(),
+  diskTotalBytes: z.number().int().nonnegative().nullable(),
+  minimumFreeBytes: z.number().int().positive(),
+  diskLow: z.boolean(),
 });
 export type BackupStatus = z.infer<typeof backupStatusSchema>;
 

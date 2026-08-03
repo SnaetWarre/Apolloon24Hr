@@ -55,6 +55,23 @@ test('online backups are verified, checksummed, and readable as independent SQLi
     assert.equal(status.latest?.fileName, record.fileName);
     assert.equal(status.latest?.verified, true);
     assert.equal(status.retainedCount, 1);
+    assert.ok((status.diskFreeBytes || 0) > 0);
+    assert.ok((status.diskTotalBytes || 0) >= (status.diskFreeBytes || 0));
+
+    const scheduledPromise = backups.createVerifiedBackup('scheduled');
+    const manualPromise = backups.createVerifiedBackup('manual-during-scheduled');
+    assert.equal(backups.backupStatus().queued, true);
+    const [scheduled, manual] = await Promise.all([scheduledPromise, manualPromise]);
+    assert.equal(scheduled.reason, 'scheduled');
+    assert.equal(manual.reason, 'manual-during-scheduled');
+    assert.notEqual(scheduled.fileName, manual.fileName);
+    assert.equal(backups.backupStatus().retainedCount, 3);
+    assert.equal(backups.backupStatus().queued, false);
+
+    const manifest = backups.backupManifest(manual);
+    assert.equal(manifest.application, 'Apolloon');
+    assert.equal(manifest.backup.sha256, manual.sha256);
+    assert.equal(manifest.verification.sqliteQuickCheck, 'ok');
   } finally {
     db.closeDb();
     fs.rmSync(dataPath, { recursive: true, force: true });

@@ -595,6 +595,22 @@ export function closeDb(): void {
   database = null;
 }
 
+export function databaseReadiness(): {
+  ready: true;
+  schemaVersion: number;
+  revision: number;
+} {
+  const probe = getDb().prepare('SELECT 1 AS ready').get() as
+    | { ready: number }
+    | undefined;
+  if (probe?.ready !== 1) throw new Error('database readiness probe failed');
+  return {
+    ready: true,
+    schemaVersion: Number(getSetting('schema_version') || 0),
+    revision: getAppDataRevision(),
+  };
+}
+
 export async function backupDatabase(destination: string): Promise<void> {
   await getDb().backup(destination);
 }

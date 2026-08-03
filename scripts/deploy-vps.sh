@@ -183,6 +183,7 @@ Environment=DATA_PATH=${data_dir}
 Environment=PORT=${app_port}
 Environment=PUBLIC_HOST=${public_host}
 Environment=PUBLIC_APP_PORT=${public_app_port}
+Environment=APOLLOON_RELEASE_ID=${release_id}
 ExecStart=${node_bin} dist-server/server/index.js
 Restart=always
 RestartSec=3
@@ -195,12 +196,33 @@ SERVICE
 "${sudo_cmd[@]}" systemctl enable "${service_name}.service" >/dev/null
 "${sudo_cmd[@]}" systemctl restart "${service_name}.service"
 
+ready=0
 for _ in 1 2 3 4 5 6 7 8 9 10; do
-  if curl -fsS "http://127.0.0.1:${app_port}/api/host-info" >/dev/null; then
+  if curl -fsS "http://127.0.0.1:${app_port}/api/health" >/dev/null; then
+    ready=1
     break
   fi
   sleep 1
 done
+
+if [[ "${ready}" != "1" ]]; then
+  echo "Apolloon readiness check failed." >&2
+  "${sudo_cmd[@]}" journalctl -u "${service_name}.service" --no-pager -n 50 >&2
+  exit 1
+fi
+
+health_json="$(curl -fsS "http://127.0.0.1:${app_port}/api/health")"
+actual_release="$(printf '%s' "${health_json}" | "${node_bin}" -e '
+let input = "";
+process.stdin.on("data", (chunk) => { input += chunk; });
+process.stdin.on("end", () => { process.stdout.write(JSON.parse(input).releaseId || ""); });
+')"
+if [[ "${actual_release}" != "${release_id}" ]]; then
+  echo "Release verification failed: expected ${release_id}, got ${actual_release:-none}." >&2
+  exit 1
+fi
+
+echo "Readiness verified for release ${actual_release}."
 
 "${sudo_cmd[@]}" systemctl --no-pager --lines=20 status "${service_name}.service"
 

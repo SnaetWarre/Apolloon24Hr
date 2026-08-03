@@ -5,6 +5,7 @@ export function useClusterStatus(): {
   cluster: ClusterStatus | null;
   loading: boolean;
   error: Error | null;
+  lastUpdatedAt: number | null;
 } {
   const query = useQuery({
     queryKey: ['cluster', 'status'],
@@ -13,12 +14,14 @@ export function useClusterStatus(): {
       if (!response.ok) throw new Error(`Cluster status failed: ${response.status}`);
       return response.json() as Promise<ClusterStatus>;
     },
-    refetchInterval: (query) => (query.state.data?.enabled ? 5_000 : false),
+    refetchInterval: (query) => (query.state.data?.enabled ? 5_000 : 10_000),
+    refetchOnWindowFocus: true,
   });
 
   return {
     cluster: query.data ?? null,
     loading: query.isPending,
     error: query.error instanceof Error ? query.error : null,
+    lastUpdatedAt: query.dataUpdatedAt || null,
   };
 }

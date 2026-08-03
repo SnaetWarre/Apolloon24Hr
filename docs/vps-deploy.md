@@ -71,6 +71,10 @@ http://185.102.172.74:3000/display/outside
 http://185.102.172.74:3000/display/inside
 ```
 
+The deploy script waits for `/api/health` and verifies that its `releaseId`
+matches the versioned release directory before declaring success. This catches
+a process that is reachable but still running the previous build.
+
 If you want plain port 80 and nothing else is using it on the VPS:
 
 ```bash

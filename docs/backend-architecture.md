@@ -45,6 +45,8 @@ server/index.ts
 - Owns the Express and HTTP server.
 - Mounts tRPC at `/trpc`.
 - Exposes state, clock, host information, and export endpoints under `/api`.
+- Exposes `/api/health` with database readiness, release identity, uptime, and
+  backup warnings; deployments verify the exact new release through this route.
 - Hosts Socket.IO and emits the current state revision on connection.
 - Serves precompressed immutable Vite assets and the uncached HTML shell.
 - Initializes SQLite before listening and performs graceful shutdown.
@@ -112,7 +114,8 @@ replication_conflicts
 ### Supporting modules
 
 - `server/backups.ts`: creates online SQLite snapshots, verifies their integrity,
-  calculates SHA-256, applies tiered retention, and exposes backup status.
+  calculates SHA-256, serializes overlapping manual/scheduled requests, applies
+  tiered retention, reports disk capacity, and re-verifies downloads.
 - `server/app-state.ts`: caches immutable application collections by database
   revision and refreshes only clock/host metadata per request.
 - `server/realtime.ts`: isolates database/router code from Socket.IO.
@@ -192,4 +195,5 @@ npm run test:e2e
 The E2E suite starts real backend processes and covers standalone writes,
 two-way sync, five-node convergence, disconnect/restart catch-up, bootstrap
 replacement, invalid batch rollback, peer address changes, concurrent edits,
-timing conflicts, and exactly-once commands.
+timing conflicts, health/release reporting, verified backup downloads, and
+exactly-once commands.
