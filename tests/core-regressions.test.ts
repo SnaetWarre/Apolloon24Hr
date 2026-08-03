@@ -72,6 +72,17 @@ test('event readiness blocks real safety failures and distinguishes standalone w
     clusterId: 'cluster',
     pairingCode: 'PAIR',
     role: 'local-first',
+    compatibility: {
+      protocolVersion: 3,
+      schemaVersion: 8,
+      minimumSchemaVersion: 8,
+      replicationFormatVersion: 1,
+      minimumReplicationFormatVersion: 1,
+      appVersion: '1.0.0',
+      minimumAppVersion: '1.0.0',
+      releaseId: 'test',
+    },
+    incompatiblePeerCount: 0,
     writable: true,
     connectedHosts: 2,
     knownHosts: 2,
@@ -100,15 +111,20 @@ test('event readiness blocks real safety failures and distinguishes standalone w
         lastSeenAt: now,
         lastSeq: 3,
         synchronized: true,
+        compatibility: null,
+        compatibilityError: null,
       },
     ],
     backup: {
       enabled: true,
       inProgress: false,
       queued: false,
+      maintenanceInProgress: false,
       intervalMs: 300_000,
       nextScheduledAt: now + 300_000,
       retainedCount: 2,
+      retainedBytes: 2_048,
+      maximumRetainedBytes: 8 * 1_024 ** 3,
       latest: {
         fileName: 'backup.sqlite',
         createdAt: now - 60_000,
@@ -123,6 +139,15 @@ test('event readiness blocks real safety failures and distinguishes standalone w
       diskTotalBytes: 20 * 1_024 ** 3,
       minimumFreeBytes: 2 * 1_024 ** 3,
       diskLow: false,
+      database: {
+        fileBytes: 2_048,
+        usedBytes: 2_048,
+        reclaimableBytes: 0,
+        reclaimablePercent: 0,
+        compactionRecommended: false,
+        raceActive: false,
+        lastCompactedAt: null,
+      },
     },
   };
 
@@ -653,12 +678,16 @@ test('operational SQLite access paths stay indexed and direct lookups preserve r
 test('full app snapshots reuse immutable collections until application data changes', async () => {
   fs.rmSync(dataPath, { recursive: true, force: true });
   const db = await import('../server/db.ts');
-  const { appSnapshot } = await import('../server/app-state.ts');
+  const { appSnapshot, liveAppSnapshot } = await import('../server/app-state.ts');
 
   try {
     await db.initDb();
     const first = appSnapshot();
     const second = appSnapshot();
+    const live = liveAppSnapshot();
+    assert.equal('laps' in live, false);
+    assert.equal('events' in live, false);
+    assert.strictEqual(live.runners, first.runners);
     assert.strictEqual(second.runners, first.runners);
     assert.strictEqual(second.laps, first.laps);
     assert.equal(second.revision, first.revision);

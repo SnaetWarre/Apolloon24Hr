@@ -23,7 +23,8 @@ server/index.ts
   |     v
   |   another Electron host
   |
-  |-- server/app-state.ts ----- cached full snapshot
+  |-- server/app-state.ts ----- cached live and replication snapshots
+  |-- server/app-history.ts --- lazy race history
   |-- server/backups.ts ------- verified point-in-time snapshots
   |-- server/realtime.ts ------ typed Socket.IO events
   |-- server/host.ts ---------- LAN address selection
@@ -48,6 +49,8 @@ server/index.ts
 - Exposes `/api/health` with database readiness, release identity, uptime, and
   backup warnings; deployments verify the exact new release through this route.
 - Hosts Socket.IO and emits the current state revision on connection.
+- Serves live state separately from gzip-compressed historical laps/events, so
+  ordinary operator screens do not repeatedly transfer the full race history.
 - Serves precompressed immutable Vite assets and the uncached HTML shell.
 - Initializes SQLite before listening and performs graceful shutdown.
 - Starts and stops the backup scheduler with the database lifecycle.
@@ -95,6 +98,9 @@ replication_conflicts
 - Keeps the in-memory peer registry and reachability/backoff state.
 - Broadcasts signed discovery packets on every physical IPv4 LAN interface.
 - Exchanges at most 250 missing operations per peer per sync request.
+- Exchanges schema, replication-format, app-version, and release compatibility
+  before accepting bootstrap data or replayable SQL. Incompatible hosts are
+  rejected with HTTP 426 and remain visibly disconnected in Admin.
 - Updates peer vectors only after a valid batch has been accepted.
 - Replaces stale peer URLs when a known host moves to another address.
 - Keeps every host locally writable; timing conflicts pause only timing.
@@ -116,8 +122,9 @@ replication_conflicts
 - `server/backups.ts`: creates online SQLite snapshots, verifies their integrity,
   calculates SHA-256, serializes overlapping manual/scheduled requests, applies
   tiered retention, reports disk capacity, and re-verifies downloads.
-- `server/app-state.ts`: caches immutable application collections by database
-  revision and refreshes only clock/host metadata per request.
+- `server/app-state.ts`: caches the small live snapshot separately from the full
+  replication/export snapshot and refreshes only clock/host metadata per request.
+- `server/app-history.ts`: serves cached full, recent, or per-runner history.
 - `server/realtime.ts`: isolates database/router code from Socket.IO.
 - `server/host.ts`: ranks physical LAN interfaces, calculates directed
   broadcast addresses, and refreshes automatic host selection.
@@ -170,6 +177,10 @@ operations after reconnecting.
 - A creator bootstrap creates a recovery SQLite backup before replacement.
 - Production hosts create verified backups every five minutes under
   `<DATA_PATH>/backups`, outside application releases.
+- Backup retention also has an 8 GiB byte ceiling by default.
+- Startup compaction runs only when reclaimable space exceeds both 16 MiB and
+  25 percent and no race is active. Admin exposes the same guarded maintenance
+  path after creating a verified safety backup.
 
 The operation log is intentionally retained so a laptop that was absent for a
 long time can still catch up without a central service.

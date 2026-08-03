@@ -2,9 +2,9 @@ import React from 'react';
 import { useAppData, useClusterStatus } from '../app/index';
 import { useAppStore } from '../store';
 import { RunnerActivationModal, RunnerAddModal } from './RunnerEntryModals';
-import type { AppSnapshot, ClusterStatus } from '../types';
+import type { ClusterStatus, LiveAppSnapshot } from '../types';
 
-const selectHostData = ({ host }: AppSnapshot) => ({ host });
+const selectHostData = ({ host }: LiveAppSnapshot) => ({ host });
 
 export const AppHeader: React.FC<{ onOpenProfile?: (runnerId: string) => void }> = ({
   onOpenProfile,
@@ -95,6 +95,13 @@ function buildSystemStatus(input: {
     };
   }
   if (!cluster) return null;
+  if (cluster.incompatiblePeerCount > 0) {
+    return {
+      tone: 'error',
+      title: 'Laptopupdate vereist',
+      detail: `${cluster.incompatiblePeerCount} laptop${cluster.incompatiblePeerCount === 1 ? '' : 's'} gebruikt een incompatibele Apolloon-versie`,
+    };
+  }
   if (cluster.conflictCount > 0) {
     return {
       tone: 'error',

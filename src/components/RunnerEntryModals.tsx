@@ -1,10 +1,10 @@
 import React from 'react';
 import { useAppActions, useAppData } from '../app/index';
-import type { AppSnapshot, Label, Runner } from '../types';
+import type { Label, LiveAppSnapshot, Runner } from '../types';
 import { LabelBadge, labelKindOrder, labelKindTitle } from './LabelBadge';
 
-const selectRunners = ({ runners }: AppSnapshot) => ({ runners });
-const selectLabels = ({ labels }: AppSnapshot) => ({ labels });
+const selectRunners = ({ runners }: LiveAppSnapshot) => ({ runners });
+const selectLabels = ({ labels }: LiveAppSnapshot) => ({ labels });
 
 export function RunnerActivationModal({
   onClose,

@@ -6,7 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { createTRPCClient, httpBatchLink } from '@trpc/client';
 import type { AppRouter } from '../server/router.ts';
-import type { AppSnapshot, ClusterStatus } from '../shared/schemas.ts';
+import type { AppSnapshot, ClusterStatus, LiveAppSnapshot, RaceHistory } from '../shared/schemas.ts';
 
 type RunningServer = {
   process: ChildProcess;
@@ -54,6 +54,51 @@ test('standalone mode stays writable and rejects replication exchange', { timeou
     assert.equal(response.status, 404);
   } finally {
     await stopServer(server);
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('incompatible app versions are blocked before cluster synchronization', { timeout: 15_000 }, async () => {
+  const root = testRoot('version-skew');
+  const ports = await Promise.all([freePort(), freePort()]);
+  const servers: RunningServer[] = [];
+  try {
+    servers.push(
+      await startServer({
+        port: ports[0],
+        dataPath: path.join(root, 'old'),
+        peers: [ports[1]],
+        appVersion: '1.0.0',
+        minimumAppVersion: '1.0.0',
+      })
+    );
+    servers.push(
+      await startServer({
+        port: ports[1],
+        dataPath: path.join(root, 'new'),
+        peers: [ports[0]],
+        appVersion: '2.0.0',
+        minimumAppVersion: '2.0.0',
+      })
+    );
+
+    await waitFor(async () => {
+      const statuses = await Promise.all(ports.map(fetchStatus));
+      return statuses.every(
+        (status) =>
+          status.connectedHosts === 1 &&
+          status.incompatiblePeerCount === 1 &&
+          status.peers.some((peer) => /Upgrade vereist/.test(peer.compatibilityError || ''))
+      );
+    });
+
+    const statuses = await Promise.all(ports.map(fetchStatus));
+    assert.deepEqual(statuses.map((status) => status.compatibility.appVersion), ['1.0.0', '2.0.0']);
+    assert.ok(statuses.every((status) => status.knownHosts === 2));
+  } catch (error) {
+    throw withServerOutput(error, ...servers);
+  } finally {
+    await Promise.all(servers.map(stopServer));
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
@@ -843,7 +888,17 @@ function postClusterExchange(
       'x-apolloon-cluster-secret': CLUSTER_SECRET,
     },
     body: JSON.stringify({
-      protocol: 2,
+      protocol: 3,
+      compatibility: {
+        protocolVersion: 3,
+        schemaVersion: 8,
+        minimumSchemaVersion: 8,
+        replicationFormatVersion: 1,
+        minimumReplicationFormatVersion: 1,
+        appVersion: '1.0.0',
+        minimumAppVersion: '1.0.0',
+        releaseId: 'e2e-test-release',
+      },
       clusterId: input.clusterId || CLUSTER_ID,
       hostId: input.hostId,
       url: input.url,
@@ -861,6 +916,8 @@ async function startServer(options: {
   clusterEnabled?: boolean;
   clusterId?: string;
   clusterSecret?: string;
+  appVersion?: string;
+  minimumAppVersion?: string;
 }): Promise<RunningServer> {
   fs.mkdirSync(options.dataPath, { recursive: true });
   const chunks: string[] = [];
@@ -886,6 +943,9 @@ async function startServer(options: {
       TIMING_FORCED_TAKEOVER_GRACE_MS: '400',
       BACKUP_ENABLED: 'false',
       APOLLOON_RELEASE_ID: 'e2e-test-release',
+      APOLLOON_APP_VERSION: options.appVersion || '1.0.0',
+      APOLLOON_MIN_COMPATIBLE_APP_VERSION:
+        options.minimumAppVersion || options.appVersion || '1.0.0',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -916,9 +976,17 @@ async function stopServer(server: RunningServer | null): Promise<void> {
 }
 
 async function fetchState(port: number): Promise<AppSnapshot> {
-  const response = await fetch(`http://127.0.0.1:${port}/api/state`);
-  assert.equal(response.ok, true);
-  return response.json() as Promise<AppSnapshot>;
+  const [stateResponse, historyResponse] = await Promise.all([
+    fetch(`http://127.0.0.1:${port}/api/state`),
+    fetch(`http://127.0.0.1:${port}/api/history`),
+  ]);
+  assert.equal(stateResponse.ok, true);
+  assert.equal(historyResponse.ok, true);
+  const [state, history] = await Promise.all([
+    stateResponse.json() as Promise<LiveAppSnapshot>,
+    historyResponse.json() as Promise<RaceHistory>,
+  ]);
+  return { ...state, laps: history.laps, events: history.events };
 }
 
 async function fetchStatus(port: number): Promise<ClusterStatus> {

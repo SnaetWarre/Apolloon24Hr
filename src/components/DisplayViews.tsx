@@ -1,23 +1,22 @@
 import React from 'react';
-import { useAppData } from '../app/index';
+import { useAppData, useRaceHistory } from '../app/index';
 import { isFastestLapForRecordMode, publicRecordModeTitle } from '../lib/analysis';
 import { formatClockTimeMs, formatDurationMs } from '../lib/time';
 import { getNextWaitingRunner, lapRunnerLabel, runnerLabel } from '../lib/runners';
-import type { AppSnapshot, Label, LapRecord, PublicRecordMode, RaceEvent, Runner } from '../types';
+import type { Label, LapRecord, LiveAppSnapshot, PublicRecordMode, RaceEvent, Runner } from '../types';
 import { LabelBadge } from './LabelBadge';
 
 const OUTSIDE_ALERT_VISIBLE_MS = 8_000;
-const selectOutsideDisplayData = ({ runners, race, laps, events, settings }: AppSnapshot) => ({
+const selectOutsideDisplayData = ({ runners, race, settings }: LiveAppSnapshot) => ({
   runners,
   race,
-  laps,
-  events,
   settings,
 });
-const selectInsideDisplayData = ({ runners, labels, laps }: AppSnapshot) => ({ runners, labels, laps });
+const selectInsideDisplayData = ({ runners, labels }: LiveAppSnapshot) => ({ runners, labels });
 
 export function OutsideDisplay({ onNavigate }: { onNavigate: (path: string) => void }) {
-  const { runners, race, laps, events, settings } = useAppData(selectOutsideDisplayData);
+  const { runners, race, settings } = useAppData(selectOutsideDisplayData);
+  const { laps, events } = useRaceHistory({ scope: 'full' });
   const activeRunner = runners.find((runner) => runner.id === race.activeRunnerId) || null;
   const nextRunner = getNextWaitingRunner(runners);
   const [recordLap, setRecordLap] = React.useState<LapRecord | null>(null);
@@ -126,7 +125,8 @@ export function OutsideDisplay({ onNavigate }: { onNavigate: (path: string) => v
 }
 
 export function InsideDisplay({ onNavigate }: { onNavigate: (path: string) => void }) {
-  const { runners, labels, laps } = useAppData(selectInsideDisplayData);
+  const { runners, labels } = useAppData(selectInsideDisplayData);
+  const { laps } = useRaceHistory({ scope: 'full' });
   const latestLap = laps[0] || null;
   const ranking = React.useMemo(
     () =>

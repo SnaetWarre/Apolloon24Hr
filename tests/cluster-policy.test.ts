@@ -8,6 +8,7 @@ import {
   verifyDiscoveryPayload,
 } from '../server/cluster-protocol.ts';
 import { lanNetworkEndpoints, selectLanIp } from '../server/host.ts';
+import { clusterCompatibilityError } from '../server/cluster-compatibility.ts';
 
 test('cluster mode requires an explicit opt-in outside the packaged Electron wrapper', () => {
   assert.equal(isClusterEnabled({ NODE_ENV: 'production' }), false);
@@ -20,7 +21,17 @@ test('UDP discovery only accepts payloads authenticated by the cluster secret', 
   const payload = signDiscoveryPayload(
     {
       app: 'apolloon',
-      protocol: 2,
+      protocol: 3,
+      compatibility: {
+        protocolVersion: 3,
+        schemaVersion: 8,
+        minimumSchemaVersion: 8,
+        replicationFormatVersion: 1,
+        minimumReplicationFormatVersion: 1,
+        appVersion: '1.0.0',
+        minimumAppVersion: '1.0.0',
+        releaseId: 'test',
+      },
       clusterId: 'cluster-a',
       hostId: 'host-a',
       url: 'http://192.168.1.20:5173',
@@ -41,6 +52,16 @@ test('UDP discovery only accepts payloads authenticated by the cluster secret', 
     ),
     null
   );
+  assert.equal(
+    verifyDiscoveryPayload(
+      {
+        ...payload,
+        compatibility: { ...payload.compatibility, schemaVersion: 999 },
+      },
+      'shared-cluster-secret'
+    ),
+    null
+  );
   assert.equal(verifyDiscoveryPayload(payload, 'wrong-secret'), null);
   assert.equal(secureEqual('same', 'same'), true);
   assert.equal(secureEqual('short', 'a-longer-secret'), false);
@@ -57,6 +78,42 @@ test('cluster operation vectors reject malformed or unbounded peer input', () =>
     ),
     null
   );
+});
+
+test('cluster compatibility rejects unsafe version skew before SQL replication', () => {
+  const local = {
+    protocolVersion: 3,
+    schemaVersion: 8,
+    minimumSchemaVersion: 8,
+    replicationFormatVersion: 1,
+    minimumReplicationFormatVersion: 1,
+    appVersion: '1.2.0',
+    minimumAppVersion: '1.0.0',
+    releaseId: 'local-release',
+  };
+
+  assert.equal(
+    clusterCompatibilityError(
+      { ...local, appVersion: '1.1.0', releaseId: 'remote-compatible' },
+      local
+    ),
+    null
+  );
+  assert.match(
+    clusterCompatibilityError(
+      { ...local, schemaVersion: 7, minimumSchemaVersion: 7 },
+      local
+    ) || '',
+    /Upgrade vereist.*databaseschema/
+  );
+  assert.match(
+    clusterCompatibilityError(
+      { ...local, appVersion: '2.0.0', minimumAppVersion: '2.0.0' },
+      local
+    ) || '',
+    /Upgrade vereist.*appversie/
+  );
+  assert.match(clusterCompatibilityError(null, local) || '', /compatibiliteitsinformatie/);
 });
 
 test('LAN host selection ignores virtual adapters and prefers physical private networks', () => {

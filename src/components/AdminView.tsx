@@ -6,9 +6,9 @@ import { SourceBadge } from './RunnerEntryModals';
 import { RunnerProfileModal } from './RunnerProfileModal';
 import { formatClockTimeMs } from '../lib/time';
 import { buildEventReadiness, readinessSummary } from '../lib/readiness';
-import type { AppSnapshot, Label, PublicRecordMode, Runner, RunnerStatus, TemporaryTeam } from '../types';
+import type { Label, LiveAppSnapshot, PublicRecordMode, Runner, RunnerStatus, TemporaryTeam } from '../types';
 
-const selectAdminData = ({ labels, runners, settings, temporaryTeams, host, race }: AppSnapshot) => ({
+const selectAdminData = ({ labels, runners, settings, temporaryTeams, host, race }: LiveAppSnapshot) => ({
   labels,
   runners,
   settings,
@@ -35,6 +35,7 @@ export function AdminView() {
     resolveConflict,
     transferTimingControl,
     createBackup,
+    compactDatabase,
   } = useAppActions();
   const [csvText, setCsvText] = React.useState('');
   const [csvFileName, setCsvFileName] = React.useState('');
@@ -60,6 +61,7 @@ export function AdminView() {
   const [clusterSaving, setClusterSaving] = React.useState(false);
   const [backupSaving, setBackupSaving] = React.useState(false);
   const [backupMessage, setBackupMessage] = React.useState<string | null>(null);
+  const [compactionSaving, setCompactionSaving] = React.useState(false);
   const [clusterConflicts, setClusterConflicts] = React.useState<Array<{
     id: string;
     kind: 'timing' | 'data';
@@ -183,6 +185,27 @@ export function AdminView() {
       setBackupMessage(err instanceof Error ? err.message : 'Backup maken mislukt');
     } finally {
       setBackupSaving(false);
+    }
+  }
+
+  async function compactStorage() {
+    if (compactionSaving || !cluster?.backup.database.compactionRecommended) return;
+    if (
+      !window.confirm(
+        'Apolloon maakt eerst een geverifieerde herstelbackup en verkleint daarna het SQLite-bestand. Dit kan alleen wanneer de race niet actief is. Doorgaan?'
+      )
+    ) return;
+    setCompactionSaving(true);
+    setBackupMessage(null);
+    try {
+      const result = await compactDatabase();
+      setBackupMessage(
+        `Database veilig verkleind van ${formatFileSize(result.before.fileBytes)} naar ${formatFileSize(result.after.fileBytes)}.`
+      );
+    } catch (err) {
+      setBackupMessage(err instanceof Error ? err.message : 'Database compactie mislukt');
+    } finally {
+      setCompactionSaving(false);
     }
   }
 
@@ -389,11 +412,25 @@ export function AdminView() {
                     ? `${cluster.timingControl.controllerUrl || 'andere laptop'} is controller en bereikbaar.`
                     : 'de timingcontroller is niet bereikbaar; gebruik alleen na fysieke controle een noodovername.'}
             </div>
+            <div className="host-hint">
+              <strong>Deze versie:</strong> app {cluster.compatibility.appVersion} · schema{' '}
+              {cluster.compatibility.schemaVersion} · replicatieformaat{' '}
+              {cluster.compatibility.replicationFormatVersion}
+              {cluster.compatibility.releaseId
+                ? ` · release ${cluster.compatibility.releaseId.slice(0, 12)}`
+                : ''}
+            </div>
             {cluster.peers.map((peer) => (
-              <div className="host-hint cluster-peer-row" key={peer.url}>
+              <div
+                className={`host-hint cluster-peer-row${peer.compatibilityError ? ' warning-banner' : ''}`}
+                key={peer.url}
+                role={peer.compatibilityError ? 'alert' : undefined}
+              >
                 <span>
                   <strong>{peer.url}</strong>{' '}
-                  {peer.reachable
+                  {peer.compatibilityError
+                    ? peer.compatibilityError
+                    : peer.reachable
                     ? peer.synchronized
                       ? 'bereikbaar en gesynchroniseerd'
                       : 'bereikbaar; synchronisatie bezig'
@@ -401,7 +438,10 @@ export function AdminView() {
                       ? `niet bereikbaar; laatst gezien om ${formatClockTimeMs(peer.lastSeenAt)}`
                       : 'nog niet bereikbaar geweest'}
                 </span>
-                {cluster.timingControl.state === 'local' && peer.id && peer.reachable && (
+                {cluster.timingControl.state === 'local' &&
+                  peer.id &&
+                  peer.reachable &&
+                  !peer.compatibilityError && (
                   <button
                     className="btn btn--secondary"
                     onClick={() => void transferTiming(peer.id!, peer.url)}
@@ -485,7 +525,7 @@ export function AdminView() {
                 {new Date(cluster.backup.latest.createdAt).toLocaleString('nl-BE')} ·{' '}
                 {formatRelativeAge(cluster.backup.latest.createdAt)} ·{' '}
                 {formatFileSize(cluster.backup.latest.sizeBytes)} · gecontroleerd ·{' '}
-                {cluster.backup.retainedCount} bewaard
+                {cluster.backup.retainedCount} bewaard ({formatFileSize(cluster.backup.retainedBytes)})
                 <div className="backup-checksum">
                   <span>SHA-256</span>
                   <code>{cluster.backup.latest.sha256}</code>
@@ -523,7 +563,27 @@ export function AdminView() {
                   ? 'onbekend'
                   : formatFileSize(cluster.backup.diskFreeBytes)}
               </span>
+              <span>
+                <strong>SQLite-database</strong>
+                {formatFileSize(cluster.backup.database.fileBytes)} ·{' '}
+                {formatFileSize(cluster.backup.database.usedBytes)} werkelijk in gebruik
+              </span>
+              <span>
+                <strong>Backupplafond</strong>
+                {formatFileSize(cluster.backup.retainedBytes)} van{' '}
+                {formatFileSize(cluster.backup.maximumRetainedBytes)}
+              </span>
             </div>
+            {cluster.backup.database.compactionRecommended && (
+              <div className="warning-banner" role="status">
+                {formatFileSize(cluster.backup.database.reclaimableBytes)} ({Math.round(
+                  cluster.backup.database.reclaimablePercent
+                )}%) van het databasebestand kan veilig worden teruggewonnen.
+                {cluster.backup.database.raceActive
+                  ? ' Compactie wordt geblokkeerd zolang de race actief is.'
+                  : ' Compactie is nu beschikbaar.'}
+              </div>
+            )}
             <div className="form-row form-row--plain backup-actions">
               <button
                 className="btn btn--primary"
@@ -552,6 +612,22 @@ export function AdminView() {
                     Controlebestand downloaden
                   </a>
                 </>
+              )}
+              {cluster.backup.database.compactionRecommended && (
+                <button
+                  className="btn btn--secondary"
+                  onClick={() => void compactStorage()}
+                  disabled={
+                    compactionSaving ||
+                    cluster.backup.database.raceActive ||
+                    cluster.backup.inProgress ||
+                    cluster.backup.maintenanceInProgress
+                  }
+                >
+                  {compactionSaving || cluster.backup.maintenanceInProgress
+                    ? 'Database verkleinen...'
+                    : 'Database veilig verkleinen'}
+                </button>
               )}
             </div>
             <p className="panel-copy">

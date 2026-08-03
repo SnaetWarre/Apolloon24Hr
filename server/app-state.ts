@@ -9,21 +9,21 @@ import {
   getTemporaryTeams,
 } from './db.js';
 import { hostInfo } from './host.js';
-import type { AppSnapshot } from '../shared/schemas.js';
+import type { AppSnapshot, LiveAppSnapshot } from '../shared/schemas.js';
 
-let cachedRevision = -1;
-let cachedSnapshot: AppSnapshot | null = null;
+let cachedLiveRevision = -1;
+let cachedLiveSnapshot: LiveAppSnapshot | null = null;
+let cachedFullRevision = -1;
+let cachedFullSnapshot: AppSnapshot | null = null;
 
-export function appSnapshot(): AppSnapshot {
+export function liveAppSnapshot(): LiveAppSnapshot {
   const revision = getAppDataRevision();
-  if (!cachedSnapshot || cachedRevision !== revision) {
-    cachedRevision = revision;
-    cachedSnapshot = {
+  if (!cachedLiveSnapshot || cachedLiveRevision !== revision) {
+    cachedLiveRevision = revision;
+    cachedLiveSnapshot = {
       runners: getAllRunners(),
       labels: getLabels(),
       race: getRaceState(),
-      laps: getAllLaps(),
-      events: getAllRaceEvents(),
       temporaryTeams: getTemporaryTeams(),
       settings: getAppSettings(),
       revision,
@@ -33,7 +33,26 @@ export function appSnapshot(): AppSnapshot {
   }
 
   return {
-    ...cachedSnapshot,
+    ...cachedLiveSnapshot,
+    revision,
+    serverNowMs: Date.now(),
+    host: hostInfo(),
+  };
+}
+
+export function appSnapshot(): AppSnapshot {
+  const revision = getAppDataRevision();
+  if (!cachedFullSnapshot || cachedFullRevision !== revision) {
+    cachedFullRevision = revision;
+    cachedFullSnapshot = {
+      ...liveAppSnapshot(),
+      laps: getAllLaps(),
+      events: getAllRaceEvents(),
+    };
+  }
+
+  return {
+    ...cachedFullSnapshot,
     revision,
     serverNowMs: Date.now(),
     host: hostInfo(),

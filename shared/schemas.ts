@@ -113,6 +113,18 @@ export type HostInfo = z.infer<typeof hostInfoSchema>;
 export const clusterRoleSchema = z.enum(['standalone', 'local-first']);
 export type ClusterRole = z.infer<typeof clusterRoleSchema>;
 
+export const clusterCompatibilitySchema = z.object({
+  protocolVersion: z.number().int().positive(),
+  schemaVersion: z.number().int().positive(),
+  minimumSchemaVersion: z.number().int().positive(),
+  replicationFormatVersion: z.number().int().positive(),
+  minimumReplicationFormatVersion: z.number().int().positive(),
+  appVersion: z.string().min(1),
+  minimumAppVersion: z.string().min(1),
+  releaseId: z.string().nullable(),
+});
+export type ClusterCompatibility = z.infer<typeof clusterCompatibilitySchema>;
+
 export const clusterPeerSchema = z.object({
   id: z.string().nullable(),
   url: z.string(),
@@ -121,6 +133,8 @@ export const clusterPeerSchema = z.object({
   lastSeq: z.number().int().nonnegative().nullable(),
   synchronized: z.boolean(),
   operationVector: z.record(z.string(), z.number().int().nonnegative()).optional(),
+  compatibility: clusterCompatibilitySchema.nullable(),
+  compatibilityError: z.string().nullable(),
 });
 export type ClusterPeer = z.infer<typeof clusterPeerSchema>;
 
@@ -134,13 +148,27 @@ export const backupRecordSchema = z.object({
 });
 export type BackupRecord = z.infer<typeof backupRecordSchema>;
 
+export const databaseStorageStatusSchema = z.object({
+  fileBytes: z.number().int().nonnegative(),
+  usedBytes: z.number().int().nonnegative(),
+  reclaimableBytes: z.number().int().nonnegative(),
+  reclaimablePercent: z.number().nonnegative(),
+  compactionRecommended: z.boolean(),
+  raceActive: z.boolean(),
+  lastCompactedAt: z.number().int().nonnegative().nullable(),
+});
+export type DatabaseStorageStatus = z.infer<typeof databaseStorageStatusSchema>;
+
 export const backupStatusSchema = z.object({
   enabled: z.boolean(),
   inProgress: z.boolean(),
   queued: z.boolean(),
+  maintenanceInProgress: z.boolean(),
   intervalMs: z.number().int().positive(),
   nextScheduledAt: z.number().int().nonnegative().nullable(),
   retainedCount: z.number().int().nonnegative(),
+  retainedBytes: z.number().int().nonnegative(),
+  maximumRetainedBytes: z.number().int().positive(),
   latest: backupRecordSchema.nullable(),
   lastFailureAt: z.number().int().nonnegative().nullable(),
   lastError: z.string().nullable(),
@@ -148,6 +176,7 @@ export const backupStatusSchema = z.object({
   diskTotalBytes: z.number().int().nonnegative().nullable(),
   minimumFreeBytes: z.number().int().positive(),
   diskLow: z.boolean(),
+  database: databaseStorageStatusSchema,
 });
 export type BackupStatus = z.infer<typeof backupStatusSchema>;
 
@@ -179,6 +208,8 @@ export const clusterStatusSchema = z.object({
   clusterId: z.string(),
   pairingCode: z.string(),
   role: clusterRoleSchema,
+  compatibility: clusterCompatibilitySchema,
+  incompatiblePeerCount: z.number().int().nonnegative(),
   writable: z.boolean(),
   connectedHosts: z.number().int().positive(),
   knownHosts: z.number().int().positive(),
@@ -193,12 +224,10 @@ export const clusterStatusSchema = z.object({
 });
 export type ClusterStatus = z.infer<typeof clusterStatusSchema>;
 
-export const appSnapshotSchema = z.object({
+export const liveAppSnapshotSchema = z.object({
   runners: z.array(runnerSchema),
   labels: z.array(labelSchema),
   race: raceStateSchema,
-  laps: z.array(lapRecordSchema),
-  events: z.array(raceEventSchema),
   temporaryTeams: z.array(temporaryTeamSchema),
   settings: appSettingsSchema,
   revision: z.number().int().nonnegative().optional(),
@@ -206,7 +235,23 @@ export const appSnapshotSchema = z.object({
   host: hostInfoSchema,
   cluster: clusterStatusSchema.optional(),
 });
+export type LiveAppSnapshot = z.infer<typeof liveAppSnapshotSchema>;
+
+export const appSnapshotSchema = liveAppSnapshotSchema.extend({
+  laps: z.array(lapRecordSchema),
+  events: z.array(raceEventSchema),
+});
 export type AppSnapshot = z.infer<typeof appSnapshotSchema>;
+
+export const raceHistorySchema = z.object({
+  scope: z.enum(['full', 'recent', 'runner']),
+  runnerId: z.string().nullable(),
+  limit: z.number().int().positive().nullable(),
+  laps: z.array(lapRecordSchema),
+  events: z.array(raceEventSchema),
+  revision: z.number().int().nonnegative(),
+});
+export type RaceHistory = z.infer<typeof raceHistorySchema>;
 
 export const publicRecordModeUpdateSchema = z.object({
   publicRecordMode: publicRecordModeSchema,

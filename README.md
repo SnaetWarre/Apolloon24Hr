@@ -46,6 +46,11 @@ CLUSTER_DISCOVERY=false         # disable UDP discovery
 
 The header shows reachable replicas, changes waiting for synchronization, backup health, and sync conflicts. Timing is owned by one Electron laptop. The current controller can transfer timing only to a reachable, fully synchronized peer. A caught-up replica gets a guarded emergency takeover after controller loss; an explicit, longer-delayed forced path remains available when completeness cannot be proven. If two isolated laptops still create different timing histories, timing pauses after reconnect; an operator chooses the correct history in Admin. Queue and registration work remains available on a single surviving laptop.
 
+Peers exchange and validate their schema, replication format, app version,
+minimum compatible version, and release identity before bootstrap or SQL
+replication. Version skew is blocked and shown as an update-required error
+instead of failing halfway through synchronization.
+
 Admin includes a wedstrijdgereedheid checklist for backup freshness, free disk
 space, live replicas, clock skew, conflicts, and timing ownership. The system
 status continues refreshing in standalone mode, so backup failures on a VPS or
@@ -63,6 +68,12 @@ different failures.
 Backup downloads are re-verified against SQLite integrity checks and their
 SHA-256 immediately before transfer. Download the adjacent control manifest as
 well so the off-device copy remains independently verifiable.
+
+Normal screens receive only live state. Historical laps and events are loaded
+separately as full, recent, or per-runner data and transferred with fast gzip
+compression. Admin also reports SQLite free pages and can compact an inactive
+race database after creating a safety backup. Backup retention has both tiered
+age rules and a total-byte ceiling.
 
 See `docs/reliability-model.md` for the complete failover policy, retention
 rules, recovery procedure, and event-day checklist.

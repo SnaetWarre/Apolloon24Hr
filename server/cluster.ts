@@ -5,6 +5,7 @@ import path from 'node:path';
 import {
   acknowledgeReplicationVector,
   applyRemoteReplicationOperations,
+  databaseReadiness,
   ensureReplicationIdentity,
   getAllReplicationOperations,
   getOpenReplicationConflictCount,
@@ -32,6 +33,7 @@ import { emitRealtime } from './realtime.js';
 import {
   appSnapshotSchema,
   type AppSnapshot,
+  type ClusterCompatibility,
   type ClusterPeer,
   type ClusterStatus,
   type TimingControlStatus,
@@ -45,6 +47,13 @@ import {
   type OperationVector,
 } from './cluster-protocol.js';
 import { isClusterEnabled } from './cluster-policy.js';
+import { encodedJsonRequest, sendJson } from './http-json.js';
+import {
+  CLUSTER_PROTOCOL_VERSION,
+  clusterCompatibilityError,
+  localClusterCompatibility,
+  parseClusterCompatibility,
+} from './cluster-compatibility.js';
 
 type PeerState = {
   id: string | null;
@@ -56,10 +65,13 @@ type PeerState = {
   nextProbeAt: number;
   unreachableSinceAt: number | null;
   clockSkewMs: number | null;
+  compatibility: ClusterCompatibility | null;
+  compatibilityError: string | null;
 };
 
 type ExchangePayload = {
-  protocol: 2;
+  protocol: number;
+  compatibility: ClusterCompatibility;
   clusterId: string;
   hostId: string;
   url: string;
@@ -69,7 +81,8 @@ type ExchangePayload = {
 };
 
 type BootstrapPayload = {
-  protocol: 2;
+  protocol: number;
+  compatibility: ClusterCompatibility;
   clusterId: string;
   clusterSecret: string;
   hostId: string;
@@ -118,6 +131,7 @@ export function clusterStatus(): ClusterStatus {
   const identity = currentIdentity();
   const peerList = [...peers.values()];
   const reachable = peerList.filter((peer) => peer.reachable);
+  const compatibility = currentCompatibility();
   const localVector = getReplicationVector();
   const skewSamples = reachable
     .map((peer) => peer.clockSkewMs)
@@ -128,6 +142,8 @@ export function clusterStatus(): ClusterStatus {
     clusterId: identity.clusterId,
     pairingCode: pairingCode(identity.clusterSecret),
     role: enabled ? 'local-first' : 'standalone',
+    compatibility,
+    incompatiblePeerCount: peerList.filter((peer) => peer.compatibilityError).length,
     writable: true,
     connectedHosts: 1 + reachable.length,
     knownHosts: 1 + peerList.length,
@@ -295,14 +311,29 @@ export function registerClusterRoutes(app: Express): void {
     return;
   }
 
-  app.get('/api/cluster/bootstrap', (req, res) => {
+  app.get('/api/cluster/bootstrap', asyncJson(async (req, res) => {
     const identity = currentIdentity();
     if (!validPairingCode(req.query.code, identity.clusterSecret)) {
       res.status(401).json({ ok: false, error: 'ongeldige koppelcode' });
       return;
     }
-    res.json({
-      protocol: 2,
+    const requesterCompatibility = compatibilityFromQuery(req);
+    const compatibilityIssue = clusterCompatibilityError(
+      requesterCompatibility,
+      currentCompatibility()
+    );
+    if (compatibilityIssue) {
+      res.status(426).json({
+        ok: false,
+        code: 'UPGRADE_REQUIRED',
+        error: compatibilityIssue,
+        compatibility: currentCompatibility(),
+      });
+      return;
+    }
+    await sendJson(req, res, {
+      protocol: CLUSTER_PROTOCOL_VERSION,
+      compatibility: currentCompatibility(),
       clusterId: identity.clusterId,
       clusterSecret: identity.clusterSecret,
       hostId: identity.hostId,
@@ -312,8 +343,8 @@ export function registerClusterRoutes(app: Express): void {
       operations: getAllReplicationOperations(),
       conflicts: getReplicationConflicts('all'),
       timingControllerHostId: getSetting('timing_controller_host_id'),
-    } satisfies BootstrapPayload);
-  });
+    } satisfies BootstrapPayload, { sensitive: true });
+  }));
 
   app.post('/api/cluster/join', asyncJson(async (req, res) => {
     if (joinInProgress) {
@@ -330,21 +361,29 @@ export function registerClusterRoutes(app: Express): void {
     joinInProgress = true;
     try {
       const response = await fetch(
-        `${remoteUrl}/api/cluster/bootstrap?code=${encodeURIComponent(code)}`,
+        `${remoteUrl}/api/cluster/bootstrap?code=${encodeURIComponent(code)}&compatibility=${encodeURIComponent(JSON.stringify(currentCompatibility()))}`,
         { signal: AbortSignal.timeout(Math.max(requestTimeoutMs, 10_000)) }
       );
       if (!response.ok) {
         const reason = await response.text();
+        const remoteError = responseErrorMessage(reason);
         throw new Error(
           response.status === 401
             ? 'De koppelcode klopt niet'
-            : `De andere laptop antwoordde met ${response.status}: ${reason.slice(0, 160)}`
+            : remoteError || `De andere laptop antwoordde met ${response.status}: ${reason.slice(0, 160)}`
         );
       }
       const payload = (await response.json()) as Partial<BootstrapPayload>;
+      const remoteCompatibility = parseClusterCompatibility(payload.compatibility);
+      const compatibilityIssue =
+        payload.protocol === CLUSTER_PROTOCOL_VERSION
+          ? clusterCompatibilityError(remoteCompatibility, currentCompatibility())
+          : clusterCompatibilityError(remoteCompatibility, currentCompatibility()) ||
+            `Upgrade vereist: clusterprotocol ${String(payload.protocol)} past niet bij ${CLUSTER_PROTOCOL_VERSION}.`;
+      if (compatibilityIssue) throw new Error(compatibilityIssue);
       const parsedSnapshot = appSnapshotSchema.safeParse(payload.snapshot);
       if (
-        payload.protocol !== 2 ||
+        payload.protocol !== CLUSTER_PROTOCOL_VERSION ||
         !payload.clusterId ||
         !payload.clusterSecret ||
         !payload.hostId ||
@@ -367,7 +406,12 @@ export function registerClusterRoutes(app: Express): void {
       });
       identityCache = null;
       peers.clear();
-      addPeer(payload.url || remoteUrl);
+      const joinedPeer = addPeer(payload.url || remoteUrl);
+      if (joinedPeer) {
+        joinedPeer.id = payload.hostId;
+        joinedPeer.compatibility = remoteCompatibility;
+        joinedPeer.compatibilityError = null;
+      }
       emitRealtime({ type: 'state:revision', payload: Date.now() });
       res.json({
         ok: true,
@@ -391,8 +435,26 @@ export function registerClusterRoutes(app: Express): void {
     }
     const payload = req.body as Partial<ExchangePayload>;
     const peerUrl = normalizeUrl(payload.url);
+    const remoteCompatibility = parseClusterCompatibility(payload.compatibility);
+    const compatibilityIssue = clusterCompatibilityError(
+      remoteCompatibility,
+      currentCompatibility()
+    );
     if (
-      payload.protocol !== 2 ||
+      payload.protocol !== CLUSTER_PROTOCOL_VERSION ||
+      compatibilityIssue
+    ) {
+      res.status(426).json({
+        ok: false,
+        code: 'UPGRADE_REQUIRED',
+        error:
+          compatibilityIssue ||
+          `Upgrade vereist: clusterprotocol ${String(payload.protocol)} past niet bij ${CLUSTER_PROTOCOL_VERSION}.`,
+        compatibility: currentCompatibility(),
+      });
+      return;
+    }
+    if (
       payload.clusterId !== identity.clusterId ||
       typeof payload.hostId !== 'string' ||
       !payload.hostId ||
@@ -413,7 +475,13 @@ export function registerClusterRoutes(app: Express): void {
       return;
     }
     const result = applyRemoteReplicationOperations(payload.operations);
-    const peer = touchPeer(peerUrl, payload.hostId, vector);
+    const peer = touchPeer(
+      peerUrl,
+      payload.hostId,
+      vector,
+      true,
+      remoteCompatibility
+    );
     peer.clockSkewMs = payload.sentAt - Date.now();
     acknowledgeReplicationVector(payload.hostId, vector);
     if (result.applied > 0 || result.conflicts > 0) {
@@ -421,15 +489,16 @@ export function registerClusterRoutes(app: Express): void {
     }
 
     const localVector = getReplicationVector();
-    res.json({
-      protocol: 2,
+    await sendJson(req, res, {
+      protocol: CLUSTER_PROTOCOL_VERSION,
+      compatibility: currentCompatibility(),
       clusterId: identity.clusterId,
       hostId: identity.hostId,
       url: currentSelfUrl(),
       vector: localVector,
       operations: getReplicationOperationsMissing(vector),
       sentAt: Date.now(),
-    } satisfies ExchangePayload);
+    } satisfies ExchangePayload, { sensitive: true });
   }));
 }
 
@@ -479,7 +548,13 @@ function startDiscovery(): void {
       ) {
         return;
       }
-      const peer = touchPeer(payload.url, payload.hostId, payload.vector, false);
+      const peer = touchPeer(
+        payload.url,
+        payload.hostId,
+        payload.vector,
+        false,
+        payload.compatibility
+      );
       peer.clockSkewMs = typeof payload.sentAt === 'number' ? payload.sentAt - Date.now() : null;
     } catch {
       // Ignore unrelated UDP traffic on the discovery port.
@@ -524,7 +599,8 @@ function discoveryPayload(advertisedUrl = currentSelfUrl()): DiscoveryPayload {
   return signDiscoveryPayload(
     {
       app: 'apolloon',
-      protocol: 2,
+      protocol: CLUSTER_PROTOCOL_VERSION,
+      compatibility: currentCompatibility(),
       clusterId: identity.clusterId,
       hostId: identity.hostId,
       url: advertisedUrl,
@@ -601,7 +677,8 @@ async function syncPeer(peer: PeerState): Promise<void> {
   const identity = currentIdentity();
   const localVector = getReplicationVector();
   const payload: ExchangePayload = {
-    protocol: 2,
+    protocol: CLUSTER_PROTOCOL_VERSION,
+    compatibility: currentCompatibility(),
     clusterId: identity.clusterId,
     hostId: identity.hostId,
     url: currentSelfUrl(),
@@ -610,21 +687,49 @@ async function syncPeer(peer: PeerState): Promise<void> {
     sentAt: Date.now(),
   };
   try {
+    const encodedPayload = await encodedJsonRequest(payload);
     const response = await fetch(`${peer.url}/api/cluster/sync/exchange`, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
         'x-apolloon-cluster-secret': identity.clusterSecret,
+        ...(encodedPayload.contentEncoding
+          ? { 'content-encoding': encodedPayload.contentEncoding }
+          : {}),
       },
-      body: JSON.stringify(payload),
+      body: encodedPayload.body,
       signal: AbortSignal.timeout(requestTimeoutMs),
     });
-    if (!response.ok) throw new Error(`sync failed: ${response.status}`);
+    if (!response.ok) {
+      const responseText = await response.text();
+      const responseError = responseErrorMessage(responseText);
+      if (
+        response.status === 426 ||
+        /upgrade vereist/i.test(responseError) ||
+        (response.status === 409 && /protocol mismatch/i.test(responseError))
+      ) {
+        peer.compatibilityError =
+          response.status === 409
+            ? 'Upgrade vereist of verkeerde cluster: de andere laptop herkent dit clusterprotocol niet. Controleer de cluster en werk beide laptops bij.'
+            : responseError || 'Upgrade vereist: de andere laptop gebruikt een incompatibele versie.';
+      }
+      throw new Error(responseError || `sync failed: ${response.status}`);
+    }
     const remote = (await response.json()) as ExchangePayload;
     const remoteVector = normalizeOperationVector(remote.vector);
     const remoteUrl = normalizeUrl(remote.url);
+    const remoteCompatibility = parseClusterCompatibility(remote.compatibility);
+    const compatibilityIssue = clusterCompatibilityError(
+      remoteCompatibility,
+      currentCompatibility()
+    );
+    if (compatibilityIssue) {
+      peer.compatibility = remoteCompatibility;
+      peer.compatibilityError = compatibilityIssue;
+      throw new Error(compatibilityIssue);
+    }
     if (
-      remote.protocol !== 2 ||
+      remote.protocol !== CLUSTER_PROTOCOL_VERSION ||
       remote.clusterId !== identity.clusterId ||
       typeof remote.hostId !== 'string' ||
       !remote.hostId ||
@@ -641,6 +746,8 @@ async function syncPeer(peer: PeerState): Promise<void> {
     peer.id = remote.hostId;
     rekeyPeer(peer, remoteUrl);
     peer.vector = remoteVector;
+    peer.compatibility = remoteCompatibility;
+    peer.compatibilityError = null;
     peer.reachable = true;
     peer.lastSeenAt = Date.now();
     peer.consecutiveFailures = 0;
@@ -683,6 +790,8 @@ function addPeer(peerUrl: string): PeerState | null {
     nextProbeAt: 0,
     unreachableSinceAt: Date.now(),
     clockSkewMs: null,
+    compatibility: null,
+    compatibilityError: null,
   };
   peers.set(url, peer);
   return peer;
@@ -692,7 +801,8 @@ function touchPeer(
   peerUrl: string,
   peerId: string,
   vector: OperationVector,
-  reachable = true
+  reachable = true,
+  compatibility?: ClusterCompatibility | null
 ): PeerState {
   const url = normalizeUrl(peerUrl);
   let peer = [...peers.values()].find((item) => item.id === peerId);
@@ -707,8 +817,15 @@ function touchPeer(
   rekeyPeer(peer, url);
   peer.id = peerId;
   peer.vector = vector;
+  if (compatibility !== undefined) {
+    peer.compatibility = compatibility;
+    peer.compatibilityError = clusterCompatibilityError(
+      compatibility,
+      currentCompatibility()
+    );
+  }
   if (reachable) {
-    peer.reachable = true;
+    peer.reachable = peer.compatibilityError === null;
     peer.lastSeenAt = Date.now();
     peer.consecutiveFailures = 0;
     peer.nextProbeAt = 0;
@@ -737,8 +854,11 @@ function toClusterPeer(
     reachable: peer.reachable,
     lastSeenAt: peer.lastSeenAt,
     lastSeq: peer.id ? peer.vector[peer.id] ?? null : null,
-    synchronized: vectorCovers(peer.vector, localVector),
+    synchronized:
+      peer.compatibilityError === null && vectorCovers(peer.vector, localVector),
     operationVector: peer.vector,
+    compatibility: peer.compatibility,
+    compatibilityError: peer.compatibilityError,
   };
 }
 
@@ -761,6 +881,29 @@ function authorized(req: Request): boolean {
 function currentIdentity(): ReplicationIdentity {
   identityCache ??= ensureReplicationIdentity();
   return identityCache;
+}
+
+function currentCompatibility(): ClusterCompatibility {
+  return localClusterCompatibility(databaseReadiness().schemaVersion);
+}
+
+function compatibilityFromQuery(req: Request): ClusterCompatibility | null {
+  const encoded = req.query.compatibility;
+  if (typeof encoded !== 'string' || encoded.length > 2_048) return null;
+  try {
+    return parseClusterCompatibility(JSON.parse(encoded));
+  } catch {
+    return null;
+  }
+}
+
+function responseErrorMessage(body: string): string {
+  try {
+    const parsed = JSON.parse(body) as { error?: unknown };
+    return typeof parsed.error === 'string' ? parsed.error.slice(0, 500) : '';
+  } catch {
+    return body.trim().slice(0, 500);
+  }
 }
 
 function pairingCode(clusterSecret: string): string {

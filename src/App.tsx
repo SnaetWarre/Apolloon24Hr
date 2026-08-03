@@ -11,10 +11,10 @@ import { TimingView } from './components/TimingView';
 import { useAppData, useRealtimeBridge } from './app/index';
 import { getNextWaitingRunner, runnerLabel } from './lib/runners';
 import { LiveDuration } from './components/LiveTime';
-import type { AppSnapshot } from './types';
+import type { LiveAppSnapshot } from './types';
 
 const selectConnectionData = () => ({});
-const selectQueuePageData = ({ race, runners }: AppSnapshot) => ({ race, runners });
+const selectQueuePageData = ({ race, runners }: LiveAppSnapshot) => ({ race, runners });
 
 export function AppRoot() {
   const { initialized, error, refresh } = useAppData(selectConnectionData);

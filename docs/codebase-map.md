@@ -15,7 +15,8 @@ Shared contracts live in `shared/`. Anything imported by both client and server 
 - `src/App.tsx`: route shell and top-level page wrappers.
 - `src/app/`: app-wide data layer.
   - `queryClient.ts`: TanStack Query configuration.
-  - `useAppData.ts`: snapshot query and loading/error state.
+  - `useAppData.ts`: compact live-state query and loading/error state.
+  - `useRaceHistory.ts`: lazy full, recent, and per-runner race history.
   - `useAppActions.ts`: tRPC mutations plus snapshot refresh.
   - `useRealtimeBridge.ts`: Socket.IO events that patch the snapshot cache.
   - `snapshot.ts`: snapshot query key and cache helpers.
@@ -33,7 +34,9 @@ Shared contracts live in `shared/`. Anything imported by both client and server 
 - `server/cluster.ts`: local-first UDP discovery, authenticated delta exchange, creator bootstrap, and peer health.
 - `server/cluster-protocol.ts`: signed discovery envelopes and untrusted network payload validation.
 - `server/backups.ts`: verified online snapshots, serialized scheduling, disk warnings, retention, and download manifests.
-- `server/app-state.ts`: full snapshot assembly.
+- `server/app-state.ts`: separate live-state and full replication snapshots.
+- `server/app-history.ts`: cached history scopes for analysis, displays, and profiles.
+- `server/http-json.ts`: fast gzip and ETag handling for large JSON transfers.
 - `server/host.ts`: event LAN URL/port discovery.
 - `server/realtime.ts`: typed realtime event bridge.
 

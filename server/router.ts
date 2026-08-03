@@ -17,7 +17,7 @@ import {
   type ImportSummary,
   type RunnerInput,
 } from '../shared/schemas.js';
-import { appSnapshot } from './app-state.js';
+import { appSnapshot, liveAppSnapshot } from './app-state.js';
 import { createVerifiedBackup } from './backups.js';
 import {
   assertEmergencyTimingTakeoverAllowed,
@@ -201,7 +201,7 @@ function commitWrite<T>(type: string, input: CommandMeta | null, action: () => T
 
 export const appRouter = t.router({
   state: t.router({
-    snapshot: t.procedure.query(() => appSnapshot()),
+    snapshot: t.procedure.query(() => liveAppSnapshot()),
     time: t.procedure.query(() => ({ serverNowMs: Date.now() })),
     hostInfo: t.procedure.query(() => hostInfo()),
   }),

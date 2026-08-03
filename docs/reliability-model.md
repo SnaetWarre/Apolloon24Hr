@@ -52,6 +52,12 @@ continues operating:
 UDP is discovery only. Signed discovery packets find known cluster members;
 authenticated HTTP exchanges carry replication operations.
 
+Every signed discovery, bootstrap, and delta exchange includes the database
+schema, replication format, application version, minimum compatible versions,
+and release identity. Apolloon rejects incompatible peers before applying SQL
+and shows an explicit update-required error in Admin. Update every host before
+changing a migration or replication compatibility range.
+
 ## Backup Policy
 
 Every production host starts its own backup scheduler. The default interval is
@@ -69,6 +75,10 @@ Automatic retention is tiered:
 - one snapshot per hour for 72 hours;
 - one snapshot per day for 30 days;
 - the 20 newest manual or safety snapshots.
+
+The retained set is additionally capped at 8 GiB by default. Apolloon removes
+the oldest scheduled recovery points first while preserving the newest overall,
+scheduled, and manual points. `BACKUP_MAX_TOTAL_BYTES` overrides the ceiling.
 
 Admin exposes the last verified backup, failure state, retained count, free
 disk space, next scheduled run, manual backup action, and downloads for both the
@@ -95,9 +105,16 @@ BACKUP_ENABLED=false
 BACKUP_INTERVAL_MS=300000
 BACKUP_INITIAL_DELAY_MS=10000
 BACKUP_MIN_FREE_BYTES=2147483648
+BACKUP_MAX_TOTAL_BYTES=8589934592
 TIMING_TAKEOVER_GRACE_MS=10000
 TIMING_FORCED_TAKEOVER_GRACE_MS=30000
 ```
+
+SQLite reuses deleted pages but does not normally shrink its file. Admin shows
+the physical, used, and reclaimable database sizes. When at least 16 MiB and 25
+percent are reclaimable, Apolloon offers guarded compaction. It first creates a
+verified safety backup and refuses to run while a race is active. Startup may
+perform the same compaction automatically only when the race is inactive.
 
 ## Recovery Runbook
 

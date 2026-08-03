@@ -1,15 +1,16 @@
 import React from 'react';
-import { useAppActions, useAppData, useClusterStatus } from '../app/index';
+import { useAppActions, useAppData, useClusterStatus, useRaceHistory } from '../app/index';
 import { formatClockTimeMs, formatDurationMs } from '../lib/time';
 import { getNextWaitingRunner, runnerLabel } from '../lib/runners';
-import type { AppSnapshot, Runner } from '../types';
+import type { LiveAppSnapshot, Runner } from '../types';
 import { LabelBadge } from './LabelBadge';
 import { LiveDuration } from './LiveTime';
 
-const selectTimingData = ({ runners, laps, race }: AppSnapshot) => ({ runners, laps, race });
+const selectTimingData = ({ runners, race }: LiveAppSnapshot) => ({ runners, race });
 
 export function TimingView() {
-  const { runners, laps, race } = useAppData(selectTimingData);
+  const { runners, race } = useAppData(selectTimingData);
+  const { laps } = useRaceHistory({ scope: 'recent', limit: 250 });
   const { cluster } = useClusterStatus();
   const { handoff, startNext, undoLastHandoff, finishRace, claimTimingControl } = useAppActions();
   const [message, setMessage] = React.useState<string | null>(null);

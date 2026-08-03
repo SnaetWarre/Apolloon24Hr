@@ -7,7 +7,7 @@ import test from 'node:test';
 import { createTRPCClient, httpBatchLink } from '@trpc/client';
 import { io, type Socket } from 'socket.io-client';
 import type { AppRouter } from '../server/router.ts';
-import type { AppSnapshot, TemporaryTeam } from '../shared/schemas.ts';
+import type { AppSnapshot, LiveAppSnapshot, RaceHistory, TemporaryTeam } from '../shared/schemas.ts';
 import { buildLabelComparisons, filterLaps } from '../src/lib/analysis.ts';
 
 const dataPath = path.resolve(`.tmp-test-temporary-teams-e2e-${process.pid}`);
@@ -106,6 +106,40 @@ test('temporary night teams work through HTTP, realtime, analysis, exports, and 
     assert.equal(filterLaps(state.laps, { enabledLabelIds: [trojanV2.id] }).length, 1);
     assert.equal(filterLaps(state.laps, { enabledLabelIds: [blue.id] }).length, 1);
 
+    const liveResponse = await fetch(`${baseUrl}/api/state`, {
+      headers: { 'accept-encoding': 'gzip' },
+    });
+    const livePayload = (await liveResponse.json()) as LiveAppSnapshot & {
+      laps?: unknown;
+      events?: unknown;
+    };
+    assert.equal(liveResponse.headers.get('content-encoding'), 'gzip');
+    assert.equal(livePayload.laps, undefined);
+    assert.equal(livePayload.events, undefined);
+
+    const historyResponse = await fetch(`${baseUrl}/api/history`, {
+      headers: { 'accept-encoding': 'gzip' },
+    });
+    const compressedHistory = (await historyResponse.json()) as RaceHistory;
+    assert.equal(historyResponse.headers.get('content-encoding'), 'gzip');
+    assert.equal(compressedHistory.laps.length, 3);
+    assert.ok(
+      Number(historyResponse.headers.get('content-length')) <
+        Number(historyResponse.headers.get('x-apolloon-uncompressed-bytes'))
+    );
+
+    const runnerHistory = (await fetch(
+      `${baseUrl}/api/history?runnerId=${encodeURIComponent(alice.id)}`
+    ).then((response) => response.json())) as RaceHistory;
+    assert.equal(runnerHistory.scope, 'runner');
+    assert.ok(runnerHistory.laps.every((lap) => lap.runnerId === alice.id));
+
+    const unsafeCompaction = await fetch(`${baseUrl}/api/database/compact`, {
+      method: 'POST',
+    });
+    assert.equal(unsafeCompaction.status, 409);
+    assert.match(await unsafeCompaction.text(), /race actief/i);
+
     const comparisons = buildLabelComparisons(
       [trojan, trojanV2, blue],
       state.laps
@@ -202,9 +236,17 @@ function raceExpectation(state: AppSnapshot) {
 }
 
 async function fetchState(baseUrl: string): Promise<AppSnapshot> {
-  const response = await fetch(`${baseUrl}/api/state`);
-  assert.equal(response.status, 200);
-  return response.json() as Promise<AppSnapshot>;
+  const [stateResponse, historyResponse] = await Promise.all([
+    fetch(`${baseUrl}/api/state`),
+    fetch(`${baseUrl}/api/history`),
+  ]);
+  assert.equal(stateResponse.status, 200);
+  assert.equal(historyResponse.status, 200);
+  const [state, history] = await Promise.all([
+    stateResponse.json() as Promise<LiveAppSnapshot>,
+    historyResponse.json() as Promise<RaceHistory>,
+  ]);
+  return { ...state, laps: history.laps, events: history.events };
 }
 
 async function waitForSocket(socket: Socket): Promise<void> {

@@ -1,8 +1,8 @@
 import React from 'react';
 import { useAppData } from '../app/index';
-import type { AppSnapshot } from '../types';
+import type { LiveAppSnapshot } from '../types';
 
-const selectHostData = ({ host }: AppSnapshot) => ({ host });
+const selectHostData = ({ host }: LiveAppSnapshot) => ({ host });
 
 const ROLES = [
   {

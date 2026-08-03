@@ -8,10 +8,12 @@ import { createExpressMiddleware } from '@trpc/server/adapters/express';
 import Papa from 'papaparse';
 import { Server as SocketIOServer } from 'socket.io';
 import { formatDurationMs } from '../shared/time.js';
-import { appSnapshot } from './app-state.js';
+import { appSnapshot, liveAppSnapshot } from './app-state.js';
+import { raceHistory } from './app-history.js';
 import {
   backupManifest,
   backupStatus,
+  compactDatabaseStorage,
   createVerifiedBackup,
   latestBackupPath,
   startBackupService,
@@ -33,6 +35,7 @@ import {
   initDb,
 } from './db.js';
 import { hostInfo, SERVER_PORT } from './host.js';
+import { sendJson } from './http-json.js';
 import { setRealtimeEmitter } from './realtime.js';
 import { appRouter } from './router.js';
 import { relativeFileWithinRoot } from './static-files.js';
@@ -137,8 +140,35 @@ app.use(
   })
 );
 
-app.get('/api/state', (_req, res) => {
-  res.json(appSnapshot());
+app.get('/api/state', async (req, res, next) => {
+  try {
+    const snapshot = liveAppSnapshot();
+    await sendJson(req, res, snapshot, {
+      cacheKey: `live:${snapshot.revision || 0}:${Math.floor(snapshot.serverNowMs / 1_000)}`,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/history', async (req, res, next) => {
+  try {
+    const runnerId = typeof req.query.runnerId === 'string' ? req.query.runnerId.trim() : '';
+    const requestedLimit = Number(req.query.limit);
+    const history = runnerId
+      ? raceHistory({ scope: 'runner', runnerId: runnerId.slice(0, 128) })
+      : req.query.scope === 'recent'
+        ? raceHistory({
+            scope: 'recent',
+            limit: Number.isFinite(requestedLimit) ? requestedLimit : 100,
+          })
+        : raceHistory({ scope: 'full' });
+    await sendJson(req, res, history, {
+      cacheKey: `history:${history.revision}:${history.scope}:${history.runnerId || ''}:${history.limit || ''}`,
+    });
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.get('/api/time', (_req, res) => {
@@ -191,6 +221,31 @@ app.post('/api/backups', async (req, res) => {
     res.status(500).json({
       ok: false,
       error: error instanceof Error ? error.message : 'backup maken mislukt',
+    });
+  }
+});
+
+app.post('/api/database/compact', async (_req, res) => {
+  try {
+    const result = await compactDatabaseStorage();
+    if (!result.compacted) {
+      res.status(409).json({
+        ok: false,
+        error:
+          result.reason === 'race-active'
+            ? 'Database compactie is geblokkeerd zolang de race actief is.'
+            : result.reason === 'insufficient-disk'
+              ? 'Er is onvoldoende vrije schijfruimte om veilig te compacten.'
+              : 'Database compactie is momenteel niet nodig.',
+        result,
+      });
+      return;
+    }
+    res.json({ ok: true, result, status: backupStatus() });
+  } catch (error) {
+    res.status(409).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'database compactie mislukt',
     });
   }
 });
@@ -361,6 +416,18 @@ process.once('SIGTERM', () => shutdown('SIGTERM'));
 process.once('disconnect', () => shutdown('parent disconnected'));
 
 await initDb();
+const startupCompaction = await compactDatabaseStorage({ force: false }).catch((error) => {
+  console.warn(
+    'Database could not be compacted safely at startup:',
+    error instanceof Error ? error.message : String(error)
+  );
+  return null;
+});
+if (startupCompaction?.compacted) {
+  console.log(
+    `Database compacted after verified backup: ${startupCompaction.before.fileBytes} -> ${startupCompaction.after.fileBytes} bytes`
+  );
+}
 startBackupService();
 startClusterService();
 

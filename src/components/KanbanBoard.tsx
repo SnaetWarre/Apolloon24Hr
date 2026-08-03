@@ -5,10 +5,10 @@ import { useAppStore } from '../store';
 import { formatDurationMs, formatElapsedSeconds, nowMs } from '../lib/time';
 import { useSecondTick } from '../lib/useAnimationFrameTick';
 import { kanbanCollisionDetection, resolveKanbanDrop } from '../lib/kanban';
-import type { AppSnapshot, Runner, RunnerStatus } from '../types';
+import type { LiveAppSnapshot, Runner, RunnerStatus } from '../types';
 import { LabelBadge } from './LabelBadge';
 
-const selectKanbanData = ({ runners }: AppSnapshot) => ({ runners });
+const selectKanbanData = ({ runners }: LiveAppSnapshot) => ({ runners });
 
 const COLUMNS: { key: RunnerStatus; title: string }[] = [
   { key: 'warming_up', title: 'Aan het opwarmen' },

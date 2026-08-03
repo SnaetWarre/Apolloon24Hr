@@ -68,6 +68,11 @@ test('online backups are verified, checksummed, and readable as independent SQLi
     assert.equal(backups.backupStatus().retainedCount, 3);
     assert.equal(backups.backupStatus().queued, false);
 
+    const compaction = await backups.compactDatabaseStorage();
+    assert.equal(compaction.compacted, true);
+    assert.equal(backups.backupStatus().latest?.reason, 'pre-database-compaction');
+    assert.equal(backups.backupStatus().maintenanceInProgress, false);
+
     const manifest = backups.backupManifest(manual);
     assert.equal(manifest.application, 'Apolloon');
     assert.equal(manifest.backup.sha256, manual.sha256);
@@ -111,4 +116,24 @@ test('retention keeps recent, hourly, daily, and bounded manual recovery points'
   assert.equal(keep.has('daily-34.sqlite'), false);
   assert.ok(keep.size < candidates.length);
   assert.ok(keep.size <= 146);
+});
+
+test('retention enforces a byte ceiling while preserving the newest recovery points', async () => {
+  const { backupsToRetain } = await import('../server/backups.ts');
+  const now = Date.UTC(2026, 7, 3, 20, 0, 0);
+  const candidates = Array.from({ length: 8 }, (_, index) => ({
+    fileName: `scheduled-${index}.sqlite`,
+    createdAt: now - index * 5 * 60_000,
+    reason: 'scheduled',
+    sizeBytes: 10,
+    sha256: 'b'.repeat(64),
+    verified: true as const,
+  }));
+
+  const keep = backupsToRetain(candidates, now, 25);
+  const retainedBytes = candidates
+    .filter((record) => keep.has(record.fileName))
+    .reduce((total, record) => total + record.sizeBytes, 0);
+  assert.equal(keep.has('scheduled-0.sqlite'), true);
+  assert.ok(retainedBytes <= 25);
 });

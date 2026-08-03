@@ -19,6 +19,7 @@ import type {
   RunnerPatch,
   RunnerStatus,
   AppSnapshot,
+  DatabaseStorageStatus,
   TemporaryTeam,
 } from '../shared/schemas.js';
 
@@ -37,7 +38,15 @@ const VALID_RACE_EVENT_TYPES = new Set<RaceEventType>(['burgie_gepakt']);
 const VALID_PUBLIC_RECORD_MODES = new Set<PublicRecordMode>(['off', 'day', 'two_hour', 'hour']);
 const DEFAULT_PUBLIC_RECORD_MODE: PublicRecordMode = 'day';
 const TEMPORARY_TEAM_KIND = 'temporary_team';
-const SCHEMA_VERSION = 7;
+export const DATABASE_SCHEMA_VERSION = 8;
+const COMPACTION_MIN_RECLAIMABLE_BYTES = readPositiveNumber(
+  process.env.DATABASE_COMPACTION_MIN_BYTES,
+  16 * 1_024 ** 2
+);
+const COMPACTION_MIN_RECLAIMABLE_RATIO = readPositiveNumber(
+  process.env.DATABASE_COMPACTION_MIN_RATIO,
+  0.25
+);
 const MAX_REPLICATION_ORIGINS = 64;
 const APP_DATA_TABLE_PATTERN =
   /\b(?:runners|labels|runner_labels|queue_entries|race_state|laps|race_events|temporary_teams|temporary_team_members)\b/i;
@@ -280,6 +289,11 @@ function cleanInt(value: unknown): number | null {
   return Number.isFinite(n) ? Math.max(0, Math.round(n)) : null;
 }
 
+function readPositiveNumber(value: unknown, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
 function cleanStatus(status: unknown): RunnerStatus {
   return VALID_STATUSES.has(status as RunnerStatus) ? (status as RunnerStatus) : 'registered';
 }
@@ -498,6 +512,11 @@ function tableHasColumn(table: string, column: string): boolean {
 
 function migrateSchema(): void {
   const previousVersion = Number(getSetting('schema_version') || 0);
+  if (previousVersion > DATABASE_SCHEMA_VERSION) {
+    throw new Error(
+      `database schema ${previousVersion} is newer than this Apolloon release (${DATABASE_SCHEMA_VERSION})`
+    );
+  }
   if (!tableHasColumn('race_state', 'active_labels_json')) {
     run('ALTER TABLE race_state ADD COLUMN active_labels_json TEXT');
   }
@@ -529,7 +548,13 @@ function migrateSchema(): void {
        ON laps(runner_id, finished_at DESC, duration_ms)`
     );
   }
-  setSetting('schema_version', String(SCHEMA_VERSION));
+  if (previousVersion < 8) {
+    // `cluster_operations` belonged to the retired leader/log replication design.
+    // Local-first replication has used `replication_operations` since schema 7.
+    run('DROP TABLE IF EXISTS cluster_operations');
+  }
+  setSetting('schema_version', String(DATABASE_SCHEMA_VERSION));
+  getDb().pragma(`user_version = ${DATABASE_SCHEMA_VERSION}`);
 }
 
 function seedDefaultLabels(): void {
@@ -573,6 +598,22 @@ export async function initDb(): Promise<void> {
   database.pragma('cache_size = -8192');
   database.pragma('temp_store = MEMORY');
   database.pragma('journal_size_limit = 16777216');
+  const hasSettingsTable = Boolean(
+    database
+      .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'settings'")
+      .get()
+  );
+  const storedSchemaVersion = hasSettingsTable
+    ? (database
+        .prepare("SELECT value FROM settings WHERE key = 'schema_version'")
+        .pluck()
+        .get() as string | undefined)
+    : undefined;
+  if (Number(storedSchemaVersion || 0) > DATABASE_SCHEMA_VERSION) {
+    throw new Error(
+      `database schema ${storedSchemaVersion} is newer than this Apolloon release (${DATABASE_SCHEMA_VERSION})`
+    );
+  }
   createSchema();
   const previousVersion = Number(getSetting('schema_version') || 0);
   if (previousVersion > 0 && previousVersion < 7) {
@@ -609,6 +650,82 @@ export function databaseReadiness(): {
     schemaVersion: Number(getSetting('schema_version') || 0),
     revision: getAppDataRevision(),
   };
+}
+
+export function databaseStorageStatus(): DatabaseStorageStatus {
+  const pageSize = Number(getDb().pragma('page_size', { simple: true })) || 0;
+  const pageCount = Number(getDb().pragma('page_count', { simple: true })) || 0;
+  const freePages = Number(getDb().pragma('freelist_count', { simple: true })) || 0;
+  const fileBytes = fs.existsSync(DB_FILE) ? fs.statSync(DB_FILE).size : pageCount * pageSize;
+  const reclaimableBytes = Math.min(fileBytes, Math.max(0, freePages * pageSize));
+  const usedBytes = Math.max(0, fileBytes - reclaimableBytes);
+  const reclaimablePercent = fileBytes > 0 ? (reclaimableBytes / fileBytes) * 100 : 0;
+  const race = one<{
+    activeRunnerId: string | null;
+    raceStartedAt: number | null;
+    raceFinishedAt: number | null;
+  }>(
+    `SELECT
+       active_runner_id AS activeRunnerId,
+       race_started_at AS raceStartedAt,
+       race_finished_at AS raceFinishedAt
+     FROM race_state
+     WHERE id = 1`
+  );
+  const raceActive = Boolean(
+    race?.activeRunnerId || (race?.raceStartedAt && !race?.raceFinishedAt)
+  );
+  return {
+    fileBytes,
+    usedBytes,
+    reclaimableBytes,
+    reclaimablePercent,
+    compactionRecommended:
+      reclaimableBytes >= COMPACTION_MIN_RECLAIMABLE_BYTES &&
+      reclaimablePercent >= COMPACTION_MIN_RECLAIMABLE_RATIO * 100,
+    raceActive,
+    lastCompactedAt: parseStoredTimestamp(getSetting('last_database_compaction_at')),
+  };
+}
+
+export function compactDatabaseIfSafe(options: { force?: boolean } = {}): {
+  compacted: boolean;
+  reason: 'compacted' | 'race-active' | 'not-needed' | 'insufficient-disk';
+  before: DatabaseStorageStatus;
+  after: DatabaseStorageStatus;
+} {
+  const before = databaseStorageStatus();
+  if (before.raceActive) {
+    return { compacted: false, reason: 'race-active', before, after: before };
+  }
+  if (!options.force && !before.compactionRecommended) {
+    return { compacted: false, reason: 'not-needed', before, after: before };
+  }
+  try {
+    const disk = fs.statfsSync(DATA_DIR);
+    const freeBytes = Math.max(0, Math.trunc(disk.bavail * disk.bsize));
+    if (freeBytes < before.fileBytes + 64 * 1_024 ** 2) {
+      return { compacted: false, reason: 'insufficient-disk', before, after: before };
+    }
+  } catch {
+    return { compacted: false, reason: 'insufficient-disk', before, after: before };
+  }
+
+  const quickCheck = getDb().pragma('quick_check', { simple: true });
+  if (quickCheck !== 'ok') throw new Error(`database quick_check failed before compaction: ${quickCheck}`);
+  statementCache.clear();
+  getDb().exec('VACUUM');
+  getDb().pragma('wal_checkpoint(TRUNCATE)');
+  setSetting('last_database_compaction_at', String(Date.now()));
+  const afterCheck = getDb().pragma('quick_check', { simple: true });
+  if (afterCheck !== 'ok') throw new Error(`database quick_check failed after compaction: ${afterCheck}`);
+  const after = databaseStorageStatus();
+  return { compacted: true, reason: 'compacted', before, after };
+}
+
+function parseStoredTimestamp(value: string | null): number | null {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
 export async function backupDatabase(destination: string): Promise<void> {
@@ -2555,6 +2672,21 @@ export function getAllLaps(): LapRecord[] {
   return all<LapRow>(`${LAP_SELECT_SQL} ORDER BY l.finished_at DESC`).map(lapFromRow);
 }
 
+export function getRecentLaps(limit = 100): LapRecord[] {
+  const safeLimit = boundedHistoryLimit(limit);
+  return all<LapRow>(
+    `${LAP_SELECT_SQL} ORDER BY l.finished_at DESC LIMIT ?`,
+    [safeLimit]
+  ).map(lapFromRow);
+}
+
+export function getLapsForRunner(runnerId: string): LapRecord[] {
+  return all<LapRow>(
+    `${LAP_SELECT_SQL} WHERE l.runner_id = ? ORDER BY l.finished_at DESC`,
+    [runnerId]
+  ).map(lapFromRow);
+}
+
 export function getLapById(id: string): LapRecord | null {
   const row = one<LapRow>(`${LAP_SELECT_SQL} WHERE l.id = ?`, [id]);
   return row ? lapFromRow(row) : null;
@@ -2584,6 +2716,35 @@ export function getAllRaceEvents(): RaceEvent[] {
     runnerNumber: event.runnerNumber ?? null,
     runnerName: event.runnerName ?? null,
   }));
+}
+
+export function getRecentRaceEvents(limit = 100): RaceEvent[] {
+  const safeLimit = boundedHistoryLimit(limit);
+  return all<RaceEvent>(
+    `SELECT
+      id,
+      type,
+      message,
+      occurred_at AS occurredAt,
+      created_at AS createdAt,
+      runner_id AS runnerId,
+      runner_number AS runnerNumber,
+      runner_name AS runnerName
+    FROM race_events
+    ORDER BY occurred_at DESC, created_at DESC
+    LIMIT ?`,
+    [safeLimit]
+  ).map((event) => ({
+    ...event,
+    type: cleanRaceEventType(event.type),
+    runnerId: event.runnerId ?? null,
+    runnerNumber: event.runnerNumber ?? null,
+    runnerName: event.runnerName ?? null,
+  }));
+}
+
+function boundedHistoryLimit(value: number): number {
+  return Math.max(1, Math.min(1_000, Math.floor(value) || 100));
 }
 
 export function getRaceEventById(id: string): RaceEvent | null {

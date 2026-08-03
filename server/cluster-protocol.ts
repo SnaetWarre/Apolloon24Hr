@@ -1,10 +1,16 @@
 import crypto from 'node:crypto';
+import {
+  clusterCompatibilitySchema,
+  type ClusterCompatibility,
+} from '../shared/schemas.js';
+import { CLUSTER_PROTOCOL_VERSION } from './cluster-compatibility.js';
 
 export type OperationVector = Record<string, number>;
 
 export type DiscoveryPayload = {
   app: 'apolloon';
-  protocol: 2;
+  protocol: number;
+  compatibility: ClusterCompatibility;
   clusterId: string;
   hostId: string;
   url: string;
@@ -56,7 +62,8 @@ export function verifyDiscoveryPayload(
   const vector = normalizeOperationVector(payload.vector);
   if (
     payload.app !== 'apolloon' ||
-    payload.protocol !== 2 ||
+    payload.protocol !== CLUSTER_PROTOCOL_VERSION ||
+    !clusterCompatibilitySchema.safeParse(payload.compatibility).success ||
     typeof payload.clusterId !== 'string' ||
     !payload.clusterId ||
     payload.clusterId.length > 128 ||
@@ -77,7 +84,8 @@ export function verifyDiscoveryPayload(
 
   const unsigned: UnsignedDiscoveryPayload = {
     app: 'apolloon',
-    protocol: 2,
+    protocol: CLUSTER_PROTOCOL_VERSION,
+    compatibility: payload.compatibility as ClusterCompatibility,
     clusterId: payload.clusterId,
     hostId: payload.hostId,
     url: payload.url,
@@ -112,6 +120,7 @@ function discoverySignature(
       JSON.stringify({
         app: payload.app,
         protocol: payload.protocol,
+        compatibility: payload.compatibility,
         clusterId: payload.clusterId,
         hostId: payload.hostId,
         url: payload.url,

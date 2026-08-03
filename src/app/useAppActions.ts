@@ -2,7 +2,7 @@ import React from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { trpc } from '../api';
 import type {
-  AppSnapshot,
+  LiveAppSnapshot,
   LabelInput,
   LabelPatch,
   PublicRecordMode,
@@ -12,6 +12,7 @@ import type {
   RunnerStatus,
 } from '../types';
 import { snapshotKey } from './snapshot';
+import { historyKey } from './history';
 import { hasRealtimeConnection } from './useRealtimeBridge';
 import { createUuid } from '../lib/uuid';
 
@@ -43,11 +44,14 @@ export function useAppActions() {
 
   const reconcileSnapshot = React.useCallback(async () => {
     if (hasRealtimeConnection()) return;
-    await activeQueryClient.invalidateQueries({ queryKey: snapshotKey });
+    await Promise.all([
+      activeQueryClient.invalidateQueries({ queryKey: snapshotKey }),
+      activeQueryClient.invalidateQueries({ queryKey: historyKey }),
+    ]);
   }, [activeQueryClient]);
 
   const currentRaceExpectation = React.useCallback((): RaceStateExpectation => {
-    const snapshot = activeQueryClient.getQueryData<AppSnapshot>(snapshotKey);
+    const snapshot = activeQueryClient.getQueryData<LiveAppSnapshot>(snapshotKey);
     if (!snapshot) throw new Error('Timingstatus wordt nog geladen');
     return {
       activeRunnerId: snapshot.race.activeRunnerId,
@@ -71,7 +75,7 @@ export function useAppActions() {
         await reconcileSnapshot();
       },
       async moveInQueue(id: string, targetId: string) {
-        const snapshot = activeQueryClient.getQueryData<AppSnapshot>(snapshotKey);
+        const snapshot = activeQueryClient.getQueryData<LiveAppSnapshot>(snapshotKey);
         const waiting = (snapshot?.runners ?? [])
           .filter((runner) => runner.status === 'waiting')
           .sort(
@@ -196,6 +200,28 @@ export function useAppActions() {
         await activeQueryClient.invalidateQueries({ queryKey: ['cluster', 'status'] });
         return result.backup;
       },
+      async compactDatabase() {
+        const response = await fetch('/api/database/compact', { method: 'POST' });
+        const responseText = await response.text();
+        let result: {
+          ok?: boolean;
+          error?: string;
+          result?: {
+            before: { fileBytes: number };
+            after: { fileBytes: number };
+          };
+        };
+        try {
+          result = JSON.parse(responseText) as typeof result;
+        } catch {
+          result = { ok: false, error: responseText || `HTTP ${response.status}` };
+        }
+        if (!response.ok || !result.ok || !result.result) {
+          throw new Error(result.error || `Database compactie mislukt (${response.status})`);
+        }
+        await activeQueryClient.invalidateQueries({ queryKey: ['cluster', 'status'] });
+        return result.result;
+      },
       async joinCluster(remoteUrl: string, pairingCode: string) {
         const response = await fetch('/api/cluster/join', {
           method: 'POST',
@@ -217,6 +243,7 @@ export function useAppActions() {
           throw new Error(result.error || `Koppelen mislukt (${response.status})`);
         }
         await activeQueryClient.invalidateQueries({ queryKey: snapshotKey });
+        await activeQueryClient.invalidateQueries({ queryKey: historyKey });
         await activeQueryClient.invalidateQueries({ queryKey: ['cluster', 'status'] });
         return result;
       },
@@ -228,6 +255,7 @@ export function useAppActions() {
           command({ conflictId, selectedOperationId })
         );
         await activeQueryClient.invalidateQueries({ queryKey: snapshotKey });
+        await activeQueryClient.invalidateQueries({ queryKey: historyKey });
         await activeQueryClient.invalidateQueries({ queryKey: ['cluster', 'status'] });
         return result;
       },

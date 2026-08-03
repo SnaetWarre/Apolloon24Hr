@@ -1,19 +1,19 @@
 import React from 'react';
-import { useAppActions, useAppData } from '../app/index';
+import { useAppActions, useAppData, useRaceHistory } from '../app/index';
 import { formatClockTimeMs, formatDurationMs } from '../lib/time';
 import { labelKindOrder, labelKindTitle } from './LabelBadge';
-import type { AppSnapshot, Label, Runner, RunnerStatus } from '../types';
+import type { Label, LiveAppSnapshot, Runner, RunnerStatus } from '../types';
 import { LiveElapsed } from './LiveTime';
 
-const selectRunnerProfileData = ({ runners, laps, labels, temporaryTeams }: AppSnapshot) => ({
+const selectRunnerProfileData = ({ runners, labels, temporaryTeams }: LiveAppSnapshot) => ({
   runners,
-  laps,
   labels,
   temporaryTeams,
 });
 
 export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; onClose: () => void }) {
-  const { runners, laps: allLaps, labels, temporaryTeams } = useAppData(selectRunnerProfileData);
+  const { runners, labels, temporaryTeams } = useAppData(selectRunnerProfileData);
+  const { laps: allLaps } = useRaceHistory({ scope: 'runner', runnerId });
   const { setStatus, updateRunner } = useAppActions();
   const runner = runners.find((item) => item.id === runnerId);
   const [runnerNumber, setRunnerNumber] = React.useState('');

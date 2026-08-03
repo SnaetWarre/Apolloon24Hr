@@ -3,7 +3,8 @@ import { useQueryClient } from '@tanstack/react-query';
 import { io } from 'socket.io-client';
 import { trpc } from '../api';
 import { setServerNowMs, syncServerClock } from '../lib/time';
-import type { AppSettings, AppSnapshot, Label, LapRecord, RaceEvent, RaceState, Runner, TemporaryTeam } from '../types';
+import type { AppSettings, Label, LapRecord, LiveAppSnapshot, RaceEvent, RaceHistory, RaceState, Runner, TemporaryTeam } from '../types';
+import { historyKey, patchRaceHistories } from './history';
 import {
   patchSnapshot,
   prependById,
@@ -44,14 +45,11 @@ export function useRealtimeBridge(enabled = true): void {
       }
     };
 
-    socket.on('bootstrap', (snapshot: AppSnapshot) => {
-      setServerNowMs(snapshot.serverNowMs);
-      activeQueryClient.setQueryData(snapshotKey, snapshot);
-    });
     socket.on('state:revision', (revision: number) => {
-      const snapshot = activeQueryClient.getQueryData<AppSnapshot>(snapshotKey);
+      const snapshot = activeQueryClient.getQueryData<LiveAppSnapshot>(snapshotKey);
       if (!snapshot || snapshot.revision !== revision) {
         void activeQueryClient.invalidateQueries({ queryKey: snapshotKey });
+        void activeQueryClient.invalidateQueries({ queryKey: historyKey });
       }
     });
     socket.on('runner:upserted', (runner: Runner) => {
@@ -97,28 +95,38 @@ export function useRealtimeBridge(enabled = true): void {
       patchSnapshot(activeQueryClient, (snapshot) => ({ ...snapshot, race }));
     });
     socket.on('lap:created', (lap: LapRecord) => {
-      patchSnapshot(activeQueryClient, (snapshot) => ({
-        ...snapshot,
-        laps: prependById(snapshot.laps, lap),
-      }));
+      patchRaceHistories(activeQueryClient, (history) => patchHistoryLap(history, lap));
     });
     socket.on('lap:deleted', (lapId: string) => {
-      patchSnapshot(activeQueryClient, (snapshot) => ({
-        ...snapshot,
-        laps: removeById(snapshot.laps, lapId),
+      patchRaceHistories(activeQueryClient, (history) => ({
+        ...history,
+        laps: removeById(history.laps, lapId),
       }));
     });
     socket.on('laps:patched', (laps: LapRecord[]) => {
-      patchSnapshot(activeQueryClient, (snapshot) => ({ ...snapshot, laps }));
-    });
-    socket.on('race-event:created', (event: RaceEvent) => {
-      patchSnapshot(activeQueryClient, (snapshot) => ({
-        ...snapshot,
-        events: prependById(snapshot.events || [], event),
+      patchRaceHistories(activeQueryClient, (history) => ({
+        ...history,
+        laps: historyLapsForScope(history, laps),
       }));
     });
+    socket.on('race-event:created', (event: RaceEvent) => {
+      patchRaceHistories(activeQueryClient, (history) =>
+        history.scope === 'runner'
+          ? history
+          : {
+              ...history,
+              events: limitHistory(history, prependById(history.events, event)),
+            }
+      );
+    });
     socket.on('race-events:patched', (events: RaceEvent[]) => {
-      patchSnapshot(activeQueryClient, (snapshot) => ({ ...snapshot, events }));
+      patchRaceHistories(activeQueryClient, (history) => ({
+        ...history,
+        events:
+          history.scope === 'runner'
+            ? []
+            : limitHistory(history, events),
+      }));
     });
     socket.on('settings:changed', (settings: AppSettings) => {
       patchSnapshot(activeQueryClient, (snapshot) => ({ ...snapshot, settings }));
@@ -144,4 +152,26 @@ export function useRealtimeBridge(enabled = true): void {
       socket.disconnect();
     };
   }, [activeQueryClient, enabled]);
+}
+
+function patchHistoryLap(history: RaceHistory, lap: LapRecord): RaceHistory {
+  if (history.scope === 'runner' && history.runnerId !== lap.runnerId) return history;
+  return {
+    ...history,
+    laps: limitHistory(history, prependById(history.laps, lap)),
+  };
+}
+
+function historyLapsForScope(history: RaceHistory, laps: LapRecord[]): LapRecord[] {
+  const matching =
+    history.scope === 'runner'
+      ? laps.filter((lap) => lap.runnerId === history.runnerId)
+      : laps;
+  return limitHistory(history, matching);
+}
+
+function limitHistory<T>(history: RaceHistory, items: T[]): T[] {
+  return history.scope === 'recent' && history.limit
+    ? items.slice(0, history.limit)
+    : items;
 }

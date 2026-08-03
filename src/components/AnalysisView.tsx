@@ -13,7 +13,7 @@ import {
   type ChartConfiguration,
 } from 'chart.js';
 import { flexRender, getCoreRowModel, useReactTable, type ColumnDef } from '@tanstack/react-table';
-import { useAppData } from '../app/index';
+import { useAppData, useRaceHistory } from '../app/index';
 import {
   buildDistribution,
   buildFastestLapWindows,
@@ -30,13 +30,11 @@ import {
   type RunnerInsight,
 } from '../lib/analysis';
 import { formatClockTimeMs, formatDurationMs } from '../lib/time';
-import type { AppSnapshot, Label, LapRecord, PublicRecordMode } from '../types';
+import type { Label, LapRecord, LiveAppSnapshot, PublicRecordMode } from '../types';
 
-const selectAnalysisData = ({ runners, labels, laps, events, race }: AppSnapshot) => ({
+const selectAnalysisData = ({ runners, labels, race }: LiveAppSnapshot) => ({
   runners,
   labels,
-  laps,
-  events,
   race,
 });
 const MAX_CHART_PIXEL_RATIO = 1.5;
@@ -62,7 +60,8 @@ const allLabelsEnabled: AnalysisFilters = {
 };
 
 export function AnalysisView() {
-  const { runners, labels, laps, events, race } = useAppData(selectAnalysisData);
+  const { runners, labels, race } = useAppData(selectAnalysisData);
+  const { laps, events, loading: historyLoading, error: historyError } = useRaceHistory({ scope: 'full' });
   const [filters, setFilters] = React.useState<AnalysisFilters>(allLabelsEnabled);
   const [runnerSearch, setRunnerSearch] = React.useState('');
   const [runnerSort, setRunnerSort] = React.useState<RunnerInsightSort>('laps');
@@ -131,6 +130,15 @@ export function AnalysisView() {
           <p className="tagline">Grafieken op basis van de geselecteerde ploegen en categorieen.</p>
         </div>
       </div>
+
+      {historyLoading && (
+        <div className="host-hint" role="status">Gecomprimeerde racegeschiedenis wordt geladen...</div>
+      )}
+      {historyError && (
+        <div className="warning-banner" role="alert">
+          De racegeschiedenis kon niet worden geladen: {historyError.message}
+        </div>
+      )}
 
       <div className="analysis-top-grid">
         <section className="panel analysis-pace-panel">

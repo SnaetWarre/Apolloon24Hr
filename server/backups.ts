@@ -2,7 +2,13 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
-import { backupDatabase, ensureReplicationIdentity } from './db.js';
+import {
+  backupDatabase,
+  compactDatabaseIfSafe,
+  databaseStorageStatus,
+  ensureReplicationIdentity,
+} from './db.js';
+import type { DatabaseStorageStatus } from '../shared/schemas.js';
 
 export type BackupRecord = {
   fileName: string;
@@ -17,9 +23,12 @@ export type BackupStatus = {
   enabled: boolean;
   inProgress: boolean;
   queued: boolean;
+  maintenanceInProgress: boolean;
   intervalMs: number;
   nextScheduledAt: number | null;
   retainedCount: number;
+  retainedBytes: number;
+  maximumRetainedBytes: number;
   latest: BackupRecord | null;
   lastFailureAt: number | null;
   lastError: string | null;
@@ -27,6 +36,7 @@ export type BackupStatus = {
   diskTotalBytes: number | null;
   minimumFreeBytes: number;
   diskLow: boolean;
+  database: DatabaseStorageStatus;
 };
 
 export type BackupManifest = {
@@ -53,6 +63,10 @@ const minimumFreeBytes = readPositiveInt(
   process.env.BACKUP_MIN_FREE_BYTES,
   2 * 1_024 ** 3
 );
+const maximumRetainedBytes = readPositiveInt(
+  process.env.BACKUP_MAX_TOTAL_BYTES,
+  8 * 1_024 ** 3
+);
 
 let records: BackupRecord[] = [];
 let activeBackup: Promise<BackupRecord> | null = null;
@@ -62,6 +76,7 @@ let nextScheduledAt: number | null = null;
 let stopping = false;
 let lastFailureAt: number | null = null;
 let lastError: string | null = null;
+let maintenanceInProgress = false;
 
 export function backupStatus(): BackupStatus {
   const storage = backupStorageCapacity();
@@ -69,9 +84,12 @@ export function backupStatus(): BackupStatus {
     enabled,
     inProgress: activeBackup !== null,
     queued: queuedBackup !== null,
+    maintenanceInProgress,
     intervalMs,
     nextScheduledAt,
     retainedCount: records.length,
+    retainedBytes: records.reduce((total, record) => total + record.sizeBytes, 0),
+    maximumRetainedBytes,
     latest: records[0] || null,
     lastFailureAt,
     lastError,
@@ -79,6 +97,7 @@ export function backupStatus(): BackupStatus {
     diskTotalBytes: storage?.totalBytes ?? null,
     minimumFreeBytes,
     diskLow: storage ? storage.freeBytes < minimumFreeBytes : false,
+    database: databaseStorageStatus(),
   };
 }
 
@@ -105,6 +124,9 @@ export async function stopBackupService(): Promise<void> {
 }
 
 export function createVerifiedBackup(reason = 'manual'): Promise<BackupRecord> {
+  if (maintenanceInProgress) {
+    return Promise.reject(new Error('databaseonderhoud is bezig; probeer de backup zo opnieuw'));
+  }
   const normalizedReason = safeReason(reason);
   if (activeBackup) {
     if (normalizedReason === 'scheduled') return activeBackup;
@@ -119,6 +141,26 @@ export function createVerifiedBackup(reason = 'manual'): Promise<BackupRecord> {
     return queuedBackup;
   }
   return startVerifiedBackup(normalizedReason);
+}
+
+export async function compactDatabaseStorage(
+  options: { force?: boolean } = { force: true }
+): Promise<ReturnType<typeof compactDatabaseIfSafe>> {
+  const storage = databaseStorageStatus();
+  if (storage.raceActive) {
+    if (options.force === false) return compactDatabaseIfSafe();
+    throw new Error('Database compactie is geblokkeerd zolang de race actief is.');
+  }
+  if (options.force === false && !storage.compactionRecommended) {
+    return compactDatabaseIfSafe();
+  }
+  await createVerifiedBackup('pre-database-compaction');
+  maintenanceInProgress = true;
+  try {
+    return compactDatabaseIfSafe({ force: options.force !== false });
+  } finally {
+    maintenanceInProgress = false;
+  }
 }
 
 function startVerifiedBackup(reason: string): Promise<BackupRecord> {
@@ -181,7 +223,8 @@ export async function verifyStoredBackup(
 
 export function backupsToRetain(
   candidates: BackupRecord[],
-  now = Date.now()
+  now = Date.now(),
+  maximumBytes = Number.POSITIVE_INFINITY
 ): Set<string> {
   const sorted = candidates.slice().sort((a, b) => b.createdAt - a.createdAt);
   const keep = new Set<string>();
@@ -210,6 +253,26 @@ export function backupsToRetain(
         keep.add(record.fileName);
       }
     }
+  }
+  const protectedFiles = new Set(
+    [sorted[0], manual[0], automatic[0]]
+      .filter((record): record is BackupRecord => Boolean(record))
+      .map((record) => record.fileName)
+  );
+  let retainedBytes = sorted
+    .filter((record) => keep.has(record.fileName))
+    .reduce((total, record) => total + record.sizeBytes, 0);
+  const removable = sorted
+    .filter((record) => keep.has(record.fileName) && !protectedFiles.has(record.fileName))
+    .sort((left, right) => {
+      const leftManual = left.reason === 'scheduled' ? 0 : 1;
+      const rightManual = right.reason === 'scheduled' ? 0 : 1;
+      return leftManual - rightManual || left.createdAt - right.createdAt;
+    });
+  for (const record of removable) {
+    if (retainedBytes <= maximumBytes) break;
+    keep.delete(record.fileName);
+    retainedBytes -= record.sizeBytes;
   }
   return keep;
 }
@@ -322,7 +385,7 @@ function refreshBackupInventory(): void {
 }
 
 async function pruneBackups(): Promise<void> {
-  const keep = backupsToRetain(records);
+  const keep = backupsToRetain(records, Date.now(), maximumRetainedBytes);
   const removed = records.filter((record) => !keep.has(record.fileName));
   records = records.filter((record) => keep.has(record.fileName));
   await Promise.all(

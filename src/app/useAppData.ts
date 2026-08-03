@@ -1,13 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
-import { trpc } from '../api';
 import { setServerNowMs } from '../lib/time';
 import type {
   AppSettings,
-  AppSnapshot,
   HostInfo,
   Label,
-  LapRecord,
-  RaceEvent,
+  LiveAppSnapshot,
   RaceState,
   Runner,
   TemporaryTeam,
@@ -24,19 +21,15 @@ type AppQueryState = {
 type FullAppData = {
   runners: Runner[];
   labels: Label[];
-  laps: LapRecord[];
-  events: RaceEvent[];
   temporaryTeams: TemporaryTeam[];
   race: RaceState;
   settings: AppSettings;
   host: HostInfo | null;
 };
 
-const emptySnapshot: AppSnapshot = {
+const emptySnapshot: LiveAppSnapshot = {
   runners: [],
   labels: [],
-  laps: [],
-  events: [],
   temporaryTeams: [],
   race: emptyRace,
   settings: defaultSettings,
@@ -51,15 +44,17 @@ const emptySnapshot: AppSnapshot = {
 
 export function useAppData(): FullAppData & AppQueryState;
 export function useAppData<TSelected extends object>(
-  selector: (snapshot: AppSnapshot) => TSelected
+  selector: (snapshot: LiveAppSnapshot) => TSelected
 ): TSelected & AppQueryState;
 export function useAppData<TSelected extends object>(
-  selector?: (snapshot: AppSnapshot) => TSelected
+  selector?: (snapshot: LiveAppSnapshot) => TSelected
 ): (FullAppData | TSelected) & AppQueryState {
-  const query = useQuery<AppSnapshot, Error, AppSnapshot | TSelected>({
+  const query = useQuery<LiveAppSnapshot, Error, LiveAppSnapshot | TSelected>({
     queryKey: snapshotKey,
     queryFn: async () => {
-      const snapshot = await trpc.state.snapshot.query();
+      const response = await fetch('/api/state');
+      if (!response.ok) throw new Error(`Serverstatus laden mislukt (${response.status})`);
+      const snapshot = (await response.json()) as LiveAppSnapshot;
       setServerNowMs(snapshot.serverNowMs);
       return snapshot;
     },
@@ -70,8 +65,8 @@ export function useAppData<TSelected extends object>(
   const data = selector
     ? selectedData
     : {
-        ...(selectedData as AppSnapshot),
-        host: query.data ? (selectedData as AppSnapshot).host : null,
+        ...(selectedData as LiveAppSnapshot),
+        host: query.data ? (selectedData as LiveAppSnapshot).host : null,
       };
 
   return {

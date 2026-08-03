@@ -58,7 +58,25 @@ export function buildEventReadiness(
         : 'Er is voldoende vrije ruimte voor nieuwe backups.',
   });
 
+  checks.push({
+    id: 'database-size',
+    label: 'Databasegrootte',
+    level: backup.database.compactionRecommended ? 'warning' : 'ready',
+    detail: backup.database.compactionRecommended
+      ? `${Math.round(backup.database.reclaimablePercent)}% van het databasebestand is herbruikbare ruimte; verklein het na de race in Admin.`
+      : 'Het databasebestand bevat geen overmatige vrije ruimte.',
+  });
+
   if (cluster.enabled) {
+    checks.push({
+      id: 'compatibility',
+      label: 'Laptopversies',
+      level: cluster.incompatiblePeerCount > 0 ? 'blocked' : 'ready',
+      detail:
+        cluster.incompatiblePeerCount > 0
+          ? `${cluster.incompatiblePeerCount} laptop${cluster.incompatiblePeerCount === 1 ? '' : 's'} moet eerst worden bijgewerkt; synchronisatie is veilig geblokkeerd.`
+          : `Schema ${cluster.compatibility.schemaVersion}, replicatieformaat ${cluster.compatibility.replicationFormatVersion} en app ${cluster.compatibility.appVersion} zijn compatibel.`,
+    });
     const synchronizedPeer = cluster.peers.some(
       (peer) => peer.reachable && peer.synchronized
     );

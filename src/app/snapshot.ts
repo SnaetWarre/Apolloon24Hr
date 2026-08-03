@@ -1,5 +1,5 @@
 import type { QueryClient } from '@tanstack/react-query';
-import type { AppSettings, AppSnapshot, RaceState } from '../types';
+import type { AppSettings, LiveAppSnapshot, RaceState } from '../types';
 
 export const snapshotKey = ['app', 'snapshot'] as const;
 
@@ -18,9 +18,9 @@ export const defaultSettings: AppSettings = {
 
 export function patchSnapshot(
   queryClientToPatch: QueryClient,
-  updater: (snapshot: AppSnapshot) => AppSnapshot
+  updater: (snapshot: LiveAppSnapshot) => LiveAppSnapshot
 ): void {
-  queryClientToPatch.setQueryData<AppSnapshot>(snapshotKey, (current) => {
+  queryClientToPatch.setQueryData<LiveAppSnapshot>(snapshotKey, (current) => {
     if (!current) return current;
     return updater(current);
   });
