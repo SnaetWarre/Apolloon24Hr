@@ -273,6 +273,19 @@ test('admin panels use explicit responsive regions instead of the analysis auto-
   assert.match(stylesSource, /@media \(max-width: 760px\)[\s\S]*?\.admin-dashboard\s*\{\s*grid-template-columns: 1fr;/);
 });
 
+test('operator views share the Apolloon design tokens and accessible navigation states', () => {
+  const appSource = fs.readFileSync(path.resolve('src/App.tsx'), 'utf8');
+  const stylesSource = fs.readFileSync(path.resolve('src/styles.css'), 'utf8');
+
+  assert.match(stylesSource, /--apolloon-blue:\s*#2877F6;/);
+  assert.match(stylesSource, /--radius-md:\s*12px;/);
+  assert.match(stylesSource, /--focus-ring:/);
+  assert.match(stylesSource, /button:focus-visible/);
+  assert.match(stylesSource, /\.nav-link--active/);
+  assert.match(appSource, /aria-current=\{isCurrentPage \? 'page' : undefined\}/);
+  assert.match(appSource, /aria-label="Hoofdnavigatie"/);
+});
+
 test('analysis hour buckets use Brussels clock hours from the race start', () => {
   const raceStartedAt = Date.parse('2026-10-20T20:00:00+02:00');
   const race = {

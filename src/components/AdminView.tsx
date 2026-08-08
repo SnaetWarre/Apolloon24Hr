@@ -347,7 +347,7 @@ export function AdminView() {
     <>
       <div className="hero hero--compact">
         <div>
-          <img className="hero-logo" src="/brand/apolloon-logo.png" alt="Apolloon" width={560} height={169} fetchPriority="high" />
+          <span className="page-kicker">Wedstrijdbeheer</span>
           <h1 className="app-title">Admin / Import / Labels</h1>
           <p className="tagline">Voorbereiding voor de lokale wedstrijddatabase.</p>
         </div>

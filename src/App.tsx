@@ -80,7 +80,7 @@ export function QueuePage() {
     <>
       <div className="hero hero--compact">
         <div>
-          <img className="hero-logo" src="/brand/apolloon-logo.png" alt="Apolloon" width={560} height={169} fetchPriority="high" />
+          <span className="page-kicker">Telsysteem 1</span>
           <h1 className="app-title">Apolloon telsysteem</h1>
           <p className="tagline">Telsysteem 1 - wachtrij en wisselzone</p>
         </div>
@@ -182,33 +182,48 @@ function RouteLoadBoundary({
 
 function TopNav() {
   const navigate = useNavigate();
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const navigationItems: ReadonlyArray<{
+    path: '/' | '/queue' | '/timing' | '/analysis' | '/admin';
+    label: string;
+    preload?: () => void;
+  }> = [
+    { path: '/', label: 'Start' },
+    { path: '/queue', label: 'Telsysteem 1' },
+    { path: '/timing', label: 'Telsysteem 2' },
+    { path: '/analysis', label: 'Analyse', preload: preloadAnalysisView },
+    { path: '/admin', label: 'Admin', preload: preloadAdminView },
+  ];
+
   return (
-    <nav className="top-nav">
-      <button className="nav-link" onClick={() => void navigate({ to: '/' })}>
-        Start
-      </button>
-      <button className="nav-link" onClick={() => void navigate({ to: '/queue' })}>
-        Telsysteem 1
-      </button>
-      <button className="nav-link" onClick={() => void navigate({ to: '/timing' })}>
-        Telsysteem 2
-      </button>
+    <nav className="top-nav" aria-label="Hoofdnavigatie">
       <button
-        className="nav-link"
-        onPointerEnter={preloadAnalysisView}
-        onFocus={preloadAnalysisView}
-        onClick={() => void navigate({ to: '/analysis' })}
+        className="top-nav__brand"
+        onClick={() => void navigate({ to: '/' })}
+        aria-label="Naar de startpagina"
       >
-        Analyse
+        <span className="top-nav__logo">
+          <img src="/brand/apolloon-logo.png" alt="" width={560} height={169} />
+        </span>
+        <span>Apolloon</span>
       </button>
-      <button
-        className="nav-link"
-        onPointerEnter={preloadAdminView}
-        onFocus={preloadAdminView}
-        onClick={() => void navigate({ to: '/admin' })}
-      >
-        Admin
-      </button>
+      <div className="top-nav__links">
+        {navigationItems.map((navigationItem) => {
+          const isCurrentPage = pathname === navigationItem.path;
+          return (
+            <button
+              key={navigationItem.path}
+              className={`nav-link${isCurrentPage ? ' nav-link--active' : ''}`}
+              aria-current={isCurrentPage ? 'page' : undefined}
+              onPointerEnter={navigationItem.preload}
+              onFocus={navigationItem.preload}
+              onClick={() => void navigate({ to: navigationItem.path as never })}
+            >
+              {navigationItem.label}
+            </button>
+          );
+        })}
+      </div>
     </nav>
   );
 }

@@ -136,8 +136,9 @@ export function TimingView() {
     <>
       <div className="hero hero--compact">
         <div>
-          <img className="hero-logo" src="/brand/apolloon-logo.png" alt="Apolloon" width={560} height={169} fetchPriority="high" />
+          <span className="page-kicker">Telsysteem 2</span>
           <h1 className="app-title">Telsysteem 2 - Timing</h1>
+          <p className="tagline">Snelle tijdsregistratie en gecontroleerde loperswissel.</p>
         </div>
       </div>
 

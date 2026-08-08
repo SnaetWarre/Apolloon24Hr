@@ -48,10 +48,14 @@ export function RolePicker({ onNavigate }: { onNavigate: (path: string) => void 
   return (
     <>
       <div className="hero">
-        <div>
+        <div className="hero__content">
           <img className="hero-logo" src="/brand/apolloon-logo.png" alt="Apolloon" width={560} height={169} fetchPriority="high" />
           <h1 className="app-title">Apolloon telsysteem</h1>
           <p className="tagline">Open deze pagina op elke laptop en kies de juiste rol.</p>
+        </div>
+        <div className="hero__status" role="status">
+          <span className="hero__status-dot" aria-hidden="true" />
+          Lokaal wedstrijdsysteem
         </div>
       </div>
       <div className="role-grid">
@@ -63,8 +67,11 @@ export function RolePicker({ onNavigate }: { onNavigate: (path: string) => void 
             onFocus={role.preload}
             onClick={() => onNavigate(role.path)}
           >
-            <span>{role.title}</span>
+            <span className="role-card__title">{role.title}</span>
             <small>{role.description}</small>
+            <span className="role-card__action" aria-hidden="true">
+              Open rol
+            </span>
           </button>
         ))}
       </div>

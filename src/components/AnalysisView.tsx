@@ -125,9 +125,9 @@ export function AnalysisView() {
     <>
       <div className="hero hero--compact">
         <div>
-          <img className="hero-logo" src="/brand/apolloon-logo.png" alt="Apolloon" width={560} height={169} fetchPriority="high" />
+          <span className="page-kicker">Wedstrijdinzicht</span>
           <h1 className="app-title">Analyse</h1>
-          <p className="tagline">Grafieken op basis van de geselecteerde ploegen en categorieen.</p>
+          <p className="tagline">Grafieken op basis van de geselecteerde ploegen en categorieën.</p>
         </div>
       </div>
 

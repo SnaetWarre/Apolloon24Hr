@@ -4,6 +4,10 @@ All notable changes to the Leuven 24h Runner Tracker will be documented in this 
 
 ## [Unreleased]
 
+### Changed
+
+- Redesign the operator interface around a coherent Apolloon blue palette, compact navigation, clear page hierarchy, consistent cards and controls, accessible focus states, and responsive layouts
+
 ### Fixed
 
 - Keep admin panels, import controls, and label actions aligned across wide, zoomed, laptop, tablet, and mobile layouts
