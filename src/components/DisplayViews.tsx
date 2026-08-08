@@ -15,7 +15,7 @@ const selectOutsideDisplayData = ({ runners, race, settings }: LiveAppSnapshot) 
 });
 const selectInsideDisplayData = ({ runners, labels }: LiveAppSnapshot) => ({ runners, labels });
 
-export function OutsideDisplay({ onNavigate }: { onNavigate: (path: string) => void }) {
+export function OutsideDisplay() {
   const { runners, race, settings } = useAppData(selectOutsideDisplayData);
   const { laps, events, initialized: historyIsInitialized } = useRaceHistory({ scope: 'full' });
   const activeRunner = runners.find((runner) => runner.id === race.activeRunnerId) || null;
@@ -106,9 +106,6 @@ export function OutsideDisplay({ onNavigate }: { onNavigate: (path: string) => v
 
   return (
     <main className="display-root display-root--outside">
-      <button className="display-home" onClick={() => onNavigate('/')}>
-        Start
-      </button>
       <section className="outside-band outside-band--current">
         <DisplayBrand tone="light" />
         <div className="outside-runner">
@@ -137,7 +134,7 @@ export function OutsideDisplay({ onNavigate }: { onNavigate: (path: string) => v
   );
 }
 
-export function InsideDisplay({ onNavigate }: { onNavigate: (path: string) => void }) {
+export function InsideDisplay() {
   const { runners, labels } = useAppData(selectInsideDisplayData);
   const { laps } = useRaceHistory({ scope: 'full' });
   const latestLap = laps[0] || null;
@@ -160,9 +157,6 @@ export function InsideDisplay({ onNavigate }: { onNavigate: (path: string) => vo
 
   return (
     <main className="display-root display-root--inside">
-      <button className="display-home" onClick={() => onNavigate('/')}>
-        Start
-      </button>
       <header className="inside-header">
         <DisplayBrand tone="light" />
         <div>

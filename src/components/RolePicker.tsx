@@ -53,10 +53,6 @@ export function RolePicker({ onNavigate }: { onNavigate: (path: string) => void 
           <h1 className="app-title">Apolloon telsysteem</h1>
           <p className="tagline">Open deze pagina op elke laptop en kies de juiste rol.</p>
         </div>
-        <div className="hero__status" role="status">
-          <span className="hero__status-dot" aria-hidden="true" />
-          Lokaal wedstrijdsysteem
-        </div>
       </div>
       <div className="role-grid">
         {ROLES.map((role) => (
@@ -69,9 +65,6 @@ export function RolePicker({ onNavigate }: { onNavigate: (path: string) => void 
           >
             <span className="role-card__title">{role.title}</span>
             <small>{role.description}</small>
-            <span className="role-card__action" aria-hidden="true">
-              Open rol
-            </span>
           </button>
         ))}
       </div>

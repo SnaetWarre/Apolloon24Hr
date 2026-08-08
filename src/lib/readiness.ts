@@ -60,10 +60,10 @@ export function buildEventReadiness(
 
   checks.push({
     id: 'database-size',
-    label: 'Databasegrootte',
-    level: backup.database.compactionRecommended ? 'warning' : 'ready',
+    label: 'Databaseopslag',
+    level: 'ready',
     detail: backup.database.compactionRecommended
-      ? `${Math.round(backup.database.reclaimablePercent)}% van het databasebestand is herbruikbare ruimte; verklein het na de race in Admin.`
+      ? 'De database bevat herbruikbare lege ruimte. Dit is geen dataprobleem; verklein het bestand na de race in Admin.'
       : 'Het databasebestand bevat geen overmatige vrije ruimte.',
   });
 

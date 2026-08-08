@@ -126,28 +126,6 @@ select {
   z-index: 1;
 }
 
-.hero__status {
-  position: relative;
-  z-index: 1;
-  display: inline-flex;
-  align-items: center;
-  gap: 9px;
-  border: 1px solid rgba(255, 255, 255, 0.35);
-  border-radius: var(--radius-pill);
-  background: rgba(255, 255, 255, 0.14);
-  padding: 9px 13px;
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.hero__status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #86efac;
-  box-shadow: 0 0 0 4px rgba(134, 239, 172, 0.18);
-}
-
 .page-kicker {
   display: block;
   margin-bottom: 6px;
@@ -271,7 +249,7 @@ select {
 
 .role-card {
   position: relative;
-  min-height: 180px;
+  min-height: 160px;
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   background: #ffffff;
@@ -300,19 +278,6 @@ select {
   color: var(--muted);
   font-size: 14px;
   line-height: 1.45;
-}
-
-.role-card__action {
-  position: absolute;
-  right: 22px;
-  bottom: 18px;
-  color: var(--blue-dark);
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.role-card__action::after {
-  content: "  →";
 }
 
 .host-hint,
@@ -368,7 +333,9 @@ select {
 .form-row--plain {
   padding: 0;
   background: transparent;
-  border-bottom: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
 }
 
 .form-row > .input {
@@ -384,16 +351,21 @@ select {
 }
 
 .public-record-mode-row {
-  align-items: center;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: stretch;
+  gap: 6px;
   margin: 14px 0 0;
 }
 
 .public-record-mode-row label {
+  color: var(--muted-strong);
+  font-size: 13px;
   font-weight: 700;
 }
 
 .public-record-mode-row .input {
-  max-width: 220px;
+  max-width: none;
 }
 
 .header-hint {
@@ -540,20 +512,35 @@ select {
   margin-top: 14px;
 }
 
+.backup-summary {
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
 .backup-metrics {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 10px;
+  gap: 0 20px;
   margin-top: 14px;
+  border-bottom: 1px solid var(--line);
 }
 
 .backup-metrics > span {
   display: grid;
   gap: 3px;
-  padding: 10px 12px;
-  border: 1px solid #dde8f8;
-  border-radius: var(--radius-md);
-  background: var(--panel-soft);
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+
+.database-storage-note {
+  margin-top: 14px;
+  color: var(--muted-strong);
+  line-height: 1.5;
+}
+
+.database-storage-note strong {
+  color: var(--text);
 }
 
 .backup-checksum {
@@ -670,6 +657,15 @@ select {
 
 .btn--ghost:hover {
   border-color: var(--blue);
+  background: var(--blue-faint);
+}
+
+.btn--secondary {
+  background: transparent;
+  color: var(--blue-dark);
+}
+
+.btn--secondary:hover {
   background: var(--blue-faint);
 }
 
@@ -821,13 +817,21 @@ select {
   background: var(--panel);
   padding: 10px;
   box-shadow: var(--shadow-xs);
-  transition: border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
 }
 
 .card:hover {
   border-color: rgba(40, 119, 246, 0.35);
   box-shadow: var(--shadow-sm);
-  transform: translateY(-1px);
+}
+
+.card--dragging {
+  position: relative;
+  z-index: 3;
+  cursor: grabbing;
+  border-color: var(--blue);
+  box-shadow: var(--shadow-md);
+  transition: none;
 }
 
 .card--muted {
@@ -1165,6 +1169,13 @@ select {
 
 .stats-grid--analysis .stat-panel strong {
   font-size: clamp(22px, 3vw, 32px);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.035em;
+  white-space: nowrap;
+}
+
+.stats-grid--analysis .stat-panel--long-value strong {
+  font-size: clamp(17px, 1.45vw, 22px);
 }
 
 .analysis-filter-panel {
@@ -1994,18 +2005,6 @@ tbody tr:hover {
   color: #ffffff;
   font-size: clamp(24px, 3vw, 48px);
   font-weight: 900;
-}
-
-.display-home {
-  position: fixed;
-  top: 12px;
-  right: 12px;
-  z-index: 5;
-  border: 1px solid rgba(22, 32, 51, 0.16);
-  border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.85);
-  padding: 8px 10px;
-  cursor: pointer;
 }
 
 .display-root--outside {

@@ -130,19 +130,17 @@ export function AdminPage() {
 }
 
 export function OutsideDisplayPage() {
-  const navigate = useNavigate();
   return (
     <RouteLoadBoundary loadingMessage="Buitenscherm wordt geladen..." displayMode>
-      <LazyOutsideDisplay onNavigate={(path) => void navigate({ to: path as never })} />
+      <LazyOutsideDisplay />
     </RouteLoadBoundary>
   );
 }
 
 export function InsideDisplayPage() {
-  const navigate = useNavigate();
   return (
     <RouteLoadBoundary loadingMessage="Binnenscherm wordt geladen..." displayMode>
-      <LazyInsideDisplay onNavigate={(path) => void navigate({ to: path as never })} />
+      <LazyInsideDisplay />
     </RouteLoadBoundary>
   );
 }

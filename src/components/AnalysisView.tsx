@@ -297,10 +297,11 @@ function mergeAnalysisLabels(currentLabels: Label[], laps: LapRecord[]): Label[]
 }
 
 function StatPanel({ label, value }: { label: string; value: string }) {
+  const hasLongValue = value.length >= 10;
   return (
-    <div className="stat-panel">
+    <div className={`stat-panel${hasLongValue ? ' stat-panel--long-value' : ''}`}>
       <span className="muted-label">{label}</span>
-      <strong>{value}</strong>
+      <strong title={value}>{value}</strong>
     </div>
   );
 }

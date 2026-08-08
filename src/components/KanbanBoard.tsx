@@ -238,7 +238,7 @@ const DraggableCard = React.memo(function DraggableCard({
   return (
     <div
       ref={setNodeRef}
-      className={`card${runner.hiddenFromQueue ? ' card--muted' : ''}`}
+      className={`card${runner.hiddenFromQueue ? ' card--muted' : ''}${isDragging ? ' card--dragging' : ''}`}
       style={style}
       onContextMenu={handleContextMenu}
     >

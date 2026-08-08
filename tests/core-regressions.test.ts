@@ -207,6 +207,28 @@ test('event readiness blocks real safety failures and distinguishes standalone w
   };
 
   assert.equal(readinessSummary(buildEventReadiness(cluster, race, now)), 'ready');
+  const compactableDatabaseReadiness = buildEventReadiness(
+    {
+      ...cluster,
+      backup: {
+        ...cluster.backup,
+        database: {
+          ...cluster.backup.database,
+          reclaimableBytes: 1_024,
+          reclaimablePercent: 50,
+          compactionRecommended: true,
+          raceActive: true,
+        },
+      },
+    },
+    race,
+    now
+  );
+  assert.equal(
+    compactableDatabaseReadiness.find((check) => check.id === 'database-size')?.level,
+    'ready'
+  );
+  assert.equal(readinessSummary(compactableDatabaseReadiness), 'ready');
   assert.equal(
     readinessSummary(
       buildEventReadiness(
@@ -275,6 +297,8 @@ test('admin panels use explicit responsive regions instead of the analysis auto-
 
 test('operator views share the Apolloon design tokens and accessible navigation states', () => {
   const appSource = fs.readFileSync(path.resolve('src/App.tsx'), 'utf8');
+  const displaySource = fs.readFileSync(path.resolve('src/components/DisplayViews.tsx'), 'utf8');
+  const kanbanSource = fs.readFileSync(path.resolve('src/components/KanbanBoard.tsx'), 'utf8');
   const stylesSource = fs.readFileSync(path.resolve('src/styles.css'), 'utf8');
 
   assert.match(stylesSource, /--apolloon-blue:\s*#2877F6;/);
@@ -284,6 +308,10 @@ test('operator views share the Apolloon design tokens and accessible navigation 
   assert.match(stylesSource, /\.nav-link--active/);
   assert.match(appSource, /aria-current=\{isCurrentPage \? 'page' : undefined\}/);
   assert.match(appSource, /aria-label="Hoofdnavigatie"/);
+  assert.doesNotMatch(displaySource, /display-home/);
+  assert.match(kanbanSource, /card--dragging/);
+  assert.match(stylesSource, /\.card--dragging\s*\{[^}]*transition:\s*none;/s);
+  assert.match(stylesSource, /\.form-row--plain\s*\{[^}]*border:\s*0;[^}]*box-shadow:\s*none;/s);
 });
 
 test('analysis hour buckets use Brussels clock hours from the race start', () => {

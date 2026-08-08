@@ -520,7 +520,7 @@ export function AdminView() {
               </div>
             )}
             {cluster.backup.latest ? (
-              <div className="host-hint">
+              <div className="backup-summary">
                 <strong>Laatste backup:</strong>{' '}
                 {new Date(cluster.backup.latest.createdAt).toLocaleString('nl-BE')} ·{' '}
                 {formatRelativeAge(cluster.backup.latest.createdAt)} ·{' '}
@@ -575,13 +575,15 @@ export function AdminView() {
               </span>
             </div>
             {cluster.backup.database.compactionRecommended && (
-              <div className="warning-banner" role="status">
-                {formatFileSize(cluster.backup.database.reclaimableBytes)} ({Math.round(
-                  cluster.backup.database.reclaimablePercent
-                )}%) van het databasebestand kan veilig worden teruggewonnen.
+              <div className="database-storage-note" role="status">
+                <strong>Geen dataprobleem:</strong> de database bevat{' '}
+                {formatFileSize(cluster.backup.database.reclaimableBytes)} lege ruimte die SQLite
+                later opnieuw kan gebruiken. Het bestand is daarom{' '}
+                {formatFileSize(cluster.backup.database.fileBytes)}, terwijl{' '}
+                {formatFileSize(cluster.backup.database.usedBytes)} werkelijk in gebruik is.
                 {cluster.backup.database.raceActive
-                  ? ' Compactie wordt geblokkeerd zolang de race actief is.'
-                  : ' Compactie is nu beschikbaar.'}
+                  ? ' Verkleinen kan veilig zodra de race afgelopen is.'
+                  : ' Je kunt het bestand nu veilig verkleinen.'}
               </div>
             )}
             <div className="form-row form-row--plain backup-actions">

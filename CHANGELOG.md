@@ -11,6 +11,8 @@ All notable changes to the Leuven 24h Runner Tracker will be documented in this 
 ### Fixed
 
 - Keep admin panels, import controls, and label actions aligned across wide, zoomed, laptop, tablet, and mobile layouts
+- Keep Kanban cards directly under the pointer while dragging instead of animating behind it
+- Clarify reusable SQLite space, flatten nested admin controls, contain long analysis values, and keep public displays free of operator buttons
 
 ## [1.2.0] - 2026-08-08
 
