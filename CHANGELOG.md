@@ -2,7 +2,7 @@
 
 All notable changes to the Leuven 24h Runner Tracker will be documented in this file.
 
-## [1.0.0] - 2026-08-08
+## [1.2.0] - 2026-08-08
 
 ### Added
 

@@ -50,6 +50,29 @@ test('desktop release packaging covers every supported platform and verifies nat
   assert.match(buildScript, /builderArgs\.push\('--publish', 'never'\)/);
 });
 
+test('release metadata uses the package version consistently', () => {
+  const packageJson = JSON.parse(fs.readFileSync(path.resolve('package.json'), 'utf8')) as {
+    version: string;
+  };
+  const packageLock = JSON.parse(fs.readFileSync(path.resolve('package-lock.json'), 'utf8')) as {
+    version: string;
+    packages: Record<string, { version?: string }>;
+  };
+  const compatibilitySource = fs.readFileSync(
+    path.resolve('server/cluster-compatibility.ts'),
+    'utf8'
+  );
+  const exampleEnvironment = fs.readFileSync(path.resolve('.env.example'), 'utf8');
+  const releaseWorkflow = fs.readFileSync(path.resolve('.github/workflows/release.yml'), 'utf8');
+  const escapedVersion = packageJson.version.replaceAll('.', '\\.');
+
+  assert.equal(packageLock.version, packageJson.version);
+  assert.equal(packageLock.packages[''].version, packageJson.version);
+  assert.match(compatibilitySource, new RegExp(`DEFAULT_APP_VERSION = '${escapedVersion}'`));
+  assert.match(exampleEnvironment, new RegExp(`APOLLOON_APP_VERSION=${escapedVersion}`));
+  assert.match(releaseWorkflow, new RegExp(`default: v${escapedVersion}`));
+});
+
 test('packaged Electron startup clears poisoned assets and never exposes a blank window', () => {
   const mainSource = fs.readFileSync(path.resolve('electron/main.js'), 'utf8');
 
