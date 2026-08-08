@@ -1,5 +1,6 @@
 import React from 'react';
 import { useAppData } from '../app/index';
+import { preloadAdminView, preloadAnalysisView, preloadDisplayViews } from '../lazyViews';
 import type { LiveAppSnapshot } from '../types';
 
 const selectHostData = ({ host }: LiveAppSnapshot) => ({ host });
@@ -19,21 +20,25 @@ const ROLES = [
     path: '/display/outside',
     title: 'Buitenscherm',
     description: 'Groot publiek scherm met huidige en volgende loper.',
+    preload: preloadDisplayViews,
   },
   {
     path: '/display/inside',
     title: 'Binnenscherm',
     description: 'Rankings, minicompetities en progressie per label.',
+    preload: preloadDisplayViews,
   },
   {
     path: '/analysis',
     title: 'Analyse & Export',
     description: 'Live rondedata bekijken en CSV/JSON exporteren.',
+    preload: preloadAnalysisView,
   },
   {
     path: '/admin',
     title: 'Admin / Import / Labels',
     description: 'Google Sheets CSV importeren en labels beheren.',
+    preload: preloadAdminView,
   },
 ];
 
@@ -51,7 +56,13 @@ export function RolePicker({ onNavigate }: { onNavigate: (path: string) => void 
       </div>
       <div className="role-grid">
         {ROLES.map((role) => (
-          <button key={role.path} className="role-card" onClick={() => onNavigate(role.path)}>
+          <button
+            key={role.path}
+            className="role-card"
+            onPointerEnter={role.preload}
+            onFocus={role.preload}
+            onClick={() => onNavigate(role.path)}
+          >
             <span>{role.title}</span>
             <small>{role.description}</small>
           </button>

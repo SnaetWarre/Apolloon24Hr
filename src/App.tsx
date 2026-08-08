@@ -1,14 +1,19 @@
 import React from 'react';
 import { Outlet, useNavigate, useRouterState } from '@tanstack/react-router';
-import { AdminView } from './components/AdminView';
-import { AnalysisView } from './components/AnalysisView';
 import { AppHeader } from './components/AppHeader';
-import { InsideDisplay, OutsideDisplay } from './components/DisplayViews';
 import { KanbanBoard } from './components/KanbanBoard';
 import { RolePicker } from './components/RolePicker';
 import { RunnerProfileModal } from './components/RunnerProfileModal';
 import { TimingView } from './components/TimingView';
 import { useAppData, useRealtimeBridge } from './app/index';
+import {
+  LazyAdminView,
+  LazyAnalysisView,
+  LazyInsideDisplay,
+  LazyOutsideDisplay,
+  preloadAdminView,
+  preloadAnalysisView,
+} from './lazyViews';
 import { getNextWaitingRunner, runnerLabel } from './lib/runners';
 import { LiveDuration } from './components/LiveTime';
 import type { LiveAppSnapshot } from './types';
@@ -109,21 +114,37 @@ export function TimingPage() {
 }
 
 export function AnalysisPage() {
-  return <AnalysisView />;
+  return (
+    <RouteLoadBoundary loadingMessage="Analyse wordt geladen...">
+      <LazyAnalysisView />
+    </RouteLoadBoundary>
+  );
 }
 
 export function AdminPage() {
-  return <AdminView />;
+  return (
+    <RouteLoadBoundary loadingMessage="Admin wordt geladen...">
+      <LazyAdminView />
+    </RouteLoadBoundary>
+  );
 }
 
 export function OutsideDisplayPage() {
   const navigate = useNavigate();
-  return <OutsideDisplay onNavigate={(path) => void navigate({ to: path as never })} />;
+  return (
+    <RouteLoadBoundary loadingMessage="Buitenscherm wordt geladen..." displayMode>
+      <LazyOutsideDisplay onNavigate={(path) => void navigate({ to: path as never })} />
+    </RouteLoadBoundary>
+  );
 }
 
 export function InsideDisplayPage() {
   const navigate = useNavigate();
-  return <InsideDisplay onNavigate={(path) => void navigate({ to: path as never })} />;
+  return (
+    <RouteLoadBoundary loadingMessage="Binnenscherm wordt geladen..." displayMode>
+      <LazyInsideDisplay onNavigate={(path) => void navigate({ to: path as never })} />
+    </RouteLoadBoundary>
+  );
 }
 
 export function NotFoundPage() {
@@ -142,6 +163,23 @@ function Shell({ children }: { children: React.ReactNode }) {
   return <div className="app-root">{children}</div>;
 }
 
+function RouteLoadBoundary({
+  children,
+  loadingMessage,
+  displayMode = false,
+}: {
+  children: React.ReactNode;
+  loadingMessage: string;
+  displayMode?: boolean;
+}) {
+  const fallback = (
+    <div className={displayMode ? 'display-loading' : 'empty-state'}>
+      <p>{loadingMessage}</p>
+    </div>
+  );
+  return <React.Suspense fallback={fallback}>{children}</React.Suspense>;
+}
+
 function TopNav() {
   const navigate = useNavigate();
   return (
@@ -155,10 +193,20 @@ function TopNav() {
       <button className="nav-link" onClick={() => void navigate({ to: '/timing' })}>
         Telsysteem 2
       </button>
-      <button className="nav-link" onClick={() => void navigate({ to: '/analysis' })}>
+      <button
+        className="nav-link"
+        onPointerEnter={preloadAnalysisView}
+        onFocus={preloadAnalysisView}
+        onClick={() => void navigate({ to: '/analysis' })}
+      >
         Analyse
       </button>
-      <button className="nav-link" onClick={() => void navigate({ to: '/admin' })}>
+      <button
+        className="nav-link"
+        onPointerEnter={preloadAdminView}
+        onFocus={preloadAdminView}
+        onClick={() => void navigate({ to: '/admin' })}
+      >
         Admin
       </button>
     </nav>

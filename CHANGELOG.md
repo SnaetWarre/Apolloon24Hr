@@ -15,6 +15,7 @@ All notable changes to the Leuven 24h Runner Tracker will be documented in this 
 ### Changed
 
 - Live state and historical race data now load separately for faster initial rendering and smaller ordinary updates
+- Analysis, administration, and display code now loads per role and preloads on user intent, reducing startup work on operator laptops
 - The packaged backend now shuts down cleanly with Electron and reports release, database, and backup health
 - The bundled CSV is now a usable import example with the documented columns and duration format
 

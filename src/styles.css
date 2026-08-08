@@ -1694,6 +1694,16 @@ td {
   color: var(--text);
 }
 
+.display-loading {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  background: var(--apolloon-blue);
+  color: #ffffff;
+  font-size: clamp(24px, 3vw, 48px);
+  font-weight: 900;
+}
+
 .display-home {
   position: fixed;
   top: 12px;

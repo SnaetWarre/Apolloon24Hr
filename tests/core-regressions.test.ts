@@ -50,11 +50,17 @@ test('live clocks are cadence-limited instead of driving full-frame renders', ()
   assert.doesNotMatch(source, /requestAnimationFrame/);
 });
 
-test('all route modules load with the app so navigation never waits on a lazy chunk', () => {
-  const source = fs.readFileSync(path.resolve('src/App.tsx'), 'utf8');
-  assert.doesNotMatch(source, /React\.lazy|Pagina wordt geladen|import\(['"]\.\/components/);
-  assert.match(source, /import \{ AnalysisView \} from '\.\/components\/AnalysisView'/);
-  assert.match(source, /import \{ TimingView \} from '\.\/components\/TimingView'/);
+test('heavy route modules load on demand while operator controls stay eager', () => {
+  const appSource = fs.readFileSync(path.resolve('src/App.tsx'), 'utf8');
+  const lazyViewsSource = fs.readFileSync(path.resolve('src/lazyViews.tsx'), 'utf8');
+
+  assert.match(appSource, /import \{ TimingView \} from '\.\/components\/TimingView'/);
+  assert.match(appSource, /import \{ KanbanBoard \} from '\.\/components\/KanbanBoard'/);
+  assert.doesNotMatch(appSource, /from '\.\/components\/(AdminView|AnalysisView|DisplayViews)'/);
+  assert.match(lazyViewsSource, /import\('\.\/components\/AnalysisView'\)/);
+  assert.match(lazyViewsSource, /import\('\.\/components\/AdminView'\)/);
+  assert.match(lazyViewsSource, /import\('\.\/components\/DisplayViews'\)/);
+  assert.match(appSource, /<React\.Suspense fallback=\{fallback\}>/);
 });
 
 test('initial rendering overlaps state transfer and defers non-critical realtime code', () => {
@@ -242,6 +248,16 @@ test('packaged static files stay relative to the AppImage mount root', () => {
   assert.doesNotMatch(serverSource, /sendFile\(compressed\.path\)/);
   assert.match(serverSource, /sendFile\(relativePath, \{ root: DIST_DIR \}\)/);
   assert.match(serverSource, /sendFile\('index\.html', \{ root: DIST_DIR \}\)/);
+});
+
+test('production builds enforce the client startup budget', () => {
+  const packageJson = JSON.parse(fs.readFileSync(path.resolve('package.json'), 'utf8'));
+  const budgetSource = fs.readFileSync(path.resolve('scripts/check-client-budget.mjs'), 'utf8');
+
+  assert.match(packageJson.scripts['client:build'], /check-client-budget\.mjs/);
+  assert.match(budgetSource, /maximumInitialJavaScriptBytes/);
+  assert.match(budgetSource, /maximumInitialBrotliBytes/);
+  assert.match(budgetSource, /modulepreload/);
 });
 
 test('analysis hour buckets use Brussels clock hours from the race start', () => {
