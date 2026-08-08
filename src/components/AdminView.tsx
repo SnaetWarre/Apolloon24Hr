@@ -353,8 +353,8 @@ export function AdminView() {
         </div>
       </div>
 
-      <div className="analysis-grid">
-        <section className={`panel readiness-panel readiness-panel--${readiness}`}>
+      <div className="admin-dashboard">
+        <section className={`panel readiness-panel readiness-panel--${readiness} admin-dashboard__full-width`}>
           <div className="readiness-heading">
             <div>
               <h2>Wedstrijdgereedheid</h2>
@@ -391,7 +391,7 @@ export function AdminView() {
         </section>
 
         {cluster?.enabled && (
-          <section className="panel">
+          <section className="panel admin-dashboard__full-width">
             <h2>Laptops koppelen</h2>
             <p className="panel-copy">
               Op deze laptop: <strong>{host.url}</strong>. Koppelcode:{' '}
@@ -507,7 +507,7 @@ export function AdminView() {
         )}
 
         {cluster?.backup && (
-          <section className="panel">
+          <section className="panel admin-dashboard__backup">
             <h2>Herstelbackups</h2>
             <p className="panel-copy">
               {cluster.backup.enabled
@@ -643,7 +643,7 @@ export function AdminView() {
           </section>
         )}
 
-        <section className="panel">
+        <section className="panel admin-dashboard__public-event">
           <h2>Publiek moment</h2>
           <p className="panel-copy">
             Slaat het moment op en toont de flash alleen op het buitenscherm.
@@ -671,7 +671,7 @@ export function AdminView() {
           {eventMessage && <div className="host-hint">{eventMessage}</div>}
         </section>
 
-        <section className="panel">
+        <section className="panel admin-dashboard__import">
           <h2>Google Sheets CSV import</h2>
           <p className="panel-copy">
             Import zet nieuwe lopers in de ingeschreven databank. Ze verschijnen pas op het bord wanneer je ze
@@ -694,7 +694,7 @@ export function AdminView() {
           {message && <div className="host-hint">{message}</div>}
         </section>
 
-        <section className="panel">
+        <section className="panel admin-dashboard__labels">
           <h2>Labels</h2>
           <div className="form-row">
             <input

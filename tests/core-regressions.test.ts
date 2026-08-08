@@ -260,6 +260,19 @@ test('production builds enforce the client startup budget', () => {
   assert.match(budgetSource, /modulepreload/);
 });
 
+test('admin panels use explicit responsive regions instead of the analysis auto-fit grid', () => {
+  const adminSource = fs.readFileSync(path.resolve('src/components/AdminView.tsx'), 'utf8');
+  const stylesSource = fs.readFileSync(path.resolve('src/styles.css'), 'utf8');
+
+  assert.match(adminSource, /className="admin-dashboard"/);
+  assert.doesNotMatch(adminSource, /className="analysis-grid"/);
+  assert.match(adminSource, /admin-dashboard__full-width/);
+  assert.match(adminSource, /admin-dashboard__labels/);
+  assert.match(stylesSource, /\.admin-dashboard__labels\s*\{\s*grid-column: 1 \/ -1;/);
+  assert.match(stylesSource, /@container \(max-width: 620px\)/);
+  assert.match(stylesSource, /@media \(max-width: 760px\)[\s\S]*?\.admin-dashboard\s*\{\s*grid-template-columns: 1fr;/);
+});
+
 test('analysis hour buckets use Brussels clock hours from the race start', () => {
   const raceStartedAt = Date.parse('2026-10-20T20:00:00+02:00');
   const race = {

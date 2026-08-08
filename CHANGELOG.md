@@ -2,6 +2,12 @@
 
 All notable changes to the Leuven 24h Runner Tracker will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+- Keep admin panels, import controls, and label actions aligned across wide, zoomed, laptop, tablet, and mobile layouts
+
 ## [1.2.0] - 2026-08-08
 
 ### Added
