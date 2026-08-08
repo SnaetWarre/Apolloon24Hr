@@ -8,6 +8,7 @@ import { buildRollingLapTrend, buildTimeBuckets } from '../src/lib/analysis.ts';
 import { kanbanCollisionDetection, resolveKanbanDrop } from '../src/lib/kanban.ts';
 import { createUuid } from '../src/lib/uuid.ts';
 import { buildEventReadiness, readinessSummary } from '../src/lib/readiness.ts';
+import { observeDisplayHistory } from '../src/lib/displayHistory.ts';
 import {
   LIVE_MILLISECOND_INTERVAL_MS,
   normalizeClockInterval,
@@ -69,6 +70,39 @@ test('initial rendering overlaps state transfer and defers non-critical realtime
   assert.equal(logo.readUInt32BE(16), 560);
   assert.equal(logo.readUInt32BE(20), 169);
   assert.ok(logo.length < 15_000);
+});
+
+test('outside display fits the viewport and announces only new history', () => {
+  assert.equal(observeDisplayHistory(false, null, [], null), null);
+
+  const initialHistory = observeDisplayHistory(true, null, ['existing-event'], 'existing-event');
+  assert.ok(initialHistory);
+  assert.equal(initialHistory.shouldAnnounceLatest, false);
+  assert.deepEqual([...initialHistory.knownIds], ['existing-event']);
+
+  const unchangedHistory = observeDisplayHistory(
+    true,
+    initialHistory.knownIds,
+    ['existing-event'],
+    'existing-event'
+  );
+  assert.ok(unchangedHistory);
+  assert.equal(unchangedHistory.shouldAnnounceLatest, false);
+
+  const realtimeHistory = observeDisplayHistory(
+    true,
+    unchangedHistory.knownIds,
+    ['new-event', 'existing-event'],
+    'new-event'
+  );
+  assert.ok(realtimeHistory);
+  assert.equal(realtimeHistory.shouldAnnounceLatest, true);
+
+  const styles = fs.readFileSync(path.resolve('src/styles.css'), 'utf8');
+  assert.match(
+    styles,
+    /\.display-root--outside\s*\{[^}]*height:\s*100vh;[^}]*min-height:\s*0;[^}]*overflow:\s*hidden;/s
+  );
 });
 
 test('event readiness blocks real safety failures and distinguishes standalone warnings', () => {

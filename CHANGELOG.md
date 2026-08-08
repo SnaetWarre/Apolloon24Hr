@@ -2,6 +2,27 @@
 
 All notable changes to the Leuven 24h Runner Tracker will be documented in this file.
 
+## [1.0.0] - 2026-08-08
+
+### Added
+
+- Local-first synchronization between writable Electron laptops, including authenticated discovery, reconnect catch-up, compatibility checks, and explicit timing transfer
+- Verified automatic and manual SQLite backups with retention, download manifests, storage monitoring, and guarded compaction
+- Event-readiness status for backups, replicas, clock skew, timing ownership, and synchronization conflicts
+- Temporary night teams that safely replace and restore each runner's normal speedteam
+- Realtime Burgie and record alerts on the outside display
+
+### Changed
+
+- Live state and historical race data now load separately for faster initial rendering and smaller ordinary updates
+- The packaged backend now shuts down cleanly with Electron and reports release, database, and backup health
+- The bundled CSV is now a usable import example with the documented columns and duration format
+
+### Fixed
+
+- Keep both outside-display panels within a single TV viewport without scrolling
+- Do not replay historical Burgie or record alerts when the outside display first loads
+
 ## [0.8.0] - 2026-06-06
 
 ### Added

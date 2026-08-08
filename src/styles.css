@@ -1709,7 +1709,9 @@ td {
 .display-root--outside {
   display: grid;
   grid-template-rows: minmax(0, 64fr) minmax(0, 36fr);
-  min-height: 100vh;
+  height: 100vh;
+  min-height: 0;
+  overflow: hidden;
   color: #ffffff;
 }
 
@@ -1719,7 +1721,7 @@ td {
   min-height: 0;
   flex-direction: column;
   justify-content: center;
-  padding: clamp(28px, 4.5vw, 76px);
+  padding: clamp(24px, 4vh, 54px) clamp(28px, 4.5vw, 76px);
   overflow: hidden;
 }
 
@@ -1740,6 +1742,10 @@ td {
 
 .outside-runner--next {
   margin-top: 18px;
+}
+
+.outside-band--next .display-runner-name {
+  font-size: clamp(54px, 6.5vw, 112px);
 }
 
 .display-kicker {

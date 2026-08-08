@@ -3,6 +3,7 @@ import { useAppData, useRaceHistory } from '../app/index';
 import { isFastestLapForRecordMode, publicRecordModeTitle } from '../lib/analysis';
 import { formatClockTimeMs, formatDurationMs } from '../lib/time';
 import { getNextWaitingRunner, lapRunnerLabel, runnerLabel } from '../lib/runners';
+import { observeDisplayHistory } from '../lib/displayHistory';
 import type { Label, LapRecord, LiveAppSnapshot, PublicRecordMode, RaceEvent, Runner } from '../types';
 import { LabelBadge } from './LabelBadge';
 
@@ -16,7 +17,7 @@ const selectInsideDisplayData = ({ runners, labels }: LiveAppSnapshot) => ({ run
 
 export function OutsideDisplay({ onNavigate }: { onNavigate: (path: string) => void }) {
   const { runners, race, settings } = useAppData(selectOutsideDisplayData);
-  const { laps, events } = useRaceHistory({ scope: 'full' });
+  const { laps, events, initialized: historyIsInitialized } = useRaceHistory({ scope: 'full' });
   const activeRunner = runners.find((runner) => runner.id === race.activeRunnerId) || null;
   const nextRunner = getNextWaitingRunner(runners);
   const [recordLap, setRecordLap] = React.useState<LapRecord | null>(null);
@@ -27,17 +28,24 @@ export function OutsideDisplay({ onNavigate }: { onNavigate: (path: string) => v
   const burgieTimeoutRef = React.useRef<number | null>(null);
 
   React.useEffect(() => {
-    const knownLapIds = knownLapIdsRef.current;
     const latestLap = laps[0] || null;
+    const lapHistoryObservation = observeDisplayHistory(
+      historyIsInitialized,
+      knownLapIdsRef.current,
+      laps.map((lap) => lap.id),
+      latestLap?.id || null
+    );
+    if (!lapHistoryObservation) return;
+    knownLapIdsRef.current = lapHistoryObservation.knownIds;
+
     if (settings.publicRecordMode === 'off') {
       setRecordLap(null);
     }
 
     if (
       !burgieEvent &&
-      knownLapIds &&
       latestLap &&
-      !knownLapIds.has(latestLap.id) &&
+      lapHistoryObservation.shouldAnnounceLatest &&
       isFastestLapForRecordMode(latestLap, laps.slice(1), race, settings.publicRecordMode)
     ) {
       setRecordLap(latestLap);
@@ -54,14 +62,20 @@ export function OutsideDisplay({ onNavigate }: { onNavigate: (path: string) => v
       if (!currentRecordLap) return currentRecordLap;
       return laps.some((lap) => lap.id === currentRecordLap.id) ? currentRecordLap : null;
     });
-    knownLapIdsRef.current = new Set(laps.map((lap) => lap.id));
-  }, [burgieEvent, laps, race, settings.publicRecordMode]);
+  }, [burgieEvent, historyIsInitialized, laps, race, settings.publicRecordMode]);
 
   React.useEffect(() => {
-    const knownEventIds = knownEventIdsRef.current;
     const latestBurgieEvent = events.find((event) => event.type === 'burgie_gepakt') || null;
+    const eventHistoryObservation = observeDisplayHistory(
+      historyIsInitialized,
+      knownEventIdsRef.current,
+      events.map((event) => event.id),
+      latestBurgieEvent?.id || null
+    );
+    if (!eventHistoryObservation) return;
+    knownEventIdsRef.current = eventHistoryObservation.knownIds;
 
-    if (knownEventIds && latestBurgieEvent && !knownEventIds.has(latestBurgieEvent.id)) {
+    if (latestBurgieEvent && eventHistoryObservation.shouldAnnounceLatest) {
       setRecordLap(null);
       if (recordTimeoutRef.current !== null) {
         window.clearTimeout(recordTimeoutRef.current);
@@ -77,8 +91,7 @@ export function OutsideDisplay({ onNavigate }: { onNavigate: (path: string) => v
       }, OUTSIDE_ALERT_VISIBLE_MS);
     }
 
-    knownEventIdsRef.current = new Set(events.map((event) => event.id));
-  }, [events]);
+  }, [events, historyIsInitialized]);
 
   React.useEffect(() => {
     return () => {
