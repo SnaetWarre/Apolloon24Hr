@@ -161,6 +161,9 @@ test('temporary night teams work through HTTP, realtime, analysis, exports, and 
     assert.equal(analysisPage.status, 200);
     const analysisHtml = await analysisPage.text();
     assert.match(analysisHtml, /<div id="root"><\/div>/);
+    const tacticsPage = await fetch(`${baseUrl}/tactics`);
+    assert.equal(tacticsPage.status, 200);
+    assert.match(await tacticsPage.text(), /<div id="root"><\/div>/);
     const scriptPath = analysisHtml.match(/<script[^>]+src="([^"]+\.js)"/)?.[1];
     assert.ok(scriptPath);
     const compressedAsset = await fetch(`${baseUrl}${scriptPath}`, {

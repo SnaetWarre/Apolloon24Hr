@@ -23,6 +23,7 @@ Shared contracts live in `shared/`. Anything imported by both client and server 
   - `snapshot.ts`: snapshot query key and cache helpers.
 - `src/components/`: route-level screens and reusable UI pieces.
 - `src/lib/`: browser-side helpers and app-specific utility functions.
+  - `tactics.ts`: historical race validation, live comparison, and target-scenario calculations for Kobe's tactiek.
   - `readiness.ts`: derives the operator-facing event readiness checklist from
     backup, replication, clock, conflict, and timing state.
 - `src/types.ts`: client-facing re-export of shared schema types.
