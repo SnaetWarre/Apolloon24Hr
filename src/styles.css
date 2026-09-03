@@ -1,18 +1,18 @@
 :root {
   color-scheme: light;
-  --bg: #f6f8fc;
+  --bg: #f7f7f8;
   --panel: #ffffff;
-  --panel-soft: #f2f7ff;
-  --panel-strong: #e6efff;
-  --text: #172033;
-  --muted: #667085;
-  --muted-strong: #475467;
-  --line: #d8e0ec;
-  --line-strong: #bdc9db;
+  --panel-soft: #f4f4f5;
+  --panel-strong: #e4e4e7;
+  --text: #18181b;
+  --muted: #71717a;
+  --muted-strong: #52525b;
+  --line: #e4e4e7;
+  --line-strong: #d4d4d8;
   --blue: #2877F6;
   --blue-dark: #1e62d0;
-  --blue-soft: #eaf2ff;
-  --blue-faint: #f5f9ff;
+  --blue-soft: #edf4ff;
+  --blue-faint: #f7faff;
   --apolloon-blue: #2877F6;
   --green: #16a34a;
   --green-soft: #ecfdf3;
@@ -20,15 +20,15 @@
   --red-soft: #fff1f2;
   --amber: #d97706;
   --amber-soft: #fff8eb;
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 16px;
-  --radius-xl: 22px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 12px;
   --radius-pill: 999px;
-  --shadow-xs: 0 1px 2px rgba(23, 32, 51, 0.05);
-  --shadow-sm: 0 6px 18px rgba(23, 32, 51, 0.07);
-  --shadow-md: 0 16px 38px rgba(23, 32, 51, 0.1);
-  --shadow-blue: 0 12px 28px rgba(40, 119, 246, 0.2);
+  --shadow-xs: 0 1px 2px rgb(0 0 0 / 0.035);
+  --shadow-sm: 0 8px 24px rgb(0 0 0 / 0.08);
+  --shadow-md: 0 18px 48px rgb(0 0 0 / 0.14);
+  --shadow-blue: none;
   --focus-ring: 0 0 0 3px rgba(40, 119, 246, 0.24);
 }
 
@@ -45,6 +45,7 @@ body {
   font-size: 15px;
   line-height: 1.45;
   -webkit-font-smoothing: antialiased;
+  font-variant-numeric: tabular-nums;
 }
 
 button,
@@ -82,7 +83,7 @@ select {
   min-height: 100vh;
   width: min(100%, 1840px);
   margin: 0 auto;
-  padding: clamp(12px, 2vw, 28px);
+  padding: clamp(12px, 1.6vw, 24px);
 }
 
 .hero {
@@ -90,35 +91,35 @@ select {
   justify-content: space-between;
   gap: 16px;
   align-items: center;
-  min-height: 230px;
-  padding: clamp(28px, 5vw, 64px);
-  margin-bottom: 20px;
+  min-height: 0;
+  padding: clamp(24px, 4vw, 44px);
+  margin-bottom: 24px;
   border-radius: var(--radius-xl);
-  background:
-    radial-gradient(circle at 88% 18%, rgba(255, 255, 255, 0.2), transparent 26%),
-    linear-gradient(135deg, var(--apolloon-blue), #1e62d0);
-  color: #ffffff;
-  box-shadow: var(--shadow-blue);
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: none;
   overflow: hidden;
 }
 
 .hero--compact {
   min-height: 0;
   justify-content: flex-start;
-  padding: clamp(20px, 3vw, 32px);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
-  background: var(--panel);
+  padding: 18px 4px 20px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
   color: var(--text);
-  box-shadow: var(--shadow-xs);
+  box-shadow: none;
 }
 
 .hero-logo {
   display: block;
-  width: clamp(150px, 18vw, 280px);
+  width: clamp(128px, 14vw, 190px);
   height: auto;
   margin-bottom: 12px;
-  filter: brightness(0) invert(1);
+  filter: none;
 }
 
 .hero__content {
@@ -132,25 +133,24 @@ select {
   color: var(--blue-dark);
   font-size: 12px;
   font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  letter-spacing: 0;
 }
 
 .app-title {
   margin: 0;
-  font-size: clamp(28px, 4vw, 48px);
+  font-size: clamp(28px, 3vw, 42px);
   line-height: 1.08;
   letter-spacing: -0.035em;
   font-weight: 800;
 }
 
 .hero--compact .app-title {
-  font-size: clamp(25px, 3vw, 38px);
+  font-size: clamp(24px, 2.4vw, 34px);
 }
 
 .tagline {
   margin: 8px 0 0;
-  color: rgba(255, 255, 255, 0.86);
+  color: var(--muted);
   font-size: 16px;
 }
 
@@ -165,10 +165,10 @@ select {
   align-items: center;
   margin-bottom: 18px;
   border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
-  background: rgba(255, 255, 255, 0.94);
-  padding: 8px;
-  box-shadow: var(--shadow-sm);
+  border-radius: var(--radius-md);
+  background: rgb(255 255 255 / 0.94);
+  padding: 5px;
+  box-shadow: var(--shadow-xs);
 }
 
 .top-nav__brand {
@@ -187,8 +187,8 @@ select {
 
 .top-nav__logo {
   display: grid;
-  width: 46px;
-  height: 42px;
+  width: 40px;
+  height: 36px;
   place-items: center;
   border-radius: 10px;
   background: var(--apolloon-blue);
@@ -196,7 +196,7 @@ select {
 
 .top-nav__logo img {
   display: block;
-  width: 36px;
+  width: 31px;
   height: auto;
   filter: brightness(0) invert(1);
 }
@@ -214,12 +214,12 @@ select {
   border: 1px solid transparent;
   background: transparent;
   color: var(--muted-strong);
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   display: inline-flex;
-  min-height: 42px;
+  min-height: 36px;
   align-items: center;
   justify-content: center;
-  padding: 9px 14px;
+  padding: 7px 12px;
   cursor: pointer;
   font-weight: 700;
   transition: background-color 140ms ease, color 140ms ease, transform 140ms ease;
@@ -237,41 +237,56 @@ select {
 }
 
 .nav-link--active {
-  background: var(--blue-soft);
+  background: var(--panel-soft);
   color: var(--blue-dark);
+}
+
+.role-sections {
+  display: grid;
+  gap: 24px;
+}
+
+.role-section h2 {
+  margin: 0 0 10px;
+  color: var(--muted-strong);
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .role-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
 }
 
 .role-card {
   position: relative;
-  min-height: 160px;
+  display: flex;
+  min-height: 96px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   background: #ffffff;
   color: var(--text);
-  padding: 22px;
+  padding: 18px 20px;
   text-align: left;
   cursor: pointer;
-  box-shadow: var(--shadow-xs);
-  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+  box-shadow: none;
+  transition: border-color 140ms ease, background-color 140ms ease;
 }
 
 .role-card:hover {
-  border-color: rgba(40, 119, 246, 0.42);
-  box-shadow: var(--shadow-md);
-  transform: translateY(-3px);
+  border-color: var(--line-strong);
+  background: var(--panel-soft);
 }
 
 .role-card__title {
   display: block;
-  margin-bottom: 10px;
-  font-size: 21px;
-  font-weight: 800;
+  margin-bottom: 5px;
+  font-size: 17px;
+  font-weight: 750;
 }
 
 .role-card small {
@@ -280,11 +295,22 @@ select {
   line-height: 1.45;
 }
 
+.role-card__arrow {
+  color: var(--muted);
+  font-size: 20px;
+  transition: color 140ms ease, transform 140ms ease;
+}
+
+.role-card:hover .role-card__arrow {
+  color: var(--blue);
+  transform: translateX(2px);
+}
+
 .host-hint,
 .header-hint,
 .warning-banner {
   background: var(--panel-soft);
-  border: 1px solid #d6e5ff;
+  border: 1px solid var(--line);
   border-radius: var(--radius-md);
   padding: 12px 14px;
   margin-top: 14px;
@@ -641,12 +667,12 @@ select {
 .btn--primary {
   background: var(--blue);
   color: #ffffff;
-  box-shadow: 0 5px 14px rgba(40, 119, 246, 0.2);
+  box-shadow: none;
 }
 
 .btn--primary:hover {
   background: var(--blue-dark);
-  box-shadow: 0 7px 18px rgba(40, 119, 246, 0.26);
+  box-shadow: none;
 }
 
 .btn--ghost {
@@ -713,7 +739,7 @@ select {
   padding: 16px;
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-xs);
+  box-shadow: none;
 }
 
 .stat-panel,
@@ -2821,7 +2847,7 @@ tbody tr:hover {
   }
 
   .role-card {
-    min-height: 155px;
+    min-height: 96px;
   }
 
   .outside-runner {

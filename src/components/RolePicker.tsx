@@ -5,21 +5,31 @@ import type { LiveAppSnapshot } from '../types';
 
 const selectHostData = ({ host }: LiveAppSnapshot) => ({ host });
 
-const ROLES = [
+const ROLE_GROUPS = [
   {
-    path: '/queue',
-    title: 'Telsysteem 1 - Wachtrij',
-    description: 'Lopers toevoegen, opwarmen, wachtrij bepalen en volgorde aanpassen.',
+    title: 'Wedstrijd bedienen',
+    roles: [
+  {
+        path: '/queue',
+        title: 'Telsysteem 1',
+        description: 'Lopers toevoegen, opwarmen en de wachtrij beheren.',
+        preload: undefined,
   },
   {
-    path: '/timing',
-    title: 'Telsysteem 2 - Timing',
-    description: 'Spacebar om de huidige loper af te klokken en de volgende te starten.',
+        path: '/timing',
+        title: 'Telsysteem 2',
+        description: 'De huidige loper afklokken en de volgende starten.',
+        preload: undefined,
   },
+    ],
+  },
+  {
+    title: 'Schermen en beheer',
+    roles: [
   {
     path: '/display/outside',
     title: 'Buitenscherm',
-    description: 'Groot publiek scherm met huidige en volgende loper.',
+        description: 'Huidige en volgende loper voor het publiek.',
     preload: preloadDisplayViews,
   },
   {
@@ -30,17 +40,19 @@ const ROLES = [
   },
   {
     path: '/analysis',
-    title: 'Analyse & Export',
-    description: 'Live rondedata bekijken en CSV/JSON exporteren.',
+        title: 'Analyse en export',
+        description: 'Live rondedata bekijken en exporteren.',
     preload: preloadAnalysisView,
   },
   {
     path: '/admin',
-    title: 'Admin / Import / Labels',
-    description: 'Google Sheets CSV importeren en labels beheren.',
+        title: 'Beheer',
+        description: 'Import, labels en wedstrijdinstellingen beheren.',
     preload: preloadAdminView,
   },
-];
+    ],
+  },
+] as const;
 
 export function RolePicker({ onNavigate }: { onNavigate: (path: string) => void }) {
   const { host } = useAppData(selectHostData);
@@ -51,21 +63,31 @@ export function RolePicker({ onNavigate }: { onNavigate: (path: string) => void 
         <div className="hero__content">
           <img className="hero-logo" src="/brand/apolloon-logo.png" alt="Apolloon" width={560} height={169} fetchPriority="high" />
           <h1 className="app-title">Apolloon telsysteem</h1>
-          <p className="tagline">Open deze pagina op elke laptop en kies de juiste rol.</p>
+          <p className="tagline">Kies de werkplek voor deze laptop.</p>
         </div>
       </div>
-      <div className="role-grid">
-        {ROLES.map((role) => (
-          <button
-            key={role.path}
-            className="role-card"
-            onPointerEnter={role.preload}
-            onFocus={role.preload}
-            onClick={() => onNavigate(role.path)}
-          >
-            <span className="role-card__title">{role.title}</span>
-            <small>{role.description}</small>
-          </button>
+      <div className="role-sections">
+        {ROLE_GROUPS.map((roleGroup) => (
+          <section key={roleGroup.title} className="role-section">
+            <h2>{roleGroup.title}</h2>
+            <div className="role-grid">
+              {roleGroup.roles.map((role) => (
+                <button
+                  key={role.path}
+                  className="role-card"
+                  onPointerEnter={role.preload}
+                  onFocus={role.preload}
+                  onClick={() => onNavigate(role.path)}
+                >
+                  <span>
+                    <span className="role-card__title">{role.title}</span>
+                    <small>{role.description}</small>
+                  </span>
+                  <span className="role-card__arrow" aria-hidden="true">→</span>
+                </button>
+              ))}
+            </div>
+          </section>
         ))}
       </div>
       {host && (
