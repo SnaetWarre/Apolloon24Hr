@@ -4,9 +4,17 @@ All notable changes to the Leuven 24h Runner Tracker will be documented in this 
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-09-03
+
+### Added
+
+- Kobe's Tactiek workspace with live drafting guidance, race analysis, tempo scenarios, diagnostics, and historical deep dives
+- Inside-display rankings for lap performance and coefficient totals, alongside recent-runner context
+
 ### Changed
 
 - Redesign the operator interface around a coherent Apolloon blue palette, compact navigation, clear page hierarchy, consistent cards and controls, accessible focus states, and responsive layouts
+- Refresh the home, queue, timing, analysis, and public displays with clearer hierarchy and calmer motion
 
 ### Fixed
 
