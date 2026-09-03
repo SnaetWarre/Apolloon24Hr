@@ -13,7 +13,10 @@ export.
   lap is added, deleted, or corrected, so every projection uses the same live
   data as the timing screens.
 - **Analyse vorig jaar** compares two teams from the official historical
-  timing export. Team 1 and team 4 are the defaults for Apolloon and VTK.
+  timing export. Team 1 and team 4 are the defaults for Apolloon and VTK. It
+  includes an all-team ranking, raw lap timelines, pace and distribution
+  comparisons, race-lead analysis, diagnostics, break-even scenarios, and the
+  statistical drafting analysis from the source project.
 
 The live section derives the race start from Apolloon's race state. It never
 asks for `laps.json` and does not maintain a second copy of the current race.
@@ -56,7 +59,44 @@ The operator selects a 24-hour lap target and one of three starting profiles:
 A historical profile is scaled to the selected total while retaining its
 hour-by-hour shape. Every hourly pace remains editable. The page then compares
 completed laps with the target count at the current race moment and projects
-the remaining hours with the edited schedule.
+the remaining hours with the edited schedule. The selected target, profile,
+and all 24 hourly paces are saved locally and restored after an application
+restart. The projection also shows an optimistic and pessimistic range based
+on the spread of the most recent valid laps.
 
 Live laps outside the configurable realistic duration range are shown for
 operator review but excluded from tactical calculations.
+
+## Source parity and native replacements
+
+The React implementation keeps the decision-making capabilities from the
+Streamlit project, but does not embed or run its Python UI. The historical
+workspace contains these five groups:
+
+- **Alle teams**: ranking and dispersion for all teams, a selectable raw lap
+  timeline with a rolling 20-lap median, and a selected-team frequency chart.
+- **Tempo A vs. B**: quarter-hour pace, smoothed trend, half-hour difference,
+  configurable-window frequency and outliers, hourly P10/P90 consistency,
+  standard deviation, and configurable night penalty.
+- **Raceverloop**: estimated time gap, same-lap-index gap, hourly gains,
+  cumulative laps, leader changes, and distance difference.
+- **Diagnostiek**: slow laps, sudden pace changes, their exact race moments,
+  a break-even calculation, and sensitivity projection.
+- **Volgeffect**: passage scatter and trend, proximity bins, chasing/leading
+  comparisons, and a tie-corrected Wilcoxon rank-sum significance test.
+
+Some presentation and input mechanisms are intentionally native:
+
+- The original live `laps.json` upload and manual start-time field are replaced
+  by Apolloon's full-history API, race state, and Socket.IO cache patches.
+- The historical Quivr export is bundled and can still be replaced through the
+  file picker. It is shared by historical and live comparisons.
+- A CSV schedule import is replaced by the editable 24-hour schedule with
+  automatic local persistence. This avoids a second file workflow during the
+  event while preserving custom targets between restarts.
+- The original 21 simultaneous small plots are represented by the all-team
+  table plus a selectable detailed timeline. This retains every team while
+  keeping the Electron page responsive on the race laptop.
+- Quarter trends use robust medians rather than mean/SEM bands so an invalid
+  timing passage cannot pull a short interval as strongly. Suspicious live laps
+  are also visible separately instead of silently disappearing.
