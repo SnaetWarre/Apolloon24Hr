@@ -185,6 +185,9 @@ test('inside rankings switch metric and filter laps by their historical label', 
   assert.match(displaySource, /window\.setTimeout/);
   assert.match(displaySource, /window\.clearTimeout/);
   assert.match(displaySource, /currentMode === 'laps' \? 'coefficient' : 'laps'/);
+  assert.match(displaySource, /prefers-reduced-motion: reduce/);
+  assert.match(displaySource, /if \(prefersReducedMotion\) return/);
+  assert.match(displaySource, /removeEventListener\('change', updateReducedMotionPreference\)/);
 });
 
 test('the three recent laps show each runners all-time best and average', () => {
