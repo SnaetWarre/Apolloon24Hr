@@ -629,8 +629,14 @@ function cleanDraftingLaps(
   const q3 = quantile(durations, 0.75) ?? center;
   const interquartileRange = q3 - q1;
   const medianAbsoluteDeviation = 1.4826 * (median(durations.map((duration) => Math.abs(duration - center))) ?? 0);
-  const lowerBound = Math.max(q1 - 3 * interquartileRange, center - 4 * medianAbsoluteDeviation, options.minimumLapSeconds);
-  const upperBound = Math.min(q3 + 3 * interquartileRange, center + 4 * medianAbsoluteDeviation, options.maximumLapSeconds);
+  const deviationLowerBound = medianAbsoluteDeviation > 0
+    ? center - 4 * medianAbsoluteDeviation
+    : Number.NEGATIVE_INFINITY;
+  const deviationUpperBound = medianAbsoluteDeviation > 0
+    ? center + 4 * medianAbsoluteDeviation
+    : Number.POSITIVE_INFINITY;
+  const lowerBound = Math.max(q1 - 3 * interquartileRange, deviationLowerBound, options.minimumLapSeconds);
+  const upperBound = Math.min(q3 + 3 * interquartileRange, deviationUpperBound, options.maximumLapSeconds);
   const cleanLaps = candidates.filter((lap) => lap.durationSeconds >= lowerBound && lap.durationSeconds <= upperBound);
   return {
     timestampsSeconds: cleanLaps.map((lap) => lap.timestampSeconds),
