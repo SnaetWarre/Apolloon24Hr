@@ -37,6 +37,9 @@
     "typecheck:server": "tsc -p tsconfig.server.json --noEmit",
     "typecheck": "npm run typecheck:client && npm run typecheck:server",
     "test": "node --import tsx --test tests/temporary-teams.test.ts tests/core-regressions.test.ts tests/cluster-policy.test.ts tests/backup-policy.test.ts tests/storage-maintenance.test.ts tests/electron-config.test.ts",
+    "test:ui": "playwright test",
+    "test:ui:update": "playwright test tests/ui/visual.spec.ts --update-snapshots",
+    "test:ui:serve": "node scripts/seed-test-db.mjs --scenario=live --data-path=.tmp-ui-test && concurrently -k -s first \"cross-env DATA_PATH=.tmp-ui-test PORT=3100 PUBLIC_APP_PORT=4173 tsx server/index.ts\" \"cross-env VITE_DEV_API_PORT=3100 vite --host 127.0.0.1 --port 4173\"",
     "test:e2e": "npm run build && node --import tsx --test tests/temporary-teams.e2e.test.ts tests/cluster.e2e.test.ts",
     "check": "npm run typecheck && npm run client:build",
     "build": "npm run typecheck:client && npm run client:build && npm run server:build",
@@ -68,6 +71,8 @@
     "zustand": "^5.0.14"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
+    "@playwright/test": "^1.62.1",
     "@types/better-sqlite3": "^7.6.13",
     "@types/express": "^5.0.6",
     "@types/node": "^25.9.5",

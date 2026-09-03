@@ -33,3 +33,6 @@ data/*.db-shm
 data/*.db-wal
 .test-data/
 .dev-data/
+.tmp-ui-test/
+playwright-report/
+test-results/
