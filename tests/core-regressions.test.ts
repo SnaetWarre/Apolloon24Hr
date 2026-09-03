@@ -410,7 +410,7 @@ test('operator views share the Apolloon design tokens and accessible navigation 
   const stylesSource = fs.readFileSync(path.resolve('src/styles.css'), 'utf8');
 
   assert.match(stylesSource, /--apolloon-blue:\s*#2877F6;/);
-  assert.match(stylesSource, /--radius-md:\s*12px;/);
+  assert.match(stylesSource, /--radius-md:\s*8px;/);
   assert.match(stylesSource, /--focus-ring:/);
   assert.match(stylesSource, /button:focus-visible/);
   assert.match(stylesSource, /\.nav-link--active/);
