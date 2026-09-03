@@ -37,6 +37,10 @@ test('desktop release packaging covers every supported platform and verifies nat
     build: Record<string, unknown>;
   };
   const buildScript = fs.readFileSync(path.resolve('scripts/electron-build.mjs'), 'utf8');
+  const cleanServerBuildScript = fs.readFileSync(
+    path.resolve('scripts/clean-server-build.mjs'),
+    'utf8'
+  );
 
   assert.match(packageJson.scripts['electron:build:win'], /--win/);
   assert.match(packageJson.scripts['electron:build:linux'], /--linux/);
@@ -48,6 +52,9 @@ test('desktop release packaging covers every supported platform and verifies nat
   assert.match(buildScript, /--config\.npmRebuild=false/);
   assert.match(buildScript, /node_register_module_v/);
   assert.match(buildScript, /builderArgs\.push\('--publish', 'never'\)/);
+  assert.match(packageJson.scripts['server:build'], /clean-server-build\.mjs/);
+  assert.match(cleanServerBuildScript, /compiledServerDirectory/);
+  assert.match(cleanServerBuildScript, /fs\.promises\.rm/);
 });
 
 test('release metadata uses the package version consistently', () => {
