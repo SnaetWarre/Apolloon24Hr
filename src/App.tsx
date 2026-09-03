@@ -10,9 +10,11 @@ import {
   LazyAdminView,
   LazyAnalysisView,
   LazyInsideDisplay,
+  LazyKobeTacticsView,
   LazyOutsideDisplay,
   preloadAdminView,
   preloadAnalysisView,
+  preloadKobeTacticsView,
 } from './lazyViews';
 import { getNextWaitingRunner, runnerLabel } from './lib/runners';
 import { LiveDuration } from './components/LiveTime';
@@ -121,6 +123,14 @@ export function AnalysisPage() {
   );
 }
 
+export function KobeTacticsPage() {
+  return (
+    <RouteLoadBoundary loadingMessage="Kobe's tactiek wordt geladen...">
+      <LazyKobeTacticsView />
+    </RouteLoadBoundary>
+  );
+}
+
 export function AdminPage() {
   return (
     <RouteLoadBoundary loadingMessage="Admin wordt geladen...">
@@ -182,7 +192,7 @@ function TopNav() {
   const navigate = useNavigate();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const navigationItems: ReadonlyArray<{
-    path: '/' | '/queue' | '/timing' | '/analysis' | '/admin';
+    path: '/' | '/queue' | '/timing' | '/analysis' | '/tactics' | '/admin';
     label: string;
     preload?: () => void;
   }> = [
@@ -190,6 +200,7 @@ function TopNav() {
     { path: '/queue', label: 'Telsysteem 1' },
     { path: '/timing', label: 'Telsysteem 2' },
     { path: '/analysis', label: 'Analyse', preload: preloadAnalysisView },
+    { path: '/tactics', label: "Kobe's tactiek", preload: preloadKobeTacticsView },
     { path: '/admin', label: 'Admin', preload: preloadAdminView },
   ];
 

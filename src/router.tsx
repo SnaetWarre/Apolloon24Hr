@@ -5,6 +5,7 @@ import {
   AppRoot,
   HomePage,
   InsideDisplayPage,
+  KobeTacticsPage,
   NotFoundPage,
   OutsideDisplayPage,
   QueuePage,
@@ -40,6 +41,12 @@ const analysisRoute = createRoute({
   component: AnalysisPage,
 });
 
+const tacticsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/tactics',
+  component: KobeTacticsPage,
+});
+
 const adminRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/admin',
@@ -63,6 +70,7 @@ const routeTree = rootRoute.addChildren([
   queueRoute,
   timingRoute,
   analysisRoute,
+  tacticsRoute,
   adminRoute,
   outsideDisplayRoute,
   insideDisplayRoute,

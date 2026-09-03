@@ -2,6 +2,7 @@ import React from 'react';
 
 const loadAdminView = () => import('./components/AdminView');
 const loadAnalysisView = () => import('./components/AnalysisView');
+const loadKobeTacticsView = () => import('./components/KobeTacticsView');
 const loadDisplayViews = () => import('./components/DisplayViews');
 
 export const LazyAdminView = React.lazy(async () => {
@@ -12,6 +13,11 @@ export const LazyAdminView = React.lazy(async () => {
 export const LazyAnalysisView = React.lazy(async () => {
   const analysisViewModule = await loadAnalysisView();
   return { default: analysisViewModule.AnalysisView };
+});
+
+export const LazyKobeTacticsView = React.lazy(async () => {
+  const tacticsViewModule = await loadKobeTacticsView();
+  return { default: tacticsViewModule.KobeTacticsView };
 });
 
 export const LazyInsideDisplay = React.lazy(async () => {
@@ -30,6 +36,10 @@ export function preloadAdminView(): void {
 
 export function preloadAnalysisView(): void {
   void loadAnalysisView();
+}
+
+export function preloadKobeTacticsView(): void {
+  void loadKobeTacticsView();
 }
 
 export function preloadDisplayViews(): void {
