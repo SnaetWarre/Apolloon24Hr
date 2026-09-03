@@ -146,6 +146,7 @@ export function InsideDisplay() {
   const { laps } = useRaceHistory({ scope: 'full' });
   const [rankingMode, setRankingMode] = React.useState<RankingMode>('laps');
   const [rankingLabelId, setRankingLabelId] = React.useState<string | null>(null);
+  const [prefersReducedMotion, setPrefersReducedMotion] = React.useState(false);
   const recentLapSummaries = React.useMemo(() => buildRecentLapSummaries(laps), [laps]);
   const rankingLabels = React.useMemo(() => collectRankingLabels(labels, laps), [labels, laps]);
   const ranking = React.useMemo(
@@ -158,11 +159,20 @@ export function InsideDisplay() {
   );
 
   React.useEffect(() => {
+    const reducedMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const updateReducedMotionPreference = () => setPrefersReducedMotion(reducedMotionQuery.matches);
+    updateReducedMotionPreference();
+    reducedMotionQuery.addEventListener('change', updateReducedMotionPreference);
+    return () => reducedMotionQuery.removeEventListener('change', updateReducedMotionPreference);
+  }, []);
+
+  React.useEffect(() => {
+    if (prefersReducedMotion) return;
     const rotationTimeout = window.setTimeout(() => {
       setRankingMode((currentMode) => currentMode === 'laps' ? 'coefficient' : 'laps');
     }, INSIDE_RANKING_ROTATION_MS);
     return () => window.clearTimeout(rotationTimeout);
-  }, [rankingMode]);
+  }, [prefersReducedMotion, rankingMode]);
 
   return (
     <main className="display-root display-root--inside">
@@ -241,7 +251,11 @@ export function InsideDisplay() {
               Coëfficiëntensom
             </button>
           </div>
-          <p className="inside-ranking-rotation-note">Wisselt automatisch om de 15 seconden</p>
+          <p className="inside-ranking-rotation-note">
+            {prefersReducedMotion
+              ? 'Automatisch wisselen is uitgeschakeld'
+              : 'Wisselt automatisch om de 15 seconden'}
+          </p>
           <div className="ranking-list">
             {ranking.map((runner, index) => (
               <div key={runner.runnerId} className="ranking-row">

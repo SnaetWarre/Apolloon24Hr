@@ -2063,9 +2063,9 @@ tbody tr:hover {
 }
 
 .outside-band--next {
-  background: #ffffff;
-  color: var(--apolloon-blue);
-  border-top: 8px solid var(--apolloon-blue);
+  background: #f7f7f8;
+  color: #18181b;
+  border-top: 2px solid rgb(0 0 0 / 0.12);
 }
 
 .outside-runner {
@@ -2115,7 +2115,7 @@ tbody tr:hover {
   padding: clamp(26px, 5vw, 90px);
   background: var(--apolloon-blue);
   color: #ffffff;
-  animation: record-flash-bg 1600ms ease-in-out infinite;
+  animation: record-flash-bg 2400ms ease-in-out infinite;
   pointer-events: none;
 }
 
@@ -2124,16 +2124,14 @@ tbody tr:hover {
   content: "";
   position: absolute;
   inset: clamp(16px, 2.4vw, 46px);
-  border: clamp(6px, 0.8vw, 16px) solid currentColor;
-  border-radius: 18px;
-  opacity: 0.88;
-  animation: record-frame-pulse 1600ms ease-in-out infinite;
+  border: clamp(4px, 0.45vw, 9px) solid currentColor;
+  border-radius: 12px;
+  opacity: 0.72;
+  animation: none;
 }
 
 .outside-record-flash::after {
-  inset: clamp(42px, 5vw, 110px);
-  opacity: 0.4;
-  animation-delay: 200ms;
+  content: none;
 }
 
 .record-flash-content {
@@ -2190,26 +2188,11 @@ tbody tr:hover {
   }
 }
 
-@keyframes record-frame-pulse {
-  0%,
-  100% {
-    transform: scale(1);
-    opacity: 0.85;
-  }
-
-  50% {
-    transform: scale(0.985);
-    opacity: 0.55;
-  }
-}
-
 .display-root--inside {
   display: grid;
   grid-template-rows: auto 1fr;
   min-height: 100vh;
-  background:
-    radial-gradient(circle at 85% -5%, rgba(40, 119, 246, 0.1), transparent 42%),
-    linear-gradient(180deg, #eef3fd 0%, #f7faff 320px, #ffffff 100%);
+  background: #f4f4f5;
 }
 
 .inside-header {
@@ -2219,10 +2202,10 @@ tbody tr:hover {
   align-items: center;
   margin: 0;
   padding: clamp(14px, 1.5vw, 24px) clamp(28px, 4vw, 64px);
-  background: linear-gradient(135deg, var(--apolloon-blue), var(--blue-dark));
+  background: var(--apolloon-blue);
   color: #ffffff;
   border-bottom: 1px solid rgba(255, 255, 255, 0.22);
-  box-shadow: 0 10px 28px rgba(30, 98, 208, 0.28);
+  box-shadow: none;
 }
 
 .inside-header h1 {
@@ -2241,11 +2224,11 @@ tbody tr:hover {
 .inside-header > div:last-child span {
   display: inline-flex;
   align-items: center;
-  border: 1px solid rgba(255, 255, 255, 0.42);
-  border-radius: var(--radius-pill);
-  background: rgba(255, 255, 255, 0.16);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   color: #ffffff;
-  padding: 6px 14px;
+  padding: 0;
   font-size: clamp(13px, 1.1vw, 17px);
   font-weight: 800;
   font-variant-numeric: tabular-nums;
@@ -2270,10 +2253,10 @@ tbody tr:hover {
 
 .display-root--inside .display-panel {
   border: 1px solid var(--line);
-  border-radius: 18px;
+  border-radius: 10px;
   background: #ffffff;
   padding: clamp(16px, 1.6vw, 24px);
-  box-shadow: var(--shadow-sm);
+  box-shadow: none;
 }
 
 .display-root--inside .inside-recent-laps {
@@ -2286,9 +2269,8 @@ tbody tr:hover {
   margin: 0;
   color: var(--blue-dark);
   font-size: clamp(20px, 1.8vw, 30px);
-  font-weight: 900;
-  letter-spacing: 0.01em;
-  text-transform: uppercase;
+  font-weight: 850;
+  letter-spacing: -0.02em;
   text-wrap: balance;
 }
 
@@ -2309,25 +2291,25 @@ tbody tr:hover {
   gap: 0;
   border: 1px solid #d7e4f8;
   border-left: 6px solid #b7cff6;
-  border-radius: 14px;
-  background: #f6f9ff;
+  border-radius: 8px;
+  background: #ffffff;
   padding: clamp(12px, 1.1vw, 16px);
-  box-shadow: var(--shadow-xs);
+  box-shadow: none;
   min-width: 0;
 }
 
 .recent-lap-row.is-latest {
   border-color: rgba(40, 119, 246, 0.45);
   border-left-color: var(--apolloon-blue);
-  background: linear-gradient(180deg, #ffffff 0%, #eaf2ff 100%);
-  box-shadow: 0 10px 26px rgba(40, 119, 246, 0.18);
+  background: #ffffff;
+  box-shadow: none;
 }
 
 .recent-lap-row.is-latest .recent-lap-card-header span:first-child {
-  border-radius: var(--radius-pill);
-  background: var(--apolloon-blue);
-  color: #ffffff;
-  padding: 3px 10px;
+  border-radius: 0;
+  background: transparent;
+  color: var(--blue-dark);
+  padding: 0;
 }
 
 .recent-lap-card-header,
@@ -2464,7 +2446,7 @@ tbody tr:hover {
   margin: 14px 0 6px;
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
-  background: #f1f5fd;
+  background: #f4f4f5;
   padding: 5px;
 }
 
@@ -2481,9 +2463,9 @@ tbody tr:hover {
 }
 
 .inside-ranking-modes button.is-active {
-  background: var(--apolloon-blue);
-  color: #ffffff;
-  box-shadow: 0 4px 12px rgba(40, 119, 246, 0.35);
+  background: #ffffff;
+  color: var(--blue-dark);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.08);
 }
 
 .inside-ranking-rotation-note {
@@ -2497,13 +2479,7 @@ tbody tr:hover {
 }
 
 .inside-ranking-rotation-note::before {
-  content: "";
-  width: 8px;
-  height: 8px;
-  flex: 0 0 auto;
-  border-radius: 999px;
-  background: var(--green);
-  box-shadow: 0 0 0 4px rgba(22, 163, 74, 0.16);
+  content: none;
 }
 
 .display-root--inside .progress-item {
@@ -2552,11 +2528,11 @@ tbody tr:hover {
 }
 
 .display-root--inside .progress-track {
-  height: 20px;
-  border: 1px solid #dbe6f7;
+  height: 10px;
+  border: 0;
   border-radius: var(--radius-pill);
-  background: #e8eef8;
-  box-shadow: inset 0 1px 2px rgba(23, 32, 51, 0.08);
+  background: #e4e4e7;
+  box-shadow: none;
 }
 
 .display-root--inside .progress-track span {
@@ -2569,10 +2545,10 @@ tbody tr:hover {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  border-radius: var(--radius-pill);
-  background: #0f2a5c;
-  color: #ffffff;
-  padding: 5px 6px;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  padding: 0;
   font-size: clamp(14px, 1.05vw, 19px);
   font-weight: 900;
   font-variant-numeric: tabular-nums;
@@ -2650,8 +2626,8 @@ tbody tr:hover {
   gap: 14px;
   align-items: center;
   border: 1px solid #e2eaf7;
-  border-radius: 12px;
-  background: #f8faff;
+  border-radius: 8px;
+  background: #ffffff;
   padding: 10px 14px;
   font-size: clamp(18px, 1.7vw, 28px);
 }
@@ -2681,10 +2657,10 @@ tbody tr:hover {
 }
 
 .ranking-row em {
-  border-radius: var(--radius-pill);
-  background: #0f2a5c;
-  color: #ffffff;
-  padding: 5px 14px;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  padding: 0;
   font-style: normal;
   font-size: 0.72em;
   font-weight: 800;
@@ -2693,8 +2669,8 @@ tbody tr:hover {
 }
 
 .ranking-list .ranking-row:nth-child(1) {
-  border-color: #ecd27a;
-  background: linear-gradient(180deg, #fffdf3 0%, #fff6d9 100%);
+  border-color: #e2eaf7;
+  background: #ffffff;
 }
 
 .ranking-list .ranking-row:nth-child(1) span {
@@ -2703,8 +2679,8 @@ tbody tr:hover {
 }
 
 .ranking-list .ranking-row:nth-child(2) {
-  border-color: #cbd5e1;
-  background: linear-gradient(180deg, #ffffff 0%, #eef2f7 100%);
+  border-color: #e2eaf7;
+  background: #ffffff;
 }
 
 .ranking-list .ranking-row:nth-child(2) span {
@@ -2713,8 +2689,8 @@ tbody tr:hover {
 }
 
 .ranking-list .ranking-row:nth-child(3) {
-  border-color: #e3b98f;
-  background: linear-gradient(180deg, #fffaf5 0%, #fdeeda 100%);
+  border-color: #e2eaf7;
+  background: #ffffff;
 }
 
 .ranking-list .ranking-row:nth-child(3) span {
