@@ -1498,6 +1498,7 @@ select {
 
 .tactics-section-stack {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 14px;
 }
 
@@ -1744,6 +1745,199 @@ select {
 .tactics-lap-status--warning {
   background: #fff7ed;
   color: #9a3412;
+}
+
+.tactics-deep-nav {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  padding: 8px;
+}
+
+.tactics-deep-nav button {
+  display: grid;
+  gap: 3px;
+  min-width: 145px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text);
+  padding: 11px 12px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.tactics-deep-nav button:hover {
+  background: var(--panel-soft);
+}
+
+.tactics-deep-nav button.is-active {
+  border-color: #bfdbfe;
+  background: var(--blue-soft);
+  color: #155fc7;
+}
+
+.tactics-deep-nav strong {
+  font-size: 13px;
+}
+
+.tactics-deep-nav small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tactics-team-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.tactics-team-key i {
+  width: 9px;
+  height: 9px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+}
+
+.tactics-ranking-table tr.is-selected td {
+  background: var(--blue-faint);
+}
+
+.tactics-inline-controls .tactics-control-grid {
+  margin-bottom: 0;
+}
+
+.tactics-compact-select {
+  display: grid;
+  min-width: 150px;
+  gap: 7px;
+}
+
+.tactics-compact-select span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.tactics-summary-table {
+  margin-bottom: 14px;
+}
+
+.tactics-control-grid--drafting {
+  grid-template-columns: repeat(6, minmax(130px, 1fr));
+}
+
+.tactics-number-control {
+  position: relative;
+}
+
+.tactics-number-control .input {
+  width: 100%;
+  padding-right: 34px;
+}
+
+.tactics-number-control em {
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  color: var(--muted);
+  font-size: 11px;
+  font-style: normal;
+  transform: translateY(-50%);
+}
+
+.tactics-stat--control input {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid var(--line-strong);
+  background: transparent;
+  color: var(--text);
+  padding: 3px 0;
+  font: inherit;
+  font-size: 24px;
+  font-weight: 850;
+}
+
+.tactics-diagnostic-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 22px;
+}
+
+.tactics-diagnostic-grid h3 {
+  margin: 0 0 9px;
+  font-size: 15px;
+}
+
+.tactics-break-even-controls {
+  grid-template-columns: minmax(180px, 0.7fr) minmax(180px, 0.7fr) minmax(300px, 1.6fr);
+  align-items: end;
+}
+
+.tactics-break-even-result {
+  display: grid;
+  gap: 3px;
+  border-left: 1px solid var(--line);
+  padding-left: 18px;
+}
+
+.tactics-break-even-result span,
+.tactics-break-even-result small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.tactics-break-even-result strong {
+  font-size: 24px;
+}
+
+.tactics-significance {
+  display: inline-flex;
+  min-width: 42px;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--panel-soft);
+  padding: 4px 7px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.tactics-significance.is-significant {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.tactics-lap-tables {
+  display: grid;
+  gap: 12px;
+}
+
+.tactics-suspicious-details {
+  border: 1px solid #fed7aa;
+  border-radius: var(--radius-md);
+  background: #fffaf5;
+  padding: 12px;
+}
+
+.tactics-suspicious-details summary {
+  color: #9a3412;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.tactics-suspicious-details[open] summary {
+  margin-bottom: 10px;
 }
 
 .panel h2,
@@ -3058,6 +3252,10 @@ tbody tr:hover {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .tactics-control-grid--drafting {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .tactics-dataset-summary {
     grid-column: 1 / -1;
     border-top: 1px solid var(--line);
@@ -3152,9 +3350,26 @@ tbody tr:hover {
   .tactics-section-switch,
   .tactics-control-grid,
   .tactics-control-grid--historical,
+  .tactics-control-grid--drafting,
   .tactics-reference-notice,
   .tactics-reference-notice--expanded {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .tactics-deep-nav {
+    grid-template-columns: repeat(5, minmax(145px, 1fr));
+  }
+
+  .tactics-diagnostic-grid,
+  .tactics-break-even-controls {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .tactics-break-even-result {
+    border-top: 1px solid var(--line);
+    border-left: 0;
+    padding-top: 12px;
+    padding-left: 0;
   }
 
   .tactics-hourly-grid {

@@ -22,8 +22,11 @@ Shared contracts live in `shared/`. Anything imported by both client and server 
   - `realtimeClient.ts`: Socket.IO events that patch the snapshot cache.
   - `snapshot.ts`: snapshot query key and cache helpers.
 - `src/components/`: route-level screens and reusable UI pieces.
+  - `KobeTacticsView.tsx`: live API-backed tactics and the historical workspace shell.
+  - `tactics/HistoricalDeepDive.tsx`: detailed historical charts, diagnostics, and drafting controls.
 - `src/lib/`: browser-side helpers and app-specific utility functions.
   - `tactics.ts`: historical race validation, live comparison, and target-scenario calculations for Kobe's tactiek.
+  - `tacticsDeepDive.ts`: detailed historical statistics, race-gap models, live uncertainty, and drafting tests.
   - `readiness.ts`: derives the operator-facing event readiness checklist from
     backup, replication, clock, conflict, and timing state.
 - `src/types.ts`: client-facing re-export of shared schema types.

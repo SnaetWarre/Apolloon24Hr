@@ -15,7 +15,6 @@ import {
   DEFAULT_MAXIMUM_LAP_SECONDS,
   DEFAULT_MINIMUM_LAP_SECONDS,
   RACE_DURATION_HOURS,
-  buildHourlyHistoricalPaces,
   buildHourlyPaceComparison,
   buildRaceProgress,
   buildTargetPaces,
@@ -28,13 +27,20 @@ import {
   teamById,
   validLiveLaps,
   type HistoricalRace,
-  type HistoricalTeam,
   type HourlyPacePoint,
   type RaceProgressPoint,
 } from '../lib/tactics';
+import {
+  buildLiveQuarterHourTrend,
+  buildLiveRivalTimeGap,
+  projectScenarioRange,
+  type LiveTrendPoint,
+  type TimeGapPoint,
+} from '../lib/tacticsDeepDive';
 import { formatClockTimeMs, formatDurationMs, nowMs } from '../lib/time';
 import { useClockTick } from '../lib/useAnimationFrameTick';
 import type { LapRecord, LiveAppSnapshot } from '../types';
+import { HistoricalDeepDive } from './tactics/HistoricalDeepDive';
 
 Chart.register(
   CategoryScale,
@@ -48,6 +54,7 @@ Chart.register(
 
 const HISTORICAL_RACE_STORAGE_KEY = 'apolloon.kobe-tactics.historical-race.v1';
 const HISTORICAL_RACE_NAME_STORAGE_KEY = 'apolloon.kobe-tactics.historical-race-name.v1';
+const TACTICS_SCENARIO_STORAGE_KEY = 'apolloon.kobe-tactics.scenario.v1';
 const BUNDLED_REFERENCE_URL = '/reference/quivr-2025-lap-times.json';
 const BUNDLED_REFERENCE_NAME = 'Quivr 2025';
 const MAX_CHART_PIXEL_RATIO = 1.5;
@@ -57,6 +64,11 @@ const DEFAULT_TARGET_LAPS = 800;
 
 type TacticsSection = 'live' | 'historical';
 type TargetProfile = 'flat' | 'apolloon' | 'vtk';
+type StoredTacticsScenario = {
+  targetLaps: number;
+  targetProfile: TargetProfile;
+  targetPaces: number[];
+};
 
 const selectTacticsData = ({ race }: LiveAppSnapshot) => ({ race });
 
@@ -210,13 +222,14 @@ function LiveTacticsSection({
   const [minimumLapSeconds, setMinimumLapSeconds] = React.useState(DEFAULT_MINIMUM_LAP_SECONDS);
   const [maximumLapSeconds, setMaximumLapSeconds] = React.useState(DEFAULT_MAXIMUM_LAP_SECONDS);
   const [recentLapCount, setRecentLapCount] = React.useState(20);
+  const storedScenario = React.useMemo(loadStoredTacticsScenario, []);
   const [targetLaps, setTargetLaps] = React.useState(
-    () => ownHistoricalTeam?.cumulativeLapTimesMs.length ?? DEFAULT_TARGET_LAPS
+    () => storedScenario?.targetLaps ?? ownHistoricalTeam?.cumulativeLapTimesMs.length ?? DEFAULT_TARGET_LAPS
   );
   const [targetProfile, setTargetProfile] = React.useState<TargetProfile>(
-    ownHistoricalTeam ? 'apolloon' : 'flat'
+    storedScenario?.targetProfile ?? (ownHistoricalTeam ? 'apolloon' : 'flat')
   );
-  const scenarioWasEdited = React.useRef(false);
+  const scenarioWasEdited = React.useRef(Boolean(storedScenario));
   const referenceTeam = targetProfile === 'apolloon'
     ? ownHistoricalTeam
     : targetProfile === 'vtk'
@@ -226,7 +239,12 @@ function LiveTacticsSection({
     () => buildTargetPaces(targetLaps, referenceTeam),
     [referenceTeam, targetLaps]
   );
-  const [targetPaces, setTargetPaces] = React.useState(generatedTargetPaces);
+  const [targetPaces, setTargetPaces] = React.useState(
+    () => storedScenario?.targetPaces.length === RACE_DURATION_HOURS
+      ? storedScenario.targetPaces
+      : generatedTargetPaces
+  );
+  const targetPacesWereEdited = React.useRef(Boolean(storedScenario));
 
   React.useEffect(() => {
     if (!ownHistoricalTeam || scenarioWasEdited.current) return;
@@ -235,8 +253,17 @@ function LiveTacticsSection({
   }, [ownHistoricalTeam]);
 
   React.useEffect(() => {
+    if (targetPacesWereEdited.current) return;
     setTargetPaces(generatedTargetPaces);
   }, [generatedTargetPaces]);
+
+  React.useEffect(() => {
+    localStorage.setItem(TACTICS_SCENARIO_STORAGE_KEY, JSON.stringify({
+      targetLaps,
+      targetProfile,
+      targetPaces,
+    } satisfies StoredTacticsScenario));
+  }, [targetLaps, targetPaces, targetProfile]);
 
   if (raceStartedAt == null) {
     return (
@@ -255,8 +282,23 @@ function LiveTacticsSection({
   const cleanLaps = validLiveLaps(laps, raceStartedAt, minimumLapSeconds, maximumLapSeconds);
   const suspiciousLapCount = laps.length - cleanLaps.length;
   const expectedLapsNow = targetLapCountAt(targetPaces, elapsedHours);
-  const projectedLaps = projectedLapCount(cleanLaps.length, elapsedHours, targetPaces);
   const currentPaceSeconds = recentMedianPaceSeconds(cleanLaps, recentLapCount);
+  const recentPaceSpreadSeconds = standardDeviation(
+    cleanLaps.slice(-recentLapCount).map((lap) => lap.durationMs / 1_000)
+  );
+  const scenarioRange = projectScenarioRange(
+    cleanLaps.length,
+    elapsedHours,
+    targetPaces,
+    recentPaceSpreadSeconds
+  );
+  const recentPaceProjection = currentPaceSeconds == null
+    ? null
+    : projectedLapCount(
+      cleanLaps.length,
+      elapsedHours,
+      Array(RACE_DURATION_HOURS).fill(currentPaceSeconds)
+    );
   const ownHistoricalLapsNow = historicalLapCountAt(ownHistoricalTeam, elapsedHours);
   const rivalHistoricalLapsNow = historicalLapCountAt(rivalHistoricalTeam, elapsedHours);
   const progressPoints = buildRaceProgress({
@@ -274,6 +316,20 @@ function LiveTacticsSection({
     ownHistoricalTeam,
     rivalHistoricalTeam,
   });
+  const trendPoints = buildLiveQuarterHourTrend(
+    cleanLaps,
+    raceStartedAt,
+    elapsedHours,
+    ownHistoricalTeam,
+    rivalHistoricalTeam
+  );
+  const rivalTimeGapPoints = buildLiveRivalTimeGap(
+    cleanLaps,
+    raceStartedAt,
+    elapsedHours,
+    targetPaces,
+    rivalHistoricalTeam
+  );
 
   return (
     <div className="tactics-section-stack">
@@ -292,11 +348,17 @@ function LiveTacticsSection({
           detail={`${expectedLapsNow.toFixed(1)} verwacht`}
           tone={cleanLaps.length >= expectedLapsNow ? 'positive' : 'negative'}
         />
-        <TacticsStat label="Projectie na 24u" value={Math.round(projectedLaps).toLocaleString('nl-BE')} detail={`Doel: ${targetLaps}`} />
+        <TacticsStat
+          label="Projectie na 24u"
+          value={Math.round(scenarioRange.expectedLaps).toLocaleString('nl-BE')}
+          detail={`${Math.round(scenarioRange.pessimisticLaps)}-${Math.round(scenarioRange.optimisticLaps)} op recente spreiding`}
+        />
         <TacticsStat
           label={`Tempo laatste ${recentLapCount}`}
           value={formatPaceSeconds(currentPaceSeconds)}
-          detail={`${suspiciousLapCount} verdachte ronde${suspiciousLapCount === 1 ? '' : 's'} genegeerd`}
+          detail={recentPaceProjection == null
+            ? `${suspiciousLapCount} verdachte ronde${suspiciousLapCount === 1 ? '' : 's'} genegeerd`
+            : `${Math.round(recentPaceProjection)} rondes bij dit tempo`}
         />
         <TacticsStat
           label="Vs. Apolloon vorig jaar"
@@ -318,7 +380,7 @@ function LiveTacticsSection({
         />
         <div className="tactics-control-grid">
           <label>
-            <span>Doel na 24 uur</span>
+            <span>Doel na 24 uur · gem. {formatPaceSeconds(86_400 / targetLaps)}</span>
             <input
               className="input"
               type="number"
@@ -327,6 +389,7 @@ function LiveTacticsSection({
               value={targetLaps}
               onChange={(event) => {
                 scenarioWasEdited.current = true;
+                targetPacesWereEdited.current = false;
                 setTargetLaps(Math.max(1, Number(event.target.value) || 1));
               }}
             />
@@ -338,6 +401,7 @@ function LiveTacticsSection({
               value={targetProfile}
               onChange={(event) => {
                 scenarioWasEdited.current = true;
+                targetPacesWereEdited.current = false;
                 setTargetProfile(event.target.value as TargetProfile);
               }}
             >
@@ -389,7 +453,10 @@ function LiveTacticsSection({
             <strong>Doeltempo per race-uur</strong>
             <span>Seconden per ronde. Wijzig een uur om het scenario meteen door te rekenen.</span>
           </div>
-          <button className="btn btn--ghost" onClick={() => setTargetPaces(generatedTargetPaces)}>
+          <button className="btn btn--ghost" onClick={() => {
+            targetPacesWereEdited.current = false;
+            setTargetPaces(generatedTargetPaces);
+          }}>
             Herbereken uit profiel
           </button>
         </div>
@@ -406,6 +473,7 @@ function LiveTacticsSection({
                   value={Math.round(paceSeconds)}
                   onChange={(event) => {
                     scenarioWasEdited.current = true;
+                    targetPacesWereEdited.current = true;
                     const nextPaces = [...targetPaces];
                     nextPaces[raceHour] = clamp(Number(event.target.value) || 30, 30, 300);
                     setTargetPaces(nextPaces);
@@ -434,6 +502,26 @@ function LiveTacticsSection({
           text="Lagere rondetijden zijn sneller. Zo ziet ge meteen in welk uur het plan gewonnen of verloren wordt."
         />
         <HourlyPaceChart points={pacePoints} showPlan showActual />
+      </section>
+
+      <section className="panel">
+        <TacticsSectionHeader
+          kicker="Kwartiertrend"
+          title="Live tempo tegenover vorig jaar"
+          text="De kwartiermedianen tonen sneller waar het huidige tempo afwijkt van Apolloon en VTK vorig jaar dan de bredere uurblokken."
+        />
+        <LiveTrendChart points={trendPoints} />
+      </section>
+
+      <section className="panel">
+        <TacticsSectionHeader
+          kicker="Tijdskloof"
+          title="Werkelijke en voorspelde achterstand op VTK vorig jaar"
+          text="Positief betekent achterstand. Na het huidige racemoment rekent de stippellijn verder met het ingestelde doeltempo per uur."
+        />
+        {rivalTimeGapPoints.length
+          ? <LiveTimeGapChart points={rivalTimeGapPoints} />
+          : <p className="empty-inline">Geen VTK-referentie beschikbaar voor deze berekening.</p>}
       </section>
 
       <section className="panel">
@@ -490,10 +578,6 @@ function HistoricalAnalysisSection({
 
   const firstTeam = teamById(historicalRace, firstTeamId) ?? historicalRace.teams[0] ?? null;
   const secondTeam = teamById(historicalRace, secondTeamId) ?? historicalRace.teams[1] ?? firstTeam;
-  const progressPoints = buildHistoricalProgress(firstTeam, secondTeam);
-  const pacePoints = buildHistoricalPaceComparison(firstTeam, secondTeam);
-  const firstMedian = medianNullable(firstTeam?.lapDurationsMs.map((duration) => duration / 1_000) ?? []);
-  const secondMedian = medianNullable(secondTeam?.lapDurationsMs.map((duration) => duration / 1_000) ?? []);
 
   return (
     <div className="tactics-section-stack">
@@ -524,46 +608,13 @@ function HistoricalAnalysisSection({
         </div>
       </section>
 
-      <section className="stats-grid stats-grid--analysis tactics-live-stats" aria-label="Historische kerncijfers">
-        <TacticsStat label={`Team ${firstTeam?.teamId ?? '-'}`} value={`${firstTeam?.cumulativeLapTimesMs.length ?? 0} rondes`} detail={`Mediaan ${formatPaceSeconds(firstMedian)}`} />
-        <TacticsStat label={`Team ${secondTeam?.teamId ?? '-'}`} value={`${secondTeam?.cumulativeLapTimesMs.length ?? 0} rondes`} detail={`Mediaan ${formatPaceSeconds(secondMedian)}`} />
-        <TacticsStat
-          label="Verschil na 24u"
-          value={formatSignedLapDifference((firstTeam?.cumulativeLapTimesMs.length ?? 0) - (secondTeam?.cumulativeLapTimesMs.length ?? 0))}
-          detail={`Team ${firstTeam?.teamId ?? '-'} tegenover team ${secondTeam?.teamId ?? '-'}`}
+      {firstTeam && secondTeam && (
+        <HistoricalDeepDive
+          historicalRace={historicalRace}
+          firstTeam={firstTeam}
+          secondTeam={secondTeam}
         />
-        <TacticsStat
-          label="Snelste mediaan"
-          value={firstMedian != null && secondMedian != null && firstMedian <= secondMedian ? `Team ${firstTeam?.teamId}` : `Team ${secondTeam?.teamId}`}
-          detail={formatPaceSeconds(Math.min(firstMedian ?? Infinity, secondMedian ?? Infinity))}
-        />
-      </section>
-
-      <section className="panel">
-        <TacticsSectionHeader
-          kicker="Raceverloop"
-          title="Wie lag wanneer voor?"
-          text="Cumulatieve rondes over de volledige 24 uur. Een kruising toont waar de leiding wisselde."
-        />
-        <RaceProgressChart
-          points={progressPoints}
-          ownLabel={`Team ${firstTeam?.teamId ?? '-'}`}
-          rivalLabel={`Team ${secondTeam?.teamId ?? '-'}`}
-        />
-      </section>
-
-      <section className="panel">
-        <TacticsSectionHeader
-          kicker="Dag en nacht"
-          title="Mediaan tempo per race-uur"
-          text="Vergelijk de vorm van beide races zonder dat snelle en trage uitschieters het gemiddelde domineren."
-        />
-        <HourlyPaceChart
-          points={pacePoints}
-          ownLabel={`Team ${firstTeam?.teamId ?? '-'}`}
-          rivalLabel={`Team ${secondTeam?.teamId ?? '-'}`}
-        />
-      </section>
+      )}
 
       <HistoricalDatasetManager
         sourceName={historicalSourceName}
@@ -753,6 +804,99 @@ function HourlyPaceChart({
   return <ChartCanvas canvasRef={canvasRef} />;
 }
 
+function LiveTrendChart({ points }: { points: LiveTrendPoint[] }) {
+  const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
+
+  React.useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || !points.length) return undefined;
+    const trendDataset = (
+      label: string,
+      valueKey: keyof Pick<LiveTrendPoint, 'liveSeconds' | 'ownHistoricalSeconds' | 'rivalHistoricalSeconds'>,
+      color: string,
+      borderWidth: number,
+      borderDash?: number[]
+    ) => ({
+      label,
+      data: points.map((point) => ({ x: point.raceHour, y: point[valueKey] })),
+      borderColor: color,
+      backgroundColor: color,
+      borderWidth,
+      borderDash,
+      pointRadius: 0,
+      pointHoverRadius: 5,
+      tension: 0.28,
+      spanGaps: true,
+    });
+    const chart = new Chart(canvas, {
+      type: 'line',
+      data: {
+        datasets: [
+          trendDataset('Apolloon live', 'liveSeconds', '#2877F6', 4),
+          trendDataset('Apolloon vorig jaar', 'ownHistoricalSeconds', '#7c3aed', 2, [7, 5]),
+          trendDataset('VTK vorig jaar', 'rivalHistoricalSeconds', '#d59d00', 2, [7, 5]),
+        ],
+      },
+      options: sharedLineChartOptions('Mediaan rondetijd per kwartier', (value) => formatPaceSeconds(Number(value))),
+    });
+    return () => chart.destroy();
+  }, [points]);
+
+  return <ChartCanvas canvasRef={canvasRef} />;
+}
+
+function LiveTimeGapChart({ points }: { points: TimeGapPoint[] }) {
+  const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
+
+  React.useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || !points.length) return undefined;
+    const actualPoints = points.filter((point) => !point.predicted);
+    const predictionPoints = points.filter((point) => point.predicted);
+    const lastActualPoint = actualPoints[actualPoints.length - 1];
+    const chart = new Chart(canvas, {
+      type: 'line',
+      data: {
+        datasets: [
+          {
+            label: 'Werkelijke tijdskloof',
+            data: actualPoints.map((point) => ({ x: point.raceHour, y: point.gapSeconds })),
+            borderColor: '#172033',
+            backgroundColor: '#172033',
+            borderWidth: 3,
+            pointRadius: 0,
+            tension: 0.2,
+          },
+          {
+            label: 'Voorspeld met doelschema',
+            data: [...(lastActualPoint ? [lastActualPoint] : []), ...predictionPoints]
+              .map((point) => ({ x: point.raceHour, y: point.gapSeconds })),
+            borderColor: '#2877F6',
+            backgroundColor: '#2877F6',
+            borderWidth: 3,
+            borderDash: [8, 6],
+            pointRadius: 0,
+            tension: 0.2,
+          },
+          {
+            label: 'Gelijke stand',
+            data: [{ x: 0, y: 0 }, { x: 24, y: 0 }],
+            borderColor: '#94a3b8',
+            backgroundColor: '#94a3b8',
+            borderWidth: 1,
+            borderDash: [5, 5],
+            pointRadius: 0,
+          },
+        ],
+      },
+      options: sharedLineChartOptions('Tijdskloof op VTK', (value) => `${Number(value) > 0 ? '+' : ''}${Math.round(Number(value))}s`),
+    });
+    return () => chart.destroy();
+  }, [points]);
+
+  return <ChartCanvas canvasRef={canvasRef} />;
+}
+
 function ChartCanvas({ canvasRef }: { canvasRef: React.RefObject<HTMLCanvasElement | null> }) {
   return (
     <div className="analysis-chart-card tactics-chart-card">
@@ -770,13 +914,40 @@ function RecentLapsTable({
   minimumLapSeconds: number;
   maximumLapSeconds: number;
 }) {
-  const recentLaps = [...laps].sort((firstLap, secondLap) => secondLap.finishedAt - firstLap.finishedAt).slice(0, 15);
+  const sortedLaps = [...laps].sort((firstLap, secondLap) => secondLap.finishedAt - firstLap.finishedAt);
+  const recentLaps = sortedLaps.slice(0, 30);
+  const suspiciousLaps = sortedLaps.filter((lap) => {
+    const durationSeconds = lap.durationMs / 1_000;
+    return durationSeconds < minimumLapSeconds || durationSeconds > maximumLapSeconds;
+  });
+  return (
+    <div className="tactics-lap-tables">
+      <LapReviewTable laps={recentLaps} minimumLapSeconds={minimumLapSeconds} maximumLapSeconds={maximumLapSeconds} />
+      {suspiciousLaps.length > 0 && (
+        <details className="tactics-suspicious-details">
+          <summary>Alle {suspiciousLaps.length} verdachte rondes bekijken</summary>
+          <LapReviewTable laps={suspiciousLaps} minimumLapSeconds={minimumLapSeconds} maximumLapSeconds={maximumLapSeconds} />
+        </details>
+      )}
+    </div>
+  );
+}
+
+function LapReviewTable({
+  laps,
+  minimumLapSeconds,
+  maximumLapSeconds,
+}: {
+  laps: LapRecord[];
+  minimumLapSeconds: number;
+  maximumLapSeconds: number;
+}) {
   return (
     <div className="table-wrap">
       <table className="analysis-table">
         <thead><tr><th>Moment</th><th>Loper</th><th>Ronde</th><th>Tijd</th><th>Controle</th></tr></thead>
         <tbody>
-          {recentLaps.map((lap) => {
+          {laps.map((lap) => {
             const durationSeconds = lap.durationMs / 1_000;
             const suspicious = durationSeconds < minimumLapSeconds || durationSeconds > maximumLapSeconds;
             return (
@@ -793,31 +964,6 @@ function RecentLapsTable({
       </table>
     </div>
   );
-}
-
-function buildHistoricalProgress(firstTeam: HistoricalTeam | null, secondTeam: HistoricalTeam | null): RaceProgressPoint[] {
-  return Array.from({ length: 97 }, (_, pointIndex) => {
-    const raceHour = pointIndex / 4;
-    return {
-      raceHour,
-      liveLaps: null,
-      targetLaps: null,
-      ownHistoricalLaps: historicalLapCountAt(firstTeam, raceHour),
-      rivalHistoricalLaps: historicalLapCountAt(secondTeam, raceHour),
-    };
-  });
-}
-
-function buildHistoricalPaceComparison(firstTeam: HistoricalTeam | null, secondTeam: HistoricalTeam | null): HourlyPacePoint[] {
-  const firstPaces = buildHourlyHistoricalPaces(firstTeam);
-  const secondPaces = buildHourlyHistoricalPaces(secondTeam);
-  return Array.from({ length: RACE_DURATION_HOURS }, (_, raceHour) => ({
-    raceHour,
-    plannedSeconds: null,
-    actualSeconds: null,
-    ownHistoricalSeconds: firstPaces[raceHour],
-    rivalHistoricalSeconds: secondPaces[raceHour],
-  }));
 }
 
 function lineDataset(
@@ -919,6 +1065,29 @@ function loadStoredHistoricalRace(): HistoricalRace | null {
   }
 }
 
+function loadStoredTacticsScenario(): StoredTacticsScenario | null {
+  const storedJson = localStorage.getItem(TACTICS_SCENARIO_STORAGE_KEY);
+  if (!storedJson) return null;
+  try {
+    const storedScenario = JSON.parse(storedJson) as Partial<StoredTacticsScenario>;
+    if (
+      typeof storedScenario.targetLaps !== 'number'
+      || !Number.isFinite(storedScenario.targetLaps)
+      || storedScenario.targetLaps < 1
+      || !['flat', 'apolloon', 'vtk'].includes(storedScenario.targetProfile ?? '')
+      || !Array.isArray(storedScenario.targetPaces)
+      || storedScenario.targetPaces.length !== RACE_DURATION_HOURS
+      || storedScenario.targetPaces.some((pace) => typeof pace !== 'number' || !Number.isFinite(pace) || pace <= 0)
+    ) {
+      throw new Error('Ongeldig opgeslagen scenario.');
+    }
+    return storedScenario as StoredTacticsScenario;
+  } catch {
+    localStorage.removeItem(TACTICS_SCENARIO_STORAGE_KEY);
+    return null;
+  }
+}
+
 function formatPaceSeconds(seconds: number | null): string {
   if (seconds == null || !Number.isFinite(seconds)) return 'Geen data';
   return formatDurationMs(seconds * 1_000);
@@ -942,15 +1111,12 @@ function formatRaceHourWindow(raceStartedAt: number, raceHour: number): string {
   return `${formatter.format(startedAt)}-${formatter.format(startedAt + 3_600_000)}`;
 }
 
-function medianNullable(values: number[]): number | null {
-  const finiteValues = values.filter(Number.isFinite).sort((firstValue, secondValue) => firstValue - secondValue);
-  if (!finiteValues.length) return null;
-  const middleIndex = Math.floor(finiteValues.length / 2);
-  return finiteValues.length % 2
-    ? finiteValues[middleIndex]
-    : (finiteValues[middleIndex - 1] + finiteValues[middleIndex]) / 2;
-}
-
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, value));
+}
+
+function standardDeviation(values: number[]): number {
+  if (!values.length) return 0;
+  const average = values.reduce((sum, value) => sum + value, 0) / values.length;
+  return Math.sqrt(values.reduce((sum, value) => sum + (value - average) ** 2, 0) / values.length);
 }
