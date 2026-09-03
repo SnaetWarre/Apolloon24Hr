@@ -10,11 +10,16 @@ import { createUuid } from '../src/lib/uuid.ts';
 import { buildEventReadiness, readinessSummary } from '../src/lib/readiness.ts';
 import { observeDisplayHistory } from '../src/lib/displayHistory.ts';
 import {
+  buildRecentLapSummaries,
+  buildRunnerRanking,
+  calculateLapCoefficient,
+} from '../src/lib/ranking.ts';
+import {
   LIVE_MILLISECOND_INTERVAL_MS,
   normalizeClockInterval,
   SECOND_DISPLAY_INTERVAL_MS,
 } from '../src/lib/useAnimationFrameTick.ts';
-import type { ClusterStatus, LapRecord, RaceState } from '../src/types.ts';
+import type { ClusterStatus, Label, LapRecord, RaceState, Runner } from '../src/types.ts';
 import { relativeFileWithinRoot } from '../server/static-files.ts';
 
 const dataPath = path.resolve(`.tmp-test-core-regressions-${process.pid}`);
@@ -109,6 +114,109 @@ test('outside display fits the viewport and announces only new history', () => {
     styles,
     /\.display-root--outside\s*\{[^}]*height:\s*100vh;[^}]*min-height:\s*0;[^}]*overflow:\s*hidden;/s
   );
+});
+
+test('lap coefficients follow the continuous prize scale including fractional seconds', () => {
+  const examples = [
+    [65_000, 2.5],
+    [68_200, 2.26],
+    [78_400, 1.495],
+    [84_300, 1.0525],
+    [85_000, 1],
+    [85_600, 0.88],
+    [87_400, 0.52],
+    [89_000, 0.2],
+    [90_000, 0],
+    [90_001, 0],
+  ] as const;
+
+  for (const [durationMs, expectedCoefficient] of examples) {
+    assert.ok(Math.abs(calculateLapCoefficient(durationMs) - expectedCoefficient) < 1e-10);
+  }
+});
+
+test('inside rankings switch metric and filter laps by their historical label', () => {
+  const firstYearsLabel = {
+    id: 'first-years',
+    name: 'Eerstejaars',
+    color: '#2877F6',
+    icon: 'E',
+    kind: 'custom',
+    imageUrl: null,
+    targetLaps: null,
+    sortOrder: 1,
+  } satisfies Label;
+  const runners = [
+    { id: 'steady', name: 'Steady', runnerNumber: '1' },
+    { id: 'fast', name: 'Fast', runnerNumber: '2' },
+  ] as Runner[];
+  const lap = (id: string, runnerId: string, durationMs: number, labels: Label[]): LapRecord => ({
+    id,
+    runnerId,
+    runnerName: runnerId === 'steady' ? 'Steady' : 'Fast',
+    runnerNumber: runnerId === 'steady' ? '1' : '2',
+    lapNumber: 1,
+    startedAt: 1_000,
+    finishedAt: 1_000 + durationMs,
+    durationMs,
+    source: 'handoff',
+    createdAt: 1_000 + durationMs,
+    labels,
+  });
+  const laps = [
+    lap('steady-1', 'steady', 89_000, [firstYearsLabel]),
+    lap('steady-2', 'steady', 89_000, [firstYearsLabel]),
+    lap('fast-1', 'fast', 65_000, [firstYearsLabel]),
+    lap('fast-other-label', 'fast', 65_000, []),
+  ];
+
+  assert.deepEqual(
+    buildRunnerRanking(runners, laps, 'laps', firstYearsLabel.id).map((entry) => entry.runnerId),
+    ['steady', 'fast']
+  );
+  assert.deepEqual(
+    buildRunnerRanking(runners, laps, 'coefficient', firstYearsLabel.id).map((entry) => entry.runnerId),
+    ['fast', 'steady']
+  );
+  assert.equal(buildRunnerRanking(runners, laps, 'coefficient', null)[0]?.coefficientTotal, 5);
+
+  const displaySource = fs.readFileSync(path.resolve('src/components/DisplayViews.tsx'), 'utf8');
+  assert.match(displaySource, /INSIDE_RANKING_ROTATION_MS = 15_000/);
+  assert.match(displaySource, /window\.setTimeout/);
+  assert.match(displaySource, /window\.clearTimeout/);
+  assert.match(displaySource, /currentMode === 'laps' \? 'coefficient' : 'laps'/);
+});
+
+test('the three recent laps show each runners all-time best and average', () => {
+  const lap = (id: string, runnerId: string, durationMs: number, finishedAt: number): LapRecord => ({
+    id,
+    runnerId,
+    runnerName: runnerId,
+    runnerNumber: null,
+    lapNumber: 1,
+    startedAt: finishedAt - durationMs,
+    finishedAt,
+    durationMs,
+    source: 'handoff',
+    createdAt: finishedAt,
+    labels: [],
+  });
+  const summaries = buildRecentLapSummaries([
+    lap('older-a', 'runner-a', 90_000, 1_000),
+    lap('recent-a', 'runner-a', 70_000, 4_000),
+    lap('recent-b', 'runner-b', 80_000, 3_000),
+    lap('recent-c', 'runner-c', 85_000, 2_000),
+  ]);
+
+  assert.deepEqual(summaries.map((summary) => summary.lap.id), ['recent-a', 'recent-b', 'recent-c']);
+  assert.equal(summaries[0]?.bestLapMs, 70_000);
+  assert.equal(summaries[0]?.averageLapMs, 80_000);
+
+  const displaySource = fs.readFileSync(path.resolve('src/components/DisplayViews.tsx'), 'utf8');
+  assert.match(displaySource, /Ronde \{lap\.lapNumber\} van deze loper/);
+  assert.match(displaySource, />Deze ronde</);
+  assert.match(displaySource, />Snelste ronde</);
+  assert.match(displaySource, />Gem\. ronde</);
 });
 
 test('event readiness blocks real safety failures and distinguishes standalone warnings', () => {
