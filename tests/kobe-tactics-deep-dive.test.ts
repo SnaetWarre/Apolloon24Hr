@@ -93,6 +93,23 @@ test('drafting analysis groups cleaned passages and reports all four comparisons
   assert.equal(analysis.comparisons.length, 4);
 });
 
+test('drafting cleanup keeps nearby laps when the median absolute deviation is zero', () => {
+  const lowVariationRace = parseHistoricalRace(JSON.stringify([
+    { teamId: 1, lapTimes: cumulativeTimes([80, 80, 80, 81]) },
+    { teamId: 4, lapTimes: cumulativeTimes([80, 80, 80, 80]) },
+  ]));
+  const analysis = analyzeDrafting(lowVariationRace.teams[0], lowVariationRace.teams[1], {
+    startHour: 0,
+    endHour: 24,
+    closeSeconds: 8,
+    farSeconds: 15,
+    minimumLapSeconds: 55,
+    maximumLapSeconds: 140,
+  });
+
+  assert.deepEqual(analysis.lapDurationsSeconds, [80, 80, 80, 81]);
+});
+
 test('live deep dive combines API laps with reference trends and scenario forecasts', () => {
   const raceStartedAt = 1_000_000;
   const liveLaps = [
