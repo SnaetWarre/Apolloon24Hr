@@ -1,0 +1,210 @@
+{
+  "baselineRevision": "ce6bf003b95a90e6d543b6d1798930c8153ea3d2",
+  "prBaseRevision": "41b9eb44f03ad7b2a167b642a4d6efccfe494409",
+  "baselineNote": "server/db.ts is identical in the measured baseline and PR base.",
+  "changedRevision": "ccb98742c557d5aa7893f014261d6866b81a0f38",
+  "command": "node --import tsx scripts/benchmark-replication-idle.ts",
+  "environment": {
+    "node": "v24.18.0",
+    "os": "Linux 7.2.2-1-cachyos",
+    "cpu": "AMD Ryzen 7 6800H with Radeon Graphics",
+    "mode": "source backend via tsx, NODE_ENV=production, SQLite synchronous=FULL"
+  },
+  "workload": {
+    "operationCount": 100000,
+    "originCount": 5,
+    "iterationsPerSample": 25,
+    "warmupIterations": 5,
+    "measuredSamples": 5
+  },
+  "baseline": {
+    "vector": {
+      "wallMsPerCall": [
+        5.844877519999995,
+        5.863642759999993,
+        5.895079880000003,
+        6.1152761999999985,
+        6.000465599999997
+      ],
+      "cpuMsPerCall": [
+        5.8292399999999995,
+        5.86568,
+        5.878640000000001,
+        6.10104,
+        5.97508
+      ]
+    },
+    "caughtUpDelta": {
+      "wallMsPerCall": [
+        2.800939159999998,
+        2.788681320000005,
+        2.783136479999994,
+        2.788272559999996,
+        2.7815230399999926
+      ],
+      "cpuMsPerCall": [
+        2.79528,
+        2.78,
+        2.77396,
+        2.7959199999999997,
+        2.77216
+      ]
+    },
+    "emptyBatch": {
+      "wallMsPerCall": [
+        60.625972439999984,
+        59.174548559999984,
+        60.41228884,
+        59.959005639999994,
+        59.770495720000035
+      ],
+      "cpuMsPerCall": [
+        62.11924,
+        60.61616,
+        62.16124,
+        61.653400000000005,
+        61.55432
+      ]
+    },
+    "unchangedAcknowledgement": {
+      "wallMsPerCall": [
+        0.06912956000000121,
+        0.06249027999998361,
+        0.06259204000001774,
+        0.060364280000067085,
+        0.060795080000025335
+      ],
+      "cpuMsPerCall": [
+        0.07307999999999999,
+        0.06727999999999999,
+        0.06716,
+        0.06756000000000001,
+        0.08388
+      ]
+    }
+  },
+  "changed": {
+    "vector": {
+      "wallMsPerCall": [
+        0.014345159999998032,
+        0.012583439999998518,
+        0.012714880000003178,
+        0.013854639999999563,
+        0.01289600000000064
+      ],
+      "cpuMsPerCall": [
+        0.01568,
+        0.0128,
+        0.012920000000000001,
+        0.013879999999999998,
+        0.01956
+      ]
+    },
+    "caughtUpDelta": {
+      "wallMsPerCall": [
+        0.01592816000000312,
+        0.014153599999999641,
+        0.012431120000001102,
+        0.014594399999996312,
+        0.01441168000000289
+      ],
+      "cpuMsPerCall": [
+        0.01864,
+        0.01432,
+        0.01256,
+        0.018520000000000002,
+        0.02916
+      ]
+    },
+    "emptyBatch": {
+      "wallMsPerCall": [
+        0.0006059600000025967,
+        0.00045363999999608495,
+        0.0006187599999975645,
+        0.0006231599999955506,
+        0.0009121199999935925
+      ],
+      "cpuMsPerCall": [
+        0.0007599999999999999,
+        0.00052,
+        0.00068,
+        0.00068,
+        0.001
+      ]
+    },
+    "unchangedAcknowledgement": {
+      "wallMsPerCall": [
+        0.025775199999998222,
+        0.021828120000000128,
+        0.021036639999992987,
+        0.019619159999992915,
+        0.019450039999992442
+      ],
+      "cpuMsPerCall": [
+        0.03032,
+        0.021840000000000002,
+        0.02112,
+        0.01956,
+        0.041639999999999996
+      ]
+    }
+  },
+  "comparisons": {
+    "vector": {
+      "baselineMedianMs": 5.895079880000003,
+      "changedMedianMs": 0.01289600000000064,
+      "absoluteDeltaMs": -5.882183880000002,
+      "percentDelta": -99.78124130185661,
+      "baselineRangeMs": [
+        5.844877519999995,
+        6.1152761999999985
+      ],
+      "changedRangeMs": [
+        0.012583439999998518,
+        0.014345159999998032
+      ]
+    },
+    "caughtUpDelta": {
+      "baselineMedianMs": 2.788272559999996,
+      "changedMedianMs": 0.01441168000000289,
+      "absoluteDeltaMs": -2.773860879999993,
+      "percentDelta": -99.48313230898765,
+      "baselineRangeMs": [
+        2.7815230399999926,
+        2.800939159999998
+      ],
+      "changedRangeMs": [
+        0.012431120000001102,
+        0.01592816000000312
+      ]
+    },
+    "emptyBatch": {
+      "baselineMedianMs": 59.959005639999994,
+      "changedMedianMs": 0.0006187599999975645,
+      "absoluteDeltaMs": -59.95838688,
+      "percentDelta": -99.99896802824965,
+      "baselineRangeMs": [
+        59.174548559999984,
+        60.625972439999984
+      ],
+      "changedRangeMs": [
+        0.00045363999999608495,
+        0.0009121199999935925
+      ]
+    },
+    "unchangedAcknowledgement": {
+      "baselineMedianMs": 0.06249027999998361,
+      "changedMedianMs": 0.021036639999992987,
+      "absoluteDeltaMs": -0.041453639999990625,
+      "percentDelta": -66.33614059658798,
+      "baselineRangeMs": [
+        0.060364280000067085,
+        0.06912956000000121
+      ],
+      "changedRangeMs": [
+        0.019450039999992442,
+        0.025775199999998222
+      ]
+    }
+  }
+}
