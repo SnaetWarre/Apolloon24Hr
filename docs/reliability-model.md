@@ -52,6 +52,34 @@ continues operating:
 UDP is discovery only. Signed discovery packets find known cluster members;
 authenticated HTTP exchanges carry replication operations.
 
+### Laptop IP changes
+
+Paired desktop hosts identify each other by their persisted host IDs. With
+automatic address selection and UDP discovery enabled, an IP change does not
+require pairing again: the next signed announcement supplies the new address,
+and replication resumes once that address is reachable. A working route stays
+selected when another interface broadcasts; recently discovered alternatives
+are tried when the selected route fails. Old requests cannot roll back the
+new route or impose the previous address's retry delay on it.
+
+An IP change can interrupt HTTP connections. The desktop UI uses its own local
+backend and ordinary writes remain local during that interruption. Missing
+operations are exchanged after reconnecting. Timing ownership and conflict
+rules still apply; changing an IP does not automatically transfer timing.
+
+This requires both laptops to regain a shared, reachable IPv4 LAN with UDP
+discovery and HTTP allowed. Default discovery announcements are one second
+apart; actual recovery also depends on HTTP timeouts, sync scheduling, network
+availability, and packet loss. It is not a zero-interruption guarantee.
+Keep `PUBLIC_HOST` and `CLUSTER_SELF_URL` unset for automatic address changes;
+a manually pinned old IP continues to advertise that old IP. If discovery is
+disabled or broadcasts cannot cross the network, use reachable stable peer
+hostnames or update the configured peer URLs.
+
+A browser opened at another laptop's literal IP remains tied to that URL. It
+cannot receive Apolloon's UDP discovery packets. Use each laptop's desktop app
+for local operation, or provide a stable LAN hostname for browser clients.
+
 Every signed discovery, bootstrap, and delta exchange includes the database
 schema, replication format, application version, minimum compatible versions,
 and release identity. Apolloon rejects incompatible peers before applying SQL

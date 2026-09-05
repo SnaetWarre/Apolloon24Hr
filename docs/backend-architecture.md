@@ -103,6 +103,14 @@ replication_conflicts
   rejected with HTTP 426 and remain visibly disconnected in Admin.
 - Updates peer vectors only after a valid batch has been accepted.
 - Replaces stale peer URLs when a known host moves to another address.
+- Keeps a working interface while retaining up to eight recently discovered
+  alternatives. On transport loss, tries an alternative without inheriting the
+  failed address's retry delay. Cancels obsolete requests before they can alter
+  a rediscovered peer or a newly joined cluster.
+- Uses the successful request URL for outgoing sync and the incoming source IP
+  for IPv4 LAN exchanges, so a peer's preferred interface cannot displace a
+  working route. Rejects responses from an unexpected host identity.
+- Restarts UDP discovery after socket errors, including a temporary bind failure.
 - Keeps every host locally writable; timing conflicts pause only timing.
 - Allows planned timing transfer only to a reachable peer whose operation
   vector covers the controller's full vector.
@@ -209,3 +217,8 @@ two-way sync, five-node convergence, disconnect/restart catch-up, bootstrap
 replacement, invalid batch rollback, peer address changes, concurrent edits,
 timing conflicts, health/release reporting, verified backup downloads, and
 exactly-once commands.
+
+`tests/cluster-network.e2e.test.ts` additionally exercises signed UDP delivery,
+address backoff, multiple interfaces, late replies/timeouts, a temporarily
+occupied discovery port, IP reuse, and two running databases catching up after
+a forwarding endpoint moves between loopback IPs on Linux.

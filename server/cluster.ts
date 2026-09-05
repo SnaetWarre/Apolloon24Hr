@@ -2,6 +2,7 @@ import type { Express, NextFunction, Request, Response } from 'express';
 import dgram from 'node:dgram';
 import crypto from 'node:crypto';
 import path from 'node:path';
+import { isIP } from 'node:net';
 import {
   acknowledgeReplicationVector,
   applyRemoteReplicationOperations,
@@ -67,6 +68,8 @@ type PeerState = {
   clockSkewMs: number | null;
   compatibility: ClusterCompatibility | null;
   compatibilityError: string | null;
+  candidateUrls: Map<string, number>;
+  probeController: AbortController | null;
 };
 
 type ExchangePayload = {
@@ -474,9 +477,17 @@ export function registerClusterRoutes(app: Express): void {
       res.status(409).json({ ok: false, error: 'invalid operation vector' });
       return;
     }
+    if (joinInProgress) {
+      res.status(503).json({ ok: false, error: 'cluster join in progress' });
+      return;
+    }
+    if (payload.hostId === identity.hostId) {
+      res.status(409).json({ ok: false, error: 'peer uses this host identity' });
+      return;
+    }
     const result = applyRemoteReplicationOperations(payload.operations);
     const peer = touchPeer(
-      peerUrl,
+      incomingPeerUrl(peerUrl, req.socket.remoteAddress),
       payload.hostId,
       vector,
       true,
@@ -516,6 +527,7 @@ export function stopClusterService(): void {
   if (syncHandle) clearTimeout(syncHandle);
   discoveryHandle = null;
   syncHandle = null;
+  for (const peer of peers.values()) peer.probeController?.abort();
   if (discoverySocket) {
     try {
       discoverySocket.close();
@@ -527,17 +539,30 @@ export function stopClusterService(): void {
 }
 
 function startDiscovery(): void {
-  if (!discoveryEnabled || discoverySocket) return;
+  if (!discoveryEnabled || discoverySocket || clusterStopping) return;
   const socket = dgram.createSocket({ type: 'udp4', reuseAddr: true });
   discoverySocket = socket;
   socket.on('error', (error) => {
     console.warn('Cluster discovery error:', error.message);
+    if (discoverySocket !== socket) return;
+    discoverySocket = null;
+    if (discoveryHandle) clearTimeout(discoveryHandle);
+    try {
+      socket.close();
+    } catch {
+      // A failed bind can leave the socket already closed.
+    }
+    discoveryHandle = null;
+    if (!clusterStopping) {
+      discoveryHandle = setTimeout(startDiscovery, discoveryIntervalMs);
+      discoveryHandle.unref?.();
+    }
   });
-  socket.on('message', (message) => {
+  socket.on('message', (packet) => {
     try {
       const identity = currentIdentity();
       const payload = verifyDiscoveryPayload(
-        JSON.parse(message.toString('utf8')),
+        JSON.parse(packet.toString('utf8')),
         identity.clusterSecret
       );
       if (
@@ -561,15 +586,16 @@ function startDiscovery(): void {
     }
   });
   socket.bind(discoveryPort, '0.0.0.0', () => {
+    if (discoverySocket !== socket || clusterStopping) return;
     try {
       socket.setBroadcast(true);
     } catch {
       // Some test and container networks do not expose broadcast support.
     }
     broadcastDiscovery();
+    discoveryHandle = setInterval(broadcastDiscovery, discoveryIntervalMs);
+    discoveryHandle.unref?.();
   });
-  discoveryHandle = setInterval(broadcastDiscovery, discoveryIntervalMs);
-  discoveryHandle.unref?.();
 }
 
 function broadcastDiscovery(): void {
@@ -675,6 +701,15 @@ function syncAllPeers(): Promise<void> {
 
 async function syncPeer(peer: PeerState): Promise<void> {
   const identity = currentIdentity();
+  const probeUrl = peer.url;
+  const lastSeenBeforeProbe = peer.lastSeenAt;
+  const probeController = new AbortController();
+  peer.probeController = probeController;
+  const probeIsCurrent = () =>
+    !clusterStopping && !joinInProgress &&
+    identity === currentIdentity() &&
+    peers.get(probeUrl) === peer && peer.url === probeUrl &&
+    peer.probeController === probeController && !probeController.signal.aborted;
   const localVector = getReplicationVector();
   const payload: ExchangePayload = {
     protocol: CLUSTER_PROTOCOL_VERSION,
@@ -688,7 +723,8 @@ async function syncPeer(peer: PeerState): Promise<void> {
   };
   try {
     const encodedPayload = await encodedJsonRequest(payload);
-    const response = await fetch(`${peer.url}/api/cluster/sync/exchange`, {
+    if (!probeIsCurrent()) return;
+    const response = await fetch(`${probeUrl}/api/cluster/sync/exchange`, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -698,10 +734,11 @@ async function syncPeer(peer: PeerState): Promise<void> {
           : {}),
       },
       body: encodedPayload.body,
-      signal: AbortSignal.timeout(requestTimeoutMs),
+      signal: AbortSignal.any([probeController.signal, AbortSignal.timeout(requestTimeoutMs)]),
     });
     if (!response.ok) {
       const responseText = await response.text();
+      if (!probeIsCurrent()) return;
       const responseError = responseErrorMessage(responseText);
       if (
         response.status === 426 ||
@@ -716,6 +753,7 @@ async function syncPeer(peer: PeerState): Promise<void> {
       throw new Error(responseError || `sync failed: ${response.status}`);
     }
     const remote = (await response.json()) as ExchangePayload;
+    if (!probeIsCurrent()) return;
     const remoteVector = normalizeOperationVector(remote.vector);
     const remoteUrl = normalizeUrl(remote.url);
     const remoteCompatibility = parseClusterCompatibility(remote.compatibility);
@@ -734,6 +772,8 @@ async function syncPeer(peer: PeerState): Promise<void> {
       typeof remote.hostId !== 'string' ||
       !remote.hostId ||
       remote.hostId.length > 128 ||
+      remote.hostId === identity.hostId ||
+      (peer.id !== null && remote.hostId !== peer.id) ||
       !remoteUrl ||
       !remoteVector ||
       !Array.isArray(remote.operations) ||
@@ -743,22 +783,20 @@ async function syncPeer(peer: PeerState): Promise<void> {
       throw new Error('invalid sync response');
     }
     const result = applyRemoteReplicationOperations(remote.operations);
-    peer.id = remote.hostId;
-    rekeyPeer(peer, remoteUrl);
-    peer.vector = remoteVector;
-    peer.compatibility = remoteCompatibility;
-    peer.compatibilityError = null;
-    peer.reachable = true;
-    peer.lastSeenAt = Date.now();
-    peer.consecutiveFailures = 0;
-    peer.nextProbeAt = 0;
-    peer.unreachableSinceAt = null;
-    peer.clockSkewMs = remote.sentAt - Date.now();
+    // The request URL just worked. The peer's preferred interface may be on
+    // another network, so its response must not replace this proven route.
+    const confirmedPeer = touchPeer(
+      probeUrl, remote.hostId, remoteVector, true, remoteCompatibility
+    );
+    confirmedPeer.clockSkewMs = remote.sentAt - Date.now();
     acknowledgeReplicationVector(remote.hostId, remoteVector);
     if (result.applied > 0 || result.conflicts > 0) {
       emitRealtime({ type: 'state:revision', payload: Date.now() });
     }
   } catch (error) {
+    // Rediscovery, joining another cluster, or a newer inbound exchange can
+    // supersede this request while fetch/compression is awaiting completion.
+    if (!probeIsCurrent() || peer.lastSeenAt !== lastSeenBeforeProbe) return;
     if (peer.consecutiveFailures === 0) {
       console.warn(
         `Cluster sync with ${peer.url} failed:`,
@@ -772,6 +810,16 @@ async function syncPeer(peer: PeerState): Promise<void> {
     peer.consecutiveFailures += 1;
     peer.nextProbeAt =
       Date.now() + Math.min(10_000, peerRetryBaseMs * 2 ** Math.min(peer.consecutiveFailures - 1, 4));
+    const alternateUrl = [...peer.candidateUrls.entries()].find(
+      ([url, seenAt]) => url !== probeUrl && Date.now() - seenAt < candidateUrlLifetimeMs()
+    )?.[0];
+    if (alternateUrl) {
+      // Retire this failed route until another announcement refreshes it.
+      peer.candidateUrls.delete(probeUrl);
+      rekeyPeer(peer, alternateUrl);
+    }
+  } finally {
+    if (peer.probeController === probeController) peer.probeController = null;
   }
 }
 
@@ -792,6 +840,8 @@ function addPeer(peerUrl: string): PeerState | null {
     clockSkewMs: null,
     compatibility: null,
     compatibilityError: null,
+    candidateUrls: new Map([[url, Date.now()]]),
+    probeController: null,
   };
   peers.set(url, peer);
   return peer;
@@ -805,7 +855,7 @@ function touchPeer(
   compatibility?: ClusterCompatibility | null
 ): PeerState {
   const url = normalizeUrl(peerUrl);
-  let peer = [...peers.values()].find((item) => item.id === peerId);
+  let peer = [...peers.values()].find((knownPeer) => knownPeer.id === peerId);
   const peerAtUrl = peers.get(url);
   if (!peer) peer = peerAtUrl || addPeer(url) || undefined;
   if (!peer) {
@@ -814,7 +864,8 @@ function touchPeer(
   if (peerAtUrl && peerAtUrl !== peer) {
     peers.delete(peerAtUrl.url);
   }
-  rekeyPeer(peer, url);
+  const isNewAddress = rememberPeerUrl(peer, url);
+  if (reachable || (!peer.reachable && isNewAddress)) rekeyPeer(peer, url);
   peer.id = peerId;
   peer.vector = vector;
   if (compatibility !== undefined) {
@@ -836,12 +887,46 @@ function touchPeer(
 
 function rekeyPeer(peer: PeerState, nextUrl: string): void {
   const url = normalizeUrl(nextUrl);
-  if (!url || url === currentSelfUrl()) return;
-  for (const [key, value] of peers) {
-    if (value === peer && key !== url) peers.delete(key);
+  if (!url || url === currentSelfUrl() || url === peer.url) return;
+  peer.probeController?.abort();
+  for (const [registeredUrl, registeredPeer] of peers) {
+    if (registeredPeer === peer && registeredUrl !== url) peers.delete(registeredUrl);
   }
   peer.url = url;
+  peer.reachable = false;
+  peer.consecutiveFailures = 0;
+  peer.nextProbeAt = 0;
   peers.set(url, peer);
+}
+
+function candidateUrlLifetimeMs(): number {
+  return Math.max(10_000, discoveryIntervalMs * 5);
+}
+
+function rememberPeerUrl(peer: PeerState, url: string): boolean {
+  const now = Date.now();
+  for (const [candidateUrl, seenAt] of peer.candidateUrls) {
+    if (now - seenAt >= candidateUrlLifetimeMs()) peer.candidateUrls.delete(candidateUrl);
+  }
+  const isNewAddress = !peer.candidateUrls.has(url);
+  peer.candidateUrls.delete(url);
+  peer.candidateUrls.set(url, now);
+  // Bound interface history when DHCP assigns many addresses over a long event.
+  if (peer.candidateUrls.size > 8) {
+    peer.candidateUrls.delete(peer.candidateUrls.keys().next().value!);
+  }
+  return isNewAddress;
+}
+
+function incomingPeerUrl(advertisedUrl: string, remoteAddress?: string): string {
+  const url = new URL(advertisedUrl);
+  const sourceAddress = remoteAddress?.replace(/^::ffff:/, '');
+  // On the physical LAN, the source address identifies the interface that
+  // reached us. Keep configured hostnames/proxies and the advertised port.
+  if (isIP(url.hostname) === 4 && sourceAddress && isIP(sourceAddress) === 4) {
+    url.hostname = sourceAddress;
+  }
+  return normalizeUrl(url.toString());
 }
 
 function toClusterPeer(
