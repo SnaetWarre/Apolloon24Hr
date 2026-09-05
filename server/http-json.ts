@@ -5,27 +5,35 @@ import { gzip, constants as zlibConstants } from 'node:zlib';
 
 const gzipAsync = promisify(gzip);
 const MINIMUM_COMPRESSION_BYTES = 1_024;
+const MAXIMUM_RESPONSE_CACHE_BYTES = 32 * 1_024 ** 2;
+type CachedResponse = {
+  cacheKey: string | undefined;
+  etag: string | null;
+  raw: Buffer;
+  compressed: Promise<Buffer> | null;
+};
+let reservedCacheBytes = 0;
 const responseCache = new Map<
   string,
-  { etag: string; raw: Buffer; compressed: Promise<Buffer> | null }
+  CachedResponse
 >();
 
 export async function sendJson(
   req: Request,
   res: Response,
-  value: unknown,
-  options: { cacheKey?: string; sensitive?: boolean } = {}
+  payload: unknown,
+  options: { cacheKey?: string; cacheSlot?: string; sensitive?: boolean } = {}
 ): Promise<void> {
-  const entry = responseEntry(value, options.cacheKey);
-  if (options.cacheKey && req.header('if-none-match') === entry.etag) {
-    res.status(304).end();
-    return;
-  }
+  const entry = responseEntry(payload, options.sensitive ? undefined : options.cacheKey, options.cacheSlot);
 
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.setHeader('Vary', 'Accept-Encoding');
-  res.setHeader('ETag', entry.etag);
-  res.setHeader('Cache-Control', options.sensitive ? 'no-store' : 'no-cache');
+  if (entry.etag) res.setHeader('ETag', entry.etag);
+  res.setHeader('Cache-Control', options.sensitive ? 'no-store' : 'private, no-cache');
+  if (entry.etag && req.fresh) {
+    res.status(304).end();
+    return;
+  }
   res.setHeader('X-Apolloon-Uncompressed-Bytes', String(entry.raw.length));
 
   const acceptsGzip = req.acceptsEncodings('gzip') === 'gzip';
@@ -66,21 +74,40 @@ export async function encodedJsonRequest(value: unknown): Promise<{
 }
 
 function responseEntry(
-  value: unknown,
-  cacheKey?: string
-): { etag: string; raw: Buffer; compressed: Promise<Buffer> | null } {
+  payload: unknown,
+  cacheKey?: string,
+  cacheSlot = cacheKey
+): CachedResponse {
   if (cacheKey) {
-    const cached = responseCache.get(cacheKey);
-    if (cached) return cached;
-  }
-  const raw = Buffer.from(JSON.stringify(value));
-  const etag = `"${crypto.createHash('sha256').update(raw).digest('base64url').slice(0, 24)}"`;
-  const entry = { etag, raw, compressed: null };
-  if (cacheKey) {
-    responseCache.set(cacheKey, entry);
-    if (responseCache.size > 32) {
-      responseCache.delete(responseCache.keys().next().value as string);
+    const cached = responseCache.get(cacheSlot!);
+    if (cached?.cacheKey === cacheKey) {
+      responseCache.delete(cacheSlot!);
+      responseCache.set(cacheSlot!, cached);
+      return cached;
     }
+    evictResponse(cacheSlot!);
+  }
+  const raw = Buffer.from(JSON.stringify(payload));
+  const etag = cacheKey
+    ? `"${crypto.createHash('sha256').update(raw).digest('base64url').slice(0, 24)}"`
+    : null;
+  const entry = { cacheKey, etag, raw, compressed: null };
+  // Reserve room for both raw JSON and gzip (including gzip framing). Large
+  // individual responses still work, but cannot evict the whole cache.
+  const reservedBytes = raw.length * 3 + 1_024;
+  if (cacheKey && reservedBytes <= MAXIMUM_RESPONSE_CACHE_BYTES / 2) {
+    while (responseCache.size >= 32 || reservedCacheBytes + reservedBytes > MAXIMUM_RESPONSE_CACHE_BYTES) {
+      evictResponse(responseCache.keys().next().value!);
+    }
+    responseCache.set(cacheSlot!, entry);
+    reservedCacheBytes += reservedBytes;
   }
   return entry;
+}
+
+function evictResponse(cacheSlot: string): void {
+  const cached = responseCache.get(cacheSlot);
+  if (!cached) return;
+  reservedCacheBytes -= cached.raw.length * 3 + 1_024;
+  responseCache.delete(cacheSlot);
 }

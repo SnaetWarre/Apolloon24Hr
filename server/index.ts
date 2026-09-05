@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import express from 'express';
+import express, { type ErrorRequestHandler } from 'express';
 import fs from 'fs';
 import http from 'http';
 import path from 'path';
@@ -32,6 +32,7 @@ import {
   getAllRaceEvents,
   getAllRunners,
   getAppDataRevision,
+  ensureReplicationIdentity,
   initDb,
 } from './db.js';
 import { hostInfo, SERVER_PORT } from './host.js';
@@ -39,6 +40,9 @@ import { sendJson } from './http-json.js';
 import { setRealtimeEmitter } from './realtime.js';
 import { appRouter } from './router.js';
 import { relativeFileWithinRoot } from './static-files.js';
+import { browserRequestIsAllowed, protectBrowserRequests } from './request-security.js';
+import { secureEqual } from './cluster-protocol.js';
+import { isClusterEnabled } from './cluster-policy.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -58,7 +62,8 @@ const app = express();
 app.disable('x-powered-by');
 const server = http.createServer(app);
 const io = new SocketIOServer(server, {
-  cors: { origin: true, credentials: false },
+  cors: { origin: false },
+  allowRequest: (req, accept) => accept(null, browserRequestIsAllowed(req)),
   serveClient: false,
 });
 let shuttingDown = false;
@@ -130,7 +135,20 @@ setRealtimeEmitter((event) => {
   io.emit(event.type, event.payload);
 });
 
-app.use(express.json({ limit: '50mb' }));
+app.use(protectBrowserRequests);
+// Authenticate large replication bodies before allocating/parsing them.
+app.use('/api/cluster/sync', (req, res, next) => {
+  if (!isClusterEnabled(process.env)) {
+    res.status(404).json({ ok: false, error: 'cluster mode is disabled' });
+    return;
+  }
+  if (!secureEqual(req.header('x-apolloon-cluster-secret'), ensureReplicationIdentity().clusterSecret)) {
+    res.status(401).json({ ok: false, error: 'invalid cluster secret' });
+    return;
+  }
+  next();
+}, express.json({ limit: '50mb' }));
+app.use(express.json({ limit: '8mb' }));
 registerClusterRoutes(app);
 
 app.use(
@@ -144,7 +162,8 @@ app.get('/api/state', async (req, res, next) => {
   try {
     const snapshot = liveAppSnapshot();
     await sendJson(req, res, snapshot, {
-      cacheKey: `live:${snapshot.revision || 0}:${Math.floor(snapshot.serverNowMs / 1_000)}`,
+      cacheKey: `live:${snapshot.revision || 0}:${Math.floor(snapshot.serverNowMs / 1_000)}:${snapshot.host?.url}`,
+      cacheSlot: 'live',
     });
   } catch (error) {
     next(error);
@@ -165,6 +184,7 @@ app.get('/api/history', async (req, res, next) => {
         : raceHistory({ scope: 'full' });
     await sendJson(req, res, history, {
       cacheKey: `history:${history.revision}:${history.scope}:${history.runnerId || ''}:${history.limit || ''}`,
+      cacheSlot: `history:${history.scope}:${history.runnerId || ''}:${history.limit || ''}`,
     });
   } catch (error) {
     next(error);
@@ -290,7 +310,7 @@ app.get('/api/export/laps.csv', (_req, res) => {
   const rows = lapExportRows();
   res.send(
     rows.length
-      ? Papa.unparse(rows, { header: true, columns: LAP_EXPORT_COLUMNS })
+      ? Papa.unparse(rows, { header: true, columns: LAP_EXPORT_COLUMNS, escapeFormulae: true })
       : `${LAP_EXPORT_COLUMNS.join(',')}\n`
   );
 });
@@ -305,7 +325,7 @@ app.get('/api/export/events.csv', (_req, res) => {
   const rows = eventExportRows();
   res.send(
     rows.length
-      ? Papa.unparse(rows, { header: true, columns: EVENT_EXPORT_COLUMNS })
+      ? Papa.unparse(rows, { header: true, columns: EVENT_EXPORT_COLUMNS, escapeFormulae: true })
       : `${EVENT_EXPORT_COLUMNS.join(',')}\n`
   );
 });
@@ -376,6 +396,17 @@ app.get('/{*splat}', (_req, res) => {
 io.on('connection', (socket) => {
   socket.emit('state:revision', getAppDataRevision());
 });
+
+const handleHttpError: ErrorRequestHandler = (error, _req, res, next) => {
+  if (res.headersSent) { next(error); return; }
+  const status = [400, 413, 415].includes(error?.status) ? error.status as number : 500;
+  if (status === 500) console.error('HTTP request failed:', error);
+  const errorText = status === 413 ? 'request body is too large'
+    : status === 415 ? 'unsupported request encoding'
+      : status === 400 ? 'invalid request body' : 'internal server error';
+  res.status(status).json({ ok: false, error: errorText });
+};
+app.use(handleHttpError);
 
 function shutdown(reason: string): void {
   if (shuttingDown) return;

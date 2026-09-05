@@ -373,16 +373,23 @@ function refreshBackupInventory(): void {
     .filter((entry) => entry.endsWith('.sqlite.json'))
     .flatMap((entry) => {
       try {
+        if (!fs.lstatSync(path.join(backupDirectory, entry)).isFile()) return [];
         const parsed = JSON.parse(
           fs.readFileSync(path.join(backupDirectory, entry), 'utf8')
         ) as Partial<BackupRecord>;
         if (
           typeof parsed.fileName !== 'string' ||
           !parsed.fileName.endsWith('.sqlite') ||
+          path.posix.basename(parsed.fileName) !== parsed.fileName ||
+          path.win32.basename(parsed.fileName) !== parsed.fileName ||
+          entry !== `${parsed.fileName}.json` ||
           !fs.existsSync(path.join(backupDirectory, parsed.fileName)) ||
+          !fs.lstatSync(path.join(backupDirectory, parsed.fileName)).isFile() ||
           !Number.isSafeInteger(parsed.createdAt) ||
+          parsed.createdAt! < 0 ||
           typeof parsed.reason !== 'string' ||
           !Number.isSafeInteger(parsed.sizeBytes) ||
+          parsed.sizeBytes! <= 0 ||
           fs.statSync(path.join(backupDirectory, parsed.fileName)).size !== parsed.sizeBytes ||
           typeof parsed.sha256 !== 'string' ||
           !/^[0-9a-f]{64}$/.test(parsed.sha256) ||

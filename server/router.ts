@@ -354,6 +354,7 @@ export const appRouter = t.router({
         if (parsed.errors?.length) {
           badRequest(parsed.errors[0].message);
         }
+        if (parsed.data.length > 10_000) badRequest('Importeer maximaal 10000 lopers tegelijk');
 
         const summary: ImportSummary = {
           created: 0,
@@ -395,7 +396,7 @@ export const appRouter = t.router({
               status: 'registered',
               registrationSource: 'import',
             };
-            const result = upsertRunnerFromImport(runnerInput);
+            const result = upsertRunnerFromImport(runnerInputSchema.parse(runnerInput));
             if (result.action === 'updated') summary.updated += 1;
             else summary.created += 1;
           } catch (err) {

@@ -240,10 +240,10 @@ function ensureDataDir(): void {
 }
 
 function run(sql: string, params: SqlValue[] = []): Database.RunResult {
+  const result = statement(sql).run(...params);
   if (writeCapture && isReplicatedMutation(sql)) {
     writeCapture.push({ sql, params: [...params] });
   }
-  const result = statement(sql).run(...params);
   if (result.changes > 0 && APP_DATA_TABLE_PATTERN.test(sql)) {
     appDataRevision += 1;
   }
@@ -268,14 +268,29 @@ function one<T>(sql: string, params: SqlValue[] = []): T | null {
 
 function statement(sql: string): PreparedStatement {
   const cached = statementCache.get(sql);
-  if (cached) return cached;
+  if (cached) {
+    statementCache.delete(sql);
+    statementCache.set(sql, cached);
+    return cached;
+  }
   const prepared = getDb().prepare(sql);
   statementCache.set(sql, prepared);
+  // IN-list lengths and remote-origin combinations produce variable SQL.
+  if (statementCache.size > 256) statementCache.delete(statementCache.keys().next().value!);
   return prepared;
 }
 
-function transaction<T>(callback: () => T): T {
-  return getDb().transaction(callback)();
+function transaction<T>(executeTransaction: () => T): T {
+  const capturedStatements = writeCapture;
+  const capturedStatementCount = capturedStatements?.length ?? 0;
+  try {
+    return getDb().transaction(executeTransaction)();
+  } catch (error) {
+    // An import can catch a failed row and continue its enclosing transaction.
+    // Its rolled-back SQL must not be replayed on another host.
+    if (capturedStatements) capturedStatements.length = capturedStatementCount;
+    throw error;
+  }
 }
 
 export function getAppDataRevision(): number {
@@ -656,6 +671,7 @@ export async function initDb(): Promise<void> {
   ensureDataDir();
   statementCache.clear();
   if (database) database.close();
+  appDataRevision += 1;
   database = new Database(DB_FILE);
   database.pragma('foreign_keys = ON');
   database.pragma('journal_mode = WAL');
@@ -1181,6 +1197,9 @@ export function commitReplicatedWrite<T>(input: {
     } finally {
       writeCapture = null;
     }
+    if (statements.length > 100_000) {
+      throw new Error('write exceeds the replication statement limit; use smaller batches');
+    }
     const createdAt = Date.now();
     const base = {
       id,
@@ -1228,9 +1247,20 @@ export function commitReplicatedWrite<T>(input: {
 export function getReplicationVector(): Record<string, number> {
   return Object.fromEntries(
     all<{ hostId: string; seq: number }>(
-      `SELECT origin_host_id AS hostId, MAX(origin_seq) AS seq
-       FROM replication_operations
-       GROUP BY origin_host_id`
+      // Seek the next origin in the existing (origin_host_id, origin_seq)
+      // unique index, then seek its maximum sequence. GROUP BY scans every
+      // operation, even when only a handful of laptops produced the history.
+      `WITH RECURSIVE origins(host_id) AS (
+         SELECT MIN(origin_host_id) FROM replication_operations
+         UNION ALL
+         SELECT (SELECT MIN(origin_host_id) FROM replication_operations
+                 WHERE origin_host_id > origins.host_id)
+         FROM origins WHERE host_id IS NOT NULL
+       )
+       SELECT host_id AS hostId,
+              (SELECT MAX(origin_seq) FROM replication_operations
+               WHERE origin_host_id = origins.host_id) AS seq
+       FROM origins WHERE host_id IS NOT NULL`
     ).map((row) => [row.hostId, row.seq])
   );
 }
@@ -1239,14 +1269,13 @@ export function getReplicationOperationsMissing(
   vector: Record<string, number>,
   limit = 250
 ): ReplicationOperation[] {
-  const origins = all<{ hostId: string }>(
-    `SELECT DISTINCT origin_host_id AS hostId
-     FROM replication_operations`
+  const origins = Object.entries(getReplicationVector()).filter(([hostId, sequence]) =>
+    !hasOwn(vector, hostId) || !Number.isFinite(vector[hostId]) || vector[hostId] < sequence
   );
   if (!origins.length) return [];
 
   const params: SqlValue[] = [];
-  const conditions = origins.map(({ hostId }) => {
+  const conditions = origins.map(([hostId]) => {
     const acknowledged = Number(
       hasOwn(vector, hostId) ? vector[hostId] : 0
     );
@@ -1413,14 +1442,14 @@ export function acknowledgeReplicationVector(
       const seq = Number(
         hasOwn(vector, originHostId) ? vector[originHostId] : 0
       );
-      getDb()
-        .prepare(
+      statement(
           `INSERT INTO replication_peer_progress (
              peer_host_id, origin_host_id, acknowledged_seq, updated_at
            ) VALUES (?, ?, ?, ?)
            ON CONFLICT(peer_host_id, origin_host_id) DO UPDATE SET
              acknowledged_seq = MAX(replication_peer_progress.acknowledged_seq, excluded.acknowledged_seq),
-             updated_at = excluded.updated_at`
+             updated_at = excluded.updated_at
+           WHERE excluded.acknowledged_seq > replication_peer_progress.acknowledged_seq`
         )
         .run(
           peerHostId,
@@ -1498,8 +1527,8 @@ function resolutionConflictId(operation: ReplicationOperation): string | null {
 }
 
 function compareReplicationOperations(
-  a: ReplicationOperation,
-  b: ReplicationOperation
+  a: Pick<ReplicationOperation, 'hlcWallMs' | 'hlcCounter' | 'originHostId' | 'originSeq'>,
+  b: Pick<ReplicationOperation, 'hlcWallMs' | 'hlcCounter' | 'originHostId' | 'originSeq'>
 ): number {
   return (
     a.hlcWallMs - b.hlcWallMs ||
@@ -1654,38 +1683,34 @@ function assertValidReplicationOperation(operation: ReplicationOperation): void 
 export function applyRemoteReplicationOperations(
   operations: ReplicationOperation[]
 ): { applied: number; duplicates: number; conflicts: number } {
-  const identity = ensureReplicationIdentity();
   if (!Array.isArray(operations) || operations.length > 1_000) {
     throw new Error('invalid replication batch');
   }
+  if (operations.length === 0) return { applied: 0, duplicates: 0, conflicts: 0 };
+  const identity = ensureReplicationIdentity();
   let duplicates = 0;
   const insertedIds: string[] = [];
   const insertedOperations: ReplicationOperation[] = [];
-  const previousLastRow = one<Parameters<typeof replicationOperationFromRow>[0]>(
-    `${REPLICATION_OPERATION_SELECT}
+  const previousLastOperation = one<Parameters<typeof compareReplicationOperations>[0]>(
+    `SELECT hlc_wall_ms AS hlcWallMs, hlc_counter AS hlcCounter,
+            origin_host_id AS originHostId, origin_seq AS originSeq
+     FROM replication_operations
      ORDER BY hlc_wall_ms DESC, hlc_counter DESC, origin_host_id DESC, origin_seq DESC
      LIMIT 1`
   );
-  const previousLastOperation = previousLastRow
-    ? replicationOperationFromRow(previousLastRow)
-    : null;
-  const seenRaceBases = new Set(
-    all<{ raceBaseKey: string }>(
-      `SELECT DISTINCT race_base_key AS raceBaseKey
-       FROM replication_operations
-       WHERE status = 'accepted' AND race_base_key IS NOT NULL`
-    ).map((row) => row.raceBaseKey)
-  );
+  const seenRaceBases = new Set<string>();
   let requiresRebuild = false;
+  for (const operation of operations) assertValidReplicationOperation(operation);
   const ordered = operations.slice().sort(compareReplicationOperations);
   const expectedVector = getReplicationVector();
 
   for (const operation of ordered) {
-    assertValidReplicationOperation(operation);
     if (operation.clusterId !== identity.clusterId) {
       throw new Error('replication cluster mismatch');
     }
-    const existing = getReplicationOperation(operation.id);
+    const existing = one<{ checksum: string }>(
+      'SELECT checksum FROM replication_operations WHERE id = ?', [operation.id]
+    );
     if (existing) {
       if (existing.checksum !== operation.checksum) {
         throw new Error(`replication operation id collision for ${operation.id}`);
@@ -1739,7 +1764,11 @@ export function applyRemoteReplicationOperations(
       requiresRebuild = true;
     }
     if (operation.raceBaseKey) {
-      if (seenRaceBases.has(operation.raceBaseKey)) requiresRebuild = true;
+      if (seenRaceBases.has(operation.raceBaseKey) || one(
+        `SELECT 1 FROM replication_operations
+         WHERE race_base_key = ? AND status = 'accepted' LIMIT 1`,
+        [operation.raceBaseKey]
+      )) requiresRebuild = true;
       seenRaceBases.add(operation.raceBaseKey);
     }
   }
@@ -1793,7 +1822,7 @@ export function applyRemoteReplicationOperations(
     }
   }
   const conflicts = insertedIds.filter(
-    (id) => getReplicationOperation(id)?.status === 'conflict'
+    (id) => one<{ status: string }>('SELECT status FROM replication_operations WHERE id = ?', [id])?.status === 'conflict'
   ).length;
   const applied = insertedIds.length - conflicts;
   return { applied, duplicates, conflicts };
