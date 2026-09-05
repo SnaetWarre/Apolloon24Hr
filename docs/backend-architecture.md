@@ -45,6 +45,11 @@ server/index.ts
 
 - Owns the Express and HTTP server.
 - Mounts tRPC at `/trpc`.
+- Rejects foreign browser origins and unconfigured DNS Host headers before
+  parsing HTTP bodies. Socket.IO applies the same admission policy.
+- Authenticates cluster requests before parsing their larger JSON bodies;
+  ordinary API bodies are capped at 8 MiB. Parser errors return short JSON
+  messages without stack traces.
 - Exposes state, clock, host information, and export endpoints under `/api`.
 - Exposes `/api/health` with database readiness, release identity, uptime, and
   backup warnings; deployments verify the exact new release through this route.
@@ -111,6 +116,9 @@ replication_conflicts
   for IPv4 LAN exchanges, so a peer's preferred interface cannot displace a
   working route. Rejects responses from an unexpected host identity.
 - Restarts UDP discovery after socket errors, including a temporary bind failure.
+- Does not follow redirects carrying cluster credentials or pairing codes.
+  Received JSON is capped at 50 MiB of decoded bytes, including chunked and
+  compressed responses; error text is capped at 8 KiB.
 - Keeps every host locally writable; timing conflicts pause only timing.
 - Allows planned timing transfer only to a reachable peer whose operation
   vector covers the controller's full vector.
@@ -138,6 +146,11 @@ replication_conflicts
 - `server/host.ts`: ranks physical LAN interfaces, calculates directed
   broadcast addresses, and refreshes automatic host selection.
 - `server/static-files.ts`: prevents static file paths escaping the build root.
+- `server/request-security.ts`: shared Host/origin checks for HTTP and Socket.IO.
+- `server/cluster-http.ts`: bounded response readers for cluster HTTP traffic.
+- `server/http-json.ts`: gzip and ETag responses, with a 32 MiB reservation
+  budget for retained raw/compressed response buffers. New revisions replace
+  their previous cache slots. This budget does not cover total process memory.
 - `shared/schemas.ts`: client/server wire contracts.
 - `shared/time.ts`: shared time formatting.
 
@@ -175,6 +188,13 @@ An invalid batch changes neither application data, the operation log, nor peer
 progress. A disconnected host continues writing locally and sends its missing
 operations after reconnecting.
 
+Nested transaction rollback also truncates captured replication SQL. A CSV
+import can skip an invalid row without replaying that rolled-back row on peers.
+Empty incoming batches return immediately, vectors seek origin maxima through
+the existing unique index, and caught-up delta requests skip operation loading.
+Unchanged acknowledgements do not update SQLite rows. Variable prepared SQL is
+retained in a 256-entry LRU cache.
+
 ## Storage And Durability
 
 - Database: `<DATA_PATH>/data/app.db`
@@ -203,6 +223,23 @@ timing failover procedures.
 The event's physical LAN is the application trust boundary. There is no user
 login. Cluster delta exchange is authenticated, and discovery is signed, but
 operator APIs and exports are intentionally reachable by devices on that LAN.
+
+Browsers must use the app's own origin. Literal IP hosts, `localhost`, the
+machine hostname (including its `.local` form), and `PUBLIC_HOST` are accepted.
+Additional DNS names belong in comma-separated `APOLLOON_ALLOWED_HOSTS`, without
+a scheme or port. Reverse proxies must preserve the original Host header;
+the Vite proxy does this too. HTTPS termination is supported. Host/origin checks
+prevent unrelated websites and unconfigured rebinding names from acting as the
+app; they do not authenticate native clients or replace LAN access controls.
+
+CSV exports escape spreadsheet formula prefixes without changing stored names.
+Input limits include 500-character runner names, 128-character identifiers and
+label names, 10000-character notes, 64 labels per runner, and 10000 queue/team
+members. CSV imports are limited to 5242880 characters and 10000 rows; imported
+profiles use the same validation as individual writes. Writes exceeding 100000
+captured SQL statements roll back instead of creating unreplicable operations.
+Very large existing bootstrap responses exceeding 50 MiB require a smaller
+dataset or a future paged bootstrap path.
 
 ## Validation
 

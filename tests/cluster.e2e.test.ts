@@ -2,8 +2,11 @@ import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
+import http from 'node:http';
 import path from 'node:path';
 import test from 'node:test';
+import Papa from 'papaparse';
+import { io } from 'socket.io-client';
 import { createTRPCClient, httpBatchLink } from '@trpc/client';
 import type { AppRouter } from '../server/router.ts';
 import type { AppSnapshot, ClusterStatus, LiveAppSnapshot, RaceHistory } from '../shared/schemas.ts';
@@ -18,6 +21,158 @@ type RunningServer = {
 
 const CLUSTER_ID = 'cluster-e2e-local-first';
 const CLUSTER_SECRET = 'cluster-e2e-secret';
+
+test('HTTP security blocks foreign origins, rebinding hosts and unauthenticated body parsing', async () => {
+  const root = testRoot('http-security');
+  const server = await startServer({ port: await freePort(), dataPath: root });
+  try {
+    for (const headers of [
+      { origin: 'https://unrelated.example' },
+      { origin: 'null' },
+      { 'sec-fetch-site': 'cross-site' },
+      { host: 'unrelated.example', origin: 'http://unrelated.example' },
+    ]) {
+      const response = await fetch(`${server.baseUrl}/api/cluster/status`, { headers });
+      assert.equal(response.status, 403);
+      await response.arrayBuffer();
+    }
+    const sameOrigin = await fetch(`${server.baseUrl}/api/state`, { headers: { origin: server.baseUrl } });
+    assert.equal(sameOrigin.status, 200);
+    await sameOrigin.arrayBuffer();
+    const unicodePairing = await fetch(`${server.baseUrl}/api/cluster/bootstrap?code=${encodeURIComponent('😀😀😀😀')}`);
+    assert.equal(unicodePairing.status, 401);
+    await unicodePairing.arrayBuffer();
+    const unauthorized = await fetch(`${server.baseUrl}/api/cluster/sync/exchange`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: '{malformed json',
+    });
+    assert.equal(unauthorized.status, 401);
+    await unauthorized.arrayBuffer();
+    const malformed = await fetch(`${server.baseUrl}/api/backups`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: '{malformed json',
+    });
+    assert.equal(malformed.status, 400);
+    assert.deepEqual(await malformed.json(), { ok: false, error: 'invalid request body' });
+    const oversized = await fetch(`${server.baseUrl}/api/backups`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ padding: 'x'.repeat(8 * 1_024 ** 2) }),
+    });
+    assert.equal(oversized.status, 413);
+    await oversized.arrayBuffer();
+    assert.equal((await fetch(`${server.baseUrl}/api/health`)).status, 200);
+  } finally {
+    await stopServer(server);
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('cluster credentials and pairing codes are never forwarded through redirects', async () => {
+  const root = testRoot('cluster-redirect');
+  const [redirectPort, destinationPort] = await Promise.all([freePort(), freePort()]);
+  let redirectedRequests = 0;
+  let receivedProbes = 0;
+  const destination = http.createServer((req, res) => {
+    req.resume(); redirectedRequests += 1; res.end('{}');
+  });
+  const redirector = http.createServer((req, res) => {
+    req.resume(); receivedProbes += 1;
+    res.writeHead(307, { location: `http://127.0.0.1:${destinationPort}/capture` });
+    res.end();
+  });
+  await Promise.all([
+    new Promise<void>((resolve) => destination.listen(destinationPort, '127.0.0.1', resolve)),
+    new Promise<void>((resolve) => redirector.listen(redirectPort, '127.0.0.1', resolve)),
+  ]);
+  let backend: RunningServer | null = null;
+  try {
+    backend = await startServer({ port: await freePort(), dataPath: root, peers: [redirectPort] });
+    await waitFor(async () => receivedProbes >= 2);
+    const joined = await fetch(`${backend.baseUrl}/api/cluster/join`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ remoteUrl: `http://127.0.0.1:${redirectPort}`, pairingCode: 'AAAAAAAA' }),
+    });
+    assert.equal(joined.status, 500);
+    await joined.arrayBuffer();
+    assert.equal(redirectedRequests, 0);
+  } finally {
+    await stopServer(backend);
+    for (const listener of [redirector, destination]) {
+      listener.closeAllConnections();
+      await new Promise<void>((resolve) => listener.close(() => resolve()));
+    }
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('Socket.IO refuses a foreign web origin and accepts the app origin', async () => {
+  const root = testRoot('socket-origin');
+  const server = await startServer({ port: await freePort(), dataPath: root });
+  try {
+    for (const [origin, expectedEvent] of [
+      ['https://unrelated.example', 'connect_error'], [server.baseUrl, 'connect'],
+    ]) {
+      const socket = io(server.baseUrl, {
+        transports: ['websocket'], extraHeaders: { Origin: origin }, reconnection: false, autoConnect: false,
+      });
+      try {
+        let connectionEvent = '';
+        socket.on('connect', () => { connectionEvent = 'connect'; });
+        socket.on('connect_error', () => { connectionEvent = 'connect_error'; });
+        socket.connect();
+        await waitFor(async () => Boolean(connectionEvent));
+        assert.equal(connectionEvent, expectedEvent);
+      } finally { socket.disconnect(); }
+    }
+  } finally {
+    await stopServer(server);
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('Vite development proxy preserves the browser origin for the backend guard', async () => {
+  const root = testRoot('dev-origin');
+  const backend = await startServer({ port: await freePort(), dataPath: root });
+  const { createServer } = await import('vite');
+  const previousApiPort = process.env.VITE_DEV_API_PORT;
+  process.env.VITE_DEV_API_PORT = String(backend.port);
+  const frontendPort = await freePort();
+  const frontend = await createServer({
+    cacheDir: path.join(root, 'vite-cache'),
+    server: { host: '127.0.0.1', port: frontendPort, strictPort: true },
+  });
+  try {
+    await frontend.listen();
+    const frontendUrl = `http://127.0.0.1:${frontendPort}`;
+    const response = await fetch(`${frontendUrl}/api/state`, { headers: { origin: frontendUrl } });
+    assert.equal(response.status, 200);
+    await response.arrayBuffer();
+  } finally {
+    await frontend.close();
+    if (previousApiPort === undefined) delete process.env.VITE_DEV_API_PORT;
+    else process.env.VITE_DEV_API_PORT = previousApiPort;
+    await stopServer(backend);
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('lap CSV exports escape user-controlled spreadsheet formulas', async () => {
+  const root = testRoot('csv-formula');
+  const server = await startServer({ port: await freePort(), dataPath: root });
+  try {
+    const client = createClient(server.port);
+    const runner = await client.runners.create.mutate({ name: '=1+1', runnerNumber: '+123', status: 'waiting' });
+    await client.race.startNext.mutate({ activeRunnerId: null, activeStartedAt: null });
+    const activeRace = (await fetchState(server.port)).race;
+    await client.race.handoff.mutate({ activeRunnerId: runner.id, activeStartedAt: activeRace.activeStartedAt });
+    const csv = await (await fetch(`${server.baseUrl}/api/export/laps.csv`)).text();
+    const rows = Papa.parse<Record<string, string>>(csv, { header: true }).data;
+    assert.equal(rows[0].name, "'=1+1");
+    assert.equal(rows[0].runner_number, "'+123");
+    assert.equal((await fetchState(server.port)).runners[0].name, '=1+1');
+  } finally {
+    await stopServer(server);
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test('standalone mode stays writable and rejects replication exchange', { timeout: 12_000 }, async () => {
   const root = testRoot('standalone');

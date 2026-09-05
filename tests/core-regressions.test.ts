@@ -939,3 +939,66 @@ test('full app snapshots reuse immutable collections until application data chan
     fs.rmSync(dataPath, { recursive: true, force: true });
   }
 });
+
+test('a rolled-back import row leaves no SQL in the committed replication record', async () => {
+  fs.rmSync(dataPath, { recursive: true, force: true });
+  const db = await import('../server/db.ts');
+  let inspectionDb: Database.Database | undefined;
+  let replicaDb: Database.Database | undefined;
+  try {
+    await db.initDb();
+    const replicaPath = path.join(dataPath, 'initial-replica.sqlite');
+    await db.backupDatabase(replicaPath);
+    inspectionDb = new Database(path.join(dataPath, 'data', 'app.db'));
+    inspectionDb.exec(`CREATE TRIGGER reject_test_queue BEFORE INSERT ON queue_entries
+      WHEN NEW.runner_id = 'rolled-back-row' BEGIN SELECT RAISE(ABORT, 'rejected test row'); END`);
+    const commandId = crypto.randomUUID();
+    db.commitReplicatedWrite({
+      id: commandId, type: 'test.partial-import', action: () => {
+        db.insertRunner({ id: 'committed-row', name: 'Keep me', runnerNumber: 'KEEP' });
+        assert.throws(() => db.insertRunner({ id: 'rolled-back-row', name: 'Rollback', runnerNumber: 'DROP' }), /rejected test row/);
+        assert.throws(() => db.insertRunner({ id: 'committed-row', name: 'Duplicate', runnerNumber: 'DUP' }), /UNIQUE/);
+        db.insertRunner({ id: 'next-row', name: 'Next valid row', runnerNumber: 'NEXT' });
+      },
+    });
+    const operation = db.getReplicationOperation(commandId)!;
+    assert.equal(operation.statements.some((statement) => statement.params.includes('rolled-back-row')), false);
+    replicaDb = new Database(replicaPath);
+    replicaDb.transaction(() => {
+      for (const statement of operation.statements) replicaDb!.prepare(statement.sql).run(...statement.params);
+    })();
+    assert.deepEqual(replicaDb.prepare('SELECT id FROM runners ORDER BY id').all(),
+      inspectionDb.prepare('SELECT id FROM runners ORDER BY id').all());
+    assert.equal(db.getAllRunners().length, 2);
+  } finally {
+    replicaDb?.close();
+    inspectionDb?.close();
+    db.closeDb();
+    fs.rmSync(dataPath, { recursive: true, force: true });
+  }
+});
+
+test('unchanged peer acknowledgements do not rewrite progress and cannot move backwards', async (context) => {
+  const db = await import('../server/db.ts');
+  let inspectionDb: Database.Database | undefined;
+  try {
+    await db.initDb();
+    inspectionDb = new Database(path.join(dataPath, 'data', 'app.db'), { readonly: true });
+    context.mock.method(Date, 'now', () => 1000);
+    db.acknowledgeReplicationVector('peer', { origin: 12 });
+    context.mock.method(Date, 'now', () => 2000);
+    db.acknowledgeReplicationVector('peer', { origin: 12 });
+    db.acknowledgeReplicationVector('peer', { origin: 2 });
+    assert.deepEqual(inspectionDb.prepare(`SELECT acknowledged_seq, updated_at
+      FROM replication_peer_progress WHERE peer_host_id = 'peer' AND origin_host_id = 'origin'`).get(),
+    { acknowledged_seq: 12, updated_at: 1000 });
+    db.acknowledgeReplicationVector('peer', { origin: 13 });
+    assert.deepEqual(inspectionDb.prepare(`SELECT acknowledged_seq, updated_at
+      FROM replication_peer_progress WHERE peer_host_id = 'peer' AND origin_host_id = 'origin'`).get(),
+    { acknowledged_seq: 13, updated_at: 2000 });
+  } finally {
+    inspectionDb?.close();
+    db.closeDb();
+    fs.rmSync(dataPath, { recursive: true, force: true });
+  }
+});

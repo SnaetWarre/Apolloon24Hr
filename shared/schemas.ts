@@ -258,31 +258,31 @@ export const publicRecordModeUpdateSchema = z.object({
 });
 
 export const runnerInputSchema = z.object({
-  id: z.string().optional(),
-  name: z.string().trim().min(1),
-  runnerNumber: z.string().nullable().optional(),
+  id: z.string().min(1).max(128).optional(),
+  name: z.string().trim().min(1).max(500),
+  runnerNumber: z.string().max(128).nullable().optional(),
   targetLaps: z.number().int().nonnegative().nullable().optional(),
   historicalAvgMs: z.number().int().nonnegative().nullable().optional(),
   historicalBestMs: z.number().int().nonnegative().nullable().optional(),
   registrationSource: registrationSourceSchema.optional(),
-  notes: z.string().optional(),
-  labels: z.array(z.string()).optional(),
+  notes: z.string().max(10_000).optional(),
+  labels: z.array(z.string().min(1).max(128)).max(64).optional(),
   status: runnerStatusSchema.optional(),
   statusSince: z.number().int().nonnegative().optional(),
 });
 export type RunnerInput = z.infer<typeof runnerInputSchema>;
 
 export const runnerPatchSchema = runnerInputSchema.partial().omit({ id: true }).extend({
-  name: z.string().trim().min(1).optional(),
+  name: z.string().trim().min(1).max(500).optional(),
 });
 export type RunnerPatch = z.infer<typeof runnerPatchSchema>;
 
 export const labelInputSchema = z.object({
-  name: z.string().trim().min(1),
-  color: z.string().optional(),
-  icon: z.string().optional(),
-  kind: z.string().optional(),
-  imageUrl: z.string().nullable().optional(),
+  name: z.string().trim().min(1).max(128),
+  color: z.string().max(64).optional(),
+  icon: z.string().max(64).optional(),
+  kind: z.string().max(64).optional(),
+  imageUrl: z.string().max(2_048).nullable().optional(),
   targetLaps: z.number().int().nonnegative().nullable().optional(),
   sortOrder: z.number().int().nonnegative().nullable().optional(),
 });
@@ -292,21 +292,21 @@ export const labelPatchSchema = labelInputSchema.partial();
 export type LabelPatch = z.infer<typeof labelPatchSchema>;
 
 export const queueReorderSchema = z.object({
-  ids: z.array(z.string()).min(1),
+  ids: z.array(z.string().min(1).max(128)).min(1).max(10_000),
 });
 
 export const temporaryTeamMembersSchema = z.object({
-  labelId: z.string().min(1),
-  runnerIds: z.array(z.string()),
+  labelId: z.string().min(1).max(128),
+  runnerIds: z.array(z.string().min(1).max(128)).max(10_000),
 });
 
 export const temporaryTeamActiveSchema = z.object({
-  labelId: z.string().min(1),
+  labelId: z.string().min(1).max(128),
   active: z.boolean(),
 });
 
 export const runnerIdSchema = z.object({
-  id: z.string().min(1),
+  id: z.string().min(1).max(128),
 });
 
 export const runnerStatusUpdateSchema = runnerIdSchema.extend({
@@ -321,7 +321,7 @@ export const raceStateExpectationSchema = z.object({
 export type RaceStateExpectation = z.infer<typeof raceStateExpectationSchema>;
 
 export const importCsvSchema = z.object({
-  csvText: z.string().min(1),
+  csvText: z.string().min(1).max(5 * 1_024 ** 2),
 });
 
 export type ImportSummary = {

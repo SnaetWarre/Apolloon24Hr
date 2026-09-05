@@ -133,6 +133,35 @@ test('retention keeps recent, hourly, daily, and bounded manual recovery points'
   assert.ok(keep.size <= 146);
 });
 
+test('backup inventory rejects path traversal, metadata aliases and symlinked databases', async () => {
+  const db = await import('../server/db.ts');
+  const backups = await import('../server/backups.ts');
+  try {
+    await db.initDb();
+    const backupDirectory = path.join(dataPath, 'backups');
+    fs.mkdirSync(backupDirectory, { recursive: true });
+    fs.writeFileSync(path.join(dataPath, 'outside.sqlite'), 'outside backup directory');
+    fs.writeFileSync(path.join(backupDirectory, 'inside.sqlite'), 'inside');
+    const manifest = (fileName: string, sizeBytes: number) => JSON.stringify({
+      fileName, sizeBytes, reason: 'manual', createdAt: Date.now(), sha256: 'a'.repeat(64), verified: true,
+    });
+    fs.writeFileSync(path.join(backupDirectory, 'traversal.sqlite.json'), manifest('../outside.sqlite', 24));
+    fs.writeFileSync(path.join(backupDirectory, 'alias.sqlite.json'), manifest('inside.sqlite', 6));
+    if (process.platform !== 'win32') {
+      fs.symlinkSync(path.join(dataPath, 'outside.sqlite'), path.join(backupDirectory, 'link.sqlite'));
+      fs.writeFileSync(path.join(backupDirectory, 'link.sqlite.json'), manifest('link.sqlite', 24));
+    }
+    backups.startBackupService();
+    assert.equal(backups.backupStatus().retainedCount, 0);
+    assert.equal(backups.latestBackupPath(), null);
+    assert.equal(fs.readFileSync(path.join(dataPath, 'outside.sqlite'), 'utf8'), 'outside backup directory');
+  } finally {
+    await backups.stopBackupService();
+    db.closeDb();
+    fs.rmSync(dataPath, { recursive: true, force: true });
+  }
+});
+
 test('retention enforces a byte ceiling while preserving the newest recovery points', async () => {
   const { backupsToRetain } = await import('../server/backups.ts');
   const now = Date.UTC(2026, 7, 3, 20, 0, 0);

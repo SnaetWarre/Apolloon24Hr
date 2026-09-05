@@ -49,6 +49,7 @@ import {
 } from './cluster-protocol.js';
 import { isClusterEnabled } from './cluster-policy.js';
 import { encodedJsonRequest, sendJson } from './http-json.js';
+import { readClusterResponseJson, readClusterResponseText } from './cluster-http.js';
 import {
   CLUSTER_PROTOCOL_VERSION,
   clusterCompatibilityError,
@@ -365,10 +366,10 @@ export function registerClusterRoutes(app: Express): void {
     try {
       const response = await fetch(
         `${remoteUrl}/api/cluster/bootstrap?code=${encodeURIComponent(code)}&compatibility=${encodeURIComponent(JSON.stringify(currentCompatibility()))}`,
-        { signal: AbortSignal.timeout(Math.max(requestTimeoutMs, 10_000)) }
+        { signal: AbortSignal.timeout(Math.max(requestTimeoutMs, 10_000)), redirect: 'error' }
       );
       if (!response.ok) {
-        const reason = await response.text();
+        const reason = await readClusterResponseText(response, 8_192);
         const remoteError = responseErrorMessage(reason);
         throw new Error(
           response.status === 401
@@ -376,7 +377,7 @@ export function registerClusterRoutes(app: Express): void {
             : remoteError || `De andere laptop antwoordde met ${response.status}: ${reason.slice(0, 160)}`
         );
       }
-      const payload = (await response.json()) as Partial<BootstrapPayload>;
+      const payload = await readClusterResponseJson<Partial<BootstrapPayload>>(response);
       const remoteCompatibility = parseClusterCompatibility(payload.compatibility);
       const compatibilityIssue =
         payload.protocol === CLUSTER_PROTOCOL_VERSION
@@ -734,10 +735,11 @@ async function syncPeer(peer: PeerState): Promise<void> {
           : {}),
       },
       body: encodedPayload.body,
+      redirect: 'error',
       signal: AbortSignal.any([probeController.signal, AbortSignal.timeout(requestTimeoutMs)]),
     });
     if (!response.ok) {
-      const responseText = await response.text();
+      const responseText = await readClusterResponseText(response, 8_192);
       if (!probeIsCurrent()) return;
       const responseError = responseErrorMessage(responseText);
       if (
@@ -752,7 +754,7 @@ async function syncPeer(peer: PeerState): Promise<void> {
       }
       throw new Error(responseError || `sync failed: ${response.status}`);
     }
-    const remote = (await response.json()) as ExchangePayload;
+    const remote = await readClusterResponseJson<ExchangePayload>(response);
     if (!probeIsCurrent()) return;
     const remoteVector = normalizeOperationVector(remote.vector);
     const remoteUrl = normalizeUrl(remote.url);
@@ -1003,8 +1005,7 @@ function pairingCode(clusterSecret: string): string {
 function validPairingCode(value: unknown, clusterSecret: string): boolean {
   const expected = pairingCode(clusterSecret);
   const received = String(value || '').trim().toUpperCase();
-  if (received.length !== expected.length) return false;
-  return crypto.timingSafeEqual(Buffer.from(received), Buffer.from(expected));
+  return secureEqual(received, expected);
 }
 
 function normalizeUrl(value: unknown): string {
