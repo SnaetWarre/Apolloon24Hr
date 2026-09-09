@@ -1,3 +1,4 @@
+import { workspaceChartPalette } from '../../lib/chartPalette';
 import React from 'react';
 import {
   BarController,
@@ -943,8 +944,8 @@ function DraftingScatterChart({ firstAnalysis, secondAnalysis }: { firstAnalysis
         interaction: { mode: 'nearest', intersect: false },
         plugins: chartPlugins(formatSeconds),
         scales: {
-          x: { type: 'linear', min: -35, max: 35, title: axisTitle('Positie: voor (-) of achter (+), seconden'), ticks: { color: '#64748b' }, grid: { color: '#eef2f7' } },
-          y: { title: axisTitle('Rondetijd'), ticks: { color: '#64748b', callback: (value) => formatSeconds(Number(value)) }, grid: { color: '#e2e8f0' } },
+          x: { type: 'linear', min: -35, max: 35, title: axisTitle('Positie: voor (-) of achter (+), seconden'), ticks: { color: workspaceChartPalette.muted }, grid: { color: workspaceChartPalette.grid } },
+          y: { title: axisTitle('Rondetijd'), ticks: { color: workspaceChartPalette.muted, callback: (value) => formatSeconds(Number(value)) }, grid: { color: workspaceChartPalette.grid } },
         },
       },
     }} />
@@ -1109,8 +1110,8 @@ function xyChartOptions(
     interaction: { mode: 'nearest', intersect: false },
     plugins: chartPlugins(formatter),
     scales: {
-      x: { type: 'linear', min: 0, title: axisTitle(xAxisTitle), ticks: { color: '#64748b' }, grid: { color: '#eef2f7' } },
-      y: { beginAtZero, title: axisTitle(yAxisTitle), ticks: { color: '#64748b', callback: (value) => formatter(Number(value)) }, grid: { color: '#e2e8f0' } },
+      x: { type: 'linear', min: 0, title: axisTitle(xAxisTitle), ticks: { color: workspaceChartPalette.muted }, grid: { color: workspaceChartPalette.grid } },
+      y: { beginAtZero, title: axisTitle(yAxisTitle), ticks: { color: workspaceChartPalette.muted, callback: (value) => formatter(Number(value)) }, grid: { color: workspaceChartPalette.grid } },
     },
   };
 }
@@ -1127,21 +1128,21 @@ function categoryChartOptions(
     interaction: { mode: 'nearest', intersect: false },
     plugins: chartPlugins(formatter),
     scales: {
-      x: { title: axisTitle(xAxisTitle), ticks: { color: '#64748b', maxTicksLimit: 18 }, grid: { color: '#eef2f7' } },
-      y: { beginAtZero: true, title: axisTitle(yAxisTitle), ticks: { color: '#64748b', callback: (value) => formatter(Number(value)) }, grid: { color: '#e2e8f0' } },
+      x: { title: axisTitle(xAxisTitle), ticks: { color: workspaceChartPalette.muted, maxTicksLimit: 18 }, grid: { color: workspaceChartPalette.grid } },
+      y: { beginAtZero: true, title: axisTitle(yAxisTitle), ticks: { color: workspaceChartPalette.muted, callback: (value) => formatter(Number(value)) }, grid: { color: workspaceChartPalette.grid } },
     },
   };
 }
 
 function chartPlugins(formatter: (value: number) => string) {
   return {
-    legend: { position: 'top' as const, labels: { boxWidth: 14, color: '#162033', font: { weight: 'bold' as const } } },
+    legend: { position: 'top' as const, labels: { boxWidth: 14, color: workspaceChartPalette.text, font: { weight: 'bold' as const } } },
     tooltip: { callbacks: { label: (context: { dataset: { label?: string }; parsed: { y: number | null } }) => `${context.dataset.label}: ${context.parsed.y == null ? 'geen data' : formatter(context.parsed.y)}` } },
   };
 }
 
 function axisTitle(text: string) {
-  return { display: true, text, color: '#64748b', font: { weight: 'bold' as const } };
+  return { display: true, text, color: workspaceChartPalette.muted, font: { weight: 'bold' as const } };
 }
 
 function teamColor(teamId: number, fallbackIndex = 0): string {

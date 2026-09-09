@@ -1,3 +1,4 @@
+import { workspaceChartPalette } from '../lib/chartPalette';
 import React from 'react';
 import {
   BarController,
@@ -459,7 +460,7 @@ function RollingLapTrendChart({ points }: { points: ReturnType<typeof buildRolli
             position: 'top',
             labels: {
               boxWidth: 14,
-              color: '#162033',
+              color: workspaceChartPalette.text,
               font: { weight: 'bold' },
             },
           },
@@ -485,17 +486,17 @@ function RollingLapTrendChart({ points }: { points: ReturnType<typeof buildRolli
             title: {
               display: true,
               text: 'Race-uur',
-              color: '#64748b',
+              color: workspaceChartPalette.muted,
               font: { weight: 'bold' },
             },
             ticks: {
-              color: '#64748b',
+              color: workspaceChartPalette.muted,
               callback(value) {
                 return `${formatNumber(Number(value), 1)}u`;
               },
             },
             grid: {
-              color: '#eef2f7',
+              color: workspaceChartPalette.grid,
             },
           },
           y: {
@@ -503,17 +504,17 @@ function RollingLapTrendChart({ points }: { points: ReturnType<typeof buildRolli
             title: {
               display: true,
               text: 'Gemiddelde rondetijd',
-              color: '#64748b',
+              color: workspaceChartPalette.muted,
               font: { weight: 'bold' },
             },
             ticks: {
-              color: '#64748b',
+              color: workspaceChartPalette.muted,
               callback(value) {
                 return formatDurationMs(Number(value) * 1000);
               },
             },
             grid: {
-              color: '#e2e8f0',
+              color: workspaceChartPalette.grid,
             },
           },
         },
@@ -558,8 +559,8 @@ function RacePaceChart({ buckets }: { buckets: ReturnType<typeof buildTimeBucket
             type: 'line',
             label: 'Gemiddelde rondetijd',
             data: buckets.map((bucket) => (bucket.averageMs == null ? null : bucket.averageMs / 1000)),
-            borderColor: '#162033',
-            backgroundColor: '#162033',
+            borderColor: workspaceChartPalette.text,
+            backgroundColor: workspaceChartPalette.text,
             borderWidth: 3,
             pointRadius: 4,
             pointHoverRadius: 6,
@@ -582,7 +583,7 @@ function RacePaceChart({ buckets }: { buckets: ReturnType<typeof buildTimeBucket
             position: 'top',
             labels: {
               boxWidth: 14,
-              color: '#162033',
+              color: workspaceChartPalette.text,
               font: { weight: 'bold' },
             },
           },
@@ -604,15 +605,15 @@ function RacePaceChart({ buckets }: { buckets: ReturnType<typeof buildTimeBucket
             title: {
               display: true,
               text: 'Rondes per uur',
-              color: '#64748b',
+              color: workspaceChartPalette.muted,
               font: { weight: 'bold' },
             },
             ticks: {
               precision: 0,
-              color: '#64748b',
+              color: workspaceChartPalette.muted,
             },
             grid: {
-              color: '#e2e8f0',
+              color: workspaceChartPalette.grid,
             },
           },
           seconds: {
@@ -621,11 +622,11 @@ function RacePaceChart({ buckets }: { buckets: ReturnType<typeof buildTimeBucket
             title: {
               display: true,
               text: 'Gemiddelde rondetijd',
-              color: '#64748b',
+              color: workspaceChartPalette.muted,
               font: { weight: 'bold' },
             },
             ticks: {
-              color: '#64748b',
+              color: workspaceChartPalette.muted,
               callback(value) {
                 return formatDurationMs(Number(value) * 1000);
               },
@@ -636,7 +637,7 @@ function RacePaceChart({ buckets }: { buckets: ReturnType<typeof buildTimeBucket
           },
           x: {
             ticks: {
-              color: '#64748b',
+              color: workspaceChartPalette.muted,
               font: { weight: 'bold' },
             },
             grid: {

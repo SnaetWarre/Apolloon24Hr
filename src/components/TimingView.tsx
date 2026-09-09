@@ -13,7 +13,7 @@ export function TimingView() {
   const { laps } = useRaceHistory({ scope: 'recent', limit: 250 });
   const { cluster } = useClusterStatus();
   const { handoff, startNext, undoLastHandoff, finishRace, claimTimingControl } = useAppActions();
-  const [message, setMessage] = React.useState<string | null>(null);
+  const [actionError, setActionError] = React.useState<string | null>(null);
   const [handoffBusy, setHandoffBusy] = React.useState(false);
   const [lastAction, setLastAction] = React.useState<string | null>(null);
   const [finishConfirmStep, setFinishConfirmStep] = React.useState<0 | 1 | 2>(0);
@@ -37,14 +37,14 @@ export function TimingView() {
       if (handoffBusyRef.current) return false;
       handoffBusyRef.current = true;
       setHandoffBusy(true);
-      setMessage(null);
+      setActionError(null);
       setLastAction(null);
       try {
         await action();
         if (successMessage) setLastAction(successMessage);
         return true;
       } catch (err) {
-        setMessage(err instanceof Error ? err.message : 'Timing actie mislukt');
+        setActionError(err instanceof Error ? err.message : 'Timing actie mislukt');
         return false;
       } finally {
         handoffBusyRef.current = false;
@@ -137,7 +137,7 @@ export function TimingView() {
       <div className="hero hero--compact">
         <div>
           <span className="page-kicker">Telsysteem 2</span>
-          <h1 className="app-title">Telsysteem 2 - Timing</h1>
+          <h1 className="app-title">Timing</h1>
           <p className="tagline">Snelle tijdsregistratie en gecontroleerde loperswissel.</p>
         </div>
       </div>
@@ -229,8 +229,8 @@ export function TimingView() {
         </button>
       </div>
 
-      {message && <div className="warning-banner">{message}</div>}
-      {lastAction && <div className="success-banner">{lastAction}</div>}
+      {actionError && <div className="warning-banner" role="alert">{actionError}</div>}
+      {lastAction && <div className="success-banner" role="status">{lastAction}</div>}
 
       <div className="stats-grid">
         <div className="stat-panel">

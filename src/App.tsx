@@ -60,8 +60,9 @@ export function AppRoot() {
 
   return (
     <Shell>
+      <a className="skip-link" href="#workspace">Naar inhoud</a>
       {pathname !== '/' && <TopNav />}
-      {outlet}
+      <main id="workspace" tabIndex={-1}>{outlet}</main>
     </Shell>
   );
 }
@@ -83,8 +84,8 @@ export function QueuePage() {
       <div className="hero hero--compact">
         <div>
           <span className="page-kicker">Telsysteem 1</span>
-          <h1 className="app-title">Apolloon telsysteem</h1>
-          <p className="tagline">Telsysteem 1 - wachtrij en wisselzone</p>
+          <h1 className="app-title">Wachtrij &amp; wisselzone</h1>
+          <p className="tagline">Van opwarming tot de volgende ronde.</p>
         </div>
       </div>
       <div className="race-strip">
@@ -197,11 +198,11 @@ function TopNav() {
     preload?: () => void;
   }> = [
     { path: '/', label: 'Start' },
-    { path: '/queue', label: 'Telsysteem 1' },
-    { path: '/timing', label: 'Telsysteem 2' },
+    { path: '/queue', label: 'Wachtrij' },
+    { path: '/timing', label: 'Timing' },
     { path: '/analysis', label: 'Analyse', preload: preloadAnalysisView },
     { path: '/tactics', label: "Kobe's tactiek", preload: preloadKobeTacticsView },
-    { path: '/admin', label: 'Admin', preload: preloadAdminView },
+    { path: '/admin', label: 'Beheer', preload: preloadAdminView },
   ];
 
   return (

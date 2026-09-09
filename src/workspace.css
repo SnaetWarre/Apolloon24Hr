@@ -1,0 +1,164 @@
+/* Operator workspace. Public displays keep their own light, distance-readable palette. */
+body:has(.app-root) {
+  background: #191919;
+}
+
+.app-root {
+  color-scheme: dark;
+  --bg: #191919;
+  --panel: #222222;
+  --panel-soft: #1d1d1d;
+  --panel-strong: #353535;
+  --text: #eeeeee;
+  --muted: #a6a6a6;
+  --muted-strong: #c5c5c5;
+  --line: #363636;
+  --line-strong: #505050;
+  --blue: #286bd4;
+  --blue-dark: #94bfff;
+  --blue-soft: #23334b;
+  --blue-faint: #252d38;
+  --green: #238247;
+  --green-soft: #203127;
+  --green-ink: #9ad7af;
+  --green-line: #385b43;
+  --amber: #a86612;
+  --amber-soft: #342c20;
+  --amber-ink: #edc281;
+  --amber-line: #655034;
+  --red: #bb3038;
+  --red-soft: #382426;
+  --red-ink: #ffacb0;
+  --red-line: #714045;
+  --focus-ring: 0 0 0 3px #94bfff;
+  color: var(--text);
+  padding: 0 clamp(16px, 2.5vw, 40px) 40px;
+}
+
+.app-root main { min-width: 0; }
+.app-root main:focus { outline: none; box-shadow: none; }
+.app-root ::selection { background: #365f96; color: white; }
+.app-root input::placeholder, .app-root textarea::placeholder { color: var(--muted); }
+.app-root input[type="checkbox"] { accent-color: var(--blue); }
+.app-root .btn--primary:hover { background: #225dbb; }
+.app-root .btn--ghost { color: var(--text); }
+.app-root .btn:disabled { transform: none; }
+.app-root .modal { border-color: var(--line-strong); }
+.app-root .modal-backdrop { background: rgb(0 0 0 / 65%); }
+.app-root .label-pill { border-radius: 5px; }
+.app-root .source-badge, .app-root .status-badge { text-transform: none; }
+.app-root .readiness-summary, .app-root .tactics-source-pill,
+.app-root .tactics-live-badge { border-radius: 6px; }
+
+.skip-link {
+  position: fixed;
+  top: 8px;
+  left: 16px;
+  z-index: 30;
+  transform: translateY(-160%);
+  padding: 12px 18px;
+  background: var(--panel);
+  color: var(--text);
+}
+.skip-link:focus { transform: none; }
+
+.app-root .top-nav {
+  min-height: 76px;
+  margin-bottom: 12px;
+  padding: 10px 0;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: var(--bg);
+  box-shadow: none;
+}
+.app-root .top-nav__brand { font-size: 17px; letter-spacing: -0.03em; }
+.app-root .top-nav__logo { border-radius: 6px; }
+.app-root .nav-link { min-height: 42px; font-weight: 550; }
+.app-root .nav-link--active {
+  background: var(--panel-strong);
+  color: var(--text);
+  border-color: var(--line-strong);
+}
+.app-root .hero--compact { border: 0; padding: 22px 0 24px; margin-bottom: 0; }
+.app-root .app-title { font-weight: 650; letter-spacing: -0.04em; }
+.app-root .page-kicker { font-weight: 550; color: var(--muted); }
+.app-root .tagline { font-size: 14px; }
+.app-root .panel h2 { font-size: 19px; font-weight: 600; }
+.app-root .panel { padding: 22px; }
+
+.home-hero {
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  padding: 64px 0 38px;
+  margin-bottom: 32px;
+}
+.home-hero .hero-logo { filter: invert(1); width: 148px; margin-bottom: 36px; }
+.home-hero .app-title { font-size: clamp(38px, 5vw, 64px); }
+.home-hero .tagline { margin-top: 16px; }
+.role-sections { gap: 32px; }
+.role-section h2 { margin-bottom: 14px; font-weight: 550; }
+.role-card { min-height: 108px; padding: 22px; }
+.role-card__title { font-weight: 600; }
+.role-section--operations .role-card { min-height: 148px; border-top: 2px solid var(--apolloon-blue); }
+.role-section--operations .role-card__title { font-size: 23px; }
+.role-card__arrow { color: var(--blue-dark); }
+.app-root .host-hint { color: var(--muted); background: transparent; overflow-wrap: anywhere; }
+
+.app-root .race-strip { gap: 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.app-root .race-strip > div { border: 0; border-radius: 0; padding: 14px 20px; }
+.app-root .race-strip > div + div { border-left: 1px solid var(--line); }
+.app-root .race-strip > div:first-child { border-left: 3px solid var(--apolloon-blue); }
+.app-root .race-strip strong { font-weight: 600; }
+.app-root .header-bar { padding: 0; gap: 0; overflow: hidden; }
+.queue-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; width: 100%; padding: 14px; }
+.board-search { display: flex; align-items: center; gap: 12px; margin-left: auto; flex: 0 1 490px; }
+.board-search > span { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.board-search .input { flex: 1; max-width: none; background: var(--panel-soft); }
+.workspace-status { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; width: 100%; padding: 9px 14px; border-top: 1px solid var(--line); background: var(--panel-soft); }
+.workspace-status .cluster-pill { min-height: 30px; flex-wrap: wrap; font-size: 12px; padding: 6px 9px; }
+.workspace-status .header-hint { background: transparent; border: 0; padding: 0; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; white-space: normal; }
+.app-root .column { padding: 12px; }
+.app-root .column-title { font-size: 14px; font-weight: 600; }
+.app-root .column-count { border-radius: 5px; }
+.app-root .card-side { min-width: 88px; }
+.app-root .runner-title { font-weight: 600; align-items: flex-start; }
+.app-root .runner-number { font-family: ui-monospace, monospace; font-size: 12px; }
+.app-root .card-profile-btn { background: transparent; color: var(--muted-strong); border-color: var(--line); }
+.app-root .card-profile-btn:hover { background: var(--blue-soft); color: var(--blue-dark); border-color: var(--blue-dark); }
+.app-root .queue-badge { background: var(--blue-soft); color: var(--blue-dark); }
+.app-root .timing-card strong { font-size: clamp(32px, 4vw, 60px); font-weight: 600; }
+.app-root .live-time { font-family: ui-monospace, SFMono-Regular, monospace; font-weight: 500; }
+.app-root .timing-actions .btn--xl { flex: 1; max-width: 680px; }
+.app-root .handoff-preview { border-color: var(--line); border-left: 3px solid var(--green-ink); }
+.app-root .stat-panel strong { font-weight: 600; }
+.app-root .danger-zone { background: transparent; }
+.app-root .danger-zone h2 { font-size: 16px; font-weight: 600; }
+.app-root .table-wrap { border-radius: 6px; }
+.app-root tbody tr:last-child td { border-bottom: 0; }
+
+@media (max-width: 760px) {
+  .app-root { padding: 0 12px 24px; }
+  .app-root .top-nav { gap: 12px; padding: 14px 0; }
+  .app-root .top-nav__links { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .app-root .nav-link { padding: 8px 4px; }
+  .app-root .hero--compact { padding: 20px 0; }
+  .app-root .home-hero { padding: 32px 0 28px; }
+  .home-hero .hero-logo { margin-bottom: 24px; }
+  .role-section--operations .role-card { min-height: 120px; }
+  .app-root .panel { padding: 16px; }
+  .queue-controls > .btn { flex: 1; }
+  .board-search { flex: 1 1 100%; flex-direction: column; align-items: stretch; gap: 6px; }
+  .workspace-status { align-items: flex-start; flex-direction: column; }
+  .workspace-status .header-hint { margin-left: 0; }
+  .app-root .race-strip { grid-template-columns: minmax(0, 1fr); }
+  .app-root .race-strip > div + div { border-left: 0; border-top: 1px solid var(--line); }
+  .app-root .timing-card { min-height: 0; padding: 20px; }
+  .app-root .timing-card strong { margin: 12px 0; }
+  .app-root .timing-card .live-time { margin-top: 12px; font-size: 32px; }
+  .app-root .timing-actions { align-items: stretch; flex-direction: column; }
+  .app-root .timing-actions .btn { width: 100%; }
+  .app-root .readiness-list { grid-template-columns: minmax(0, 1fr); }
+}
