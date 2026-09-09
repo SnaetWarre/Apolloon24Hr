@@ -81,6 +81,7 @@ export function QueuePage() {
 
   return (
     <>
+      <div className="queue-heading">
       <div className="hero hero--compact">
         <div>
           <span className="page-kicker">Telsysteem 1</span>
@@ -98,6 +99,7 @@ export function QueuePage() {
           <span className="muted-label">Volgende</span>
           <strong>{nextRunner ? runnerLabel(nextRunner) : 'Geen loper in wachtrij'}</strong>
         </div>
+      </div>
       </div>
       <AppHeader
         onOpenProfile={(runnerId) => {

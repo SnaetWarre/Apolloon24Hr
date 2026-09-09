@@ -76,11 +76,7 @@ const selectTacticsData = ({ race }: LiveAppSnapshot) => ({ race });
 export function KobeTacticsView() {
   const { race } = useAppData(selectTacticsData);
   useClockTick(30_000, race.raceStartedAt != null && race.raceFinishedAt == null);
-  const {
-    laps,
-    loading: historyLoading,
-    error: historyError,
-  } = useRaceHistory({ scope: 'full' });
+  const { laps, loading: historyLoading, error: historyError } = useRaceHistory({ scope: 'full' });
   const [section, setSection] = React.useState<TacticsSection>('live');
   const storedHistoricalRace = React.useMemo(loadStoredHistoricalRace, []);
   const [historicalRace, setHistoricalRace] = React.useState<HistoricalRace | null>(storedHistoricalRace);
@@ -105,7 +101,9 @@ export function KobeTacticsView() {
       })
       .catch((error) => {
         if (!cancelled) {
-          setHistoricalError(error instanceof Error ? error.message : 'De Quivr-referentie kon niet worden geladen.');
+          setHistoricalError(
+            error instanceof Error ? error.message : 'De Quivr-referentie kon niet worden geladen.'
+          );
         }
       });
     return () => {
@@ -373,6 +371,16 @@ function LiveTacticsSection({
         />
       </section>
 
+      <div className="tactics-planning-layout">
+      <section className="panel tactics-forecast">
+        <TacticsSectionHeader
+          kicker="Voortgang"
+          title="Live tegenover doel en vorig jaar"
+          text="Elke nieuwe ronde uit het telsysteem wordt automatisch toegevoegd. De stippellijn toont het gekozen doelverloop tot het einde van de race."
+        />
+        <RaceProgressChart points={progressPoints} showLive showTarget />
+      </section>
+
       <section className="panel tactics-scenario-panel">
         <TacticsSectionHeader
           kicker="Scenario"
@@ -449,6 +457,8 @@ function LiveTacticsSection({
           </div>
         </div>
 
+        <details className="tactics-hour-editor">
+          <summary>Doeltempo per uur aanpassen</summary>
         <div className="tactics-hourly-header">
           <div>
             <strong>Doeltempo per race-uur</strong>
@@ -485,17 +495,13 @@ function LiveTacticsSection({
             </label>
           ))}
         </div>
+        </details>
       </section>
 
-      <section className="panel">
-        <TacticsSectionHeader
-          kicker="Voortgang"
-          title="Live tegenover doel en vorig jaar"
-          text="Elke nieuwe ronde uit het telsysteem wordt automatisch toegevoegd. De stippellijn toont het gekozen doelverloop tot het einde van de race."
-        />
-        <RaceProgressChart points={progressPoints} showLive showTarget />
-      </section>
+      </div>
 
+      <details className="tactics-analysis-details">
+        <summary>Tempotrends, vergelijking &amp; rondecontrole</summary>
       <section className="panel">
         <TacticsSectionHeader
           kicker="Tempo"
@@ -536,6 +542,8 @@ function LiveTacticsSection({
         </div>
         <RecentLapsTable laps={laps} minimumLapSeconds={minimumLapSeconds} maximumLapSeconds={maximumLapSeconds} />
       </section>
+
+      </details>
 
       {historicalRace && (
         <HistoricalDatasetManager
