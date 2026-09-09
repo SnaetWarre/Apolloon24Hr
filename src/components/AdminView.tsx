@@ -1,3 +1,4 @@
+import { SectionNavigation } from './SectionNavigation';
 import React from 'react';
 import { flexRender, getCoreRowModel, useReactTable, type ColumnDef } from '@tanstack/react-table';
 import { useAppActions, useAppData, useClusterStatus } from '../app/index';
@@ -17,7 +18,17 @@ const selectAdminData = ({ labels, runners, settings, temporaryTeams, host, race
   race,
 });
 
+type AdminSection = 'preparation' | 'runners' | 'labels' | 'system' | 'public';
+const ADMIN_SECTIONS: ReadonlyArray<{ id: AdminSection; label: string }> = [
+  { id: 'preparation', label: 'Voorbereiding' },
+  { id: 'runners', label: 'Lopers' },
+  { id: 'labels', label: 'Ploegen & labels' },
+  { id: 'public', label: 'Publiek' },
+  { id: 'system', label: 'Systeem & herstel' },
+];
+
 export function AdminView() {
+  const [activeSection, setActiveSection] = React.useState<AdminSection>('preparation');
   const { labels, runners, settings, temporaryTeams, host, race } = useAppData(selectAdminData);
   const { cluster, error: clusterError } = useClusterStatus();
   const {
@@ -62,22 +73,21 @@ export function AdminView() {
   const [backupSaving, setBackupSaving] = React.useState(false);
   const [backupMessage, setBackupMessage] = React.useState<string | null>(null);
   const [compactionSaving, setCompactionSaving] = React.useState(false);
-  const [clusterConflicts, setClusterConflicts] = React.useState<Array<{
-    id: string;
-    kind: 'timing' | 'data';
-    operationIds: string[];
-    createdAt: number;
-    operations: Array<{
+  const [clusterConflicts, setClusterConflicts] = React.useState<
+    Array<{
       id: string;
-      originHostId: string;
-      type: string;
+      kind: 'timing' | 'data';
+      operationIds: string[];
       createdAt: number;
-    }>;
-  }>>([]);
-  const readinessChecks = React.useMemo(
-    () => buildEventReadiness(cluster, race),
-    [cluster, race]
-  );
+      operations: Array<{
+        id: string;
+        originHostId: string;
+        type: string;
+        createdAt: number;
+      }>;
+    }>
+  >([]);
+  const readinessChecks = React.useMemo(() => buildEventReadiness(cluster, race), [cluster, race]);
   const readiness = readinessSummary(readinessChecks);
 
   React.useEffect(() => {
@@ -128,10 +138,7 @@ export function AdminView() {
     }
   }
 
-  async function chooseConflictVersion(
-    conflictId: string,
-    selectedOperationId: string
-  ) {
+  async function chooseConflictVersion(conflictId: string, selectedOperationId: string) {
     if (
       !window.confirm(
         'Deze timingversie wordt de gekozen geschiedenis voor alle laptops. Controleer het tijdstip zorgvuldig. Doorgaan?'
@@ -178,9 +185,7 @@ export function AdminView() {
     setBackupMessage(null);
     try {
       const backup = await createBackup();
-      setBackupMessage(
-        `Backup gecontroleerd en opgeslagen om ${formatClockTimeMs(backup.createdAt)}.`
-      );
+      setBackupMessage(`Backup gecontroleerd en opgeslagen om ${formatClockTimeMs(backup.createdAt)}.`);
     } catch (err) {
       setBackupMessage(err instanceof Error ? err.message : 'Backup maken mislukt');
     } finally {
@@ -194,7 +199,8 @@ export function AdminView() {
       !window.confirm(
         'Apolloon maakt eerst een geverifieerde herstelbackup en verkleint daarna het SQLite-bestand. Dit kan alleen wanneer de race niet actief is. Doorgaan?'
       )
-    ) return;
+    )
+      return;
     setCompactionSaving(true);
     setBackupMessage(null);
     try {
@@ -301,7 +307,10 @@ export function AdminView() {
     const q = runnerQuery.trim().toLowerCase();
     const filtered = q
       ? runners.filter((runner) => {
-          const labelText = runner.labels.map((label) => label.name).join(' ').toLowerCase();
+          const labelText = runner.labels
+            .map((label) => label.name)
+            .join(' ')
+            .toLowerCase();
           return (
             runner.name.toLowerCase().includes(q) ||
             (runner.runnerNumber || '').toLowerCase().includes(q) ||
@@ -353,490 +362,514 @@ export function AdminView() {
         </div>
       </div>
 
-      <div className="admin-dashboard">
-        <section className={`panel readiness-panel readiness-panel--${readiness} admin-dashboard__full-width`}>
-          <div className="readiness-heading">
-            <div>
-              <h2>Wedstrijdgereedheid</h2>
-              <p className="panel-copy">
-                Eén overzicht van de herstel-, synchronisatie- en timingvoorwaarden.
-              </p>
-            </div>
-            <strong className={`readiness-summary readiness-summary--${readiness}`}>
-              {readiness === 'ready'
-                ? 'Klaar'
-                : readiness === 'warning'
-                  ? 'Aandacht nodig'
-                  : 'Niet klaar'}
-            </strong>
-          </div>
-          {clusterError && (
-            <div className="warning-banner" role="alert">
-              De actuele systeemstatus kon niet worden vernieuwd: {clusterError.message}
-            </div>
+      <div className="management-workspace">
+        <aside className="management-navigation">
+          <SectionNavigation
+            label="Beheeronderdelen"
+            sections={ADMIN_SECTIONS}
+            activeSectionId={activeSection}
+            onSectionChange={setActiveSection}
+          />
+          {readiness !== 'ready' && (
+            <button className="management-health" onClick={() => setActiveSection('system')}>
+              Systeem vraagt aandacht <span>Bekijk verbinding en herstel →</span>
+            </button>
           )}
-          <ul className="readiness-list">
-            {readinessChecks.map((check) => (
-              <li className={`readiness-check readiness-check--${check.level}`} key={check.id}>
-                <span className="readiness-check__marker" aria-hidden="true">
-                  {check.level === 'ready' ? '✓' : check.level === 'warning' ? '!' : '×'}
-                </span>
-                <span>
-                  <strong>{check.label}</strong>
-                  <small>{check.detail}</small>
-                </span>
-              </li>
-            ))}
-          </ul>
-        </section>
-
-        {cluster?.enabled && (
-          <section className="panel admin-dashboard__full-width">
-            <h2>Laptops koppelen</h2>
-            <p className="panel-copy">
-              Op deze laptop: <strong>{host.url}</strong>. Koppelcode:{' '}
-              <strong>{cluster.pairingCode}</strong>. Geef beide aan de andere laptop.
-            </p>
-            <p className="panel-copy">
-              {cluster.connectedHosts === 1
-                ? 'Deze laptop werkt zelfstandig en blijft volledig schrijfbaar.'
-                : `${cluster.connectedHosts} laptops zijn nu bereikbaar. Iedere laptop bewaart een volledige replica.`}
-            </p>
-            <div className="host-hint">
-              <strong>Timing:</strong>{' '}
-              {cluster.timingControl.state === 'unassigned'
-                ? 'nog niet toegewezen; de eerste timingactie kiest deze laptop.'
-                : cluster.timingControl.state === 'local'
-                  ? `deze laptop is controller (generatie ${cluster.timingControl.generation}).`
-                  : cluster.timingControl.state === 'remote-reachable'
-                    ? `${cluster.timingControl.controllerUrl || 'andere laptop'} is controller en bereikbaar.`
-                    : 'de timingcontroller is niet bereikbaar; gebruik alleen na fysieke controle een noodovername.'}
-            </div>
-            <div className="host-hint">
-              <strong>Deze versie:</strong> app {cluster.compatibility.appVersion} · schema{' '}
-              {cluster.compatibility.schemaVersion} · replicatieformaat{' '}
-              {cluster.compatibility.replicationFormatVersion}
-              {cluster.compatibility.releaseId
-                ? ` · release ${cluster.compatibility.releaseId.slice(0, 12)}`
-                : ''}
-            </div>
-            {cluster.peers.map((peer) => (
-              <div
-                className={`host-hint cluster-peer-row${peer.compatibilityError ? ' warning-banner' : ''}`}
-                key={peer.url}
-                role={peer.compatibilityError ? 'alert' : undefined}
-              >
-                <span>
-                  <strong>{peer.url}</strong>{' '}
-                  {peer.compatibilityError
-                    ? peer.compatibilityError
-                    : peer.reachable
-                    ? peer.synchronized
-                      ? 'bereikbaar en gesynchroniseerd'
-                      : 'bereikbaar; synchronisatie bezig'
-                    : peer.lastSeenAt
-                      ? `niet bereikbaar; laatst gezien om ${formatClockTimeMs(peer.lastSeenAt)}`
-                      : 'nog niet bereikbaar geweest'}
-                </span>
-                {cluster.timingControl.state === 'local' &&
-                  peer.id &&
-                  peer.reachable &&
-                  !peer.compatibilityError && (
-                  <button
-                    className="btn btn--secondary"
-                    onClick={() => void transferTiming(peer.id!, peer.url)}
-                    disabled={clusterSaving || !peer.synchronized}
-                    title={
-                      peer.synchronized
-                        ? 'Draag timing gecontroleerd over'
-                        : 'Wacht tot alle wijzigingen gesynchroniseerd zijn'
-                    }
-                  >
-                    Timing hierheen overdragen
-                  </button>
-                )}
+        </aside>
+        <div className="management-content">
+          <div className="admin-dashboard">
+            <section
+              hidden={activeSection !== 'preparation'}
+              className={`panel readiness-panel readiness-panel--${readiness} admin-dashboard__full-width`}
+            >
+              <div className="readiness-heading">
+                <div>
+                  <h2>Wedstrijdgereedheid</h2>
+                  <p className="panel-copy">
+                    Eén overzicht van de herstel-, synchronisatie- en timingvoorwaarden.
+                  </p>
+                </div>
+                <strong className={`readiness-summary readiness-summary--${readiness}`}>
+                  {readiness === 'ready'
+                    ? 'Klaar'
+                    : readiness === 'warning'
+                      ? 'Aandacht nodig'
+                      : 'Niet klaar'}
+                </strong>
               </div>
-            ))}
-            <div className="form-row">
-              <input
-                className="input"
-                value={remoteClusterUrl}
-                onChange={(event) => setRemoteClusterUrl(event.target.value)}
-                placeholder="http://192.168.1.20:5173"
-                inputMode="url"
-              />
-              <input
-                className="input"
-                value={remotePairingCode}
-                onChange={(event) => setRemotePairingCode(event.target.value.toUpperCase())}
-                placeholder="Koppelcode"
-                maxLength={8}
-              />
-              <button
-                className="btn btn--primary btn--fixed"
-                onClick={() => void connectToCluster()}
-                disabled={!remoteClusterUrl.trim() || !remotePairingCode.trim() || clusterSaving}
-              >
-                {clusterSaving ? 'Bezig...' : 'Deze laptop koppelen'}
-              </button>
-            </div>
-            {clusterConflicts.map((conflict) => (
-              <div className="host-hint" key={conflict.id}>
-                <strong>
-                  {conflict.kind === 'timing' ? 'Timingconflict' : 'Dataconflict'}
-                </strong>{' '}
-                van {new Date(conflict.createdAt).toLocaleTimeString('nl-BE')}. Kies welke actie
-                werkelijk gebeurd is.
-                {conflict.operations.map((operation, index) => (
-                  <button
-                    className="btn btn--secondary"
-                    key={operation.id}
-                    onClick={() =>
-                      void chooseConflictVersion(conflict.id, operation.id)
-                    }
-                    disabled={clusterSaving}
+              {clusterError && (
+                <div className="warning-banner" role="alert">
+                  De actuele systeemstatus kon niet worden vernieuwd: {clusterError.message}
+                </div>
+              )}
+              <ul className="readiness-list">
+                {readinessChecks.map((check) => (
+                  <li className={`readiness-check readiness-check--${check.level}`} key={check.id}>
+                    <span className="readiness-check__marker" aria-hidden="true">
+                      {check.level === 'ready' ? '✓' : check.level === 'warning' ? '!' : '×'}
+                    </span>
+                    <span>
+                      <strong>{check.label}</strong>
+                      <small>{check.detail}</small>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+
+            {cluster?.enabled && (
+              <section hidden={activeSection !== 'system'} className="panel admin-dashboard__full-width">
+                <h2>Laptops koppelen</h2>
+                <p className="panel-copy">
+                  Op deze laptop: <strong>{host.url}</strong>. Koppelcode:{' '}
+                  <strong>{cluster.pairingCode}</strong>. Geef beide aan de andere laptop.
+                </p>
+                <p className="panel-copy">
+                  {cluster.connectedHosts === 1
+                    ? 'Deze laptop werkt zelfstandig en blijft volledig schrijfbaar.'
+                    : `${cluster.connectedHosts} laptops zijn nu bereikbaar. Iedere laptop bewaart een volledige replica.`}
+                </p>
+                <div className="host-hint">
+                  <strong>Timing:</strong>{' '}
+                  {cluster.timingControl.state === 'unassigned'
+                    ? 'nog niet toegewezen; de eerste timingactie kiest deze laptop.'
+                    : cluster.timingControl.state === 'local'
+                      ? `deze laptop is controller (generatie ${cluster.timingControl.generation}).`
+                      : cluster.timingControl.state === 'remote-reachable'
+                        ? `${cluster.timingControl.controllerUrl || 'andere laptop'} is controller en bereikbaar.`
+                        : 'de timingcontroller is niet bereikbaar; gebruik alleen na fysieke controle een noodovername.'}
+                </div>
+                <div className="host-hint">
+                  <strong>Deze versie:</strong> app {cluster.compatibility.appVersion} · schema{' '}
+                  {cluster.compatibility.schemaVersion} · replicatieformaat{' '}
+                  {cluster.compatibility.replicationFormatVersion}
+                  {cluster.compatibility.releaseId
+                    ? ` · release ${cluster.compatibility.releaseId.slice(0, 12)}`
+                    : ''}
+                </div>
+                {cluster.peers.map((peer) => (
+                  <div
+                    className={`host-hint cluster-peer-row${peer.compatibilityError ? ' warning-banner' : ''}`}
+                    key={peer.url}
+                    role={peer.compatibilityError ? 'alert' : undefined}
                   >
-                    Versie {index + 1}: {formatConflictTime(operation.createdAt)}{' '}
-                    ({operation.originHostId === cluster.hostId ? 'deze laptop' : 'andere laptop'})
+                    <span>
+                      <strong>{peer.url}</strong>{' '}
+                      {peer.compatibilityError
+                        ? peer.compatibilityError
+                        : peer.reachable
+                          ? peer.synchronized
+                            ? 'bereikbaar en gesynchroniseerd'
+                            : 'bereikbaar; synchronisatie bezig'
+                          : peer.lastSeenAt
+                            ? `niet bereikbaar; laatst gezien om ${formatClockTimeMs(peer.lastSeenAt)}`
+                            : 'nog niet bereikbaar geweest'}
+                    </span>
+                    {cluster.timingControl.state === 'local' &&
+                      peer.id &&
+                      peer.reachable &&
+                      !peer.compatibilityError && (
+                        <button
+                          className="btn btn--secondary"
+                          onClick={() => void transferTiming(peer.id!, peer.url)}
+                          disabled={clusterSaving || !peer.synchronized}
+                          title={
+                            peer.synchronized
+                              ? 'Draag timing gecontroleerd over'
+                              : 'Wacht tot alle wijzigingen gesynchroniseerd zijn'
+                          }
+                        >
+                          Timing hierheen overdragen
+                        </button>
+                      )}
+                  </div>
+                ))}
+                <div className="form-row">
+                  <input
+                    className="input"
+                    value={remoteClusterUrl}
+                    onChange={(event) => setRemoteClusterUrl(event.target.value)}
+                    placeholder="http://192.168.1.20:5173"
+                    inputMode="url"
+                  />
+                  <input
+                    className="input"
+                    value={remotePairingCode}
+                    onChange={(event) => setRemotePairingCode(event.target.value.toUpperCase())}
+                    placeholder="Koppelcode"
+                    maxLength={8}
+                  />
+                  <button
+                    className="btn btn--primary btn--fixed"
+                    onClick={() => void connectToCluster()}
+                    disabled={!remoteClusterUrl.trim() || !remotePairingCode.trim() || clusterSaving}
+                  >
+                    {clusterSaving ? 'Bezig...' : 'Deze laptop koppelen'}
                   </button>
+                </div>
+                {clusterConflicts.map((conflict) => (
+                  <div className="host-hint" key={conflict.id}>
+                    <strong>{conflict.kind === 'timing' ? 'Timingconflict' : 'Dataconflict'}</strong> van{' '}
+                    {new Date(conflict.createdAt).toLocaleTimeString('nl-BE')}. Kies welke actie werkelijk
+                    gebeurd is.
+                    {conflict.operations.map((operation, index) => (
+                      <button
+                        className="btn btn--secondary"
+                        key={operation.id}
+                        onClick={() => void chooseConflictVersion(conflict.id, operation.id)}
+                        disabled={clusterSaving}
+                      >
+                        Versie {index + 1}: {formatConflictTime(operation.createdAt)} (
+                        {operation.originHostId === cluster.hostId ? 'deze laptop' : 'andere laptop'})
+                      </button>
+                    ))}
+                  </div>
+                ))}
+                {clusterMessage && <div className="host-hint">{clusterMessage}</div>}
+              </section>
+            )}
+
+            {cluster?.backup && (
+              <section hidden={activeSection !== 'system'} className="panel admin-dashboard__backup">
+                <h2>Herstelbackups</h2>
+                <p className="panel-copy">
+                  {cluster.backup.enabled
+                    ? 'Apolloon maakt tijdens gebruik automatisch gecontroleerde SQLite-snapshots. Recente backups blijven fijnmazig bewaard, daarna per uur en per dag.'
+                    : 'Automatische backups zijn op deze installatie uitgeschakeld. Handmatige backups blijven beschikbaar.'}
+                </p>
+                {!cluster.backup.enabled && (
+                  <div className="warning-banner" role="alert">
+                    Automatische backups zijn uitgeschakeld.
+                  </div>
+                )}
+                {cluster.backup.latest ? (
+                  <div className="backup-summary">
+                    <strong>Laatste backup:</strong>{' '}
+                    {new Date(cluster.backup.latest.createdAt).toLocaleString('nl-BE')} ·{' '}
+                    {formatRelativeAge(cluster.backup.latest.createdAt)} ·{' '}
+                    {formatFileSize(cluster.backup.latest.sizeBytes)} · gecontroleerd ·{' '}
+                    {cluster.backup.retainedCount} bewaard ({formatFileSize(cluster.backup.retainedBytes)})
+                    <div className="backup-checksum">
+                      <span>SHA-256</span>
+                      <code>{cluster.backup.latest.sha256}</code>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="warning-banner" role="alert">
+                    Er is op deze laptop nog geen herstelbackup.
+                  </div>
+                )}
+                {cluster.backup.lastError && (
+                  <div className="warning-banner" role="alert">
+                    Laatste automatische backup mislukt: {cluster.backup.lastError}
+                  </div>
+                )}
+                {cluster.backup.diskLow && (
+                  <div className="warning-banner" role="alert">
+                    Weinig opslagruimte: nog{' '}
+                    {cluster.backup.diskFreeBytes === null
+                      ? 'onbekend'
+                      : formatFileSize(cluster.backup.diskFreeBytes)}{' '}
+                    vrij; de veiligheidsgrens is {formatFileSize(cluster.backup.minimumFreeBytes)}.
+                  </div>
+                )}
+                <div className="backup-metrics">
+                  <span>
+                    <strong>Volgende automatische backup</strong>
+                    {cluster.backup.enabled && cluster.backup.nextScheduledAt
+                      ? new Date(cluster.backup.nextScheduledAt).toLocaleTimeString('nl-BE')
+                      : 'niet gepland'}
+                  </span>
+                  <span>
+                    <strong>Vrije opslag</strong>
+                    {cluster.backup.diskFreeBytes === null
+                      ? 'onbekend'
+                      : formatFileSize(cluster.backup.diskFreeBytes)}
+                  </span>
+                  <span>
+                    <strong>SQLite-database</strong>
+                    {formatFileSize(cluster.backup.database.fileBytes)} ·{' '}
+                    {formatFileSize(cluster.backup.database.usedBytes)} werkelijk in gebruik
+                  </span>
+                  <span>
+                    <strong>Backupplafond</strong>
+                    {formatFileSize(cluster.backup.retainedBytes)} van{' '}
+                    {formatFileSize(cluster.backup.maximumRetainedBytes)}
+                  </span>
+                </div>
+                {cluster.backup.database.compactionRecommended && (
+                  <div className="database-storage-note" role="status">
+                    <strong>Geen dataprobleem:</strong> de database bevat{' '}
+                    {formatFileSize(cluster.backup.database.reclaimableBytes)} lege ruimte die SQLite later
+                    opnieuw kan gebruiken. Het bestand is daarom{' '}
+                    {formatFileSize(cluster.backup.database.fileBytes)}, terwijl{' '}
+                    {formatFileSize(cluster.backup.database.usedBytes)} werkelijk in gebruik is.
+                    {cluster.backup.database.raceActive
+                      ? ' Verkleinen kan veilig zodra de race afgelopen is.'
+                      : ' Je kunt het bestand nu veilig verkleinen.'}
+                  </div>
+                )}
+                <div className="form-row form-row--plain backup-actions">
+                  <button
+                    className="btn btn--primary"
+                    onClick={() => void makeBackup()}
+                    disabled={backupSaving || cluster.backup.inProgress || cluster.backup.queued}
+                    aria-busy={backupSaving || cluster.backup.inProgress}
+                  >
+                    {cluster.backup.queued
+                      ? 'Backup wacht...'
+                      : backupSaving || cluster.backup.inProgress
+                        ? 'Backup bezig...'
+                        : 'Nu backup maken'}
+                  </button>
+                  {cluster.backup.latest && (
+                    <>
+                      <a className="btn btn--secondary" href="/api/backups/latest" download>
+                        Laatste backup downloaden
+                      </a>
+                      <a className="btn btn--secondary" href="/api/backups/latest/manifest" download>
+                        Controlebestand downloaden
+                      </a>
+                    </>
+                  )}
+                  {cluster.backup.database.compactionRecommended && (
+                    <button
+                      className="btn btn--secondary"
+                      onClick={() => void compactStorage()}
+                      disabled={
+                        compactionSaving ||
+                        cluster.backup.database.raceActive ||
+                        cluster.backup.inProgress ||
+                        cluster.backup.maintenanceInProgress
+                      }
+                    >
+                      {compactionSaving || cluster.backup.maintenanceInProgress
+                        ? 'Database verkleinen...'
+                        : 'Database veilig verkleinen'}
+                    </button>
+                  )}
+                </div>
+                <p className="panel-copy">
+                  Download regelmatig een kopie naar een andere laptop of USB-stick. Gesynchroniseerde
+                  replica's beschermen tegen een defect toestel; deze versies beschermen ook tegen een fout
+                  die naar alle laptops wordt gesynchroniseerd.
+                </p>
+                {backupMessage && (
+                  <div className="success-banner" role="status" aria-live="polite">
+                    {backupMessage}
+                  </div>
+                )}
+              </section>
+            )}
+
+            <section hidden={activeSection !== 'public'} className="panel admin-dashboard__public-event">
+              <h2>Publiek moment</h2>
+              <p className="panel-copy">Slaat het moment op en toont de flash alleen op het buitenscherm.</p>
+              <button
+                className="btn btn--primary btn--xl"
+                onClick={triggerBurgieGepakt}
+                disabled={eventSaving}
+              >
+                {eventSaving ? 'Opslaan...' : 'Burgie gepakt'}
+              </button>
+              <div className="form-row form-row--plain public-record-mode-row">
+                <label htmlFor="public-record-mode">
+                  <strong>Recordflits</strong>
+                </label>
+                <select
+                  id="public-record-mode"
+                  className="input"
+                  value={settings.publicRecordMode}
+                  onChange={(event) => void changePublicRecordMode(event.target.value as PublicRecordMode)}
+                  disabled={recordModeSaving}
+                >
+                  <option value="off">Uit</option>
+                  <option value="day">Dagrecord</option>
+                  <option value="two_hour">Per 2 uur</option>
+                  <option value="hour">Per uur</option>
+                </select>
+              </div>
+              {eventMessage && <div className="host-hint">{eventMessage}</div>}
+            </section>
+
+            <section hidden={activeSection !== 'preparation'} className="panel admin-dashboard__import">
+              <h2>Google Sheets CSV import</h2>
+              <p className="panel-copy">
+                Import zet nieuwe lopers in de ingeschreven databank. Ze verschijnen pas op het bord wanneer
+                je ze activeert in Telsysteem 1.
+              </p>
+              <div className="file-import-row">
+                <label className="file-picker">
+                  <input type="file" accept=".csv,text/csv" onChange={onFileChange} />
+                  <span>CSV-bestand kiezen</span>
+                </label>
+                <span className="file-name">{csvFileName || 'Geen bestand gekozen'}</span>
+                <button
+                  className="btn btn--primary btn--fixed"
+                  onClick={importCsv}
+                  disabled={!csvText.trim() || importing}
+                >
+                  {importing ? 'Importeren...' : 'Importeren'}
+                </button>
+              </div>
+              {message && <div className="host-hint">{message}</div>}
+            </section>
+
+            <section hidden={activeSection !== 'labels'} className="panel admin-dashboard__labels">
+              <h2>Labels</h2>
+              <div className="form-row">
+                <input
+                  className="input"
+                  value={labelName}
+                  onChange={(event) => setLabelName(event.target.value)}
+                  placeholder="Nieuw label"
+                />
+                <input
+                  className="input input--color"
+                  type="color"
+                  value={labelColor}
+                  onChange={(event) => setLabelColor(event.target.value)}
+                />
+                <select
+                  className="input"
+                  value={labelKind}
+                  onChange={(event) => setLabelKind(event.target.value)}
+                >
+                  <option value="speedteam">Speedteam</option>
+                  <option value="temporary_team">Tijdelijke nachtploeg</option>
+                  <option value="zustervereniging">Zustervereniging</option>
+                  <option value="andere">Andere</option>
+                  <option value="custom">Custom</option>
+                </select>
+                <input
+                  className="input"
+                  value={labelImageUrl}
+                  onChange={(event) => setLabelImageUrl(event.target.value)}
+                  placeholder="/labels/logo.png optioneel"
+                />
+                <input
+                  className="input input--number"
+                  type="number"
+                  min="0"
+                  value={labelTargetLaps}
+                  onChange={(event) => setLabelTargetLaps(event.target.value)}
+                  placeholder="Doel"
+                />
+                <input
+                  className="input input--number"
+                  type="number"
+                  min="0"
+                  value={labelSortOrder}
+                  onChange={(event) => setLabelSortOrder(event.target.value)}
+                  placeholder="Positie"
+                />
+                <button
+                  className="btn btn--primary"
+                  onClick={addLabel}
+                  disabled={!labelName.trim() || addingLabel}
+                >
+                  {addingLabel ? 'Toevoegen...' : 'Label toevoegen'}
+                </button>
+              </div>
+
+              {labelMessage && <div className="host-hint">{labelMessage}</div>}
+
+              <div className="label-admin-list">
+                {groupLabels(labels).map(([kind, groupedLabels]) => (
+                  <section key={kind} className="label-admin-group">
+                    <h3>{labelKindTitle(kind)}</h3>
+                    {groupedLabels.map((label) => (
+                      <LabelAdminRow
+                        key={label.id}
+                        label={label}
+                        onSave={(fields) => updateLabel(label.id, fields)}
+                        onDelete={() => removeLabel(label.id, label.name)}
+                      />
+                    ))}
+                  </section>
                 ))}
               </div>
-            ))}
-            {clusterMessage && <div className="host-hint">{clusterMessage}</div>}
-          </section>
-        )}
+            </section>
+          </div>
 
-        {cluster?.backup && (
-          <section className="panel admin-dashboard__backup">
-            <h2>Herstelbackups</h2>
+          <section hidden={activeSection !== 'labels'} className="panel">
+            <h2>Tijdelijke nachtploegen</h2>
             <p className="panel-copy">
-              {cluster.backup.enabled
-                ? 'Apolloon maakt tijdens gebruik automatisch gecontroleerde SQLite-snapshots. Recente backups blijven fijnmazig bewaard, daarna per uur en per dag.'
-                : 'Automatische backups zijn op deze installatie uitgeschakeld. Handmatige backups blijven beschikbaar.'}
+              Stel de leden vooraf in. Activeren vervangt hun gewone speedteam tijdelijk; deactiveren zet die
+              automatisch terug.
             </p>
-            {!cluster.backup.enabled && (
-              <div className="warning-banner" role="alert">
-                Automatische backups zijn uitgeschakeld.
-              </div>
-            )}
-            {cluster.backup.latest ? (
-              <div className="backup-summary">
-                <strong>Laatste backup:</strong>{' '}
-                {new Date(cluster.backup.latest.createdAt).toLocaleString('nl-BE')} ·{' '}
-                {formatRelativeAge(cluster.backup.latest.createdAt)} ·{' '}
-                {formatFileSize(cluster.backup.latest.sizeBytes)} · gecontroleerd ·{' '}
-                {cluster.backup.retainedCount} bewaard ({formatFileSize(cluster.backup.retainedBytes)})
-                <div className="backup-checksum">
-                  <span>SHA-256</span>
-                  <code>{cluster.backup.latest.sha256}</code>
-                </div>
+            {temporaryTeams.length ? (
+              <div className="temporary-team-list">
+                {temporaryTeams.map((team) => {
+                  const label = labels.find((item) => item.id === team.labelId);
+                  return label ? (
+                    <TemporaryTeamAdminCard
+                      key={team.labelId}
+                      label={label}
+                      team={team}
+                      allTeams={temporaryTeams}
+                      runners={runners}
+                      onSaveMembers={setTemporaryTeamMembers}
+                      onSetActive={setTemporaryTeamActive}
+                    />
+                  ) : null;
+                })}
               </div>
             ) : (
-              <div className="warning-banner" role="alert">
-                Er is op deze laptop nog geen herstelbackup.
-              </div>
-            )}
-            {cluster.backup.lastError && (
-              <div className="warning-banner" role="alert">
-                Laatste automatische backup mislukt: {cluster.backup.lastError}
-              </div>
-            )}
-            {cluster.backup.diskLow && (
-              <div className="warning-banner" role="alert">
-                Weinig opslagruimte: nog{' '}
-                {cluster.backup.diskFreeBytes === null
-                  ? 'onbekend'
-                  : formatFileSize(cluster.backup.diskFreeBytes)}{' '}
-                vrij; de veiligheidsgrens is {formatFileSize(cluster.backup.minimumFreeBytes)}.
-              </div>
-            )}
-            <div className="backup-metrics">
-              <span>
-                <strong>Volgende automatische backup</strong>
-                {cluster.backup.enabled && cluster.backup.nextScheduledAt
-                  ? new Date(cluster.backup.nextScheduledAt).toLocaleTimeString('nl-BE')
-                  : 'niet gepland'}
-              </span>
-              <span>
-                <strong>Vrije opslag</strong>
-                {cluster.backup.diskFreeBytes === null
-                  ? 'onbekend'
-                  : formatFileSize(cluster.backup.diskFreeBytes)}
-              </span>
-              <span>
-                <strong>SQLite-database</strong>
-                {formatFileSize(cluster.backup.database.fileBytes)} ·{' '}
-                {formatFileSize(cluster.backup.database.usedBytes)} werkelijk in gebruik
-              </span>
-              <span>
-                <strong>Backupplafond</strong>
-                {formatFileSize(cluster.backup.retainedBytes)} van{' '}
-                {formatFileSize(cluster.backup.maximumRetainedBytes)}
-              </span>
-            </div>
-            {cluster.backup.database.compactionRecommended && (
-              <div className="database-storage-note" role="status">
-                <strong>Geen dataprobleem:</strong> de database bevat{' '}
-                {formatFileSize(cluster.backup.database.reclaimableBytes)} lege ruimte die SQLite
-                later opnieuw kan gebruiken. Het bestand is daarom{' '}
-                {formatFileSize(cluster.backup.database.fileBytes)}, terwijl{' '}
-                {formatFileSize(cluster.backup.database.usedBytes)} werkelijk in gebruik is.
-                {cluster.backup.database.raceActive
-                  ? ' Verkleinen kan veilig zodra de race afgelopen is.'
-                  : ' Je kunt het bestand nu veilig verkleinen.'}
-              </div>
-            )}
-            <div className="form-row form-row--plain backup-actions">
-              <button
-                className="btn btn--primary"
-                onClick={() => void makeBackup()}
-                disabled={
-                  backupSaving || cluster.backup.inProgress || cluster.backup.queued
-                }
-                aria-busy={backupSaving || cluster.backup.inProgress}
-              >
-                {cluster.backup.queued
-                  ? 'Backup wacht...'
-                  : backupSaving || cluster.backup.inProgress
-                    ? 'Backup bezig...'
-                    : 'Nu backup maken'}
-              </button>
-              {cluster.backup.latest && (
-                <>
-                  <a className="btn btn--secondary" href="/api/backups/latest" download>
-                    Laatste backup downloaden
-                  </a>
-                  <a
-                    className="btn btn--secondary"
-                    href="/api/backups/latest/manifest"
-                    download
-                  >
-                    Controlebestand downloaden
-                  </a>
-                </>
-              )}
-              {cluster.backup.database.compactionRecommended && (
-                <button
-                  className="btn btn--secondary"
-                  onClick={() => void compactStorage()}
-                  disabled={
-                    compactionSaving ||
-                    cluster.backup.database.raceActive ||
-                    cluster.backup.inProgress ||
-                    cluster.backup.maintenanceInProgress
-                  }
-                >
-                  {compactionSaving || cluster.backup.maintenanceInProgress
-                    ? 'Database verkleinen...'
-                    : 'Database veilig verkleinen'}
-                </button>
-              )}
-            </div>
-            <p className="panel-copy">
-              Download regelmatig een kopie naar een andere laptop of USB-stick. Gesynchroniseerde
-              replica's beschermen tegen een defect toestel; deze versies beschermen ook tegen een
-              fout die naar alle laptops wordt gesynchroniseerd.
-            </p>
-            {backupMessage && (
-              <div className="success-banner" role="status" aria-live="polite">
-                {backupMessage}
+              <div className="empty-inline">
+                Maak hierboven eerst een label van het type Tijdelijke nachtploeg.
               </div>
             )}
           </section>
-        )}
 
-        <section className="panel admin-dashboard__public-event">
-          <h2>Publiek moment</h2>
-          <p className="panel-copy">
-            Slaat het moment op en toont de flash alleen op het buitenscherm.
-          </p>
-          <button className="btn btn--primary btn--xl" onClick={triggerBurgieGepakt} disabled={eventSaving}>
-            {eventSaving ? 'Opslaan...' : 'Burgie gepakt'}
-          </button>
-          <div className="form-row form-row--plain public-record-mode-row">
-            <label htmlFor="public-record-mode">
-              <strong>Recordflits</strong>
-            </label>
-            <select
-              id="public-record-mode"
-              className="input"
-              value={settings.publicRecordMode}
-              onChange={(event) => void changePublicRecordMode(event.target.value as PublicRecordMode)}
-              disabled={recordModeSaving}
-            >
-              <option value="off">Uit</option>
-              <option value="day">Dagrecord</option>
-              <option value="two_hour">Per 2 uur</option>
-              <option value="hour">Per uur</option>
-            </select>
-          </div>
-          {eventMessage && <div className="host-hint">{eventMessage}</div>}
-        </section>
+          <section hidden={activeSection !== 'runners'} className="panel">
+            <h2>Lopers beheren</h2>
+            <p className="panel-copy">
+              Definitief verwijderen kan alleen voor lopers zonder rondes. Gelopen data blijft bewaard voor
+              analyse.
+            </p>
+            <div className="form-row form-row--plain">
+              <input
+                className="input input--stretch"
+                value={runnerQuery}
+                onChange={(event) => setRunnerQuery(event.target.value)}
+                placeholder="Zoek op nummer, naam, label, status of bron..."
+              />
+            </div>
+            {runnerMessage && <div className="host-hint">{runnerMessage}</div>}
+            <div className="table-wrap">
+              <AdminRunnerTable
+                runners={adminRunners}
+                onOpenProfile={setProfileRunnerId}
+                onRestore={restoreRunner}
+                onRemove={removeRunner}
+              />
+            </div>
+          </section>
 
-        <section className="panel admin-dashboard__import">
-          <h2>Google Sheets CSV import</h2>
-          <p className="panel-copy">
-            Import zet nieuwe lopers in de ingeschreven databank. Ze verschijnen pas op het bord wanneer je ze
-            activeert in Telsysteem 1.
-          </p>
-          <div className="file-import-row">
-            <label className="file-picker">
-              <input type="file" accept=".csv,text/csv" onChange={onFileChange} />
-              <span>CSV-bestand kiezen</span>
-            </label>
-            <span className="file-name">{csvFileName || 'Geen bestand gekozen'}</span>
-            <button
-              className="btn btn--primary btn--fixed"
-              onClick={importCsv}
-              disabled={!csvText.trim() || importing}
-            >
-              {importing ? 'Importeren...' : 'Importeren'}
-            </button>
-          </div>
-          {message && <div className="host-hint">{message}</div>}
-        </section>
+          {profileRunnerId && (
+            <RunnerProfileModal runnerId={profileRunnerId} onClose={() => setProfileRunnerId(null)} />
+          )}
 
-        <section className="panel admin-dashboard__labels">
-          <h2>Labels</h2>
-          <div className="form-row">
-            <input
-              className="input"
-              value={labelName}
-              onChange={(event) => setLabelName(event.target.value)}
-              placeholder="Nieuw label"
-            />
-            <input
-              className="input input--color"
-              type="color"
-              value={labelColor}
-              onChange={(event) => setLabelColor(event.target.value)}
-            />
-            <select className="input" value={labelKind} onChange={(event) => setLabelKind(event.target.value)}>
-              <option value="speedteam">Speedteam</option>
-              <option value="temporary_team">Tijdelijke nachtploeg</option>
-              <option value="zustervereniging">Zustervereniging</option>
-              <option value="andere">Andere</option>
-              <option value="custom">Custom</option>
-            </select>
-            <input
-              className="input"
-              value={labelImageUrl}
-              onChange={(event) => setLabelImageUrl(event.target.value)}
-              placeholder="/labels/logo.png optioneel"
-            />
-            <input
-              className="input input--number"
-              type="number"
-              min="0"
-              value={labelTargetLaps}
-              onChange={(event) => setLabelTargetLaps(event.target.value)}
-              placeholder="Doel"
-            />
-            <input
-              className="input input--number"
-              type="number"
-              min="0"
-              value={labelSortOrder}
-              onChange={(event) => setLabelSortOrder(event.target.value)}
-              placeholder="Positie"
-            />
-            <button className="btn btn--primary" onClick={addLabel} disabled={!labelName.trim() || addingLabel}>
-              {addingLabel ? 'Toevoegen...' : 'Label toevoegen'}
-            </button>
-          </div>
-
-          {labelMessage && <div className="host-hint">{labelMessage}</div>}
-
-          <div className="label-admin-list">
-            {groupLabels(labels).map(([kind, groupedLabels]) => (
-              <section key={kind} className="label-admin-group">
-                <h3>{labelKindTitle(kind)}</h3>
-                {groupedLabels.map((label) => (
-                  <LabelAdminRow
-                    key={label.id}
-                    label={label}
-                    onSave={(fields) => updateLabel(label.id, fields)}
-                    onDelete={() => removeLabel(label.id, label.name)}
-                  />
-                ))}
-              </section>
-            ))}
-          </div>
-        </section>
+          <section hidden={activeSection !== 'system'} className="panel">
+            <h2>Database status</h2>
+            <div className="stats-grid">
+              <div className="stat-panel">
+                <span className="muted-label">Lopers</span>
+                <strong>{runners.length}</strong>
+              </div>
+              <div className="stat-panel">
+                <span className="muted-label">Labels</span>
+                <strong>{labels.length}</strong>
+              </div>
+              <div className="stat-panel">
+                <span className="muted-label">In wachtrij</span>
+                <strong>{runners.filter((runner) => runner.status === 'waiting').length}</strong>
+              </div>
+            </div>
+          </section>
+        </div>
       </div>
-
-      <section className="panel">
-        <h2>Tijdelijke nachtploegen</h2>
-        <p className="panel-copy">
-          Stel de leden vooraf in. Activeren vervangt hun gewone speedteam tijdelijk; deactiveren zet die automatisch terug.
-        </p>
-        {temporaryTeams.length ? (
-          <div className="temporary-team-list">
-            {temporaryTeams.map((team) => {
-              const label = labels.find((item) => item.id === team.labelId);
-              return label ? (
-                <TemporaryTeamAdminCard
-                  key={team.labelId}
-                  label={label}
-                  team={team}
-                  allTeams={temporaryTeams}
-                  runners={runners}
-                  onSaveMembers={setTemporaryTeamMembers}
-                  onSetActive={setTemporaryTeamActive}
-                />
-              ) : null;
-            })}
-          </div>
-        ) : (
-          <div className="empty-inline">Maak hierboven eerst een label van het type Tijdelijke nachtploeg.</div>
-        )}
-      </section>
-
-      <section className="panel">
-        <h2>Lopers beheren</h2>
-        <p className="panel-copy">
-          Definitief verwijderen kan alleen voor lopers zonder rondes. Gelopen data blijft bewaard voor analyse.
-        </p>
-        <div className="form-row form-row--plain">
-          <input
-            className="input input--stretch"
-            value={runnerQuery}
-            onChange={(event) => setRunnerQuery(event.target.value)}
-            placeholder="Zoek op nummer, naam, label, status of bron..."
-          />
-        </div>
-        {runnerMessage && <div className="host-hint">{runnerMessage}</div>}
-        <div className="table-wrap">
-          <AdminRunnerTable
-            runners={adminRunners}
-            onOpenProfile={setProfileRunnerId}
-            onRestore={restoreRunner}
-            onRemove={removeRunner}
-          />
-        </div>
-      </section>
-
-      {profileRunnerId && (
-        <RunnerProfileModal runnerId={profileRunnerId} onClose={() => setProfileRunnerId(null)} />
-      )}
-
-      <section className="panel">
-        <h2>Database status</h2>
-        <div className="stats-grid">
-          <div className="stat-panel">
-            <span className="muted-label">Lopers</span>
-            <strong>{runners.length}</strong>
-          </div>
-          <div className="stat-panel">
-            <span className="muted-label">Labels</span>
-            <strong>{labels.length}</strong>
-          </div>
-          <div className="stat-panel">
-            <span className="muted-label">In wachtrij</span>
-            <strong>{runners.filter((runner) => runner.status === 'waiting').length}</strong>
-          </div>
-        </div>
-      </section>
     </>
   );
 }
@@ -1340,7 +1373,6 @@ function LabelAdminRow({
   return (
     <div className="label-admin-row">
       <LabelBadge label={label} />
-      <em>{label.kind}</em>
       <label className="label-target-editor">
         Doel toeren
         <input

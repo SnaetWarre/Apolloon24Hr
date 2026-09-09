@@ -162,3 +162,176 @@ body:has(.app-root) {
   .app-root .timing-actions .btn { width: 100%; }
   .app-root .readiness-list { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* Laptop task layouts: working lists, a timing station and dedicated research sections. */
+.app-root [hidden] { display: none !important; }
+.app-root .queue-heading { display: grid; grid-template-columns: 1fr 1.2fr; align-items: center; gap: 30px; }
+.app-root .queue-heading .hero--compact { padding: 10px 0 18px; }
+.app-root .queue-heading .tagline { display: none; }
+.app-root .queue-heading .race-strip { margin: 0 0 10px; background: transparent; border: 0; border-radius: 0; }
+.app-root .queue-heading .race-strip > div { background: transparent; padding: 6px 20px; }
+.app-root .queue-heading .race-strip strong { font-size: 17px; }
+.app-root .queue-heading .race-strip > div:first-child { border-left: 0; }
+.app-root .queue-heading .race-strip > div:first-child > span:last-child { font-size: 12px; }
+.app-root .header-bar { border-radius: 0; border-inline: 0; margin-bottom: 16px; background: transparent; }
+.queue-controls { padding: 10px 0; }
+.workspace-status { padding: 6px 0; background: transparent; border-top: 0; }
+.workspace-status .cluster-pill { background: transparent; border: 0; padding-left: 0; }
+.workspace-status .cluster-pill--healthy strong { color: var(--green-ink); }
+.workspace-status .cluster-pill--standby strong { color: var(--amber-ink); }
+.workspace-status .cluster-pill--error strong { color: var(--red-ink); }
+.queue-workspace { display: flex; flex-direction: column; gap: 12px; }
+.queue-lanes { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.12fr); gap: 24px; }
+.queue-lane { min-width: 0; }
+.queue-lane > header, .timing-upcoming > header { display: flex; align-items: center; justify-content: space-between; padding: 10px 0 12px; border-bottom: 1px solid var(--line-strong); }
+.queue-lane h2, .timing-upcoming h2, .timing-log h2 { margin: 0; font-size: 16px; font-weight: 600; }
+.queue-lane > header > span, .timing-upcoming > header > span { color: var(--muted); font-size: 12px; }
+.queue-lane__rows { height: max(280px, calc(100dvh - 420px)); overflow: auto; scrollbar-gutter: stable; overscroll-behavior: contain; }
+.queue-lane--over { background: var(--blue-faint); }
+.queue-runner { display: flex; align-items: center; gap: 8px; min-height: 68px; padding: 9px 4px; border-bottom: 1px solid var(--line); background: var(--bg); }
+.queue-runner:hover { background: var(--panel); }
+.queue-runner--next { background: var(--blue-faint); box-shadow: inset 3px 0 var(--apolloon-blue); }
+.queue-runner--dragging { position: relative; z-index: 4; opacity: 0.7; box-shadow: var(--shadow-md); transition: none; }
+.queue-drop-target { outline: 1px solid var(--blue-dark); }
+.queue-drag { flex: 0 0 22px; min-height: 32px; border: 0; background: transparent; color: var(--muted); padding: 0; cursor: grab; touch-action: none; }
+.queue-identity { flex: 1; min-width: 0; border: 0; background: transparent; color: var(--text); text-align: left; padding: 0; cursor: pointer; }
+.queue-identity:hover .runner-title { color: var(--blue-dark); }
+.queue-identity .runner-title { margin-bottom: 4px; font-size: 13px; }
+.queue-identity .runner-number { padding: 0; background: transparent; color: var(--muted); min-width: 28px; }
+.queue-runner__details { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; color: var(--muted); font-size: 11px; }
+.queue-runner__details .label-pill { min-height: 17px; padding: 0; border: 0; font-size: 10px; font-weight: 500; }
+.queue-runner__details .label-image { width: 14px; height: 14px; }
+.queue-runner__details .label-dot { width: 5px; height: 5px; }
+.queue-runner__details > span:last-child { margin-left: 3px; }
+.queue-runner .timer-badge { font-family: ui-monospace, monospace; background: transparent; font-size: 11px; padding: 0 4px; font-weight: 400; }
+.queue-row-actions { display: flex; gap: 4px; }
+.queue-row-actions .btn { font-size: 11px; min-height: 32px; padding: 5px 7px; border-radius: 4px; white-space: nowrap; }
+.queue-position { flex: 0 0 20px; color: var(--blue-dark); font-family: ui-monospace, monospace; font-size: 12px; text-align: center; }
+.queue-completed { border-top: 1px solid var(--line-strong); }
+.queue-completed summary { display: flex; align-items: center; gap: 12px; cursor: pointer; padding: 12px 0; font-weight: 600; font-size: 13px; }
+.queue-completed summary::before { content: '+'; color: var(--muted); }
+.queue-completed[open] summary::before { content: '−'; }
+.queue-completed summary small { margin-left: auto; font-weight: 400; color: var(--muted); }
+.queue-completed summary span { color: var(--muted); }
+.queue-completed .toggle-row { margin-bottom: 8px; }
+.queue-completed__rows { max-height: 210px; overflow: auto; }
+.queue-completed .queue-runner { min-height: 52px; }
+
+.timing-workspace { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(360px, 1fr); gap: 36px; }
+.timing-station { min-width: 0; padding-right: 36px; border-right: 1px solid var(--line); }
+.timing-runner { padding: 20px 0 12px; }
+.timing-runner > strong { display: block; margin: 16px 0 12px; font-size: clamp(28px, 3vw, 44px); font-weight: 600; line-height: 1.15; }
+.app-root .timing-runner .live-time { margin: 24px 0; font-size: clamp(64px, 7.5vw, 110px); color: var(--text); line-height: 1.1; letter-spacing: -0.06em; }
+.timing-runner .muted-label { color: var(--blue-dark); }
+.app-root .timing-station .handoff-preview { background: transparent; border: 0; border-radius: 0; padding: 14px 0; border-top: 1px solid var(--line); margin-top: 0; }
+.timing-station .handoff-preview strong { font-size: 14px; font-weight: 500; }
+.app-root .timing-station .timing-actions { margin: 10px 0 20px; display: grid; grid-template-columns: 1fr; gap: 8px; }
+.app-root .timing-station .timing-actions .btn--xl { max-width: none; width: 100%; font-size: 20px; min-height: 70px; }
+.app-root .timing-station .timing-actions .btn--ghost { justify-self: start; border: 0; padding-left: 0; background: transparent; color: var(--muted); }
+.app-root .timing-station .stats-grid { display: flex; flex-wrap: wrap; gap: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
+.app-root .timing-station .stat-panel { min-height: 0; padding: 0; background: transparent; border: 0; border-radius: 0; }
+.timing-station .stat-panel strong { font-size: 15px; }
+.timing-station .stat-panel .muted-label { font-size: 11px; font-weight: 400; }
+.timing-upcoming ol { margin: 0; padding: 0; list-style: none; }
+.timing-upcoming li { display: flex; gap: 12px; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.timing-upcoming li:first-child { padding-block: 16px; }
+.timing-upcoming li strong { font-size: 14px; font-weight: 500; }
+.timing-upcoming li:first-child strong { font-size: 20px; }
+.timing-upcoming small { display: block; margin-top: 4px; color: var(--muted); font-size: 12px; }
+.timing-log { margin-top: 28px; }
+.timing-log h2 { margin-bottom: 12px; }
+.timing-log .table-wrap { max-height: 255px; overflow: auto; border: 0; }
+.timing-log td, .timing-log th { padding: 7px 8px; font-size: 12px; }
+.app-root .timing-workspace + .danger-zone { display: flex; justify-content: space-between; align-items: center; border: 0; border-top: 1px solid var(--line); border-radius: 0; padding: 12px 0; margin-top: 24px; }
+.app-root .timing-workspace + .danger-zone h2 { margin: 0; color: var(--muted); font-size: 13px; }
+.app-root .timing-workspace + .danger-zone .btn { min-height: 34px; padding: 6px 12px; font-size: 12px; }
+.runner-extra-details { padding: 16px 0; border-top: 1px solid var(--line); margin-top: 20px; }
+.runner-extra-details summary { cursor: pointer; font-size: 14px; }
+.runner-extra-details summary span { color: var(--muted); font-size: 12px; margin-left: 8px; }
+.runner-extra-details .form-grid { margin-top: 18px; }
+.app-root .runner-search-row { background: transparent; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; }
+.app-root .runner-search-list { gap: 0; }
+
+.section-navigation { display: flex; gap: 22px; border-bottom: 1px solid var(--line); margin-bottom: 24px; }
+.section-navigation button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; padding: 12px 0; background: transparent; color: var(--muted); cursor: pointer; font-size: 14px; }
+.section-navigation button[aria-pressed="true"] { border-color: var(--blue-dark); color: var(--text); }
+.section-navigation button:hover { color: var(--text); }
+.management-workspace { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 40px; border-top: 1px solid var(--line); padding-top: 24px; }
+.management-navigation .section-navigation { flex-direction: column; gap: 4px; border: 0; }
+.management-navigation .section-navigation button { text-align: left; padding: 11px 12px; border: 0; border-left: 2px solid transparent; }
+.management-navigation .section-navigation button[aria-pressed="true"] { background: var(--panel); border-left-color: var(--blue-dark); }
+.management-health { background: transparent; border: 0; border-top: 1px solid var(--line); color: var(--amber-ink); font-size: 12px; text-align: left; padding: 16px 0; cursor: pointer; }
+.management-health span { display: block; margin-top: 5px; color: var(--muted); font-size: 11px; }
+.management-content { min-width: 0; }
+.app-root .management-content .admin-dashboard { display: block; margin: 0; }
+.app-root .management-content .panel { background: transparent; border: 0; border-radius: 0; padding: 0 0 28px; margin: 0 0 24px; border-bottom: 1px solid var(--line); }
+.app-root .management-content .readiness-list { grid-template-columns: 1fr; gap: 0; }
+.app-root .management-content .readiness-check { border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: transparent; padding: 12px 0; }
+.management-content .readiness-check small { font-size: 12px; }
+.management-content .readiness-summary { font-size: 12px; }
+.app-root .management-content .form-row { background: transparent; padding: 0; border: 0; }
+.app-root .management-content .stat-panel { background: transparent; border: 0; border-radius: 0; padding-left: 0; }
+.analysis-workspace { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 28px; }
+.analysis-scope { padding-right: 20px; border-right: 1px solid var(--line); }
+.app-root .analysis-scope .panel { border: 0; background: transparent; padding: 0; border-radius: 0; max-height: none; }
+.analysis-scope .panel-heading-row { display: block; }
+.analysis-scope .panel h2 { font-size: 14px; }
+.analysis-scope .analysis-section-header p { font-size: 12px; }
+.analysis-scope .analysis-filter-actions { justify-content: flex-start; gap: 6px; margin-bottom: 16px; }
+.analysis-scope .analysis-filter-actions .btn { min-height: 30px; padding: 5px 9px; font-size: 11px; }
+.app-root .analysis-scope .label-toggle-row { border: 0; padding: 4px 0; min-height: 34px; grid-template-columns: minmax(0, 1fr) 34px 22px; gap: 6px; background: transparent; }
+.analysis-scope .label-toggle-state { display: none; }
+.analysis-scope .label-toggle-list { gap: 0; }
+.analysis-scope .label-toggle-name { font-size: 12px; }
+.analysis-scope .label-image { width: 16px; height: 16px; }
+.analysis-content { min-width: 0; }
+.app-root .analysis-content .stats-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px; border-bottom: 1px solid var(--line); padding-bottom: 20px; }
+.app-root .analysis-content .stat-panel { min-height: 0; border: 0; border-radius: 0; background: transparent; padding: 0; }
+.app-root .analysis-content .stat-panel strong { font-size: 24px; }
+.analysis-content .stat-panel .muted-label { font-size: 11px; font-weight: 400; }
+.app-root .analysis-content .panel { padding: 0 0 24px; background: transparent; border: 0; border-radius: 0; }
+.analysis-charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.analysis-downloads { border-top: 1px solid var(--line); margin-top: 24px; padding-top: 16px; }
+.analysis-downloads summary { cursor: pointer; font-size: 13px; }
+.analysis-downloads .export-row { flex-direction: column; align-items: stretch; gap: 4px; }
+.analysis-downloads .btn { font-size: 11px; }
+.analysis-downloads .panel-copy { margin-top: 12px; font-size: 12px; }
+
+.app-root .tactics-live-stats { border-bottom: 1px solid var(--line); gap: 20px; padding: 14px 0 24px; }
+.app-root .tactics-live-stats .stat-panel { border: 0; border-radius: 0; background: transparent; min-height: 0; padding: 0; }
+.tactics-planning-layout { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 30px; }
+.app-root .tactics-planning-layout .panel { border: 0; border-radius: 0; background: transparent; padding: 0; }
+.app-root .tactics-planning-layout .tactics-scenario-panel { padding-left: 24px; border-left: 1px solid var(--line); }
+.tactics-planning-layout .tactics-control-grid { grid-template-columns: minmax(0, 1fr); }
+.tactics-planning-layout .tactics-hourly-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.tactics-planning-layout .tactics-hourly-header { flex-wrap: wrap; margin-top: 16px; }
+.tactics-hour-editor { border-top: 1px solid var(--line); padding-top: 12px; }
+.tactics-hour-editor summary, .tactics-analysis-details > summary { cursor: pointer; font-size: 14px; }
+.tactics-analysis-details { margin-top: 20px; border-top: 1px solid var(--line); padding-top: 18px; }
+.tactics-analysis-details > summary { padding-bottom: 20px; }
+.app-root .tactics-analysis-details .panel { background: transparent; border: 0; border-radius: 0; padding: 16px 0; }
+
+@media (max-width: 1100px) {
+  .queue-lanes { gap: 14px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .queue-runner { flex-wrap: wrap; }
+  .queue-row-actions { margin-left: auto; }
+  .timing-workspace { gap: 24px; grid-template-columns: minmax(0, 1.2fr) minmax(320px, 1fr); }
+  .timing-station { padding-right: 24px; }
+}
+
+.app-root:has(.timing-workspace) .hero--compact { padding: 8px 0 16px; }
+.app-root .timing-runner .live-time { font-size: clamp(64px, 6.6vw, 96px); margin: 20px 0; }
+.timing-upcoming li { padding: 9px 0; }
+.timing-upcoming li:first-child { padding: 12px 0; }
+.analysis-scope .label-toggle-row > strong { font-size: 10px; }
+.analysis-charts .analysis-chart-card { min-height: 300px; }
+.analysis-charts .analysis-chart-card canvas { height: 300px !important; }
+.timing-actions kbd { font: inherit; font-size: 11px; font-weight: 400; opacity: 0.85; }
+.app-root .timing-station .timing-actions .btn--xl { display: flex; flex-direction: column; gap: 3px; }
+.management-content .table-wrap { max-height: 65dvh; overflow: auto; }
+
+.app-root .management-content .label-admin-row { grid-template-columns: minmax(180px, 1fr) 110px 110px auto auto; padding: 10px 0; background: transparent; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; }
+.management-content .label-admin-row > .label-pill { width: fit-content; border: 0; padding: 0; font-size: 13px; }
+.management-content .label-admin-row .btn--danger { background: transparent; color: var(--red-ink); border: 1px solid var(--red-line); }
+.management-content .label-admin-group h3 { text-transform: none; margin-top: 22px; }
+.app-root .management-content .temporary-team-card { border: 0; border-bottom: 1px solid var(--line); border-radius: 0; padding: 16px 0; background: transparent; }

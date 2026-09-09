@@ -20,15 +20,15 @@ export function RunnerActivationModal({
   const [activationError, setActivationError] = React.useState<string | null>(null);
   const activationBusyRef = React.useRef(false);
 
-  const availableRunners = React.useMemo(() => {
-    return runners.filter(isAvailableForActivation).sort(sortRunnerByNumberThenName);
+  const searchableRunners = React.useMemo(() => {
+    return [...runners].sort(sortRunnerByNumberThenName);
   }, [runners]);
 
   const filteredMatches = React.useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return availableRunners;
-    return availableRunners.filter((runner) => runnerMatchesQuery(runner, q));
-  }, [availableRunners, query]);
+    if (!q) return searchableRunners;
+    return searchableRunners.filter((runner) => runnerMatchesQuery(runner, q));
+  }, [searchableRunners, query]);
 
   const visibleMatches = filteredMatches.slice(0, 40);
   const hasQuery = Boolean(query.trim());
@@ -62,7 +62,14 @@ export function RunnerActivationModal({
     }
     if (event.key !== 'Enter') return;
     const firstMatch = visibleMatches[0];
-    if (!firstMatch || activatingId) return;
+    if (
+      !query.trim() ||
+      filteredMatches.length !== 1 ||
+      !firstMatch ||
+      !isAvailableForActivation(firstMatch) ||
+      activatingId
+    )
+      return;
     event.preventDefault();
     void activate(firstMatch.id);
   }
@@ -84,12 +91,14 @@ export function RunnerActivationModal({
           <div className="runner-search-summary">
             {hasQuery
               ? `${filteredMatches.length} resultaat${filteredMatches.length === 1 ? '' : 'en'}`
-              : `${availableRunners.length} lopers buiten Telsysteem 1`}
-            {filteredMatches.length > visibleMatches.length ? ` · eerste ${visibleMatches.length} getoond` : ''}
+              : `${searchableRunners.length} lopers in de databank`}
+            {filteredMatches.length > visibleMatches.length
+              ? ` · eerste ${visibleMatches.length} getoond`
+              : ''}
           </div>
           {filteredMatches.length === 0 && (
             <div className="empty-inline">
-              {hasQuery ? 'Geen loper buiten Telsysteem 1 gevonden.' : 'Geen beschikbare lopers buiten Telsysteem 1.'}
+              {hasQuery ? 'Geen loper gevonden.' : 'Geen beschikbare lopers in de databank.'}
             </div>
           )}
           {activationError && <div className="warning-banner">{activationError}</div>}
@@ -110,13 +119,15 @@ export function RunnerActivationModal({
                 >
                   Profiel
                 </button>
-                <button
-                  className="btn btn--primary btn--fixed"
-                  onClick={() => activate(runner.id)}
-                  disabled={Boolean(activatingId)}
-                >
-                  {activatingId === runner.id ? 'Bezig...' : 'Opwarmen'}
-                </button>
+                {isAvailableForActivation(runner) && (
+                  <button
+                    className="btn btn--primary btn--fixed"
+                    onClick={() => activate(runner.id)}
+                    disabled={Boolean(activatingId)}
+                  >
+                    {activatingId === runner.id ? 'Bezig...' : 'Opwarmen'}
+                  </button>
+                )}
               </div>
             </div>
           ))}
@@ -190,7 +201,10 @@ export function RunnerAddModal({ onClose }: { onClose: () => void }) {
 
     setSelectedLabels((current) => {
       if (current.includes(labelId)) return current.filter((id) => id !== labelId);
-      return [...current.filter((id) => exclusiveLabelGroup(labels.find((item) => item.id === id)?.kind) !== group), labelId];
+      return [
+        ...current.filter((id) => exclusiveLabelGroup(labels.find((item) => item.id === id)?.kind) !== group),
+        labelId,
+      ];
     });
   }
 
@@ -213,96 +227,109 @@ export function RunnerAddModal({ onClose }: { onClose: () => void }) {
             Naam
             <input className="input" value={name} onChange={(event) => setName(event.target.value)} />
           </label>
-          <label>
-            Doelstelling toeren
-            <input
-              className="input"
-              type="number"
-              min="0"
-              value={targetLaps}
-              onChange={(event) => setTargetLaps(event.target.value)}
-            />
-          </label>
-          <label>
-            Historisch gemiddelde
-            <div className="duration-input">
-              <input
-                className="input"
-                type="number"
-                min="0"
-                value={historicalAvgMinutes}
-                onChange={(event) => setHistoricalAvgMinutes(event.target.value)}
-                placeholder="min"
-              />
-              <input
-                className="input"
-                type="number"
-                min="0"
-                max="59"
-                value={historicalAvgSeconds}
-                onBlur={() => setHistoricalAvgSeconds(normalizeSecondsInput(historicalAvgSeconds))}
-                onChange={(event) => setHistoricalAvgSeconds(event.target.value)}
-                placeholder="sec"
-              />
-            </div>
-          </label>
-          <label>
-            Historisch snelste
-            <div className="duration-input">
-              <input
-                className="input"
-                type="number"
-                min="0"
-                value={historicalBestMinutes}
-                onChange={(event) => setHistoricalBestMinutes(event.target.value)}
-                placeholder="min"
-              />
-              <input
-                className="input"
-                type="number"
-                min="0"
-                max="59"
-                value={historicalBestSeconds}
-                onBlur={() => setHistoricalBestSeconds(normalizeSecondsInput(historicalBestSeconds))}
-                onChange={(event) => setHistoricalBestSeconds(event.target.value)}
-                placeholder="sec"
-              />
-            </div>
-          </label>
         </div>
 
         <div className="label-picker-groups">
-          {groupLabels(labels.filter((label) => label.kind !== 'temporary_team')).map(([kind, groupedLabels]) => (
-            <section key={kind} className="label-picker-group">
-              <h3>{labelKindTitle(kind)}</h3>
-              <p className="label-picker-help">Kies maximaal 1 optie.</p>
-              <div className="label-picker">
-                {groupedLabels.map((label) => (
-                  <label key={label.id} className="check-pill">
-                    <input
-                      type="checkbox"
-                      checked={selectedLabels.includes(label.id)}
-                      onChange={() => toggleLabel(label.id)}
-                    />
-                    <span style={{ borderColor: label.color }}>
-                      {label.imageUrl ? (
-                        <img src={label.imageUrl} alt="" className="label-image" />
-                      ) : (
-                        <i className="label-dot" style={{ background: label.color }} />
-                      )}
-                      {label.name}
-                    </span>
-                  </label>
-                ))}
-              </div>
-            </section>
-          ))}
+          {groupLabels(labels.filter((label) => label.kind !== 'temporary_team')).map(
+            ([kind, groupedLabels]) => (
+              <section key={kind} className="label-picker-group">
+                <h3>{labelKindTitle(kind)}</h3>
+                <p className="label-picker-help">Kies maximaal 1 optie.</p>
+                <div className="label-picker">
+                  {groupedLabels.map((label) => (
+                    <label key={label.id} className="check-pill">
+                      <input
+                        type="checkbox"
+                        checked={selectedLabels.includes(label.id)}
+                        onChange={() => toggleLabel(label.id)}
+                      />
+                      <span style={{ borderColor: label.color }}>
+                        {label.imageUrl ? (
+                          <img src={label.imageUrl} alt="" className="label-image" />
+                        ) : (
+                          <i className="label-dot" style={{ background: label.color }} />
+                        )}
+                        {label.name}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </section>
+            )
+          )}
         </div>
 
-        <label className="stacked-label">
-          Notities
-          <textarea className="input textarea" value={notes} onChange={(event) => setNotes(event.target.value)} />
-        </label>
+        <details className="runner-extra-details">
+          <summary>
+            Extra gegevens <span>Doel, historische tijden en notities</span>
+          </summary>
+          <div className="form-grid">
+            <label>
+              Doelstelling toeren
+              <input
+                className="input"
+                type="number"
+                min="0"
+                value={targetLaps}
+                onChange={(event) => setTargetLaps(event.target.value)}
+              />
+            </label>
+            <label>
+              Historisch gemiddelde
+              <div className="duration-input">
+                <input
+                  className="input"
+                  type="number"
+                  min="0"
+                  value={historicalAvgMinutes}
+                  onChange={(event) => setHistoricalAvgMinutes(event.target.value)}
+                  placeholder="min"
+                />
+                <input
+                  className="input"
+                  type="number"
+                  min="0"
+                  max="59"
+                  value={historicalAvgSeconds}
+                  onBlur={() => setHistoricalAvgSeconds(normalizeSecondsInput(historicalAvgSeconds))}
+                  onChange={(event) => setHistoricalAvgSeconds(event.target.value)}
+                  placeholder="sec"
+                />
+              </div>
+            </label>
+            <label>
+              Historisch snelste
+              <div className="duration-input">
+                <input
+                  className="input"
+                  type="number"
+                  min="0"
+                  value={historicalBestMinutes}
+                  onChange={(event) => setHistoricalBestMinutes(event.target.value)}
+                  placeholder="min"
+                />
+                <input
+                  className="input"
+                  type="number"
+                  min="0"
+                  max="59"
+                  value={historicalBestSeconds}
+                  onBlur={() => setHistoricalBestSeconds(normalizeSecondsInput(historicalBestSeconds))}
+                  onChange={(event) => setHistoricalBestSeconds(event.target.value)}
+                  placeholder="sec"
+                />
+              </div>
+            </label>
+          </div>
+          <label className="stacked-label">
+            Notities
+            <textarea
+              className="input textarea"
+              value={notes}
+              onChange={(event) => setNotes(event.target.value)}
+            />
+          </label>
+        </details>
 
         {error && <div className="warning-banner">{error}</div>}
 
@@ -369,6 +396,12 @@ function runnerStatusLabel(runner: Runner) {
       return 'Ingeschreven';
     case 'ran':
       return 'Heeft gelopen';
+    case 'warming_up':
+      return 'Aan het opwarmen';
+    case 'waiting':
+      return 'In de wachtrij';
+    case 'running':
+      return 'Op de piste';
     default:
       return runner.status;
   }

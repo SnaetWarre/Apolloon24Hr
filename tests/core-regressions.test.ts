@@ -420,8 +420,8 @@ test('operator views share the Apolloon design tokens and accessible navigation 
   assert.match(appSource, /aria-current=\{isCurrentPage \? 'page' : undefined\}/);
   assert.match(appSource, /aria-label="Hoofdnavigatie"/);
   assert.doesNotMatch(displaySource, /display-home/);
-  assert.match(kanbanSource, /card--dragging/);
-  assert.match(stylesSource, /\.card--dragging\s*\{[^}]*transition:\s*none;/s);
+  assert.match(kanbanSource, /queue-runner--dragging/);
+  assert.match(fs.readFileSync(path.resolve('src/workspace.css'), 'utf8'), /\.queue-runner--dragging\s*\{[^}]*transition:\s*none;/s);
   assert.match(stylesSource, /\.form-row--plain\s*\{[^}]*border:\s*0;[^}]*box-shadow:\s*none;/s);
 });
 

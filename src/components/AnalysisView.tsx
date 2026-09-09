@@ -1,3 +1,4 @@
+import { SectionNavigation } from './SectionNavigation';
 import { workspaceChartPalette } from '../lib/chartPalette';
 import React from 'react';
 import {
@@ -60,7 +61,15 @@ const allLabelsEnabled: AnalysisFilters = {
   enabledLabelIds: null,
 };
 
+type AnalysisSection = 'race' | 'runners' | 'teams';
+const ANALYSIS_SECTIONS: ReadonlyArray<{ id: AnalysisSection; label: string }> = [
+  { id: 'race', label: 'Wedstrijd' },
+  { id: 'runners', label: 'Lopers' },
+  { id: 'teams', label: 'Ploegen' },
+];
+
 export function AnalysisView() {
+  const [activeSection, setActiveSection] = React.useState<AnalysisSection>('race');
   const { runners, labels, race } = useAppData(selectAnalysisData);
   const { laps, events, loading: historyLoading, error: historyError } = useRaceHistory({ scope: 'full' });
   const [filters, setFilters] = React.useState<AnalysisFilters>(allLabelsEnabled);
@@ -95,7 +104,10 @@ export function AnalysisView() {
     [runners, filteredLaps]
   );
   const visibleRunnerInsights = React.useMemo(
-    () => runnerInsights.filter((insight) => runnerInsightMatches(insight, runnerSearch)).sort(sortRunnerInsight(runnerSort)),
+    () =>
+      runnerInsights
+        .filter((insight) => runnerInsightMatches(insight, runnerSearch))
+        .sort(sortRunnerInsight(runnerSort)),
     [runnerInsights, runnerSearch, runnerSort]
   );
   const burgieEventCount = React.useMemo(
@@ -133,7 +145,9 @@ export function AnalysisView() {
       </div>
 
       {historyLoading && (
-        <div className="host-hint" role="status">Gecomprimeerde racegeschiedenis wordt geladen...</div>
+        <div className="host-hint" role="status">
+          Gecomprimeerde racegeschiedenis wordt geladen...
+        </div>
       )}
       {historyError && (
         <div className="warning-banner" role="alert">
@@ -141,144 +155,178 @@ export function AnalysisView() {
         </div>
       )}
 
-      <div className="analysis-top-grid">
-        <section className="panel analysis-pace-panel">
-          <SectionHeader
-            title="Toertjestempo over tijd"
-            text="Balken tonen hoeveel rondes er per uur liepen. De lijn toont hoe snel die rondes gemiddeld waren."
-          />
-          <RacePaceChart buckets={timeBuckets} />
-        </section>
-
-        <section className="panel analysis-filter-panel">
-          <div className="panel-heading-row">
-            <SectionHeader
-              title="Ploegen aan/uit"
-              text={`${filteredLaps.length} van ${laps.length} rondes tellen mee. Een ronde telt zodra minstens een van haar labels aan staat.`}
-            />
-            <div className="analysis-filter-actions">
-              <button className="btn btn--ghost" onClick={enableAllLabels}>
-                Alles aan
-              </button>
-              <button className="btn btn--ghost" onClick={disableAllLabels}>
-                Alles uit
-              </button>
+      <div className="analysis-workspace">
+        <aside className="analysis-scope">
+          <section className="panel analysis-filter-panel">
+            <div className="panel-heading-row">
+              <SectionHeader
+                title="Ploegen aan/uit"
+                text={`${filteredLaps.length} van ${laps.length} rondes tellen mee. Een ronde telt zodra minstens een van haar labels aan staat.`}
+              />
+              <div className="analysis-filter-actions">
+                <button className="btn btn--ghost" onClick={enableAllLabels}>
+                  Alles aan
+                </button>
+                <button className="btn btn--ghost" onClick={disableAllLabels}>
+                  Alles uit
+                </button>
+              </div>
             </div>
+            <LabelTogglePicker
+              labels={analysisLabels}
+              enabledLabelIds={enabledLabelIds}
+              onToggle={toggleLabel}
+            />
+          </section>
+          <details className="analysis-downloads">
+            <summary>Downloads</summary>
+            <p className="panel-copy">Volledige wedstrijddata; exports volgen de schermfilters niet.</p>
+            <div className="export-row export-row--secondary">
+              <a className="btn btn--primary" href="/api/export/laps.csv">
+                Download CSV
+              </a>
+              <a className="btn btn--ghost" href="/api/export/laps.json">
+                Download laps.json
+              </a>
+              <a className="btn btn--ghost" href="/api/export/current-state.json">
+                Download current-state.json
+              </a>
+              <a className="btn btn--ghost" href="/api/export/events.csv">
+                Download events.csv
+              </a>
+              <a className="btn btn--ghost" href="/api/export/events.json">
+                Download events.json
+              </a>
+            </div>
+          </details>{' '}
+        </aside>
+        <div className="analysis-content">
+          <div className="stats-grid stats-grid--analysis">
+            <StatPanel label="Geselecteerde toeren" value={kpis.count.toString()} />
+            <StatPanel label="Gemiddelde ronde" value={formatDurationMs(kpis.averageMs)} />
+            <StatPanel label="Mediaan" value={formatDurationMs(kpis.medianMs)} />
+            <StatPanel label="Snelste" value={formatDurationMs(kpis.bestMs)} />
+            <StatPanel label="Traagste" value={formatDurationMs(kpis.slowestMs)} />
+            <StatPanel label="Toeren / uur" value={formatNumber(kpis.lapsPerHour, 1)} />
+            <StatPanel label="Projectie 24u" value={formatNumber(kpis.projected24hLaps, 0)} />
+            <StatPanel label="Burgie gepakt" value={burgieEventCount.toString()} />
           </div>
-          <LabelTogglePicker labels={analysisLabels} enabledLabelIds={enabledLabelIds} onToggle={toggleLabel} />
-        </section>
+
+          <SectionNavigation
+            label="Analyseonderdelen"
+            sections={ANALYSIS_SECTIONS}
+            activeSectionId={activeSection}
+            onSectionChange={setActiveSection}
+          />
+          {activeSection === 'race' && (
+            <>
+              <div className="analysis-charts">
+                <section className="panel analysis-pace-panel">
+                  <SectionHeader
+                    title="Toertjestempo over tijd"
+                    text="Balken tonen hoeveel rondes er per uur liepen. De lijn toont hoe snel die rondes gemiddeld waren."
+                  />
+                  <RacePaceChart buckets={timeBuckets} />
+                </section>
+
+                <section className="panel analysis-trend-panel">
+                  <SectionHeader
+                    title="Rondeduurtrend"
+                    text="Blauwe lijn met het rolling gemiddelde van Apolloon-rondetijden over de race."
+                  />
+                  <RollingLapTrendChart points={rollingLapTrend} />
+                </section>
+              </div>
+              {kpis.outlierUnderMinuteCount > 0 && (
+                <div className="warning-banner">
+                  {kpis.outlierUnderMinuteCount} ronde(s) onder 1:00 gevonden. Die worden niet opgenomen in de
+                  verdeling.
+                </div>
+              )}
+
+              <div className="analysis-main-grid">
+                <section className="panel">
+                  <SectionHeader
+                    title="Rondeverdeling"
+                    text="Vaste zones van 5 seconden, van 1:00 tot 1:30+."
+                  />
+                  <DistributionChart bins={distribution} />
+                </section>
+
+                <section className="panel">
+                  <SectionHeader
+                    title="Snelste rondes"
+                    text="Bekijk de snelste ronde binnen de huidige selectie per dag, per 2 uur of per uur."
+                  />
+                  <FastestLapWindowList
+                    mode={fastestWindowMode}
+                    windows={fastestLapWindows}
+                    onModeChange={setFastestWindowMode}
+                  />
+                </section>
+              </div>
+            </>
+          )}
+          {activeSection === 'runners' && (
+            <>
+              <section className="panel">
+                <div className="panel-heading-row">
+                  <SectionHeader
+                    title="Loper inzichten"
+                    text="Zoek op nummer of naam. Sorteer op aantallen, tempo of consistentie binnen de selectie."
+                  />
+                  <input
+                    className="input input--search analysis-runner-search"
+                    value={runnerSearch}
+                    onChange={(event) => setRunnerSearch(event.target.value)}
+                    placeholder="Zoek loper..."
+                  />
+                </div>
+                <div className="segmented-control analysis-sort-control">
+                  <button
+                    className={runnerSort === 'laps' ? 'is-active' : ''}
+                    onClick={() => setRunnerSort('laps')}
+                  >
+                    Meeste rondes
+                  </button>
+                  <button
+                    className={runnerSort === 'average' ? 'is-active' : ''}
+                    onClick={() => setRunnerSort('average')}
+                  >
+                    Snelste gem.
+                  </button>
+                  <button
+                    className={runnerSort === 'best' ? 'is-active' : ''}
+                    onClick={() => setRunnerSort('best')}
+                  >
+                    Snelste ronde
+                  </button>
+                  <button
+                    className={runnerSort === 'consistency' ? 'is-active' : ''}
+                    onClick={() => setRunnerSort('consistency')}
+                  >
+                    Consistent
+                  </button>
+                </div>
+                <div className="table-wrap">
+                  <RunnerInsightsTable insights={visibleRunnerInsights} />
+                </div>
+              </section>
+            </>
+          )}
+          {activeSection === 'teams' && (
+            <>
+              <section className="panel">
+                <SectionHeader
+                  title="Gemiddelde per label"
+                  text="Een loper kan in meerdere labels zitten; labels kunnen dus overlappen."
+                />
+                <LabelComparisonList comparisons={labelComparisons} />
+              </section>
+            </>
+          )}
+        </div>
       </div>
-
-      <section className="panel analysis-trend-panel">
-        <SectionHeader
-          title="Rondeduurtrend"
-          text="Blauwe lijn met het rolling gemiddelde van Apolloon-rondetijden over de race."
-        />
-        <RollingLapTrendChart points={rollingLapTrend} />
-      </section>
-
-      <div className="stats-grid stats-grid--analysis">
-        <StatPanel label="Geselecteerde toeren" value={kpis.count.toString()} />
-        <StatPanel label="Gemiddelde ronde" value={formatDurationMs(kpis.averageMs)} />
-        <StatPanel label="Mediaan" value={formatDurationMs(kpis.medianMs)} />
-        <StatPanel label="Snelste" value={formatDurationMs(kpis.bestMs)} />
-        <StatPanel label="Traagste" value={formatDurationMs(kpis.slowestMs)} />
-        <StatPanel label="Toeren / uur" value={formatNumber(kpis.lapsPerHour, 1)} />
-        <StatPanel label="Projectie 24u" value={formatNumber(kpis.projected24hLaps, 0)} />
-        <StatPanel label="Burgie gepakt" value={burgieEventCount.toString()} />
-      </div>
-
-      {kpis.outlierUnderMinuteCount > 0 && (
-        <div className="warning-banner">
-          {kpis.outlierUnderMinuteCount} ronde(s) onder 1:00 gevonden. Die worden niet opgenomen in de verdeling.
-        </div>
-      )}
-
-      <div className="analysis-main-grid">
-        <section className="panel">
-          <SectionHeader
-            title="Rondeverdeling"
-            text="Vaste zones van 5 seconden, van 1:00 tot 1:30+."
-          />
-          <DistributionChart bins={distribution} />
-        </section>
-
-        <section className="panel">
-          <SectionHeader
-            title="Snelste rondes"
-            text="Bekijk de snelste ronde binnen de huidige selectie per dag, per 2 uur of per uur."
-          />
-          <FastestLapWindowList
-            mode={fastestWindowMode}
-            windows={fastestLapWindows}
-            onModeChange={setFastestWindowMode}
-          />
-        </section>
-      </div>
-
-      <section className="panel">
-        <SectionHeader
-          title="Gemiddelde per label"
-          text="Een loper kan in meerdere labels zitten; labels kunnen dus overlappen."
-        />
-        <LabelComparisonList comparisons={labelComparisons} />
-      </section>
-
-      <section className="panel">
-        <div className="panel-heading-row">
-          <SectionHeader
-            title="Loper inzichten"
-            text="Zoek op nummer of naam. Sorteer op aantallen, tempo of consistentie binnen de selectie."
-          />
-          <input
-            className="input input--search analysis-runner-search"
-            value={runnerSearch}
-            onChange={(event) => setRunnerSearch(event.target.value)}
-            placeholder="Zoek loper..."
-          />
-        </div>
-        <div className="segmented-control analysis-sort-control">
-          <button className={runnerSort === 'laps' ? 'is-active' : ''} onClick={() => setRunnerSort('laps')}>
-            Meeste rondes
-          </button>
-          <button className={runnerSort === 'average' ? 'is-active' : ''} onClick={() => setRunnerSort('average')}>
-            Snelste gem.
-          </button>
-          <button className={runnerSort === 'best' ? 'is-active' : ''} onClick={() => setRunnerSort('best')}>
-            Snelste ronde
-          </button>
-          <button
-            className={runnerSort === 'consistency' ? 'is-active' : ''}
-            onClick={() => setRunnerSort('consistency')}
-          >
-            Consistent
-          </button>
-        </div>
-        <div className="table-wrap">
-          <RunnerInsightsTable insights={visibleRunnerInsights} />
-        </div>
-      </section>
-
-      <section className="panel analysis-export-panel">
-        <SectionHeader title="Downloads" text="Exports blijven beschikbaar, maar staan bewust onderaan." />
-        <div className="export-row export-row--secondary">
-          <a className="btn btn--primary" href="/api/export/laps.csv">
-            Download CSV
-          </a>
-          <a className="btn btn--ghost" href="/api/export/laps.json">
-            Download laps.json
-          </a>
-          <a className="btn btn--ghost" href="/api/export/current-state.json">
-            Download current-state.json
-          </a>
-          <a className="btn btn--ghost" href="/api/export/events.csv">
-            Download events.csv
-          </a>
-          <a className="btn btn--ghost" href="/api/export/events.json">
-            Download events.json
-          </a>
-        </div>
-      </section>
     </>
   );
 }

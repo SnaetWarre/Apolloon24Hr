@@ -11,9 +11,8 @@ import { LabelBadge } from './LabelBadge';
 const selectKanbanData = ({ runners }: LiveAppSnapshot) => ({ runners });
 
 const COLUMNS: { key: RunnerStatus; title: string }[] = [
-  { key: 'warming_up', title: 'Aan het opwarmen' },
-  { key: 'waiting', title: 'In de wachtrij' },
-  { key: 'ran', title: 'Heeft gelopen' },
+  { key: 'warming_up', title: 'Opwarming' },
+  { key: 'waiting', title: 'Klaar om te lopen' },
 ];
 
 function TimerBadge({ runner }: { runner: Runner }) {
@@ -79,7 +78,10 @@ export const KanbanBoard: React.FC<{ onOpenProfile: (runnerId: string) => void }
     });
     if (!q) return visible;
     return visible.filter((runner) => {
-      const labelText = runner.labels.map((label) => label.name).join(' ').toLowerCase();
+      const labelText = runner.labels
+        .map((label) => label.name)
+        .join(' ')
+        .toLowerCase();
       return (
         runner.name.toLowerCase().includes(q) ||
         (runner.runnerNumber || '').toLowerCase().includes(q) ||
@@ -93,8 +95,8 @@ export const KanbanBoard: React.FC<{ onOpenProfile: (runnerId: string) => void }
       .sort((a, b) => compareByStatusSinceAsc(a, b) || runnerNumberValue(a) - runnerNumberValue(b));
   }, [filteredRunners]);
 
-  const waitingSorted = React.useMemo(() => {
-    return filteredRunners
+  const completeWaitingQueue = React.useMemo(() => {
+    return runners
       .filter((runner) => runner.status === 'waiting')
       .sort(
         (a, b) =>
@@ -102,7 +104,13 @@ export const KanbanBoard: React.FC<{ onOpenProfile: (runnerId: string) => void }
           compareByStatusSinceAsc(a, b) ||
           runnerNumberValue(a) - runnerNumberValue(b)
       );
-  }, [filteredRunners]);
+  }, [runners]);
+  const visibleRunnerIds = new Set(filteredRunners.map((runner) => runner.id));
+  const waitingSorted = completeWaitingQueue.filter((runner) => visibleRunnerIds.has(runner.id));
+  const queuePositionByRunnerId = React.useMemo(
+    () => new Map(completeWaitingQueue.map((runner, index) => [runner.id, index])),
+    [completeWaitingQueue]
+  );
 
   const ranSorted = React.useMemo(() => {
     return filteredRunners
@@ -129,49 +137,83 @@ export const KanbanBoard: React.FC<{ onOpenProfile: (runnerId: string) => void }
     }
   }
 
+  function renderRunnerRow(runner: Runner) {
+    const queuePosition = queuePositionByRunnerId.get(runner.id) ?? -1;
+    const previousRunner = queuePosition > 0 ? completeWaitingQueue[queuePosition - 1] : null;
+    return (
+      <QueueRunnerRow
+        key={runner.id}
+        runner={runner}
+        queuePosition={queuePosition}
+        actionBusy={actionBusy}
+        onOpenProfile={onOpenProfile}
+        onAdvance={() =>
+          void runQueueAction(() =>
+            setStatus(runner.id, runner.status === 'warming_up' ? 'waiting' : 'warming_up')
+          )
+        }
+        onMoveEarlier={
+          previousRunner
+            ? () => void runQueueAction(() => moveInQueue(runner.id, previousRunner.id))
+            : undefined
+        }
+        onToggleHidden={() => void (runner.hiddenFromQueue ? handleUnhide(runner.id) : handleHide(runner.id))}
+      />
+    );
+  }
+
   return (
     <DndContext collisionDetection={kanbanCollisionDetection} onDragEnd={onDragEnd}>
-      <div className="board-toolbar">
-        <label className="toggle-row">
-          <input
-            type="checkbox"
-            checked={showHiddenRan}
-            onChange={(event) => setShowHiddenRan(event.target.checked)}
-          />
-          Verborgen gelopen tonen
-        </label>
-      </div>
-      {actionError && <div className="warning-banner">{actionError}</div>}
-      <div className="kanban">
-        {COLUMNS.map((column) => {
-          const items =
-            column.key === 'warming_up' ? warmingUpSorted : column.key === 'waiting' ? waitingSorted : ranSorted;
-          return (
-            <DroppableColumn key={column.key} id={`column-${column.key}`} title={column.title} count={items.length}>
-              {items.map((runner, index) => (
-                <DroppableCard key={runner.id} id={runner.id}>
-                  <DraggableCard
-                    id={runner.id}
-                    runner={runner}
-                    onOpenProfile={onOpenProfile}
-                    columnKey={column.key}
-                    queueIndex={column.key === 'waiting' ? index : undefined}
-                    actionBusy={actionBusy}
-                    onHide={handleHide}
-                    onUnhide={handleUnhide}
-                  />
-                </DroppableCard>
-              ))}
-              {items.length === 0 && <div className="column-empty">Geen lopers</div>}
-            </DroppableColumn>
-          );
-        })}
+      {actionError && (
+        <div className="warning-banner" role="alert">
+          {actionError}
+        </div>
+      )}
+      <div className="queue-workspace">
+        <div className="queue-lanes">
+          {COLUMNS.map((column) => {
+            const columnRunners = column.key === 'warming_up' ? warmingUpSorted : waitingSorted;
+            return (
+              <QueueLane
+                key={column.key}
+                id={`column-${column.key}`}
+                title={column.title}
+                count={columnRunners.length}
+              >
+                {columnRunners.map(renderRunnerRow)}
+                {!columnRunners.length && (
+                  <p className="empty-inline">
+                    {search ? 'Geen lopers voor dit filter.' : 'Nog geen lopers.'}
+                  </p>
+                )}
+              </QueueLane>
+            );
+          })}
+        </div>
+        <details className="queue-completed">
+          <summary>
+            Heeft gelopen <span>{ranSorted.length}</span>
+            <small>Terug laten opwarmen of verbergen</small>
+          </summary>
+          <label className="toggle-row">
+            <input
+              type="checkbox"
+              checked={showHiddenRan}
+              onChange={(event) => setShowHiddenRan(event.target.checked)}
+            />
+            Verborgen gelopen tonen
+          </label>
+          <div className="queue-completed__rows">
+            {ranSorted.map(renderRunnerRow)}
+            {!ranSorted.length && <p className="empty-inline">Geen gelopen lopers voor deze selectie.</p>}
+          </div>
+        </details>
       </div>
     </DndContext>
   );
 };
 
-function DroppableColumn({
+function QueueLane({
   id,
   title,
   count,
@@ -184,124 +226,107 @@ function DroppableColumn({
 }) {
   const { setNodeRef, isOver } = useDroppable({ id });
   return (
-    <div ref={setNodeRef} className={`column${isOver ? ' column--over' : ''}`}>
-      <div className="column-title">
-        <span>{title}</span>
-        <span className="column-count">{count}</span>
-      </div>
-      <div className="column-body">{children}</div>
-    </div>
+    <section ref={setNodeRef} className={`queue-lane${isOver ? ' queue-lane--over' : ''}`} aria-label={title}>
+      <header>
+        <h2>{title}</h2>
+        <span>{count} lopers</span>
+      </header>
+      <div className="queue-lane__rows">{children}</div>
+    </section>
   );
 }
 
-const DraggableCard = React.memo(function DraggableCard({
-  id,
+function QueueRunnerRow({
   runner,
-  onOpenProfile,
-  columnKey,
-  queueIndex,
+  queuePosition,
   actionBusy,
-  onHide,
-  onUnhide,
+  onOpenProfile,
+  onAdvance,
+  onMoveEarlier,
+  onToggleHidden,
 }: {
-  id: string;
   runner: Runner;
-  onOpenProfile: (id: string) => void;
-  columnKey: RunnerStatus;
-  queueIndex?: number;
+  queuePosition: number;
   actionBusy: boolean;
-  onHide: (id: string) => Promise<void>;
-  onUnhide: (id: string) => Promise<void>;
+  onOpenProfile: (runnerId: string) => void;
+  onAdvance: () => void;
+  onMoveEarlier?: () => void;
+  onToggleHidden: () => void;
 }) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id, disabled: actionBusy });
-  const style: React.CSSProperties = {
+  const {
+    attributes,
+    listeners,
+    setNodeRef: setDragRef,
+    transform,
+    isDragging,
+  } = useDraggable({ id: runner.id, disabled: actionBusy });
+  const { setNodeRef: setDropRef, isOver } = useDroppable({ id: runner.id });
+  const rowStyle: React.CSSProperties = {
     transform: transform ? `translate3d(${transform.x}px, ${transform.y}px, 0)` : undefined,
-    opacity: isDragging ? 0.5 : 1,
   };
-
-  async function handleHide(event: React.MouseEvent) {
-    event.stopPropagation();
-    await onHide(id);
-  }
-
-  async function handleUnhide(event: React.MouseEvent) {
-    event.stopPropagation();
-    await onUnhide(id);
-  }
-
-  function handleContextMenu(event: React.MouseEvent) {
-    event.preventDefault();
-    event.stopPropagation();
-    onOpenProfile(id);
-  }
-
+  const isCompleted = runner.status === 'ran';
   return (
-    <div
-      ref={setNodeRef}
-      className={`card${runner.hiddenFromQueue ? ' card--muted' : ''}${isDragging ? ' card--dragging' : ''}`}
-      style={style}
-      onContextMenu={handleContextMenu}
-    >
-      <div className="card-row">
+    <div ref={setDropRef} className={isOver ? 'queue-drop-target' : undefined}>
+      <div
+        ref={setDragRef}
+        style={rowStyle}
+        className={`queue-runner${isDragging ? ' queue-runner--dragging' : ''}${queuePosition === 0 ? ' queue-runner--next' : ''}`}
+      >
         <button
-          type="button"
           {...listeners}
           {...attributes}
-          onClick={() => onOpenProfile(id)}
-          className="card-main"
-          title="Profiel openen"
+          className="queue-drag"
+          aria-label={`Verplaats ${runner.name}`}
+          title="Sleep om te verplaatsen"
         >
-          <span className="runner-title">
-            {runner.runnerNumber && <span className="runner-number">{runner.runnerNumber}</span>}
-            <span>{runner.name}</span>
+          ⠿
+        </button>
+        {queuePosition >= 0 && (
+          <span
+            className="queue-position"
+            title={queuePosition === 0 ? 'Volgende loper' : 'Positie in wachtrij'}
+          >
+            {queuePosition + 1}
           </span>
-          <LabelPills labels={runner.labels} />
-          <span className="card-meta">
-            <span>
+        )}
+        <button className="queue-identity" onClick={() => onOpenProfile(runner.id)} title="Profiel openen">
+          <span className="runner-title">
+            <span className="runner-number">{runner.runnerNumber || '-'}</span>
+            {runner.name}
+          </span>
+          <span className="queue-runner__details">
+            {runner.labels.map((label) => (
+              <LabelBadge key={label.id} label={label} compact />
+            ))}
+            <span
+              title={runner.bestLapMs ? `Snelste ronde ${formatDurationMs(runner.bestLapMs)}` : undefined}
+            >
               {runner.lapCount} toeren
-              {runner.bestLapMs ? ` · snelste ${formatDurationMs(runner.bestLapMs)}` : ''}
             </span>
           </span>
         </button>
-        <div className="card-side">
-          <button
-            className="card-profile-btn"
-            onClick={(event) => { event.stopPropagation(); onOpenProfile(id); }}
-          >
-            Profiel
-          </button>
-          <TimerBadge runner={runner} />
-          {columnKey === 'waiting' && queueIndex !== undefined && (
-            <span className="queue-badge">{queueIndex === 0 ? 'Volgende' : `#${queueIndex + 1}`}</span>
-          )}
-          {columnKey === 'ran' && !runner.hiddenFromQueue && (
-            <button className="btn btn--sm btn--fixed" onClick={handleHide} disabled={actionBusy}>
-              Verberg
+        <TimerBadge runner={runner} />
+        <div className="queue-row-actions">
+          {queuePosition >= 0 && (
+            <button
+              className="btn btn--sm"
+              disabled={actionBusy || !onMoveEarlier}
+              onClick={onMoveEarlier}
+              aria-label={`${runner.name} één plaats naar voren`}
+            >
+              ↑
             </button>
           )}
-          {columnKey === 'ran' && runner.hiddenFromQueue && (
-            <button className="btn btn--sm btn--fixed" onClick={handleUnhide} disabled={actionBusy}>
-              Terug tonen
+          <button className="btn btn--sm" disabled={actionBusy} onClick={onAdvance}>
+            {runner.status === 'warming_up' ? 'Naar wachtrij →' : 'Opwarmen'}
+          </button>
+          {isCompleted && (
+            <button className="btn btn--secondary btn--sm" disabled={actionBusy} onClick={onToggleHidden}>
+              {runner.hiddenFromQueue ? 'Terug tonen' : 'Verberg'}
             </button>
           )}
         </div>
       </div>
     </div>
   );
-});
-
-function LabelPills({ labels }: { labels: Runner['labels'] }) {
-  if (!labels.length) return null;
-  return (
-    <span className="label-row">
-      {labels.map((label) => (
-        <LabelBadge key={label.id} label={label} compact />
-      ))}
-    </span>
-  );
-}
-
-function DroppableCard({ id, children }: { id: string; children: React.ReactNode }) {
-  const { setNodeRef } = useDroppable({ id });
-  return <div ref={setNodeRef}>{children}</div>;
 }
