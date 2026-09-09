@@ -572,6 +572,20 @@ test('kanban collision detection targets the exact empty column or runner under 
     pointerCoordinates: { x: 450, y: 150 },
   });
   assert.equal(populatedColumnCollision[0]?.id, 'waiting-runner');
+
+  const outsideBoardCollisions = kanbanCollisionDetection({
+    active,
+    collisionRect: rect(700, 100, 280, 100),
+    droppableContainers: [warmingColumn, waitingColumn, waitingRunner],
+    droppableRects: new Map([
+      [warmingColumn.id, warmingColumnRect],
+      [waitingColumn.id, waitingColumnRect],
+      [waitingRunner.id, waitingRunnerRect],
+    ]),
+    pointerCoordinates: { x: 800, y: 150 },
+  });
+  assert.deepEqual(outsideBoardCollisions, []);
+
 });
 
 test('finishing a race retires the active runner without recording an extra lap', async () => {

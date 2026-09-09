@@ -1,5 +1,15 @@
 import React from 'react';
-import { DndContext, useDraggable, useDroppable, DragEndEvent } from '@dnd-kit/core';
+import {
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  KeyboardSensor,
+  useSensor,
+  useSensors,
+  useDraggable,
+  useDroppable,
+  type DragEndEvent,
+} from '@dnd-kit/core';
 import { useAppActions, useAppData } from '../app/index';
 import { useAppStore } from '../store';
 import { formatDurationMs, formatElapsedSeconds, nowMs } from '../lib/time';
@@ -45,6 +55,12 @@ export const KanbanBoard: React.FC<{ onOpenProfile: (runnerId: string) => void }
   const [actionError, setActionError] = React.useState<string | null>(null);
   const [actionBusy, setActionBusy] = React.useState(false);
   const actionBusyRef = React.useRef(false);
+  const [draggedRunnerId, setDraggedRunnerId] = React.useState<string | null>(null);
+  const [dropTargetId, setDropTargetId] = React.useState<string | null>(null);
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor)
+  );
 
   const runQueueAction = React.useCallback(async (action: () => Promise<unknown>) => {
     if (actionBusyRef.current) return;
@@ -124,6 +140,8 @@ export const KanbanBoard: React.FC<{ onOpenProfile: (runnerId: string) => void }
   }, [filteredRunners]);
 
   function onDragEnd(event: DragEndEvent) {
+    setDraggedRunnerId(null);
+    setDropTargetId(null);
     const { active, over } = event;
     if (!over) return;
 
@@ -137,25 +155,28 @@ export const KanbanBoard: React.FC<{ onOpenProfile: (runnerId: string) => void }
     }
   }
 
+  const draggedRunner = runners.find((runner) => runner.id === draggedRunnerId);
+  const dropAction = draggedRunnerId && dropTargetId
+    ? resolveKanbanDrop(draggedRunnerId, dropTargetId, filteredRunners)
+    : null;
+
   function renderRunnerRow(runner: Runner) {
     const queuePosition = queuePositionByRunnerId.get(runner.id) ?? -1;
-    const previousRunner = queuePosition > 0 ? completeWaitingQueue[queuePosition - 1] : null;
+    const insertionEdge = dropAction?.type === 'move-in-queue' && dropAction.targetRunnerId === runner.id
+      ? (queuePositionByRunnerId.get(dropAction.runnerId) ?? -1) < queuePosition ? 'after' : 'before'
+      : undefined;
     return (
       <QueueRunnerRow
         key={runner.id}
         runner={runner}
         queuePosition={queuePosition}
         actionBusy={actionBusy}
+        insertionEdge={insertionEdge}
         onOpenProfile={onOpenProfile}
         onAdvance={() =>
           void runQueueAction(() =>
             setStatus(runner.id, runner.status === 'warming_up' ? 'waiting' : 'warming_up')
           )
-        }
-        onMoveEarlier={
-          previousRunner
-            ? () => void runQueueAction(() => moveInQueue(runner.id, previousRunner.id))
-            : undefined
         }
         onToggleHidden={() => void (runner.hiddenFromQueue ? handleUnhide(runner.id) : handleHide(runner.id))}
       />
@@ -163,7 +184,14 @@ export const KanbanBoard: React.FC<{ onOpenProfile: (runnerId: string) => void }
   }
 
   return (
-    <DndContext collisionDetection={kanbanCollisionDetection} onDragEnd={onDragEnd}>
+    <DndContext
+      sensors={sensors}
+      collisionDetection={kanbanCollisionDetection}
+      onDragStart={({ active }) => setDraggedRunnerId(String(active.id))}
+      onDragOver={({ over }) => setDropTargetId(over ? String(over.id) : null)}
+      onDragCancel={() => { setDraggedRunnerId(null); setDropTargetId(null); }}
+      onDragEnd={onDragEnd}
+    >
       {actionError && (
         <div className="warning-banner" role="alert">
           {actionError}
@@ -179,6 +207,9 @@ export const KanbanBoard: React.FC<{ onOpenProfile: (runnerId: string) => void }
                 id={`column-${column.key}`}
                 title={column.title}
                 count={columnRunners.length}
+                dropHint={dropAction?.type === 'set-status' && dropAction.status === column.key
+                  ? column.key === 'waiting' ? 'Loslaten: achteraan in de wachtrij' : 'Loslaten: naar opwarming'
+                  : undefined}
               >
                 {columnRunners.map(renderRunnerRow)}
                 {!columnRunners.length && (
@@ -209,6 +240,17 @@ export const KanbanBoard: React.FC<{ onOpenProfile: (runnerId: string) => void }
           </div>
         </details>
       </div>
+      <DragOverlay dropAnimation={null} zIndex={2}>
+        {draggedRunner && (
+          <div className="queue-runner queue-runner--overlay">
+            <span className="queue-drag" aria-hidden="true">⠿</span>
+            <div className="queue-identity">
+              <span className="runner-title">{draggedRunner.runnerNumber} · {draggedRunner.name}</span>
+              <span className="queue-runner__details">Loslaten om te verplaatsen</span>
+            </div>
+          </div>
+        )}
+      </DragOverlay>
     </DndContext>
   );
 };
@@ -217,19 +259,21 @@ function QueueLane({
   id,
   title,
   count,
+  dropHint,
   children,
 }: {
   id: string;
   title: string;
   count: number;
+  dropHint?: string;
   children: React.ReactNode;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id });
   return (
-    <section ref={setNodeRef} className={`queue-lane${isOver ? ' queue-lane--over' : ''}`} aria-label={title}>
+    <section ref={setNodeRef} className={`queue-lane${isOver || dropHint ? ' queue-lane--over' : ''}`} aria-label={title}>
       <header>
         <h2>{title}</h2>
-        <span>{count} lopers</span>
+        {dropHint ? <span className="queue-drop-hint" role="status">{dropHint}</span> : <span>{count} lopers</span>}
       </header>
       <div className="queue-lane__rows">{children}</div>
     </section>
@@ -242,7 +286,7 @@ function QueueRunnerRow({
   actionBusy,
   onOpenProfile,
   onAdvance,
-  onMoveEarlier,
+  insertionEdge,
   onToggleHidden,
 }: {
   runner: Runner;
@@ -250,37 +294,31 @@ function QueueRunnerRow({
   actionBusy: boolean;
   onOpenProfile: (runnerId: string) => void;
   onAdvance: () => void;
-  onMoveEarlier?: () => void;
+  insertionEdge?: 'before' | 'after';
   onToggleHidden: () => void;
 }) {
   const {
     attributes,
     listeners,
     setNodeRef: setDragRef,
-    transform,
     isDragging,
   } = useDraggable({ id: runner.id, disabled: actionBusy });
-  const { setNodeRef: setDropRef, isOver } = useDroppable({ id: runner.id });
-  const rowStyle: React.CSSProperties = {
-    transform: transform ? `translate3d(${transform.x}px, ${transform.y}px, 0)` : undefined,
-  };
+  const { setNodeRef: setDropRef } = useDroppable({ id: runner.id, disabled: isDragging });
   const isCompleted = runner.status === 'ran';
   return (
-    <div ref={setDropRef} className={isOver ? 'queue-drop-target' : undefined}>
+    <div ref={setDropRef} className={insertionEdge ? `queue-drop-target queue-drop-target--${insertionEdge}` : undefined}>
+      {insertionEdge && <span className="queue-insertion-label">Hier invoegen</span>}
       <div
         ref={setDragRef}
-        style={rowStyle}
+        {...listeners}
+        {...attributes}
+        aria-label={`Verplaats ${runner.name}`}
+        onKeyDown={(event) => {
+          if (event.target === event.currentTarget) listeners?.onKeyDown?.(event);
+        }}
         className={`queue-runner${isDragging ? ' queue-runner--dragging' : ''}${queuePosition === 0 ? ' queue-runner--next' : ''}`}
       >
-        <button
-          {...listeners}
-          {...attributes}
-          className="queue-drag"
-          aria-label={`Verplaats ${runner.name}`}
-          title="Sleep om te verplaatsen"
-        >
-          ⠿
-        </button>
+        <span className="queue-drag" aria-hidden="true">⠿</span>
         {queuePosition >= 0 && (
           <span
             className="queue-position"
@@ -306,17 +344,7 @@ function QueueRunnerRow({
           </span>
         </button>
         <TimerBadge runner={runner} />
-        <div className="queue-row-actions">
-          {queuePosition >= 0 && (
-            <button
-              className="btn btn--sm"
-              disabled={actionBusy || !onMoveEarlier}
-              onClick={onMoveEarlier}
-              aria-label={`${runner.name} één plaats naar voren`}
-            >
-              ↑
-            </button>
-          )}
+        <div className="queue-row-actions" onPointerDown={(event) => event.stopPropagation()}>
           <button className="btn btn--sm" disabled={actionBusy} onClick={onAdvance}>
             {runner.status === 'warming_up' ? 'Naar wachtrij →' : 'Opwarmen'}
           </button>

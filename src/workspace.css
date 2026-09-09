@@ -191,8 +191,19 @@ body:has(.app-root) {
 .queue-runner { display: flex; align-items: center; gap: 8px; min-height: 68px; padding: 9px 4px; border-bottom: 1px solid var(--line); background: var(--bg); }
 .queue-runner:hover { background: var(--panel); }
 .queue-runner--next { background: var(--blue-faint); box-shadow: inset 3px 0 var(--apolloon-blue); }
-.queue-runner--dragging { position: relative; z-index: 4; opacity: 0.7; box-shadow: var(--shadow-md); transition: none; }
-.queue-drop-target { outline: 1px solid var(--blue-dark); }
+.queue-runner--dragging { opacity: 0.25; transition: none; }
+.queue-drop-target { position: relative; }
+.queue-drop-target::after { content: ''; position: absolute; z-index: 3; left: 0; right: 0; height: 3px; background: var(--apolloon-blue); pointer-events: none; }
+.queue-drop-target--before::after { top: 0; }
+.queue-drop-target--after::after { bottom: 0; }
+.queue-insertion-label { position: absolute; z-index: 4; right: 8px; padding: 2px 7px; background: var(--apolloon-blue); color: white; font-size: 11px; pointer-events: none; }
+.queue-drop-target--before .queue-insertion-label { top: 0; }
+.queue-drop-target--after .queue-insertion-label { bottom: 0; }
+.queue-lane > header > .queue-drop-hint { padding: 0 6px; background: var(--blue-soft); color: var(--blue-dark); font-size: 12px; font-weight: 600; }
+.queue-runner[role="button"] { cursor: grab; touch-action: none; }
+.queue-runner[role="button"]:focus-visible { outline: 2px solid var(--apolloon-blue); outline-offset: -2px; }
+.queue-runner .queue-identity { cursor: grab; }
+.queue-runner--overlay { box-shadow: var(--shadow-md); border: 1px solid var(--apolloon-blue); cursor: grabbing; }
 .queue-drag { flex: 0 0 22px; min-height: 32px; border: 0; background: transparent; color: var(--muted); padding: 0; cursor: grab; touch-action: none; }
 .queue-identity { flex: 1; min-width: 0; border: 0; background: transparent; color: var(--text); text-align: left; padding: 0; cursor: pointer; }
 .queue-identity:hover .runner-title { color: var(--blue-dark); }
@@ -271,7 +282,7 @@ body:has(.app-root) {
 .management-content .readiness-summary { font-size: 12px; }
 .app-root .management-content .form-row { background: transparent; padding: 0; border: 0; }
 .app-root .management-content .stat-panel { background: transparent; border: 0; border-radius: 0; padding-left: 0; }
-.analysis-workspace { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 28px; }
+.analysis-workspace { display: grid; grid-template-columns: 248px minmax(0, 1fr); gap: 28px; }
 .analysis-scope { padding-right: 20px; border-right: 1px solid var(--line); }
 .app-root .analysis-scope .panel { border: 0; background: transparent; padding: 0; border-radius: 0; max-height: none; }
 .analysis-scope .panel-heading-row { display: block; }
@@ -279,7 +290,7 @@ body:has(.app-root) {
 .analysis-scope .analysis-section-header p { font-size: 12px; }
 .analysis-scope .analysis-filter-actions { justify-content: flex-start; gap: 6px; margin-bottom: 16px; }
 .analysis-scope .analysis-filter-actions .btn { min-height: 30px; padding: 5px 9px; font-size: 11px; }
-.app-root .analysis-scope .label-toggle-row { border: 0; padding: 4px 0; min-height: 34px; grid-template-columns: minmax(0, 1fr) 34px 22px; gap: 6px; background: transparent; }
+.app-root .analysis-scope .label-toggle-row { border: 0; padding: 4px 0; min-height: 34px; grid-template-columns: minmax(0, 1fr) 42px 24px; gap: 10px; background: transparent; }
 .analysis-scope .label-toggle-state { display: none; }
 .analysis-scope .label-toggle-list { gap: 0; }
 .analysis-scope .label-toggle-name { font-size: 12px; }

@@ -25,7 +25,7 @@ function preferRunnerTarget(collisions: Collision[]): Collision[] {
  */
 export const kanbanCollisionDetection: CollisionDetection = (args) => {
   const pointerCollisions = withoutActive(pointerWithin(args), String(args.active.id));
-  if (pointerCollisions.length > 0) return preferRunnerTarget(pointerCollisions);
+  if (args.pointerCoordinates) return preferRunnerTarget(pointerCollisions);
 
   return preferRunnerTarget(withoutActive(closestCenter(args), String(args.active.id)));
 };
