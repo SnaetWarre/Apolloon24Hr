@@ -45,30 +45,38 @@ export const AppHeader: React.FC<{ onOpenProfile?: (runnerId: string) => void }>
   return (
     <>
       <div className="header-bar">
-        <button onClick={() => setActivationOpen(true)} className="btn btn--primary">
-          Loper zoeken
-        </button>
-        <button onClick={() => setAddOpen(true)} className="btn btn--ghost">
-          Nieuwe loper
-        </button>
-        <input
-          placeholder="Filter bord op naam, nummer of label..."
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-          className="input input--search input--stretch"
-        />
-        {systemStatus && (
-          <div
-            className={`cluster-pill cluster-pill--${systemStatus.tone}`}
-            role={systemStatus.tone === 'error' ? 'alert' : 'status'}
-            aria-live="polite"
-            aria-atomic="true"
-          >
-            <strong>{systemStatus.title}</strong>
-            <span>{systemStatus.detail}</span>
-          </div>
-        )}
-        {host && <div className="header-hint">{host.url}</div>}
+        <div className="queue-controls">
+          <button onClick={() => setActivationOpen(true)} className="btn btn--primary">
+            Loper zoeken
+          </button>
+          <button onClick={() => setAddOpen(true)} className="btn btn--ghost">
+            Nieuwe loper
+          </button>
+          <label className="board-search">
+            <span>Filter dit bord</span>
+            <input
+              type="search"
+              placeholder="Naam, nummer of label"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              className="input input--search input--stretch"
+            />
+          </label>
+        </div>
+        <div className="workspace-status">
+          {systemStatus && (
+            <div
+              className={`cluster-pill cluster-pill--${systemStatus.tone}`}
+              role={systemStatus.tone === 'error' ? 'alert' : 'status'}
+              aria-live="polite"
+              aria-atomic="true"
+            >
+              <strong>{systemStatus.title}</strong>
+              <span>{systemStatus.detail}</span>
+            </div>
+          )}
+          {host && <div className="header-hint">{host.url}</div>}
+        </div>
       </div>
       {activationOpen && (
         <RunnerActivationModal onClose={() => setActivationOpen(false)} onOpenProfile={onOpenProfile} />

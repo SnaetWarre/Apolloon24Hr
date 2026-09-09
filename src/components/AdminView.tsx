@@ -348,7 +348,7 @@ export function AdminView() {
       <div className="hero hero--compact">
         <div>
           <span className="page-kicker">Wedstrijdbeheer</span>
-          <h1 className="app-title">Admin / Import / Labels</h1>
+          <h1 className="app-title">Beheer</h1>
           <p className="tagline">Voorbereiding voor de lokale wedstrijddatabase.</p>
         </div>
       </div>
