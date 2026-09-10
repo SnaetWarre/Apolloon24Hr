@@ -10,7 +10,10 @@ const selectTimingData = ({ runners, race }: LiveAppSnapshot) => ({ runners, rac
 
 export function TimingView() {
   const { runners, race } = useAppData(selectTimingData);
-  const { laps } = useRaceHistory({ scope: 'recent', limit: 250 });
+  const { laps, loading: historyLoading, error: historyError, refresh: refreshHistory } =
+    useRaceHistory({ scope: 'recent', limit: 10 });
+  const { laps: activeRunnerLaps, loading: runnerHistoryLoading, error: runnerHistoryError } =
+    useRaceHistory({ scope: 'runner', runnerId: race.activeRunnerId || '' });
   const { cluster } = useClusterStatus();
   const { handoff, startNext, undoLastHandoff, finishRace, claimTimingControl } = useAppActions();
   const [actionError, setActionError] = React.useState<string | null>(null);
@@ -33,7 +36,7 @@ export function TimingView() {
     .sort((first, second) => (first.queueIndex ?? 0) - (second.queueIndex ?? 0))
     .slice(0, 5);
   const activePreviousLap = activeRunner
-    ? laps.find((lap) => lap.runnerId === activeRunner.id) || null
+    ? activeRunnerLaps.find((lap) => lap.runnerId === activeRunner.id) || null
     : null;
   const handoffPreview = buildHandoffPreview(activeRunner, nextRunner);
 
@@ -60,13 +63,25 @@ export function TimingView() {
   );
 
   const runHandoff = React.useCallback(async () => {
-    if (timingBlocked) return;
-    const hadActiveRunner = Boolean(activeRunner);
+    if (timingBlocked || finishConfirmStep > 0 || (!activeRunner && !nextRunner)) return;
+    if (
+      race.raceFinishedAt &&
+      !window.confirm('De race is afgesloten. Wil je de race hervatten en de volgende loper starten?')
+    ) return;
     await runExclusiveRaceAction(
-      () => (activeRunner ? handoff() : startNext()),
-      hadActiveRunner ? 'Ronde opgeslagen. Volgende loper gestart.' : 'Race gestart. Eerste loper loopt.'
+      async () => {
+        const handoffResult = await (activeRunner ? handoff() : startNext());
+        setLastAction(
+          handoffResult.lapId
+            ? handoffResult.startedRunnerId
+              ? 'Ronde opgeslagen. Volgende loper gestart.'
+              : 'Ronde opgeslagen. Niemand actief; de wachtrij is leeg.'
+            : 'Loper gestart.'
+        );
+      },
+      null
     );
-  }, [activeRunner, handoff, runExclusiveRaceAction, startNext, timingBlocked]);
+  }, [activeRunner, nextRunner, finishConfirmStep, race.raceFinishedAt, handoff, runExclusiveRaceAction, startNext, timingBlocked]);
 
   React.useEffect(() => {
     // Navigation buttons can stay focused when this route opens. In that case,
@@ -83,7 +98,11 @@ export function TimingView() {
         setFinishConfirmStep(0);
         return;
       }
-      if (!isHandoffKey(event) || isTextEntryTarget(target) || finishConfirmStep > 0 || timingBlocked) return;
+      if (
+        event.defaultPrevented || event.ctrlKey || event.altKey || event.metaKey || event.isComposing ||
+        !isHandoffKey(event) || isTextEntryTarget(target) ||
+        finishConfirmStep > 0 || timingBlocked || race.raceFinishedAt
+      ) return;
       // Space is the dedicated timing control on this screen, even if a button
       // still has focus. Keep Enter's normal button/link behaviour intact.
       if (event.key === 'Enter' && isInteractiveTarget(target)) return;
@@ -93,7 +112,7 @@ export function TimingView() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [finishConfirmStep, handoffBusy, runHandoff, timingBlocked]);
+  }, [finishConfirmStep, handoffBusy, runHandoff, timingBlocked, race.raceFinishedAt]);
 
   async function undo() {
     if (handoffBusyRef.current) return;
@@ -157,8 +176,8 @@ export function TimingView() {
             }
           />
           <div className="handoff-preview">
-            <span className="muted-label">Bij volgende spatie/enter</span>
-            <strong>{handoffPreview}</strong>
+            <span className="muted-label">{race.raceFinishedAt ? 'Race afgesloten' : 'Bij volgende spatie/enter'}</span>
+            <strong>{race.raceFinishedAt ? 'Race afgesloten. Hervat bewust via de knop hieronder.' : handoffPreview}</strong>
           </div>
 
           {controlledElsewhere && (
@@ -213,18 +232,19 @@ export function TimingView() {
             <button
               className="btn btn--primary btn--xl"
               onClick={runHandoff}
-              disabled={handoffBusy || timingBlocked}
+              disabled={handoffBusy || timingBlocked || (!activeRunner && !nextRunner)}
             >
               <span>
                 {handoffBusy
                   ? 'Bezig...'
+                  : race.raceFinishedAt && nextRunner ? 'Race hervatten'
                   : activeRunner
                     ? nextRunner
                       ? 'Ronde opslaan & volgende starten'
                       : 'Ronde opslaan'
-                    : 'Start eerste loper'}
+                    : nextRunner ? 'Start volgende loper' : 'Geen loper klaar'}
               </span>
-              <kbd>Spatie / Enter</kbd>
+              {!race.raceFinishedAt && <kbd>Spatie / Enter</kbd>}
             </button>
             <button className="btn btn--ghost" onClick={undo} disabled={handoffBusy || timingBlocked}>
               Laatste wissel ongedaan maken
@@ -252,7 +272,11 @@ export function TimingView() {
             <div className="stat-panel">
               <span className="muted-label">Vorige ronde huidige loper</span>
               <strong>
-                {activePreviousLap ? formatDurationMs(activePreviousLap.durationMs) : 'Geen vorige ronde'}
+                {runnerHistoryError
+                  ? 'Vorige ronde niet beschikbaar'
+                  : activePreviousLap
+                    ? formatDurationMs(activePreviousLap.durationMs)
+                    : activeRunner && runnerHistoryLoading ? 'Laden...' : 'Geen vorige ronde'}
               </strong>
             </div>
             <div className="stat-panel">
@@ -285,6 +309,14 @@ export function TimingView() {
           </section>
           <section className="timing-log">
             <h2>Laatste 10 rondes</h2>
+            {historyError && (
+              <div className="warning-banner" role="alert">
+                Rondes konden niet worden bijgewerkt.
+                <button className="btn btn--ghost" onClick={() => void refreshHistory()}>
+                  Opnieuw proberen
+                </button>
+              </div>
+            )}
             {recentLaps.length ? (
               <div className="table-wrap">
                 <table>
@@ -311,7 +343,7 @@ export function TimingView() {
                 </table>
               </div>
             ) : (
-              <div className="empty-inline">Nog geen rondes geregistreerd</div>
+              <div className="empty-inline">{historyLoading ? 'Rondes laden...' : historyError ? 'Rondes niet beschikbaar' : 'Nog geen rondes geregistreerd'}</div>
             )}
           </section>
         </aside>

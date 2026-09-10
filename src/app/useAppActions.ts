@@ -131,12 +131,14 @@ export function useAppActions() {
         return `${summary.created} aangemaakt, ${summary.updated} bijgewerkt, ${summary.skipped} overgeslagen`;
       },
       async handoff() {
-        await trpc.race.handoff.mutate(command(currentRaceExpectation()));
+        const handoffResult = await trpc.race.handoff.mutate(command(currentRaceExpectation()));
         await reconcileSnapshot();
+        return handoffResult;
       },
       async startNext() {
-        await trpc.race.startNext.mutate(command(currentRaceExpectation()));
+        const handoffResult = await trpc.race.startNext.mutate(command(currentRaceExpectation()));
         await reconcileSnapshot();
+        return handoffResult;
       },
       async undoLastHandoff() {
         await trpc.race.undoLastHandoff.mutate(command(currentRaceExpectation()));

@@ -27,18 +27,34 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
   const [queueActionBusy, setQueueActionBusy] = React.useState(false);
   const [queueActionMessage, setQueueActionMessage] = React.useState<string | null>(null);
   const [queueActionError, setQueueActionError] = React.useState<string | null>(null);
+  const [draftBaseline, setDraftBaseline] = React.useState(runner);
   const editableRunnerKey = runner ? getEditableRunnerKey(runner) : '';
+  const dirty = draftBaseline
+    ? isDirty({ runner: draftBaseline, runnerNumber, name, targetLaps, notes, selectedLabels })
+    : false;
+  const profileChangedElsewhere = Boolean(
+    runner && draftBaseline && runner.id === draftBaseline.id &&
+    editableRunnerKey !== getEditableRunnerKey(draftBaseline)
+  );
+  const initializedRunnerId = React.useRef<string | null>(null);
   const activeTemporaryTeam = temporaryTeams.find(
     (team) => team.active && team.memberRunnerIds.includes(runnerId)
   );
 
-  React.useEffect(() => {
+  function loadLatestProfile() {
     if (!runner) return;
+    initializedRunnerId.current = runner.id;
+    setDraftBaseline(runner);
     setRunnerNumber(runner.runnerNumber || '');
     setName(runner.name);
     setTargetLaps(runner.targetLaps?.toString() || '');
     setNotes(runner.notes || '');
     setSelectedLabels(runner.labels.map((label) => label.id));
+  }
+
+  React.useEffect(() => {
+    // Refresh untouched profiles, but never replace an operator's unsaved draft.
+    if (initializedRunnerId.current !== runnerId || !dirty) loadLatestProfile();
   }, [editableRunnerKey]);
 
   React.useEffect(() => {
@@ -49,19 +65,9 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
   }, [runnerId]);
 
   const laps = React.useMemo(() => allLaps.filter((lap) => lap.runnerId === runnerId), [allLaps, runnerId]);
-  const dirty = runner
-    ? isDirty({
-        runner,
-        runnerNumber,
-        name,
-        targetLaps,
-        notes,
-        selectedLabels,
-      })
-    : false;
 
   async function saveAndClose() {
-    if (saving) return;
+    if (saving || profileChangedElsewhere) return;
     setSaving(true);
     setSaveError(null);
     try {
@@ -280,13 +286,24 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
 
         {queueActionMessage && <div className="success-banner">{queueActionMessage}</div>}
         {queueActionError && <div className="warning-banner">{queueActionError}</div>}
+        {profileChangedElsewhere && (
+          <div className="warning-banner" role="alert">
+            Dit profiel is intussen elders gewijzigd. Je invoer is bewaard. Kopieer je aanpassingen voordat je de nieuwste versie laadt en opnieuw bewerkt.
+            <button className="btn btn--ghost" onClick={() => {
+              if (window.confirm('Nieuwste profiel laden? Je niet-opgeslagen aanpassingen worden vervangen.')) {
+                loadLatestProfile();
+                setClosePromptOpen(false);
+              }
+            }}>Nieuwste profiel laden</button>
+          </div>
+        )}
         {saveError && <div className="warning-banner">{saveError}</div>}
 
         <div className="modal-actions">
           <button className="btn btn--ghost" onClick={requestClose}>
             Annuleer
           </button>
-          <button className="btn btn--primary" onClick={saveAndClose} disabled={saving}>
+          <button className="btn btn--primary" onClick={saveAndClose} disabled={saving || profileChangedElsewhere}>
             {saving ? 'Opslaan...' : 'Opslaan'}
           </button>
         </div>
@@ -303,7 +320,7 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
                 <button className="btn btn--ghost" onClick={onClose}>
                   Niet opslaan
                 </button>
-                <button className="btn btn--primary" onClick={saveAndClose} disabled={saving}>
+                <button className="btn btn--primary" onClick={saveAndClose} disabled={saving || profileChangedElsewhere}>
                   {saving ? 'Opslaan...' : 'Opslaan'}
                 </button>
               </div>
