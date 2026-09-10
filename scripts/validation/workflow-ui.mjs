@@ -26,6 +26,33 @@ try {
   const initial = await snapshot();
   assert.equal(initial.race.raceStartedAt, null, 'Requires a fresh ready seed');
   const [firstRunner, secondRunner] = initial.runners;
+  const checkinRunner = initial.runners[3];
+  await rpc.runners.update.mutate({ id: checkinRunner.id, fields: { runnerNumber: '10' } });
+  await rpc.runners.setStatus.mutate({ id: checkinRunner.id, status: 'registered' });
+  await rpc.runners.setStatus.mutate({ id: firstRunner.id, status: 'registered' });
+  await page.goto(`${baseUrl}/queue`);
+  const boardFilter = page.getByRole('searchbox', { name: 'Filter dit bord' });
+  await boardFilter.fill('No matching runner');
+  await page.getByRole('button', { name: 'Loper zoeken', exact: true }).click();
+  const checkinSearch = page.getByRole('textbox', { name: 'Zoek op nummer, naam of label', exact: true });
+  await checkinSearch.fill('10');
+  assert.equal(await page.locator('.runner-search-row').count(), 1);
+  await page.getByRole('checkbox', { name: 'Meerdere lopers aanmelden' }).check();
+  await checkinSearch.press('Enter');
+  await page.getByText(`${checkinRunner.name} staat bij opwarming.`, { exact: true }).waitFor();
+  assert.equal(await checkinSearch.inputValue(), '');
+  assert.equal(await checkinSearch.evaluate((input) => input === document.activeElement), true);
+  assert.equal(await boardFilter.inputValue(), '');
+  await checkinSearch.fill(firstRunner.runnerNumber);
+  await checkinSearch.press('Enter');
+  await page.getByText(`${firstRunner.name} staat bij opwarming.`, { exact: true }).waitFor();
+  await checkinSearch.press('Escape');
+  await page.locator('button.queue-identity').filter({ hasText: checkinRunner.name }).waitFor();
+  assert.equal((await snapshot()).runners.find((runner) => runner.id === firstRunner.id).status, 'warming_up');
+  await boardFilter.fill('No matching runner');
+  await page.getByRole('button', { name: 'Filter wissen', exact: true }).click();
+  assert.equal(await boardFilter.inputValue(), '');
+  console.log('PASS exact bib lookup, repeated check-in, focus restoration, and board filter clearing');
   for (const runner of initial.runners.filter((runner) => runner.status === 'waiting')) {
     await rpc.runners.setStatus.mutate({ id: runner.id, status: 'warming_up' });
   }

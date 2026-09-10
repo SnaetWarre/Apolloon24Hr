@@ -62,6 +62,11 @@ export const AppHeader: React.FC<{ onOpenProfile?: (runnerId: string) => void }>
               className="input input--search input--stretch"
             />
           </label>
+          {search && (
+            <button className="btn btn--ghost" onClick={() => setSearch('')}>
+              Filter wissen
+            </button>
+          )}
         </div>
         <div className="workspace-status">
           {systemStatus && (
@@ -79,9 +84,13 @@ export const AppHeader: React.FC<{ onOpenProfile?: (runnerId: string) => void }>
         </div>
       </div>
       {activationOpen && (
-        <RunnerActivationModal onClose={() => setActivationOpen(false)} onOpenProfile={onOpenProfile} />
+        <RunnerActivationModal
+          onClose={() => setActivationOpen(false)}
+          onOpenProfile={onOpenProfile}
+          onActivated={() => setSearch('')}
+        />
       )}
-      {addOpen && <RunnerAddModal onClose={() => setAddOpen(false)} />}
+      {addOpen && <RunnerAddModal onClose={() => setAddOpen(false)} onAdded={() => setSearch('')} />}
     </>
   );
 };

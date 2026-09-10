@@ -38,3 +38,18 @@ concurrency control for simultaneous saves. The resume confirmation applies to
 the updated timing screen, not older clients or direct API callers. Production
 was not changed. This pass does not establish that every administration,
 import, accessibility, or recovery workflow is issue-free.
+
+## Check-in workflow follow-up
+
+- Exact bib numbers take priority over partial number, name, and label matches.
+  For example, entering `10` selects bib 10 even when bibs 101 through 109 exist.
+  If several runners have that exact number, Enter still refuses an ambiguous selection.
+- Optional `Meerdere lopers aanmelden` keeps the search open after activation,
+  announces the runner added, clears the query, and restores input focus.
+  The default single-runner flow still closes after activation.
+- Successful activation or creation clears the board filter so the newly warming
+  runner is visible. Cancelling the form leaves the filter intact. A visible
+  `Filter wissen` button also clears the filter manually.
+- Browser regression coverage now includes exact-number disambiguation, two
+  consecutive keyboard check-ins, focus restoration, and automatic/manual
+  filter clearing.

@@ -9,13 +9,18 @@ const selectLabels = ({ labels }: LiveAppSnapshot) => ({ labels });
 export function RunnerActivationModal({
   onClose,
   onOpenProfile,
+  onActivated,
 }: {
   onClose: () => void;
   onOpenProfile?: (runnerId: string) => void;
+  onActivated?: () => void;
 }) {
   const { runners } = useAppData(selectRunners);
   const { setStatus } = useAppActions();
   const [query, setQuery] = React.useState('');
+  const [keepSearchOpen, setKeepSearchOpen] = React.useState(false);
+  const [activationNotice, setActivationNotice] = React.useState<string | null>(null);
+  const searchInputRef = React.useRef<HTMLInputElement>(null);
   const [activatingId, setActivatingId] = React.useState<string | null>(null);
   const [activationError, setActivationError] = React.useState<string | null>(null);
   const activationBusyRef = React.useRef(false);
@@ -27,7 +32,12 @@ export function RunnerActivationModal({
   const filteredMatches = React.useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return searchableRunners;
-    return searchableRunners.filter((runner) => runnerMatchesQuery(runner, q));
+    const exactNumberMatches = searchableRunners.filter(
+      (runner) => runner.runnerNumber?.trim().toLowerCase() === q
+    );
+    return exactNumberMatches.length
+      ? exactNumberMatches
+      : searchableRunners.filter((runner) => runnerMatchesQuery(runner, q));
   }, [searchableRunners, query]);
 
   const visibleMatches = filteredMatches.slice(0, 40);
@@ -38,9 +48,18 @@ export function RunnerActivationModal({
     activationBusyRef.current = true;
     setActivatingId(runnerId);
     setActivationError(null);
+    setActivationNotice(null);
     try {
       await setStatus(runnerId, 'warming_up');
-      onClose();
+      onActivated?.();
+      if (keepSearchOpen) {
+        const activatedRunner = runners.find((runner) => runner.id === runnerId);
+        setActivationNotice(`${activatedRunner?.name || 'Loper'} staat bij opwarming.`);
+        setQuery('');
+        searchInputRef.current?.focus();
+      } else {
+        onClose();
+      }
     } catch (err) {
       setActivationError(err instanceof Error ? err.message : 'Loper activeren mislukt');
     } finally {
@@ -60,7 +79,7 @@ export function RunnerActivationModal({
       onClose();
       return;
     }
-    if (event.key !== 'Enter') return;
+    if (event.key !== 'Enter' || event.repeat || event.nativeEvent.isComposing) return;
     const firstMatch = visibleMatches[0];
     if (
       !query.trim() ||
@@ -80,13 +99,29 @@ export function RunnerActivationModal({
         <ModalHeader title="Loper zoeken" onClose={onClose} />
         <input
           autoFocus
+          ref={searchInputRef}
+          aria-label="Zoek op nummer, naam of label"
           className="input"
           value={query}
+          readOnly={Boolean(activatingId)}
           onChange={(event) => setQuery(event.target.value)}
           onKeyDown={handleSearchKeyDown}
           placeholder="Zoek op nummer, naam of label..."
         />
 
+        <label className="toggle-row">
+          <input
+            type="checkbox"
+            checked={keepSearchOpen}
+            disabled={Boolean(activatingId)}
+            onChange={(event) => setKeepSearchOpen(event.target.checked)}
+          />
+          Meerdere lopers aanmelden
+        </label>
+        {activationNotice && <div className="success-banner" role="status">{activationNotice}</div>}
+        {hasQuery && filteredMatches.length === 1 && isAvailableForActivation(filteredMatches[0]) && (
+          <p className="label-picker-help">Enter: deze loper naar opwarming.</p>
+        )}
         <div className="runner-search-list">
           <div className="runner-search-summary">
             {hasQuery
@@ -137,7 +172,7 @@ export function RunnerActivationModal({
   );
 }
 
-export function RunnerAddModal({ onClose }: { onClose: () => void }) {
+export function RunnerAddModal({ onClose, onAdded }: { onClose: () => void; onAdded?: () => void }) {
   const { labels } = useAppData(selectLabels);
   const { addRunner } = useAppActions();
   const [runnerNumber, setRunnerNumber] = React.useState('');
@@ -174,6 +209,7 @@ export function RunnerAddModal({ onClose }: { onClose: () => void }) {
         labels: selectedLabels,
         status: 'warming_up',
       });
+      onAdded?.();
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Loper toevoegen mislukt');
