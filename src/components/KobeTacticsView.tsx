@@ -1001,7 +1001,7 @@ function HourlyPaceChart({
     if (!canvas || !points.length) return undefined;
     const datasets: ChartConfiguration<'line'>['data']['datasets'] = [];
     if (showActual) datasets.push(paceDataset('Werkelijk live', points, 'actualSeconds', '#2877F6', 4));
-    if (showPlan) datasets.push(paceDataset('Doeltempo', points, 'plannedSeconds', '#111827', 2, [8, 6]));
+    if (showPlan) datasets.push(paceDataset('Doeltempo', points, 'plannedSeconds', '#9aa3b2', 2, [8, 6]));
     datasets.push(paceDataset(ownLabel, points, 'ownHistoricalSeconds', '#7c3aed', 2));
     datasets.push(paceDataset(rivalLabel, points, 'rivalHistoricalSeconds', '#d59d00', 2));
 
@@ -1073,8 +1073,8 @@ function LiveTimeGapChart({ points }: { points: TimeGapPoint[] }) {
           {
             label: 'Werkelijke tijdskloof',
             data: actualPoints.map((point) => ({ x: point.raceHour, y: point.gapSeconds })),
-            borderColor: '#172033',
-            backgroundColor: '#172033',
+            borderColor: '#e2e8f0',
+            backgroundColor: '#e2e8f0',
             borderWidth: 3,
             pointRadius: 0,
             tension: 0.2,

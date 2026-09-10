@@ -545,7 +545,7 @@ function TeamLapTimelineChart({ team }: { team: HistoricalTeam }) {
             borderColor: 'transparent',
             pointRadius: 2,
           },
-          xySeries('Lopende mediaan (20)', rollingMedianPoints, '#172033', 2),
+          xySeries('Lopende mediaan (20)', rollingMedianPoints, '#e2e8f0', 2),
         ],
       },
       options: xyChartOptions('Rondetijd', formatSeconds),
@@ -725,7 +725,7 @@ function TimeGapChart({ points, firstTeam, secondTeam }: { points: ReturnType<ty
       type: 'line',
       data: {
         datasets: [
-          xySeries(`Tijdskloof team ${firstTeam.teamId} op team ${secondTeam.teamId}`, points.map((point) => ({ x: point.raceHour, y: point.gapSeconds })), '#172033', 3),
+          xySeries(`Tijdskloof team ${firstTeam.teamId} op team ${secondTeam.teamId}`, points.map((point) => ({ x: point.raceHour, y: point.gapSeconds })), '#4d9fff', 3),
           xySeries('Gelijke stand', [{ x: 0, y: 0 }, { x: 24, y: 0 }], '#94a3b8', 1, [6, 5]),
         ],
       },
@@ -748,7 +748,7 @@ function SameLapGapChart({
       type: 'line',
       data: {
         datasets: [
-          xySeries(`Team ${firstTeam.teamId} tegenover team ${secondTeam.teamId}`, points.map((point) => ({ x: point.raceHour, y: point.gapSeconds })), '#172033', 3),
+          xySeries(`Team ${firstTeam.teamId} tegenover team ${secondTeam.teamId}`, points.map((point) => ({ x: point.raceHour, y: point.gapSeconds })), '#4d9fff', 3),
           xySeries('Gelijke ronde-index', [{ x: 0, y: 0 }, { x: 24, y: 0 }], '#94a3b8', 1, [6, 5]),
         ],
       },
@@ -815,7 +815,7 @@ function RaceLeadChart({
           xySeries(
             `Voorsprong team ${firstTeam.teamId} in rondes`,
             points.map((point) => ({ x: point.raceHour, y: point.lapDifference })),
-            '#172033',
+            '#4d9fff',
             3
           ),
           xySeries('Gelijke stand', [{ x: 0, y: 0 }, { x: 24, y: 0 }], '#94a3b8', 1, [6, 5]),
@@ -881,7 +881,7 @@ function BreakEvenChart({ points, targetLaps, teamId }: { points: ReturnType<typ
       data: {
         datasets: [
           xySeries(`Projectie team ${teamId}`, points.map((point) => ({ x: point.improvementSeconds, y: point.projectedLaps })), teamColor(teamId), 3),
-          xySeries('Te kloppen resultaat', [{ x: 0, y: targetLaps }, { x: points[points.length - 1]?.improvementSeconds ?? 15, y: targetLaps }], '#172033', 2, [6, 5]),
+          xySeries('Te kloppen resultaat', [{ x: 0, y: targetLaps }, { x: points[points.length - 1]?.improvementSeconds ?? 15, y: targetLaps }], '#9aa3b2', 2, [6, 5]),
         ],
       },
       options: xyChartOptions('Totaal rondes', (value) => String(Math.round(Number(value))), false, 'Verbetering per ronde (s)'),
@@ -1146,7 +1146,7 @@ function axisTitle(text: string) {
 }
 
 function teamColor(teamId: number, fallbackIndex = 0): string {
-  if (teamId === 1) return '#0072B2';
+  if (teamId === 1) return '#38a1ff';
   if (teamId === 4) return '#F0B400';
   const alternatives = ['#009E73', '#D55E00', '#CC79A7', '#7F3FBF', '#8B4513', '#64748b'];
   return alternatives[fallbackIndex % alternatives.length];
