@@ -1,4 +1,5 @@
 import React from 'react';
+import { ModalDialog } from './ModalDialog';
 import { useAppActions, useAppData, useClusterStatus, useRaceHistory } from '../app/index';
 import { formatClockTimeMs, formatDurationMs } from '../lib/time';
 import { getNextWaitingRunner, runnerLabel } from '../lib/runners';
@@ -93,11 +94,6 @@ export function TimingView() {
   React.useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
-      if (event.key === 'Escape' && finishConfirmStep > 0) {
-        event.preventDefault();
-        setFinishConfirmStep(0);
-        return;
-      }
       if (
         event.defaultPrevented || event.ctrlKey || event.altKey || event.metaKey || event.isComposing ||
         !isHandoffKey(event) || isTextEntryTarget(target) ||
@@ -360,14 +356,14 @@ export function TimingView() {
       </section>
 
       {finishConfirmStep > 0 && (
-        <div className="modal-backdrop" role="dialog" aria-modal="true">
+        <ModalDialog label="Race afsluiten" onRequestClose={() => { if (!handoffBusy) setFinishConfirmStep(0); }}>
           <div className="confirm-modal finish-confirm">
             {finishConfirmStep === 1 ? (
               <>
                 <h3>Race beeindigen?</h3>
                 <p>Dit stopt de actieve loper zonder extra ronde.</p>
                 <div className="modal-actions">
-                  <button className="btn btn--ghost" onClick={() => setFinishConfirmStep(0)}>
+                  <button className="btn btn--ghost" onClick={() => setFinishConfirmStep(0)} disabled={handoffBusy}>
                     Annuleer
                   </button>
                   <button className="btn btn--primary" onClick={() => setFinishConfirmStep(2)}>
@@ -380,7 +376,7 @@ export function TimingView() {
                 <h3>Definitief afsluiten</h3>
                 <p>Bevestig alleen als de race echt afgerond is.</p>
                 <div className="modal-actions">
-                  <button className="btn btn--ghost" onClick={() => setFinishConfirmStep(0)}>
+                  <button className="btn btn--ghost" onClick={() => setFinishConfirmStep(0)} disabled={handoffBusy}>
                     Annuleer
                   </button>
                   <button className="btn btn--danger" onClick={finish} disabled={handoffBusy}>
@@ -390,7 +386,7 @@ export function TimingView() {
               </>
             )}
           </div>
-        </div>
+        </ModalDialog>
       )}
     </>
   );

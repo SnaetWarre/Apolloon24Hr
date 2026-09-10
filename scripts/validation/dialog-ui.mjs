@@ -1,0 +1,68 @@
+// Use the same disposable-server environment variables as workflow-ui.mjs.
+import assert from 'node:assert/strict';
+const baseUrl = process.env.APOLLOON_TEST_URL;
+assert.ok(baseUrl && ['127.0.0.1', 'localhost'].includes(new URL(baseUrl).hostname));
+const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
+const browser = await chromium.launch({ headless: true, executablePath: process.env.CHROMIUM_EXECUTABLE });
+const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+try {
+  await page.goto(`${baseUrl}/queue`);
+  const openSearch = page.getByRole('button', { name: 'Loper zoeken', exact: true });
+  await openSearch.click();
+  const searchDialog = page.getByRole('dialog', { name: 'Loper zoeken', exact: true });
+  await searchDialog.locator('button').last().focus();
+  await page.keyboard.press('Tab');
+  await page.keyboard.press('Tab');
+  assert.equal(await page.evaluate(() => !!document.activeElement.closest('dialog')), true);
+  await searchDialog.getByRole('button', { name: 'Profiel', exact: true }).first().focus();
+  await page.keyboard.press('Escape');
+  await searchDialog.waitFor({ state: 'detached' });
+  assert.equal(await openSearch.evaluate((button) => button === document.activeElement), true);
+  console.log('PASS search dialog contains keyboard focus, Escape works on buttons, and opener regains focus');
+
+  const openNewRunner = page.getByRole('button', { name: 'Nieuwe loper', exact: true });
+  await openNewRunner.click();
+  const nameInput = page.getByRole('textbox', { name: 'Naam', exact: true });
+  await nameInput.fill('Unsaved draft');
+  page.once('dialog', (dialog) => dialog.dismiss());
+  await page.keyboard.press('Escape');
+  assert.equal(await nameInput.inputValue(), 'Unsaved draft');
+  page.once('dialog', (dialog) => dialog.accept());
+  await page.getByRole('button', { name: 'Annuleer', exact: true }).click();
+  assert.equal(await openNewRunner.evaluate((button) => button === document.activeElement), true);
+  console.log('PASS new-runner draft requires explicit discard and focus returns to opener');
+
+  await openSearch.click();
+  await searchDialog.getByRole('button', { name: 'Profiel', exact: true }).first().click();
+  const profileDialog = page.getByRole('dialog', { name: 'Lopersprofiel', exact: true });
+  await profileDialog.getByRole('textbox', { name: 'Naam', exact: true }).fill('');
+  await profileDialog.getByRole('textbox', { name: 'Notities', exact: true }).focus();
+  await page.keyboard.press('Escape');
+  const savePrompt = page.getByRole('dialog', { name: 'Wijzigingen opslaan?', exact: true });
+  await savePrompt.waitFor();
+  const promptBounds = await savePrompt.locator('.confirm-modal').boundingBox();
+  assert.ok(promptBounds.y >= 0 && promptBounds.y + promptBounds.height <= 720);
+  await page.keyboard.press('Escape');
+  await savePrompt.waitFor({ state: 'detached' });
+  assert.equal(await profileDialog.count(), 1);
+  await page.keyboard.press('Escape');
+  await savePrompt.getByRole('button', { name: 'Opslaan', exact: true }).click();
+  await savePrompt.getByRole('alert').waitFor();
+  assert.equal(await savePrompt.getByRole('alert').innerText(), 'Naam is verplicht.');
+  await page.screenshot({ path: '/tmp/apolloon-dialog-save-error.png', fullPage: true });
+  await savePrompt.getByRole('button', { name: 'Verder bewerken' }).click();
+  assert.equal(await profileDialog.getByRole('textbox', { name: 'Naam', exact: true }).inputValue(), '');
+  await profileDialog.getByRole('textbox', { name: 'Naam', exact: true }).fill('Valid draft');
+  await profileDialog.getByRole('spinbutton', { name: 'Doelstelling toeren' }).fill('-1');
+  await profileDialog.getByRole('button', { name: 'Opslaan', exact: true }).click();
+  await profileDialog.getByText('Doelstelling toeren moet een geheel getal van 0 of meer zijn.', { exact: true }).waitFor();
+  await profileDialog.getByRole('spinbutton', { name: 'Doelstelling toeren' }).fill('2');
+  await page.route('**/trpc/runners.update*', (route) => route.abort());
+  await page.keyboard.press('Escape');
+  await savePrompt.getByRole('button', { name: 'Opslaan', exact: true }).click();
+  await savePrompt.getByRole('alert').waitFor();
+  assert.equal(await savePrompt.getByRole('alert').isVisible(), true);
+  console.log('PASS nested prompt stays on-screen, Escape closes only top dialog, validation is readable, and failed saves remain visible');
+} finally {
+  await browser.close();
+}

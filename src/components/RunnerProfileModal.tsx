@@ -1,4 +1,6 @@
 import React from 'react';
+import { ModalDialog } from './ModalDialog';
+import { runnerFormError } from '../lib/runnerForm';
 import { useAppActions, useAppData, useRaceHistory } from '../app/index';
 import { formatClockTimeMs, formatDurationMs } from '../lib/time';
 import { labelKindOrder, labelKindTitle } from './LabelBadge';
@@ -68,6 +70,11 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
 
   async function saveAndClose() {
     if (saving || profileChangedElsewhere) return;
+    const validationError = runnerFormError(name, targetLaps);
+    if (validationError) {
+      setSaveError(validationError);
+      return;
+    }
     setSaving(true);
     setSaveError(null);
     try {
@@ -87,29 +94,13 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
   }
 
   function requestClose() {
+    if (saving) return;
     if (dirty) {
       setClosePromptOpen(true);
       return;
     }
     onClose();
   }
-
-  React.useEffect(() => {
-    if (!runner) return undefined;
-
-    function handleDocumentKeyDown(event: KeyboardEvent) {
-      if (event.key !== 'Escape') return;
-      event.preventDefault();
-      if (closePromptOpen) {
-        setClosePromptOpen(false);
-        return;
-      }
-      requestClose();
-    }
-
-    document.addEventListener('keydown', handleDocumentKeyDown);
-    return () => document.removeEventListener('keydown', handleDocumentKeyDown);
-  }, [closePromptOpen, dirty, runner]);
 
   function toggleLabel(labelId: string) {
     const label = labels.find((item) => item.id === labelId);
@@ -149,7 +140,7 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
   const queueRemovalLabel = queueRemovalButtonLabel(runner.status);
 
   return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true">
+    <ModalDialog label="Lopersprofiel" onRequestClose={requestClose}>
       <div className="modal">
         <div className="modal-header">
           <div>
@@ -297,7 +288,7 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
             }}>Nieuwste profiel laden</button>
           </div>
         )}
-        {saveError && <div className="warning-banner">{saveError}</div>}
+        {saveError && <div className="warning-banner" role="alert">{saveError}</div>}
 
         <div className="modal-actions">
           <button className="btn btn--ghost" onClick={requestClose}>
@@ -309,15 +300,17 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
         </div>
 
         {closePromptOpen && (
-          <div className="nested-modal-backdrop" role="dialog" aria-modal="true">
+          <ModalDialog label="Wijzigingen opslaan?" onRequestClose={() => { if (!saving) setClosePromptOpen(false); }}>
             <div className="confirm-modal">
               <h3>Wijzigingen opslaan?</h3>
               <p>Er zijn aanpassingen aan dit lopersprofiel.</p>
+              {saveError && <div className="warning-banner" role="alert">{saveError}</div>}
+              {profileChangedElsewhere && <p role="alert">Dit profiel is elders gewijzigd. Kies Verder bewerken om je invoer te bekijken.</p>}
               <div className="modal-actions">
-                <button className="btn btn--ghost" onClick={() => setClosePromptOpen(false)}>
+                <button className="btn btn--ghost" onClick={() => setClosePromptOpen(false)} disabled={saving}>
                   Verder bewerken
                 </button>
-                <button className="btn btn--ghost" onClick={onClose}>
+                <button className="btn btn--ghost" onClick={onClose} disabled={saving}>
                   Niet opslaan
                 </button>
                 <button className="btn btn--primary" onClick={saveAndClose} disabled={saving || profileChangedElsewhere}>
@@ -325,10 +318,10 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
                 </button>
               </div>
             </div>
-          </div>
+          </ModalDialog>
         )}
       </div>
-    </div>
+    </ModalDialog>
   );
 }
 

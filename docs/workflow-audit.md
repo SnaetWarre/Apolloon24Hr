@@ -35,8 +35,8 @@ The script changes that server's runners and race, and requires a fresh seed.
 These are client workflow fixes. The profile conflict check protects drafts
 against updates already observed by the client; it is not server-side optimistic
 concurrency control for simultaneous saves. The resume confirmation applies to
-the updated timing screen, not older clients or direct API callers. Production
-was not changed. This pass does not establish that every administration,
+the updated timing screen, not older clients or direct API callers. The initial pass was tested locally; the fixes were subsequently deployed at
+the user's request. Live browser checks used read-only interactions. This pass does not establish that every administration,
 import, accessibility, or recovery workflow is issue-free.
 
 ## Check-in workflow follow-up
@@ -53,3 +53,28 @@ import, accessibility, or recovery workflow is issue-free.
 - Browser regression coverage now includes exact-number disambiguation, two
   consecutive keyboard check-ins, focus restoration, and automatic/manual
   filter clearing.
+
+## Dialog and form follow-up
+
+Reproduced in headless Chromium before changing the components: Tab escaped
+runner search to the page underneath, Escape on a profile button left search
+open, and Escape discarded a partially completed new-runner form without warning.
+
+Runner search, new-runner entry, runner profiles, and timing closure now share
+a native modal dialog. It makes the background inert, gives each dialog an
+accessible name, supports Escape throughout the dialog, and restores focus to
+its opener when that opener still exists. Nested profile confirmation uses the
+browser's top layer instead of an absolute overlay inside the scrolling form.
+
+New-runner entry asks before discarding populated fields and blocks closing
+while its save is pending. Both runner forms explain missing names and invalid
+lap targets in Dutch before submitting. The profile confirmation displays save
+errors in the active dialog, including network failures, so the operator can
+return to editing without losing the draft.
+
+`scripts/validation/dialog-ui.mjs` covers focus containment and restoration,
+Escape on buttons, cancelling and accepting draft discard, nested dialog
+position at 1280x720, top-dialog-only Escape, readable validation, and a failed
+save request. The existing full browser workflow checks also passed after the
+modal replacement. `npm test` passed 58 tests; `npm run test:e2e` passed 23
+tests, including a production build. The production check also passed.

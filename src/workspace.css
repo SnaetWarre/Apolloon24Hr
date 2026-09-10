@@ -346,3 +346,16 @@ body:has(.app-root) {
 .management-content .label-admin-row .btn--danger { background: transparent; color: var(--red-ink); border: 1px solid var(--red-line); }
 .management-content .label-admin-group h3 { text-transform: none; margin-top: 22px; }
 .app-root .management-content .temporary-team-card { border: 0; border-bottom: 1px solid var(--line); border-radius: 0; padding: 16px 0; background: transparent; }
+
+/* Native dialogs enter the top layer while retaining the existing modal surfaces. */
+dialog.modal-backdrop {
+  width: 100%;
+  height: 100dvh;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  border: 0;
+  color: inherit;
+}
+
+dialog.modal-backdrop::backdrop { background: transparent; }

@@ -1,4 +1,6 @@
 import React from 'react';
+import { ModalDialog } from './ModalDialog';
+import { runnerFormError } from '../lib/runnerForm';
 import { useAppActions, useAppData } from '../app/index';
 import type { Label, LiveAppSnapshot, Runner } from '../types';
 import { LabelBadge, labelKindOrder, labelKindTitle } from './LabelBadge';
@@ -74,11 +76,6 @@ export function RunnerActivationModal({
   }
 
   function handleSearchKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      onClose();
-      return;
-    }
     if (event.key !== 'Enter' || event.repeat || event.nativeEvent.isComposing) return;
     const firstMatch = visibleMatches[0];
     if (
@@ -94,9 +91,9 @@ export function RunnerActivationModal({
   }
 
   return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true">
+    <ModalDialog label="Loper zoeken" onRequestClose={() => { if (!activationBusyRef.current) onClose(); }}>
       <div className="modal">
-        <ModalHeader title="Loper zoeken" onClose={onClose} />
+        <ModalHeader title="Loper zoeken" onClose={() => { if (!activationBusyRef.current) onClose(); }} />
         <input
           autoFocus
           ref={searchInputRef}
@@ -168,7 +165,7 @@ export function RunnerActivationModal({
           ))}
         </div>
       </div>
-    </div>
+    </ModalDialog>
   );
 }
 
@@ -186,15 +183,28 @@ export function RunnerAddModal({ onClose, onAdded }: { onClose: () => void; onAd
   const [selectedLabels, setSelectedLabels] = React.useState<string[]>([]);
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const saveBusyRef = React.useRef(false);
+
+  function requestClose() {
+    if (saveBusyRef.current) return;
+    const hasDraft = selectedLabels.length > 0 || [
+      runnerNumber, name, targetLaps, notes,
+      historicalAvgMinutes, historicalAvgSeconds, historicalBestMinutes, historicalBestSeconds,
+    ].some((input) => input.trim());
+    if (hasDraft && !window.confirm('Nieuwe loper sluiten zonder opslaan? Je invoer gaat verloren.')) return;
+    onClose();
+  }
 
   async function save() {
-    if (saving) return;
+    if (saveBusyRef.current) return;
     const cleanName = name.trim();
-    if (!cleanName) {
-      setError('Naam is verplicht');
+    const validationError = runnerFormError(name, targetLaps);
+    if (validationError) {
+      setError(validationError);
       return;
     }
 
+    saveBusyRef.current = true;
     setSaving(true);
     setError(null);
     try {
@@ -214,17 +224,13 @@ export function RunnerAddModal({ onClose, onAdded }: { onClose: () => void; onAd
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Loper toevoegen mislukt');
     } finally {
+      saveBusyRef.current = false;
       setSaving(false);
     }
   }
 
   function handleKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      onClose();
-      return;
-    }
-    if (event.key === 'Enter' && event.ctrlKey) {
+    if (event.key === 'Enter' && event.ctrlKey && !event.repeat && !event.nativeEvent.isComposing) {
       event.preventDefault();
       void save();
     }
@@ -245,9 +251,9 @@ export function RunnerAddModal({ onClose, onAdded }: { onClose: () => void; onAd
   }
 
   return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true">
+    <ModalDialog label="Nieuwe loper" onRequestClose={requestClose}>
       <div className="modal" onKeyDown={handleKeyDown}>
-        <ModalHeader title="Nieuwe loper" onClose={onClose} />
+        <ModalHeader title="Nieuwe loper" onClose={requestClose} />
 
         <div className="form-grid">
           <label>
@@ -367,10 +373,10 @@ export function RunnerAddModal({ onClose, onAdded }: { onClose: () => void; onAd
           </label>
         </details>
 
-        {error && <div className="warning-banner">{error}</div>}
+        {error && <div className="warning-banner" role="alert">{error}</div>}
 
         <div className="modal-actions">
-          <button className="btn btn--ghost" onClick={onClose}>
+          <button className="btn btn--ghost" onClick={requestClose} disabled={saving}>
             Annuleer
           </button>
           <button className="btn btn--primary" onClick={save} disabled={saving}>
@@ -378,7 +384,7 @@ export function RunnerAddModal({ onClose, onAdded }: { onClose: () => void; onAd
           </button>
         </div>
       </div>
-    </div>
+    </ModalDialog>
   );
 }
 
