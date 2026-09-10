@@ -186,7 +186,7 @@ test('inside rankings switch metric and filter laps by their historical label', 
   assert.match(displaySource, /window\.clearTimeout/);
   assert.match(displaySource, /currentMode === 'laps' \? 'coefficient' : 'laps'/);
   assert.match(displaySource, /prefers-reduced-motion: reduce/);
-  assert.match(displaySource, /if \(prefersReducedMotion\) return/);
+  assert.match(displaySource, /if \(prefersReducedMotion \|\| rotationPaused\) return/);
   assert.match(displaySource, /removeEventListener\('change', updateReducedMotionPreference\)/);
 });
 
@@ -216,7 +216,7 @@ test('the three recent laps show each runners all-time best and average', () => 
   assert.equal(summaries[0]?.averageLapMs, 80_000);
 
   const displaySource = fs.readFileSync(path.resolve('src/components/DisplayViews.tsx'), 'utf8');
-  assert.match(displaySource, /Ronde \{lap\.lapNumber\} van deze loper/);
+  assert.match(displaySource, /Ronde \{lap\.lapNumber\} · \{formatDurationMs\(lap\.durationMs\)\}/);
   assert.match(displaySource, />Deze ronde</);
   assert.match(displaySource, />Snelste ronde</);
   assert.match(displaySource, />Gem\. ronde</);

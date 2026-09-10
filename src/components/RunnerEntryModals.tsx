@@ -20,6 +20,7 @@ export function RunnerActivationModal({
   const { runners } = useAppData(selectRunners);
   const { setStatus } = useAppActions();
   const [query, setQuery] = React.useState('');
+  const [showAllMatches, setShowAllMatches] = React.useState(false);
   const [keepSearchOpen, setKeepSearchOpen] = React.useState(false);
   const [activationNotice, setActivationNotice] = React.useState<string | null>(null);
   const searchInputRef = React.useRef<HTMLInputElement>(null);
@@ -42,7 +43,7 @@ export function RunnerActivationModal({
       : searchableRunners.filter((runner) => runnerMatchesQuery(runner, q));
   }, [searchableRunners, query]);
 
-  const visibleMatches = filteredMatches.slice(0, 40);
+  const visibleMatches = showAllMatches ? filteredMatches : filteredMatches.slice(0, 40);
   const hasQuery = Boolean(query.trim());
 
   async function activate(runnerId: string) {
@@ -101,7 +102,10 @@ export function RunnerActivationModal({
           className="input"
           value={query}
           readOnly={Boolean(activatingId)}
-          onChange={(event) => setQuery(event.target.value)}
+          onChange={(event) => {
+            setQuery(event.target.value);
+            setShowAllMatches(false);
+          }}
           onKeyDown={handleSearchKeyDown}
           placeholder="Zoek op nummer, naam of label..."
         />
@@ -115,6 +119,7 @@ export function RunnerActivationModal({
           />
           Meerdere lopers aanmelden
         </label>
+        <p className="label-picker-help">Aan: dit venster blijft open na elke aanmelding.</p>
         {activationNotice && <div className="success-banner" role="status">{activationNotice}</div>}
         {hasQuery && filteredMatches.length === 1 && isAvailableForActivation(filteredMatches[0]) && (
           <p className="label-picker-help">Enter: deze loper naar opwarming.</p>
@@ -151,7 +156,7 @@ export function RunnerActivationModal({
                 >
                   Profiel
                 </button>
-                {isAvailableForActivation(runner) && (
+                {isAvailableForActivation(runner) ? (
                   <button
                     className="btn btn--primary btn--fixed"
                     onClick={() => activate(runner.id)}
@@ -159,10 +164,23 @@ export function RunnerActivationModal({
                   >
                     {activatingId === runner.id ? 'Bezig...' : 'Opwarmen'}
                   </button>
+                ) : (
+                  <button
+                    className="btn btn--ghost btn--fixed"
+                    disabled
+                    title="Deze loper staat al in het traject en kan niet opnieuw worden aangemeld."
+                  >
+                    {runnerStatusLabel(runner)}
+                  </button>
                 )}
               </div>
             </div>
           ))}
+          {filteredMatches.length > visibleMatches.length && (
+            <button className="btn btn--ghost" onClick={() => setShowAllMatches(true)}>
+              Toon alle {filteredMatches.length} lopers
+            </button>
+          )}
         </div>
       </div>
     </ModalDialog>
@@ -392,8 +410,8 @@ function ModalHeader({ title, onClose }: { title: string; onClose: () => void })
   return (
     <div className="modal-header">
       <h2>{title}</h2>
-      <button className="icon-btn" onClick={onClose} aria-label="Sluiten">
-        x
+      <button className="icon-btn modal-close-btn" onClick={onClose} aria-label="Sluiten">
+        ✕
       </button>
     </div>
   );
@@ -410,11 +428,14 @@ function RunnerTitle({ runner }: { runner: Runner }) {
 
 function LabelPills({ labels }: { labels: Runner['labels'] }) {
   if (!labels.length) return null;
+  const visible = labels.slice(0, 2);
+  const hiddenCount = labels.length - visible.length;
   return (
-    <span className="label-row">
-      {labels.map((label) => (
+    <span className="label-row" title={labels.map((label) => label.name).join(', ')}>
+      {visible.map((label) => (
         <LabelBadge key={label.id} label={label} compact />
       ))}
+      {hiddenCount > 0 && <span className="label-pill label-pill--compact">+{hiddenCount}</span>}
     </span>
   );
 }

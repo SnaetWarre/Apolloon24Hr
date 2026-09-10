@@ -29,7 +29,11 @@ function TimerBadge({ runner }: { runner: Runner }) {
   const running = Boolean(runner.statusSince && runner.status !== 'ran');
   useSecondTick(running);
   if (!runner.statusSince || runner.status === 'ran') return null;
-  return <span className="timer-badge">{formatElapsedSeconds(nowMs() - runner.statusSince)}</span>;
+  return (
+    <span className="timer-badge" title="Tijd in deze status (mm:ss)">
+      {formatElapsedSeconds(nowMs() - runner.statusSince)}
+    </span>
+  );
 }
 
 const LAST_IN_ORDER = Number.MAX_SAFE_INTEGER;

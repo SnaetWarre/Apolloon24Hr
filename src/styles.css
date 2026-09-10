@@ -259,6 +259,11 @@ select {
   gap: 10px;
 }
 
+/* A lone card on the last row spans the full width instead of leaving a hole. */
+.role-grid > .role-card:last-child:nth-child(odd) {
+  grid-column: 1 / -1;
+}
+
 .role-card {
   position: relative;
   display: flex;
@@ -314,6 +319,17 @@ select {
   border-radius: var(--radius-md);
   padding: 12px 14px;
   margin-top: 14px;
+}
+
+.host-hint--with-copy {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.host-hint--with-copy .btn {
+  margin-left: auto;
 }
 
 .warning-banner {
@@ -1190,6 +1206,10 @@ select {
   grid-template-columns: minmax(320px, 0.8fr) minmax(420px, 1.2fr);
 }
 
+.analysis-main-grid > * {
+  min-width: 0;
+}
+
 .stats-grid--analysis {
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
 }
@@ -1208,6 +1228,17 @@ select {
 
 .stats-grid--analysis .stat-panel--long-value strong {
   font-size: clamp(17px, 1.45vw, 22px);
+}
+
+.stats-grid--analysis .stat-panel--hero strong {
+  color: var(--blue-dark);
+}
+
+.chart-note {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
 }
 
 .analysis-filter-panel {
@@ -1361,11 +1392,12 @@ select {
 .histogram {
   display: grid;
   gap: 12px;
+  min-width: 0;
 }
 
 .histogram-row {
   display: grid;
-  grid-template-columns: 80px minmax(140px, 1fr) 44px;
+  grid-template-columns: 80px minmax(0, 1fr) 44px;
   gap: 12px;
   align-items: center;
 }
@@ -2991,8 +3023,27 @@ tbody tr:hover {
   gap: 8px;
   margin: 0 0 10px;
   color: var(--muted);
-  font-size: clamp(11px, 0.75vw, 13px);
+  font-size: clamp(12px, 0.8vw, 13px);
   font-weight: 700;
+}
+
+.inside-ranking-modes-help {
+  display: block;
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.inside-ranking-rotation-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 8px 0 10px;
+}
+
+.inside-ranking-rotation-row .inside-ranking-rotation-note {
+  margin: 0;
 }
 
 .inside-ranking-rotation-note::before {
@@ -3080,7 +3131,7 @@ tbody tr:hover {
 
 .display-brand img {
   display: block;
-  width: clamp(180px, 20vw, 390px);
+  width: clamp(140px, 14vw, 250px);
   height: auto;
   object-fit: contain;
 }
@@ -3090,7 +3141,7 @@ tbody tr:hover {
 }
 
 .display-brand span {
-  font-size: clamp(17px, 1.6vw, 30px);
+  font-size: clamp(14px, 1.2vw, 20px);
   font-weight: 900;
   font-style: italic;
   letter-spacing: 0;
@@ -3117,6 +3168,11 @@ tbody tr:hover {
 
 .outside-band--next .display-labels .label-pill {
   background: #ffffff;
+}
+
+.outside-band--current .display-labels .label-pill {
+  background: #ffffff;
+  color: #18181b;
 }
 
 .display-root .display-labels .label-dot {

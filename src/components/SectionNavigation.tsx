@@ -5,12 +5,15 @@ export function SectionNavigation<SectionId extends string>({
   sections,
   activeSectionId,
   onSectionChange,
+  attentionIds,
 }: {
   label: string;
   sections: ReadonlyArray<{ id: SectionId; label: string }>;
   activeSectionId: SectionId;
   onSectionChange: (sectionId: SectionId) => void;
+  attentionIds?: ReadonlyArray<SectionId>;
 }) {
+  const attention = new Set(attentionIds ?? []);
   return (
     <nav className="section-navigation" aria-label={label}>
       {sections.map((section) => (
@@ -19,8 +22,14 @@ export function SectionNavigation<SectionId extends string>({
           type="button"
           aria-pressed={section.id === activeSectionId}
           onClick={() => onSectionChange(section.id)}
+          className={attention.has(section.id) ? 'is-attention' : undefined}
         >
           {section.label}
+          {attention.has(section.id) && (
+            <span className="section-nav-dot" aria-label="Vraagt aandacht">
+              !
+            </span>
+          )}
         </button>
       ))}
     </nav>

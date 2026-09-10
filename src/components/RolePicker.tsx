@@ -64,6 +64,18 @@ const ROLE_GROUPS = [
 
 export function RolePicker({ onNavigate }: { onNavigate: (path: string) => void }) {
   const { host } = useAppData(selectHostData);
+  const [copied, setCopied] = React.useState(false);
+
+  async function copyHostUrl() {
+    if (!host) return;
+    try {
+      await navigator.clipboard.writeText(host.url);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setCopied(false);
+    }
+  }
 
   return (
     <>
@@ -100,8 +112,11 @@ export function RolePicker({ onNavigate }: { onNavigate: (path: string) => void 
         ))}
       </div>
       {host && (
-        <div className="host-hint">
+        <div className="host-hint host-hint--with-copy">
           Event URL voor alle laptops: <strong>{host.url}</strong>
+          <button type="button" className="btn btn--ghost btn--sm" onClick={() => void copyHostUrl()}>
+            {copied ? 'Gekopieerd!' : 'Kopieer'}
+          </button>
         </div>
       )}
     </>

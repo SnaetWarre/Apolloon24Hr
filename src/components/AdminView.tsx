@@ -89,6 +89,7 @@ export function AdminView() {
   >([]);
   const readinessChecks = React.useMemo(() => buildEventReadiness(cluster, race), [cluster, race]);
   const readiness = readinessSummary(readinessChecks);
+  const openReadinessCount = readinessChecks.filter((check) => check.level !== 'ready').length;
 
   React.useEffect(() => {
     if (!cluster?.enabled || cluster.conflictCount === 0) {
@@ -369,6 +370,7 @@ export function AdminView() {
             sections={ADMIN_SECTIONS}
             activeSectionId={activeSection}
             onSectionChange={setActiveSection}
+            attentionIds={readiness === 'ready' ? [] : (['system'] as AdminSection[])}
           />
           {readiness !== 'ready' && (
             <button className="management-health" onClick={() => setActiveSection('system')}>
@@ -393,8 +395,8 @@ export function AdminView() {
                   {readiness === 'ready'
                     ? 'Klaar'
                     : readiness === 'warning'
-                      ? 'Aandacht nodig'
-                      : 'Niet klaar'}
+                      ? `Aandacht nodig · ${openReadinessCount} open`
+                      : `Niet klaar · ${openReadinessCount} open`}
                 </strong>
               </div>
               {clusterError && (
@@ -411,6 +413,14 @@ export function AdminView() {
                     <span>
                       <strong>{check.label}</strong>
                       <small>{check.detail}</small>
+                      {check.id === 'timing-controller' && check.level !== 'ready' && (
+                        <button
+                          className="btn btn--ghost btn--sm readiness-check-action"
+                          onClick={() => setActiveSection('system')}
+                        >
+                          Naar Systeem &amp; herstel →
+                        </button>
+                      )}
                     </span>
                   </li>
                 ))}

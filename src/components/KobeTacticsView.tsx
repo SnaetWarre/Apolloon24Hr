@@ -344,7 +344,8 @@ function LiveTacticsSection({
         <TacticsStat
           label="Op schema"
           value={formatSignedLapDifference(cleanLaps.length - expectedLapsNow)}
-          detail={`${expectedLapsNow.toFixed(1)} verwacht`}
+          unit="rondes"
+          detail={`${expectedLapsNow.toFixed(1)} rondes verwacht`}
           tone={cleanLaps.length >= expectedLapsNow ? 'positive' : 'negative'}
         />
         <TacticsStat
@@ -362,12 +363,14 @@ function LiveTacticsSection({
         <TacticsStat
           label="Vs. Apolloon vorig jaar"
           value={formatSignedLapDifference(ownHistoricalLapsNow == null ? null : cleanLaps.length - ownHistoricalLapsNow)}
-          detail={historicalSourceName}
+          unit="rondes"
+          detail={`Bron: ${historicalSourceName}`}
         />
         <TacticsStat
           label="Vs. VTK vorig jaar"
           value={formatSignedLapDifference(rivalHistoricalLapsNow == null ? null : cleanLaps.length - rivalHistoricalLapsNow)}
-          detail={historicalSourceName}
+          unit="rondes"
+          detail={`Bron: ${historicalSourceName}`}
         />
       </section>
 
@@ -376,7 +379,7 @@ function LiveTacticsSection({
         <TacticsSectionHeader
           kicker="Voortgang"
           title="Live tegenover doel en vorig jaar"
-          text="Elke nieuwe ronde uit het telsysteem wordt automatisch toegevoegd. De stippellijn toont het gekozen doelverloop tot het einde van de race."
+          text="Elke nieuwe ronde uit het telsysteem wordt automatisch toegevoegd. De stippellijn toont het gekozen doelverloop tot het einde van de race. De vorig-jaarlijnen staan standaard uit; klik op de legenda om ze te tonen."
         />
         <RaceProgressChart points={progressPoints} showLive showTarget />
       </section>
@@ -388,10 +391,11 @@ function LiveTacticsSection({
           text="Kies een einddoel en gebruik een vlak tempo of het dag-nachtverloop van vorig jaar als vertrekpunt. Pas daarna elk uur afzonderlijk aan."
         />
         <div className="tactics-control-grid">
+          <p className="tactics-group-label">Doelstelling</p>
           <label>
             <span>Doel na 24 uur · gem. {formatPaceSeconds(86_400 / targetLaps)}</span>
             <input
-              className="input"
+              className="input tactics-goal-input"
               type="number"
               min={1}
               step={5}
@@ -419,6 +423,7 @@ function LiveTacticsSection({
               <option value="vtk" disabled={!rivalHistoricalTeam}>VTK vorig jaar</option>
             </select>
           </label>
+          <p className="tactics-group-label">Filter voor tempo</p>
           <label>
             <span>Recente rondes voor huidig tempo</span>
             <input
@@ -718,16 +723,21 @@ function TacticsStat({
   value,
   detail,
   tone,
+  unit,
 }: {
   label: string;
   value: string;
   detail: string;
   tone?: 'positive' | 'negative';
+  unit?: string;
 }) {
   return (
     <div className={`stat-panel tactics-stat${tone ? ` tactics-stat--${tone}` : ''}`}>
       <span className="muted-label">{label}</span>
-      <strong>{value}</strong>
+      <strong>
+        {value}
+        {unit && <small className="tactics-stat-unit">{unit}</small>}
+      </strong>
       <small>{detail}</small>
     </div>
   );
@@ -764,8 +774,8 @@ function RaceProgressChart({
     const datasets: ChartConfiguration<'line'>['data']['datasets'] = [];
     if (showLive) datasets.push(lineDataset('Apolloon live', points, 'liveLaps', '#2877F6', 4));
     if (showTarget) datasets.push(lineDataset('Doelverloop', points, 'targetLaps', '#111827', 2, [8, 6]));
-    datasets.push(lineDataset(ownLabel, points, 'ownHistoricalLaps', '#7c3aed', 2));
-    datasets.push(lineDataset(rivalLabel, points, 'rivalHistoricalLaps', '#d59d00', 2));
+    datasets.push(lineDataset(ownLabel, points, 'ownHistoricalLaps', '#7c3aed', 2, [7, 5], true));
+    datasets.push(lineDataset(rivalLabel, points, 'rivalHistoricalLaps', '#d59d00', 2, [7, 5], true));
 
     const chart = new Chart(canvas, {
       type: 'line',
@@ -981,7 +991,8 @@ function lineDataset(
   valueKey: keyof Pick<RaceProgressPoint, 'liveLaps' | 'targetLaps' | 'ownHistoricalLaps' | 'rivalHistoricalLaps'>,
   color: string,
   borderWidth: number,
-  borderDash?: number[]
+  borderDash?: number[],
+  hiddenByDefault?: boolean
 ) {
   return {
     label,
@@ -990,6 +1001,7 @@ function lineDataset(
     backgroundColor: color,
     borderWidth,
     borderDash,
+    hidden: hiddenByDefault,
     pointRadius: 0,
     pointHoverRadius: 5,
     tension: 0.18,

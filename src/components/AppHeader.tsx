@@ -62,11 +62,14 @@ export const AppHeader: React.FC<{ onOpenProfile?: (runnerId: string) => void }>
               className="input input--search input--stretch"
             />
           </label>
-          {search && (
-            <button className="btn btn--ghost" onClick={() => setSearch('')}>
-              Filter wissen
-            </button>
-          )}
+          <button
+            className="btn btn--ghost"
+            onClick={() => setSearch('')}
+            disabled={!search}
+            title={search ? 'Filter wissen' : 'Geen filter actief'}
+          >
+            Filter wissen
+          </button>
         </div>
         <div className="workspace-status">
           {systemStatus && (

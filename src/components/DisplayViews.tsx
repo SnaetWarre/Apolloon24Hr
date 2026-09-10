@@ -12,6 +12,7 @@ import {
 } from '../lib/ranking';
 import type { Label, LapRecord, LiveAppSnapshot, PublicRecordMode, RaceEvent, Runner } from '../types';
 import { LabelBadge } from './LabelBadge';
+import { LiveDuration } from './LiveTime';
 
 const OUTSIDE_ALERT_VISIBLE_MS = 8_000;
 const INSIDE_RANKING_ROTATION_MS = 15_000;
@@ -120,6 +121,9 @@ export function OutsideDisplay() {
           <strong className="display-runner-name">
             {activeRunner ? runnerLabel(activeRunner) : 'Nog niemand gestart'}
           </strong>
+          {activeRunner && race.activeStartedAt ? (
+            <LiveDuration startedAt={race.activeStartedAt} className="display-time" />
+          ) : null}
           {activeRunner && <DisplayLabels labels={activeRunner.labels} />}
         </div>
       </section>
@@ -146,6 +150,7 @@ export function InsideDisplay() {
   const { laps } = useRaceHistory({ scope: 'full' });
   const [rankingMode, setRankingMode] = React.useState<RankingMode>('laps');
   const [rankingLabelId, setRankingLabelId] = React.useState<string | null>(null);
+  const [rotationPaused, setRotationPaused] = React.useState(false);
   const [prefersReducedMotion, setPrefersReducedMotion] = React.useState(false);
   const recentLapSummaries = React.useMemo(() => buildRecentLapSummaries(laps), [laps]);
   const rankingLabels = React.useMemo(() => collectRankingLabels(labels, laps), [labels, laps]);
@@ -167,12 +172,12 @@ export function InsideDisplay() {
   }, []);
 
   React.useEffect(() => {
-    if (prefersReducedMotion) return;
+    if (prefersReducedMotion || rotationPaused) return;
     const rotationTimeout = window.setTimeout(() => {
       setRankingMode((currentMode) => currentMode === 'laps' ? 'coefficient' : 'laps');
     }, INSIDE_RANKING_ROTATION_MS);
     return () => window.clearTimeout(rotationTimeout);
-  }, [prefersReducedMotion, rankingMode]);
+  }, [prefersReducedMotion, rankingMode, rotationPaused]);
 
   return (
     <main className="display-root display-root--inside">
@@ -192,7 +197,7 @@ export function InsideDisplay() {
                 <article key={lap.id} className={`recent-lap-row${index === 0 ? ' is-latest' : ''}`}>
                   <div className="recent-lap-card-header">
                     <span>{index === 0 ? 'Net binnen' : `Binnen om ${formatDisplayClockTime(lap.finishedAt)}`}</span>
-                    <span>Ronde {lap.lapNumber} van deze loper</span>
+                    <span>Ronde {lap.lapNumber} · {formatDurationMs(lap.durationMs)}</span>
                   </div>
                   <div className="recent-lap-runner">
                     <strong>{lapRunnerLabel(lap)}</strong>
@@ -241,21 +246,35 @@ export function InsideDisplay() {
               onClick={() => setRankingMode('laps')}
               aria-pressed={rankingMode === 'laps'}
             >
-              Aantal toeren
+              Meeste rondes
             </button>
             <button
               className={rankingMode === 'coefficient' ? 'is-active' : ''}
               onClick={() => setRankingMode('coefficient')}
               aria-pressed={rankingMode === 'coefficient'}
             >
-              Coëfficiëntensom
+              Punten (tempo)
             </button>
           </div>
-          <p className="inside-ranking-rotation-note">
-            {prefersReducedMotion
-              ? 'Automatisch wisselen is uitgeschakeld'
-              : 'Wisselt automatisch om de 15 seconden'}
-          </p>
+          <small className="inside-ranking-modes-help">Punten wegen snelle rondes zwaarder.</small>
+          <div className="inside-ranking-rotation-row">
+            <p className="inside-ranking-rotation-note">
+              {prefersReducedMotion
+                ? 'Automatisch wisselen is uitgeschakeld'
+                : rotationPaused
+                  ? 'Automatisch wisselen is gepauzeerd'
+                  : 'Wisselt automatisch om de 15 seconden'}
+            </p>
+            {!prefersReducedMotion && (
+              <button
+                className="btn btn--ghost btn--sm"
+                aria-pressed={rotationPaused}
+                onClick={() => setRotationPaused((paused) => !paused)}
+              >
+                {rotationPaused ? 'Hervat wisselen' : 'Pauzeer wisselen'}
+              </button>
+            )}
+          </div>
           <div className="ranking-list">
             {ranking.map((runner, index) => (
               <div key={runner.runnerId} className="ranking-row">
@@ -263,8 +282,8 @@ export function InsideDisplay() {
                 <strong>{rankingRunnerLabel(runner)}</strong>
                 <em>
                   {rankingMode === 'coefficient'
-                    ? `${formatCoefficient(runner.coefficientTotal)} punten`
-                    : `${runner.lapCount} toeren`}
+                    ? `${formatCoefficient(runner.coefficientTotal)} punten · ${runner.lapCount} toeren`
+                    : `${runner.lapCount} toeren · ${formatDurationMs(runner.averageLapMs)} gem.`}
                 </em>
               </div>
             ))}
@@ -287,8 +306,9 @@ export function InsideDisplay() {
                 </div>
                 <div className="progress-track">
                   <span
+                    title={`${stat.laps} van ${stat.target} toeren`}
                     style={{
-                      width: `${Math.min(100, stat.percent)}%`,
+                      width: `${stat.target > 0 ? Math.min(100, Math.max(stat.percent, 5)) : 0}%`,
                       background: stat.label.color,
                     }}
                   />

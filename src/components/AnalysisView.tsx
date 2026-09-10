@@ -203,12 +203,12 @@ export function AnalysisView() {
         <div className="analysis-content">
           <div className="stats-grid stats-grid--analysis">
             <StatPanel label="Geselecteerde toeren" value={kpis.count.toString()} />
-            <StatPanel label="Gemiddelde ronde" value={formatDurationMs(kpis.averageMs)} />
+            <StatPanel label="Gemiddelde ronde" value={formatDurationMs(kpis.averageMs)} hero />
             <StatPanel label="Mediaan" value={formatDurationMs(kpis.medianMs)} />
             <StatPanel label="Snelste" value={formatDurationMs(kpis.bestMs)} />
             <StatPanel label="Traagste" value={formatDurationMs(kpis.slowestMs)} />
-            <StatPanel label="Toeren / uur" value={formatNumber(kpis.lapsPerHour, 1)} />
-            <StatPanel label="Projectie 24u" value={formatNumber(kpis.projected24hLaps, 0)} />
+            <StatPanel label="Toeren / uur" value={formatNumber(kpis.lapsPerHour, 1)} hero />
+            <StatPanel label="Projectie 24u" value={formatNumber(kpis.projected24hLaps, 0)} hero />
             <StatPanel label="Burgie gepakt" value={burgieEventCount.toString()} />
           </div>
 
@@ -345,10 +345,12 @@ function mergeAnalysisLabels(currentLabels: Label[], laps: LapRecord[]): Label[]
   );
 }
 
-function StatPanel({ label, value }: { label: string; value: string }) {
+function StatPanel({ label, value, hero }: { label: string; value: string; hero?: boolean }) {
   const hasLongValue = value.length >= 10;
   return (
-    <div className={`stat-panel${hasLongValue ? ' stat-panel--long-value' : ''}`}>
+    <div
+      className={`stat-panel${hasLongValue ? ' stat-panel--long-value' : ''}${hero ? ' stat-panel--hero' : ''}`}
+    >
       <span className="muted-label">{label}</span>
       <strong title={value}>{value}</strong>
     </div>
@@ -377,7 +379,7 @@ function FastestLapWindowList({
     <>
       <div className="segmented-control analysis-sort-control">
         <button className={mode === 'day' ? 'is-active' : ''} onClick={() => onModeChange('day')}>
-          Dag
+          Per dag
         </button>
         <button className={mode === 'two_hour' ? 'is-active' : ''} onClick={() => onModeChange('two_hour')}>
           Per 2 uur
@@ -533,14 +535,18 @@ function RollingLapTrendChart({ points }: { points: ReturnType<typeof buildRolli
             type: 'linear',
             title: {
               display: true,
-              text: 'Race-uur',
+              text: 'Tijd sinds start (u:mm)',
               color: workspaceChartPalette.muted,
               font: { weight: 'bold' },
             },
             ticks: {
               color: workspaceChartPalette.muted,
+              maxTicksLimit: 9,
               callback(value) {
-                return `${formatNumber(Number(value), 1)}u`;
+                const totalMinutes = Math.round(Number(value) * 60);
+                const hours = Math.floor(totalMinutes / 60);
+                const minutes = String(totalMinutes % 60).padStart(2, '0');
+                return `${hours}:${minutes}`;
               },
             },
             grid: {
@@ -601,6 +607,9 @@ function RacePaceChart({ buckets }: { buckets: ReturnType<typeof buildTimeBucket
             borderColor: '#2877F6',
             borderWidth: 1,
             borderRadius: 4,
+            maxBarThickness: 160,
+            categoryPercentage: 0.6,
+            barPercentage: 0.9,
             yAxisID: 'laps',
           },
           {
@@ -702,9 +711,14 @@ function RacePaceChart({ buckets }: { buckets: ReturnType<typeof buildTimeBucket
 
   if (!buckets.length) return <EmptyAnalyticsState message="Zet minstens een ploeg aan om de grafiek te tonen." />;
   return (
-    <div className="analysis-chart-card">
-      <canvas ref={canvasRef} />
-    </div>
+    <>
+      <div className="analysis-chart-card">
+        <canvas ref={canvasRef} />
+      </div>
+      {buckets.length < 2 && (
+        <p className="chart-note">Nog maar één uur met rondes — de trend wordt zichtbaar naarmate de race vordert.</p>
+      )}
+    </>
   );
 }
 

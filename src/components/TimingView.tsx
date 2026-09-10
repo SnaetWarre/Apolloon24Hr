@@ -117,7 +117,7 @@ export function TimingView() {
   }
 
   async function finish() {
-    const succeeded = await runExclusiveRaceAction(finishRace, 'Race beeindigd.');
+    const succeeded = await runExclusiveRaceAction(finishRace, 'Race beëindigd.');
     if (succeeded) {
       setFinishConfirmStep(0);
     }
@@ -233,16 +233,16 @@ export function TimingView() {
               <span>
                 {handoffBusy
                   ? 'Bezig...'
-                  : race.raceFinishedAt && nextRunner ? 'Race hervatten'
+                  : race.raceFinishedAt && nextRunner ? `Race hervatten met ${shortRunnerName(nextRunner)}`
                   : activeRunner
                     ? nextRunner
-                      ? 'Ronde opslaan & volgende starten'
-                      : 'Ronde opslaan'
-                    : nextRunner ? 'Start volgende loper' : 'Geen loper klaar'}
+                      ? `Klok ${shortRunnerName(activeRunner)} af → start ${shortRunnerName(nextRunner)}`
+                      : `Klok ${shortRunnerName(activeRunner)} af`
+                    : nextRunner ? `Start ${shortRunnerName(nextRunner)}` : 'Geen loper klaar'}
               </span>
               {!race.raceFinishedAt && <kbd>Spatie / Enter</kbd>}
             </button>
-            <button className="btn btn--ghost" onClick={undo} disabled={handoffBusy || timingBlocked}>
+            <button className="btn btn--ghost timing-undo" onClick={undo} disabled={handoffBusy || timingBlocked}>
               Laatste wissel ongedaan maken
             </button>
           </div>
@@ -285,7 +285,7 @@ export function TimingView() {
           <section className="timing-upcoming" aria-label="Komende lopers">
             <header>
               <h2>Hierna op de piste</h2>
-              <span>{runners.filter((runner) => runner.status === 'waiting').length} klaar</span>
+              <span>{runners.filter((runner) => runner.status === 'waiting').length} lopers klaar</span>
             </header>
             {upcomingRunners.length ? (
               <ol>
@@ -351,7 +351,7 @@ export function TimingView() {
           onClick={() => setFinishConfirmStep(1)}
           disabled={handoffBusy || timingBlocked}
         >
-          Race beeindigen
+          Race beëindigen
         </button>
       </section>
 
@@ -360,7 +360,7 @@ export function TimingView() {
           <div className="confirm-modal finish-confirm">
             {finishConfirmStep === 1 ? (
               <>
-                <h3>Race beeindigen?</h3>
+                <h3>Race beëindigen?</h3>
                 <p>Dit stopt de actieve loper zonder extra ronde.</p>
                 <div className="modal-actions">
                   <button className="btn btn--ghost" onClick={() => setFinishConfirmStep(0)} disabled={handoffBusy}>
@@ -440,6 +440,11 @@ function TimingRunner({
       )}
     </section>
   );
+}
+
+function shortRunnerName(runner: Runner) {
+  const firstName = runner.name.trim().split(/\s+/)[0] || runner.name;
+  return runner.runnerNumber ? `${runner.runnerNumber} - ${firstName}` : firstName;
 }
 
 function buildHandoffPreview(activeRunner: Runner | null, nextRunner: Runner | null) {
