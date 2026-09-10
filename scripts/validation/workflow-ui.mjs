@@ -62,12 +62,12 @@ try {
   await page.keyboard.press('Space');
   assert.equal((await snapshot()).race.activeRunnerId, null);
   await rpc.runners.setStatus.mutate({ id: firstRunner.id, status: 'waiting' });
-  await page.getByRole('button', { name: 'Start volgende loper' }).waitFor();
+  await page.getByRole('button', { name: /^Start / }).waitFor();
   await page.keyboard.press('Control+Enter');
   assert.equal((await snapshot()).race.activeRunnerId, null);
   await page.keyboard.press('Space');
   await waitUntil(async () => (await snapshot()).race.activeRunnerId === firstRunner.id);
-  await page.getByRole('button', { name: 'Ronde opslaan' }).waitFor();
+  await page.getByRole('button', { name: /^Klok / }).waitFor();
   await page.keyboard.press('Space');
   await page.getByText('Ronde opgeslagen. Niemand actief; de wachtrij is leeg.').waitFor();
   assert.equal((await snapshot()).race.activeRunnerId, null);
@@ -76,7 +76,7 @@ try {
   await rpc.runners.setStatus.mutate({ id: firstRunner.id, status: 'waiting' });
   await rpc.race.startNext.mutate(await expectation());
   await rpc.runners.setStatus.mutate({ id: secondRunner.id, status: 'waiting' });
-  await page.getByRole('button', { name: 'Race beeindigen', exact: true }).click();
+  await page.getByRole('button', { name: 'Race beëindigen', exact: true }).click();
   await page.getByRole('button', { name: 'Verder', exact: true }).click();
   await page.getByRole('button', { name: 'Race definitief beeindigen' }).click();
   await page.getByRole('button', { name: 'Race hervatten' }).waitFor();

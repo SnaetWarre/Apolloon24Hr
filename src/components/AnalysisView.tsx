@@ -138,7 +138,6 @@ export function AnalysisView() {
     <>
       <div className="hero hero--compact">
         <div>
-          <span className="page-kicker">Wedstrijdinzicht</span>
           <h1 className="app-title">Analyse</h1>
           <p className="tagline">Grafieken op basis van de geselecteerde ploegen en categorieën.</p>
         </div>
@@ -146,7 +145,7 @@ export function AnalysisView() {
 
       {historyLoading && (
         <div className="host-hint" role="status">
-          Gecomprimeerde racegeschiedenis wordt geladen...
+          Racegeschiedenis wordt geladen...
         </div>
       )}
       {historyError && (

@@ -1,4 +1,5 @@
 import React from 'react';
+import { Link } from '@tanstack/react-router';
 import { useAppData } from '../app/index';
 import { preloadAdminView, preloadAnalysisView, preloadDisplayViews, preloadKobeTacticsView } from '../lazyViews';
 import type { LiveAppSnapshot } from '../types';
@@ -25,21 +26,9 @@ const ROLE_GROUPS = [
     ],
   },
   {
-    title: 'Schermen en beheer',
+    title: 'Analyse en beheer',
     isOperatorGroup: false,
     roles: [
-      {
-        path: '/display/outside',
-        title: 'Buitenscherm',
-        description: 'Huidige en volgende loper voor het publiek.',
-        preload: preloadDisplayViews,
-      },
-      {
-        path: '/display/inside',
-        title: 'Binnenscherm',
-        description: 'Rankings, minicompetities en progressie per label.',
-        preload: preloadDisplayViews,
-      },
       {
         path: '/analysis',
         title: 'Analyse en export',
@@ -60,9 +49,27 @@ const ROLE_GROUPS = [
       },
     ],
   },
+  {
+    title: 'Publieksschermen',
+    isOperatorGroup: false,
+    roles: [
+      {
+        path: '/display/inside',
+        title: 'Binnenscherm',
+        description: 'Rankings en progressie van lopers en ploegen.',
+        preload: preloadDisplayViews,
+      },
+      {
+        path: '/display/outside',
+        title: 'Buitenscherm',
+        description: 'De huidige en volgende loper op de piste.',
+        preload: preloadDisplayViews,
+      },
+    ],
+  },
 ] as const;
 
-export function RolePicker({ onNavigate }: { onNavigate: (path: string) => void }) {
+export function RolePicker() {
   const { host } = useAppData(selectHostData);
   const [copied, setCopied] = React.useState(false);
 
@@ -80,11 +87,10 @@ export function RolePicker({ onNavigate }: { onNavigate: (path: string) => void 
   return (
     <>
       <div className="hero home-hero">
+        <img className="hero-logo" src="/brand/apolloon-logo.png" alt="Apolloon" width={560} height={169} fetchPriority="high" />
         <div className="hero__content">
-          <img className="hero-logo" src="/brand/apolloon-logo.png" alt="Apolloon" width={560} height={169} fetchPriority="high" />
-          <span className="page-kicker">24 urenloop · Wedstrijdorganisatie</span>
           <h1 className="app-title">Elke ronde telt.</h1>
-          <p className="tagline">Kies je werkplek. Hou de wedstrijd in beweging.</p>
+          <p className="tagline">Je werkplek voor de 24 urenloop.</p>
         </div>
       </div>
       <div className="role-sections">
@@ -93,19 +99,18 @@ export function RolePicker({ onNavigate }: { onNavigate: (path: string) => void 
             <h2>{roleGroup.title}</h2>
             <div className="role-grid">
               {roleGroup.roles.map((role) => (
-                <button
+                <Link
                   key={role.path}
                   className="role-card"
+                  to={role.path}
                   onPointerEnter={role.preload}
                   onFocus={role.preload}
-                  onClick={() => onNavigate(role.path)}
                 >
                   <span>
                     <span className="role-card__title">{role.title}</span>
                     <small>{role.description}</small>
                   </span>
-                  <span className="role-card__arrow" aria-hidden="true">→</span>
-                </button>
+                </Link>
               ))}
             </div>
           </section>
@@ -113,7 +118,7 @@ export function RolePicker({ onNavigate }: { onNavigate: (path: string) => void 
       </div>
       {host && (
         <div className="host-hint host-hint--with-copy">
-          Event URL voor alle laptops: <strong>{host.url}</strong>
+          Open op een andere laptop: <strong>{host.url}</strong>
           <button type="button" className="btn btn--ghost btn--sm" onClick={() => void copyHostUrl()}>
             {copied ? 'Gekopieerd!' : 'Kopieer'}
           </button>

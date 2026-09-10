@@ -300,17 +300,6 @@ select {
   line-height: 1.45;
 }
 
-.role-card__arrow {
-  color: var(--muted);
-  font-size: 20px;
-  transition: color 140ms ease, transform 140ms ease;
-}
-
-.role-card:hover .role-card__arrow {
-  color: var(--blue);
-  transform: translateX(2px);
-}
-
 .host-hint,
 .header-hint,
 .warning-banner {
@@ -1484,48 +1473,6 @@ select {
   border-radius: 999px;
   background: #22c55e;
   box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.13);
-}
-
-.tactics-section-switch {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-  margin-bottom: 14px;
-}
-
-.tactics-section-switch button {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
-  background: var(--panel);
-  color: var(--text);
-  padding: 16px 18px;
-  cursor: pointer;
-  text-align: left;
-  transition: border-color 120ms ease, background-color 120ms ease, box-shadow 120ms ease;
-}
-
-.tactics-section-switch button:hover {
-  border-color: var(--line-strong);
-  background: var(--blue-faint);
-}
-
-.tactics-section-switch button.is-active {
-  border-color: var(--apolloon-blue);
-  background: var(--blue-soft);
-  box-shadow: inset 4px 0 0 var(--apolloon-blue);
-}
-
-.tactics-section-switch span {
-  font-size: 16px;
-  font-weight: 850;
-}
-
-.tactics-section-switch small {
-  color: var(--muted);
-  font-size: 12px;
 }
 
 .tactics-section-stack {
@@ -3403,7 +3350,6 @@ tbody tr:hover {
     flex-direction: column;
   }
 
-  .tactics-section-switch,
   .tactics-control-grid,
   .tactics-control-grid--historical,
   .tactics-control-grid--drafting,

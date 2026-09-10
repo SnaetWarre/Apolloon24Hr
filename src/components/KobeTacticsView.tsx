@@ -1,5 +1,6 @@
 import { workspaceChartPalette } from '../lib/chartPalette';
 import React from 'react';
+import { SectionNavigation } from './SectionNavigation';
 import {
   CategoryScale,
   Chart,
@@ -136,7 +137,6 @@ export function KobeTacticsView() {
     <>
       <div className="hero hero--compact tactics-hero">
         <div>
-          <span className="page-kicker">Wedstrijdstrategie</span>
           <h1 className="app-title">Kobe&apos;s tactiek</h1>
           <p className="tagline">
             Vergelijk vorige edities en stuur het doelverloop bij met de live data uit Apolloon.
@@ -154,24 +154,15 @@ export function KobeTacticsView() {
         </div>
       )}
 
-      <div className="tactics-section-switch" aria-label="Tactiekonderdeel">
-        <button
-          className={section === 'live' ? 'is-active' : ''}
-          aria-pressed={section === 'live'}
-          onClick={() => setSection('live')}
-        >
-          <span>Live race &amp; doelverloop</span>
-          <small>Automatisch gekoppeld aan het telsysteem</small>
-        </button>
-        <button
-          className={section === 'historical' ? 'is-active' : ''}
-          aria-pressed={section === 'historical'}
-          onClick={() => setSection('historical')}
-        >
-          <span>Analyse vorig jaar</span>
-          <small>Vergelijk Apolloon met VTK en andere teams</small>
-        </button>
-      </div>
+      <SectionNavigation
+        label="Tactiekonderdeel"
+        sections={[
+          { id: 'live', label: 'Live race & doelverloop' },
+          { id: 'historical', label: 'Analyse vorig jaar' },
+        ] as const}
+        activeSectionId={section}
+        onSectionChange={setSection}
+      />
 
       {section === 'live' ? (
         <LiveTacticsSection
