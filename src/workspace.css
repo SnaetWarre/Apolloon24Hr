@@ -326,6 +326,20 @@ body:has(.app-root) {
 .tactics-planning-layout .tactics-hourly-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .tactics-planning-layout .tactics-hourly-header { flex-wrap: wrap; margin-top: 16px; }
 .tactics-hour-editor { border-top: 1px solid var(--line); padding-top: 12px; }
+.tactics-series-switch { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-bottom: 16px; }
+.tactics-series-switch button { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--text); padding: 10px 12px; cursor: pointer; text-align: left; transition: border-color 120ms ease, background-color 120ms ease; }
+.tactics-series-switch button:hover:not(:disabled) { border-color: var(--line-strong); background: var(--blue-faint); }
+.tactics-series-switch button[data-active="true"] { border-color: var(--apolloon-blue); background: var(--blue-soft); box-shadow: inset 3px 0 0 var(--apolloon-blue); }
+.tactics-series-switch button:disabled { opacity: 0.45; cursor: not-allowed; }
+.tactics-series-switch__label { display: inline-flex; align-items: center; gap: 7px; min-width: 0; color: var(--muted); font-size: 12px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.tactics-series-switch__label i { width: 9px; height: 9px; flex: 0 0 auto; border-radius: 999px; }
+.tactics-series-switch__value { font-size: 24px; font-weight: 800; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.tactics-recharts-wrap { width: 100%; height: 430px; }
+.tactics-chart-tooltip { display: grid; gap: 6px; min-width: 180px; border: 1px solid var(--line-strong); border-radius: 10px; background: #101010; color: var(--text); padding: 10px 12px; font-size: 13px; box-shadow: var(--shadow-md); }
+.tactics-chart-tooltip > strong { color: var(--muted); font-size: 12px; }
+.tactics-chart-tooltip span { display: flex; align-items: center; gap: 8px; }
+.tactics-chart-tooltip span i { width: 9px; height: 9px; flex: 0 0 auto; border-radius: 999px; }
+.tactics-chart-tooltip span b { margin-left: auto; font-variant-numeric: tabular-nums; }
 .tactics-hour-editor summary { font-weight: 700; color: var(--blue-dark); padding: 6px 0; }
 .tactics-group-label { margin: 4px 0 2px; color: var(--muted); font-size: 12px; font-weight: 750; text-transform: uppercase; letter-spacing: 0.04em; }
 .tactics-goal-input { font-size: 20px; font-weight: 800; }
