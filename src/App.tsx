@@ -1,5 +1,5 @@
 import React from 'react';
-import { Outlet, useNavigate, useRouterState } from '@tanstack/react-router';
+import { Link, Outlet, useNavigate, useRouterState } from '@tanstack/react-router';
 import { AppHeader } from './components/AppHeader';
 import { KanbanBoard } from './components/KanbanBoard';
 import { RolePicker } from './components/RolePicker';
@@ -68,8 +68,7 @@ export function AppRoot() {
 }
 
 export function HomePage() {
-  const navigate = useNavigate();
-  return <RolePicker onNavigate={(path) => void navigate({ to: path as never })} />;
+  return <RolePicker />;
 }
 
 export function QueuePage() {
@@ -192,7 +191,6 @@ function RouteLoadBoundary({
 }
 
 function TopNav() {
-  const navigate = useNavigate();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const navigationItems: ReadonlyArray<{
     path: '/' | '/queue' | '/timing' | '/analysis' | '/tactics' | '/admin';
@@ -209,30 +207,29 @@ function TopNav() {
 
   return (
     <nav className="top-nav" aria-label="Hoofdnavigatie">
-      <button
+      <Link
         className="top-nav__brand"
-        onClick={() => void navigate({ to: '/' })}
+        to="/"
         aria-label="Naar de startpagina"
       >
         <span className="top-nav__logo">
           <img src="/brand/apolloon-logo.png" alt="" width={560} height={169} />
         </span>
-        <span>Apolloon</span>
-      </button>
+      </Link>
       <div className="top-nav__links">
         {navigationItems.map((navigationItem) => {
           const isCurrentPage = pathname === navigationItem.path;
           return (
-            <button
+            <Link
               key={navigationItem.path}
               className={`nav-link${isCurrentPage ? ' nav-link--active' : ''}`}
               aria-current={isCurrentPage ? 'page' : undefined}
               onPointerEnter={navigationItem.preload}
               onFocus={navigationItem.preload}
-              onClick={() => void navigate({ to: navigationItem.path as never })}
+              to={navigationItem.path}
             >
               {navigationItem.label}
-            </button>
+            </Link>
           );
         })}
       </div>

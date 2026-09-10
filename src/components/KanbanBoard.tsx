@@ -211,6 +211,9 @@ export const KanbanBoard: React.FC<{ onOpenProfile: (runnerId: string) => void }
                 id={`column-${column.key}`}
                 title={column.title}
                 count={columnRunners.length}
+                totalCount={search.trim()
+                  ? runners.filter((runner) => runner.status === column.key && !runner.hiddenFromQueue).length
+                  : undefined}
                 dropHint={dropAction?.type === 'set-status' && dropAction.status === column.key
                   ? column.key === 'waiting' ? 'Loslaten: achteraan in de wachtrij' : 'Loslaten: naar opwarming'
                   : undefined}
@@ -218,7 +221,11 @@ export const KanbanBoard: React.FC<{ onOpenProfile: (runnerId: string) => void }
                 {columnRunners.map(renderRunnerRow)}
                 {!columnRunners.length && (
                   <p className="empty-inline">
-                    {search ? 'Geen lopers voor dit filter.' : 'Nog geen lopers.'}
+                    {search.trim()
+                      ? 'Geen lopers voor dit filter. Wis het filter om iedereen te zien.'
+                      : column.key === 'warming_up'
+                        ? 'Meld een loper aan via Loper zoeken of Nieuwe loper.'
+                        : 'Verplaats een opgewarmde loper naar de wachtrij.'}
                   </p>
                 )}
               </QueueLane>
@@ -263,12 +270,14 @@ function QueueLane({
   id,
   title,
   count,
+  totalCount,
   dropHint,
   children,
 }: {
   id: string;
   title: string;
   count: number;
+  totalCount?: number;
   dropHint?: string;
   children: React.ReactNode;
 }) {
@@ -277,7 +286,11 @@ function QueueLane({
     <section ref={setNodeRef} className={`queue-lane${isOver || dropHint ? ' queue-lane--over' : ''}`} aria-label={title}>
       <header>
         <h2>{title}</h2>
-        {dropHint ? <span className="queue-drop-hint" role="status">{dropHint}</span> : <span>{count} lopers</span>}
+        {dropHint ? (
+          <span className="queue-drop-hint" role="status">{dropHint}</span>
+        ) : (
+          <span>{count}{totalCount !== undefined ? ` van ${totalCount}` : ''} lopers</span>
+        )}
       </header>
       <div className="queue-lane__rows">{children}</div>
     </section>
