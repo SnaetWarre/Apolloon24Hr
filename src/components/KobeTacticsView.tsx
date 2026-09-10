@@ -13,15 +13,6 @@ import {
 } from 'chart.js';
 import { useAppData, useRaceHistory } from '../app/index';
 import {
-  CartesianGrid,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip as RechartsTooltip,
-  XAxis,
-  YAxis,
-} from 'recharts';
-import {
   DEFAULT_MAXIMUM_LAP_SECONDS,
   DEFAULT_MINIMUM_LAP_SECONDS,
   RACE_DURATION_HOURS,
@@ -388,7 +379,7 @@ function LiveTacticsSection({
         <TacticsSectionHeader
           kicker="Voortgang"
           title="Live tegenover doel en vorig jaar"
-          text="Elke nieuwe ronde uit het telsysteem wordt automatisch toegevoegd. Kies hieronder welke lijn je met het doelverloop (stippellijn) vergelijkt."
+          text="Elke nieuwe ronde uit het telsysteem wordt automatisch toegevoegd. De stippellijn toont het gekozen doelverloop tot het einde van de race. De vorig-jaarlijnen staan standaard uit; klik op de legenda om ze te tonen."
         />
         <RaceProgressChart points={progressPoints} showLive showTarget />
       </section>
@@ -762,52 +753,6 @@ function TacticsSectionHeader({ kicker, title, text }: { kicker: string; title: 
   );
 }
 
-type ProgressSeriesKey = 'live' | 'target' | 'own' | 'rival';
-
-const PROGRESS_SERIES: ReadonlyArray<{ key: ProgressSeriesKey; color: string; dash?: string }> = [
-  { key: 'live', color: '#4d9fff' },
-  { key: 'target', color: '#9aa3b2', dash: '8 6' },
-  { key: 'own', color: '#a78bfa' },
-  { key: 'rival', color: '#fbbf24' },
-];
-
-function formatProgressHourLabel(raceHour: number) {
-  const totalMinutes = Math.round(raceHour * 60);
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = String(totalMinutes % 60).padStart(2, '0');
-  return `${hours}u${minutes}`;
-}
-
-function ProgressTooltip({
-  active,
-  payload,
-  label,
-}: {
-  active?: boolean;
-  payload?: ReadonlyArray<{
-    name?: string;
-    value?: number | string | null;
-    color?: string;
-    dataKey?: string | number;
-  }>;
-  label?: number | string;
-}) {
-  if (!active || !payload?.length) return null;
-  const rows = payload.filter((entry) => entry.value != null);
-  if (!rows.length) return null;
-  return (
-    <div className="tactics-chart-tooltip">
-      <strong>{formatProgressHourLabel(Number(label))} na start</strong>
-      {rows.map((entry) => (
-        <span key={String(entry.dataKey)}>
-          <i style={{ background: entry.color }} aria-hidden="true" />
-          {entry.name}: <b>{Math.round(Number(entry.value)).toLocaleString('nl-BE')} rondes</b>
-        </span>
-      ))}
-    </div>
-  );
-}
-
 function RaceProgressChart({
   points,
   showLive = false,
@@ -821,164 +766,26 @@ function RaceProgressChart({
   ownLabel?: string;
   rivalLabel?: string;
 }) {
-  const [activeSeries, setActiveSeries] = React.useState<ProgressSeriesKey>('live');
+  const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
 
-  const seriesLabels: Record<ProgressSeriesKey, string> = React.useMemo(
-    () => ({ live: 'Apolloon live', target: 'Doelverloop', own: ownLabel, rival: rivalLabel }),
-    [ownLabel, rivalLabel]
-  );
+  React.useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || !points.length) return undefined;
+    const datasets: ChartConfiguration<'line'>['data']['datasets'] = [];
+    if (showLive) datasets.push(lineDataset('Apolloon live', points, 'liveLaps', '#2877F6', 4));
+    if (showTarget) datasets.push(lineDataset('Doelverloop', points, 'targetLaps', '#9aa3b2', 2, [8, 6]));
+    datasets.push(lineDataset(ownLabel, points, 'ownHistoricalLaps', '#7c3aed', 2, [7, 5], true));
+    datasets.push(lineDataset(rivalLabel, points, 'rivalHistoricalLaps', '#d59d00', 2, [7, 5], true));
 
-  const seriesValues = React.useMemo(() => {
-    const lastValue = (pick: (point: RaceProgressPoint) => number | null) => {
-      for (let index = points.length - 1; index >= 0; index -= 1) {
-        const value = pick(points[index]);
-        if (value != null) return Math.round(value);
-      }
-      return null;
-    };
-    return {
-      live: showLive ? lastValue((point) => point.liveLaps) : null,
-      target: showTarget ? lastValue((point) => point.targetLaps) : null,
-      own: lastValue((point) => point.ownHistoricalLaps),
-      rival: lastValue((point) => point.rivalHistoricalLaps),
-    } satisfies Record<ProgressSeriesKey, number | null>;
-  }, [points, showLive, showTarget]);
+    const chart = new Chart(canvas, {
+      type: 'line',
+      data: { datasets },
+      options: sharedLineChartOptions('Cumulatieve rondes', (value) => `${Math.round(Number(value))}`),
+    });
+    return () => chart.destroy();
+  }, [ownLabel, points, rivalLabel, showLive, showTarget]);
 
-  const isAvailable: Record<ProgressSeriesKey, boolean> = {
-    live: seriesValues.live != null,
-    target: seriesValues.target != null,
-    own: seriesValues.own != null,
-    rival: seriesValues.rival != null,
-  };
-  const order: ProgressSeriesKey[] = ['live', 'target', 'own', 'rival'];
-  const effectiveActive = isAvailable[activeSeries]
-    ? activeSeries
-    : (order.find((key) => isAvailable[key]) ?? 'live');
-
-  const chartData = React.useMemo(
-    () =>
-      points.map((point) => ({
-        raceHour: point.raceHour,
-        live: point.liveLaps,
-        target: point.targetLaps,
-        own: point.ownHistoricalLaps,
-        rival: point.rivalHistoricalLaps,
-      })),
-    [points]
-  );
-
-  if (!points.length) {
-    return <p className="chart-note">Nog geen data voor deze grafiek.</p>;
-  }
-
-  const showTargetReference = effectiveActive !== 'target' && isAvailable.target;
-  const showLiveContext = effectiveActive === 'target' && isAvailable.live;
-
-  return (
-    <>
-      <div className="tactics-series-switch" role="group" aria-label="Lijn kiezen">
-        {PROGRESS_SERIES.map((series) => {
-          const value = seriesValues[series.key];
-          const isActive = effectiveActive === series.key;
-          return (
-            <button
-              key={series.key}
-              type="button"
-              data-active={isActive}
-              aria-pressed={isActive}
-              disabled={!isAvailable[series.key]}
-              onClick={() => setActiveSeries(series.key)}
-              title={isAvailable[series.key] ? undefined : 'Geen data beschikbaar'}
-            >
-              <span className="tactics-series-switch__label">
-                <i style={{ background: series.color }} aria-hidden="true" />
-                {seriesLabels[series.key]}
-              </span>
-              <span className="tactics-series-switch__value">
-                {value == null ? '–' : value.toLocaleString('nl-BE')}
-              </span>
-            </button>
-          );
-        })}
-      </div>
-      <div className="tactics-recharts-wrap">
-        <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={chartData} margin={{ top: 8, right: 12, bottom: 0, left: 0 }}>
-            <CartesianGrid stroke={workspaceChartPalette.grid} vertical={false} />
-            <XAxis
-              dataKey="raceHour"
-              type="number"
-              domain={[0, RACE_DURATION_HOURS]}
-              ticks={Array.from({ length: 13 }, (_, index) => index * 2)}
-              tickFormatter={(value: number) => `${value}u`}
-              tick={{ fill: workspaceChartPalette.muted, fontSize: 12 }}
-              tickLine={false}
-              axisLine={{ stroke: workspaceChartPalette.grid }}
-              tickMargin={8}
-            />
-            <YAxis
-              domain={[0, 'auto']}
-              allowDecimals={false}
-              width={56}
-              tick={{ fill: workspaceChartPalette.muted, fontSize: 12 }}
-              tickLine={false}
-              axisLine={false}
-              tickFormatter={(value: number) => `${Math.round(value)}`}
-            />
-            <RechartsTooltip
-              content={<ProgressTooltip />}
-              cursor={{ stroke: workspaceChartPalette.muted, strokeDasharray: '4 4' }}
-            />
-            {showTargetReference && (
-              <Line
-                dataKey="target"
-                name={seriesLabels.target}
-                stroke={PROGRESS_SERIES[1].color}
-                strokeWidth={2}
-                strokeDasharray="8 6"
-                strokeOpacity={0.6}
-                dot={false}
-                activeDot={{ r: 4 }}
-                connectNulls={false}
-                type="monotone"
-              />
-            )}
-            {showLiveContext && (
-              <Line
-                dataKey="live"
-                name={seriesLabels.live}
-                stroke={PROGRESS_SERIES[0].color}
-                strokeWidth={3}
-                dot={false}
-                activeDot={{ r: 4 }}
-                connectNulls={false}
-                type="monotone"
-              />
-            )}
-            {(['live', 'target', 'own', 'rival'] as const)
-              .filter((key) => key === effectiveActive)
-              .map((key) => {
-                const series = PROGRESS_SERIES.find((entry) => entry.key === key)!;
-                return (
-                  <Line
-                    key={key}
-                    dataKey={key}
-                    name={seriesLabels[key]}
-                    stroke={series.color}
-                    strokeWidth={3}
-                    strokeDasharray={series.dash}
-                    dot={false}
-                    activeDot={{ r: 5 }}
-                    connectNulls={false}
-                    type="monotone"
-                  />
-                );
-              })}
-          </LineChart>
-        </ResponsiveContainer>
-      </div>
-    </>
-  );
+  return <ChartCanvas canvasRef={canvasRef} />;
 }
 
 function HourlyPaceChart({
@@ -1176,6 +983,30 @@ function LapReviewTable({
       </table>
     </div>
   );
+}
+
+function lineDataset(
+  label: string,
+  points: RaceProgressPoint[],
+  valueKey: keyof Pick<RaceProgressPoint, 'liveLaps' | 'targetLaps' | 'ownHistoricalLaps' | 'rivalHistoricalLaps'>,
+  color: string,
+  borderWidth: number,
+  borderDash?: number[],
+  hiddenByDefault?: boolean
+) {
+  return {
+    label,
+    data: points.map((point) => ({ x: point.raceHour, y: point[valueKey] })),
+    borderColor: color,
+    backgroundColor: color,
+    borderWidth,
+    borderDash,
+    hidden: hiddenByDefault,
+    pointRadius: 0,
+    pointHoverRadius: 5,
+    tension: 0.18,
+    spanGaps: false,
+  };
 }
 
 function paceDataset(
