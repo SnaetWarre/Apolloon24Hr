@@ -10,6 +10,11 @@ try {
   const openSearch = page.getByRole('button', { name: 'Loper zoeken', exact: true });
   await openSearch.click();
   const searchDialog = page.getByRole('dialog', { name: 'Loper zoeken', exact: true });
+  const searchInput = searchDialog.getByRole('textbox', { name: 'Zoek op nummer, naam of label', exact: true });
+  assert.equal(await searchInput.evaluate((input) => input === document.activeElement), true);
+  await page.keyboard.type('113');
+  assert.equal(await searchInput.inputValue(), '113');
+  await searchInput.fill('');
   await searchDialog.locator('button').last().focus();
   await page.keyboard.press('Tab');
   await page.keyboard.press('Tab');
@@ -18,10 +23,14 @@ try {
   await page.keyboard.press('Escape');
   await searchDialog.waitFor({ state: 'detached' });
   assert.equal(await openSearch.evaluate((button) => button === document.activeElement), true);
-  console.log('PASS search dialog contains keyboard focus, Escape works on buttons, and opener regains focus');
+  console.log('PASS search dialog accepts typing immediately, contains keyboard focus, Escape works on buttons, and opener regains focus');
 
   const openNewRunner = page.getByRole('button', { name: 'Nieuwe loper', exact: true });
   await openNewRunner.click();
+  const runnerNumberInput = page.getByRole('textbox', { name: 'Lopersnummer', exact: true });
+  assert.equal(await runnerNumberInput.evaluate((input) => input === document.activeElement), true);
+  await page.keyboard.type('501');
+  assert.equal(await runnerNumberInput.inputValue(), '501');
   const nameInput = page.getByRole('textbox', { name: 'Naam', exact: true });
   await nameInput.fill('Unsaved draft');
   page.once('dialog', (dialog) => dialog.dismiss());
@@ -30,7 +39,7 @@ try {
   page.once('dialog', (dialog) => dialog.accept());
   await page.getByRole('button', { name: 'Annuleer', exact: true }).click();
   assert.equal(await openNewRunner.evaluate((button) => button === document.activeElement), true);
-  console.log('PASS new-runner draft requires explicit discard and focus returns to opener');
+  console.log('PASS new-runner dialog accepts a runner number immediately, protects drafts, and returns focus to its opener');
 
   await openSearch.click();
   await searchDialog.getByRole('button', { name: 'Profiel', exact: true }).first().click();
