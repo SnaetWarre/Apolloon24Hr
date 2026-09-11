@@ -31,7 +31,7 @@ test('Electron can advertise a different public port without opening its window 
   );
 });
 
-test('desktop release packaging covers every supported platform and verifies N-API prebuilds', () => {
+test('desktop release packaging covers every supported platform and rebuilds native modules', () => {
   const packageJson = JSON.parse(fs.readFileSync(path.resolve('package.json'), 'utf8')) as {
     scripts: Record<string, string>;
     build: Record<string, unknown>;
@@ -39,7 +39,7 @@ test('desktop release packaging covers every supported platform and verifies N-A
     allowScripts: Record<string, boolean>;
   };
   const packageLock = JSON.parse(fs.readFileSync(path.resolve('package-lock.json'), 'utf8')) as {
-    packages: Record<string, unknown>;
+    packages: Record<string, { version?: string; hasInstallScript?: boolean }>;
   };
   const buildScript = fs.readFileSync(path.resolve('scripts/electron-build.mjs'), 'utf8');
   const cleanServerBuildScript = fs.readFileSync(
@@ -47,20 +47,24 @@ test('desktop release packaging covers every supported platform and verifies N-A
     'utf8'
   );
 
-  assert.match(packageJson.scripts['electron:build:win'], /--win/);
-  assert.match(packageJson.scripts['electron:build:linux'], /--linux/);
-  assert.match(packageJson.scripts['electron:build:mac'], /--mac/);
+  assert.match(packageJson.scripts['electron:build:win'], /electron-build\.mjs --win/);
+  assert.match(packageJson.scripts['electron:build:linux'], /electron-build\.mjs --linux/);
+  assert.match(packageJson.scripts['electron:build:mac'], /electron-build\.mjs --mac/);
   assert.ok(packageJson.build.win);
   assert.ok(packageJson.build.linux);
   assert.ok(packageJson.build.mac);
-  assert.equal(packageJson.dependencies['better-sqlite3'], '^13.0.3');
-  assert.equal(packageJson.allowScripts['better-sqlite3@13.0.3'], false);
-  assert.equal(packageLock.packages['node_modules/prebuild-install'], undefined);
-  assert.match(buildScript, /--config\.npmRebuild=false/);
-  assert.match(buildScript, /napi_register_module_v1/);
-  assert.match(buildScript, /better-sqlite3[\s\S]*prebuilds/);
-  assert.doesNotMatch(buildScript, /--build-from-source/);
-  assert.match(buildScript, /builderArgs\.push\('--publish', 'never'\)/);
+  assert.equal(packageJson.build.npmRebuild, true);
+  assert.equal(packageJson.dependencies['better-sqlite3'], '^12.11.1');
+  assert.equal(packageJson.allowScripts['better-sqlite3@12.11.1'], true);
+  assert.equal(packageLock.packages['node_modules/better-sqlite3'].version, '12.11.1');
+  assert.equal(packageLock.packages['node_modules/better-sqlite3'].hasInstallScript, true);
+  assert.ok(packageLock.packages['node_modules/prebuild-install']);
+  assert.match(buildScript, /electron-builder[\s\S]*out[\s\S]*cli[\s\S]*cli\.js/);
+  assert.match(buildScript, /node_register_module_v/);
+  assert.match(buildScript, /restoreNodeBinding/);
+  assert.match(buildScript, /snapshotPackagedSqliteBindings/);
+  assert.match(buildScript, /\.forge-meta/);
+  assert.doesNotMatch(buildScript, /electronRebuildCli|--build-from-source|npmRebuild=false/);
   assert.match(packageJson.scripts['server:build'], /clean-server-build\.mjs/);
   assert.match(cleanServerBuildScript, /compiledServerDirectory/);
   assert.match(cleanServerBuildScript, /fs\.promises\.rm/);
