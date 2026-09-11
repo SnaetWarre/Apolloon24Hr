@@ -1,4 +1,5 @@
 import React from 'react';
+import { useNavigate } from '@tanstack/react-router';
 import { useAppData, useRaceHistory } from '../app/index';
 import { isFastestLapForRecordMode, publicRecordModeTitle } from '../lib/analysis';
 import { formatClockTimeMs, formatDurationMs } from '../lib/time';
@@ -339,9 +340,18 @@ function formatDisplayClockTime(finishedAt: number) {
 }
 
 function DisplayBrand({ tone }: { tone: 'light' | 'dark' }) {
+  const navigate = useNavigate();
   return (
     <div className={`display-brand display-brand--${tone}`}>
-      <img src="/brand/apolloon-logo.png" alt="Apolloon" width={560} height={169} fetchPriority="high" />
+      <button
+        type="button"
+        className="display-brand__home"
+        onClick={() => void navigate({ to: '/' })}
+        aria-label="Terug naar start"
+        title="Terug naar start"
+      >
+        <img src="/brand/apolloon-logo.png" alt="Apolloon" width={560} height={169} fetchPriority="high" />
+      </button>
       <span>you&apos;ll never walk alone</span>
     </div>
   );
