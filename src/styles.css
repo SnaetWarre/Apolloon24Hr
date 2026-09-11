@@ -3083,6 +3083,29 @@ tbody tr:hover {
   object-fit: contain;
 }
 
+/* Invisible home button around the display logo: identical layout, no chrome. */
+.display-brand__home {
+  appearance: none;
+  background: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  line-height: 0;
+}
+
+.display-brand__home:focus {
+  outline: none;
+}
+
+.display-brand__home:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 4px;
+  border-radius: 4px;
+}
+
 .display-brand--light img {
   filter: brightness(0) invert(1);
 }
