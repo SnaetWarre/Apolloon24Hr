@@ -1,16 +1,10 @@
 #!/usr/bin/env node
-import { spawn } from 'child_process';
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import { spawn } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const __filename = fileURLToPath(import.meta.url);
-const repoRoot = path.resolve(path.dirname(__filename), '..');
-const args = process.argv.slice(2);
-const packageJson = JSON.parse(
-  fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8')
-);
-
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const builderCli = path.join(
   repoRoot,
   'node_modules',
@@ -19,105 +13,121 @@ const builderCli = path.join(
   'cli',
   'cli.js'
 );
-const targetPlatform = resolveTargetPlatform();
-const targetArch = resolveTargetArch();
-const prebuildName = `${targetPlatform}-${targetArch}.node`;
-const sourceBinding = path.join(
+const sqliteBindingPath = path.join(
   repoRoot,
   'node_modules',
   'better-sqlite3',
-  'prebuilds',
-  prebuildName
+  'build',
+  'Release',
+  'better_sqlite3.node'
 );
-const nativeBindingParts = [
-  'app.asar.unpacked',
-  'node_modules',
-  'better-sqlite3',
-  'prebuilds',
-  prebuildName,
-];
-const packagedBinding = resolvePackagedBinding();
+const nodeBinding = readNativeBinding(sqliteBindingPath, process.versions.modules);
+const electronRebuildMarker = path.join(path.dirname(sqliteBindingPath), '.forge-meta');
+const builderArgs = process.argv.slice(2);
 
-let exitCode = 0;
+if (!builderArgs.some((arg) => arg === '--publish' || arg.startsWith('--publish='))) {
+  builderArgs.push('--publish', 'never');
+}
+
+let exitCode = 1;
 
 try {
-  assertNapiBinding(sourceBinding, 'Electron build input');
-
-  // better-sqlite3 v13 ships N-API prebuilds for every supported desktop target.
-  // Keep electron-builder from replacing the selected prebuild with an ABI-specific build.
-  const builderArgs = [...args, '--config.npmRebuild=false'];
-  if (!args.some((arg) => arg === '--publish' || arg.startsWith('--publish='))) {
-    builderArgs.push('--publish', 'never');
-  }
+  // electron-builder performs its standard native dependency rebuild for Electron.
+  // The marker belongs to the Electron ABI that the previous build replaced locally.
+  fs.rmSync(electronRebuildMarker, { force: true });
   exitCode = await run(process.execPath, [builderCli, ...builderArgs]);
-  if (exitCode !== 0) {
-    throw new Error(`electron-builder exited with code ${exitCode}.`);
+} catch (error) {
+  console.error(error instanceof Error ? error.message : error);
+} finally {
+  const packagedBindings = snapshotPackagedSqliteBindings();
+  // Apolloon also runs its backend directly with Node.js. Restore the original
+  // binding without changing a hard-linked binary in the packaged application.
+  try {
+    restoreNodeBinding(nodeBinding);
+    fs.rmSync(electronRebuildMarker, { force: true });
+  } catch (error) {
+    console.error('Failed to restore better-sqlite3 for the local Node.js runtime.');
+    console.error(error instanceof Error ? error.message : error);
+    exitCode = 1;
   }
-
-  if (packagedBinding) {
-    assertNapiBinding(packagedBinding, 'Packaged application');
+  try {
+    for (const binding of packagedBindings) restoreBinding(binding, 'electron');
+  } catch (error) {
+    console.error('Failed to preserve better-sqlite3 in the packaged application.');
+    console.error(error instanceof Error ? error.message : error);
+    exitCode = 1;
   }
-} catch (err) {
-  console.error(err instanceof Error ? err.message : err);
-  exitCode = exitCode || 1;
 }
 
 process.exit(exitCode);
 
-function assertNapiBinding(bindingPath, label) {
+function readNativeBinding(bindingPath, expectedAbi) {
   if (!fs.existsSync(bindingPath)) {
-    throw new Error(`${label}: native binding is missing at ${bindingPath}`);
+    throw new Error(`better-sqlite3 is not installed at ${bindingPath}`);
   }
 
-  const marker = Buffer.from('napi_register_module_v1');
-  if (!fs.readFileSync(bindingPath).includes(marker)) {
-    throw new Error(`${label}: better-sqlite3 is not an N-API binding.`);
+  const contents = fs.readFileSync(bindingPath);
+  const abiMarker = Buffer.from(`node_register_module_v${expectedAbi}`);
+  if (!contents.includes(abiMarker)) {
+    throw new Error(`better-sqlite3 does not match the local Node.js ABI ${expectedAbi}.`);
   }
-  console.log(`${label}: verified better-sqlite3 N-API binding ${prebuildName}.`);
+
+  return {
+    path: bindingPath,
+    contents,
+    mode: fs.statSync(bindingPath).mode,
+  };
 }
 
-function resolvePackagedBinding() {
-  if (targetPlatform === 'win32') {
-    return path.join(repoRoot, 'release', 'win-unpacked', 'resources', ...nativeBindingParts);
-  }
-  if (targetPlatform === 'linux') {
-    return path.join(repoRoot, 'release', 'linux-unpacked', 'resources', ...nativeBindingParts);
-  }
-  if (targetPlatform === 'darwin') {
-    const outputDirectory = targetArch === 'arm64' ? 'mac-arm64' : 'mac';
-    return path.join(
-      repoRoot,
-      'release',
-      outputDirectory,
-      `${packageJson.build.productName}.app`,
-      'Contents',
-      'Resources',
-      ...nativeBindingParts
-    );
-  }
-  return null;
+function restoreNodeBinding(binding) {
+  restoreBinding(binding, 'node');
 }
 
-function resolveTargetPlatform() {
-  if (args.includes('--win')) return 'win32';
-  if (args.includes('--linux')) return 'linux';
-  if (args.includes('--mac')) return 'darwin';
-  return process.platform;
+function snapshotPackagedSqliteBindings() {
+  const releaseDirectory = path.join(repoRoot, 'release');
+  if (!fs.existsSync(releaseDirectory)) return [];
+
+  const bindings = [];
+  const directories = [releaseDirectory];
+  while (directories.length > 0) {
+    const directory = directories.pop();
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const entryPath = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        directories.push(entryPath);
+      } else if (
+        entry.isFile() &&
+        entry.name === 'better_sqlite3.node' &&
+        entryPath.includes(`${path.sep}better-sqlite3${path.sep}`)
+      ) {
+        bindings.push({
+          path: entryPath,
+          contents: fs.readFileSync(entryPath),
+          mode: fs.statSync(entryPath).mode,
+        });
+      }
+    }
+  }
+  return bindings;
 }
 
-function resolveTargetArch() {
-  if (args.includes('--arm64')) return 'arm64';
-  if (args.includes('--x64')) return 'x64';
-  if (process.arch === 'arm64' || process.arch === 'x64') return process.arch;
-  throw new Error(`Unsupported desktop architecture: ${process.arch}`);
+function restoreBinding(binding, runtime) {
+  const temporaryPath = `${binding.path}.${runtime}-${process.pid}`;
+  try {
+    fs.writeFileSync(temporaryPath, binding.contents, { mode: binding.mode });
+    fs.rmSync(binding.path, { force: true });
+    fs.renameSync(temporaryPath, binding.path);
+  } finally {
+    fs.rmSync(temporaryPath, { force: true });
+  }
 }
 
-function run(command, commandArgs, options = {}) {
+function run(command, args) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, commandArgs, {
+    const child = spawn(command, args, {
       cwd: repoRoot,
       stdio: 'inherit',
-      shell: options.shell ?? false,
+      shell: false,
     });
     child.on('error', reject);
     child.on('exit', (code, signal) => {
@@ -125,7 +135,7 @@ function run(command, commandArgs, options = {}) {
         reject(new Error(`${command} exited with signal ${signal}`));
         return;
       }
-      resolve(code ?? 0);
+      resolve(code ?? 1);
     });
   });
 }
