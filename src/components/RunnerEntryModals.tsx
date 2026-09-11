@@ -92,11 +92,14 @@ export function RunnerActivationModal({
   }
 
   return (
-    <ModalDialog label="Loper zoeken" onRequestClose={() => { if (!activationBusyRef.current) onClose(); }}>
+    <ModalDialog
+      label="Loper zoeken"
+      onRequestClose={() => { if (!activationBusyRef.current) onClose(); }}
+      initialFocusRef={searchInputRef}
+    >
       <div className="modal">
         <ModalHeader title="Loper zoeken" onClose={() => { if (!activationBusyRef.current) onClose(); }} />
         <input
-          autoFocus
           ref={searchInputRef}
           aria-label="Zoek op nummer, naam of label"
           className="input"
@@ -202,6 +205,7 @@ export function RunnerAddModal({ onClose, onAdded }: { onClose: () => void; onAd
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const saveBusyRef = React.useRef(false);
+  const runnerNumberInputRef = React.useRef<HTMLInputElement>(null);
 
   function requestClose() {
     if (saveBusyRef.current) return;
@@ -269,7 +273,11 @@ export function RunnerAddModal({ onClose, onAdded }: { onClose: () => void; onAd
   }
 
   return (
-    <ModalDialog label="Nieuwe loper" onRequestClose={requestClose}>
+    <ModalDialog
+      label="Nieuwe loper"
+      onRequestClose={requestClose}
+      initialFocusRef={runnerNumberInputRef}
+    >
       <div className="modal" onKeyDown={handleKeyDown}>
         <ModalHeader title="Nieuwe loper" onClose={requestClose} />
 
@@ -277,7 +285,7 @@ export function RunnerAddModal({ onClose, onAdded }: { onClose: () => void; onAd
           <label>
             Lopersnummer
             <input
-              autoFocus
+              ref={runnerNumberInputRef}
               className="input"
               value={runnerNumber}
               onChange={(event) => setRunnerNumber(event.target.value)}

@@ -4,10 +4,12 @@ import React from 'react';
 export function ModalDialog({
   label,
   onRequestClose,
+  initialFocusRef,
   children,
 }: {
   label: string;
   onRequestClose: () => void;
+  initialFocusRef?: React.RefObject<HTMLElement | null>;
   children: React.ReactNode;
 }) {
   const [opener] = React.useState(() =>
@@ -19,11 +21,12 @@ export function ModalDialog({
     const dialog = dialogRef.current;
     if (!dialog) return;
     dialog.showModal();
+    initialFocusRef?.current?.focus({ preventScroll: true });
     return () => {
       dialog.close();
       if (opener?.isConnected) opener.focus({ preventScroll: true });
     };
-  }, [opener]);
+  }, [initialFocusRef, opener]);
 
   return (
     <dialog
