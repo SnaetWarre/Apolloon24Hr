@@ -36,6 +36,8 @@ test('desktop release packaging covers every supported platform and rebuilds nat
     scripts: Record<string, string>;
     build: Record<string, unknown>;
     dependencies: Record<string, string>;
+    devDependencies: Record<string, string>;
+    engines: Record<string, string>;
     allowScripts: Record<string, boolean>;
   };
   const packageLock = JSON.parse(fs.readFileSync(path.resolve('package-lock.json'), 'utf8')) as {
@@ -56,6 +58,10 @@ test('desktop release packaging covers every supported platform and rebuilds nat
   assert.equal(packageJson.build.npmRebuild, true);
   assert.equal(packageJson.dependencies['better-sqlite3'], '^12.11.1');
   assert.equal(packageJson.allowScripts['better-sqlite3@12.11.1'], true);
+  assert.match(packageJson.devDependencies['electron'], /^\^44\./);
+  assert.match(packageJson.devDependencies['@types/node'], /^\^22\./);
+  assert.match(packageJson.engines['node'], /22\.12/);
+  assert.equal(packageJson.allowScripts['electron@44.3.0'], true);
   assert.equal(packageLock.packages['node_modules/better-sqlite3'].version, '12.11.1');
   assert.equal(packageLock.packages['node_modules/better-sqlite3'].hasInstallScript, true);
   assert.ok(packageLock.packages['node_modules/prebuild-install']);

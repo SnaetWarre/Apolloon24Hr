@@ -44,7 +44,7 @@ server/index.ts
 ### `server/index.ts`
 
 - Owns the Express and HTTP server.
-- Mounts tRPC at `/trpc`.
+- Mounts tRPC at `/trpc` (validated commands, see `docs/api-contracts.md`).
 - Exposes state, clock, host information, and export endpoints under `/api`.
 - Exposes `/api/health` with database readiness, release identity, uptime, and
   backup warnings; deployments verify the exact new release through this route.
@@ -63,8 +63,12 @@ server/index.ts
 - Enforces queue and timing preconditions before committing.
 - Emits small realtime deltas after successful local writes.
 
-### `server/db.ts`
+### `server/db.ts` (facade over `server/db/`)
 
+- `server/db.ts` is a thin facade that re-exports the split modules in
+- `server/db/`: `connection`, `schema`, `settings`, `labels`, `teams`,
+- `runner-queries`, `runners`, `queue`, `history`, `timing`, `snapshot`,
+- `replication`, `replication-state`, `checkpoint`, `storage`, `values`, `types`.
 - Owns the single `better-sqlite3` connection and prepared statement cache.
 - Creates and migrates the relational application schema.
 - Runs local writes and their replication operation in one SQLite transaction.
