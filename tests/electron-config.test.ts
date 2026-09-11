@@ -31,10 +31,15 @@ test('Electron can advertise a different public port without opening its window 
   );
 });
 
-test('desktop release packaging covers every supported platform and verifies native ABI', () => {
+test('desktop release packaging covers every supported platform and verifies N-API prebuilds', () => {
   const packageJson = JSON.parse(fs.readFileSync(path.resolve('package.json'), 'utf8')) as {
     scripts: Record<string, string>;
     build: Record<string, unknown>;
+    dependencies: Record<string, string>;
+    allowScripts: Record<string, boolean>;
+  };
+  const packageLock = JSON.parse(fs.readFileSync(path.resolve('package-lock.json'), 'utf8')) as {
+    packages: Record<string, unknown>;
   };
   const buildScript = fs.readFileSync(path.resolve('scripts/electron-build.mjs'), 'utf8');
   const cleanServerBuildScript = fs.readFileSync(
@@ -48,9 +53,13 @@ test('desktop release packaging covers every supported platform and verifies nat
   assert.ok(packageJson.build.win);
   assert.ok(packageJson.build.linux);
   assert.ok(packageJson.build.mac);
-  assert.match(buildScript, /--build-from-source/);
+  assert.equal(packageJson.dependencies['better-sqlite3'], '^13.0.3');
+  assert.equal(packageJson.allowScripts['better-sqlite3@13.0.3'], false);
+  assert.equal(packageLock.packages['node_modules/prebuild-install'], undefined);
   assert.match(buildScript, /--config\.npmRebuild=false/);
-  assert.match(buildScript, /node_register_module_v/);
+  assert.match(buildScript, /napi_register_module_v1/);
+  assert.match(buildScript, /better-sqlite3[\s\S]*prebuilds/);
+  assert.doesNotMatch(buildScript, /--build-from-source/);
   assert.match(buildScript, /builderArgs\.push\('--publish', 'never'\)/);
   assert.match(packageJson.scripts['server:build'], /clean-server-build\.mjs/);
   assert.match(cleanServerBuildScript, /compiledServerDirectory/);

@@ -197,21 +197,31 @@ SERVICE
 "${sudo_cmd[@]}" systemctl restart "${service_name}.service"
 
 ready=0
-for _ in 1 2 3 4 5 6 7 8 9 10; do
-  if curl -fsS "http://127.0.0.1:${app_port}/api/health" >/dev/null; then
+health_url="http://127.0.0.1:${app_port}/api/health"
+health_json=""
+last_health_error=""
+for attempt in 1 2 3 4 5 6 7 8 9 10; do
+  if health_json="$(curl -fsS "${health_url}" 2>&1)"; then
     ready=1
     break
   fi
-  sleep 1
+
+  last_health_error="${health_json}"
+  health_json=""
+  if [[ "${attempt}" -lt 10 ]]; then
+    sleep 1
+  fi
 done
 
 if [[ "${ready}" != "1" ]]; then
   echo "Apolloon readiness check failed." >&2
+  if [[ -n "${last_health_error}" ]]; then
+    echo "Last health probe error: ${last_health_error}" >&2
+  fi
   "${sudo_cmd[@]}" journalctl -u "${service_name}.service" --no-pager -n 50 >&2
   exit 1
 fi
 
-health_json="$(curl -fsS "http://127.0.0.1:${app_port}/api/health")"
 actual_release="$(printf '%s' "${health_json}" | "${node_bin}" -e '
 let input = "";
 process.stdin.on("data", (chunk) => { input += chunk; });
