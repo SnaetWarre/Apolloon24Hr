@@ -113,7 +113,7 @@ body:has(.app-root) {
 .role-card__title { font-weight: 600; }
 .role-section--operations { grid-column: 1 / -1; }
 .role-section--operations .role-grid { gap: 20px; }
-.role-section--operations .role-card { min-height: 128px; border-left: 3px solid var(--apolloon-blue); }
+.role-section--operations .role-card { min-height: 128px; border: 1px solid var(--apolloon-blue); }
 .role-section--operations .role-card__title { font-size: 23px; }
 .role-section:not(.role-section--operations) .role-grid { grid-template-columns: minmax(0, 1fr); gap: 0; }
 .role-section:not(.role-section--operations) .role-card { min-height: 80px; padding: 16px 0; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: transparent; }
