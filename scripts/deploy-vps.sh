@@ -14,7 +14,7 @@ DEPLOY_SKIP_BUILD="${DEPLOY_SKIP_BUILD:-0}"
 DEPLOY_ARTIFACT="${DEPLOY_ARTIFACT:-}"
 
 target="${VPS_USER}@${VPS_HOST}"
-release_id="$(date -u +%Y%m%d%H%M%S)-$(git rev-parse --short HEAD 2>/dev/null || echo manual)"
+release_id="$(date -u +%Y%m%d%H%M%S)-$(git rev-parse --short HEAD 2>/dev/null || echo manual)-${RANDOM}${RANDOM}"
 tmp_dir="$(mktemp -d)"
 
 cleanup() {
@@ -46,10 +46,15 @@ fi
 remote_artifact="/tmp/apolloon-${release_id}.tar.gz"
 
 echo "Uploading ${DEPLOY_ARTIFACT} to ${target}:${remote_artifact}"
-scp "${DEPLOY_ARTIFACT}" "${target}:${remote_artifact}"
+scp -o StrictHostKeyChecking=yes -o BatchMode=yes "${DEPLOY_ARTIFACT}" "${target}:${remote_artifact}"
 
 echo "Installing release ${release_id} on ${target}"
-ssh "${target}" "bash -s" -- \
+# Hold the server-side lock for the entire install, including manual deploys.
+remote_shell='flock -w 600 /run/lock/apolloon-deploy.lock bash -s'
+if [[ "${VPS_USER}" != root ]]; then
+  remote_shell="sudo -n ${remote_shell}"
+fi
+ssh -o StrictHostKeyChecking=yes -o BatchMode=yes "${target}" "${remote_shell}" -- \
   "${remote_artifact}" \
   "${VPS_APP_DIR}" \
   "${VPS_DATA_DIR}" \
@@ -165,6 +170,21 @@ current_dir="${app_dir}/current"
 cd "${release_dir}"
 "${npm_bin}" ci --omit=dev --include=optional
 
+if ! id apolloon >/dev/null 2>&1; then
+  "${sudo_cmd[@]}" useradd --system --user-group --home-dir "${data_dir}" --no-create-home --shell /usr/sbin/nologin apolloon
+fi
+if [[ "$(id -u apolloon)" -eq 0 ]]; then
+  echo 'The apolloon service account must not be root.' >&2
+  exit 1
+fi
+# Quiesce SQLite before migrating ownership, including WAL and backup files.
+if "${sudo_cmd[@]}" systemctl cat "${service_name}.service" >/dev/null 2>&1; then
+  "${sudo_cmd[@]}" systemctl stop "${service_name}.service"
+fi
+"${sudo_cmd[@]}" chown -R apolloon:apolloon "${data_dir}"
+"${sudo_cmd[@]}" chmod 750 "${data_dir}"
+"${sudo_cmd[@]}" chmod -R a+rX "${release_dir}"
+
 "${sudo_cmd[@]}" ln -sfn "${release_dir}" "${current_dir}"
 
 service_file="/etc/systemd/system/${service_name}.service"
@@ -176,6 +196,21 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+User=apolloon
+Group=apolloon
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+ReadWritePaths=${data_dir}
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 WorkingDirectory=${current_dir}
 Environment=NODE_ENV=production
 Environment=CLUSTER_ENABLED=false

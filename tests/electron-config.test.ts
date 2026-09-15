@@ -107,7 +107,7 @@ test('packaged Electron startup clears poisoned assets and never exposes a blank
   assert.match(mainSource, /desktopVersion/);
   assert.match(mainSource, /rendererHasContent/);
   assert.match(mainSource, /await createWindow\(\)/);
-  assert.match(mainSource, /if \(!window\.isDestroyed\(\)\) window\.show\(\)/);
+  assert.match(mainSource, /if \(!smokeTest && !window\.isDestroyed\(\)\) window\.show\(\)/);
 });
 
 test('the packaged backend exits when its Electron parent disappears', () => {

@@ -1,5 +1,12 @@
 name: Deploy VPS
 
+concurrency:
+  group: apolloon-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
 on:
   workflow_dispatch:
   push:
@@ -21,6 +28,7 @@ jobs:
   deploy:
     if: github.event_name == 'workflow_dispatch' || vars.VPS_AUTO_DEPLOY == 'true'
     runs-on: ubuntu-latest
+    environment: production
     steps:
       - uses: actions/checkout@v6
 
@@ -39,16 +47,23 @@ jobs:
       - name: Configure SSH
         env:
           VPS_SSH_PRIVATE_KEY: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
         run: |
           if [ -z "${VPS_SSH_PRIVATE_KEY}" ]; then
             echo "Missing secret VPS_SSH_PRIVATE_KEY" >&2
+            exit 1
+          fi
+          if [ -z "${VPS_KNOWN_HOSTS}" ]; then
+            echo "Missing production secret VPS_KNOWN_HOSTS" >&2
             exit 1
           fi
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
           printf '%s\n' "${VPS_SSH_PRIVATE_KEY}" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
-          ssh-keyscan -H "${VPS_HOST:-185.102.172.74}" >> ~/.ssh/known_hosts
+          printf '%s\n' "${VPS_KNOWN_HOSTS}" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+          printf 'Host *\n  StrictHostKeyChecking yes\n  BatchMode yes\n' > ~/.ssh/config
 
       - name: Deploy to VPS
         env:

@@ -11,6 +11,11 @@ const __dirname = path.dirname(__filename);
 let mainWindow;
 let serverProcess;
 let appUrl = 'http://127.0.0.1:5173';
+const smokeTest = process.env.APOLLOON_PACKAGE_SMOKE === '1';
+if (smokeTest) {
+  if (!process.env.APOLLOON_SMOKE_DATA) throw new Error('Missing smoke test data directory');
+  app.setPath('userData', process.env.APOLLOON_SMOKE_DATA);
+}
 
 async function createWindow() {
   if (mainWindow) return; // Prevent multiple windows
@@ -34,7 +39,7 @@ async function createWindow() {
   } else {
     await loadPackagedRenderer(window);
   }
-  if (!window.isDestroyed()) window.show();
+  if (!smokeTest && !window.isDestroyed()) window.show();
 
   window.on('closed', () => {
     if (mainWindow === window) mainWindow = null;
@@ -171,11 +176,22 @@ if (!gotTheLock) {
     try {
       await startServer();
       await createWindow();
+      if (smokeTest) {
+        const response = await fetch(`${appUrl}/api/health`);
+        const health = await response.json();
+        if (!response.ok || !health.database?.ready) throw new Error('SQLite is not ready');
+        fs.writeFileSync(path.join(app.getPath('userData'), 'smoke-result.json'),
+          JSON.stringify({ version: app.getVersion(), renderer: true, database: true }));
+        app.quit();
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error('Failed to initialize Apolloon:', error);
-      dialog.showErrorBox('Apolloon kon niet starten', message);
-      app.quit();
+      if (smokeTest) app.exit(1);
+      else {
+        dialog.showErrorBox('Apolloon kon niet starten', message);
+        app.quit();
+      }
     }
   });
 }
