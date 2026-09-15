@@ -41,6 +41,8 @@ scp
 tar
 curl
 systemd
+flock
+useradd
 ```
 
 If you deploy as a non-root user, that user needs passwordless `sudo` for installing Node prerequisites, creating `/opt/apolloon`, creating `/var/lib/apolloon`, and managing the systemd service.
@@ -75,17 +77,24 @@ The deploy script waits for `/api/health` and verifies that its `releaseId`
 matches the versioned release directory before declaring success. This catches
 a process that is reachable but still running the previous build.
 
-If you want plain port 80 and nothing else is using it on the VPS:
+The service runs as the dedicated `apolloon` system account. Releases remain
+owned by the deployment account; only the data directory is writable by the
+service. The first deployment stops the service before migrating data ownership.
+systemd limits filesystem writes to that directory and private temporary files,
+removes capabilities, and prevents privilege escalation. Use a reverse proxy for
+ports 80/443; the unprivileged application should use port 3000.
 
-```bash
-VPS_APP_PORT=80 VPS_PUBLIC_APP_PORT=80 npm run deploy:vps
-```
+Manual and CI deployments share a server-side `flock`, held through readiness
+verification and release cleanup. Concurrent deploys wait up to ten minutes.
 
 ## GitHub Actions Deploy
 
 The workflow is `.github/workflows/deploy-vps.yml`.
 
-It can be run manually from GitHub Actions with `workflow_dispatch`.
+It can be run manually from GitHub Actions with `workflow_dispatch` on `main`.
+Configure a `production` environment restricted to the `main` branch. The workflow
+uses that environment and the `apolloon-production` concurrency group without
+cancelling a running deployment.
 
 To auto-deploy every push to `main`, set repository variable:
 
@@ -93,12 +102,19 @@ To auto-deploy every push to `main`, set repository variable:
 VPS_AUTO_DEPLOY=true
 ```
 
-Required repository secrets:
+Required production environment secrets:
 
 ```text
 VPS_SSH_PRIVATE_KEY
 VPS_HOST
+VPS_KNOWN_HOSTS
 ```
+
+`VPS_KNOWN_HOSTS` contains the expected OpenSSH known_hosts entry, including the
+hostname/IP used by `VPS_HOST`. Obtain it through an already trusted SSH connection
+or the provider console and verify its fingerprint. Never establish trust using
+an unauthenticated live `ssh-keyscan`. Both CI and manual deployment require a
+matching saved host key; key rotation requires deliberately replacing that entry.
 
 Optional repository secrets:
 

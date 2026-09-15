@@ -10,8 +10,23 @@ env:
   ELECTRON_BUILDER_CACHE: ${{ github.workspace }}/.cache/electron-builder
 
 jobs:
+  tests:
+    name: Typecheck, unit and integration tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --include=optional
+      - run: npm run typecheck
+      - run: npm test
+      - run: node --test tests/release-tag.test.mjs
+      - run: npm run test:e2e
+
   build-windows:
-    runs-on: windows-latest
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v6
       
@@ -39,6 +54,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         
+      - name: Smoke test Windows package
+        run: node scripts/package-smoke.mjs
+
       - name: Upload Windows installer
         uses: actions/upload-artifact@v7
         with:
@@ -75,9 +93,23 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         
+      - name: Smoke test Linux AppImage
+        run: xvfb-run -a node scripts/package-smoke.mjs
+
       - name: Upload Linux AppImage
         uses: actions/upload-artifact@v7
         with:
           name: linux-appimage
           path: release/*.AppImage
           retention-days: 1
+
+  required-ci:
+    name: Required CI
+    if: always()
+    needs: [tests, build-windows, build-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require all checks to pass
+        env:
+          RESULTS: ${{ join(needs.*.result, ',') }}
+        run: test "$RESULTS" = 'success,success,success'

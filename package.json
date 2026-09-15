@@ -4,7 +4,7 @@
   "version": "2.0.0",
   "description": "24h runner tracker for Leuven event",
   "author": "Apolloon",
-  "homepage": "https://github.com/apolloon/leuven-tracker",
+  "homepage": "https://github.com/SnaetWarre/Apolloon24Hr",
   "desktopName": "Leuven 24h Tracker",
   "type": "module",
   "packageManager": "npm@11.16.0",
