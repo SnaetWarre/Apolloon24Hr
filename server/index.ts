@@ -35,6 +35,12 @@ import {
   initDb,
 } from './db.js';
 import { hostInfo, SERVER_PORT } from './host.js';
+import {
+  getNetProfile,
+  isLoopbackAddress,
+  requestMakeStatic,
+  requestRevertDhcp,
+} from './net-setup.js';
 import { sendJson } from './http-json.js';
 import { setRealtimeEmitter } from './realtime.js';
 import { appRouter } from './router.js';
@@ -177,6 +183,61 @@ app.get('/api/time', (_req, res) => {
 
 app.get('/api/host-info', (_req, res) => {
   res.json(hostInfo());
+});
+
+// Event-netwerk: alleen uitlezen mag vanaf het LAN, vastzetten/terugzetten
+// mag uitsluitend vanaf de laptop zelf (127.0.0.1). Zo kan een browser op een
+// andere laptop nooit het netwerk van deze host omgooien; de Windows-UAC
+// melding verschijnt bovendien alleen op het scherm van de host zelf.
+app.get('/api/net/profile', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  try {
+    res.json({ ok: true, profile: getNetProfile() });
+  } catch (error) {
+    res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'netwerkprofiel mislukt',
+    });
+  }
+});
+
+app.post('/api/net/make-static', (req, res) => {
+  if (!isLoopbackAddress(req.socket.remoteAddress)) {
+    res.status(403).json({
+      ok: false,
+      error: 'Dit kan alleen op de laptop zelf (open Admin op die laptop, niet via het netwerk).',
+    });
+    return;
+  }
+  const result = requestMakeStatic({
+    ip: req.body?.ip,
+    prefixLength: req.body?.prefixLength,
+    gateway: req.body?.gateway,
+  });
+  if (!result.ok) {
+    res.status(400).json(result);
+    return;
+  }
+  res.json(result);
+});
+
+app.post('/api/net/revert-dhcp', (req, res) => {
+  if (!isLoopbackAddress(req.socket.remoteAddress)) {
+    res.status(403).json({
+      ok: false,
+      error: 'Dit kan alleen op de laptop zelf (open Admin op die laptop, niet via het netwerk).',
+    });
+    return;
+  }
+  const result = requestRevertDhcp({
+    eventOver: req.body?.eventOver,
+    confirmText: req.body?.confirmText,
+  });
+  if (!result.ok) {
+    res.status(400).json(result);
+    return;
+  }
+  res.json(result);
 });
 
 app.get('/api/health', (_req, res) => {

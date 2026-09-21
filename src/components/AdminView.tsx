@@ -8,6 +8,7 @@ import { buildEventReadiness, readinessSummary } from '../lib/readiness';
 import { AdminRunnerTable } from './admin/AdminRunnerTable';
 import { LabelAdminRow } from './admin/LabelAdminRow';
 import { TemporaryTeamAdminCard } from './admin/TemporaryTeamAdminCard';
+import { NetworkSetupPanel } from './NetworkSetupPanel';
 import {
   formatConflictTime,
   formatFileSize,
@@ -547,6 +548,10 @@ export function AdminView() {
                 {clusterMessage && <div className="host-hint">{clusterMessage}</div>}
               </section>
             )}
+
+            <section hidden={activeSection !== 'system'} className="panel">
+              <NetworkSetupPanel />
+            </section>
 
             {cluster?.backup && (
               <section hidden={activeSection !== 'system'} className="panel admin-dashboard__backup">
