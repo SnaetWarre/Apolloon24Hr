@@ -546,6 +546,13 @@ export function AdminView() {
                   </div>
                 ))}
                 {clusterMessage && <div className="host-hint">{clusterMessage}</div>}
+                {(cluster.deadLetterCount ?? 0) > 0 && (
+                  <div className="warning-banner" role="alert">
+                    {cluster.deadLetterCount} synchronisatie-actie{(cluster.deadLetterCount ?? 0) === 1 ? ' is' : 's zijn'} in
+                    quarantaine gezet omdat de data fout was. De sync loopt door, maar controleer welke
+                    wijziging mist en voer die indien nodig opnieuw in.
+                  </div>
+                )}
               </section>
             )}
 

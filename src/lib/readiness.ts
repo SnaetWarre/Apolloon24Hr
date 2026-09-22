@@ -118,6 +118,17 @@ export function buildEventReadiness(
         : 'Er zijn geen open conflicten.',
   });
 
+  const deadLetters = cluster.deadLetterCount ?? 0;
+  checks.push({
+    id: 'quarantine',
+    label: 'Quarantaine',
+    level: deadLetters > 0 ? 'warning' : 'ready',
+    detail:
+      deadLetters > 0
+        ? `${deadLetters} synchronisatie-actie${deadLetters === 1 ? ' is' : 's zijn'} in quarantaine gezet (foute data overgeslagen zodat de sync doorloopt). Controleer in Admin wat er mist.`
+        : 'Er staan geen acties in quarantaine.',
+  });
+
   const timing = cluster.timingControl;
   checks.push({
     id: 'timing-controller',

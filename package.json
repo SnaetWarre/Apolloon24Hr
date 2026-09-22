@@ -36,7 +36,7 @@
     "typecheck:client": "tsc -p tsconfig.json",
     "typecheck:server": "tsc -p tsconfig.server.json --noEmit",
     "typecheck": "npm run typecheck:client && npm run typecheck:server",
-    "test": "node --import tsx --test tests/temporary-teams.test.ts tests/core-regressions.test.ts tests/cluster-policy.test.ts tests/backup-policy.test.ts tests/storage-maintenance.test.ts tests/electron-config.test.ts tests/kobe-tactics.test.ts tests/kobe-tactics-deep-dive.test.ts tests/net-setup.test.ts",
+    "test": "node --import tsx --test tests/temporary-teams.test.ts tests/core-regressions.test.ts tests/cluster-policy.test.ts tests/backup-policy.test.ts tests/storage-maintenance.test.ts tests/electron-config.test.ts tests/kobe-tactics.test.ts tests/kobe-tactics-deep-dive.test.ts tests/net-setup.test.ts tests/race-guards.test.ts",
     "test:e2e": "npm run build && node --import tsx --test tests/temporary-teams.e2e.test.ts tests/cluster.e2e.test.ts tests/cluster-network.e2e.test.ts",
     "check": "npm run typecheck && npm run client:build",
     "build": "npm run typecheck:client && npm run client:build && npm run server:build",

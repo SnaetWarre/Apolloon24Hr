@@ -431,7 +431,7 @@ test('joining a creator laptop imports its database and preserves a recovery bac
   }
 });
 
-test('an invalid replication batch cannot strand a valid operation in the log', { timeout: 20_000 }, async () => {
+test('an invalid replication operation is quarantined without stranding the valid ones', { timeout: 20_000 }, async () => {
   const root = testRoot('atomic-batch');
   const source = await startServer({
     port: await freePort(),
@@ -477,12 +477,18 @@ test('an invalid replication batch cannot strand a valid operation in the log', 
       vector: { [sourceStatus.hostId]: 2 },
       operations: invalidOperations,
     });
-    assert.equal(invalidResponse.status, 500);
+    // De foute operatie gaat in quarantaine; de geldige wordt gewoon toegepast.
+    assert.equal(invalidResponse.ok, true);
     assert.equal(
       (await fetchState(target.port)).runners.some((runner) => runner.id === first.id),
+      true
+    );
+    assert.equal(
+      (await fetchState(target.port)).runners.some((runner) => runner.id === second.id),
       false
     );
-    assert.equal((await fetchStatus(target.port)).knownHosts, 1);
+    assert.equal((await fetchStatus(target.port)).deadLetterCount, 1);
+    assert.equal((await fetchStatus(target.port)).knownHosts, 2);
 
     const retryResponse = await postClusterExchange(target, {
       clusterId: sourceStatus.clusterId,
