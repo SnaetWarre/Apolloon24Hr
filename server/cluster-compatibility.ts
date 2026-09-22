@@ -6,7 +6,7 @@ import {
 export const CLUSTER_PROTOCOL_VERSION = 3;
 export const REPLICATION_FORMAT_VERSION = 1;
 
-const DEFAULT_APP_VERSION = '2.0.0';
+const DEFAULT_APP_VERSION = '3.0.0';
 
 export function localClusterCompatibility(schemaVersion: number): ClusterCompatibility {
   const appVersion = cleanVersion(process.env.APOLLOON_APP_VERSION) || DEFAULT_APP_VERSION;

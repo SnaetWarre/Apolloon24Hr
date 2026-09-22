@@ -4,6 +4,28 @@ All notable changes to the Leuven 24h Runner Tracker will be documented in this 
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-09-22
+
+Event-ready major release. Alle laptops op het evenement moeten deze versie draaien:
+3.x weigert te synchroniseren met 2.x, zodat er nooit per ongeluk gemengde versies meedoen.
+
+### Added
+
+- Noob-vriendelijk "Vast netwerkadres"-paneel in Admin: pin het huidige adres als vast IP
+  met één knop op Windows, Linux (NetworkManager) en macOS, inclusief dubbel-bevestigde
+  VOORBIJ-terugzet naar DHCP na het evenement
+- Gebundelde netwerkscripts (PowerShell en shell) die de app zelf serveert, ook zonder source
+  code op de laptop
+- Clusterherstel bij IP-wissels van laptops, timing- en wachtrijbeveiligingen, en
+  herstelmetingen als regressiebewijs
+
+### Changed
+
+- Operatorinterface heringericht rond wachtrijlijsten en een aparte timingpost, met
+  toetsenbordveilige dialogen en een rustiger donker thema
+- Verplichte CI (typecheck, unit-, e2e- en packaging-tests) en geharde releases met
+  rooktests per platform
+
 ## [2.0.0] - 2026-09-03
 
 ### Added
