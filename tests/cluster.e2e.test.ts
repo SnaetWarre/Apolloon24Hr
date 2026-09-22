@@ -466,9 +466,26 @@ test('an invalid replication operation is quarantined without stranding the vali
     const pulled = (await pullResponse.json()) as { operations: Array<Record<string, unknown>> };
     assert.equal(pulled.operations.length, 2);
 
+    // De gif-batch draagt een herkenbare loper (POISON-1) die nergens anders
+    // bestaat: als quarantaine werkt, mag die nooit in de database belanden,
+    // terwijl de geldige operatie ernaast gewoon wordt toegepast. ATOMIC-2 kan
+    // intussen óók via de normale background-sync binnenkomen (de exchange
+    // registreert source als peer), dus daarop valt niet deterministisch te
+    // asserten.
+    const poisonRunnerId = crypto.randomUUID();
+    const poisonNow = Date.now();
     const invalidOperations = [
       pulled.operations[0],
-      { ...pulled.operations[1], checksum: '0'.repeat(64) },
+      {
+        ...pulled.operations[1],
+        checksum: '0'.repeat(64),
+        statements: [
+          {
+            sql: 'INSERT INTO runners (id, runner_number, name, registration_source, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+            params: [poisonRunnerId, 'POISON-1', 'Poison Runner', 'manual', poisonNow, poisonNow],
+          },
+        ],
+      },
     ];
     const invalidResponse = await postClusterExchange(target, {
       clusterId: sourceStatus.clusterId,
@@ -484,7 +501,7 @@ test('an invalid replication operation is quarantined without stranding the vali
       true
     );
     assert.equal(
-      (await fetchState(target.port)).runners.some((runner) => runner.id === second.id),
+      (await fetchState(target.port)).runners.some((runner) => runner.runnerNumber === 'POISON-1'),
       false
     );
     assert.equal((await fetchStatus(target.port)).deadLetterCount, 1);
