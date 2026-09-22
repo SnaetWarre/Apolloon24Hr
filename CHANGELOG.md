@@ -4,6 +4,20 @@ All notable changes to the Leuven 24h Runner Tracker will be documented in this 
 
 ## [Unreleased]
 
+## [3.1.0] - 2026-09-22
+
+Race-hardening bovenop 3.0.0. Ook deze versie synchroniseert alleen met gelijke
+versies: alle evenement-laptops moeten 3.1.0 draaien.
+
+### Fixed
+
+- Foute synchronisatie-acties gaan in quarantaine i.p.v. de hele sync stil te
+  leggen, met een teller en waarschuwing in Admin
+- Statuswijzigingen die de live race raken kunnen alleen nog vanaf de
+  timinglaptop; wachtrijwerk op Telsysteem 1 is ongewijzigd
+- Schermen halen na een onderbreking alles opnieuw op bij reconnect, met een
+  offline-banner en echte revisienummers
+
 ## [3.0.0] - 2026-09-22
 
 Event-ready major release. Alle laptops op het evenement moeten deze versie draaien:
