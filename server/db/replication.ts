@@ -465,11 +465,74 @@ function operationConflictId(operationIds: string[]): string {
     .digest('hex');
 }
 
+export type DeadLetterOperation = {
+  id: string;
+  originHostId: string | null;
+  originSeq: number | null;
+  type: string | null;
+  reason: string;
+  createdAt: number;
+};
+
+const DEAD_LETTER_SETTING_KEY = 'replication_dead_letters_json';
+const MAX_DEAD_LETTERS = 200;
+
+/**
+ * Quarantaine voor deterministisch foute operaties (vormfout, checksumfout,
+ * id-botsing). Zonder dit blijft de afzender dezelfde foute batch aanbieden en
+ * komt de vector nooit vooruit: de hele sync staat dan stil. Quarantaine slaat
+ * de operatie over zodat geldige operaties eromheen gewoon toegepast worden;
+ * de teller in de cluststatus waarschuwt de operator.
+ *
+ * Bewust géén schema-migratie: de lijst leeft in de settings-tabel, dus oude
+ * en nieuwe builds blijven koppelbaar.
+ */
+export function getDeadLetterOperations(): DeadLetterOperation[] {
+  try {
+    const raw = getSetting(DEAD_LETTER_SETTING_KEY);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (entry): entry is DeadLetterOperation =>
+        Boolean(entry) &&
+        typeof entry === 'object' &&
+        typeof (entry as DeadLetterOperation).id === 'string' &&
+        typeof (entry as DeadLetterOperation).reason === 'string'
+    );
+  } catch {
+    return [];
+  }
+}
+
+export function getDeadLetterCount(): number {
+  return getDeadLetterOperations().length;
+}
+
+function recordDeadLetterOperation(operation: unknown, error: unknown): void {
+  const record = (typeof operation === 'object' && operation !== null
+    ? (operation as Partial<ReplicationOperation>)
+    : {}) as Partial<ReplicationOperation>;
+  const id = typeof record.id === 'string' && record.id ? record.id.slice(0, 128) : '(onbekend)';
+  const reason =
+    error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200);
+  const entry: DeadLetterOperation = {
+    id,
+    originHostId: typeof record.originHostId === 'string' ? record.originHostId.slice(0, 128) : null,
+    originSeq: Number.isSafeInteger(record.originSeq) ? (record.originSeq as number) : null,
+    type: typeof record.type === 'string' ? record.type.slice(0, 128) : null,
+    reason,
+    createdAt: Date.now(),
+  };
+  const retained = [entry, ...getDeadLetterOperations().filter((item) => item.id !== id)];
+  setSetting(DEAD_LETTER_SETTING_KEY, JSON.stringify(retained.slice(0, MAX_DEAD_LETTERS)));
+  console.warn(`Replication operation in quarantaine (${id}): ${reason}`);
+}
+
 function saveReplicationConflict(
   kind: ReplicationConflict['kind'],
   operationIds: string[]
-): string {
-  const sortedIds = operationIds.slice().sort();
+): string {  const sortedIds = operationIds.slice().sort();
   const id = operationConflictId(sortedIds);
   getDb()
     .prepare(
@@ -651,12 +714,13 @@ function assertValidReplicationOperation(operation: ReplicationOperation): void 
 
 export function applyRemoteReplicationOperations(
   operations: ReplicationOperation[]
-): { applied: number; duplicates: number; conflicts: number } {
+): { applied: number; duplicates: number; conflicts: number; quarantined: number } {
   const identity = ensureReplicationIdentity();
   if (!Array.isArray(operations) || operations.length > 1_000) {
     throw new Error('invalid replication batch');
   }
   let duplicates = 0;
+  let quarantined = 0;
   const insertedIds: string[] = [];
   const insertedOperations: ReplicationOperation[] = [];
   const previousLastRow = one<Parameters<typeof replicationOperationFromRow>[0]>(
@@ -679,14 +743,35 @@ export function applyRemoteReplicationOperations(
   const expectedVector = getReplicationVector();
 
   for (const operation of ordered) {
-    assertValidReplicationOperation(operation);
-    if (operation.clusterId !== identity.clusterId) {
-      throw new Error('replication cluster mismatch');
+    // Deterministisch foute operaties (vorm, cluster, checksum, id-botsing)
+    // gaan in quarantaine zodat de rest van de batch gewoon toegepast wordt.
+    // Alleen volgordeproblemen (gaps) en de origin-limiet breken de batch nog
+    // af: die kunnen vanzelf herstellen of vereisen een operator.
+    try {
+      assertValidReplicationOperation(operation);
+      if (operation.clusterId !== identity.clusterId) {
+        throw new Error('replication cluster mismatch');
+      }
+    } catch (error) {
+      recordDeadLetterOperation(operation, error);
+      quarantined += 1;
+      const origin = (operation as Partial<ReplicationOperation> | null)?.originHostId;
+      const seq = (operation as Partial<ReplicationOperation> | null)?.originSeq;
+      if (typeof origin === 'string' && Number.isSafeInteger(seq)) {
+        expectedVector[origin] = Math.max(expectedVector[origin] ?? 0, seq as number);
+      }
+      continue;
     }
     const existing = getReplicationOperation(operation.id);
     if (existing) {
       if (existing.checksum !== operation.checksum) {
-        throw new Error(`replication operation id collision for ${operation.id}`);
+        recordDeadLetterOperation(operation, new Error(`replication operation id collision for ${operation.id}`));
+        quarantined += 1;
+        expectedVector[operation.originHostId] = Math.max(
+          expectedVector[operation.originHostId] ?? 0,
+          operation.originSeq
+        );
+        continue;
       }
       duplicates += 1;
       continue;
@@ -706,7 +791,16 @@ export function applyRemoteReplicationOperations(
       createdAt: operation.createdAt,
     });
     if (operation.checksum !== expectedChecksum) {
-      throw new Error(`replication checksum mismatch for ${operation.id}`);
+      recordDeadLetterOperation(
+        operation,
+        new Error(`replication checksum mismatch for ${operation.id}`)
+      );
+      quarantined += 1;
+      expectedVector[operation.originHostId] = Math.max(
+        expectedVector[operation.originHostId] ?? 0,
+        operation.originSeq
+      );
+      continue;
     }
     const hasKnownOrigin = hasOwn(
       expectedVector,
@@ -794,7 +888,7 @@ export function applyRemoteReplicationOperations(
     (id) => getReplicationOperation(id)?.status === 'conflict'
   ).length;
   const applied = insertedIds.length - conflicts;
-  return { applied, duplicates, conflicts };
+  return { applied, duplicates, conflicts, quarantined };
 }
 
 export async function installReplicationBootstrap(input: {

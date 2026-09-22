@@ -328,6 +328,20 @@ select {
   font-weight: 700;
 }
 
+.connection-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 9999;
+  background: var(--amber-soft, #fef3c7);
+  border-bottom: 1px solid var(--amber-line, #fed7aa);
+  color: var(--amber-ink, #9a3412);
+  font-weight: 700;
+  text-align: center;
+  padding: 8px 12px;
+}
+
 .success-banner {
   background: var(--green-soft);
   border: 1px solid var(--green-line, #bbf7d0);

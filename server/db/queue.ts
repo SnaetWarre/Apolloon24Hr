@@ -28,6 +28,45 @@ export function unhideRunnerInQueue(id: string): Runner | null {
   return getRunnerById(id);
 }
 
+/**
+ * Poort rond statuswijzigingen die de live race raken. Telsysteem 1 werkt de
+ * hele dag op een andere laptop dan de timing; zonder deze poort kan één klik
+ * daar de live ronde wissen of een gefinishte race stilletjes heropenen.
+ *
+ * Puur (geen DB-toegang) zodat de regels unit-testbaar zijn; de router vult de
+ * live waarden in en zet een melding om in een conflict-fout.
+ *
+ * Retourneert null als de wijziging mag, anders de Nederlandse foutmelding.
+ */
+export function runnerStatusChangeError(input: {
+  runnerId: string;
+  status: RunnerStatus;
+  activeRunnerId: string | null;
+  raceFinishedAt: number | null;
+  controllerHostId: string | null;
+  localHostId: string;
+}): string | null {
+  const controlledElsewhere =
+    Boolean(input.controllerHostId) && input.controllerHostId !== input.localHostId;
+  const touchesLiveLap =
+    input.activeRunnerId !== null &&
+    input.runnerId === input.activeRunnerId &&
+    input.status !== 'running';
+  if (touchesLiveLap && controlledElsewhere) {
+    return 'Deze loper loopt nu live. Alleen de timinglaptop kan dit aanpassen.';
+  }
+  const manualStart =
+    input.status === 'running' &&
+    (input.activeRunnerId === null || input.activeRunnerId !== input.runnerId);
+  if (manualStart && input.raceFinishedAt !== null && controlledElsewhere) {
+    return 'De race is gefinisht. Hervatten kan alleen op de timinglaptop.';
+  }
+  if (manualStart && input.raceFinishedAt === null && controlledElsewhere) {
+    return 'Alleen de timinglaptop kan een loper handmatig laten starten.';
+  }
+  return null;
+}
+
 export function updateRunnerStatus({
   id,
   status,

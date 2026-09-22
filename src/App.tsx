@@ -5,7 +5,7 @@ import { KanbanBoard } from './components/KanbanBoard';
 import { RolePicker } from './components/RolePicker';
 import { RunnerProfileModal } from './components/RunnerProfileModal';
 import { TimingView } from './components/TimingView';
-import { useAppData, useRealtimeBridge } from './app/index';
+import { useAppData, useConnectionLost, useRealtimeBridge } from './app/index';
 import {
   LazyAdminView,
   LazyAnalysisView,
@@ -56,7 +56,7 @@ export function AppRoot() {
 
   const outlet = <Outlet />;
 
-  if (displayRoute) return outlet;
+  if (displayRoute) return (<><ConnectionBanner /><Outlet /></>);
 
   return (
     <Shell>
@@ -170,7 +170,22 @@ export function NotFoundPage() {
 }
 
 function Shell({ children }: { children: React.ReactNode }) {
-  return <div className="app-root">{children}</div>;
+  return (
+    <div className="app-root">
+      <ConnectionBanner />
+      {children}
+    </div>
+  );
+}
+
+function ConnectionBanner() {
+  const connectionLost = useConnectionLost();
+  if (!connectionLost) return null;
+  return (
+    <div className="connection-banner" role="alert">
+      Verbinding met de server verbroken — probeert opnieuw te verbinden…
+    </div>
+  );
 }
 
 function RouteLoadBoundary({

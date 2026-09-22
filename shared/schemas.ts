@@ -215,6 +215,7 @@ export const clusterStatusSchema = z.object({
   knownHosts: z.number().int().positive(),
   pendingOperations: z.number().int().nonnegative(),
   conflictCount: z.number().int().nonnegative(),
+  deadLetterCount: z.number().int().nonnegative().default(0),
   timingControllerHostId: z.string().nullable(),
   timingControl: timingControlStatusSchema,
   clockSkewMs: z.number().nullable(),

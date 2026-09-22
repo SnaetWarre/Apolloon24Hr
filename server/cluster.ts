@@ -9,6 +9,8 @@ import {
   databaseReadiness,
   ensureReplicationIdentity,
   getAllReplicationOperations,
+  getAppDataRevision,
+  getDeadLetterCount,
   getOpenReplicationConflictCount,
   getPendingReplicationOperationCount,
   getReplicationCheckpoint,
@@ -152,6 +154,7 @@ export function clusterStatus(): ClusterStatus {
     knownHosts: 1 + peerList.length,
     pendingOperations: getPendingReplicationOperationCount(),
     conflictCount: getOpenReplicationConflictCount(),
+    deadLetterCount: getDeadLetterCount(),
     timingControllerHostId: getSetting('timing_controller_host_id'),
     timingControl: timingControlStatus(),
     clockSkewMs: skewSamples.length
@@ -415,7 +418,7 @@ export function registerClusterRoutes(app: Express): void {
         joinedPeer.compatibility = remoteCompatibility;
         joinedPeer.compatibilityError = null;
       }
-      emitRealtime({ type: 'state:revision', payload: Date.now() });
+      emitRealtime({ type: 'state:revision', payload: getAppDataRevision() });
       res.json({
         ok: true,
         backupFile: path.basename(result.backupPath),
@@ -496,7 +499,7 @@ export function registerClusterRoutes(app: Express): void {
     peer.clockSkewMs = payload.sentAt - Date.now();
     acknowledgeReplicationVector(payload.hostId, vector);
     if (result.applied > 0 || result.conflicts > 0) {
-      emitRealtime({ type: 'state:revision', payload: Date.now() });
+      emitRealtime({ type: 'state:revision', payload: getAppDataRevision() });
     }
 
     const localVector = getReplicationVector();
@@ -790,8 +793,10 @@ async function syncPeer(peer: PeerState): Promise<void> {
     );
     confirmedPeer.clockSkewMs = remote.sentAt - Date.now();
     acknowledgeReplicationVector(remote.hostId, remoteVector);
+    // NB: geen emit bij quarantaine alleen — er is geen snapshot/history
+    // veranderd en de teller komt via de clusterstatus-poll binnen.
     if (result.applied > 0 || result.conflicts > 0) {
-      emitRealtime({ type: 'state:revision', payload: Date.now() });
+      emitRealtime({ type: 'state:revision', payload: getAppDataRevision() });
     }
   } catch (error) {
     // Rediscovery, joining another cluster, or a newer inbound exchange can

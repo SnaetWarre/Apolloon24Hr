@@ -17,6 +17,7 @@ import {
 export function connectRealtime(activeQueryClient: QueryClient): () => void {
   let disposed = false;
   let connected = false;
+  let hasConnectedBefore = false;
   let clockSyncInFlight = false;
   const socket = io('/');
 
@@ -129,6 +130,14 @@ export function connectRealtime(activeQueryClient: QueryClient): () => void {
       connected = true;
       markRealtimeConnected();
     }
+    if (hasConnectedBefore) {
+      // Reconnect na een onderbreking: alles wat onderweg gemist is opnieuw
+      // ophalen in plaats van te vertrouwen op gemiste realtime-events.
+      void activeQueryClient.invalidateQueries({ queryKey: snapshotKey });
+      void activeQueryClient.invalidateQueries({ queryKey: historyKey });
+      void activeQueryClient.invalidateQueries({ queryKey: ['cluster', 'status'] });
+    }
+    hasConnectedBefore = true;
     void syncClock();
   });
   socket.on('disconnect', () => {

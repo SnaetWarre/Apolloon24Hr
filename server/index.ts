@@ -66,6 +66,9 @@ const server = http.createServer(app);
 const io = new SocketIOServer(server, {
   cors: { origin: true, credentials: false },
   serveClient: false,
+  // Korte onderbrekingen (kabel eruit, switch herstart) overbruggen zonder dat
+  // schermen events missen: de server buffert kort en de client hervat.
+  connectionStateRecovery: {},
 });
 let shuttingDown = false;
 const processStartedAt = Date.now();

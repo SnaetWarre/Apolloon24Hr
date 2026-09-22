@@ -32,23 +32,27 @@ import {
   createLabel,
   deleteLabel,
   deleteRunner,
+  ensureReplicationIdentity,
   finishRace,
   finalizeReplicationConflict,
   getAllLaps,
   getAllRaceEvents,
   getAllRunners,
+  getAppDataRevision,
   getAppSettings,
   getLabels,
   getLapById,
   getRaceState,
   getRunnerById,
   getRunnersByIds,
+  getSetting,
   getTemporaryTeams,
   getTimingControllerGeneration,
   hideRunnerInQueue,
   insertRunner,
   performHandoff,
   prepareReplicationConflictChoice,
+  runnerStatusChangeError,
   setPublicRecordMode,
   setTemporaryTeamActive,
   setTemporaryTeamMembers,
@@ -256,7 +260,7 @@ export const appRouter = t.router({
             input.conflictId,
             appSnapshot()
           );
-          emitRealtime({ type: 'state:revision', payload: Date.now() });
+          emitRealtime({ type: 'state:revision', payload: getAppDataRevision() });
           return result;
         });
       }),
@@ -294,6 +298,16 @@ export const appRouter = t.router({
     }),
     setStatus: t.procedure.input(withCommandMeta(runnerStatusUpdateSchema)).mutation(({ input }) => {
       return commitWrite('runners.setStatus', input, () => {
+        const race = getRaceState();
+        const gateError = runnerStatusChangeError({
+          runnerId: input.id,
+          status: input.status,
+          activeRunnerId: race.activeRunnerId,
+          raceFinishedAt: race.raceFinishedAt,
+          controllerHostId: getSetting('timing_controller_host_id'),
+          localHostId: ensureReplicationIdentity().hostId,
+        });
+        if (gateError) conflict(gateError);
         let runner: ReturnType<typeof updateRunnerStatus>;
         try {
           runner = updateRunnerStatus({

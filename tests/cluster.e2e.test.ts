@@ -431,7 +431,7 @@ test('joining a creator laptop imports its database and preserves a recovery bac
   }
 });
 
-test('an invalid replication batch cannot strand a valid operation in the log', { timeout: 20_000 }, async () => {
+test('an invalid replication operation is quarantined without stranding the valid ones', { timeout: 20_000 }, async () => {
   const root = testRoot('atomic-batch');
   const source = await startServer({
     port: await freePort(),
@@ -466,9 +466,26 @@ test('an invalid replication batch cannot strand a valid operation in the log', 
     const pulled = (await pullResponse.json()) as { operations: Array<Record<string, unknown>> };
     assert.equal(pulled.operations.length, 2);
 
+    // De gif-batch draagt een herkenbare loper (POISON-1) die nergens anders
+    // bestaat: als quarantaine werkt, mag die nooit in de database belanden,
+    // terwijl de geldige operatie ernaast gewoon wordt toegepast. ATOMIC-2 kan
+    // intussen óók via de normale background-sync binnenkomen (de exchange
+    // registreert source als peer), dus daarop valt niet deterministisch te
+    // asserten.
+    const poisonRunnerId = crypto.randomUUID();
+    const poisonNow = Date.now();
     const invalidOperations = [
       pulled.operations[0],
-      { ...pulled.operations[1], checksum: '0'.repeat(64) },
+      {
+        ...pulled.operations[1],
+        checksum: '0'.repeat(64),
+        statements: [
+          {
+            sql: 'INSERT INTO runners (id, runner_number, name, registration_source, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+            params: [poisonRunnerId, 'POISON-1', 'Poison Runner', 'manual', poisonNow, poisonNow],
+          },
+        ],
+      },
     ];
     const invalidResponse = await postClusterExchange(target, {
       clusterId: sourceStatus.clusterId,
@@ -477,12 +494,18 @@ test('an invalid replication batch cannot strand a valid operation in the log', 
       vector: { [sourceStatus.hostId]: 2 },
       operations: invalidOperations,
     });
-    assert.equal(invalidResponse.status, 500);
+    // De foute operatie gaat in quarantaine; de geldige wordt gewoon toegepast.
+    assert.equal(invalidResponse.ok, true);
     assert.equal(
       (await fetchState(target.port)).runners.some((runner) => runner.id === first.id),
+      true
+    );
+    assert.equal(
+      (await fetchState(target.port)).runners.some((runner) => runner.runnerNumber === 'POISON-1'),
       false
     );
-    assert.equal((await fetchStatus(target.port)).knownHosts, 1);
+    assert.equal((await fetchStatus(target.port)).deadLetterCount, 1);
+    assert.equal((await fetchStatus(target.port)).knownHosts, 2);
 
     const retryResponse = await postClusterExchange(target, {
       clusterId: sourceStatus.clusterId,
