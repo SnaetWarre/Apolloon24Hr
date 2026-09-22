@@ -5,11 +5,15 @@ type NetAdapterProfile = {
   address: string;
   prefixLength: number | null;
   dhcp: boolean | null;
+  connection: string | null;
 };
 
 type NetProfile = {
   platform: string;
   windows: boolean;
+  elevateMethod: 'uac' | 'pkexec' | 'osascript' | null;
+  elevateHint: string | null;
+  manager: string | null;
   adapters: NetAdapterProfile[];
   primary: NetAdapterProfile | null;
   apipa: boolean;
@@ -122,7 +126,8 @@ export function NetworkSetupPanel() {
         return;
       }
       setPhase('waiting-make');
-      setMessage('Windows vraagt nu om toestemming (klik op Ja). Daarna controleer ik het adres…');
+      const permissionHint = profile?.elevateHint || 'Het systeem vraagt nu om toestemming';
+      setMessage(`${permissionHint} — bevestig op deze laptop en wacht tot ik “Gelukt!” zeg…`);
       const wanted = ipInput.trim();
       pollUntil(
         (next) => next.primary !== null && next.primary.address === wanted && next.primary.dhcp === false,
@@ -132,7 +137,7 @@ export function NetworkSetupPanel() {
         },
         () => {
           setPhase('idle');
-          setError('Er is niets veranderd. Waarschijnlijk is de Windows-toestemming (UAC) geweigerd of weggeklikt. Probeer het opnieuw.');
+          setError('Er is niets veranderd. Waarschijnlijk is de toestemming geweigerd of weggeklikt. Probeer het opnieuw.');
         }
       );
     } catch (err) {
@@ -157,7 +162,8 @@ export function NetworkSetupPanel() {
         return;
       }
       setPhase('waiting-revert');
-      setMessage('Windows vraagt nu om toestemming (klik op Ja). Daarna controleer ik het adres…');
+      const permissionHint = profile?.elevateHint || 'Het systeem vraagt nu om toestemming';
+      setMessage(`${permissionHint} — bevestig op deze laptop en wacht tot ik “Gelukt!” zeg…`);
       pollUntil(
         (next) => next.primary !== null && next.primary.dhcp === true,
         () => {
@@ -168,7 +174,7 @@ export function NetworkSetupPanel() {
         },
         () => {
           setPhase('idle');
-          setError('Er is niets veranderd. Waarschijnlijk is de Windows-toestemming (UAC) geweigerd of weggeklikt.');
+          setError('Er is niets veranderd. Waarschijnlijk is de toestemming geweigerd of weggeklikt.');
         }
       );
     } catch (err) {
@@ -231,19 +237,32 @@ export function NetworkSetupPanel() {
         </div>
       )}
 
-      {!profile.windows && (
+      {profile.manager && (
         <div className="host-hint">
-          Automatisch vastzetten werkt alleen op Windows. Op dit toestel ({profile.platform}) doe je het
-          handmatig, of download je hieronder de scripts voor de Windows-laptops.
+          Beheerd door <strong>{profile.manager}</strong>.
         </div>
       )}
 
-      {profile.windows && !isStatic && (
+      {!profile.elevateMethod && (
+        <div className="host-hint">
+          Automatisch vastzetten kan op dit toestel ({profile.platform}) niet vanuit de app. Doe het
+          handmatig, of download hieronder het script voor de Windows- en Linux-laptops.
+        </div>
+      )}
+
+      {profile.elevateMethod && !isStatic && (
         <>
           <p className="panel-copy">
             <strong>Stap 1:</strong> controleer het adres hieronder (meestal klopt wat er al staat).{' '}
-            <strong>Stap 2:</strong> klik op de knop, klik in Windows op <strong>Ja</strong>, wacht tot ik{' '}
-            <strong>“Gelukt!”</strong> zeg. Herhaal dit op elke laptop met een ander adres.
+            <strong>Stap 2:</strong> klik op de knop
+            {profile.elevateHint ? (
+              <>
+                , bevestig ({profile.elevateHint.toLowerCase()})
+              </>
+            ) : (
+              <>, bevestig de toestemmingsvraag</>
+            )}
+            , wacht tot ik <strong>“Gelukt!”</strong> zeg. Herhaal dit op elke laptop met een ander adres.
           </p>
           <div className="form-row">
             <label>
@@ -290,14 +309,14 @@ export function NetworkSetupPanel() {
         </>
       )}
 
-      {profile.windows && isStatic && profile.primary && (
+      {isStatic && profile.primary && (
         <div className="host-hint">
           <strong>Dit adres staat vast:</strong> {profile.primary.address}. Goed zo — hier hoef je niets
           meer te doen tot het evenement voorbij is.
         </div>
       )}
 
-      {profile.windows && (
+      {profile.elevateMethod && (
         <details className="host-hint">
           <summary>
             <strong>Na het evenement: adres weer automatisch maken</strong> (hiervoor moet je twee keer
@@ -364,15 +383,23 @@ export function NetworkSetupPanel() {
       <p className="panel-copy">
         Liever met de hand of op een andere laptop? Download:{' '}
         <a href="/event-network/Set-ApolloonStaticIp.ps1" download>
-          vastzetten-script
+          Windows vastzetten-script
+        </a>{' '}
+        ·{' '}
+        <a href="/event-network/set-apolloon-static-ip.sh" download>
+          Linux/macOS vastzetten-script
         </a>{' '}
         ·{' '}
         <a href="/event-network/Test-ApolloonNetwork.ps1" download>
-          controle-script
+          controle-script (Windows)
+        </a>{' '}
+        ·{' '}
+        <a href="/event-network/revert-apolloon-dhcp.sh" download>
+          terugzetten-script (Linux/macOS)
         </a>{' '}
         ·{' '}
         <a href="/event-network/Revert-ApolloonDhcp.ps1" download>
-          terugzetten-script
+          terugzetten-script (Windows)
         </a>
       </p>
 
