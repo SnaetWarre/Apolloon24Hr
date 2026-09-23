@@ -13,7 +13,6 @@ import {
 } from '../lib/ranking';
 import type { Label, LapRecord, LiveAppSnapshot, PublicRecordMode, RaceEvent, Runner } from '../types';
 import { LabelBadge } from './LabelBadge';
-import { LiveDuration } from './LiveTime';
 
 const OUTSIDE_ALERT_VISIBLE_MS = 8_000;
 const INSIDE_RANKING_ROTATION_MS = 15_000;
@@ -122,9 +121,6 @@ export function OutsideDisplay() {
           <strong className="display-runner-name">
             {activeRunner ? runnerLabel(activeRunner) : 'Nog niemand gestart'}
           </strong>
-          {activeRunner && race.activeStartedAt ? (
-            <LiveDuration startedAt={race.activeStartedAt} className="display-time" />
-          ) : null}
           {activeRunner && <DisplayLabels labels={activeRunner.labels} />}
         </div>
       </section>
