@@ -176,6 +176,26 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
           </div>
         </div>
 
+        {runner.registration && (
+          <section className="profile-registration" aria-label="Inschrijvingsgegevens">
+            <h3>Inschrijvingsgegevens</h3>
+            <div className="profile-registration__grid">
+              <RegistrationField label="Ingeschreven op" value={runner.registration.submittedAt} />
+              <RegistrationField label="E-mailadres" value={runner.registration.email} />
+              <RegistrationField label="GSM-nummer" value={runner.registration.phone} />
+              <RegistrationField label="Studiefase" value={runner.registration.studyPhase} />
+              <RegistrationField label="Geschat totaal rondjes" value={runner.registration.estimatedLaps} />
+              <RegistrationField label="Geschat gemiddeld tempo op 515 m" value={runner.registration.estimatedPace} />
+              <RegistrationField label="Maximum rondjes per blok van 2 uur" value={runner.registration.maxLapsPerBlock} />
+              <RegistrationField label="Beschikbare uren" value={runner.registration.availableHours.join(', ')} />
+              <RegistrationField label="Flexibiliteit" value={runner.registration.flexibility} />
+              <RegistrationField label="Categorieën" value={runner.registration.categories.join(', ')} />
+              <RegistrationField label="Toestemming voor hergebruik" value={runner.registration.reuseConsent} />
+              <RegistrationField label="Opmerking bij inschrijving" value={runner.registration.remarks} />
+            </div>
+          </section>
+        )}
+
         <section className="profile-laps">
           <h3>Laatste rondes</h3>
           {recentLaps.length ? (
@@ -325,6 +345,10 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
   );
 }
 
+function RegistrationField({ label, value }: { label: string; value: string }) {
+  return <div className="profile-registration__field"><span className="muted-label">{label}</span><strong>{value || 'Niet ingevuld'}</strong></div>;
+}
+
 function isQueueRemovalStatus(status: RunnerStatus) {
   return status === 'warming_up' || status === 'waiting';
 }
@@ -372,6 +396,7 @@ function getEditableRunnerKey(runner: Runner) {
     runner.name,
     runner.targetLaps ?? '',
     runner.notes || '',
+    JSON.stringify(runner.registration),
     runner.labels.map((label) => label.id).sort().join('|'),
   ].join('\u0001');
 }

@@ -23,6 +23,13 @@ function findRunnerByNumber(runnerNumber: unknown): { id: string } | null {
   return one<{ id: string }>('SELECT id FROM runners WHERE runner_number = ?', [number]);
 }
 
+function findRunnerByEmail(email: string): { id: string } | null {
+  return one<{ id: string }>(
+    "SELECT id FROM runners WHERE lower(json_extract(registration_json, '$.email')) = lower(?) LIMIT 1",
+    [email]
+  );
+}
+
 export function setRunnerLabels(runnerId: string, labelNamesOrIds: unknown): void {
   run('DELETE FROM runner_labels WHERE runner_id = ?', [runnerId]);
   const labels = Array.isArray(labelNamesOrIds) ? labelNamesOrIds : [];
@@ -60,9 +67,10 @@ export function insertRunner(input: RunnerInput): Runner {
         historical_best_ms,
         registration_source,
         notes,
+        registration_json,
         created_at,
         updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
         cleanText(input.runnerNumber),
@@ -72,6 +80,7 @@ export function insertRunner(input: RunnerInput): Runner {
         cleanInt(input.historicalBestMs),
         cleanRegistrationSource(input.registrationSource),
         cleanText(input.notes) || '',
+        input.registration ? JSON.stringify(input.registration) : null,
         now,
         now,
       ]
@@ -97,6 +106,7 @@ export function updateRunner(id: string, fields: RunnerPatch): Runner | null {
     historical_best_ms: number | null;
     registration_source: RegistrationSource;
     notes: string | null;
+    registration_json: string | null;
   }>('SELECT * FROM runners WHERE id = ?', [id]);
   if (!current) return null;
 
@@ -126,6 +136,9 @@ export function updateRunner(id: string, fields: RunnerPatch): Runner | null {
         ? cleanRegistrationSource(fields.registrationSource)
         : cleanRegistrationSource(current.registration_source),
     notes: fields.notes !== undefined ? cleanText(fields.notes) || '' : current.notes || '',
+    registrationJson: fields.registration !== undefined
+      ? fields.registration ? JSON.stringify(fields.registration) : null
+      : current.registration_json,
     updatedAt: Date.now(),
   };
 
@@ -139,6 +152,7 @@ export function updateRunner(id: string, fields: RunnerPatch): Runner | null {
            historical_best_ms = ?,
            registration_source = ?,
            notes = ?,
+           registration_json = ?,
            updated_at = ?
        WHERE id = ?`,
       [
@@ -149,6 +163,7 @@ export function updateRunner(id: string, fields: RunnerPatch): Runner | null {
         next.historicalBestMs,
         next.registrationSource,
         next.notes,
+        next.registrationJson,
         next.updatedAt,
         id,
       ]
@@ -163,9 +178,16 @@ export function updateRunner(id: string, fields: RunnerPatch): Runner | null {
 
 export function upsertRunnerFromImport(input: RunnerInput): { action: 'created' | 'updated'; runner: Runner } {
   const runnerNumber = cleanText(input.runnerNumber);
-  const existing = runnerNumber ? findRunnerByNumber(runnerNumber) : null;
+  const email = cleanText(input.registration?.email);
+  const existing = email ? findRunnerByEmail(email) : runnerNumber ? findRunnerByNumber(runnerNumber) : null;
   if (existing) {
     const { status: _status, statusSince: _statusSince, ...profileFields } = input;
+    // The sheet row can move; preserve the number and operator notes on repeat imports.
+    if (email) {
+      delete profileFields.runnerNumber;
+      delete profileFields.notes;
+      delete profileFields.labels;
+    }
     const runner = updateRunner(existing.id, profileFields);
     if (!runner) throw new Error('runner update failed');
     return { action: 'updated', runner };

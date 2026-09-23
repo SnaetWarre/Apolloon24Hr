@@ -2190,6 +2190,18 @@ tbody tr:hover {
   margin: 18px 0;
 }
 
+.profile-registration {
+  margin: 18px 0;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  padding: 14px;
+}
+
+.profile-registration h3 { margin: 0 0 12px; font-size: 15px; }
+.profile-registration__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px 18px; }
+.profile-registration__field { min-width: 0; }
+.profile-registration__field strong { display: block; margin-top: 3px; font-size: 14px; font-weight: 600; overflow-wrap: anywhere; white-space: pre-wrap; }
+
 .profile-laps h3 {
   margin: 0 0 8px;
   color: var(--muted);

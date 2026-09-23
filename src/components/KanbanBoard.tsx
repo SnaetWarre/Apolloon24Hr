@@ -358,10 +358,16 @@ function QueueRunnerRow({
             >
               {runner.lapCount} toeren
             </span>
+            {runner.registration?.studyPhase && <span>{runner.registration.studyPhase}</span>}
+            {runner.registration?.estimatedPace && <span>Tempo {runner.registration.estimatedPace}</span>}
+            {runner.registration?.categories.length ? <span>{runner.registration.categories.join(', ')}</span> : null}
           </span>
         </button>
         <TimerBadge runner={runner} />
         <div className="queue-row-actions" onPointerDown={(event) => event.stopPropagation()}>
+          <button className="btn btn--secondary btn--sm" onClick={() => onOpenProfile(runner.id)} aria-label={`Profiel van ${runner.name} openen`}>
+            Profiel
+          </button>
           <button className="btn btn--sm" disabled={actionBusy} onClick={onAdvance}>
             {runner.status === 'warming_up' ? 'Naar wachtrij →' : 'Opwarmen'}
           </button>

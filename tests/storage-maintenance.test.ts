@@ -61,9 +61,9 @@ test('schema migration removes the retired log and compaction never runs during 
       assert.equal(retiredTable, undefined);
       assert.equal(
         migrated.prepare("SELECT value FROM settings WHERE key = 'schema_version'").pluck().get(),
-        '9'
+        '10'
       );
-      assert.equal(migrated.pragma('user_version', { simple: true }), 9);
+      assert.equal(migrated.pragma('user_version', { simple: true }), 10);
       const compressedCheckpoint = String(
         migrated
           .prepare("SELECT value FROM settings WHERE key = 'replication_checkpoint_gzip_v1'")
