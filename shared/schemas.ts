@@ -115,6 +115,9 @@ export const temporaryTeamSchema = z.object({
   labelId: z.string(),
   active: z.boolean(),
   activatedAt: z.number().nullable(),
+  startsAt: z.number().nullable(),
+  endsAt: z.number().nullable(),
+  scheduleOwnerHostId: z.string().nullable(),
   memberRunnerIds: z.array(z.string()),
   restoreLabelIdsByRunner: z.record(z.string(), z.array(z.string())),
 });
@@ -322,6 +325,19 @@ export const temporaryTeamMembersSchema = z.object({
 export const temporaryTeamActiveSchema = z.object({
   labelId: z.string().min(1),
   active: z.boolean(),
+});
+
+export const temporaryTeamScheduleSchema = z.object({
+  startsAt: z.number().int().nonnegative(),
+  endsAt: z.number().int().nonnegative(),
+}).refine((value) => value.endsAt > value.startsAt, {
+  message: 'Het einduur moet na het beginuur liggen',
+});
+
+export const temporaryTeamCreateSchema = temporaryTeamScheduleSchema.safeExtend({
+  name: z.string().trim().min(1),
+  color: z.string(),
+  runnerIds: z.array(z.string()).min(1),
 });
 
 export const runnerIdSchema = z.object({

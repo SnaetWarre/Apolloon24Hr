@@ -14,6 +14,8 @@ import {
   runnerStatusUpdateSchema,
   temporaryTeamActiveSchema,
   temporaryTeamMembersSchema,
+  temporaryTeamCreateSchema,
+  temporaryTeamScheduleSchema,
   type ImportSummary,
   type RunnerInput,
   type RunnerRegistration,
@@ -57,6 +59,7 @@ import {
   setPublicRecordMode,
   setTemporaryTeamActive,
   setTemporaryTeamMembers,
+  setTemporaryTeamSchedule,
   undoLastHandoff,
   unhideRunnerInQueue,
   updateLabel,
@@ -67,6 +70,7 @@ import {
 } from './db.js';
 import { hostInfo } from './host.js';
 import { emitRealtime } from './realtime.js';
+import { isClusterEnabled } from './cluster-policy.js';
 
 const t = initTRPC.create();
 const commandMetaShape = {
@@ -242,6 +246,37 @@ function commitWrite<T>(type: string, input: CommandMeta | null, action: () => T
       return action();
     },
   });
+}
+
+function scheduledActive(team: { startsAt: number | null; endsAt: number | null; memberRunnerIds: string[] }, nowMs: number): boolean {
+  return team.startsAt !== null && team.endsAt !== null && team.memberRunnerIds.length > 0
+    && nowMs >= team.startsAt && nowMs < team.endsAt;
+}
+
+function applyTemporaryTeamSchedule(labelId: string, nowMs: number): void {
+  const team = getTemporaryTeams().find((item) => item.labelId === labelId);
+  if (!team || team.startsAt === null || team.endsAt === null) return;
+  const active = scheduledActive(team, nowMs);
+  if (team.active === active) return;
+  setTemporaryTeamActive(labelId, active, nowMs);
+  emitRunnerDelta(team.memberRunnerIds);
+}
+
+export function runTemporaryTeamSchedules(nowMs = Date.now()): void {
+  const hostId = isClusterEnabled(process.env) ? ensureReplicationIdentity().hostId : null;
+  const timingHostId = hostId ? getSetting('timing_controller_host_id') : null;
+  for (const team of getTemporaryTeams()) {
+    if (team.startsAt === null || team.endsAt === null || team.active === scheduledActive(team, nowMs)) continue;
+    if (hostId && (timingHostId || team.scheduleOwnerHostId) !== hostId) continue;
+    try {
+      commitWrite('temporaryTeams.scheduleTransition', null, () => {
+        applyTemporaryTeamSchedule(team.labelId, Date.now());
+        emitRealtime({ type: 'temporary-teams:patched', payload: getTemporaryTeams() });
+      });
+    } catch (error) {
+      console.error(`Tijdelijke nachtploeg ${team.labelId} automatisch omschakelen mislukt:`, error);
+    }
+  }
 }
 
 export const appRouter = t.router({
@@ -506,15 +541,45 @@ export const appRouter = t.router({
 
   temporaryTeams: t.router({
     list: t.procedure.query(() => getTemporaryTeams()),
+    create: t.procedure.input(withCommandMeta(temporaryTeamCreateSchema)).mutation(({ input }) => {
+      return commitWrite('temporaryTeams.create', input, () => {
+        const label = createLabel({ name: input.name, color: input.color, kind: 'temporary_team' });
+        setTemporaryTeamMembers(label.id, input.runnerIds);
+        setTemporaryTeamSchedule(label.id, input.startsAt, input.endsAt, ensureReplicationIdentity().hostId);
+        applyTemporaryTeamSchedule(label.id, Date.now());
+        emitRealtime({ type: 'label:upserted', payload: label });
+        emitRunnerDelta(input.runnerIds);
+        emitRealtime({ type: 'temporary-teams:patched', payload: getTemporaryTeams() });
+        return getTemporaryTeams().find((team) => team.labelId === label.id)!;
+      });
+    }),
+    setSchedule: t.procedure.input(withCommandMeta(temporaryTeamScheduleSchema.safeExtend({ labelId: z.string().min(1) }))).mutation(({ input }) => {
+      return commitWrite('temporaryTeams.setSchedule', input, () => {
+        const previous = getTemporaryTeams().find((team) => team.labelId === input.labelId);
+        if (previous && !previous.memberRunnerIds.length) throw new Error('Voeg eerst minstens een loper toe');
+        setTemporaryTeamSchedule(input.labelId, input.startsAt, input.endsAt, ensureReplicationIdentity().hostId);
+        applyTemporaryTeamSchedule(input.labelId, Date.now());
+        emitRunnerDelta(previous?.memberRunnerIds ?? []);
+        emitRealtime({ type: 'temporary-teams:patched', payload: getTemporaryTeams() });
+        return getTemporaryTeams().find((team) => team.labelId === input.labelId)!;
+      });
+    }),
     setMembers: t.procedure.input(withCommandMeta(temporaryTeamMembersSchema)).mutation(({ input }) => {
       return commitWrite('temporaryTeams.setMembers', input, () => {
-        const team = setTemporaryTeamMembers(input.labelId, input.runnerIds);
+        setTemporaryTeamMembers(input.labelId, input.runnerIds);
+        applyTemporaryTeamSchedule(input.labelId, Date.now());
+        const team = getTemporaryTeams().find((item) => item.labelId === input.labelId)!;
+        emitRunnerDelta(team.memberRunnerIds);
         emitRealtime({ type: 'temporary-teams:patched', payload: getTemporaryTeams() });
         return team;
       });
     }),
     setActive: t.procedure.input(withCommandMeta(temporaryTeamActiveSchema)).mutation(({ input }) => {
       return commitWrite('temporaryTeams.setActive', input, () => {
+        const scheduled = getTemporaryTeams().find((team) => team.labelId === input.labelId);
+        if (scheduled?.startsAt !== null && scheduled?.startsAt !== undefined) {
+          throw new Error('Deze ploeg volgt haar planning. Pas het begin- of einduur aan.');
+        }
         const team = setTemporaryTeamActive(input.labelId, input.active, Date.now());
         emitRunnerDelta(team.memberRunnerIds);
         emitRealtime({ type: 'temporary-teams:patched', payload: getTemporaryTeams() });

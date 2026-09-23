@@ -3,6 +3,7 @@ import { LabelBadge } from '../LabelBadge';
 import { formatClockTimeMs } from '../../lib/time';
 import { compareRunnerIdentity } from './adminFormat';
 import { RunnerIdentity } from './RunnerIdentity';
+import { formatTeamWindow, parseTeamWindow, toLocalDateTime } from './temporaryTeamTime';
 import type { Label, Runner, TemporaryTeam } from '../../types';
 
 export function TemporaryTeamAdminCard({
@@ -12,6 +13,7 @@ export function TemporaryTeamAdminCard({
   runners,
   onSaveMembers,
   onSetActive,
+  onSetSchedule,
 }: {
   label: Label;
   team: TemporaryTeam;
@@ -19,12 +21,22 @@ export function TemporaryTeamAdminCard({
   runners: Runner[];
   onSaveMembers: (labelId: string, runnerIds: string[]) => Promise<TemporaryTeam>;
   onSetActive: (labelId: string, active: boolean) => Promise<TemporaryTeam>;
+  onSetSchedule: (labelId: string, startsAt: number, endsAt: number) => Promise<TemporaryTeam>;
 }) {
   const [selectedIds, setSelectedIds] = React.useState<string[]>(team.memberRunnerIds);
   const [query, setQuery] = React.useState('');
   const [membersOpen, setMembersOpen] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const [feedback, setFeedback] = React.useState<string | null>(null);
+  const [editingSchedule, setEditingSchedule] = React.useState(false);
+  const [start, setStart] = React.useState(team.startsAt === null ? '' : toLocalDateTime(team.startsAt));
+  const [end, setEnd] = React.useState(team.endsAt === null ? '' : toLocalDateTime(team.endsAt));
+
+  React.useEffect(() => {
+    if (editingSchedule) return;
+    setStart(team.startsAt === null ? '' : toLocalDateTime(team.startsAt));
+    setEnd(team.endsAt === null ? '' : toLocalDateTime(team.endsAt));
+  }, [team.startsAt, team.endsAt, editingSchedule]);
 
   React.useEffect(() => {
     setSelectedIds(team.memberRunnerIds);
@@ -105,6 +117,23 @@ export function TemporaryTeamAdminCard({
     }
   }
 
+  async function saveSchedule(event: React.FormEvent) {
+    event.preventDefault();
+    if (busy) return;
+    setFeedback(null);
+    try {
+      const window = parseTeamWindow(start, end);
+      setBusy(true);
+      const updated = await onSetSchedule(team.labelId, window.startsAt, window.endsAt);
+      setFeedback(updated.active ? 'Planning opgeslagen. De ploeg is nu actief.' : 'Planning opgeslagen. De ploeg schakelt automatisch om.');
+      setEditingSchedule(false);
+    } catch (error) {
+      setFeedback(error instanceof Error ? error.message : 'Planning opslaan mislukt.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const memberNames = team.memberRunnerIds
     .map((id) => runners.find((runner) => runner.id === id))
     .filter((runner): runner is Runner => Boolean(runner));
@@ -139,17 +168,32 @@ export function TemporaryTeamAdminCard({
           <div className="empty-inline">Nog geen leden geselecteerd.</div>
         )}
       </div>
+      {team.startsAt !== null && team.endsAt !== null && (
+        <p className="temporary-team-schedule-summary">
+          <strong>Planning:</strong> {formatTeamWindow(team.startsAt)} tot {formatTeamWindow(team.endsAt)}
+          {team.active ? ' · Nu actief' : Date.now() >= team.endsAt ? ' · Afgelopen' : ' · Nog niet gestart'}
+        </p>
+      )}
+      {editingSchedule && (
+        <form className="temporary-team-schedule-edit" onSubmit={saveSchedule}>
+          <label className="stacked-label">Begin<input className="input" type="datetime-local" value={start} onChange={(event) => setStart(event.target.value)} required /></label>
+          <label className="stacked-label">Einde<input className="input" type="datetime-local" value={end} onChange={(event) => setEnd(event.target.value)} required /></label>
+          <button className="btn btn--primary btn--sm" disabled={busy}>Planning opslaan</button>
+          <button className="btn btn--ghost btn--sm" type="button" onClick={() => setEditingSchedule(false)} disabled={busy}>Annuleren</button>
+        </form>
+      )}
       <div className="form-row form-row--plain">
         <button className="btn btn--ghost" onClick={openMembers} disabled={busy}>
           {team.active ? 'Ledenlijst bekijken' : 'Ledenlijst beheren'}
         </button>
-        <button
+        <button className="btn btn--ghost" onClick={() => setEditingSchedule(true)} disabled={busy || editingSchedule}>Planning aanpassen</button>
+        {team.startsAt === null && <button
           className={`btn ${team.active ? 'btn--danger' : 'btn--primary'}`}
           onClick={changeActive}
           disabled={busy || (!team.active && team.memberRunnerIds.length === 0)}
         >
           {busy ? 'Bezig...' : team.active ? 'Deactiveren' : 'Activeren'}
-        </button>
+        </button>}
       </div>
       {feedback && <div className="host-hint">{feedback}</div>}
       </article>

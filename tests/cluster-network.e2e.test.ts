@@ -17,8 +17,8 @@ const clusterId = 'network-recovery-test';
 const clusterSecret = 'network-recovery-secret';
 const compatibility = {
   protocolVersion: 3,
-  schemaVersion: 10,
-  minimumSchemaVersion: 10,
+  schemaVersion: 12,
+  minimumSchemaVersion: 12,
   replicationFormatVersion: 1,
   minimumReplicationFormatVersion: 1,
   appVersion: '2.0.0',
