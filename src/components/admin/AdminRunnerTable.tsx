@@ -30,6 +30,13 @@ export function AdminRunnerTable({
         ),
       },
       {
+        header: 'Beschikbare uren',
+        cell: ({ row }) => {
+          const hours = row.original.registration?.availableHours ?? [];
+          return hours.length ? hours.join(', ') : 'Niet opgegeven';
+        },
+      },
+      {
         header: 'Bron',
         cell: ({ row }) => <SourceBadge source={row.original.registrationSource} />,
       },

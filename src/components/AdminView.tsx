@@ -68,6 +68,7 @@ export function AdminView() {
   const [recordModeSaving, setRecordModeSaving] = React.useState(false);
   const [runnerMessage, setRunnerMessage] = React.useState<string | null>(null);
   const [runnerQuery, setRunnerQuery] = React.useState('');
+  const [runnerHour, setRunnerHour] = React.useState('');
   const [labelName, setLabelName] = React.useState('');
   const [labelColor, setLabelColor] = React.useState('#3b82f6');
   const [labelKind, setLabelKind] = React.useState('andere');
@@ -315,32 +316,52 @@ export function AdminView() {
     }
   }
 
-  const adminRunners = React.useMemo(() => {
+  const availableHours = React.useMemo(
+    () => [...new Set(runners.flatMap((runner) => runner.registration?.availableHours ?? []))]
+      .sort((a, b) => {
+        const day = (hour: string) => hour.toLowerCase().includes('dinsdag') ? 0 : hour.toLowerCase().includes('woensdag') ? 1 : 2;
+        return day(a) - day(b) || a.localeCompare(b, 'nl-BE', { numeric: true });
+      }),
+    [runners]
+  );
+
+  const matchingAdminRunners = React.useMemo(() => {
     const q = runnerQuery.trim().toLowerCase();
-    const filtered = q
-      ? runners.filter((runner) => {
-          const labelText = runner.labels
-            .map((label) => label.name)
-            .join(' ')
-            .toLowerCase();
-          return (
-            runner.name.toLowerCase().includes(q) ||
-            (runner.runnerNumber || '').toLowerCase().includes(q) ||
-            runner.status.toLowerCase().includes(q) ||
-            runner.registrationSource.toLowerCase().includes(q) ||
-            labelText.includes(q)
-          );
-        })
-      : runners;
-    return [...filtered]
+    return runners
+      .filter((runner) => !runnerHour || runner.registration?.availableHours.includes(runnerHour))
+      .filter((runner) => {
+        if (!q) return true;
+        const labelText = runner.labels
+          .map((label) => label.name)
+          .join(' ')
+          .toLowerCase();
+        return (
+          runner.name.toLowerCase().includes(q) ||
+          (runner.runnerNumber || '').toLowerCase().includes(q) ||
+          runner.status.toLowerCase().includes(q) ||
+          runner.registrationSource.toLowerCase().includes(q) ||
+          labelText.includes(q) ||
+          runner.registration?.availableHours.some((hour) => hour.toLowerCase().includes(q))
+        );
+      })
       .sort(
         (a, b) =>
           statusOrder(a.status) - statusOrder(b.status) ||
           (a.runnerNumber || '').localeCompare(b.runnerNumber || '', undefined, { numeric: true }) ||
           a.name.localeCompare(b.name)
-      )
-      .slice(0, 150);
-  }, [runnerQuery, runners]);
+      );
+  }, [runnerHour, runnerQuery, runners]);
+  const adminRunners = matchingAdminRunners.slice(0, 150);
+  const runnerStatusCounts = React.useMemo(() => {
+    const counts = new Map<Runner['status'], number>();
+    for (const runner of matchingAdminRunners) {
+      counts.set(runner.status, (counts.get(runner.status) ?? 0) + 1);
+    }
+    return [...counts.entries()]
+      .sort(([a], [b]) => statusOrder(a) - statusOrder(b))
+      .map(([status, count]) => `${statusLabel(status)}: ${count}`)
+      .join(' · ');
+  }, [matchingAdminRunners]);
 
   async function restoreRunner(runner: Runner) {
     setRunnerMessage(null);
@@ -863,11 +884,28 @@ export function AdminView() {
             <div className="form-row form-row--plain">
               <input
                 className="input input--stretch"
+                aria-label="Lopers zoeken"
                 value={runnerQuery}
                 onChange={(event) => setRunnerQuery(event.target.value)}
-                placeholder="Zoek op nummer, naam, label, status of bron..."
+                placeholder="Zoek op nummer, naam, label, status, bron of uur..."
               />
+              <select
+                className="input"
+                aria-label="Beschikbaar tijdens"
+                value={runnerHour}
+                onChange={(event) => setRunnerHour(event.target.value)}
+              >
+                <option value="">Alle beschikbare uren</option>
+                {availableHours.map((hour) => <option key={hour} value={hour}>{hour}</option>)}
+              </select>
             </div>
+            <p className="panel-copy" role="status">
+              {matchingAdminRunners.length} {matchingAdminRunners.length === 1 ? 'loper' : 'lopers'} gevonden
+              {runnerHour ? ` voor ${runnerHour}` : ''}
+              {matchingAdminRunners.length > 150 ? ' · eerste 150 getoond' : ''}
+              {runnerStatusCounts ? ` · ${runnerStatusCounts}` : ''}
+            </p>
+            {runnerHour && <p className="panel-copy">Beschikbaarheid komt uit de inschrijving. De status toont de huidige stap in de app, niet de fysieke locatie.</p>}
             {runnerMessage && <div className="host-hint">{runnerMessage}</div>}
             <div className="table-wrap">
               <AdminRunnerTable
