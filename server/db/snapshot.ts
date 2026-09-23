@@ -55,9 +55,10 @@ export function applySnapshot(snapshot: AppSnapshot): void {
           historical_best_ms,
           registration_source,
           notes,
+          registration_json,
           created_at,
           updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           runner.id,
           runner.runnerNumber ?? null,
@@ -67,6 +68,7 @@ export function applySnapshot(snapshot: AppSnapshot): void {
           runner.historicalBestMs ?? null,
           cleanRegistrationSource(runner.registrationSource),
           runner.notes ?? '',
+          runner.registration ? JSON.stringify(runner.registration) : null,
           runner.createdAt,
           runner.updatedAt,
         ]

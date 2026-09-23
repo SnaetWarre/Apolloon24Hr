@@ -4,7 +4,7 @@ import { getSetting, setSetting } from './settings.js';
 import { getRunnerLabelsMap, findLabelByName, createLabelRecord } from './labels.js';
 import { compactStoredLapLabels, REPLICATION_CHECKPOINT_KEY, LEGACY_REPLICATION_CHECKPOINT_KEY, storeReplicationCheckpoint, decodeReplicationCheckpoint } from './checkpoint.js';
 
-export const DATABASE_SCHEMA_VERSION = 9;
+export const DATABASE_SCHEMA_VERSION = 10;
 
 type DefaultLabel = LabelInput & { id: string };
 
@@ -109,6 +109,7 @@ export function createSchema(): void {
       historical_best_ms INTEGER,
       registration_source TEXT NOT NULL DEFAULT 'manual' CHECK(registration_source IN ('import','manual')),
       notes TEXT DEFAULT '',
+      registration_json TEXT,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
@@ -282,6 +283,9 @@ export function migrateSchema(): void {
     throw new Error(
       `database schema ${previousVersion} is newer than this Apolloon release (${DATABASE_SCHEMA_VERSION})`
     );
+  }
+  if (!tableHasColumn('runners', 'registration_json')) {
+    run('ALTER TABLE runners ADD COLUMN registration_json TEXT');
   }
   if (!tableHasColumn('race_state', 'active_labels_json')) {
     run('ALTER TABLE race_state ADD COLUMN active_labels_json TEXT');

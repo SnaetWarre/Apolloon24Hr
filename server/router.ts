@@ -16,6 +16,7 @@ import {
   temporaryTeamMembersSchema,
   type ImportSummary,
   type RunnerInput,
+  type RunnerRegistration,
 } from '../shared/schemas.js';
 import { appSnapshot, liveAppSnapshot } from './app-state.js';
 import { createVerifiedBackup } from './backups.js';
@@ -135,6 +136,46 @@ function getRowValue(row: Record<string, unknown>, names: string[]): unknown {
     if (value !== undefined && cleanText(value)) return value;
   }
   return '';
+}
+
+function getFormValue(row: Record<string, unknown>, prefix: string): string {
+  const key = Object.keys(row).find((candidate) =>
+    candidate.trim().toLocaleLowerCase('nl-BE').startsWith(prefix.toLocaleLowerCase('nl-BE'))
+  );
+  return cleanText(key ? row[key] : '');
+}
+
+function splitFormChoices(value: string): string[] {
+  return value.split(/\s*,\s*|\s*;\s*|\n/).map((choice) => choice.trim()).filter(Boolean);
+}
+
+function registrationFromRow(row: Record<string, unknown>): RunnerRegistration {
+  return {
+    submittedAt: getFormValue(row, 'Tijdstempel'),
+    email: getFormValue(row, 'E-mailadres'),
+    phone: getFormValue(row, 'GSM-nummer'),
+    studyPhase: getFormValue(row, 'Studiefase'),
+    estimatedLaps: getFormValue(row, 'Ik schat in totaal'),
+    estimatedPace: getFormValue(row, 'Ik schat een gemiddelde'),
+    maxLapsPerBlock: getFormValue(row, 'Maximum aantal rondjes'),
+    availableHours: splitFormChoices(getFormValue(row, 'Ik ben volgende uren beschikbaar')),
+    reuseConsent: getFormValue(row, 'Ik geef hierbij toestemming'),
+    flexibility: getFormValue(row, 'Hoe flexibel ben jij'),
+    remarks: getFormValue(row, 'Nog iets dat wij best kunnen weten'),
+    categories: splitFormChoices(getFormValue(row, 'Behoor je tot')),
+  };
+}
+
+function labelsFromFormCategories(categories: string[]): string[] {
+  const names: Record<string, string> = {
+    eerstejaars: '1ste jaar',
+    'hilok gent': 'HILOK',
+    'kinesia antwerpen': 'Kinesia',
+    mesacosa: 'Mesacosa',
+    vrouw: 'Dames',
+    'ik ben alumni aan de faculteit faber': 'Anciens',
+  };
+  return categories.map((category) => names[category.trim().toLowerCase()]).filter((name): name is string => Boolean(name));
 }
 
 function emitRunnerCollections(): void {
@@ -375,16 +416,20 @@ export const appRouter = t.router({
           skipped: 0,
           errors: [],
         };
+        const formExport = parsed.data.some((row) =>
+          Object.keys(row).some((key) => key.trim().toLowerCase().startsWith('e-mailadres'))
+        );
 
         for (const [index, row] of parsed.data.entries()) {
+          const registration = formExport ? registrationFromRow(row) : null;
           const runnerNumber = cleanText(
             getRowValue(row, ['runner_number', 'lopersnummer', 'nummer', 'number', 'bib'])
-          );
-          const name = cleanText(getRowValue(row, ['name', 'naam', 'runner_name', 'loper']));
+          ) || (formExport ? String(index + 2) : '');
+          const name = cleanText(getRowValue(row, ['name', 'naam', 'runner_name', 'loper', 'voornaam_+_naam']));
 
-          if (!runnerNumber || !name) {
+          if (!runnerNumber || !name || (formExport && !registration?.email)) {
             summary.skipped += 1;
-            summary.errors.push(`Rij ${index + 2}: runner_number en name zijn verplicht`);
+            summary.errors.push(`Rij ${index + 2}: lopersnummer, naam en bij formulierexport e-mailadres zijn verplicht`);
             continue;
           }
 
@@ -398,16 +443,15 @@ export const appRouter = t.router({
             const runnerInput: RunnerInput = {
               runnerNumber,
               name,
-              labels: splitLabels(labelValues),
-              targetLaps: parsePositiveInt(getRowValue(row, ['target_laps', 'doelstelling', 'target'])),
-              historicalAvgMs: parseDurationMs(
-                getRowValue(row, ['historical_avg', 'gemiddelde', 'avg', 'average'])
-              ),
-              historicalBestMs: parseDurationMs(
-                getRowValue(row, ['historical_best', 'snelste', 'best', 'fastest'])
-              ),
+              ...(!formExport ? {
+                labels: splitLabels(labelValues),
+                targetLaps: parsePositiveInt(getRowValue(row, ['target_laps', 'doelstelling', 'target'])),
+                historicalAvgMs: parseDurationMs(getRowValue(row, ['historical_avg', 'gemiddelde', 'avg', 'average'])),
+                historicalBestMs: parseDurationMs(getRowValue(row, ['historical_best', 'snelste', 'best', 'fastest'])),
+              } : { labels: labelsFromFormCategories(registration?.categories ?? []) }),
               status: 'registered',
               registrationSource: 'import',
+              ...(registration ? { registration } : {}),
             };
             const result = upsertRunnerFromImport(runnerInput);
             if (result.action === 'updated') summary.updated += 1;

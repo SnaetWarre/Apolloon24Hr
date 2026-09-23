@@ -23,6 +23,7 @@ export type {
   Runner,
   RunnerInput,
   RunnerPatch,
+  RunnerRegistration,
   RunnerStatus,
   TemporaryTeam,
   TimingControlState,

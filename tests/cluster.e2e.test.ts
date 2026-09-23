@@ -914,8 +914,8 @@ function postClusterExchange(
       protocol: 3,
       compatibility: {
         protocolVersion: 3,
-        schemaVersion: 9,
-        minimumSchemaVersion: 9,
+        schemaVersion: 10,
+        minimumSchemaVersion: 10,
         replicationFormatVersion: 1,
         minimumReplicationFormatVersion: 1,
         appVersion: '1.0.0',
