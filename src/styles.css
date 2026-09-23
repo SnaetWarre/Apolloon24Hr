@@ -2608,13 +2608,6 @@ tbody tr:hover {
   overflow-wrap: break-word;
 }
 
-.display-time {
-  display: block;
-  font-size: clamp(42px, 5.5vw, 96px);
-  font-style: normal;
-  font-weight: 900;
-}
-
 .outside-record-flash {
   position: fixed;
   inset: 0;
