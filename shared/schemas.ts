@@ -58,6 +58,22 @@ export const appSettingsSchema = z.object({
 });
 export type AppSettings = z.infer<typeof appSettingsSchema>;
 
+export const runnerRegistrationSchema = z.object({
+  submittedAt: z.string(),
+  email: z.string(),
+  phone: z.string(),
+  studyPhase: z.string(),
+  estimatedLaps: z.string(),
+  estimatedPace: z.string(),
+  maxLapsPerBlock: z.string(),
+  availableHours: z.array(z.string()),
+  reuseConsent: z.string(),
+  flexibility: z.string(),
+  remarks: z.string(),
+  categories: z.array(z.string()),
+});
+export type RunnerRegistration = z.infer<typeof runnerRegistrationSchema>;
+
 export const runnerSchema = z.object({
   id: z.string(),
   runnerNumber: z.string().nullable(),
@@ -67,6 +83,7 @@ export const runnerSchema = z.object({
   historicalBestMs: z.number().int().nonnegative().nullable(),
   registrationSource: registrationSourceSchema,
   notes: z.string(),
+  registration: runnerRegistrationSchema.nullable(),
   createdAt: z.number(),
   updatedAt: z.number(),
   status: runnerStatusSchema,
@@ -267,6 +284,7 @@ export const runnerInputSchema = z.object({
   historicalBestMs: z.number().int().nonnegative().nullable().optional(),
   registrationSource: registrationSourceSchema.optional(),
   notes: z.string().optional(),
+  registration: runnerRegistrationSchema.nullable().optional(),
   labels: z.array(z.string()).optional(),
   status: runnerStatusSchema.optional(),
   statusSince: z.number().int().nonnegative().optional(),

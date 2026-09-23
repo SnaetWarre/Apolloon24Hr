@@ -1,11 +1,18 @@
-import { type Runner, type Label } from '../../shared/schemas.js';
+import { runnerRegistrationSchema, type Runner, type Label } from '../../shared/schemas.js';
 import { cleanRegistrationSource, cleanStatus } from './values.js';
 import { getRunnerLabelsMap, getRunnerLabels } from './labels.js';
 import { all, one } from './connection.js';
 
 type RunnerRow = Omit<Runner, 'labels' | 'hiddenFromQueue'> & {
   queueHiddenAt: number | null;
+  registrationJson: string | null;
 };
+
+function parseRegistration(value: string | null): Runner['registration'] {
+  if (!value) return null;
+  try { return runnerRegistrationSchema.parse(JSON.parse(value)); }
+  catch { return null; }
+}
 
 const RUNNER_SELECT_SQL = `
   SELECT
@@ -17,6 +24,7 @@ const RUNNER_SELECT_SQL = `
     r.historical_best_ms AS historicalBestMs,
     r.registration_source AS registrationSource,
     r.notes,
+    r.registration_json AS registrationJson,
     r.created_at AS createdAt,
     r.updated_at AS updatedAt,
     COALESCE(q.status, 'registered') AS status,
@@ -50,6 +58,7 @@ function runnerFromRow(row: RunnerRow, labels: Label[]): Runner {
     historicalBestMs: row.historicalBestMs ?? null,
     registrationSource: cleanRegistrationSource(row.registrationSource),
     notes: row.notes ?? '',
+    registration: parseRegistration(row.registrationJson),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     status: cleanStatus(row.status),

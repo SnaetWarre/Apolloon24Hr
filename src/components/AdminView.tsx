@@ -728,6 +728,7 @@ export function AdminView() {
               <p className="panel-copy">
                 Import zet nieuwe lopers in de ingeschreven databank. Ze verschijnen pas op het bord wanneer
                 je ze activeert in Telsysteem 1.
+                Een formulierexport met E-mailadres en Voornaam + naam neemt het spreadsheetrijnummer als lopersnummer en bewaart alle inschrijvingsantwoorden in het profiel.
               </p>
               <div className="file-import-row">
                 <label className="file-picker">
