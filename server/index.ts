@@ -43,7 +43,7 @@ import {
 } from './net-setup.js';
 import { sendJson } from './http-json.js';
 import { setRealtimeEmitter } from './realtime.js';
-import { appRouter } from './router.js';
+import { appRouter, runTemporaryTeamSchedules } from './router.js';
 import { relativeFileWithinRoot } from './static-files.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -71,6 +71,7 @@ const io = new SocketIOServer(server, {
   connectionStateRecovery: {},
 });
 let shuttingDown = false;
+let temporaryTeamScheduleTimer: NodeJS.Timeout | null = null;
 const processStartedAt = Date.now();
 
 function lapExportRows(): Array<Record<string, string | number>> {
@@ -446,6 +447,7 @@ function shutdown(reason: string): void {
   shuttingDown = true;
   console.log(`Stopping server (${reason})`);
   stopClusterService();
+  if (temporaryTeamScheduleTimer) clearInterval(temporaryTeamScheduleTimer);
 
   let finished = false;
   let forceExit: NodeJS.Timeout;
@@ -494,6 +496,8 @@ if (startupCompaction?.compacted) {
 }
 startBackupService();
 startClusterService();
+runTemporaryTeamSchedules();
+temporaryTeamScheduleTimer = setInterval(runTemporaryTeamSchedules, 1_000);
 
 server.listen(SERVER_PORT, () => {
   console.log(`Server listening on http://0.0.0.0:${SERVER_PORT}`);

@@ -126,9 +126,9 @@ export function applySnapshot(snapshot: AppSnapshot): void {
 
     for (const team of snapshot.temporaryTeams ?? []) {
       run(
-        `INSERT INTO temporary_teams (label_id, active, activated_at)
-         VALUES (?, ?, ?)`,
-        [team.labelId, team.active ? 1 : 0, team.activatedAt ?? null]
+        `INSERT INTO temporary_teams (label_id, active, activated_at, starts_at, ends_at, schedule_owner_host_id)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [team.labelId, team.active ? 1 : 0, team.activatedAt ?? null, team.startsAt ?? null, team.endsAt ?? null, team.scheduleOwnerHostId ?? null]
       );
       for (const runnerId of team.memberRunnerIds) {
         run(

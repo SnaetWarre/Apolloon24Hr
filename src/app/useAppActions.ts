@@ -120,6 +120,16 @@ export function useAppActions() {
         await reconcileSnapshot();
         return team;
       },
+      async createTemporaryTeam(input: { name: string; color: string; startsAt: number; endsAt: number; runnerIds: string[] }) {
+        const team = await trpc.temporaryTeams.create.mutate(command(input));
+        await reconcileSnapshot();
+        return team;
+      },
+      async setTemporaryTeamSchedule(labelId: string, startsAt: number, endsAt: number) {
+        const team = await trpc.temporaryTeams.setSchedule.mutate(command({ labelId, startsAt, endsAt }));
+        await reconcileSnapshot();
+        return team;
+      },
       async setTemporaryTeamActive(labelId: string, active: boolean) {
         const team = await trpc.temporaryTeams.setActive.mutate(command({ labelId, active }));
         await reconcileSnapshot();
