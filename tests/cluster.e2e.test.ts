@@ -224,6 +224,20 @@ test('two writable Electron databases exchange operations in both directions', {
 
     const states = await Promise.all(ports.map(fetchState));
     assert.deepEqual(normalizeState(states[0]), normalizeState(states[1]));
+
+    const clientA = createClient(ports[0]);
+    const blue = (await clientA.labels.list.query()).find((label) => label.name === 'Speedteam Blue');
+    assert.ok(blue);
+    const nightRunner = await clientA.runners.create.mutate({ name: 'Planned runner', labels: [blue.id] });
+    await waitFor(async () => (await fetchState(ports[1])).runners.some((runner) => runner.id === nightRunner.id));
+    const startsAt = Date.now() + 1_500;
+    const team = await clientA.temporaryTeams.create.mutate({
+      name: 'Planned cluster team', color: '#7c3aed', runnerIds: [nightRunner.id],
+      startsAt, endsAt: startsAt + 2_000,
+    });
+    await waitFor(async () => (await fetchState(ports[1])).temporaryTeams.some((item) => item.labelId === team.labelId));
+    await waitFor(async () => (await fetchState(ports[1])).runners.find((runner) => runner.id === nightRunner.id)?.labels.some((label) => label.id === team.labelId) ?? false, 8_000);
+    await waitFor(async () => (await fetchState(ports[1])).runners.find((runner) => runner.id === nightRunner.id)?.labels.some((label) => label.id === blue.id) ?? false, 8_000);
   } catch (error) {
     throw withServerOutput(error, ...servers);
   } finally {
@@ -914,8 +928,8 @@ function postClusterExchange(
       protocol: 3,
       compatibility: {
         protocolVersion: 3,
-        schemaVersion: 10,
-        minimumSchemaVersion: 10,
+        schemaVersion: 12,
+        minimumSchemaVersion: 12,
         replicationFormatVersion: 1,
         minimumReplicationFormatVersion: 1,
         appVersion: '1.0.0',

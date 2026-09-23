@@ -8,6 +8,7 @@ import { buildEventReadiness, readinessSummary } from '../lib/readiness';
 import { AdminRunnerTable } from './admin/AdminRunnerTable';
 import { LabelAdminRow } from './admin/LabelAdminRow';
 import { TemporaryTeamAdminCard } from './admin/TemporaryTeamAdminCard';
+import { TemporaryTeamCreateForm } from './admin/TemporaryTeamCreateForm';
 import { NetworkSetupPanel } from './NetworkSetupPanel';
 import {
   formatConflictTime,
@@ -53,6 +54,8 @@ export function AdminView() {
     updatePublicRecordMode,
     setTemporaryTeamMembers,
     setTemporaryTeamActive,
+    createTemporaryTeam,
+    setTemporaryTeamSchedule,
     joinCluster,
     resolveConflict,
     transferTimingControl,
@@ -410,6 +413,37 @@ export function AdminView() {
           )}
         </aside>
         <div className="management-content">
+          <section hidden={activeSection !== 'labels'} className="panel">
+            <h2>Tijdelijke nachtploegen</h2>
+            <p className="panel-copy">
+              Plan wanneer de lopers tijdelijk van hun gewone speedteam naar deze ploeg gaan. Na het einduur keren ze automatisch terug.
+            </p>
+            <TemporaryTeamCreateForm runners={runners} allTeams={temporaryTeams} onCreate={createTemporaryTeam} />
+            {temporaryTeams.length ? (
+              <div className="temporary-team-list">
+                {temporaryTeams.map((team) => {
+                  const label = labels.find((item) => item.id === team.labelId);
+                  return label ? (
+                    <TemporaryTeamAdminCard
+                      key={team.labelId}
+                      label={label}
+                      team={team}
+                      allTeams={temporaryTeams}
+                      runners={runners}
+                      onSaveMembers={setTemporaryTeamMembers}
+                      onSetActive={setTemporaryTeamActive}
+                      onSetSchedule={setTemporaryTeamSchedule}
+                    />
+                  ) : null;
+                })}
+              </div>
+            ) : (
+              <div className="empty-inline">
+                Nog geen tijdelijke nachtploegen. Maak hierboven de eerste aan.
+              </div>
+            )}
+          </section>
+
           <div className="admin-dashboard">
             <section
               hidden={activeSection !== 'preparation'}
@@ -789,7 +823,6 @@ export function AdminView() {
                   onChange={(event) => setLabelKind(event.target.value)}
                 >
                   <option value="speedteam">Speedteam</option>
-                  <option value="temporary_team">Tijdelijke nachtploeg</option>
                   <option value="zustervereniging">Zustervereniging</option>
                   <option value="andere">Andere</option>
                   <option value="custom">Custom</option>
@@ -844,36 +877,6 @@ export function AdminView() {
               </div>
             </section>
           </div>
-
-          <section hidden={activeSection !== 'labels'} className="panel">
-            <h2>Tijdelijke nachtploegen</h2>
-            <p className="panel-copy">
-              Stel de leden vooraf in. Activeren vervangt hun gewone speedteam tijdelijk; deactiveren zet die
-              automatisch terug.
-            </p>
-            {temporaryTeams.length ? (
-              <div className="temporary-team-list">
-                {temporaryTeams.map((team) => {
-                  const label = labels.find((item) => item.id === team.labelId);
-                  return label ? (
-                    <TemporaryTeamAdminCard
-                      key={team.labelId}
-                      label={label}
-                      team={team}
-                      allTeams={temporaryTeams}
-                      runners={runners}
-                      onSaveMembers={setTemporaryTeamMembers}
-                      onSetActive={setTemporaryTeamActive}
-                    />
-                  ) : null;
-                })}
-              </div>
-            ) : (
-              <div className="empty-inline">
-                Maak hierboven eerst een label van het type Tijdelijke nachtploeg.
-              </div>
-            )}
-          </section>
 
           <section hidden={activeSection !== 'runners'} className="panel">
             <h2>Lopers beheren</h2>

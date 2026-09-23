@@ -2382,6 +2382,44 @@ tbody tr:hover {
   gap: 1rem;
 }
 
+.temporary-team-create {
+  display: grid;
+  gap: 0.75rem;
+  margin: 1.25rem 0 2rem;
+  padding-bottom: 1.5rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.temporary-team-create__fields {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) 80px repeat(2, minmax(190px, 1fr));
+  gap: 0.75rem;
+  align-items: end;
+}
+
+.temporary-team-create__fields .input:not(.input--color) { width: 100%; min-width: 0; }
+.temporary-team-create .panel-copy { margin: 0; }
+.temporary-team-window-preview { margin: 0; color: var(--text); font-size: 0.9rem; font-weight: 600; }
+.temporary-team-create__runners { max-height: 220px; overflow: auto; border: 1px solid var(--line); border-radius: var(--radius-md); }
+.temporary-team-create__runner { display: flex; align-items: center; gap: 0.75rem; padding: 0.6rem 0.75rem; border-bottom: 1px solid var(--line); cursor: pointer; }
+.temporary-team-create__runner:last-child { border-bottom: 0; }
+.temporary-team-create__runner input { width: 18px; height: 18px; flex: none; }
+.temporary-team-create__runner span { display: grid; gap: 2px; min-width: 0; }
+.temporary-team-create__runner small { color: var(--muted); }
+.temporary-team-create__runner.is-disabled { opacity: 0.55; cursor: default; }
+.temporary-team-create__selected { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.temporary-team-create__selected span { border: 1px solid var(--line); border-radius: var(--radius-pill); padding: 0.25rem 0.6rem; font-size: 0.85rem; }
+.temporary-team-schedule-summary { margin: 0.75rem 0; font-size: 0.9rem; }
+.temporary-team-schedule-edit { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: end; margin: 0.75rem 0; }
+.temporary-team-schedule-edit .stacked-label { min-width: 190px; }
+@media (max-width: 850px) {
+  .temporary-team-create__fields { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+}
+@media (max-width: 520px) {
+  .temporary-team-create__fields { grid-template-columns: minmax(0, 1fr); }
+  .temporary-team-create__runners { max-height: 260px; }
+}
+
 .temporary-team-card {
   border: 2px solid var(--line);
   border-radius: var(--radius-lg);

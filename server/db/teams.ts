@@ -28,8 +28,9 @@ export function getTemporaryTeams(): TemporaryTeam[] {
     restores[member.runnerId] = parseStringArray(member.restoreJson);
     restoresByTeam.set(member.labelId, restores);
   }
-  return all<{ labelId: string; active: number; activatedAt: number | null }>(
-    `SELECT tt.label_id AS labelId, tt.active, tt.activated_at AS activatedAt
+  return all<{ labelId: string; active: number; activatedAt: number | null; startsAt: number | null; endsAt: number | null; scheduleOwnerHostId: string | null }>(
+    `SELECT tt.label_id AS labelId, tt.active, tt.activated_at AS activatedAt,
+            tt.starts_at AS startsAt, tt.ends_at AS endsAt, tt.schedule_owner_host_id AS scheduleOwnerHostId
      FROM temporary_teams tt
      JOIN labels l ON l.id = tt.label_id
      WHERE l.kind = ?
@@ -39,6 +40,9 @@ export function getTemporaryTeams(): TemporaryTeam[] {
     labelId: team.labelId,
     active: Boolean(team.active),
     activatedAt: team.activatedAt ?? null,
+    startsAt: team.startsAt ?? null,
+    endsAt: team.endsAt ?? null,
+    scheduleOwnerHostId: team.scheduleOwnerHostId ?? null,
     memberRunnerIds: membersByTeam.get(team.labelId) ?? [],
     restoreLabelIdsByRunner: restoresByTeam.get(team.labelId) ?? {},
   }));
@@ -53,6 +57,11 @@ export function setTemporaryTeamMembers(labelId: string, runnerIds: string[]): T
   for (const runnerId of uniqueRunnerIds) {
     if (!one<{ id: string }>('SELECT id FROM runners WHERE id = ?', [runnerId])) {
       throw new Error('Een geselecteerde loper bestaat niet meer');
+    }
+    const baseTeams = getRunnerLabels(runnerId).filter((item) => item.kind === 'speedteam');
+    if (baseTeams.length !== 1) {
+      const runner = getRunnerById(runnerId);
+      throw new Error(`${runner?.name ?? 'Loper'} moet exact een gewone speedteamploeg hebben`);
     }
     const other = one<{ labelId: string }>(
       `SELECT team_label_id AS labelId FROM temporary_team_members
@@ -131,4 +140,14 @@ export function setTemporaryTeamActive(labelId: string, active: boolean, nowMs =
   const updated = getTemporaryTeams().find((item) => item.labelId === labelId);
   if (!updated) throw new Error('Tijdelijke nachtploeg aanpassen mislukt');
   return updated;
+}
+
+export function setTemporaryTeamSchedule(labelId: string, startsAt: number, endsAt: number, ownerHostId: string | null = null): TemporaryTeam {
+  if (!Number.isSafeInteger(startsAt) || !Number.isSafeInteger(endsAt) || startsAt < 0 || endsAt <= startsAt) {
+    throw new Error('Het einduur moet na het beginuur liggen');
+  }
+  const team = getTemporaryTeams().find((item) => item.labelId === labelId);
+  if (!team) throw new Error('Tijdelijke nachtploeg niet gevonden');
+  run('UPDATE temporary_teams SET starts_at = ?, ends_at = ?, schedule_owner_host_id = COALESCE(?, schedule_owner_host_id) WHERE label_id = ?', [startsAt, endsAt, ownerHostId, labelId]);
+  return getTemporaryTeams().find((item) => item.labelId === labelId)!;
 }

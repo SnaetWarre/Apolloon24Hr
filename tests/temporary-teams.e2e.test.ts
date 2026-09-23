@@ -174,6 +174,20 @@ test('temporary night teams work through HTTP, realtime, analysis, exports, and 
     assert.match(compressedAsset.headers.get('content-type') || '', /^text\/javascript/);
     assert.match(compressedAsset.headers.get('cache-control') || '', /immutable/);
 
+    const charlie = await client.runners.create.mutate({ name: 'E2E Charlie', runnerNumber: 'E2E-3', labels: [blue.id] });
+    const dana = await client.runners.create.mutate({ name: 'E2E Dana', runnerNumber: 'E2E-4', labels: [white.id] });
+    const scheduledStart = Date.now() + 4_500;
+    const scheduledEnd = scheduledStart + 2_000;
+    const scheduled = await client.temporaryTeams.create.mutate({
+      name: 'E2E Gepland', color: '#7c3aed', runnerIds: [charlie.id],
+      startsAt: scheduledStart, endsAt: scheduledEnd,
+    });
+    assert.equal(scheduled.active, false);
+    await assert.rejects(
+      client.temporaryTeams.setActive.mutate({ labelId: scheduled.labelId, active: true }),
+      /volgt haar planning/
+    );
+
     socket.close();
     socket = null;
     await stopServer(server);
@@ -185,6 +199,18 @@ test('temporary night teams work through HTTP, realtime, analysis, exports, and 
     assert.equal(restartedState.temporaryTeams.filter((team) => team.active).length, 0);
     assert.equal(filterLaps(restartedState.laps, { enabledLabelIds: [trojan.id] }).length, 1);
     assert.deepEqual(currentTeamIds(restartedState, alice.id), [blue.id]);
+    assert.equal(restartedState.temporaryTeams.find((team) => team.labelId === scheduled.labelId)?.startsAt, scheduledStart);
+    await waitFor(async () => currentTeamIds(await fetchState(baseUrl), charlie.id).includes(scheduled.labelId), 8_000);
+    await waitFor(async () => currentTeamIds(await fetchState(baseUrl), charlie.id).includes(blue.id), 8_000);
+    assert.equal((await fetchState(baseUrl)).temporaryTeams.find((team) => team.labelId === scheduled.labelId)?.active, false);
+
+    const immediate = await client.temporaryTeams.create.mutate({
+      name: 'E2E Meteen', color: '#db2777', runnerIds: [dana.id],
+      startsAt: Date.now() - 10 * 60_000, endsAt: Date.now() + 2_000,
+    });
+    assert.equal(immediate.active, true);
+    assert.deepEqual(currentTeamIds(await fetchState(baseUrl), dana.id), [immediate.labelId]);
+    await waitFor(async () => currentTeamIds(await fetchState(baseUrl), dana.id).includes(white.id), 8_000);
   } catch (error) {
     throw new Error(`${error instanceof Error ? error.stack || error.message : String(error)}\nServer output:\n${serverOutput}`);
   } finally {

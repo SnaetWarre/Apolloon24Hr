@@ -4,7 +4,7 @@ import { getSetting, setSetting } from './settings.js';
 import { getRunnerLabelsMap, findLabelByName, createLabelRecord } from './labels.js';
 import { compactStoredLapLabels, REPLICATION_CHECKPOINT_KEY, LEGACY_REPLICATION_CHECKPOINT_KEY, storeReplicationCheckpoint, decodeReplicationCheckpoint } from './checkpoint.js';
 
-export const DATABASE_SCHEMA_VERSION = 10;
+export const DATABASE_SCHEMA_VERSION = 12;
 
 type DefaultLabel = LabelInput & { id: string };
 
@@ -190,6 +190,9 @@ export function createSchema(): void {
       label_id TEXT PRIMARY KEY,
       active INTEGER NOT NULL DEFAULT 0,
       activated_at INTEGER,
+      starts_at INTEGER,
+      ends_at INTEGER,
+      schedule_owner_host_id TEXT,
       FOREIGN KEY (label_id) REFERENCES labels(id) ON DELETE CASCADE
     );
 
@@ -292,6 +295,15 @@ export function migrateSchema(): void {
   }
   if (!tableHasColumn('laps', 'labels_json')) {
     run("ALTER TABLE laps ADD COLUMN labels_json TEXT NOT NULL DEFAULT '[]'");
+  }
+  if (!tableHasColumn('temporary_teams', 'starts_at')) {
+    run('ALTER TABLE temporary_teams ADD COLUMN starts_at INTEGER');
+  }
+  if (!tableHasColumn('temporary_teams', 'ends_at')) {
+    run('ALTER TABLE temporary_teams ADD COLUMN ends_at INTEGER');
+  }
+  if (!tableHasColumn('temporary_teams', 'schedule_owner_host_id')) {
+    run('ALTER TABLE temporary_teams ADD COLUMN schedule_owner_host_id TEXT');
   }
 
   if (previousVersion < 5) {

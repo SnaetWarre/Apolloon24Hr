@@ -48,7 +48,7 @@ export { ensureReplicationIdentity, getReplicationVector } from './db/replicatio
 export { assertOrClaimTimingController, claimTimingController, assignTimingController, getTimingControllerGeneration, commitReplicatedWrite, getReplicationOperationsMissing, getAllReplicationOperations, getReplicationOperation, getOpenReplicationConflictCount, getReplicationConflicts, getDeadLetterOperations, getDeadLetterCount, prepareReplicationConflictChoice, finalizeReplicationConflict, getPendingReplicationOperationCount, acknowledgeReplicationVector, applyRemoteReplicationOperations, installReplicationBootstrap } from './db/replication.js';
 export { getReplicationCheckpoint } from './db/checkpoint.js';
 export { getLabels, findLabelByName, ensureLabel, createLabel, updateLabel, deleteLabel } from './db/labels.js';
-export { getTemporaryTeams, setTemporaryTeamMembers, setTemporaryTeamActive } from './db/teams.js';
+export { getTemporaryTeams, setTemporaryTeamMembers, setTemporaryTeamActive, setTemporaryTeamSchedule } from './db/teams.js';
 export { getAllRunners, getRunnerById, getRunnersByIds } from './db/runner-queries.js';
 export { setRunnerLabels, insertRunner, updateRunner, upsertRunnerFromImport, deleteRunner } from './db/runners.js';
 export { hideRunnerInQueue, unhideRunnerInQueue, updateRunnerStatus, runnerStatusChangeError, updateWaitingOrder, getMaxQueueIndex } from './db/queue.js';
