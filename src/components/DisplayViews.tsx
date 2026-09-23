@@ -250,10 +250,10 @@ export function InsideDisplay() {
               onClick={() => setRankingMode('coefficient')}
               aria-pressed={rankingMode === 'coefficient'}
             >
-              Punten (tempo)
+              Punten (tempo en tijdstip)
             </button>
           </div>
-          <small className="inside-ranking-modes-help">Punten wegen snelle rondes zwaarder.</small>
+          <small className="inside-ranking-modes-help">Snellere rondes scoren hoger; het tijdvak van aankomst telt mee.</small>
           <div className="inside-ranking-rotation-row">
             <p className="inside-ranking-rotation-note">
               {prefersReducedMotion
