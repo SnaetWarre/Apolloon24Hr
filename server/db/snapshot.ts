@@ -1,19 +1,24 @@
 import { type AppSnapshot } from '../../shared/schemas.js';
-import { transaction, run } from './connection.js';
-import { cleanRegistrationSource, cleanStatus, serializeHistoricalLabels, cleanRaceEventType } from './values.js';
-import { setPublicRecordMode, DEFAULT_PUBLIC_RECORD_MODE } from './settings.js';
+import { run, transaction } from './connection.js';
+import { setPublicRecordMode } from './settings.js';
+import { cleanRaceEventType, cleanRegistrationSource, cleanStatus, serializeHistoricalLabels } from './values.js';
 
+const SNAPSHOT_DELETE_ORDER = [
+  'handoff_history',
+  'race_events',
+  'laps',
+  'temporary_team_members',
+  'temporary_teams',
+  'runner_labels',
+  'queue_entries',
+  'runners',
+  'labels',
+] as const;
+
+/** Replaces all application data with the snapshot, as replicated statements. */
 export function applySnapshot(snapshot: AppSnapshot): void {
   transaction(() => {
-    run('DELETE FROM handoff_history');
-    run('DELETE FROM race_events');
-    run('DELETE FROM laps');
-    run('DELETE FROM temporary_team_members');
-    run('DELETE FROM temporary_teams');
-    run('DELETE FROM runner_labels');
-    run('DELETE FROM queue_entries');
-    run('DELETE FROM runners');
-    run('DELETE FROM labels');
+    for (const table of SNAPSHOT_DELETE_ORDER) run(`DELETE FROM ${table}`);
 
     for (const label of snapshot.labels) {
       run(
@@ -89,7 +94,7 @@ export function applySnapshot(snapshot: AppSnapshot): void {
           runner.queueHiddenAt ?? null,
         ]
       );
-      for (const label of runner.labels || []) {
+      for (const label of runner.labels) {
         run('INSERT OR IGNORE INTO runner_labels (runner_id, label_id) VALUES (?, ?)', [
           runner.id,
           label.id,
@@ -119,12 +124,12 @@ export function applySnapshot(snapshot: AppSnapshot): void {
           lap.durationMs,
           lap.source,
           lap.createdAt,
-          serializeHistoricalLabels(lap.labels ?? []),
+          serializeHistoricalLabels(lap.labels),
         ]
       );
     }
 
-    for (const team of snapshot.temporaryTeams ?? []) {
+    for (const team of snapshot.temporaryTeams) {
       run(
         `INSERT INTO temporary_teams (label_id, active, activated_at, starts_at, ends_at, schedule_owner_host_id)
          VALUES (?, ?, ?, ?, ?, ?)`,
@@ -135,7 +140,7 @@ export function applySnapshot(snapshot: AppSnapshot): void {
           `INSERT INTO temporary_team_members (
              team_label_id, runner_id, restore_label_ids_json
            ) VALUES (?, ?, ?)`,
-          [team.labelId, runnerId, JSON.stringify(team.restoreLabelIdsByRunner?.[runnerId] ?? [])]
+          [team.labelId, runnerId, JSON.stringify(team.restoreLabelIdsByRunner[runnerId] ?? [])]
         );
       }
     }
@@ -178,9 +183,9 @@ export function applySnapshot(snapshot: AppSnapshot): void {
         snapshot.race.activeStartedAt ?? null,
         snapshot.race.raceStartedAt ?? null,
         snapshot.race.raceFinishedAt ?? null,
-        JSON.stringify(snapshot.race.activeLabels ?? []),
+        JSON.stringify(snapshot.race.activeLabels),
       ]
     );
-    setPublicRecordMode(snapshot.settings?.publicRecordMode ?? DEFAULT_PUBLIC_RECORD_MODE);
+    setPublicRecordMode(snapshot.settings.publicRecordMode);
   });
 }

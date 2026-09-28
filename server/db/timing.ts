@@ -1,17 +1,28 @@
-import { type RaceEvent, type RaceState } from '../../shared/schemas.js';
 import { v4 as uuidv4 } from 'uuid';
-import { getRaceState, getRaceEventById, getLapCount } from './history.js';
-import { getRunnerById } from './runner-queries.js';
-import { run, transaction, one } from './connection.js';
-import { type QueueEntrySnapshot, getNextWaitingRunner, getQueueEntriesByRunnerIds } from './queue.js';
-import { serializeHistoricalLabels, cleanStatus } from './values.js';
+import { type RaceEvent, type RaceState } from '../../shared/schemas.js';
+import { one, run, transaction } from './connection.js';
+import { getLapCount, getRaceEventById } from './history.js';
 import { getRunnerLabels } from './labels.js';
+import {
+  type QueueEntrySnapshot,
+  getNextWaitingRunner,
+  getQueueEntriesByRunnerIds,
+  setQueueEntryStatus,
+} from './queue.js';
+import { clearActiveRunner, getRaceState, startActiveRunner } from './race-state.js';
+import { getRunnerById } from './runner-queries.js';
+import { cleanStatus, serializeHistoricalLabels } from './values.js';
+
+type HandoffSnapshot = {
+  raceState: RaceState;
+  queueEntries: QueueEntrySnapshot[];
+  lapIds: string[];
+};
 
 export function createBurgieGepaktEvent(nowMs = Date.now()): RaceEvent {
   const activeRunnerId = getRaceState().activeRunnerId;
   const activeRunner = activeRunnerId ? getRunnerById(activeRunnerId) : null;
   const id = uuidv4();
-  const message = 'Burgie gepakt';
   run(
     `INSERT INTO race_events (
       id,
@@ -25,7 +36,7 @@ export function createBurgieGepaktEvent(nowMs = Date.now()): RaceEvent {
     ) VALUES (?, 'burgie_gepakt', ?, ?, ?, ?, ?, ?)`,
     [
       id,
-      message,
+      'Burgie gepakt',
       nowMs,
       activeRunner?.id ?? null,
       activeRunner?.runnerNumber ?? null,
@@ -38,12 +49,10 @@ export function createBurgieGepaktEvent(nowMs = Date.now()): RaceEvent {
   return event;
 }
 
-type HandoffSnapshot = {
-  raceState: RaceState;
-  queueEntries: QueueEntrySnapshot[];
-  lapIds: string[];
-};
-
+/**
+ * The spacebar action: records the active runner's lap and starts the next
+ * waiting runner. Stores what it replaced so the handoff can be undone.
+ */
 export function performHandoff(nowMs = Date.now()):
   | { ok: true; lapId: string | null; startedRunnerId: string | null }
   | { ok: false; error: 'empty_queue' } {
@@ -62,18 +71,16 @@ export function performHandoff(nowMs = Date.now()):
     queueEntries: getQueueEntriesByRunnerIds(affectedIds),
     lapIds: lapId ? [lapId] : [],
   };
-  const historyId = uuidv4();
 
   transaction(() => {
     run(
       `INSERT INTO handoff_history (id, created_at, payload_json, undone)
        VALUES (?, ?, ?, 0)`,
-      [historyId, nowMs, JSON.stringify(snapshot)]
+      [uuidv4(), nowMs, JSON.stringify(snapshot)]
     );
 
     if (activeRunnerId) {
       const startedAt = raceState.activeStartedAt ?? nowMs;
-      const lapNumber = getLapCount(activeRunnerId) + 1;
       run(
         `INSERT INTO laps (
           id,
@@ -89,51 +96,24 @@ export function performHandoff(nowMs = Date.now()):
         [
           lapId,
           activeRunnerId,
-          lapNumber,
+          getLapCount(activeRunnerId) + 1,
           startedAt,
           nowMs,
           Math.max(0, nowMs - startedAt),
           nowMs,
           serializeHistoricalLabels(
-            raceState.activeLabels.length
-              ? raceState.activeLabels
-              : getRunnerLabels(activeRunnerId)
+            raceState.activeLabels.length ? raceState.activeLabels : getRunnerLabels(activeRunnerId)
           ),
         ]
       );
-      run(
-        `UPDATE queue_entries
-         SET status = 'ran', queue_index = NULL, status_since = ?, hidden_at = NULL
-         WHERE runner_id = ?`,
-        [nowMs, activeRunnerId]
-      );
+      setQueueEntryStatus(activeRunnerId, 'ran', nowMs);
     }
 
     if (nextRunner) {
-      run(
-        `UPDATE queue_entries
-         SET status = 'running', queue_index = NULL, status_since = ?, hidden_at = NULL
-         WHERE runner_id = ?`,
-        [nowMs, nextRunner.id]
-      );
-      run(
-        `UPDATE race_state
-         SET active_runner_id = ?,
-             active_started_at = ?,
-             race_started_at = COALESCE(race_started_at, ?),
-             race_finished_at = NULL,
-             active_labels_json = ?
-         WHERE id = 1`,
-        [nextRunner.id, nowMs, nowMs, JSON.stringify(getRunnerLabels(nextRunner.id))]
-      );
+      setQueueEntryStatus(nextRunner.id, 'running', nowMs);
+      startActiveRunner(nextRunner.id, nowMs);
     } else {
-      run(
-        `UPDATE race_state
-         SET active_runner_id = NULL,
-             active_started_at = NULL,
-             active_labels_json = NULL
-         WHERE id = 1`
-      );
+      clearActiveRunner();
     }
   });
 
@@ -152,14 +132,15 @@ export function undoLastHandoff(): { ok: true; deletedLapIds: string[] } | { ok:
     return { ok: false, error: 'nothing_to_undo' };
   }
 
-  const payload = JSON.parse(row.payloadJson) as HandoffSnapshot;
-  const deletedLapIds = payload.lapIds || [];
+  const payload = JSON.parse(row.payloadJson) as Partial<HandoffSnapshot>;
+  const deletedLapIds = payload.lapIds ?? [];
+  const raceState: Partial<RaceState> = payload.raceState ?? {};
   transaction(() => {
     for (const lapId of deletedLapIds) {
       run('DELETE FROM laps WHERE id = ?', [lapId]);
     }
 
-    for (const entry of payload.queueEntries || []) {
+    for (const entry of payload.queueEntries ?? []) {
       run(
         `INSERT INTO queue_entries (runner_id, status, queue_index, status_since, hidden_at)
          VALUES (?, ?, ?, ?, ?)
@@ -178,7 +159,6 @@ export function undoLastHandoff(): { ok: true; deletedLapIds: string[] } | { ok:
       );
     }
 
-    const raceState = payload.raceState || {};
     run(
       `UPDATE race_state
        SET active_runner_id = ?,
@@ -204,14 +184,7 @@ export function undoLastHandoff(): { ok: true; deletedLapIds: string[] } | { ok:
 export function finishRace(nowMs = Date.now()): void {
   const activeRunnerId = getRaceState().activeRunnerId;
   transaction(() => {
-    if (activeRunnerId) {
-      run(
-        `UPDATE queue_entries
-         SET status = 'ran', queue_index = NULL, status_since = ?, hidden_at = NULL
-         WHERE runner_id = ?`,
-        [nowMs, activeRunnerId]
-      );
-    }
+    if (activeRunnerId) setQueueEntryStatus(activeRunnerId, 'ran', nowMs);
     run(
       `UPDATE race_state
        SET active_runner_id = NULL,

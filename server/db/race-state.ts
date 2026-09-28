@@ -1,0 +1,54 @@
+import { type RaceState } from '../../shared/schemas.js';
+import { one, run } from './connection.js';
+import { getRunnerLabels } from './labels.js';
+import { parseLabelsJson } from './values.js';
+
+export function getRaceState(): RaceState {
+  const row = one<Omit<RaceState, 'id' | 'activeLabels'> & { activeLabelsJson: string | null }>(
+    `SELECT
+      active_runner_id AS activeRunnerId,
+      active_started_at AS activeStartedAt,
+      race_started_at AS raceStartedAt,
+      race_finished_at AS raceFinishedAt,
+      active_labels_json AS activeLabelsJson
+     FROM race_state
+     WHERE id = 1`
+  );
+  return {
+    id: 1,
+    activeRunnerId: row?.activeRunnerId ?? null,
+    activeStartedAt: row?.activeStartedAt ?? null,
+    raceStartedAt: row?.raceStartedAt ?? null,
+    raceFinishedAt: row?.raceFinishedAt ?? null,
+    activeLabels: parseLabelsJson(row?.activeLabelsJson),
+  };
+}
+
+export function isRaceActive(race: RaceState = getRaceState()): boolean {
+  return Boolean(race.activeRunnerId || (race.raceStartedAt && !race.raceFinishedAt));
+}
+
+/** Starts the runner's live lap, starting (or reopening) the race if needed. */
+export function startActiveRunner(runnerId: string, nowMs: number): void {
+  run(
+    `UPDATE race_state
+     SET active_runner_id = ?,
+         active_started_at = ?,
+         race_started_at = COALESCE(race_started_at, ?),
+         race_finished_at = NULL,
+         active_labels_json = ?
+     WHERE id = 1`,
+    [runnerId, nowMs, nowMs, JSON.stringify(getRunnerLabels(runnerId))]
+  );
+}
+
+/** Clears the live lap; with a runner id, only when that runner is the active one. */
+export function clearActiveRunner(runnerId?: string): void {
+  const sql = `UPDATE race_state
+     SET active_runner_id = NULL,
+         active_started_at = NULL,
+         active_labels_json = NULL
+     WHERE id = 1`;
+  if (runnerId) run(`${sql} AND active_runner_id = ?`, [runnerId]);
+  else run(sql);
+}

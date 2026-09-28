@@ -1,27 +1,19 @@
-import { readPositiveNumber } from './values.js';
-import { getDb, getAppDataRevision, DB_FILE, one, DATA_DIR, statementCache } from './connection.js';
-import { getSetting, setSetting } from './settings.js';
+import fs from 'node:fs';
 import { type DatabaseStorageStatus } from '../../shared/schemas.js';
-import fs from 'fs';
+import { readPositiveNumber } from '../env.js';
+import { DATA_DIR, DB_FILE, getAppDataRevision, getDb, statementCache } from './connection.js';
+import { isRaceActive } from './race-state.js';
+import { getSetting, setLocalSetting } from './settings.js';
 
-const COMPACTION_MIN_RECLAIMABLE_BYTES = readPositiveNumber(
-  process.env.DATABASE_COMPACTION_MIN_BYTES,
-  16 * 1_024 ** 2
-);
+const COMPACTION_MIN_RECLAIMABLE_BYTES = readPositiveNumber(process.env.DATABASE_COMPACTION_MIN_BYTES, 16 * 1_024 ** 2);
 
-const COMPACTION_MIN_RECLAIMABLE_RATIO = readPositiveNumber(
-  process.env.DATABASE_COMPACTION_MIN_RATIO,
-  0.25
-);
+const COMPACTION_MIN_RECLAIMABLE_RATIO = readPositiveNumber(process.env.DATABASE_COMPACTION_MIN_RATIO, 0.25);
 
-export function databaseReadiness(): {
-  ready: true;
-  schemaVersion: number;
-  revision: number;
-} {
-  const probe = getDb().prepare('SELECT 1 AS ready').get() as
-    | { ready: number }
-    | undefined;
+/** VACUUM writes a full copy of the database, so keep this much headroom beyond it. */
+const COMPACTION_DISK_HEADROOM_BYTES = 64 * 1_024 ** 2;
+
+export function databaseReadiness(): { ready: true; schemaVersion: number; revision: number } {
+  const probe = getDb().prepare('SELECT 1 AS ready').get() as { ready: number } | undefined;
   if (probe?.ready !== 1) throw new Error('database readiness probe failed');
   return {
     ready: true,
@@ -36,36 +28,31 @@ export function databaseStorageStatus(): DatabaseStorageStatus {
   const freePages = Number(getDb().pragma('freelist_count', { simple: true })) || 0;
   const fileBytes = fs.existsSync(DB_FILE) ? fs.statSync(DB_FILE).size : pageCount * pageSize;
   const reclaimableBytes = Math.min(fileBytes, Math.max(0, freePages * pageSize));
-  const usedBytes = Math.max(0, fileBytes - reclaimableBytes);
   const reclaimablePercent = fileBytes > 0 ? (reclaimableBytes / fileBytes) * 100 : 0;
-  const race = one<{
-    activeRunnerId: string | null;
-    raceStartedAt: number | null;
-    raceFinishedAt: number | null;
-  }>(
-    `SELECT
-       active_runner_id AS activeRunnerId,
-       race_started_at AS raceStartedAt,
-       race_finished_at AS raceFinishedAt
-     FROM race_state
-     WHERE id = 1`
-  );
-  const raceActive = Boolean(
-    race?.activeRunnerId || (race?.raceStartedAt && !race?.raceFinishedAt)
-  );
+  const lastCompactedAt = Number(getSetting('last_database_compaction_at'));
   return {
     fileBytes,
-    usedBytes,
+    usedBytes: Math.max(0, fileBytes - reclaimableBytes),
     reclaimableBytes,
     reclaimablePercent,
     compactionRecommended:
       reclaimableBytes >= COMPACTION_MIN_RECLAIMABLE_BYTES &&
       reclaimablePercent >= COMPACTION_MIN_RECLAIMABLE_RATIO * 100,
-    raceActive,
-    lastCompactedAt: parseStoredTimestamp(getSetting('last_database_compaction_at')),
+    raceActive: isRaceActive(),
+    lastCompactedAt: Number.isSafeInteger(lastCompactedAt) && lastCompactedAt > 0 ? lastCompactedAt : null,
   };
 }
 
+function freeDiskBytes(): number | null {
+  try {
+    const disk = fs.statfsSync(DATA_DIR);
+    return Math.max(0, Math.trunc(disk.bavail * disk.bsize));
+  } catch {
+    return null;
+  }
+}
+
+/** Never compacts during a race; without `force`, only when enough space is reclaimable. */
 export function compactDatabaseIfSafe(options: { force?: boolean } = {}): {
   compacted: boolean;
   reason: 'compacted' | 'race-active' | 'not-needed' | 'insufficient-disk';
@@ -73,35 +60,29 @@ export function compactDatabaseIfSafe(options: { force?: boolean } = {}): {
   after: DatabaseStorageStatus;
 } {
   const before = databaseStorageStatus();
-  if (before.raceActive) {
-    return { compacted: false, reason: 'race-active', before, after: before };
-  }
-  if (!options.force && !before.compactionRecommended) {
-    return { compacted: false, reason: 'not-needed', before, after: before };
-  }
-  try {
-    const disk = fs.statfsSync(DATA_DIR);
-    const freeBytes = Math.max(0, Math.trunc(disk.bavail * disk.bsize));
-    if (freeBytes < before.fileBytes + 64 * 1_024 ** 2) {
-      return { compacted: false, reason: 'insufficient-disk', before, after: before };
-    }
-  } catch {
-    return { compacted: false, reason: 'insufficient-disk', before, after: before };
+  const skip = (reason: 'race-active' | 'not-needed' | 'insufficient-disk') => ({
+    compacted: false,
+    reason,
+    before,
+    after: before,
+  });
+  if (before.raceActive) return skip('race-active');
+  if (!options.force && !before.compactionRecommended) return skip('not-needed');
+  const freeBytes = freeDiskBytes();
+  if (freeBytes === null || freeBytes < before.fileBytes + COMPACTION_DISK_HEADROOM_BYTES) {
+    return skip('insufficient-disk');
   }
 
-  const quickCheck = getDb().pragma('quick_check', { simple: true });
-  if (quickCheck !== 'ok') throw new Error(`database quick_check failed before compaction: ${quickCheck}`);
+  assertQuickCheck('before');
   statementCache.clear();
   getDb().exec('VACUUM');
   getDb().pragma('wal_checkpoint(TRUNCATE)');
-  setSetting('last_database_compaction_at', String(Date.now()));
-  const afterCheck = getDb().pragma('quick_check', { simple: true });
-  if (afterCheck !== 'ok') throw new Error(`database quick_check failed after compaction: ${afterCheck}`);
-  const after = databaseStorageStatus();
-  return { compacted: true, reason: 'compacted', before, after };
+  setLocalSetting('last_database_compaction_at', String(Date.now()));
+  assertQuickCheck('after');
+  return { compacted: true, reason: 'compacted', before, after: databaseStorageStatus() };
 }
 
-function parseStoredTimestamp(value: string | null): number | null {
-  const parsed = Number(value);
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+function assertQuickCheck(stage: 'before' | 'after'): void {
+  const result = getDb().pragma('quick_check', { simple: true });
+  if (result !== 'ok') throw new Error(`database quick_check failed ${stage} compaction: ${result}`);
 }

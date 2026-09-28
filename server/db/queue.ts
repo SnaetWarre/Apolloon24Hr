@@ -1,9 +1,16 @@
 import { type Runner, type RunnerStatus } from '../../shared/schemas.js';
-import { cleanInt, cleanStatus } from './values.js';
-import { run, one, transaction, all } from './connection.js';
+import { all, one, run, transaction } from './connection.js';
+import { clearActiveRunner, getRaceState, startActiveRunner } from './race-state.js';
 import { getRunnerById } from './runner-queries.js';
-import { getRaceState } from './history.js';
-import { getRunnerLabels } from './labels.js';
+import { cleanInt, cleanStatus } from './values.js';
+
+export type QueueEntrySnapshot = {
+  runnerId: string;
+  status: RunnerStatus;
+  queueIndex: number | null;
+  statusSince: number | null;
+  hiddenAt: number | null;
+};
 
 export function hideRunnerInQueue(id: string, hiddenAt = Date.now()): Runner | null {
   const now = cleanInt(hiddenAt) ?? Date.now();
@@ -29,14 +36,12 @@ export function unhideRunnerInQueue(id: string): Runner | null {
 }
 
 /**
- * Poort rond statuswijzigingen die de live race raken. Telsysteem 1 werkt de
- * hele dag op een andere laptop dan de timing; zonder deze poort kan één klik
- * daar de live ronde wissen of een gefinishte race stilletjes heropenen.
+ * Guards status changes that touch the live race. The queue desk works on a
+ * different laptop than timing all day; without this, one click there could
+ * wipe the live lap or silently reopen a finished race.
  *
- * Puur (geen DB-toegang) zodat de regels unit-testbaar zijn; de router vult de
- * live waarden in en zet een melding om in een conflict-fout.
- *
- * Retourneert null als de wijziging mag, anders de Nederlandse foutmelding.
+ * Pure so the rules are unit-testable. Returns null when the change is
+ * allowed, otherwise the (Dutch) message shown to the operator.
  */
 export function runnerStatusChangeError(input: {
   runnerId: string;
@@ -46,25 +51,18 @@ export function runnerStatusChangeError(input: {
   controllerHostId: string | null;
   localHostId: string;
 }): string | null {
-  const controlledElsewhere =
-    Boolean(input.controllerHostId) && input.controllerHostId !== input.localHostId;
+  const controlledElsewhere = Boolean(input.controllerHostId) && input.controllerHostId !== input.localHostId;
+  if (!controlledElsewhere) return null;
   const touchesLiveLap =
-    input.activeRunnerId !== null &&
-    input.runnerId === input.activeRunnerId &&
-    input.status !== 'running';
-  if (touchesLiveLap && controlledElsewhere) {
+    input.activeRunnerId !== null && input.runnerId === input.activeRunnerId && input.status !== 'running';
+  if (touchesLiveLap) {
     return 'Deze loper loopt nu live. Alleen de timinglaptop kan dit aanpassen.';
   }
-  const manualStart =
-    input.status === 'running' &&
-    (input.activeRunnerId === null || input.activeRunnerId !== input.runnerId);
-  if (manualStart && input.raceFinishedAt !== null && controlledElsewhere) {
-    return 'De race is gefinisht. Hervatten kan alleen op de timinglaptop.';
-  }
-  if (manualStart && input.raceFinishedAt === null && controlledElsewhere) {
-    return 'Alleen de timinglaptop kan een loper handmatig laten starten.';
-  }
-  return null;
+  const manualStart = input.status === 'running' && input.activeRunnerId !== input.runnerId;
+  if (!manualStart) return null;
+  return input.raceFinishedAt !== null
+    ? 'De race is gefinisht. Hervatten kan alleen op de timinglaptop.'
+    : 'Alleen de timinglaptop kan een loper handmatig laten starten.';
 }
 
 export function updateRunnerStatus({
@@ -88,11 +86,7 @@ export function updateRunnerStatus({
   }
   const now = cleanInt(statusSince) ?? Date.now();
   const nextQueueIndex =
-    nextStatus === 'waiting'
-      ? queueIndex !== undefined && queueIndex !== null
-        ? cleanInt(queueIndex)
-        : getMaxQueueIndex() + 1
-      : null;
+    nextStatus !== 'waiting' ? null : queueIndex != null ? cleanInt(queueIndex) : getMaxQueueIndex() + 1;
 
   transaction(() => {
     run(
@@ -105,31 +99,21 @@ export function updateRunnerStatus({
          hidden_at = NULL`,
       [id, nextStatus, nextQueueIndex, now]
     );
-
-    if (nextStatus === 'running') {
-      run(
-        `UPDATE race_state
-         SET active_runner_id = ?,
-             active_started_at = ?,
-             race_started_at = COALESCE(race_started_at, ?),
-             race_finished_at = NULL,
-             active_labels_json = ?
-         WHERE id = 1`,
-        [id, now, now, JSON.stringify(getRunnerLabels(id))]
-      );
-    } else {
-      run(
-        `UPDATE race_state
-         SET active_runner_id = NULL,
-             active_started_at = NULL,
-             active_labels_json = NULL
-         WHERE id = 1 AND active_runner_id = ?`,
-        [id]
-      );
-    }
+    if (nextStatus === 'running') startActiveRunner(id, now);
+    else clearActiveRunner(id);
   });
 
   return getRunnerById(id);
+}
+
+/** Moves a runner out of the waiting order into `running` or `ran`. */
+export function setQueueEntryStatus(runnerId: string, status: 'running' | 'ran', nowMs: number): void {
+  run(
+    `UPDATE queue_entries
+     SET status = ?, queue_index = NULL, status_since = ?, hidden_at = NULL
+     WHERE runner_id = ?`,
+    [status, nowMs, runnerId]
+  );
 }
 
 export function updateWaitingOrder(idOrder: string[]): void {
@@ -166,27 +150,27 @@ export function updateWaitingOrder(idOrder: string[]): void {
 }
 
 export function getMaxQueueIndex(): number {
-  const row = one<{ maxIdx: number | null }>("SELECT MAX(queue_index) AS maxIdx FROM queue_entries WHERE status = 'waiting'");
-  return typeof row?.maxIdx === 'number' ? row.maxIdx : -1;
+  return (
+    one<{ maxIdx: number | null }>("SELECT MAX(queue_index) AS maxIdx FROM queue_entries WHERE status = 'waiting'")
+      ?.maxIdx ?? -1
+  );
 }
 
 export function getQueueEntriesByRunnerIds(ids: string[]): QueueEntrySnapshot[] {
-  if (!ids.length) return [];
-  return ids
-    .map((id) =>
-      one<QueueEntrySnapshot>(
-        `SELECT
-           runner_id AS runnerId,
-           status,
-           queue_index AS queueIndex,
-           status_since AS statusSince,
-           hidden_at AS hiddenAt
-         FROM queue_entries
-         WHERE runner_id = ?`,
-        [id]
-      )
-    )
-    .filter((entry): entry is QueueEntrySnapshot => Boolean(entry));
+  return ids.flatMap((id) => {
+    const entry = one<QueueEntrySnapshot>(
+      `SELECT
+         runner_id AS runnerId,
+         status,
+         queue_index AS queueIndex,
+         status_since AS statusSince,
+         hidden_at AS hiddenAt
+       FROM queue_entries
+       WHERE runner_id = ?`,
+      [id]
+    );
+    return entry ? [entry] : [];
+  });
 }
 
 export function getNextWaitingRunner(): { id: string; name: string } | null {
@@ -199,11 +183,3 @@ export function getNextWaitingRunner(): { id: string; name: string } | null {
      LIMIT 1`
   );
 }
-
-export type QueueEntrySnapshot = {
-  runnerId: string;
-  status: RunnerStatus;
-  queueIndex: number | null;
-  statusSince: number | null;
-  hiddenAt: number | null;
-};

@@ -1,66 +1,55 @@
+import { v4 as uuidv4 } from 'uuid';
 import { type Label, type LabelInput, type LabelPatch } from '../../shared/schemas.js';
 import { all, one, run, transaction } from './connection.js';
-import { normalizeName, canonicalLabelName, cleanText, cleanInt, parseStringArray } from './values.js';
-import { v4 as uuidv4 } from 'uuid';
+import { canonicalLabelName, cleanInt, cleanText, parseStringArray } from './values.js';
 
 export const TEMPORARY_TEAM_KIND = 'temporary_team';
 
+const DEFAULT_LABEL_COLOR = '#3b82f6';
+
+const LABEL_COLUMNS = `
+  l.id,
+  l.name,
+  l.color,
+  l.icon,
+  l.kind,
+  l.image_url AS imageUrl,
+  l.target_laps AS targetLaps,
+  l.sort_order AS sortOrder,
+  l.created_at AS createdAt,
+  l.updated_at AS updatedAt`;
+
+const LABEL_ORDER = 'COALESCE(l.sort_order, 9999), l.name';
+
 export function getLabels(): Label[] {
-  return all<Label>(
-    `SELECT
-       id,
-       name,
-       color,
-       icon,
-       kind,
-       image_url AS imageUrl,
-       target_laps AS targetLaps,
-       sort_order AS sortOrder,
-       created_at AS createdAt,
-       updated_at AS updatedAt
-     FROM labels
-     ORDER BY
-       COALESCE(sort_order, 9999),
-       name`
-  );
+  return all<Label>(`SELECT ${LABEL_COLUMNS} FROM labels l ORDER BY ${LABEL_ORDER}`);
+}
+
+function getLabel(id: string): Label | null {
+  return one<Label>(`SELECT ${LABEL_COLUMNS} FROM labels l WHERE l.id = ?`, [id]);
 }
 
 export function findLabelByName(name: unknown): Label | null {
-  const normalized = normalizeName(canonicalLabelName(name));
-  if (!normalized) return null;
+  const labelName = canonicalLabelName(name);
+  if (!labelName) return null;
   return one<Label>(
-    `SELECT
-       id,
-       name,
-       color,
-       icon,
-       kind,
-       image_url AS imageUrl,
-       target_laps AS targetLaps,
-       sort_order AS sortOrder,
-       created_at AS createdAt,
-       updated_at AS updatedAt
-     FROM labels
-     WHERE name = ? COLLATE NOCASE
-     LIMIT 1`,
-    [canonicalLabelName(name)]
+    `SELECT ${LABEL_COLUMNS} FROM labels l WHERE l.name = ? COLLATE NOCASE LIMIT 1`,
+    [labelName]
   );
 }
 
-export function ensureLabel(name: unknown, options: Partial<LabelInput> = {}): Label | null {
+export function ensureLabel(name: unknown): Label | null {
   const labelName = canonicalLabelName(name);
   if (!labelName) return null;
-  const existing = findLabelByName(labelName);
-  if (existing) return existing;
-  return createLabel({
-    name: labelName,
-    color: options.color || '#3b82f6',
-    icon: options.icon || labelName.slice(0, 2).toUpperCase(),
-    kind: options.kind || 'custom',
-    imageUrl: options.imageUrl || null,
-    targetLaps: options.targetLaps ?? null,
-    sortOrder: options.sortOrder ?? null,
-  });
+  return findLabelByName(labelName) ?? createLabel({ name: labelName });
+}
+
+export function ensureTemporaryTeamRow(labelId: string): void {
+  run('INSERT OR IGNORE INTO temporary_teams (label_id, active, activated_at) VALUES (?, 0, NULL)', [labelId]);
+}
+
+export function isActiveTemporaryTeam(labelId: string): boolean {
+  return Boolean(one<{ active: number }>('SELECT active FROM temporary_teams WHERE label_id = ?', [labelId])?.active);
 }
 
 export function createLabelRecord(input: LabelInput, id: string, now: number): Label {
@@ -72,7 +61,7 @@ export function createLabelRecord(input: LabelInput, id: string, now: number): L
   const label = {
     id,
     name: labelName,
-    color: cleanText(input.color) || '#3b82f6',
+    color: cleanText(input.color) || DEFAULT_LABEL_COLOR,
     icon: cleanText(input.icon) || labelName.slice(0, 2).toUpperCase(),
     kind: cleanText(input.kind) || 'custom',
     imageUrl: cleanText(input.imageUrl),
@@ -105,11 +94,7 @@ export function createLabelRecord(input: LabelInput, id: string, now: number): L
       now,
     ]
   );
-  if (label.kind === TEMPORARY_TEAM_KIND) {
-    run('INSERT OR IGNORE INTO temporary_teams (label_id, active, activated_at) VALUES (?, 0, NULL)', [
-      label.id,
-    ]);
-  }
+  if (label.kind === TEMPORARY_TEAM_KIND) ensureTemporaryTeamRow(label.id);
   return { ...label, createdAt: now, updatedAt: now };
 }
 
@@ -118,30 +103,9 @@ export function createLabel(input: LabelInput): Label {
 }
 
 export function updateLabel(id: string, fields: LabelPatch): Label | null {
-  const existing = one<{
-    name: string;
-    color: string;
-    icon: string;
-    kind: string;
-    imageUrl: string | null;
-    targetLaps: number | null;
-    sortOrder: number | null;
-  }>(
-    `SELECT
-       name,
-       color,
-       icon,
-       kind,
-       image_url AS imageUrl,
-       target_laps AS targetLaps,
-       sort_order AS sortOrder
-     FROM labels
-     WHERE id = ?`,
-    [id]
-  );
+  const existing = getLabel(id);
   if (!existing) return null;
-  const temporaryState = one<{ active: number }>('SELECT active FROM temporary_teams WHERE label_id = ?', [id]);
-  if (temporaryState?.active && fields.kind !== undefined && fields.kind !== TEMPORARY_TEAM_KIND) {
+  if (isActiveTemporaryTeam(id) && fields.kind !== undefined && fields.kind !== TEMPORARY_TEAM_KIND) {
     throw new Error('Een actieve tijdelijke nachtploeg kan niet van type veranderen');
   }
 
@@ -150,20 +114,15 @@ export function updateLabel(id: string, fields: LabelPatch): Label | null {
     color: fields.color !== undefined ? cleanText(fields.color) || existing.color : existing.color,
     icon: fields.icon !== undefined ? cleanText(fields.icon) || existing.icon : existing.icon,
     kind: fields.kind !== undefined ? cleanText(fields.kind) || existing.kind : existing.kind,
-    imageUrl: fields.imageUrl !== undefined ? cleanText(fields.imageUrl) || null : existing.imageUrl,
+    imageUrl: fields.imageUrl !== undefined ? cleanText(fields.imageUrl) : existing.imageUrl,
     targetLaps: fields.targetLaps !== undefined ? cleanInt(fields.targetLaps) : existing.targetLaps,
     sortOrder: fields.sortOrder !== undefined ? cleanInt(fields.sortOrder) : existing.sortOrder,
-    updatedAt: Date.now(),
   };
   const conflictingLabel = findLabelByName(next.name);
   if (conflictingLabel && conflictingLabel.id !== id) {
     throw new Error('Er bestaat al een label met deze naam');
   }
-  if (
-    fields.kind !== undefined &&
-    next.kind !== existing.kind &&
-    isRestoreLabelForActiveTemporaryTeam(id)
-  ) {
+  if (next.kind !== existing.kind && isRestoreLabelForActiveTemporaryTeam(id)) {
     throw new Error('Deactiveer de tijdelijke nachtploeg voordat je dit speedteamtype wijzigt');
   }
 
@@ -186,23 +145,22 @@ export function updateLabel(id: string, fields: LabelPatch): Label | null {
       next.imageUrl,
       next.targetLaps,
       next.sortOrder,
-      next.updatedAt,
+      Date.now(),
       id,
     ]
   );
 
   if (next.kind === TEMPORARY_TEAM_KIND) {
-    run('INSERT OR IGNORE INTO temporary_teams (label_id, active, activated_at) VALUES (?, 0, NULL)', [id]);
+    ensureTemporaryTeamRow(id);
   } else {
     run('DELETE FROM temporary_teams WHERE label_id = ? AND active = 0', [id]);
   }
 
-  return getLabels().find((label) => label.id === id) ?? null;
+  return getLabel(id);
 }
 
 export function deleteLabel(id: string): boolean {
-  const temporaryState = one<{ active: number }>('SELECT active FROM temporary_teams WHERE label_id = ?', [id]);
-  if (temporaryState?.active) throw new Error('Deactiveer deze tijdelijke nachtploeg voor je ze verwijdert');
+  if (isActiveTemporaryTeam(id)) throw new Error('Deactiveer deze tijdelijke nachtploeg voor je ze verwijdert');
   if (isRestoreLabelForActiveTemporaryTeam(id)) {
     throw new Error('Deactiveer de tijdelijke nachtploeg voordat je dit speedteamlabel verwijdert');
   }
@@ -224,43 +182,26 @@ function isRestoreLabelForActiveTemporaryTeam(labelId: string): boolean {
 
 export function getRunnerLabelsMap(runnerId?: string): Map<string, Label[]> {
   const rows = all<Label & { runnerId: string }>(
-    `SELECT
-      rl.runner_id AS runnerId,
-      l.id,
-      l.name,
-      l.color,
-      l.icon,
-      l.kind,
-      l.image_url AS imageUrl,
-      l.target_laps AS targetLaps,
-      l.sort_order AS sortOrder,
-      l.created_at AS createdAt,
-      l.updated_at AS updatedAt
-    FROM runner_labels rl
-    JOIN labels l ON l.id = rl.label_id
-    ${runnerId ? 'WHERE rl.runner_id = ?' : ''}
-    ORDER BY COALESCE(l.sort_order, 9999), l.name`,
+    `SELECT rl.runner_id AS runnerId, ${LABEL_COLUMNS}
+     FROM runner_labels rl
+     JOIN labels l ON l.id = rl.label_id
+     ${runnerId ? 'WHERE rl.runner_id = ?' : ''}
+     ORDER BY ${LABEL_ORDER}`,
     runnerId ? [runnerId] : []
   );
   const map = new Map<string, Label[]>();
-  for (const row of rows) {
-    if (!map.has(row.runnerId)) map.set(row.runnerId, []);
-    map.get(row.runnerId)?.push({
-      id: row.id,
-      name: row.name,
-      color: row.color,
-      icon: row.icon,
-      kind: row.kind,
-      imageUrl: row.imageUrl ?? null,
-      targetLaps: row.targetLaps ?? null,
-      sortOrder: row.sortOrder ?? null,
-      createdAt: row.createdAt,
-      updatedAt: row.updatedAt,
-    });
+  for (const { runnerId: owner, ...label } of rows) {
+    const labels = map.get(owner);
+    if (labels) labels.push(label);
+    else map.set(owner, [label]);
   }
   return map;
 }
 
 export function getRunnerLabels(runnerId: string): Label[] {
   return getRunnerLabelsMap(runnerId).get(runnerId) ?? [];
+}
+
+export function getBaseSpeedteamLabels(runnerId: string): Label[] {
+  return getRunnerLabels(runnerId).filter((label) => label.kind === 'speedteam');
 }

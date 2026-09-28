@@ -5,10 +5,12 @@ import { gzip, constants as zlibConstants } from 'node:zlib';
 
 const gzipAsync = promisify(gzip);
 const MINIMUM_COMPRESSION_BYTES = 1_024;
-const responseCache = new Map<
-  string,
-  { etag: string; raw: Buffer; compressed: Promise<Buffer> | null }
->();
+const MAX_CACHED_RESPONSES = 32;
+
+type CachedResponse = { etag: string; raw: Buffer; compressed: Promise<Buffer> | null };
+
+/** Serialized bodies keyed by the caller's cache key (e.g. data revision), oldest evicted first. */
+const responseCache = new Map<string, CachedResponse>();
 
 export async function sendJson(
   req: Request,
@@ -44,41 +46,33 @@ export async function sendJson(
   res.end(entry.raw);
 }
 
-export async function encodedJsonRequest(value: unknown): Promise<{
-  body: string | Blob;
-  contentEncoding: 'gzip' | null;
-  uncompressedBytes: number;
-}> {
+/** Request body for a peer, gzipped once it is large enough to be worth it. */
+export async function encodedJsonRequest(
+  value: unknown
+): Promise<{ body: string | Blob; contentEncoding: 'gzip' | null }> {
   const raw = Buffer.from(JSON.stringify(value));
   if (raw.length < MINIMUM_COMPRESSION_BYTES) {
-    return { body: raw.toString('utf8'), contentEncoding: null, uncompressedBytes: raw.length };
+    return { body: raw.toString('utf8'), contentEncoding: null };
   }
   const compressed = await gzipAsync(raw, { level: zlibConstants.Z_BEST_SPEED });
   const body = compressed.buffer.slice(
     compressed.byteOffset,
     compressed.byteOffset + compressed.byteLength
   ) as ArrayBuffer;
-  return {
-    body: new Blob([body], { type: 'application/json' }),
-    contentEncoding: 'gzip',
-    uncompressedBytes: raw.length,
-  };
+  return { body: new Blob([body], { type: 'application/json' }), contentEncoding: 'gzip' };
 }
 
-function responseEntry(
-  value: unknown,
-  cacheKey?: string
-): { etag: string; raw: Buffer; compressed: Promise<Buffer> | null } {
+function responseEntry(value: unknown, cacheKey?: string): CachedResponse {
   if (cacheKey) {
     const cached = responseCache.get(cacheKey);
     if (cached) return cached;
   }
   const raw = Buffer.from(JSON.stringify(value));
   const etag = `"${crypto.createHash('sha256').update(raw).digest('base64url').slice(0, 24)}"`;
-  const entry = { etag, raw, compressed: null };
+  const entry: CachedResponse = { etag, raw, compressed: null };
   if (cacheKey) {
     responseCache.set(cacheKey, entry);
-    if (responseCache.size > 32) {
+    if (responseCache.size > MAX_CACHED_RESPONSES) {
       responseCache.delete(responseCache.keys().next().value as string);
     }
   }
