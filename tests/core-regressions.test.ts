@@ -242,6 +242,7 @@ test('event readiness blocks real safety failures and distinguishes standalone w
     knownHosts: 2,
     pendingOperations: 0,
     conflictCount: 0,
+    deadLetterCount: 0,
     timingControllerHostId: 'host-a',
     timingControl: {
       state: 'local',
@@ -382,9 +383,12 @@ test('analysis hour buckets use Brussels clock hours from the race start', () =>
     runnerId: 'runner-1',
     runnerName: 'Runner',
     runnerNumber: '1',
+    lapNumber: 1,
     startedAt: finishedAt - 60_000,
     finishedAt,
     durationMs: 60_000,
+    source: 'test',
+    createdAt: finishedAt,
     labels: [],
   });
 

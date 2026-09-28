@@ -24,7 +24,6 @@ jobs:
       - run: npm ci --include=optional
       - run: npm run typecheck
       - run: npm test
-      - run: node --test tests/release-tag.test.mjs
       - run: npm run test:e2e
 
   build-windows:

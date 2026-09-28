@@ -16,6 +16,6 @@ export function RunnerName({
   );
 }
 
-export function Bib({ number, size }: { number: string; size?: 'lg' }) {
+function Bib({ number, size }: { number: string; size?: 'lg' }) {
   return <span className={`bib${size ? ` bib--${size}` : ''}`}>{number}</span>;
 }

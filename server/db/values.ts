@@ -86,7 +86,7 @@ export function serializeHistoricalLabels(labels: Label[]): string {
   );
 }
 
-export function normalizeName(name: unknown): string {
+function normalizeName(name: unknown): string {
   return String(name || '').trim().toLowerCase();
 }
 

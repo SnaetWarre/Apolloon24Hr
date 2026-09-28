@@ -1,4 +1,6 @@
+/** @returns {Record<string, string>} */
 export function parseEnvText(content) {
+  /** @type {Record<string, string>} */
   const values = {};
   for (const rawLine of String(content || '').split(/\r?\n/)) {
     const line = rawLine.trim();

@@ -16,10 +16,6 @@ process.env.NODE_ENV = 'test';
 process.env.BACKUP_ENABLED = 'false';
 process.env.CLUSTER_ENABLED = 'false';
 
-async function loadDb() {
-  return import('../server/db.ts');
-}
-
 async function loadGate() {
   const queue = await import('../server/db/queue.ts');
   return queue.runnerStatusChangeError;

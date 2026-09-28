@@ -1,5 +1,6 @@
 import React from 'react';
 import { ModalDialog } from './ModalDialog';
+import { useConfirm } from './ConfirmDialog';
 import { runnerFormError } from '../lib/runnerForm';
 import { useAppActions, useAppData, useRaceHistory } from '../app/index';
 import { formatClockTimeMs, formatDurationMs } from '../lib/time';
@@ -14,6 +15,7 @@ const selectRunnerProfileData = ({ runners, labels, temporaryTeams }: LiveAppSna
 });
 
 export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; onClose: () => void }) {
+  const confirm = useConfirm();
   const { runners, labels, temporaryTeams } = useAppData(selectRunnerProfileData);
   const { laps: allLaps } = useRaceHistory({ scope: 'runner', runnerId });
   const { setStatus, updateRunner } = useAppActions();
@@ -116,7 +118,11 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
 
   async function removeFromQueueFlow() {
     if (!runner || !isQueueRemovalStatus(runner.status)) return;
-    if (!window.confirm('Loper uit de wachtrij en opwarming halen?')) return;
+    if (!(await confirm({
+      title: 'Uit de wachtrij halen?',
+      message: `${runner.name} verdwijnt uit de wachtrij en opwarming.`,
+      confirmLabel: 'Uit wachtrij halen',
+    }))) return;
 
     const runnerName = runner.name;
     setQueueActionBusy(true);
@@ -328,8 +334,13 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
         {profileChangedElsewhere && (
           <div className="warning-banner" role="alert">
             Dit profiel is intussen elders gewijzigd. Je invoer is bewaard. Kopieer je aanpassingen voordat je de nieuwste versie laadt en opnieuw bewerkt.
-            <button className="btn btn--ghost" onClick={() => {
-              if (window.confirm('Nieuwste profiel laden? Je niet-opgeslagen aanpassingen worden vervangen.')) {
+            <button className="btn btn--ghost" onClick={async () => {
+              if (await confirm({
+                title: 'Nieuwste profiel laden?',
+                message: 'Je niet-opgeslagen aanpassingen worden vervangen.',
+                confirmLabel: 'Nieuwste laden',
+                tone: 'danger',
+              })) {
                 loadLatestProfile();
                 setClosePromptOpen(false);
               }

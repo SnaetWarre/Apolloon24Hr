@@ -28,8 +28,9 @@ release/
 .DS_Store
 Thumbs.db
 
-# Database
-data/*.db-shm
-data/*.db-wal
-.test-data/
-.dev-data/
+# Local databases and disposable test data
+/data/
+/backups/
+/.test-data/
+/.dev-data*/
+/.tmp-*/

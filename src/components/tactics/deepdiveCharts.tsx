@@ -14,24 +14,18 @@ import {
   Tooltip,
   type ChartConfiguration,
 } from 'chart.js';
-import type { HistoricalRace, HistoricalTeam } from '../../lib/tactics';
+import type { HistoricalTeam } from '../../lib/tactics';
 import {
-  analyzeDrafting,
   buildBreakEvenSensitivity,
   buildHalfHourPaceDifferences,
   buildHourlyConsistency,
   buildHourlyLapGains,
-  buildQuarterHourPaces,
   buildRaceLeadCurve,
   buildSameLapIndexGap,
   buildTimeGapCurve,
-  calculateBreakEven,
   calculateNightPenalty,
-  defaultSlowLapThreshold,
   findPaceChanges,
   findSlowLaps,
-  smoothPacePoints,
-  summarizeHistoricalTeams,
   summarizeHistoricalWindow,
   type DraftingTeamAnalysis,
   type PacePoint,
@@ -325,12 +319,10 @@ export function CumulativeRaceChart({ firstTeam, secondTeam }: { firstTeam: Hist
 export function RaceLeadChart({
   points,
   firstTeam,
-  secondTeam,
   lapLengthMeters,
 }: {
   points: ReturnType<typeof buildRaceLeadCurve>;
   firstTeam: HistoricalTeam;
-  secondTeam: HistoricalTeam;
   lapLengthMeters: number;
 }) {
   return (
@@ -585,7 +577,7 @@ export function SectionHeader({ kicker, title, text }: { kicker: string; title: 
   return <div className="analysis-section-header"><span className="page-kicker">{kicker}</span><h2>{title}</h2><p>{text}</p></div>;
 }
 
-export function ChartPanel({ configuration }: { configuration: ChartConfiguration }) {
+function ChartPanel({ configuration }: { configuration: ChartConfiguration }) {
   const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
   const chartTheme = useChartTheme();
   React.useEffect(() => {
@@ -596,7 +588,7 @@ export function ChartPanel({ configuration }: { configuration: ChartConfiguratio
   return <div className="analysis-chart-card tactics-chart-card"><canvas ref={canvasRef} /></div>;
 }
 
-export function xyLineConfiguration(
+function xyLineConfiguration(
   points: PacePoint[],
   firstTeam: HistoricalTeam,
   secondTeam: HistoricalTeam,
@@ -615,15 +607,15 @@ export function xyLineConfiguration(
   };
 }
 
-export function xySeries(label: string, data: Array<{ x: number; y: number | null }>, color: string, borderWidth = 2, borderDash?: number[]) {
+function xySeries(label: string, data: Array<{ x: number; y: number | null }>, color: string, borderWidth = 2, borderDash?: number[]) {
   return { label, data, borderColor: color, backgroundColor: color, borderWidth, borderDash, pointRadius: 0, pointHoverRadius: 5, tension: 0.2, spanGaps: false };
 }
 
-export function lineSeries(label: string, data: Array<number | null>, color: string) {
+function lineSeries(label: string, data: Array<number | null>, color: string) {
   return { label, data, borderColor: color, backgroundColor: color, borderWidth: 3, pointRadius: 2, pointHoverRadius: 5, tension: 0.25, spanGaps: false };
 }
 
-export function xyChartOptions(
+function xyChartOptions(
   yAxisTitle: string,
   formatter: (value: number) => string,
   beginAtZero = false,
@@ -643,7 +635,7 @@ export function xyChartOptions(
   };
 }
 
-export function categoryChartOptions(
+function categoryChartOptions(
   xAxisTitle: string,
   yAxisTitle: string,
   formatter: (value: number) => string = (value) => String(value)
@@ -661,14 +653,14 @@ export function categoryChartOptions(
   };
 }
 
-export function chartPlugins(formatter: (value: number) => string) {
+function chartPlugins(formatter: (value: number) => string) {
   return {
     legend: { position: 'top' as const, labels: { boxWidth: 14, color: workspaceChartPalette.text, font: { weight: 500 as const } } },
     tooltip: { ...chartTooltipColors(), callbacks: { label: (context: { dataset: { label?: string }; parsed: { y: number | null } }) => `${context.dataset.label}: ${context.parsed.y == null ? 'geen data' : formatter(context.parsed.y)}` } },
   };
 }
 
-export function axisTitle(text: string) {
+function axisTitle(text: string) {
   return { display: true, text, color: workspaceChartPalette.muted, font: { weight: 500 as const } };
 }
 
@@ -683,7 +675,7 @@ export function formatSeconds(seconds: number): string {
   return formatDurationMs(seconds * 1_000);
 }
 
-export function formatNullableSeconds(seconds: number | null): string {
+function formatNullableSeconds(seconds: number | null): string {
   return seconds == null ? 'Geen data' : formatSeconds(seconds);
 }
 
@@ -696,7 +688,7 @@ export function signedNumber(value: number, fractionDigits = 0): string {
   return `${roundedValue > 0 ? '+' : ''}${roundedValue.toLocaleString('nl-BE', { maximumFractionDigits: fractionDigits })}`;
 }
 
-export function significanceLabel(pValue: number | null): string {
+function significanceLabel(pValue: number | null): string {
   if (pValue == null) return 'n.v.t.';
   if (pValue < 0.001) return '***';
   if (pValue < 0.01) return '**';
@@ -708,7 +700,7 @@ export function percentage(part: number, total: number): string {
   return total ? `${(part / total * 100).toFixed(1)}%` : '0%';
 }
 
-export function medianValue(values: number[]): number | null {
+function medianValue(values: number[]): number | null {
   if (!values.length) return null;
   const sortedValues = [...values].sort((firstValue, secondValue) => firstValue - secondValue);
   const middleIndex = Math.floor(sortedValues.length / 2);
@@ -717,7 +709,7 @@ export function medianValue(values: number[]): number | null {
     : (sortedValues[middleIndex - 1] + sortedValues[middleIndex]) / 2;
 }
 
-export function percentileValue(values: number[], probability: number): number {
+function percentileValue(values: number[], probability: number): number {
   if (!values.length) return 60;
   const sortedValues = [...values].sort((firstValue, secondValue) => firstValue - secondValue);
   const position = (sortedValues.length - 1) * probability;
@@ -726,7 +718,7 @@ export function percentileValue(values: number[], probability: number): number {
   return sortedValues[lowerIndex] + (sortedValues[Math.min(lowerIndex + 1, sortedValues.length - 1)] - sortedValues[lowerIndex]) * fraction;
 }
 
-export function linearTrend(
+function linearTrend(
   points: Array<{ x: number; y: number }>,
   minimumX: number,
   maximumX: number
@@ -745,11 +737,11 @@ export function linearTrend(
   ];
 }
 
-export function withOpacity(hexColor: string, opacity: number): string {
+function withOpacity(hexColor: string, opacity: number): string {
   const alpha = Math.round(clamp(opacity, 0, 1) * 255).toString(16).padStart(2, '0');
   return `${hexColor}${alpha}`;
 }
 
-export function clamp(value: number, minimum: number, maximum: number): number {
+function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, value));
 }

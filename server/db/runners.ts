@@ -1,4 +1,4 @@
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'node:crypto';
 import { type Runner, type RunnerInput, type RunnerPatch } from '../../shared/schemas.js';
 import { one, run, transaction } from './connection.js';
 import { TEMPORARY_TEAM_KIND, ensureLabel, getLabels } from './labels.js';
@@ -47,7 +47,7 @@ function findRunnerIdByEmail(email: string): string | null {
  * Replaces the runner's labels. Values may be label ids or names; unknown names
  * create a label. A temporary team label is only kept while that team is active.
  */
-export function setRunnerLabels(runnerId: string, labelNamesOrIds: string[]): void {
+function setRunnerLabels(runnerId: string, labelNamesOrIds: string[]): void {
   run('DELETE FROM runner_labels WHERE runner_id = ?', [runnerId]);
   const activeTemporaryLabelId = getActiveTemporaryTeamLabelIdForRunner(runnerId);
   for (const value of labelNamesOrIds) {
@@ -71,7 +71,7 @@ export function insertRunner(input: RunnerInput): Runner {
     throw new Error('Start een nieuwe loper via het timingscherm');
   }
   const now = Date.now();
-  const id = input.id || uuidv4();
+  const id = input.id || randomUUID();
   const initialQueueIndex = initialStatus === 'waiting' ? getMaxQueueIndex() + 1 : null;
   transaction(() => {
     run(

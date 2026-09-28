@@ -33,11 +33,16 @@ try {
   assert.equal(await runnerNumberInput.inputValue(), '501');
   const nameInput = page.getByRole('textbox', { name: 'Naam', exact: true });
   await nameInput.fill('Unsaved draft');
-  page.once('dialog', (dialog) => dialog.dismiss());
+  const discardPrompt = page.getByRole('dialog', { name: 'Nieuwe loper sluiten?', exact: true });
   await page.keyboard.press('Escape');
+  const keepEditing = discardPrompt.getByRole('button', { name: 'Verder invullen', exact: true });
+  assert.equal(await keepEditing.evaluate((button) => button === document.activeElement), true);
+  await keepEditing.click();
+  await discardPrompt.waitFor({ state: 'detached' });
   assert.equal(await nameInput.inputValue(), 'Unsaved draft');
-  page.once('dialog', (dialog) => dialog.accept());
   await page.getByRole('button', { name: 'Annuleer', exact: true }).click();
+  await discardPrompt.getByRole('button', { name: 'Sluiten zonder opslaan', exact: true }).click();
+  await nameInput.waitFor({ state: 'detached' });
   assert.equal(await openNewRunner.evaluate((button) => button === document.activeElement), true);
   console.log('PASS new-runner dialog accepts a runner number immediately, protects drafts, and returns focus to its opener');
 

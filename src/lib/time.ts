@@ -4,10 +4,9 @@ export {
   formatClockTimeMs,
   formatDurationMs,
   formatElapsedSeconds,
-  formatSecondsAsMmSs,
 } from '../../shared/time';
 
-export function setServerTimeOffsetMs(offsetMs: number): void {
+function setServerTimeOffsetMs(offsetMs: number): void {
   if (!Number.isFinite(offsetMs)) return;
   serverTimeOffsetMs = offsetMs;
 }
@@ -15,10 +14,6 @@ export function setServerTimeOffsetMs(offsetMs: number): void {
 export function setServerNowMs(serverNowMs: number, clientNowMs = Date.now()): void {
   if (!Number.isFinite(serverNowMs)) return;
   setServerTimeOffsetMs(serverNowMs - clientNowMs);
-}
-
-export function getServerTimeOffsetMs(): number {
-  return serverTimeOffsetMs;
 }
 
 async function fetchServerNowOverHttp(startedAt: number): Promise<number> {

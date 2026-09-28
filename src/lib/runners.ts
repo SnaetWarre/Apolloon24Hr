@@ -11,10 +11,6 @@ export function getNextWaitingRunner(runners: Runner[]): Runner | null {
   return nextRunner;
 }
 
-export function runnerLabel(runner: Pick<Runner, 'runnerNumber' | 'name'>): string {
-  return runner.runnerNumber ? `${runner.runnerNumber} ${runner.name}` : runner.name;
-}
-
 export function lapRunnerLabel(lap: Pick<LapRecord, 'runnerNumber' | 'runnerName'>): string {
   return lap.runnerNumber ? `${lap.runnerNumber} ${lap.runnerName}` : lap.runnerName;
 }

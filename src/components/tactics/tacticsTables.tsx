@@ -29,7 +29,7 @@ export function RecentLapsTable({
   );
 }
 
-export function LapReviewTable({
+function LapReviewTable({
   laps,
   minimumLapSeconds,
   maximumLapSeconds,

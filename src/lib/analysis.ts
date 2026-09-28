@@ -64,10 +64,6 @@ const BRUSSELS_HOUR_FORMATTER = new Intl.DateTimeFormat('nl-BE', {
   timeZone: 'Europe/Brussels',
 });
 
-export function isSpeedteamLabel(label: Pick<Label, 'kind' | 'name'>): boolean {
-  return label.kind === 'speedteam' || label.name.toLowerCase().includes('speedteam');
-}
-
 export function filterLaps(laps: LapRecord[], filters: AnalysisFilters): LapRecord[] {
   if (filters.enabledLabelIds === null) return laps;
   if (filters.enabledLabelIds.length === 0) return [];
@@ -79,7 +75,7 @@ export function filterLaps(laps: LapRecord[], filters: AnalysisFilters): LapReco
   });
 }
 
-export function calculateDurationStats(laps: Pick<LapRecord, 'durationMs'>[]): DurationStats {
+function calculateDurationStats(laps: Pick<LapRecord, 'durationMs'>[]): DurationStats {
   const durations = laps
     .map((lap) => lap.durationMs)
     .filter((duration) => Number.isFinite(duration) && duration >= 0)
@@ -148,7 +144,7 @@ export function buildTimeBuckets(laps: LapRecord[], race: RaceState): TimeBucket
     }));
 }
 
-export function formatClockHourWindow(startedAt: number, raceHour: number): string {
+function formatClockHourWindow(startedAt: number, raceHour: number): string {
   const windowStartedAt = startedAt + raceHour * 3_600_000;
   return `${BRUSSELS_HOUR_FORMATTER.format(windowStartedAt)}u-${BRUSSELS_HOUR_FORMATTER.format(windowStartedAt + 3_600_000)}u`;
 }
