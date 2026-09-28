@@ -1,12 +1,18 @@
 import { type LabelInput } from '../../shared/schemas.js';
-import { getDb, run, all, one } from './connection.js';
-import { getSetting, setSetting } from './settings.js';
-import { getRunnerLabelsMap, findLabelByName, createLabelRecord } from './labels.js';
-import { compactStoredLapLabels, REPLICATION_CHECKPOINT_KEY, LEGACY_REPLICATION_CHECKPOINT_KEY, storeReplicationCheckpoint, decodeReplicationCheckpoint } from './checkpoint.js';
+import {
+  LEGACY_REPLICATION_CHECKPOINT_KEY,
+  REPLICATION_CHECKPOINT_KEY,
+  compactStoredLapLabels,
+  decodeReplicationCheckpoint,
+  storeReplicationCheckpoint,
+} from './checkpoint.js';
+import { all, getDb, one, run } from './connection.js';
+import { createLabelRecord, findLabelByName, getRunnerLabelsMap } from './labels.js';
+import { deleteLocalSetting, getSetting, setLocalSetting } from './settings.js';
 
 export const DATABASE_SCHEMA_VERSION = 12;
 
-type DefaultLabel = LabelInput & { id: string };
+type DefaultLabel = Required<LabelInput> & { id: string };
 
 const DEFAULT_LABEL_CREATED_AT = 1_700_000_000_000;
 
@@ -282,11 +288,6 @@ function tableHasColumn(table: string, column: string): boolean {
 
 export function migrateSchema(): void {
   const previousVersion = Number(getSetting('schema_version') || 0);
-  if (previousVersion > DATABASE_SCHEMA_VERSION) {
-    throw new Error(
-      `database schema ${previousVersion} is newer than this Apolloon release (${DATABASE_SCHEMA_VERSION})`
-    );
-  }
   if (!tableHasColumn('runners', 'registration_json')) {
     run('ALTER TABLE runners ADD COLUMN registration_json TEXT');
   }
@@ -339,16 +340,13 @@ export function migrateSchema(): void {
     compactStoredLapLabels();
 
     const storedCheckpoint =
-      getSetting(REPLICATION_CHECKPOINT_KEY) ||
-      getSetting(LEGACY_REPLICATION_CHECKPOINT_KEY);
+      getSetting(REPLICATION_CHECKPOINT_KEY) || getSetting(LEGACY_REPLICATION_CHECKPOINT_KEY);
     if (storedCheckpoint) {
       storeReplicationCheckpoint(decodeReplicationCheckpoint(storedCheckpoint));
     }
-    getDb()
-      .prepare('DELETE FROM settings WHERE key = ?')
-      .run(LEGACY_REPLICATION_CHECKPOINT_KEY);
+    deleteLocalSetting(LEGACY_REPLICATION_CHECKPOINT_KEY);
   }
-  setSetting('schema_version', String(DATABASE_SCHEMA_VERSION));
+  setLocalSetting('schema_version', String(DATABASE_SCHEMA_VERSION));
   getDb().pragma(`user_version = ${DATABASE_SCHEMA_VERSION}`);
 }
 
@@ -365,15 +363,7 @@ export function seedDefaultLabels(): void {
              target_laps = COALESCE(target_laps, ?),
              sort_order = COALESCE(sort_order, ?)
          WHERE id = ?`,
-        [
-          label.color ?? '#3b82f6',
-          label.icon ?? label.name.slice(0, 2).toUpperCase(),
-          label.kind ?? 'custom',
-          label.imageUrl ?? null,
-          label.targetLaps ?? null,
-          label.sortOrder ?? null,
-          existing.id,
-        ]
+        [label.color, label.icon, label.kind, label.imageUrl, label.targetLaps, label.sortOrder, existing.id]
       );
       continue;
     }

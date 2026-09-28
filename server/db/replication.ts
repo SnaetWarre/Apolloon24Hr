@@ -1,139 +1,47 @@
-import { ensureReplicationIdentity, nextLocalHlc, getReplicationVector, observeRemoteHlc } from './replication-state.js';
-import { getSetting, setSetting, setReplicationSetting } from './settings.js';
 import crypto from 'node:crypto';
-import { type ReplicationOperation, type ReplicatedSqlStatement, type SqlValue, type ReplicationConflict, type ReplicationCheckpoint } from './types.js';
+import path from 'node:path';
 import { v4 as uuidv4 } from 'uuid';
-import { one, isCapturingWrite, transaction, captureWrite, getDb, all, markAppDataChanged, isReplicatedMutation, DATA_DIR } from './connection.js';
-import { ensureReplicationCheckpoint, restoreReplicationCheckpoint, compactStoredLapLabels, storeReplicationCheckpoint } from './checkpoint.js';
 import { type AppSnapshot } from '../../shared/schemas.js';
+import {
+  compactStoredLapLabels,
+  ensureReplicationCheckpoint,
+  restoreReplicationCheckpoint,
+  storeReplicationCheckpoint,
+} from './checkpoint.js';
+import {
+  DATA_DIR,
+  all,
+  captureWrite,
+  getDb,
+  isReplicatedMutation,
+  markAppDataChanged,
+  one,
+  runUncaptured,
+  transaction,
+} from './connection.js';
+import { ensureReplicationIdentity, getReplicationVector, nextLocalHlc, observeRemoteHlc } from './replication-state.js';
+import { deleteLocalSetting, getSetting, setLocalSetting, setSetting } from './settings.js';
 import { applySnapshot } from './snapshot.js';
-import path from 'path';
+import {
+  type ReplicatedSqlStatement,
+  type ReplicationCheckpoint,
+  type ReplicationConflict,
+  type ReplicationOperation,
+  type SqlValue,
+} from './types.js';
 
 const MAX_REPLICATION_ORIGINS = 64;
 
-export function assertOrClaimTimingController(): string {
-  if (getOpenReplicationConflictCount() > 0) {
-    throw new Error(
-      'Timing is gepauzeerd door een syncconflict. Los dit eerst op in Admin.'
-    );
-  }
-  const hostId = ensureReplicationIdentity().hostId;
-  const current = getSetting('timing_controller_host_id');
-  if (current && current !== hostId) {
-    throw new Error('De timing wordt bediend op een andere laptop');
-  }
-  assignTimingController(hostId);
-  return hostId;
-}
+const TIMING_CONTROLLER_KEY = 'timing_controller_host_id';
+const TIMING_GENERATION_KEY = 'timing_controller_generation';
 
-export function claimTimingController(): string {
-  const hostId = ensureReplicationIdentity().hostId;
-  assignTimingController(hostId);
-  return hostId;
-}
+const CANONICAL_ORDER = 'hlc_wall_ms, hlc_counter, origin_host_id, origin_seq';
 
-export function assignTimingController(hostId: string): {
-  hostId: string;
-  generation: number;
-} {
-  const targetHostId = String(hostId || '').trim();
-  if (!targetHostId || targetHostId.length > 128) {
-    throw new Error('ongeldige timinglaptop');
-  }
-  const current = getSetting('timing_controller_host_id');
-  const storedGeneration = Number(getSetting('timing_controller_generation') || 0);
-  if (current === targetHostId && storedGeneration > 0) {
-    return { hostId: targetHostId, generation: storedGeneration };
-  }
-  const generation = Math.max(0, Math.floor(storedGeneration) || 0) + 1;
-  setSetting('timing_controller_host_id', targetHostId);
-  setSetting('timing_controller_generation', String(generation));
-  return { hostId: targetHostId, generation };
-}
-
-export function getTimingControllerGeneration(): number {
-  const generation = Number(getSetting('timing_controller_generation') || 0);
-  return Number.isSafeInteger(generation) && generation > 0 ? generation : 0;
-}
-
-function replicationChecksum(input: Omit<ReplicationOperation, 'checksum' | 'status' | 'appliedAt'>): string {
-  return crypto
-    .createHash('sha256')
-    .update(
-      JSON.stringify({
-        id: input.id,
-        clusterId: input.clusterId,
-        originHostId: input.originHostId,
-        originSeq: input.originSeq,
-        hlcWallMs: input.hlcWallMs,
-        hlcCounter: input.hlcCounter,
-        type: input.type,
-        payload: input.payload,
-        statements: input.statements,
-        result: input.result,
-        raceBaseKey: input.raceBaseKey,
-        createdAt: input.createdAt,
-      })
-    )
-    .digest('hex');
-}
-
-function stableJson(value: unknown): string {
-  return JSON.stringify(value, (_key, nestedValue) => {
-    if (
-      nestedValue &&
-      typeof nestedValue === 'object' &&
-      !Array.isArray(nestedValue)
-    ) {
-      return Object.fromEntries(
-        Object.entries(nestedValue as Record<string, unknown>).sort(([a], [b]) =>
-          a.localeCompare(b)
-        )
-      );
-    }
-    return nestedValue;
-  });
-}
-
-function hasOwn(record: object, key: PropertyKey): boolean {
-  return Object.prototype.hasOwnProperty.call(record, key);
-}
-
-function replicationOperationFromRow(row: {
-  id: string;
-  clusterId: string;
-  originHostId: string;
-  originSeq: number;
-  hlcWallMs: number;
-  hlcCounter: number;
-  type: string;
+type ReplicationOperationRow = Omit<ReplicationOperation, 'payload' | 'statements' | 'result'> & {
   payloadJson: string;
   statementsJson: string;
   resultJson: string;
-  raceBaseKey: string | null;
-  status: ReplicationOperation['status'];
-  checksum: string;
-  createdAt: number;
-  appliedAt: number;
-}): ReplicationOperation {
-  return {
-    id: row.id,
-    clusterId: row.clusterId,
-    originHostId: row.originHostId,
-    originSeq: row.originSeq,
-    hlcWallMs: row.hlcWallMs,
-    hlcCounter: row.hlcCounter,
-    type: row.type,
-    payload: JSON.parse(row.payloadJson) as unknown,
-    statements: JSON.parse(row.statementsJson) as ReplicatedSqlStatement[],
-    result: JSON.parse(row.resultJson) as unknown,
-    raceBaseKey: row.raceBaseKey,
-    status: row.status,
-    checksum: row.checksum,
-    createdAt: row.createdAt,
-    appliedAt: row.appliedAt,
-  };
-}
+};
 
 const REPLICATION_OPERATION_SELECT = `SELECT
   id,
@@ -153,6 +61,92 @@ const REPLICATION_OPERATION_SELECT = `SELECT
   applied_at AS appliedAt
 FROM replication_operations`;
 
+function operationFromRow({ payloadJson, statementsJson, resultJson, ...row }: ReplicationOperationRow): ReplicationOperation {
+  return {
+    ...row,
+    payload: JSON.parse(payloadJson) as unknown,
+    statements: JSON.parse(statementsJson) as ReplicatedSqlStatement[],
+    result: JSON.parse(resultJson) as unknown,
+  };
+}
+
+// Timing control is a replicated setting: exactly one laptop records laps.
+
+export function getTimingControllerHostId(): string | null {
+  return getSetting(TIMING_CONTROLLER_KEY);
+}
+
+export function getTimingControllerGeneration(): number {
+  const generation = Number(getSetting(TIMING_GENERATION_KEY) || 0);
+  return Number.isSafeInteger(generation) && generation > 0 ? generation : 0;
+}
+
+export function assertOrClaimTimingController(): void {
+  if (getOpenReplicationConflictCount() > 0) {
+    throw new Error('Timing is gepauzeerd door een syncconflict. Los dit eerst op in Admin.');
+  }
+  const hostId = ensureReplicationIdentity().hostId;
+  const current = getTimingControllerHostId();
+  if (current && current !== hostId) {
+    throw new Error('De timing wordt bediend op een andere laptop');
+  }
+  assignTimingController(hostId);
+}
+
+export function assignTimingController(hostId: string): { hostId: string; generation: number } {
+  const targetHostId = hostId.trim();
+  if (!targetHostId || targetHostId.length > 128) {
+    throw new Error('ongeldige timinglaptop');
+  }
+  const generation = getTimingControllerGeneration();
+  if (getTimingControllerHostId() === targetHostId && generation > 0) {
+    return { hostId: targetHostId, generation };
+  }
+  setSetting(TIMING_CONTROLLER_KEY, targetHostId);
+  setSetting(TIMING_GENERATION_KEY, String(generation + 1));
+  return { hostId: targetHostId, generation: generation + 1 };
+}
+
+function replicationChecksum(operation: Omit<ReplicationOperation, 'checksum' | 'status' | 'appliedAt'>): string {
+  return crypto
+    .createHash('sha256')
+    .update(
+      JSON.stringify({
+        id: operation.id,
+        clusterId: operation.clusterId,
+        originHostId: operation.originHostId,
+        originSeq: operation.originSeq,
+        hlcWallMs: operation.hlcWallMs,
+        hlcCounter: operation.hlcCounter,
+        type: operation.type,
+        payload: operation.payload,
+        statements: operation.statements,
+        result: operation.result,
+        raceBaseKey: operation.raceBaseKey,
+        createdAt: operation.createdAt,
+      })
+    )
+    .digest('hex');
+}
+
+/** `Object.hasOwn`, which the client's ES2020 typecheck of this file does not know. */
+function hasOwn(record: object, key: PropertyKey): boolean {
+  return Object.prototype.hasOwnProperty.call(record, key);
+}
+
+function stableJson(value: unknown): string {
+  return JSON.stringify(value, (_key, nested) =>
+    nested && typeof nested === 'object' && !Array.isArray(nested)
+      ? Object.fromEntries(Object.entries(nested as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)))
+      : nested
+  );
+}
+
+/**
+ * Runs a local write and records it as an immutable operation in the same
+ * transaction. Retrying a command id returns the original result; reusing it
+ * for another write is rejected.
+ */
 export function commitReplicatedWrite<T>(input: {
   id?: string;
   type: string;
@@ -162,35 +156,24 @@ export function commitReplicatedWrite<T>(input: {
 }): T {
   const identity = ensureReplicationIdentity();
   const id = input.id || uuidv4();
-  const existing = one<Parameters<typeof replicationOperationFromRow>[0]>(
-    `${REPLICATION_OPERATION_SELECT} WHERE id = ?`,
-    [id]
-  );
+  const existing = getReplicationOperation(id);
   if (existing) {
-    const operation = replicationOperationFromRow(existing);
-    if (
-      operation.type !== input.type ||
-      stableJson(operation.payload) !== stableJson(input.payload ?? null)
-    ) {
+    if (existing.type !== input.type || stableJson(existing.payload) !== stableJson(input.payload ?? null)) {
       throw new Error('command id was already used for a different write');
     }
-    return operation.result as T;
+    return existing.result as T;
   }
-  if (isCapturingWrite()) throw new Error('nested replicated write is not supported');
 
   return transaction(() => {
     ensureReplicationCheckpoint();
     const originSeq =
       (one<{ seq: number }>(
-        `SELECT COALESCE(MAX(origin_seq), 0) AS seq
-         FROM replication_operations
-         WHERE origin_host_id = ?`,
+        'SELECT COALESCE(MAX(origin_seq), 0) AS seq FROM replication_operations WHERE origin_host_id = ?',
         [identity.hostId]
       )?.seq ?? 0) + 1;
     const hlc = nextLocalHlc();
     const { result, statements } = captureWrite(input.action);
-    const createdAt = Date.now();
-    const base = {
+    const operation = {
       id,
       clusterId: identity.clusterId,
       originHostId: identity.hostId,
@@ -202,107 +185,56 @@ export function commitReplicatedWrite<T>(input: {
       statements,
       result: result ?? null,
       raceBaseKey: input.raceBaseKey ?? null,
-      createdAt,
+      createdAt: Date.now(),
     };
-    const checksum = replicationChecksum(base);
-    getDb()
-      .prepare(
-        `INSERT INTO replication_operations (
-          id, cluster_id, origin_host_id, origin_seq, hlc_wall_ms, hlc_counter,
-          type, payload_json, statements_json, result_json, race_base_key,
-          status, checksum, created_at, applied_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'accepted', ?, ?, ?)`
-      )
-      .run(
-        id,
-        identity.clusterId,
-        identity.hostId,
-        originSeq,
-        hlc.wallMs,
-        hlc.counter,
-        input.type,
-        JSON.stringify(base.payload),
-        JSON.stringify(statements),
-        JSON.stringify(base.result),
-        base.raceBaseKey,
-        checksum,
-        createdAt,
-        createdAt
-      );
+    insertReplicationOperation({
+      ...operation,
+      status: 'accepted',
+      checksum: replicationChecksum(operation),
+      appliedAt: operation.createdAt,
+    });
     return result;
   });
 }
 
-export function getReplicationOperationsMissing(
-  vector: Record<string, number>,
-  limit = 250
-): ReplicationOperation[] {
-  const origins = all<{ hostId: string }>(
-    `SELECT DISTINCT origin_host_id AS hostId
-     FROM replication_operations`
-  );
+export function getReplicationOperationsMissing(vector: Record<string, number>, limit = 250): ReplicationOperation[] {
+  const origins = all<{ hostId: string }>('SELECT DISTINCT origin_host_id AS hostId FROM replication_operations');
   if (!origins.length) return [];
 
   const params: SqlValue[] = [];
   const conditions = origins.map(({ hostId }) => {
-    const acknowledged = Number(
-      hasOwn(vector, hostId) ? vector[hostId] : 0
-    );
-    params.push(
-      hostId,
-      Number.isFinite(acknowledged) ? Math.max(0, Math.floor(acknowledged)) : 0
-    );
+    const acknowledged = Number(hasOwn(vector, hostId) ? vector[hostId] : 0);
+    params.push(hostId, Number.isFinite(acknowledged) ? Math.max(0, Math.floor(acknowledged)) : 0);
     return '(origin_host_id = ? AND origin_seq > ?)';
   });
   params.push(Math.max(1, Math.min(1_000, Math.floor(limit) || 250)));
 
-  return all<Parameters<typeof replicationOperationFromRow>[0]>(
+  return all<ReplicationOperationRow>(
     `${REPLICATION_OPERATION_SELECT}
      WHERE ${conditions.join(' OR ')}
-     ORDER BY hlc_wall_ms, hlc_counter, origin_host_id, origin_seq
+     ORDER BY ${CANONICAL_ORDER}
      LIMIT ?`,
     params
-  )
-    .map(replicationOperationFromRow);
+  ).map(operationFromRow);
 }
 
 export function getAllReplicationOperations(): ReplicationOperation[] {
-  return all<Parameters<typeof replicationOperationFromRow>[0]>(
-    `${REPLICATION_OPERATION_SELECT}
-     ORDER BY hlc_wall_ms, hlc_counter, origin_host_id, origin_seq`
-  ).map(replicationOperationFromRow);
+  return all<ReplicationOperationRow>(`${REPLICATION_OPERATION_SELECT} ORDER BY ${CANONICAL_ORDER}`).map(
+    operationFromRow
+  );
 }
 
 export function getReplicationOperation(id: string): ReplicationOperation | null {
-  const row = one<Parameters<typeof replicationOperationFromRow>[0]>(
-    `${REPLICATION_OPERATION_SELECT} WHERE id = ?`,
-    [id]
-  );
-  return row ? replicationOperationFromRow(row) : null;
+  const row = one<ReplicationOperationRow>(`${REPLICATION_OPERATION_SELECT} WHERE id = ?`, [id]);
+  return row ? operationFromRow(row) : null;
 }
 
 export function getOpenReplicationConflictCount(): number {
-  return (
-    one<{ count: number }>(
-      `SELECT COUNT(*) AS count FROM replication_conflicts WHERE status = 'open'`
-    )?.count ?? 0
-  );
+  return one<{ count: number }>(`SELECT COUNT(*) AS count FROM replication_conflicts WHERE status = 'open'`)?.count ?? 0;
 }
 
-export function getReplicationConflicts(
-  status: ReplicationConflict['status'] | 'all' = 'open'
-): ReplicationConflict[] {
-  const where = status === 'all' ? '' : 'WHERE status = ?';
-  const params: SqlValue[] = status === 'all' ? [] : [status];
-  return all<{
-    id: string;
-    kind: ReplicationConflict['kind'];
-    operationIdsJson: string;
-    status: ReplicationConflict['status'];
-    resolutionOperationId: string | null;
-    createdAt: number;
-    resolvedAt: number | null;
-  }>(
+export function getReplicationConflicts(status: ReplicationConflict['status'] | 'all' = 'open'): ReplicationConflict[] {
+  const rows = all<Omit<ReplicationConflict, 'operationIds' | 'operations'> & { operationIdsJson: string }>(
     `SELECT
        id,
        kind,
@@ -312,71 +244,70 @@ export function getReplicationConflicts(
        created_at AS createdAt,
        resolved_at AS resolvedAt
      FROM replication_conflicts
-     ${where}
+     ${status === 'all' ? '' : 'WHERE status = ?'}
      ORDER BY created_at DESC`,
-    params
-  ).map((row) => ({
-    id: row.id,
-    kind: row.kind,
-    operationIds: JSON.parse(row.operationIdsJson) as string[],
-    status: row.status,
-    resolutionOperationId: row.resolutionOperationId,
-    createdAt: row.createdAt,
-    resolvedAt: row.resolvedAt,
-  })).map((conflict) => ({
-    ...conflict,
-    operations: conflict.operationIds.flatMap((id) => {
-      const operation = getReplicationOperation(id);
-      return operation
-        ? [{
-            id: operation.id,
-            originHostId: operation.originHostId,
-            type: operation.type,
-            createdAt: operation.createdAt,
-          }]
-        : [];
-    }),
-  }));
+    status === 'all' ? [] : [status]
+  );
+  return rows.map(({ operationIdsJson, ...conflict }) => {
+    const operationIds = JSON.parse(operationIdsJson) as string[];
+    return {
+      id: conflict.id,
+      kind: conflict.kind,
+      operationIds,
+      status: conflict.status,
+      resolutionOperationId: conflict.resolutionOperationId,
+      createdAt: conflict.createdAt,
+      resolvedAt: conflict.resolvedAt,
+      operations: operationIds.flatMap((operationId) => {
+        const operation = one<ReplicationConflict['operations'][number]>(
+          `SELECT id, origin_host_id AS originHostId, type, created_at AS createdAt
+           FROM replication_operations WHERE id = ?`,
+          [operationId]
+        );
+        return operation ? [operation] : [];
+      }),
+    };
+  });
 }
 
-export function prepareReplicationConflictChoice(
-  conflictId: string,
-  selectedOperationId: string
-): void {
-  const conflict = getReplicationConflicts().find((item) => item.id === conflictId);
-  if (!conflict) throw new Error('syncconflict niet gevonden of al opgelost');
-  if (!conflict.operationIds.includes(selectedOperationId)) {
+function openConflictOperationIds(conflictId: string): string[] | null {
+  const row = one<{ operationIdsJson: string }>(
+    `SELECT operation_ids_json AS operationIdsJson FROM replication_conflicts WHERE id = ? AND status = 'open'`,
+    [conflictId]
+  );
+  return row ? (JSON.parse(row.operationIdsJson) as string[]) : null;
+}
+
+/** Rebuilds the application tables with the chosen timing history winning the conflict. */
+export function prepareReplicationConflictChoice(conflictId: string, selectedOperationId: string): void {
+  const operationIds = openConflictOperationIds(conflictId);
+  if (!operationIds) throw new Error('syncconflict niet gevonden of al opgelost');
+  if (!operationIds.includes(selectedOperationId)) {
     throw new Error('de gekozen timingversie hoort niet bij dit conflict');
   }
   rebuildApplicationFromReplicationLog(new Set([selectedOperationId]));
 }
 
+/**
+ * Records the resolved state as a full snapshot inside the resolving command,
+ * so every peer converges on it regardless of its own replay order.
+ */
 export function finalizeReplicationConflict(
   conflictId: string,
   snapshot: AppSnapshot
 ): { conflictId: string; kept: 'current' } {
-  const conflict = one<{ id: string }>(
-    `SELECT id FROM replication_conflicts
-     WHERE id = ? AND status = 'open'`,
-    [conflictId]
-  );
-  if (!conflict) throw new Error('syncconflict niet gevonden of al opgelost');
+  if (!openConflictOperationIds(conflictId)) throw new Error('syncconflict niet gevonden of al opgelost');
   applySnapshot(snapshot);
-  getDb()
-    .prepare(
-      `UPDATE replication_conflicts
-       SET status = 'resolved', resolved_at = ?
-       WHERE id = ?`
-    )
-    .run(Date.now(), conflictId);
+  runUncaptured(`UPDATE replication_conflicts SET status = 'resolved', resolved_at = ? WHERE id = ?`, [
+    Date.now(),
+    conflictId,
+  ]);
   return { conflictId, kept: 'current' };
 }
 
+/** Local operations not yet acknowledged by every known peer. */
 export function getPendingReplicationOperationCount(): number {
-  const peers =
-    one<{ count: number }>(
-      'SELECT COUNT(DISTINCT peer_host_id) AS count FROM replication_peer_progress'
-    )?.count ?? 0;
+  const peers = one<{ count: number }>('SELECT COUNT(DISTINCT peer_host_id) AS count FROM replication_peer_progress')?.count;
   if (!peers) return 0;
   const local = ensureReplicationIdentity().hostId;
   const acknowledged =
@@ -400,46 +331,32 @@ export function getPendingReplicationOperationCount(): number {
   );
 }
 
-export function acknowledgeReplicationVector(
-  peerHostId: string,
-  vector: Record<string, number>
-): void {
+export function acknowledgeReplicationVector(peerHostId: string, vector: Record<string, number>): void {
   const now = Date.now();
-  const origins = new Set([peerHostId, ...Object.keys(vector)]);
+  const upsert = getDb().prepare(
+    `INSERT INTO replication_peer_progress (
+       peer_host_id, origin_host_id, acknowledged_seq, updated_at
+     ) VALUES (?, ?, ?, ?)
+     ON CONFLICT(peer_host_id, origin_host_id) DO UPDATE SET
+       acknowledged_seq = MAX(replication_peer_progress.acknowledged_seq, excluded.acknowledged_seq),
+       updated_at = excluded.updated_at`
+  );
   transaction(() => {
-    for (const originHostId of origins) {
-      const seq = Number(
-        hasOwn(vector, originHostId) ? vector[originHostId] : 0
-      );
-      getDb()
-        .prepare(
-          `INSERT INTO replication_peer_progress (
-             peer_host_id, origin_host_id, acknowledged_seq, updated_at
-           ) VALUES (?, ?, ?, ?)
-           ON CONFLICT(peer_host_id, origin_host_id) DO UPDATE SET
-             acknowledged_seq = MAX(replication_peer_progress.acknowledged_seq, excluded.acknowledged_seq),
-             updated_at = excluded.updated_at`
-        )
-        .run(
-          peerHostId,
-          originHostId,
-          Number.isFinite(seq) ? Math.max(0, Math.floor(seq)) : 0,
-          now
-        );
+    for (const originHostId of new Set([peerHostId, ...Object.keys(vector)])) {
+      const seq = Number(hasOwn(vector, originHostId) ? vector[originHostId] : 0);
+      upsert.run(peerHostId, originHostId, Number.isFinite(seq) ? Math.max(0, Math.floor(seq)) : 0, now);
     }
   });
 }
 
 function insertReplicationOperation(operation: ReplicationOperation): void {
-  getDb()
-    .prepare(
-      `INSERT INTO replication_operations (
-        id, cluster_id, origin_host_id, origin_seq, hlc_wall_ms, hlc_counter,
-        type, payload_json, statements_json, result_json, race_base_key,
-        status, checksum, created_at, applied_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    )
-    .run(
+  runUncaptured(
+    `INSERT INTO replication_operations (
+      id, cluster_id, origin_host_id, origin_seq, hlc_wall_ms, hlc_counter,
+      type, payload_json, statements_json, result_json, race_base_key,
+      status, checksum, created_at, applied_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
       operation.id,
       operation.clusterId,
       operation.originHostId,
@@ -454,18 +371,12 @@ function insertReplicationOperation(operation: ReplicationOperation): void {
       operation.status,
       operation.checksum,
       operation.createdAt,
-      operation.appliedAt
-    );
+      operation.appliedAt,
+    ]
+  );
 }
 
-function operationConflictId(operationIds: string[]): string {
-  return crypto
-    .createHash('sha256')
-    .update(operationIds.slice().sort().join(':'))
-    .digest('hex');
-}
-
-export type DeadLetterOperation = {
+type DeadLetterOperation = {
   id: string;
   originHostId: string | null;
   originSeq: number | null;
@@ -478,27 +389,18 @@ const DEAD_LETTER_SETTING_KEY = 'replication_dead_letters_json';
 const MAX_DEAD_LETTERS = 200;
 
 /**
- * Quarantaine voor deterministisch foute operaties (vormfout, checksumfout,
- * id-botsing). Zonder dit blijft de afzender dezelfde foute batch aanbieden en
- * komt de vector nooit vooruit: de hele sync staat dan stil. Quarantaine slaat
- * de operatie over zodat geldige operaties eromheen gewoon toegepast worden;
- * de teller in de cluststatus waarschuwt de operator.
- *
- * Bewust géén schema-migratie: de lijst leeft in de settings-tabel, dus oude
- * en nieuwe builds blijven koppelbaar.
+ * Quarantine for operations that can never apply (malformed, checksum
+ * mismatch, id collision). Without it the sender keeps offering the same batch
+ * and the vector never advances. Stored in settings rather than a table so
+ * older and newer builds can still pair.
  */
-export function getDeadLetterOperations(): DeadLetterOperation[] {
+function getDeadLetterOperations(): DeadLetterOperation[] {
   try {
-    const raw = getSetting(DEAD_LETTER_SETTING_KEY);
-    if (!raw) return [];
-    const parsed: unknown = JSON.parse(raw);
+    const parsed: unknown = JSON.parse(getSetting(DEAD_LETTER_SETTING_KEY) || '[]');
     if (!Array.isArray(parsed)) return [];
     return parsed.filter(
       (entry): entry is DeadLetterOperation =>
-        Boolean(entry) &&
-        typeof entry === 'object' &&
-        typeof (entry as DeadLetterOperation).id === 'string' &&
-        typeof (entry as DeadLetterOperation).reason === 'string'
+        Boolean(entry) && typeof entry.id === 'string' && typeof entry.reason === 'string'
     );
   } catch {
     return [];
@@ -510,58 +412,66 @@ export function getDeadLetterCount(): number {
 }
 
 function recordDeadLetterOperation(operation: unknown, error: unknown): void {
-  const record = (typeof operation === 'object' && operation !== null
-    ? (operation as Partial<ReplicationOperation>)
-    : {}) as Partial<ReplicationOperation>;
+  const record = (operation ?? {}) as Partial<ReplicationOperation>;
   const id = typeof record.id === 'string' && record.id ? record.id.slice(0, 128) : '(onbekend)';
-  const reason =
-    error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200);
+  const reason = (error instanceof Error ? error.message : String(error)).slice(0, 200);
   const entry: DeadLetterOperation = {
     id,
     originHostId: typeof record.originHostId === 'string' ? record.originHostId.slice(0, 128) : null,
-    originSeq: Number.isSafeInteger(record.originSeq) ? (record.originSeq as number) : null,
+    originSeq: Number.isSafeInteger(record.originSeq) ? record.originSeq! : null,
     type: typeof record.type === 'string' ? record.type.slice(0, 128) : null,
     reason,
     createdAt: Date.now(),
   };
   const retained = [entry, ...getDeadLetterOperations().filter((item) => item.id !== id)];
-  setSetting(DEAD_LETTER_SETTING_KEY, JSON.stringify(retained.slice(0, MAX_DEAD_LETTERS)));
-  console.warn(`Replication operation in quarantaine (${id}): ${reason}`);
+  setLocalSetting(DEAD_LETTER_SETTING_KEY, JSON.stringify(retained.slice(0, MAX_DEAD_LETTERS)));
+  console.warn(`Replication operation quarantined (${id}): ${reason}`);
 }
 
-function saveReplicationConflict(
-  kind: ReplicationConflict['kind'],
-  operationIds: string[]
-): string {  const sortedIds = operationIds.slice().sort();
-  const id = operationConflictId(sortedIds);
-  getDb()
-    .prepare(
-      `INSERT INTO replication_conflicts (
-         id, kind, operation_ids_json, status, created_at
-       ) VALUES (?, ?, ?, 'open', ?)
-       ON CONFLICT(id) DO UPDATE SET
-         kind = excluded.kind,
-         operation_ids_json = excluded.operation_ids_json`
-    )
-    .run(id, kind, JSON.stringify(sortedIds), Date.now());
-  return id;
+function saveReplicationConflict(kind: ReplicationConflict['kind'], operationIds: string[]): void {
+  const sortedIds = operationIds.slice().sort();
+  const id = crypto.createHash('sha256').update(sortedIds.join(':')).digest('hex');
+  runUncaptured(
+    `INSERT INTO replication_conflicts (
+       id, kind, operation_ids_json, status, created_at
+     ) VALUES (?, ?, ?, 'open', ?)
+     ON CONFLICT(id) DO UPDATE SET
+       kind = excluded.kind,
+       operation_ids_json = excluded.operation_ids_json`,
+    [id, kind, JSON.stringify(sortedIds), Date.now()]
+  );
 }
 
 function resolutionConflictId(operation: ReplicationOperation): string | null {
   if (operation.type !== 'cluster.resolveConflict') return null;
   if (!operation.payload || typeof operation.payload !== 'object') return null;
-  const payload = operation.payload as {
-    conflictId?: unknown;
-    input?: { conflictId?: unknown };
-  };
+  // Older operations carried the conflict id at the top level of the payload.
+  const payload = operation.payload as { conflictId?: unknown; input?: { conflictId?: unknown } };
   const id = payload.conflictId ?? payload.input?.conflictId;
   return typeof id === 'string' && id ? id : null;
 }
 
-function compareReplicationOperations(
-  a: ReplicationOperation,
-  b: ReplicationOperation
-): number {
+function markConflictResolvedBy(operation: ReplicationOperation): void {
+  const conflictId = resolutionConflictId(operation);
+  if (!conflictId) return;
+  const resolution = runUncaptured(
+    `UPDATE replication_conflicts
+     SET status = 'resolved',
+         resolution_operation_id = ?,
+         resolved_at = ?
+     WHERE id = ?`,
+    [operation.id, Date.now(), conflictId]
+  );
+  if (resolution.changes === 0) {
+    console.warn(`Conflict resolution ${operation.id} did not find conflict ${conflictId}`);
+  }
+}
+
+function applyStatements(operation: ReplicationOperation): void {
+  for (const { sql, params } of operation.statements) runUncaptured(sql, params);
+}
+
+function compareReplicationOperations(a: ReplicationOperation, b: ReplicationOperation): number {
   return (
     a.hlcWallMs - b.hlcWallMs ||
     a.hlcCounter - b.hlcCounter ||
@@ -570,94 +480,55 @@ function compareReplicationOperations(
   );
 }
 
-function rebuildApplicationFromReplicationLog(
-  preferredOperationIds: ReadonlySet<string> = new Set()
-): void {
+/**
+ * Restores the checkpoint and replays every later operation in canonical
+ * order. Timing operations that started from the same race state compete; the
+ * first (or preferred) one wins and the others become a timing conflict.
+ */
+function rebuildApplicationFromReplicationLog(preferredOperationIds: ReadonlySet<string> = new Set()): void {
   const checkpoint = ensureReplicationCheckpoint();
-  const operations = all<Parameters<typeof replicationOperationFromRow>[0]>(
-    `${REPLICATION_OPERATION_SELECT}
-     ORDER BY hlc_wall_ms, hlc_counter, origin_host_id, origin_seq`
-  )
-    .map(replicationOperationFromRow)
-    .filter(
-      (operation) =>
-        operation.originSeq > (checkpoint.vector[operation.originHostId] || 0)
-    );
+  const operations = getAllReplicationOperations().filter(
+    (operation) => operation.originSeq > (checkpoint.vector[operation.originHostId] || 0)
+  );
   const raceGroups = new Map<string, ReplicationOperation[]>();
   for (const operation of operations) {
     if (!operation.raceBaseKey) continue;
-    const group = raceGroups.get(operation.raceBaseKey) || [];
-    group.push(operation);
-    raceGroups.set(operation.raceBaseKey, group);
+    const group = raceGroups.get(operation.raceBaseKey);
+    if (group) group.push(operation);
+    else raceGroups.set(operation.raceBaseKey, [operation]);
   }
   const raceChoices = new Map<string, string>();
   for (const [raceBaseKey, group] of raceGroups) {
     const preferred = group.find((operation) => preferredOperationIds.has(operation.id));
-    raceChoices.set(raceBaseKey, (preferred || group[0]).id);
+    raceChoices.set(raceBaseKey, (preferred ?? group[0]).id);
   }
 
   transaction(() => {
     restoreReplicationCheckpoint(checkpoint);
-    getDb()
-      .prepare(
-        `DELETE FROM replication_conflicts
-         WHERE resolution_operation_id IS NULL`
-      )
-      .run();
+    runUncaptured('DELETE FROM replication_conflicts WHERE resolution_operation_id IS NULL');
 
     for (const operation of operations) {
       let conflictKind: ReplicationConflict['kind'] | null = null;
       let conflictOperationIds = [operation.id];
-      const raceChoice = operation.raceBaseKey
-        ? raceChoices.get(operation.raceBaseKey)
-        : null;
+      const raceChoice = operation.raceBaseKey ? raceChoices.get(operation.raceBaseKey) : null;
       if (raceChoice && raceChoice !== operation.id) {
         conflictKind = 'timing';
         conflictOperationIds = [raceChoice, operation.id];
       } else {
         try {
-          getDb().transaction(() => {
-            for (const item of operation.statements) {
-              getDb().prepare(item.sql).run(...item.params);
-            }
-          })();
+          transaction(() => applyStatements(operation));
         } catch {
           conflictKind = operation.raceBaseKey ? 'timing' : 'data';
         }
       }
 
-      const status: ReplicationOperation['status'] = conflictKind
-        ? 'conflict'
-        : 'accepted';
-      getDb()
-        .prepare(
-          `UPDATE replication_operations
-           SET status = ?, applied_at = ?
-           WHERE id = ?`
-        )
-        .run(status, Date.now(), operation.id);
-
-      if (conflictKind) {
-        saveReplicationConflict(conflictKind, conflictOperationIds);
-        continue;
-      }
-      const resolvedConflictId = resolutionConflictId(operation);
-      if (resolvedConflictId) {
-        const resolution = getDb()
-          .prepare(
-            `UPDATE replication_conflicts
-             SET status = 'resolved',
-                 resolution_operation_id = ?,
-                 resolved_at = ?
-             WHERE id = ?`
-          )
-          .run(operation.id, Date.now(), resolvedConflictId);
-        if (resolution.changes === 0) {
-          console.warn(
-            `Conflict resolution ${operation.id} did not find conflict ${resolvedConflictId}`
-          );
-        }
-      }
+      runUncaptured('UPDATE replication_operations SET status = ?, applied_at = ? WHERE id = ?', [
+        conflictKind ? 'conflict' : 'accepted',
+        Date.now(),
+        operation.id,
+      ]);
+      if (conflictKind) saveReplicationConflict(conflictKind, conflictOperationIds);
+      else markConflictResolvedBy(operation);
     }
     compactStoredLapLabels();
   });
@@ -682,8 +553,7 @@ function assertValidReplicationOperation(operation: ReplicationOperation): void 
     !validText(operation.type, 128) ||
     !Array.isArray(operation.statements) ||
     operation.statements.length > 100_000 ||
-    (operation.raceBaseKey !== null &&
-      !validText(operation.raceBaseKey, 1_024)) ||
+    (operation.raceBaseKey !== null && !validText(operation.raceBaseKey, 1_024)) ||
     !/^[0-9a-f]{64}$/i.test(operation.checksum) ||
     !Number.isSafeInteger(operation.createdAt) ||
     operation.createdAt < 0
@@ -702,9 +572,7 @@ function assertValidReplicationOperation(operation: ReplicationOperation): void 
       item.params.length > 10_000 ||
       item.params.some(
         (value) =>
-          value !== null &&
-          typeof value !== 'string' &&
-          (typeof value !== 'number' || !Number.isFinite(value))
+          value !== null && typeof value !== 'string' && (typeof value !== 'number' || !Number.isFinite(value))
       )
     ) {
       throw new Error(`invalid replicated statement for ${operation.id}`);
@@ -712,6 +580,11 @@ function assertValidReplicationOperation(operation: ReplicationOperation): void 
   }
 }
 
+/**
+ * Accepts a batch from a peer. Invalid operations are quarantined so valid
+ * ones around them still apply; a sequence gap or too many origins rejects the
+ * whole batch, since those can heal on their own or need an operator.
+ */
 export function applyRemoteReplicationOperations(
   operations: ReplicationOperation[]
 ): { applied: number; duplicates: number; conflicts: number; quarantined: number } {
@@ -721,16 +594,13 @@ export function applyRemoteReplicationOperations(
   }
   let duplicates = 0;
   let quarantined = 0;
-  const insertedIds: string[] = [];
-  const insertedOperations: ReplicationOperation[] = [];
-  const previousLastRow = one<Parameters<typeof replicationOperationFromRow>[0]>(
+  const accepted: ReplicationOperation[] = [];
+  const previousLastRow = one<ReplicationOperationRow>(
     `${REPLICATION_OPERATION_SELECT}
      ORDER BY hlc_wall_ms DESC, hlc_counter DESC, origin_host_id DESC, origin_seq DESC
      LIMIT 1`
   );
-  const previousLastOperation = previousLastRow
-    ? replicationOperationFromRow(previousLastRow)
-    : null;
+  const previousLastOperation = previousLastRow ? operationFromRow(previousLastRow) : null;
   const seenRaceBases = new Set(
     all<{ raceBaseKey: string }>(
       `SELECT DISTINCT race_base_key AS raceBaseKey
@@ -739,81 +609,40 @@ export function applyRemoteReplicationOperations(
     ).map((row) => row.raceBaseKey)
   );
   let requiresRebuild = false;
-  const ordered = operations.slice().sort(compareReplicationOperations);
   const expectedVector = getReplicationVector();
 
-  for (const operation of ordered) {
-    // Deterministisch foute operaties (vorm, cluster, checksum, id-botsing)
-    // gaan in quarantaine zodat de rest van de batch gewoon toegepast wordt.
-    // Alleen volgordeproblemen (gaps) en de origin-limiet breken de batch nog
-    // af: die kunnen vanzelf herstellen of vereisen een operator.
+  const quarantine = (operation: unknown, error: unknown) => {
+    recordDeadLetterOperation(operation, error);
+    quarantined += 1;
+    const { originHostId, originSeq } = (operation ?? {}) as Partial<ReplicationOperation>;
+    if (typeof originHostId === 'string' && Number.isSafeInteger(originSeq)) {
+      expectedVector[originHostId] = Math.max(expectedVector[originHostId] ?? 0, originSeq!);
+    }
+  };
+
+  for (const operation of operations.slice().sort(compareReplicationOperations)) {
     try {
       assertValidReplicationOperation(operation);
       if (operation.clusterId !== identity.clusterId) {
         throw new Error('replication cluster mismatch');
       }
     } catch (error) {
-      recordDeadLetterOperation(operation, error);
-      quarantined += 1;
-      const origin = (operation as Partial<ReplicationOperation> | null)?.originHostId;
-      const seq = (operation as Partial<ReplicationOperation> | null)?.originSeq;
-      if (typeof origin === 'string' && Number.isSafeInteger(seq)) {
-        expectedVector[origin] = Math.max(expectedVector[origin] ?? 0, seq as number);
-      }
+      quarantine(operation, error);
       continue;
     }
     const existing = getReplicationOperation(operation.id);
     if (existing) {
-      if (existing.checksum !== operation.checksum) {
-        recordDeadLetterOperation(operation, new Error(`replication operation id collision for ${operation.id}`));
-        quarantined += 1;
-        expectedVector[operation.originHostId] = Math.max(
-          expectedVector[operation.originHostId] ?? 0,
-          operation.originSeq
-        );
-        continue;
-      }
-      duplicates += 1;
+      if (existing.checksum === operation.checksum) duplicates += 1;
+      else quarantine(operation, new Error(`replication operation id collision for ${operation.id}`));
       continue;
     }
-    const expectedChecksum = replicationChecksum({
-      id: operation.id,
-      clusterId: operation.clusterId,
-      originHostId: operation.originHostId,
-      originSeq: operation.originSeq,
-      hlcWallMs: operation.hlcWallMs,
-      hlcCounter: operation.hlcCounter,
-      type: operation.type,
-      payload: operation.payload,
-      statements: operation.statements,
-      result: operation.result,
-      raceBaseKey: operation.raceBaseKey,
-      createdAt: operation.createdAt,
-    });
-    if (operation.checksum !== expectedChecksum) {
-      recordDeadLetterOperation(
-        operation,
-        new Error(`replication checksum mismatch for ${operation.id}`)
-      );
-      quarantined += 1;
-      expectedVector[operation.originHostId] = Math.max(
-        expectedVector[operation.originHostId] ?? 0,
-        operation.originSeq
-      );
+    if (operation.checksum !== replicationChecksum(operation)) {
+      quarantine(operation, new Error(`replication checksum mismatch for ${operation.id}`));
       continue;
     }
-    const hasKnownOrigin = hasOwn(
-      expectedVector,
-      operation.originHostId
-    );
-    const knownSeq = hasKnownOrigin
-      ? expectedVector[operation.originHostId]
-      : 0;
-    if (
-      knownSeq === 0 &&
-      !hasKnownOrigin &&
-      Object.keys(expectedVector).length >= MAX_REPLICATION_ORIGINS
-    ) {
+    const hasKnownOrigin = hasOwn(expectedVector, operation.originHostId);
+    const knownSeq = hasKnownOrigin ? expectedVector[operation.originHostId] : 0;
+    if (!hasKnownOrigin && Object.keys(expectedVector).length >= MAX_REPLICATION_ORIGINS) {
       throw new Error('replication origin limit exceeded');
     }
     if (operation.originSeq !== knownSeq + 1) {
@@ -822,12 +651,8 @@ export function applyRemoteReplicationOperations(
       );
     }
     expectedVector[operation.originHostId] = operation.originSeq;
-    insertedIds.push(operation.id);
-    insertedOperations.push(operation);
-    if (
-      previousLastOperation &&
-      compareReplicationOperations(operation, previousLastOperation) < 0
-    ) {
+    accepted.push(operation);
+    if (previousLastOperation && compareReplicationOperations(operation, previousLastOperation) < 0) {
       requiresRebuild = true;
     }
     if (operation.raceBaseKey) {
@@ -835,62 +660,50 @@ export function applyRemoteReplicationOperations(
       seenRaceBases.add(operation.raceBaseKey);
     }
   }
-  if (insertedIds.length) {
+
+  if (accepted.length) {
     ensureReplicationCheckpoint();
-    const insertOperations = () => {
-      for (const operation of insertedOperations) {
-        insertReplicationOperation({
-          ...operation,
-          status: 'accepted',
-          appliedAt: Date.now(),
-        });
+    const insertAccepted = () => {
+      for (const operation of accepted) {
+        insertReplicationOperation({ ...operation, status: 'accepted', appliedAt: Date.now() });
         observeRemoteHlc(operation.hlcWallMs, operation.hlcCounter);
       }
     };
-
-    if (requiresRebuild) {
+    const insertAndRebuild = () =>
       transaction(() => {
-        insertOperations();
+        insertAccepted();
         rebuildApplicationFromReplicationLog();
       });
+
+    if (requiresRebuild) {
+      insertAndRebuild();
     } else {
+      // Operations that arrive in canonical order apply directly; anything
+      // that fails to apply falls back to a full deterministic rebuild.
       try {
         transaction(() => {
-          insertOperations();
-          for (const operation of insertedOperations) {
-            for (const item of operation.statements) {
-              getDb().prepare(item.sql).run(...item.params);
-            }
-            const resolvedConflictId = resolutionConflictId(operation);
-            if (resolvedConflictId) {
-              getDb()
-                .prepare(
-                  `UPDATE replication_conflicts
-                   SET status = 'resolved',
-                       resolution_operation_id = ?,
-                       resolved_at = ?
-                   WHERE id = ?`
-                )
-                .run(operation.id, Date.now(), resolvedConflictId);
-            }
+          insertAccepted();
+          for (const operation of accepted) {
+            applyStatements(operation);
+            markConflictResolvedBy(operation);
           }
         });
         markAppDataChanged();
       } catch {
-        transaction(() => {
-          insertOperations();
-          rebuildApplicationFromReplicationLog();
-        });
+        insertAndRebuild();
       }
     }
   }
-  const conflicts = insertedIds.filter(
-    (id) => getReplicationOperation(id)?.status === 'conflict'
+
+  const conflicts = accepted.filter(
+    (operation) =>
+      one<{ status: string }>('SELECT status FROM replication_operations WHERE id = ?', [operation.id])?.status ===
+      'conflict'
   ).length;
-  const applied = insertedIds.length - conflicts;
-  return { applied, duplicates, conflicts, quarantined };
+  return { applied: accepted.length - conflicts, duplicates, conflicts, quarantined };
 }
 
+/** Replaces this host's database with a creator laptop's, keeping a recovery copy first. */
 export async function installReplicationBootstrap(input: {
   clusterId: string;
   clusterSecret: string;
@@ -904,68 +717,42 @@ export async function installReplicationBootstrap(input: {
     if (operation.clusterId !== input.clusterId) {
       throw new Error('bootstrap bevat wijzigingen uit een andere cluster');
     }
-    const expectedChecksum = replicationChecksum({
-      id: operation.id,
-      clusterId: operation.clusterId,
-      originHostId: operation.originHostId,
-      originSeq: operation.originSeq,
-      hlcWallMs: operation.hlcWallMs,
-      hlcCounter: operation.hlcCounter,
-      type: operation.type,
-      payload: operation.payload,
-      statements: operation.statements,
-      result: operation.result,
-      raceBaseKey: operation.raceBaseKey,
-      createdAt: operation.createdAt,
-    });
-    if (operation.checksum !== expectedChecksum) {
+    if (operation.checksum !== replicationChecksum(operation)) {
       throw new Error(`bootstrap checksum klopt niet voor ${operation.id}`);
     }
   }
 
-  const backupPath = path.join(
-    DATA_DIR,
-    `app.before-cluster-join-${Date.now()}-${uuidv4().slice(0, 8)}.sqlite`
-  );
+  const backupPath = path.join(DATA_DIR, `app.before-cluster-join-${Date.now()}-${uuidv4().slice(0, 8)}.sqlite`);
   await getDb().backup(backupPath);
   transaction(() => {
-    getDb().prepare('DELETE FROM replication_peer_progress').run();
-    getDb().prepare('DELETE FROM replication_conflicts').run();
-    getDb().prepare('DELETE FROM replication_operations').run();
+    runUncaptured('DELETE FROM replication_peer_progress');
+    runUncaptured('DELETE FROM replication_conflicts');
+    runUncaptured('DELETE FROM replication_operations');
     applySnapshot(input.snapshot);
-    setReplicationSetting('replication_cluster_id', input.clusterId);
-    setReplicationSetting('replication_cluster_secret', input.clusterSecret);
+    setLocalSetting('replication_cluster_id', input.clusterId);
+    setLocalSetting('replication_cluster_secret', input.clusterSecret);
     storeReplicationCheckpoint(input.checkpoint);
-    if (input.timingControllerHostId) {
-      setReplicationSetting(
-        'timing_controller_host_id',
-        input.timingControllerHostId
-      );
-    } else {
-      getDb()
-        .prepare("DELETE FROM settings WHERE key = 'timing_controller_host_id'")
-        .run();
-    }
+    if (input.timingControllerHostId) setLocalSetting(TIMING_CONTROLLER_KEY, input.timingControllerHostId);
+    else deleteLocalSetting(TIMING_CONTROLLER_KEY);
     for (const operation of input.operations) {
       insertReplicationOperation(operation);
     }
     for (const conflict of input.conflicts) {
-      getDb()
-        .prepare(
-          `INSERT INTO replication_conflicts (
-             id, kind, operation_ids_json, status, resolution_operation_id,
-             created_at, resolved_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?)`
-        )
-        .run(
+      runUncaptured(
+        `INSERT INTO replication_conflicts (
+           id, kind, operation_ids_json, status, resolution_operation_id,
+           created_at, resolved_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [
           conflict.id,
           conflict.kind,
           JSON.stringify(conflict.operationIds),
           conflict.status,
           conflict.resolutionOperationId,
           conflict.createdAt,
-          conflict.resolvedAt
-        );
+          conflict.resolvedAt,
+        ]
+      );
     }
   });
   if (input.operations.length) rebuildApplicationFromReplicationLog();

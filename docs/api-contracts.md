@@ -21,7 +21,7 @@ Owns cacheable reads, file transfers, and operational endpoints.
 - Health and deployment: `GET /api/health` (readiness verified per release).
 - Backups: `GET /api/backups/status`, `POST /api/backups`, `GET /api/backups/latest`, manifest download.
 - Maintenance: `POST /api/database/compact` (guarded, never during an active race).
-- Exports: `GET /api/export/laps.csv|json`, `events.csv|json`, `current-state.json`.
+- Exports (`server/exports.ts`): `GET /api/export/laps.csv|json`, `events.csv|json`, `current-state.json`.
 - Responses use `server/http-json.ts` (`sendJson`) with ETag and gzip.
 
 Rule: reads that benefit from HTTP caching, curl, or file download stay here. Do not add validated domain commands here.

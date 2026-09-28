@@ -1,22 +1,22 @@
 import Database from 'better-sqlite3';
+import fs from 'node:fs';
+import path from 'node:path';
+import { DATA_ROOT } from '../env.js';
 import { type SqlValue, type ReplicatedSqlStatement } from './types.js';
-import path from 'path';
-import fs from 'fs';
-
-type Db = Database.Database;
 
 type PreparedStatement = Database.Statement<SqlValue[], unknown>;
 
-export const DATA_DIR = process.env.DATA_PATH
-  ? path.resolve(process.env.DATA_PATH, 'data')
-  : path.resolve(process.cwd(), 'data');
+export const DATA_DIR = path.join(DATA_ROOT, 'data');
 
 export const DB_FILE = path.join(DATA_DIR, 'app.db');
 
 const APP_DATA_TABLE_PATTERN =
   /\b(?:runners|labels|runner_labels|queue_entries|race_state|laps|race_events|temporary_teams|temporary_team_members)\b/i;
 
-let database: Db | null = null;
+const REPLICATION_TABLE_PATTERN =
+  /\b(?:replication_operations|replication_peer_progress|replication_conflicts)\b/;
+
+let database: Database.Database | null = null;
 
 export const statementCache = new Map<string, PreparedStatement>();
 
@@ -24,17 +24,21 @@ let appDataRevision = 0;
 
 let writeCapture: ReplicatedSqlStatement[] | null = null;
 
-export function getDb(): Db {
+export function getDb(): Database.Database {
   if (!database) throw new Error('database not initialized');
   return database;
 }
 
-function ensureDataDir(): void {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
+function statement(sql: string): PreparedStatement {
+  let prepared = statementCache.get(sql);
+  if (!prepared) {
+    prepared = getDb().prepare(sql);
+    statementCache.set(sql, prepared);
   }
+  return prepared;
 }
 
+/** Application write: recorded into the active replicated command and bumps the data revision. */
 export function run(sql: string, params: SqlValue[] = []): Database.RunResult {
   if (writeCapture && isReplicatedMutation(sql)) {
     writeCapture.push({ sql, params: [...params] });
@@ -46,12 +50,17 @@ export function run(sql: string, params: SqlValue[] = []): Database.RunResult {
   return result;
 }
 
+/**
+ * Write that must never be captured into a replicated command: replication
+ * bookkeeping, checkpoint restores, and replaying statements received from peers.
+ */
+export function runUncaptured(sql: string, params: SqlValue[] = []): Database.RunResult {
+  return getDb().prepare(sql).run(...params);
+}
+
 export function isReplicatedMutation(sql: string): boolean {
   const normalized = sql.trim().toLowerCase();
-  return /^(insert|update|delete|replace)\b/.test(normalized)
-    && !/\b(?:replication_operations|replication_peer_progress|replication_conflicts)\b/.test(
-      normalized
-    );
+  return /^(insert|update|delete|replace)\b/.test(normalized) && !REPLICATION_TABLE_PATTERN.test(normalized);
 }
 
 export function all<T>(sql: string, params: SqlValue[] = []): T[] {
@@ -59,15 +68,7 @@ export function all<T>(sql: string, params: SqlValue[] = []): T[] {
 }
 
 export function one<T>(sql: string, params: SqlValue[] = []): T | null {
-  return statement(sql).get(...params) as T | undefined ?? null;
-}
-
-function statement(sql: string): PreparedStatement {
-  const cached = statementCache.get(sql);
-  if (cached) return cached;
-  const prepared = getDb().prepare(sql);
-  statementCache.set(sql, prepared);
-  return prepared;
+  return (statement(sql).get(...params) as T | undefined) ?? null;
 }
 
 export function transaction<T>(callback: () => T): T {
@@ -78,8 +79,8 @@ export function markAppDataChanged(): void {
   appDataRevision += 1;
 }
 
-export function isCapturingWrite(): boolean {
-  return writeCapture !== null;
+export function getAppDataRevision(): number {
+  return appDataRevision;
 }
 
 export function captureWrite<T>(action: () => T): { result: T; statements: ReplicatedSqlStatement[] } {
@@ -93,14 +94,9 @@ export function captureWrite<T>(action: () => T): { result: T; statements: Repli
   }
 }
 
-export function getAppDataRevision(): number {
-  return appDataRevision;
-}
-
-export function openDatabase(): Db {
-  ensureDataDir();
-  statementCache.clear();
-  if (database) database.close();
+export function openDatabase(): Database.Database {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  closeDb();
   database = new Database(DB_FILE);
   database.pragma('foreign_keys = ON');
   database.pragma('journal_mode = WAL');
@@ -114,8 +110,7 @@ export function openDatabase(): Db {
 
 export function closeDb(): void {
   statementCache.clear();
-  if (!database) return;
-  database.close();
+  database?.close();
   database = null;
 }
 

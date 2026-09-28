@@ -28,6 +28,7 @@ server/index.ts
   |-- server/backups.ts ------- verified point-in-time snapshots
   |-- server/realtime.ts ------ typed Socket.IO events
   |-- server/host.ts ---------- LAN address selection
+  |-- server/exports.ts ------- CSV/JSON exports
   `-- server/static-files.ts -- packaged frontend
 ```
 
@@ -51,14 +52,17 @@ server/index.ts
 - Hosts Socket.IO and emits the current state revision on connection.
 - Serves live state separately from gzip-compressed historical laps/events, so
   ordinary operator screens do not repeatedly transfer the full race history.
-- Serves precompressed immutable Vite assets and the uncached HTML shell.
+- Mounts the exports (`server/exports.ts`) and the packaged frontend
+  (`server/static-files.ts`: precompressed immutable Vite assets and the
+  uncached HTML shell).
 - Initializes SQLite before listening and performs graceful shutdown.
 - Starts and stops the backup scheduler with the database lifecycle.
 
 ### `server/router.ts`
 
 - Defines every query and mutation exposed to the UI.
-- Validates payloads with Zod.
+- Validates payloads with Zod. CSV and Google Form imports are parsed in
+  `server/runner-import.ts`.
 - Adds `_commandId` and `_clientId` metadata to writes.
 - Enforces queue and timing preconditions before committing.
 - Emits small realtime deltas after successful local writes.
@@ -66,9 +70,14 @@ server/index.ts
 ### `server/db.ts` (facade over `server/db/`)
 
 - `server/db.ts` is a thin facade that re-exports the split modules in
-- `server/db/`: `connection`, `schema`, `settings`, `labels`, `teams`,
-- `runner-queries`, `runners`, `queue`, `history`, `timing`, `snapshot`,
-- `replication`, `replication-state`, `checkpoint`, `storage`, `values`, `types`.
+  `server/db/`: `connection`, `schema`, `settings`, `labels`, `teams`,
+  `runner-queries`, `runners`, `queue`, `race-state`, `history`, `timing`,
+  `snapshot`, `replication`, `replication-state`, `checkpoint`, `storage`,
+  `values`, `types`.
+- `connection.run()` is the application write: it is captured into the active
+  replicated command. `runUncaptured()` is for replication bookkeeping,
+  checkpoint restores, and replaying peer statements. Host-local settings
+  (identity, clocks, checkpoint) use `setLocalSetting()` and never replicate.
 - Owns the single `better-sqlite3` connection and prepared statement cache.
 - Creates and migrates the relational application schema.
 - Runs local writes and their replication operation in one SQLite transaction.
@@ -141,6 +150,9 @@ replication_conflicts
 - `server/realtime.ts`: isolates database/router code from Socket.IO.
 - `server/host.ts`: ranks physical LAN interfaces, calculates directed
   broadcast addresses, and refreshes automatic host selection.
+- `server/net-setup.ts`: pins the host's wired adapter to a static event-LAN
+  address (and back to DHCP) through the OS permission prompt.
+- `server/env.ts`: data root, release id, and numeric environment parsing.
 - `server/static-files.ts`: prevents static file paths escaping the build root.
 - `shared/schemas.ts`: client/server wire contracts.
 - `shared/time.ts`: shared time formatting.

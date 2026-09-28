@@ -1,31 +1,27 @@
-import {
-  clusterCompatibilitySchema,
-  type ClusterCompatibility,
-} from '../shared/schemas.js';
+import { clusterCompatibilitySchema, type ClusterCompatibility } from '../shared/schemas.js';
+import { readPositiveInt, RELEASE_ID } from './env.js';
 
 export const CLUSTER_PROTOCOL_VERSION = 3;
-export const REPLICATION_FORMAT_VERSION = 1;
+const REPLICATION_FORMAT_VERSION = 1;
 
 const DEFAULT_APP_VERSION = '3.1.0';
+
+type Version = [number, number, number];
 
 export function localClusterCompatibility(schemaVersion: number): ClusterCompatibility {
   const appVersion = cleanVersion(process.env.APOLLOON_APP_VERSION) || DEFAULT_APP_VERSION;
   return {
     protocolVersion: CLUSTER_PROTOCOL_VERSION,
     schemaVersion,
-    minimumSchemaVersion: readPositiveInt(
-      process.env.APOLLOON_MIN_COMPATIBLE_SCHEMA_VERSION,
-      schemaVersion
-    ),
+    minimumSchemaVersion: readPositiveInt(process.env.APOLLOON_MIN_COMPATIBLE_SCHEMA_VERSION, schemaVersion),
     replicationFormatVersion: REPLICATION_FORMAT_VERSION,
     minimumReplicationFormatVersion: readPositiveInt(
       process.env.APOLLOON_MIN_COMPATIBLE_REPLICATION_FORMAT_VERSION,
       REPLICATION_FORMAT_VERSION
     ),
     appVersion,
-    minimumAppVersion:
-      cleanVersion(process.env.APOLLOON_MIN_COMPATIBLE_APP_VERSION) || appVersion,
-    releaseId: process.env.APOLLOON_RELEASE_ID?.trim() || null,
+    minimumAppVersion: cleanVersion(process.env.APOLLOON_MIN_COMPATIBLE_APP_VERSION) || appVersion,
+    releaseId: RELEASE_ID,
   };
 }
 
@@ -34,6 +30,7 @@ export function parseClusterCompatibility(value: unknown): ClusterCompatibility 
   return parsed.success ? parsed.data : null;
 }
 
+/** Why two hosts may not exchange data (each side's version must meet the other's minimum), or null. */
 export function clusterCompatibilityError(
   remote: ClusterCompatibility | null,
   local: ClusterCompatibility
@@ -48,19 +45,10 @@ export function clusterCompatibilityError(
     return versionError(remote, 'de andere laptop verstuurt ongeldige compatibiliteitsgrenzen');
   }
   if (remote.protocolVersion !== local.protocolVersion) {
-    return versionError(
-      remote,
-      `clusterprotocol ${remote.protocolVersion} past niet bij ${local.protocolVersion}`
-    );
+    return versionError(remote, `clusterprotocol ${remote.protocolVersion} past niet bij ${local.protocolVersion}`);
   }
-  if (
-    remote.schemaVersion < local.minimumSchemaVersion ||
-    local.schemaVersion < remote.minimumSchemaVersion
-  ) {
-    return versionError(
-      remote,
-      `databaseschema ${remote.schemaVersion} past niet bij ${local.schemaVersion}`
-    );
+  if (remote.schemaVersion < local.minimumSchemaVersion || local.schemaVersion < remote.minimumSchemaVersion) {
+    return versionError(remote, `databaseschema ${remote.schemaVersion} past niet bij ${local.schemaVersion}`);
   }
   if (
     remote.replicationFormatVersion < local.minimumReplicationFormatVersion ||
@@ -85,10 +73,7 @@ export function clusterCompatibilityError(
     compareVersions(remoteVersion, localMinimum) < 0 ||
     compareVersions(localVersion, remoteMinimum) < 0
   ) {
-    return versionError(
-      remote,
-      `appversie ${remote.appVersion} past niet bij ${local.appVersion}`
-    );
+    return versionError(remote, `appversie ${remote.appVersion} past niet bij ${local.appVersion}`);
   }
   return null;
 }
@@ -102,24 +87,13 @@ function cleanVersion(value: unknown): string {
   return typeof value === 'string' && parseVersion(value.trim()) ? value.trim() : '';
 }
 
-function parseVersion(value: string): [number, number, number] | null {
+function parseVersion(value: string): Version | null {
   const match = /^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/.exec(value);
   if (!match) return null;
-  const parts = match.slice(1, 4).map(Number) as [number, number, number];
+  const parts = match.slice(1, 4).map(Number) as Version;
   return parts.every(Number.isSafeInteger) ? parts : null;
 }
 
-function compareVersions(
-  left: [number, number, number],
-  right: [number, number, number]
-): number {
-  for (let index = 0; index < left.length; index += 1) {
-    if (left[index] !== right[index]) return left[index] - right[index];
-  }
-  return 0;
-}
-
-function readPositiveInt(value: unknown, fallback: number): number {
-  const parsed = Number(value);
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+function compareVersions(left: Version, right: Version): number {
+  return left[0] - right[0] || left[1] - right[1] || left[2] - right[2];
 }

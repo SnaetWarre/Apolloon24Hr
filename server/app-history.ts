@@ -1,4 +1,5 @@
 import type { RaceHistory } from '../shared/schemas.js';
+import { boundedHistoryLimit } from './db/values.js';
 import {
   getAllLaps,
   getAllRaceEvents,
@@ -48,7 +49,7 @@ export function raceHistory(request: HistoryRequest): RaceHistory {
         : {
             scope: 'recent',
             runnerId: null,
-            limit: boundedLimit(request.limit),
+            limit: boundedHistoryLimit(request.limit),
             laps: getRecentLaps(request.limit),
             events: getRecentRaceEvents(Math.min(request.limit, 100)),
             revision,
@@ -60,10 +61,6 @@ export function raceHistory(request: HistoryRequest): RaceHistory {
 
 function historyCacheKey(request: HistoryRequest): string {
   if (request.scope === 'runner') return `runner:${request.runnerId}`;
-  if (request.scope === 'recent') return `recent:${boundedLimit(request.limit)}`;
+  if (request.scope === 'recent') return `recent:${boundedHistoryLimit(request.limit)}`;
   return 'full';
-}
-
-function boundedLimit(value: number): number {
-  return Math.max(1, Math.min(1_000, Math.floor(value) || 100));
 }

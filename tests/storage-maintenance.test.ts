@@ -83,7 +83,7 @@ test('schema migration removes the retired log and compaction never runs during 
     } finally {
       migrated.close();
     }
-    assert.deepEqual(db.getReplicationCheckpoint(), legacyCheckpoint);
+    assert.deepEqual(db.ensureReplicationCheckpoint(), legacyCheckpoint);
     const migrationStorage = db.databaseStorageStatus();
     assert.equal(migrationStorage.compactionRecommended, true);
     const startupCompaction = db.compactDatabaseIfSafe();

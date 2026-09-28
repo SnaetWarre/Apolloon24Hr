@@ -1,18 +1,12 @@
-import { runnerRegistrationSchema, type Runner, type Label } from '../../shared/schemas.js';
-import { cleanRegistrationSource, cleanStatus } from './values.js';
-import { getRunnerLabelsMap, getRunnerLabels } from './labels.js';
+import { runnerRegistrationSchema, type Label, type Runner } from '../../shared/schemas.js';
 import { all, one } from './connection.js';
+import { getRunnerLabels, getRunnerLabelsMap } from './labels.js';
+import { cleanRegistrationSource, cleanStatus } from './values.js';
 
-type RunnerRow = Omit<Runner, 'labels' | 'hiddenFromQueue'> & {
-  queueHiddenAt: number | null;
+type RunnerRow = Omit<Runner, 'labels' | 'hiddenFromQueue' | 'registration' | 'notes'> & {
+  notes: string | null;
   registrationJson: string | null;
 };
-
-function parseRegistration(value: string | null): Runner['registration'] {
-  if (!value) return null;
-  try { return runnerRegistrationSchema.parse(JSON.parse(value)); }
-  catch { return null; }
-}
 
 const RUNNER_SELECT_SQL = `
   SELECT
@@ -48,37 +42,30 @@ const RUNNER_SELECT_SQL = `
   LEFT JOIN laps l ON l.runner_id = r.id
 `;
 
-function runnerFromRow(row: RunnerRow, labels: Label[]): Runner {
+function parseRegistration(value: string | null): Runner['registration'] {
+  if (!value) return null;
+  try {
+    return runnerRegistrationSchema.parse(JSON.parse(value));
+  } catch {
+    return null;
+  }
+}
+
+function runnerFromRow({ registrationJson, ...row }: RunnerRow, labels: Label[]): Runner {
   return {
-    id: row.id,
-    runnerNumber: row.runnerNumber ?? null,
-    name: row.name,
-    targetLaps: row.targetLaps ?? null,
-    historicalAvgMs: row.historicalAvgMs ?? null,
-    historicalBestMs: row.historicalBestMs ?? null,
+    ...row,
     registrationSource: cleanRegistrationSource(row.registrationSource),
     notes: row.notes ?? '',
-    registration: parseRegistration(row.registrationJson),
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
+    registration: parseRegistration(registrationJson),
     status: cleanStatus(row.status),
-    statusSince: row.statusSince ?? null,
-    queueIndex: row.queueIndex ?? null,
-    hiddenFromQueue: row.queueHiddenAt !== null && row.queueHiddenAt !== undefined,
-    queueHiddenAt: row.queueHiddenAt ?? null,
+    hiddenFromQueue: row.queueHiddenAt !== null,
     labels,
-    lapCount: Number(row.lapCount || 0),
-    lastLapMs: row.lastLapMs ?? null,
-    bestLapMs: row.bestLapMs ?? null,
-    slowestLapMs: row.slowestLapMs ?? null,
-    averageLapMs: row.averageLapMs ?? null,
-    totalTimeMs: Number(row.totalTimeMs || 0),
   };
 }
 
 export function getAllRunners(): Runner[] {
   const labelsByRunner = getRunnerLabelsMap();
-  const rows = all<RunnerRow>(
+  return all<RunnerRow>(
     `${RUNNER_SELECT_SQL}
      GROUP BY r.id
      ORDER BY
@@ -91,31 +78,22 @@ export function getAllRunners(): Runner[] {
        END,
        q.queue_index,
        r.name`
-  );
-
-  return rows.map((row) => runnerFromRow(row, labelsByRunner.get(row.id) ?? []));
+  ).map((row) => runnerFromRow(row, labelsByRunner.get(row.id) ?? []));
 }
 
 export function getRunnerById(id: string): Runner | null {
-  const row = one<RunnerRow>(
-    `${RUNNER_SELECT_SQL}
-     WHERE r.id = ?
-     GROUP BY r.id`,
-    [id]
-  );
+  const row = one<RunnerRow>(`${RUNNER_SELECT_SQL} WHERE r.id = ? GROUP BY r.id`, [id]);
   return row ? runnerFromRow(row, getRunnerLabels(id)) : null;
 }
 
 export function getRunnersByIds(ids: string[]): Runner[] {
   const uniqueIds = [...new Set(ids)];
   if (!uniqueIds.length) return [];
-  const placeholders = uniqueIds.map(() => '?').join(', ');
   const labelsByRunner = getRunnerLabelsMap();
-  const rows = all<RunnerRow>(
+  return all<RunnerRow>(
     `${RUNNER_SELECT_SQL}
-     WHERE r.id IN (${placeholders})
+     WHERE r.id IN (${uniqueIds.map(() => '?').join(', ')})
      GROUP BY r.id`,
     uniqueIds
-  );
-  return rows.map((row) => runnerFromRow(row, labelsByRunner.get(row.id) ?? []));
+  ).map((row) => runnerFromRow(row, labelsByRunner.get(row.id) ?? []));
 }

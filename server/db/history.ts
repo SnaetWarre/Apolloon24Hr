@@ -1,33 +1,6 @@
-import { one, all } from './connection.js';
-import { type RaceState, type LapRecord, type RaceEvent } from '../../shared/schemas.js';
-import { parseLabelsJson, boundedHistoryLimit, cleanRaceEventType } from './values.js';
-
-export function getLapCount(runnerId: string): number {
-  const row = one<{ count: number }>('SELECT COUNT(*) AS count FROM laps WHERE runner_id = ?', [runnerId]);
-  return Number(row?.count || 0);
-}
-
-export function getRaceState(): RaceState {
-  const row = one<Omit<RaceState, 'id' | 'activeLabels'> & { id: 1; activeLabelsJson: string | null }>(
-    `SELECT
-      id,
-      active_runner_id AS activeRunnerId,
-      active_started_at AS activeStartedAt,
-      race_started_at AS raceStartedAt,
-      race_finished_at AS raceFinishedAt,
-      active_labels_json AS activeLabelsJson
-     FROM race_state
-     WHERE id = 1`
-  );
-  return {
-    id: 1,
-    activeRunnerId: row?.activeRunnerId ?? null,
-    activeStartedAt: row?.activeStartedAt ?? null,
-    raceStartedAt: row?.raceStartedAt ?? null,
-    raceFinishedAt: row?.raceFinishedAt ?? null,
-    activeLabels: parseLabelsJson(row?.activeLabelsJson),
-  };
-}
+import { type LapRecord, type RaceEvent } from '../../shared/schemas.js';
+import { all, one } from './connection.js';
+import { boundedHistoryLimit, cleanRaceEventType, parseLabelsJson } from './values.js';
 
 type LapRow = Omit<LapRecord, 'labels'> & { labelsJson: string };
 
@@ -48,8 +21,31 @@ const LAP_SELECT_SQL = `
   JOIN runners r ON r.id = l.runner_id
 `;
 
+const RACE_EVENT_SELECT_SQL = `
+  SELECT
+    id,
+    type,
+    message,
+    occurred_at AS occurredAt,
+    created_at AS createdAt,
+    runner_id AS runnerId,
+    runner_number AS runnerNumber,
+    runner_name AS runnerName
+  FROM race_events
+`;
+
+const RACE_EVENT_ORDER = 'ORDER BY occurred_at DESC, created_at DESC';
+
 function lapFromRow({ labelsJson, ...lap }: LapRow): LapRecord {
   return { ...lap, labels: parseLabelsJson(labelsJson) };
+}
+
+function raceEventFromRow(event: RaceEvent): RaceEvent {
+  return { ...event, type: cleanRaceEventType(event.type) };
+}
+
+export function getLapCount(runnerId: string): number {
+  return one<{ count: number }>('SELECT COUNT(*) AS count FROM laps WHERE runner_id = ?', [runnerId])?.count ?? 0;
 }
 
 export function getAllLaps(): LapRecord[] {
@@ -57,18 +53,15 @@ export function getAllLaps(): LapRecord[] {
 }
 
 export function getRecentLaps(limit = 100): LapRecord[] {
-  const safeLimit = boundedHistoryLimit(limit);
-  return all<LapRow>(
-    `${LAP_SELECT_SQL} ORDER BY l.finished_at DESC LIMIT ?`,
-    [safeLimit]
-  ).map(lapFromRow);
+  return all<LapRow>(`${LAP_SELECT_SQL} ORDER BY l.finished_at DESC LIMIT ?`, [boundedHistoryLimit(limit)]).map(
+    lapFromRow
+  );
 }
 
 export function getLapsForRunner(runnerId: string): LapRecord[] {
-  return all<LapRow>(
-    `${LAP_SELECT_SQL} WHERE l.runner_id = ? ORDER BY l.finished_at DESC`,
-    [runnerId]
-  ).map(lapFromRow);
+  return all<LapRow>(`${LAP_SELECT_SQL} WHERE l.runner_id = ? ORDER BY l.finished_at DESC`, [runnerId]).map(
+    lapFromRow
+  );
 }
 
 export function getLapById(id: string): LapRecord | null {
@@ -77,74 +70,16 @@ export function getLapById(id: string): LapRecord | null {
 }
 
 export function getAllRaceEvents(): RaceEvent[] {
-  return all<RaceEvent>(
-    `SELECT
-      id,
-      type,
-      message,
-      occurred_at AS occurredAt,
-      created_at AS createdAt,
-      runner_id AS runnerId,
-      runner_number AS runnerNumber,
-      runner_name AS runnerName
-    FROM race_events
-    ORDER BY occurred_at DESC, created_at DESC`
-  ).map((event) => ({
-    ...event,
-    type: cleanRaceEventType(event.type),
-    runnerId: event.runnerId ?? null,
-    runnerNumber: event.runnerNumber ?? null,
-    runnerName: event.runnerName ?? null,
-  }));
+  return all<RaceEvent>(`${RACE_EVENT_SELECT_SQL} ${RACE_EVENT_ORDER}`).map(raceEventFromRow);
 }
 
 export function getRecentRaceEvents(limit = 100): RaceEvent[] {
-  const safeLimit = boundedHistoryLimit(limit);
-  return all<RaceEvent>(
-    `SELECT
-      id,
-      type,
-      message,
-      occurred_at AS occurredAt,
-      created_at AS createdAt,
-      runner_id AS runnerId,
-      runner_number AS runnerNumber,
-      runner_name AS runnerName
-    FROM race_events
-    ORDER BY occurred_at DESC, created_at DESC
-    LIMIT ?`,
-    [safeLimit]
-  ).map((event) => ({
-    ...event,
-    type: cleanRaceEventType(event.type),
-    runnerId: event.runnerId ?? null,
-    runnerNumber: event.runnerNumber ?? null,
-    runnerName: event.runnerName ?? null,
-  }));
+  return all<RaceEvent>(`${RACE_EVENT_SELECT_SQL} ${RACE_EVENT_ORDER} LIMIT ?`, [boundedHistoryLimit(limit)]).map(
+    raceEventFromRow
+  );
 }
 
 export function getRaceEventById(id: string): RaceEvent | null {
-  const event = one<RaceEvent>(
-    `SELECT
-       id,
-       type,
-       message,
-       occurred_at AS occurredAt,
-       created_at AS createdAt,
-       runner_id AS runnerId,
-       runner_number AS runnerNumber,
-       runner_name AS runnerName
-     FROM race_events
-     WHERE id = ?`,
-    [id]
-  );
-  return event
-    ? {
-        ...event,
-        type: cleanRaceEventType(event.type),
-        runnerId: event.runnerId ?? null,
-        runnerNumber: event.runnerNumber ?? null,
-        runnerName: event.runnerName ?? null,
-      }
-    : null;
+  const event = one<RaceEvent>(`${RACE_EVENT_SELECT_SQL} WHERE id = ?`, [id]);
+  return event ? raceEventFromRow(event) : null;
 }

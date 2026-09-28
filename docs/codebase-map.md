@@ -48,9 +48,12 @@ Shared contracts live in `shared/`. Anything imported by both client and server 
 
 ## Server Shape
 
-- `server/index.ts`: HTTP, tRPC, Socket.IO, static frontend serving, and export endpoints.
+- `server/index.ts`: HTTP, tRPC, and Socket.IO wiring, operational `/api` routes, startup and shutdown.
 - `server/router.ts`: tRPC procedures and request validation.
-- `server/db.ts`: SQLite schema, reads, writes, and race-state transitions.
+- `server/runner-import.ts`: runner CSV and Google Form import.
+- `server/exports.ts`: lap and event CSV/JSON exports.
+- `server/static-files.ts`: packaged frontend serving.
+- `server/db.ts`: facade over `server/db/` (SQLite schema, reads, writes, race-state transitions, replication log).
 - `server/cluster.ts`: local-first UDP discovery, authenticated delta exchange, creator bootstrap, and peer health.
 - `server/cluster-protocol.ts`: signed discovery envelopes and untrusted network payload validation.
 - `server/backups.ts`: verified online snapshots, serialized scheduling, disk warnings, retention, and download manifests.

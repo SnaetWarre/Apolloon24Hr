@@ -1,10 +1,12 @@
-import { type RunnerStatus, type RegistrationSource, type RaceEventType, type Label } from '../../shared/schemas.js';
-
-const VALID_STATUSES = new Set<RunnerStatus>(['registered', 'warming_up', 'waiting', 'running', 'ran']);
-
-const VALID_REGISTRATION_SOURCES = new Set<RegistrationSource>(['import', 'manual']);
-
-const VALID_RACE_EVENT_TYPES = new Set<RaceEventType>(['burgie_gepakt']);
+import {
+  raceEventTypeSchema,
+  registrationSourceSchema,
+  runnerStatusSchema,
+  type Label,
+  type RaceEventType,
+  type RegistrationSource,
+  type RunnerStatus,
+} from '../../shared/schemas.js';
 
 export function cleanText(value: unknown): string | null {
   if (value === undefined || value === null) return null;
@@ -18,56 +20,59 @@ export function cleanInt(value: unknown): number | null {
   return Number.isFinite(n) ? Math.max(0, Math.round(n)) : null;
 }
 
-export function readPositiveNumber(value: unknown, fallback: number): number {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-}
-
 export function cleanStatus(status: unknown): RunnerStatus {
-  return VALID_STATUSES.has(status as RunnerStatus) ? (status as RunnerStatus) : 'registered';
+  const parsed = runnerStatusSchema.safeParse(status);
+  return parsed.success ? parsed.data : 'registered';
 }
 
 export function cleanRegistrationSource(source: unknown): RegistrationSource {
-  return VALID_REGISTRATION_SOURCES.has(source as RegistrationSource)
-    ? (source as RegistrationSource)
-    : 'manual';
+  const parsed = registrationSourceSchema.safeParse(source);
+  return parsed.success ? parsed.data : 'manual';
 }
 
+export function cleanRaceEventType(type: unknown): RaceEventType {
+  const parsed = raceEventTypeSchema.safeParse(type);
+  return parsed.success ? parsed.data : 'burgie_gepakt';
+}
+
+/** Reads label snapshots stored on laps and the race state; older rows omit optional fields. */
 export function parseLabelsJson(value: unknown): Label[] {
   if (typeof value !== 'string' || !value.trim()) return [];
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(value) as unknown;
-    if (!Array.isArray(parsed)) return [];
-    return parsed.flatMap((item): Label[] => {
-      if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
-      const label = item as Partial<Label>;
-      if (
-        typeof label.id !== 'string' ||
-        typeof label.name !== 'string' ||
-        typeof label.color !== 'string' ||
-        typeof label.icon !== 'string' ||
-        typeof label.kind !== 'string'
-      ) {
-        return [];
-      }
-      return [{
-        id: label.id,
-        name: label.name,
-        color: label.color,
-        icon: label.icon,
-        kind: label.kind,
-        imageUrl: typeof label.imageUrl === 'string' ? label.imageUrl : null,
-        targetLaps: Number.isSafeInteger(label.targetLaps) ? label.targetLaps! : null,
-        sortOrder: Number.isSafeInteger(label.sortOrder) ? label.sortOrder! : null,
-        ...(Number.isSafeInteger(label.createdAt) ? { createdAt: label.createdAt } : {}),
-        ...(Number.isSafeInteger(label.updatedAt) ? { updatedAt: label.updatedAt } : {}),
-      }];
-    });
+    parsed = JSON.parse(value);
   } catch {
     return [];
   }
+  if (!Array.isArray(parsed)) return [];
+  return parsed.flatMap((item): Label[] => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
+    const label = item as Partial<Label>;
+    if (
+      typeof label.id !== 'string' ||
+      typeof label.name !== 'string' ||
+      typeof label.color !== 'string' ||
+      typeof label.icon !== 'string' ||
+      typeof label.kind !== 'string'
+    ) {
+      return [];
+    }
+    return [{
+      id: label.id,
+      name: label.name,
+      color: label.color,
+      icon: label.icon,
+      kind: label.kind,
+      imageUrl: typeof label.imageUrl === 'string' ? label.imageUrl : null,
+      targetLaps: Number.isSafeInteger(label.targetLaps) ? label.targetLaps! : null,
+      sortOrder: Number.isSafeInteger(label.sortOrder) ? label.sortOrder! : null,
+      ...(Number.isSafeInteger(label.createdAt) ? { createdAt: label.createdAt } : {}),
+      ...(Number.isSafeInteger(label.updatedAt) ? { updatedAt: label.updatedAt } : {}),
+    }];
+  });
 }
 
+/** Compact label snapshot stored with each lap, so later label edits never rewrite history. */
 export function serializeHistoricalLabels(labels: Label[]): string {
   return JSON.stringify(
     labels.map((label) => ({
@@ -85,13 +90,11 @@ export function normalizeName(name: unknown): string {
   return String(name || '').trim().toLowerCase();
 }
 
+const FIRST_YEAR_ALIASES = new Set(['1ste jaars', '1e jaar', '1e jaars', 'eerste jaar', 'eerste jaars']);
+
 export function canonicalLabelName(name: unknown): string | null {
   const text = cleanText(name);
-  const normalized = normalizeName(text);
-  if (['1ste jaars', '1e jaar', '1e jaars', 'eerste jaar', 'eerste jaars'].includes(normalized)) {
-    return '1ste jaar';
-  }
-  return text;
+  return FIRST_YEAR_ALIASES.has(normalizeName(text)) ? '1ste jaar' : text;
 }
 
 export function parseStringArray(value: string | null): string[] {
@@ -102,10 +105,6 @@ export function parseStringArray(value: string | null): string[] {
   } catch {
     return [];
   }
-}
-
-export function cleanRaceEventType(type: unknown): RaceEventType {
-  return VALID_RACE_EVENT_TYPES.has(type as RaceEventType) ? (type as RaceEventType) : 'burgie_gepakt';
 }
 
 export function boundedHistoryLimit(value: number): number {

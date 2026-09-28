@@ -2,44 +2,11 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
-import {
-  backupDatabase,
-  compactDatabaseIfSafe,
-  databaseStorageStatus,
-  ensureReplicationIdentity,
-} from './db.js';
-import type { DatabaseStorageStatus } from '../shared/schemas.js';
+import { backupRecordSchema, type BackupRecord, type BackupStatus } from '../shared/schemas.js';
+import { backupDatabase, compactDatabaseIfSafe, databaseStorageStatus, ensureReplicationIdentity } from './db.js';
+import { DATA_ROOT, readPositiveInt } from './env.js';
 
-export type BackupRecord = {
-  fileName: string;
-  createdAt: number;
-  reason: string;
-  sizeBytes: number;
-  sha256: string;
-  verified: true;
-};
-
-export type BackupStatus = {
-  enabled: boolean;
-  inProgress: boolean;
-  queued: boolean;
-  maintenanceInProgress: boolean;
-  intervalMs: number;
-  nextScheduledAt: number | null;
-  retainedCount: number;
-  retainedBytes: number;
-  maximumRetainedBytes: number;
-  latest: BackupRecord | null;
-  lastFailureAt: number | null;
-  lastError: string | null;
-  diskFreeBytes: number | null;
-  diskTotalBytes: number | null;
-  minimumFreeBytes: number;
-  diskLow: boolean;
-  database: DatabaseStorageStatus;
-};
-
-export type BackupManifest = {
+type BackupManifest = {
   formatVersion: 1;
   application: 'Apolloon';
   backup: BackupRecord;
@@ -50,23 +17,14 @@ export type BackupManifest = {
   };
 };
 
-const dataRoot = process.env.DATA_PATH
-  ? path.resolve(process.env.DATA_PATH)
-  : path.resolve(process.cwd());
-const backupDirectory = path.join(dataRoot, 'backups');
+const backupDirectory = path.join(DATA_ROOT, 'backups');
 const enabled =
   process.env.BACKUP_ENABLED === 'true' ||
   (process.env.BACKUP_ENABLED !== 'false' && process.env.NODE_ENV !== 'test');
 const intervalMs = readPositiveInt(process.env.BACKUP_INTERVAL_MS, 5 * 60_000);
 const initialDelayMs = readPositiveInt(process.env.BACKUP_INITIAL_DELAY_MS, 10_000);
-const minimumFreeBytes = readPositiveInt(
-  process.env.BACKUP_MIN_FREE_BYTES,
-  2 * 1_024 ** 3
-);
-const maximumRetainedBytes = readPositiveInt(
-  process.env.BACKUP_MAX_TOTAL_BYTES,
-  8 * 1_024 ** 3
-);
+const minimumFreeBytes = readPositiveInt(process.env.BACKUP_MIN_FREE_BYTES, 2 * 1_024 ** 3);
+const maximumRetainedBytes = readPositiveInt(process.env.BACKUP_MAX_TOTAL_BYTES, 8 * 1_024 ** 3);
 
 let records: BackupRecord[] = [];
 let activeBackup: Promise<BackupRecord> | null = null;
@@ -113,51 +71,48 @@ export async function stopBackupService(): Promise<void> {
   if (scheduleHandle) clearTimeout(scheduleHandle);
   scheduleHandle = null;
   nextScheduledAt = null;
-  const pendingBackup = queuedBackup || activeBackup;
-  if (pendingBackup) {
-    try {
-      await pendingBackup;
-    } catch {
-      // The failure is already exposed through backupStatus().
-    }
-  }
+  // A failure is already exposed through backupStatus().
+  await (queuedBackup || activeBackup)?.catch(() => undefined);
 }
 
+/**
+ * Serializes backups: a scheduled request joins the running one, any other
+ * request queues (at most one) behind it so it captures the latest state.
+ */
 export function createVerifiedBackup(reason = 'manual'): Promise<BackupRecord> {
   if (maintenanceInProgress) {
     return Promise.reject(new Error('databaseonderhoud is bezig; probeer de backup zo opnieuw'));
   }
   const normalizedReason = safeReason(reason);
-  if (activeBackup) {
-    if (normalizedReason === 'scheduled') return activeBackup;
-    if (queuedBackup) return queuedBackup;
-    const currentBackup = activeBackup;
-    queuedBackup = currentBackup
-      .catch(() => undefined)
-      .then(() => startVerifiedBackup(normalizedReason))
-      .finally(() => {
-        queuedBackup = null;
-      });
-    return queuedBackup;
-  }
-  return startVerifiedBackup(normalizedReason);
+  if (!activeBackup) return startVerifiedBackup(normalizedReason);
+  if (normalizedReason === 'scheduled') return activeBackup;
+  queuedBackup ??= activeBackup
+    .catch(() => undefined)
+    .then(() => startVerifiedBackup(normalizedReason))
+    .finally(() => {
+      queuedBackup = null;
+    });
+  return queuedBackup;
 }
 
-export async function compactDatabaseStorage(
-  options: { force?: boolean } = { force: true }
-): Promise<ReturnType<typeof compactDatabaseIfSafe>> {
+/**
+ * Compacts the live database behind a verified safety backup. Without `force`
+ * (startup) it only runs when worthwhile; forced (Admin) it refuses during a race.
+ */
+export async function compactDatabaseStorage({ force = true }: { force?: boolean } = {}): Promise<
+  ReturnType<typeof compactDatabaseIfSafe>
+> {
   const storage = databaseStorageStatus();
-  if (storage.raceActive) {
-    if (options.force === false) return compactDatabaseIfSafe();
+  if (storage.raceActive && force) {
     throw new Error('Database compactie is geblokkeerd zolang de race actief is.');
   }
-  if (options.force === false && !storage.compactionRecommended) {
+  if (storage.raceActive || (!force && !storage.compactionRecommended)) {
     return compactDatabaseIfSafe();
   }
   await createVerifiedBackup('pre-database-compaction');
   maintenanceInProgress = true;
   try {
-    return compactDatabaseIfSafe({ force: options.force !== false });
+    return compactDatabaseIfSafe({ force });
   } finally {
     maintenanceInProgress = false;
   }
@@ -277,9 +232,8 @@ export function backupsToRetain(
   return keep;
 }
 
-async function performBackup(reasonInput: string): Promise<BackupRecord> {
+async function performBackup(reason: string): Promise<BackupRecord> {
   await fs.promises.mkdir(backupDirectory, { recursive: true });
-  const reason = safeReason(reasonInput);
   const createdAt = Date.now();
   const hostSuffix = ensureReplicationIdentity().hostId.replace(/[^a-z0-9]/gi, '').slice(0, 8);
   const stamp = new Date(createdAt).toISOString().replace(/[-:.]/g, '');
@@ -373,24 +327,12 @@ function refreshBackupInventory(): void {
     .filter((entry) => entry.endsWith('.sqlite.json'))
     .flatMap((entry) => {
       try {
-        const parsed = JSON.parse(
-          fs.readFileSync(path.join(backupDirectory, entry), 'utf8')
-        ) as Partial<BackupRecord>;
-        if (
-          typeof parsed.fileName !== 'string' ||
-          !parsed.fileName.endsWith('.sqlite') ||
-          !fs.existsSync(path.join(backupDirectory, parsed.fileName)) ||
-          !Number.isSafeInteger(parsed.createdAt) ||
-          typeof parsed.reason !== 'string' ||
-          !Number.isSafeInteger(parsed.sizeBytes) ||
-          fs.statSync(path.join(backupDirectory, parsed.fileName)).size !== parsed.sizeBytes ||
-          typeof parsed.sha256 !== 'string' ||
-          !/^[0-9a-f]{64}$/.test(parsed.sha256) ||
-          parsed.verified !== true
-        ) {
-          return [];
-        }
-        return [{ ...parsed, verified: true } as BackupRecord];
+        const parsed = backupRecordSchema.safeParse(
+          JSON.parse(fs.readFileSync(path.join(backupDirectory, entry), 'utf8'))
+        );
+        if (!parsed.success || !parsed.data.fileName.endsWith('.sqlite')) return [];
+        const filePath = path.join(backupDirectory, parsed.data.fileName);
+        return fs.existsSync(filePath) && fs.statSync(filePath).size === parsed.data.sizeBytes ? [parsed.data] : [];
       } catch {
         return [];
       }
@@ -425,7 +367,7 @@ function scheduleNext(delayMs: number): void {
       })
       .finally(() => scheduleNext(intervalMs));
   }, delayMs);
-  scheduleHandle.unref?.();
+  scheduleHandle.unref();
 }
 
 async function writeMetadata(record: BackupRecord): Promise<void> {
@@ -471,11 +413,6 @@ async function removePartialBackup(filePath: string): Promise<void> {
 function safeReason(value: string): string {
   const cleaned = value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
   return cleaned.slice(0, 32) || 'manual';
-}
-
-function readPositiveInt(value: unknown, fallback: number): number {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
 }
 
 function backupStorageCapacity(): { freeBytes: number; totalBytes: number } | null {
