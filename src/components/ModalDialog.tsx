@@ -5,11 +5,13 @@ export function ModalDialog({
   label,
   onRequestClose,
   initialFocusRef,
+  closeOnBackdrop = false,
   children,
 }: {
   label: string;
   onRequestClose: () => void;
   initialFocusRef?: React.RefObject<HTMLElement | null>;
+  closeOnBackdrop?: boolean;
   children: React.ReactNode;
 }) {
   const [opener] = React.useState(() =>
@@ -37,6 +39,9 @@ export function ModalDialog({
         event.preventDefault();
         event.stopPropagation();
         onRequestClose();
+      }}
+      onClick={(event) => {
+        if (closeOnBackdrop && event.target === event.currentTarget) onRequestClose();
       }}
     >
       {children}

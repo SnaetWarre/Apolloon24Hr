@@ -42,11 +42,20 @@ try {
   console.log('PASS new-runner dialog accepts a runner number immediately, protects drafts, and returns focus to its opener');
 
   await openSearch.click();
-  await searchDialog.getByRole('button', { name: 'Profiel', exact: true }).first().click();
+  const openProfile = searchDialog.getByRole('button', { name: 'Profiel', exact: true }).first();
+  await openProfile.click();
   const profileDialog = page.getByRole('dialog', { name: 'Lopersprofiel', exact: true });
+  await profileDialog.locator('.profile-essentials').click({ position: { x: 10, y: 10 } });
+  assert.equal(await profileDialog.count(), 1);
+  await page.mouse.click(5, 5);
+  await profileDialog.waitFor({ state: 'detached' });
+  assert.equal(await openSearch.evaluate((button) => button === document.activeElement), true);
+  console.log('PASS profile stays open on inside clicks and closes on backdrop clicks');
+  await openSearch.click();
+  await openProfile.click();
   await profileDialog.getByRole('textbox', { name: 'Naam', exact: true }).fill('');
   await profileDialog.getByRole('textbox', { name: 'Notities', exact: true }).focus();
-  await page.keyboard.press('Escape');
+  await page.mouse.click(5, 5);
   const savePrompt = page.getByRole('dialog', { name: 'Wijzigingen opslaan?', exact: true });
   await savePrompt.waitFor();
   const promptBounds = await savePrompt.locator('.confirm-modal').boundingBox();

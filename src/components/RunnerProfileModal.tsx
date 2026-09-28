@@ -140,29 +140,48 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
   const queueRemovalLabel = queueRemovalButtonLabel(runner.status);
 
   return (
-    <ModalDialog label="Lopersprofiel" onRequestClose={requestClose}>
-      <div className="modal">
+    <ModalDialog label="Lopersprofiel" onRequestClose={requestClose} closeOnBackdrop>
+      <div className="modal modal--runner-profile">
         <div className="modal-header">
           <div>
             <span className="modal-kicker">Lopersprofiel</span>
             <h2>{runnerTitle(runner)}</h2>
-            {runner.registration && (runner.registration.phone || runner.registration.email) ? (
-              <p className="profile-contact">
-                {runner.registration.phone && (
-                  <a href={`tel:${runner.registration.phone.replace(/\s+/g, '')}`}>{runner.registration.phone}</a>
-                )}
-                {runner.registration.email && (
-                  <a href={`mailto:${runner.registration.email}`}>{runner.registration.email}</a>
-                )}
-              </p>
-            ) : (
-              <p>{runner.registrationSource === 'manual' ? 'Manueel toegevoegd, geen inschrijving' : 'Geen inschrijvingsgegevens'}</p>
-            )}
           </div>
           <button className="icon-btn" onClick={requestClose} aria-label="Sluiten">
             ✕
           </button>
         </div>
+
+        <section className="profile-essentials" aria-label="Contact en beschikbaarheid">
+          <h3>Contact en beschikbaarheid</h3>
+          <div className="profile-essentials__grid">
+            <div className="profile-essential-field">
+              <span className="muted-label">Telefoon</span>
+              {runner.registration?.phone ? (
+                <a href={`tel:${runner.registration.phone.replace(/\s+/g, '')}`}>{runner.registration.phone}</a>
+              ) : <span className="profile-essential-field__empty">Niet opgegeven</span>}
+            </div>
+            <div className="profile-essential-field">
+              <span className="muted-label">E-mail</span>
+              {runner.registration?.email ? (
+                <a href={`mailto:${runner.registration.email}`}>{runner.registration.email}</a>
+              ) : <span className="profile-essential-field__empty">Niet opgegeven</span>}
+            </div>
+            <div className="profile-essential-field profile-essential-field--hours">
+              <span className="muted-label">Beschikbare uren</span>
+              {runner.registration?.availableHours.length ? (
+                <div className="profile-hours">
+                  {runner.registration.availableHours.map((hour) => <span key={hour}>{hour}</span>)}
+                </div>
+              ) : <span className="profile-essential-field__empty">Niet opgegeven</span>}
+            </div>
+          </div>
+          {!runner.registration && (
+            <p className="profile-essentials__note">
+              {runner.registrationSource === 'manual' ? 'Manueel toegevoegd, geen inschrijving.' : 'Geen inschrijvingsgegevens.'}
+            </p>
+          )}
+        </section>
 
         <div className="profile-stats">
           <div className="profile-stat">
@@ -195,7 +214,6 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
               <RegistrationField label="Geschat totaal rondjes" value={runner.registration.estimatedLaps} />
               <RegistrationField label="Geschat gemiddeld tempo op 515 m" value={runner.registration.estimatedPace} />
               <RegistrationField label="Maximum rondjes per blok van 2 uur" value={runner.registration.maxLapsPerBlock} />
-              <RegistrationField label="Beschikbare uren" value={runner.registration.availableHours.join(', ')} />
               <RegistrationField label="Flexibiliteit" value={runner.registration.flexibility} />
               <RegistrationField label="Categorieën" value={runner.registration.categories.join(', ')} />
               <RegistrationField label="Toestemming voor hergebruik" value={runner.registration.reuseConsent} />
@@ -233,6 +251,7 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
           )}
         </section>
 
+        <h3 className="profile-edit-title">Profiel aanpassen</h3>
         <div className="form-grid">
           <label>
             Lopersnummer
