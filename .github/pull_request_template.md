@@ -14,10 +14,10 @@
 
 | Surface and state | Before | After |
 |---|---|---|
-| <!-- route, viewport, seed --> | <!-- github.com/.../blob/<branch>/docs/...png?raw=true --> | <!-- github.com/.../blob/<branch>/docs/...png?raw=true --> |
+| <!-- route, viewport, seed --> | <!-- ![Before](./before.png) --> | <!-- ![After](./after.png) --> |
 
 - [ ] Same data, viewport, route, and state in both captures
-- [ ] Evidence committed under `docs/pr-evidence/<branch-slug>/`
+- [ ] Screenshots attached to the PR (`gh pr create --attach`), not committed to the repository
 - [ ] Responsive capture included when responsive behavior changed
 
 ### Optimization measurements

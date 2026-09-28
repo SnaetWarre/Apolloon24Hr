@@ -8,7 +8,8 @@ const baseUrl = process.env.APOLLOON_TEST_URL;
 assert.ok(baseUrl && ['127.0.0.1', 'localhost'].includes(new URL(baseUrl).hostname));
 const revision = process.argv[2];
 assert.ok(['before', 'after'].includes(revision));
-const evidence = path.resolve('docs/pr-evidence/runtime-and-modules');
+// Screenshots belong on the PR as attachments, not in the repository.
+const evidence = path.resolve(process.env.EVIDENCE_DIR || '.test-data/runtime-refactor-ui/evidence');
 const fixturePath = path.resolve('.test-data/runtime-refactor-ui/visual-fixture.json');
 await fs.mkdir(evidence, { recursive: true });
 const endpoints = ['/api/state', '/api/cluster/status', '/api/history?scope=full'];
