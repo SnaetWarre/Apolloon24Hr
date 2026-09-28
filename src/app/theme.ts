@@ -1,37 +1,31 @@
 import React from 'react';
 
-// Operator theme preference. Stored per browser (laptop), never synchronised as a race setting.
+// Operator theme: Licht or Donker. Stored per browser (laptop), never synchronised as a race setting.
+// Without a stored choice the first load follows the operating system once.
 // index.html applies the same logic before first paint; keep the key and values in sync.
-export type ThemePreference = 'light' | 'dark' | 'system';
-export type ResolvedTheme = 'light' | 'dark';
+export type ThemePreference = 'light' | 'dark';
+export type ResolvedTheme = ThemePreference;
 
 export const THEME_STORAGE_KEY = 'apolloon.theme';
 const DARK_QUERY = '(prefers-color-scheme: dark)';
 
 const listeners = new Set<() => void>();
 let preference: ThemePreference = readStoredPreference();
-let systemDark = typeof window !== 'undefined' && window.matchMedia(DARK_QUERY).matches;
 let listening = false;
 
 function readStoredPreference(): ThemePreference {
   try {
     const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
-    if (stored === 'light' || stored === 'dark' || stored === 'system') return stored;
+    if (stored === 'light' || stored === 'dark') return stored;
   } catch {
     // Storage can be blocked (private mode); fall back to the operating system.
   }
-  return 'system';
-}
-
-export function resolveTheme(value: ThemePreference, prefersDark: boolean): ResolvedTheme {
-  if (value === 'system') return prefersDark ? 'dark' : 'light';
-  return value;
+  return typeof window !== 'undefined' && window.matchMedia(DARK_QUERY).matches ? 'dark' : 'light';
 }
 
 function apply(): void {
   const root = document.documentElement;
-  const resolved = resolveTheme(preference, systemDark);
-  root.dataset.themePreference = preference;
+  const resolved = preference;
   // Public displays own their presentation; they ignore the operator theme.
   if (root.dataset.surface === 'display') return;
   root.dataset.theme = resolved;
@@ -46,10 +40,6 @@ function notify(): void {
 function ensureListening(): void {
   if (listening || typeof window === 'undefined') return;
   listening = true;
-  window.matchMedia(DARK_QUERY).addEventListener('change', (event) => {
-    systemDark = event.matches;
-    notify();
-  });
   // Another tab on the same laptop changed the preference.
   window.addEventListener('storage', (event) => {
     if (event.key !== THEME_STORAGE_KEY) return;
@@ -69,7 +59,7 @@ export function setThemePreference(next: ThemePreference): void {
 }
 
 export function getResolvedTheme(): ResolvedTheme {
-  return resolveTheme(preference, systemDark);
+  return preference;
 }
 
 function subscribe(listener: () => void): () => void {
@@ -79,7 +69,7 @@ function subscribe(listener: () => void): () => void {
 }
 
 export function useThemePreference(): ThemePreference {
-  return React.useSyncExternalStore(subscribe, () => preference, () => 'system');
+  return React.useSyncExternalStore(subscribe, () => preference, () => 'light');
 }
 
 export function useResolvedTheme(): ResolvedTheme {

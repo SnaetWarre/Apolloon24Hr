@@ -1,29 +1,15 @@
 /* Analyse: label scope on the left, figures and charts on the right. */
 
-.analysis-scope-summary {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  min-height: 30px;
-  padding: 0 10px;
-  border-radius: var(--radius-sm);
-  background: var(--brand-wash);
-  color: var(--brand-ink);
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.analysis-scope-summary--partial {
-  background: var(--warn-wash);
-  color: var(--warn-ink);
-}
-
 .analysis-export {
   position: relative;
 }
 
 .analysis-export > summary {
   list-style: none;
+}
+
+.analysis-export[open] > summary {
+  background: var(--surface-3);
 }
 
 .analysis-export > summary::-webkit-details-marker {
@@ -84,11 +70,11 @@
 }
 
 .analysis-filter-panel .analysis-section-header h2 {
-  font-size: 19px;
+  font-size: 14px;
 }
 
 .analysis-filter-panel .analysis-section-header p {
-  font-size: 13.5px;
+  font-size: 12.5px;
 }
 
 .analysis-filter-actions {
@@ -226,7 +212,9 @@
 }
 
 .stats-grid--analysis .stat-panel strong {
-  font-size: clamp(24px, 2.4vw, 32px);
+  font-size: clamp(20px, 1.7vw, 24px);
+  font-weight: 550;
+  letter-spacing: -0.02em;
   white-space: nowrap;
 }
 

@@ -663,13 +663,13 @@ export function categoryChartOptions(
 
 export function chartPlugins(formatter: (value: number) => string) {
   return {
-    legend: { position: 'top' as const, labels: { boxWidth: 14, color: workspaceChartPalette.text, font: { weight: 'bold' as const } } },
+    legend: { position: 'top' as const, labels: { boxWidth: 14, color: workspaceChartPalette.text, font: { weight: 500 as const } } },
     tooltip: { ...chartTooltipColors(), callbacks: { label: (context: { dataset: { label?: string }; parsed: { y: number | null } }) => `${context.dataset.label}: ${context.parsed.y == null ? 'geen data' : formatter(context.parsed.y)}` } },
   };
 }
 
 export function axisTitle(text: string) {
-  return { display: true, text, color: workspaceChartPalette.muted, font: { weight: 'bold' as const } };
+  return { display: true, text, color: workspaceChartPalette.muted, font: { weight: 500 as const } };
 }
 
 export function teamColor(teamId: number, fallbackIndex = 0): string {

@@ -18,6 +18,7 @@ import { kanbanCollisionDetection, resolveKanbanDrop } from '../lib/kanban';
 import type { LiveAppSnapshot, Runner, RunnerStatus } from '../types';
 import { LabelBadge } from './LabelBadge';
 import { RunnerName } from './RunnerName';
+import { Icon } from './Icon';
 
 const selectKanbanData = ({ runners }: LiveAppSnapshot) => ({ runners });
 
@@ -40,6 +41,7 @@ function TimerBadge({ runner }: { runner: Runner }) {
       className={`timer-badge${long ? ' timer-badge--long' : ''}`}
       title={long ? 'Al meer dan 10 minuten aan het opwarmen (mm:ss)' : 'Tijd in deze status (mm:ss)'}
     >
+      <Icon name="timing" size={12} />
       {formatElapsedSeconds(elapsedMs)}
     </span>
   );
@@ -298,7 +300,7 @@ function QueueLane({
         {dropHint ? (
           <span className="queue-drop-hint" role="status">{dropHint}</span>
         ) : (
-          <span>{count}{totalCount !== undefined ? ` van ${totalCount}` : ''} lopers</span>
+          <span>{count}{totalCount !== undefined ? ` van ${totalCount}` : ''} {count === 1 && totalCount === undefined ? 'loper' : 'lopers'}</span>
         )}
       </header>
       <div className="queue-lane__rows">{children}</div>
@@ -362,21 +364,20 @@ function QueueRunnerRow({
             {runner.labels.map((label) => (
               <LabelBadge key={label.id} label={label} compact />
             ))}
-            <span
-              title={runner.bestLapMs ? `Snelste ronde ${formatDurationMs(runner.bestLapMs)}` : undefined}
-            >
-              {runner.lapCount} {runner.lapCount === 1 ? 'toer' : 'toeren'}
-            </span>
-            {runner.registration?.studyPhase && <span>{runner.registration.studyPhase}</span>}
-            {runner.registration?.estimatedPace && <span>Tempo {runner.registration.estimatedPace}</span>}
-            {runner.registration?.categories.length ? <span>{runner.registration.categories.join(', ')}</span> : null}
+            {runner.lapCount > 0 && (
+              <span
+                title={runner.bestLapMs ? `Snelste ronde ${formatDurationMs(runner.bestLapMs)}` : undefined}
+              >
+                {runner.lapCount} {runner.lapCount === 1 ? 'ronde' : 'rondes'}
+              </span>
+            )}
+            {runner.registration?.estimatedPace && (
+              <span title="Geschat tempo uit de inschrijving">~{runner.registration.estimatedPace}</span>
+            )}
           </span>
         </button>
         <TimerBadge runner={runner} />
         <div className="queue-row-actions" onPointerDown={(event) => event.stopPropagation()}>
-          <button className="btn btn--quiet btn--sm" onClick={() => onOpenProfile(runner.id)} aria-label={`Profiel van ${runner.name} openen`}>
-            Profiel
-          </button>
           <button
             className={`btn btn--sm${runner.status === 'warming_up' ? ' btn--advance' : ''}`}
             disabled={actionBusy}

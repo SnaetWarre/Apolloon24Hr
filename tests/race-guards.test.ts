@@ -104,7 +104,7 @@ test('gef finishte race heropenen kan alleen op de timinglaptop', async () => {
   assert.equal(allowedLocal, null);
 });
 
-test('gewoon wachtrijwerk op Telsysteem 1 wordt nooit geblokkeerd', async () => {
+test('gewoon wachtrijwerk wordt nooit geblokkeerd', async () => {
   const runnerStatusChangeError = await loadGate();
   const result = runnerStatusChangeError({
     runnerId: 'runner-y',

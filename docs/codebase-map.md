@@ -30,17 +30,19 @@ Shared contracts live in `shared/`. Anything imported by both client and server 
   - `readiness.ts`: derives the operator-facing event readiness checklist from
     backup, replication, clock, conflict, and timing state.
 - `src/types.ts`: client-facing re-export of shared schema types.
-- `src/styles/`: the "Piste" design system, imported once via `index.css`.
+- `src/styles/`: the design system, imported once via `index.css` (Geist, neutral light and charcoal dark).
   - `tokens.css`: semantic colour, type, spacing and radius tokens for the light
     (day) and dark (night) operator themes. Components use only these names.
   - `base.css`, `primitives.css`: reset, focus, buttons, fields, labels, bibs,
     messages, tables and dialogs.
-  - `shell.css`, `queue.css`, `timing.css`, `analysis.css`, `tactics.css`,
-    `admin.css`: one file per operator surface.
+  - `shell.css`: sidebar, thin page header (`PageHeader.tsx`) and overview.
+  - `queue.css`, `timing.css`, `analysis.css`, `tactics.css`, `admin.css`:
+    one file per operator surface.
   - `displays.css`: Binnen- and Buitenscherm with their own fixed palettes.
-- `src/app/theme.ts`: per-browser Licht/Donker/Systeem preference
-  (`localStorage["apolloon.theme"]`). `index.html` applies it before first paint;
-  display routes ignore it and accept `?thema=licht|donker` instead.
+- `src/app/theme.ts`: per-browser Licht/Donker choice
+  (`localStorage["apolloon.theme"]`; without a stored choice the first load follows
+  the OS once). `index.html` applies it before first paint; display routes ignore
+  it and accept `?thema=licht|donker` instead.
 - `src/lib/chartPalette.ts`: Chart.js colours read from the theme tokens;
   `useChartTheme()` in a chart effect redraws it after a theme switch.
 

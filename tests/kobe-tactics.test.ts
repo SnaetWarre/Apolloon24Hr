@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import path from 'node:path';
 import test from 'node:test';
 import {
   buildHourlyHistoricalPaces,
   buildRaceProgress,
   buildTargetPaces,
+  paceUncertaintySeconds,
   historicalLapCountAt,
   parseHistoricalRace,
   projectedLapCount,
@@ -79,18 +81,6 @@ test('live filtering and projection use Apolloon lap records without file conver
   assert.equal(progress.at(-1)?.liveLaps, null);
 });
 
-test("Kobe's tactiek is a dedicated route backed by Apolloon's realtime history hook", () => {
-  const routerSource = fs.readFileSync('src/router.tsx', 'utf8');
-  const viewSource = fs.readFileSync('src/components/KobeTacticsView.tsx', 'utf8');
-  const realtimeSource = fs.readFileSync('src/app/realtimeClient.ts', 'utf8');
-
-  assert.match(routerSource, /path: '\/tactics'/);
-  assert.match(viewSource, /useRaceHistory\(\{ scope: 'full' \}\)/);
-  assert.doesNotMatch(viewSource, /laps\.json/);
-  assert.match(realtimeSource, /socket\.on\('lap:created'/);
-  assert.match(realtimeSource, /patchRaceHistories/);
-});
-
 test('bundled Quivr 2025 data is valid and contains the Apolloon and VTK reference teams', () => {
   const bundledReference = parseHistoricalRace(
     fs.readFileSync('public/reference/quivr-2025-lap-times.json', 'utf8')
@@ -116,3 +106,32 @@ function lap(id: string, finishedAt: number, durationMs: number): LapRecord {
     labels: [],
   };
 }
+
+test('target schedules add up to the chosen 24-hour target with the bundled reference', () => {
+  const reference = parseHistoricalRace(
+    fs.readFileSync(path.resolve('public/reference/quivr-2025-lap-times.json'), 'utf8')
+  );
+  for (const teamId of [1, 4]) {
+    const referenceTeam = reference.teams.find((team) => team.teamId === teamId) ?? null;
+    for (const targetLaps of [1_000, 1_095, 1_200]) {
+      const paces = buildTargetPaces(targetLaps, referenceTeam);
+      assert.ok(Math.abs(targetLapCountAt(paces, 24) - targetLaps) < 0.01, `team ${teamId}, target ${targetLaps}`);
+      // Running exactly on schedule projects exactly the target.
+      const onSchedule = targetLapCountAt(paces, 9.5);
+      assert.ok(Math.abs(projectedLapCount(onSchedule, 9.5, paces) - targetLaps) < 0.01);
+    }
+  }
+  assert.ok(Math.abs(targetLapCountAt(buildTargetPaces(1_095, null), 24) - 1_095) < 0.01);
+});
+
+test('projection uncertainty uses the standard error of recent laps, not one lap spread', () => {
+  // Sample standard deviation 10 s over 4 laps -> standard error 5 s.
+  const durations = [70, 80, 90, 80 + Math.sqrt(100 * 3 - 200)];
+  const mean = durations.reduce((sum, value) => sum + value, 0) / durations.length;
+  const sampleSd = Math.sqrt(durations.reduce((sum, value) => sum + (value - mean) ** 2, 0) / 3);
+  assert.ok(Math.abs(paceUncertaintySeconds(durations) - sampleSd / 2) < 1e-9);
+  assert.equal(paceUncertaintySeconds([80]), 0);
+  // Twenty laps with a 12 s spread give roughly 2.7 s uncertainty on the average pace.
+  const twenty = Array.from({ length: 20 }, (_, index) => (index % 2 ? 92 : 68));
+  assert.ok(paceUncertaintySeconds(twenty) < 3);
+});

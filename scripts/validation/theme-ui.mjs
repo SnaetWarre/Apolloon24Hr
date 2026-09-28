@@ -21,9 +21,9 @@ try {
   await blockedPage.goto(`${baseUrl}/timing`);
   const beforeApp = await theme(blockedPage);
   assert.equal(beforeApp.theme, 'dark');
-  assert.equal(beforeApp.background, 'rgb(10, 17, 25)');
+  assert.equal(beforeApp.background, 'rgb(26, 26, 26)');
   await blocked.close();
-  console.log('PASS system dark preference applies before the app loads');
+  console.log('PASS without a stored choice the OS preference applies before the app loads');
 
   const context = await browser.newContext({ colorScheme: 'light', viewport: { width: 1280, height: 720 } });
   const page = await context.newPage();
@@ -44,13 +44,13 @@ try {
   assert.equal((await theme(page)).theme, 'dark');
   console.log('PASS explicit choice is stored per browser and survives navigation and reload');
 
-  await themeGroup.getByRole('radio', { name: 'Systeem' }).click();
-  assert.equal((await theme(page)).theme, 'light');
-  await page.emulateMedia({ colorScheme: 'dark' });
-  await page.waitForFunction(() => document.documentElement.dataset.theme === 'dark');
+  // Only Licht and Donker exist; a stored choice wins over the operating system.
+  assert.equal(await themeGroup.getByRole('radio').count(), 2);
   await page.emulateMedia({ colorScheme: 'light' });
-  await page.waitForFunction(() => document.documentElement.dataset.theme === 'light');
-  console.log('PASS system preference follows operating-system changes live');
+  await page.reload();
+  await page.getByRole('button', { name: 'Loper zoeken', exact: true }).waitFor();
+  assert.equal((await theme(page)).theme, 'dark');
+  console.log('PASS only Licht and Donker are offered and the stored choice beats the OS setting');
 
   // Arrow keys move within the group; Space on Timing stays the timing key.
   await page.goto(`${baseUrl}/timing`);
@@ -98,6 +98,13 @@ try {
   await page.locator('.display-root--inside.display-root--dark').waitFor();
   await page.goto(`${baseUrl}/display/inside?thema=licht`);
   await page.locator('.display-root--inside.display-root--light').waitFor();
+  // The choice made on the display itself is remembered by that display's browser.
+  await page.goto(`${baseUrl}/display/inside`);
+  await page.getByRole('group', { name: 'Weergave van dit scherm' }).getByRole('button', { name: 'Licht' }).click();
+  await page.locator('.display-root--inside.display-root--light').waitFor();
+  await page.reload();
+  await page.locator('.display-root--inside.display-root--light').waitFor();
+  assert.equal(await page.evaluate(() => document.documentElement.dataset.theme ?? null), null);
   await page.goto(`${baseUrl}/queue`);
   await page.getByRole('button', { name: 'Loper zoeken', exact: true }).waitFor();
   assert.equal((await theme(page)).theme, 'dark');

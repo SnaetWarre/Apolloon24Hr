@@ -103,6 +103,48 @@ export function escapeAppleScriptString(value: string): string {
 
 export type NmActiveConnection = { name: string; device: string; type: string };
 
+/** Only wired connections may be pinned; a wifi profile at home must never be changed. */
+export function isWiredNmConnectionType(type: string): boolean {
+  return type === 'ethernet' || type === '802-3-ethernet';
+}
+
+/** Same rule as the pinning script, which skips adapters with these names. */
+export function isWirelessWindowsAdapter(alias: string): boolean {
+  return /wi-?fi|wlan|wireless|draadloos|bluetooth/i.test(alias);
+}
+
+export function isWirelessMacService(service: string): boolean {
+  return /wi-?fi|airport|bluetooth|iphone/i.test(service);
+}
+
+/** Turns an elevation helper's exit into advice the operator can act on. */
+export function describeElevationFailure(
+  platform: NodeJS.Platform,
+  exitCode: number | null,
+  stderr: string
+): string {
+  const output = stderr.toLowerCase();
+  if (platform === 'linux') {
+    if (output.includes('authentication agent') || output.includes('textual authentication agent')) {
+      return 'Er kon geen wachtwoordvenster openen: op deze Linux-desktop draait geen polkit-agent. Start er een (bijvoorbeeld polkit-kde-authentication-agent-1 of hyprpolkitagent) en probeer opnieuw, of gebruik het Linux-script hieronder.';
+    }
+    if (exitCode === 126) return 'De toestemming is geweigerd of het wachtwoordvenster werd gesloten. Er is niets veranderd.';
+    if (exitCode === 127) return 'Het wachtwoord werd niet aanvaard. Er is niets veranderd.';
+  }
+  if (platform === 'win32') {
+    if (exitCode === 1223 || output.includes('uac_cancelled')) {
+      return 'De toestemming werd geweigerd (Nee in het Windows-venster). Er is niets veranderd.';
+    }
+    if (exitCode === 11) {
+      return 'Geen bedrade netwerkadapter gevonden. Steek de netwerkkabel in; wifi wordt nooit vastgezet.';
+    }
+  }
+  if (platform === 'darwin' && (output.includes('user canceled') || output.includes('-128'))) {
+    return 'De toestemming werd geannuleerd. Er is niets veranderd.';
+  }
+  return `De netwerkwijziging is mislukt${exitCode === null ? '' : ` (code ${exitCode})`}. Er is niets veranderd.`;
+}
+
 /** Parse `nmcli -t -f NAME,DEVICE,TYPE connection show --active` (dubbele punt escaped als `\\:`). */
 export function parseNmcliActiveConnections(output: string): NmActiveConnection[] {
   const connections: NmActiveConnection[] = [];
@@ -236,6 +278,39 @@ export type NetAdapterProfile = {
 
 export type ElevateMethod = 'uac' | 'pkexec' | 'osascript' | null;
 
+export type ElevationOutcome = {
+  id: string;
+  state: 'waiting' | 'finished' | 'failed';
+  message: string | null;
+  startedAt: number;
+};
+
+let lastElevation: ElevationOutcome | null = null;
+
+function beginElevation(): ElevationOutcome {
+  lastElevation = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, state: 'waiting', message: null, startedAt: Date.now() };
+  return lastElevation;
+}
+
+/** Follows the helper process so a refused or impossible password prompt is reported instead of silently waited on. */
+function trackElevation(outcome: ElevationOutcome, launcher: ReturnType<typeof spawn>): void {
+  let stderr = '';
+  launcher.stderr?.setEncoding('utf8');
+  launcher.stderr?.on('data', (chunk: string) => {
+    stderr = (stderr + chunk).slice(-2_000);
+  });
+  launcher.on('error', (error) => {
+    if (lastElevation?.id !== outcome.id) return;
+    lastElevation = { ...outcome, state: 'failed', message: `Kon de toestemming niet vragen: ${error.message}` };
+  });
+  launcher.on('exit', (exitCode) => {
+    if (lastElevation?.id !== outcome.id) return;
+    lastElevation = exitCode === 0
+      ? { ...outcome, state: 'finished', message: null }
+      : { ...outcome, state: 'failed', message: describeElevationFailure(process.platform, exitCode, stderr) };
+  });
+}
+
 export type NetProfile = {
   platform: NodeJS.Platform;
   windows: boolean;
@@ -250,6 +325,10 @@ export type NetProfile = {
   apipa: boolean;
   suggestion: { ip: string; prefixLength: number; gateway: string | null } | null;
   eventUrl: string | null;
+  /** Whether the primary adapter is a cable (true), wifi (false) or unknown (null). */
+  primaryWired: boolean | null;
+  /** Outcome of the latest elevated network change started from this server. */
+  lastElevation: ElevationOutcome | null;
 };
 
 function readWindowsDhcpState(): Map<string, boolean> {
@@ -330,13 +409,14 @@ export function clearToolAvailabilityCache(): void {
 
 type LinuxNetState = {
   connection: string | null;
+  connectionType: string | null;
   dhcp: boolean | null;
   prefixLength: number | null;
   gateway: string | null;
 };
 
 function readLinuxNetState(iface: string, address: string): LinuxNetState {
-  const state: LinuxNetState = { connection: null, dhcp: null, prefixLength: null, gateway: null };
+  const state: LinuxNetState = { connection: null, connectionType: null, dhcp: null, prefixLength: null, gateway: null };
   if (!toolAvailable('nmcli')) return state;
   try {
     const active = parseNmcliActiveConnections(
@@ -348,6 +428,7 @@ function readLinuxNetState(iface: string, address: string): LinuxNetState {
       active.find((item) => item.type === 'ethernet' || item.type === '802-3-ethernet');
     if (!match) return state;
     state.connection = match.name;
+    state.connectionType = match.type;
     try {
       const method = execFileSyncQuiet('nmcli', ['-t', '-f', 'ipv4.method', 'connection', 'show', match.name])
         .split(':')[1]
@@ -464,6 +545,15 @@ export function getNetProfile(): NetProfile {
     return { name: alias || 'onbekend', address: endpoint.address, prefixLength, dhcp, connection };
   });
   const primary = adapters[0] || null;
+  let primaryWired: boolean | null = null;
+  if (primary && windows && primary.name !== 'onbekend') {
+    primaryWired = !isWirelessWindowsAdapter(primary.name);
+  } else if (primary && platform === 'linux') {
+    const type = readLinuxNetState(primary.name, primary.address).connectionType;
+    primaryWired = type ? isWiredNmConnectionType(type) : null;
+  } else if (primary?.connection && platform === 'darwin') {
+    primaryWired = !isWirelessMacService(primary.connection);
+  }
   const apipa = primary ? isApipaAddress(primary.address) : false;
   let suggestion: NetProfile['suggestion'] = null;
   if (primary && !apipa && isPrivateLanAddress(primary.address)) {
@@ -481,47 +571,62 @@ export function getNetProfile(): NetProfile {
     apipa,
     suggestion,
     eventUrl: primary && !apipa ? `http://${primary.address}:${APP_PORT}` : null,
+    primaryWired,
+    lastElevation,
   };
 }
 
 // ---------------------------------------------------------------------------
-// Elevated execution. Fire-and-forget: de toestemmingsvraag (UAC /
-// wachtwoordvenster) verschijnt op het scherm van de host zelf, dus alleen
-// iemand fysiek achter die laptop kan goedkeuren. De HTTP-call keert direct
-// terug; de UI pollt het profiel tot de wijziging zichtbaar is.
+// Elevated execution. De toestemmingsvraag (UAC / wachtwoordvenster)
+// verschijnt op het scherm van de host zelf, dus alleen iemand fysiek achter
+// die laptop kan goedkeuren. De HTTP-call keert direct terug; de UI pollt het
+// profiel tot de wijziging zichtbaar is of lastElevation een fout meldt.
 // ---------------------------------------------------------------------------
 
 function toEncodedCommand(script: string): string {
   return Buffer.from(script, 'utf16le').toString('base64');
 }
 
-function launchElevatedWindows(encodedCommand: string): void {
+/** Exit code the launcher uses when the UAC prompt is answered with "Nee" (Windows ERROR_CANCELLED). */
+export const WINDOWS_UAC_CANCELLED_EXIT = 1223;
+/** Exit code of the network script when no wired adapter is up. */
+export const WINDOWS_NO_WIRED_ADAPTER_EXIT = 11;
+
+export function buildWindowsLauncherCommand(encodedCommand: string): string {
+  // Wait for the elevated script so a refused prompt or a missing cable is reported
+  // right away instead of after the polling timeout.
+  const elevated =
+    "Start-Process powershell.exe -Verb RunAs -Wait -PassThru -WindowStyle Hidden -ErrorAction Stop " +
+    `-ArgumentList '-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-EncodedCommand','${encodedCommand}'`;
+  return (
+    `try { $p = ${elevated}; if ($null -eq $p.ExitCode) { exit 0 }; exit $p.ExitCode } ` +
+    `catch { [Console]::Error.WriteLine('UAC_CANCELLED'); exit ${WINDOWS_UAC_CANCELLED_EXIT} }`
+  );
+}
+
+function launchElevatedWindows(encodedCommand: string): ElevationOutcome {
   // No shell involved: argument list is passed verbatim to powershell.exe,
   // and the actual network script travels base64-encoded, so validated IPs
   // can never break out into extra commands.
+  const outcome = beginElevation();
   const launcher = spawn(
     'powershell.exe',
-    [
-      '-NoProfile',
-      '-NonInteractive',
-      '-ExecutionPolicy',
-      'Bypass',
-      '-Command',
-      `Start-Process powershell.exe -Verb RunAs -ArgumentList '-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-EncodedCommand','${encodedCommand}'`,
-    ],
-    { detached: true, stdio: 'ignore', windowsHide: true }
+    ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', buildWindowsLauncherCommand(encodedCommand)],
+    { detached: true, stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true }
   );
-  launcher.unref();
+  trackElevation(outcome, launcher);
+  return outcome;
 }
 
-function launchElevatedLinuxScript(scriptText: string): void {
+function launchElevatedLinuxScript(scriptText: string): ElevationOutcome {
   // Eén wachtwoordvraag: het hele recept staat in een tijdelijk script dat
   // pkexec als root uitvoert. Alleen gevalideerde waarden en shQuote'de
   // systeemnamen belanden erin.
   const tmpFile = path.join(os.tmpdir(), `apolloon-net-${Date.now()}-${process.pid}.sh`);
   fs.writeFileSync(tmpFile, `#!/bin/sh\nset -eu\n${scriptText}\n`, { mode: 0o700 });
-  const launcher = spawn('pkexec', ['sh', tmpFile], { detached: true, stdio: 'ignore' });
-  launcher.unref();
+  const outcome = beginElevation();
+  const launcher = spawn('pkexec', ['sh', tmpFile], { detached: true, stdio: ['ignore', 'ignore', 'pipe'] });
+  trackElevation(outcome, launcher);
   // Opruimen nadat pkexec het heeft kunnen lezen; ongevaarlijk als het blijft liggen (0700, tmp).
   setTimeout(() => {
     try {
@@ -530,13 +635,16 @@ function launchElevatedLinuxScript(scriptText: string): void {
       // Al weg of tmp is geleegd; prima.
     }
   }, 120_000).unref?.();
+  return outcome;
 }
 
-function launchElevatedMacOs(innerCommand: string): void {
+function launchElevatedMacOs(innerCommand: string): ElevationOutcome {
   // osascript toont zelf de wachtwoordvraag op het scherm van de host.
   const appleScript = `do shell script "${escapeAppleScriptString(innerCommand)}" with administrator privileges`;
-  const launcher = spawn('osascript', ['-e', appleScript], { detached: true, stdio: 'ignore' });
-  launcher.unref();
+  const outcome = beginElevation();
+  const launcher = spawn('osascript', ['-e', appleScript], { detached: true, stdio: ['ignore', 'ignore', 'pipe'] });
+  trackElevation(outcome, launcher);
+  return outcome;
 }
 
 export function buildLinuxSetStaticScript(connection: string, ip: string, prefixLength: number, gateway: string | null): string {
@@ -574,12 +682,20 @@ function resolvePrimaryConnection(): { kind: 'nm' | 'macos'; name: string } | nu
   const profile = getNetProfile();
   if (!profile.primary || profile.apipa) return null;
   if (process.platform === 'linux') {
-    const state = readLinuxNetState(profile.primary.name, profile.primary.address);
-    return state.connection ? { kind: 'nm', name: state.connection } : null;
+    // Only a wired connection: the wifi at home or at school must never be pinned.
+    try {
+      const wired = parseNmcliActiveConnections(
+        execFileSyncQuiet('nmcli', ['-t', '-f', 'NAME,DEVICE,TYPE', 'connection', 'show', '--active'])
+      ).filter((connection) => isWiredNmConnectionType(connection.type));
+      const match = wired.find((connection) => connection.device === profile.primary?.name) ?? wired[0];
+      return match ? { kind: 'nm', name: match.name } : null;
+    } catch {
+      return null;
+    }
   }
   if (process.platform === 'darwin') {
     const state = readMacNetState(profile.primary.name);
-    return state.service ? { kind: 'macos', name: state.service } : null;
+    return state.service && !isWirelessMacService(state.service) ? { kind: 'macos', name: state.service } : null;
   }
   return null;
 }
@@ -622,7 +738,7 @@ function buildRevertDhcpScript(): string {
   ].join('\r\n');
 }
 
-export type NetActionResult = { ok: true; elevated: true } | { ok: false; error: string };
+export type NetActionResult = { ok: true; elevated: true; elevationId: string | null } | { ok: false; error: string };
 
 const MANUAL_HINT =
   'Gebruik de handmatige stappen of download hieronder het script voor dit toestel.';
@@ -637,8 +753,8 @@ export function requestMakeStatic(input: {
   const platform = process.platform;
   try {
     if (platform === 'win32') {
-      launchElevatedWindows(toEncodedCommand(buildSetStaticScript(validated.ip, validated.prefixLength, validated.gateway)));
-      return { ok: true, elevated: true };
+      const outcome = launchElevatedWindows(toEncodedCommand(buildSetStaticScript(validated.ip, validated.prefixLength, validated.gateway)));
+      return { ok: true, elevated: true, elevationId: outcome.id };
     }
     if (platform === 'linux') {
       if (!toolAvailable('nmcli') || !toolAvailable('pkexec')) {
@@ -646,12 +762,12 @@ export function requestMakeStatic(input: {
       }
       const resolved = resolvePrimaryConnection();
       if (!resolved || resolved.kind !== 'nm') {
-        return { ok: false, error: `Geen bedrade NetworkManager-verbinding gevonden. ${MANUAL_HINT}` };
+        return { ok: false, error: `Geen bedrade verbinding gevonden. Steek de netwerkkabel in; wifi wordt nooit vastgezet. ${MANUAL_HINT}` };
       }
-      launchElevatedLinuxScript(
+      const outcome = launchElevatedLinuxScript(
         buildLinuxSetStaticScript(resolved.name, validated.ip, validated.prefixLength, validated.gateway)
       );
-      return { ok: true, elevated: true };
+      return { ok: true, elevated: true, elevationId: outcome.id };
     }
     if (platform === 'darwin') {
       if (!toolAvailable('networksetup') || !toolAvailable('osascript')) {
@@ -659,14 +775,14 @@ export function requestMakeStatic(input: {
       }
       const resolved = resolvePrimaryConnection();
       if (!resolved || resolved.kind !== 'macos') {
-        return { ok: false, error: `Geen bedrade macOS-netwerkdienst gevonden. ${MANUAL_HINT}` };
+        return { ok: false, error: `Geen bedrade verbinding gevonden. Steek de netwerkkabel in; wifi wordt nooit vastgezet. ${MANUAL_HINT}` };
       }
       const mask = prefixLengthToMask(validated.prefixLength);
       if (!mask) return { ok: false, error: 'Ongeldig subnetmasker.' };
-      launchElevatedMacOs(
+      const outcome = launchElevatedMacOs(
         buildMacOsSetManualCommand(resolved.name, validated.ip, mask, validated.gateway)
       );
-      return { ok: true, elevated: true };
+      return { ok: true, elevated: true, elevationId: outcome.id };
     }
     return { ok: false, error: `Automatisch vastzetten werkt niet op dit systeem. ${MANUAL_HINT}` };
   } catch (error) {
@@ -685,8 +801,8 @@ export function requestRevertDhcp(input: { eventOver?: unknown; confirmText?: un
   const platform = process.platform;
   try {
     if (platform === 'win32') {
-      launchElevatedWindows(toEncodedCommand(buildRevertDhcpScript()));
-      return { ok: true, elevated: true };
+      const outcome = launchElevatedWindows(toEncodedCommand(buildRevertDhcpScript()));
+      return { ok: true, elevated: true, elevationId: outcome.id };
     }
     if (platform === 'linux') {
       if (!toolAvailable('nmcli') || !toolAvailable('pkexec')) {
@@ -694,10 +810,10 @@ export function requestRevertDhcp(input: { eventOver?: unknown; confirmText?: un
       }
       const resolved = resolvePrimaryConnection();
       if (!resolved || resolved.kind !== 'nm') {
-        return { ok: false, error: `Geen bedrade NetworkManager-verbinding gevonden. ${MANUAL_HINT}` };
+        return { ok: false, error: `Geen bedrade verbinding gevonden. Steek de netwerkkabel in; wifi wordt nooit vastgezet. ${MANUAL_HINT}` };
       }
-      launchElevatedLinuxScript(buildLinuxRevertDhcpScript(resolved.name));
-      return { ok: true, elevated: true };
+      const outcome = launchElevatedLinuxScript(buildLinuxRevertDhcpScript(resolved.name));
+      return { ok: true, elevated: true, elevationId: outcome.id };
     }
     if (platform === 'darwin') {
       if (!toolAvailable('networksetup') || !toolAvailable('osascript')) {
@@ -705,10 +821,10 @@ export function requestRevertDhcp(input: { eventOver?: unknown; confirmText?: un
       }
       const resolved = resolvePrimaryConnection();
       if (!resolved || resolved.kind !== 'macos') {
-        return { ok: false, error: `Geen bedrade macOS-netwerkdienst gevonden. ${MANUAL_HINT}` };
+        return { ok: false, error: `Geen bedrade verbinding gevonden. Steek de netwerkkabel in; wifi wordt nooit vastgezet. ${MANUAL_HINT}` };
       }
-      launchElevatedMacOs(buildMacOsRevertDhcpCommand(resolved.name));
-      return { ok: true, elevated: true };
+      const outcome = launchElevatedMacOs(buildMacOsRevertDhcpCommand(resolved.name));
+      return { ok: true, elevated: true, elevationId: outcome.id };
     }
     return { ok: false, error: `Automatisch terugzetten werkt niet op dit systeem. ${MANUAL_HINT}` };
   } catch (error) {

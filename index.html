@@ -10,35 +10,37 @@
         var root = document.documentElement;
         if (location.pathname.indexOf('/display/') === 0) {
           var requested = new URLSearchParams(location.search).get('thema');
+          var display = location.pathname.indexOf('/display/outside') === 0 ? 'outside' : 'inside';
+          var stored = null;
+          try { stored = localStorage.getItem('apolloon.display.' + display); } catch (error) {}
           var tone = requested === 'licht' ? 'light' : requested === 'donker' ? 'dark'
-            : location.pathname.indexOf('/display/outside') === 0 ? 'light' : 'dark';
+            : stored === 'light' || stored === 'dark' ? stored
+            : display === 'outside' ? 'light' : 'dark';
           root.setAttribute('data-surface', 'display');
           root.setAttribute('data-display-tone', tone);
           return;
         }
-        var preference = 'system';
+        var theme = null;
         try {
           var stored = localStorage.getItem('apolloon.theme');
-          if (stored === 'light' || stored === 'dark' || stored === 'system') preference = stored;
+          if (stored === 'light' || stored === 'dark') theme = stored;
         } catch (error) {}
-        var theme = preference === 'system'
-          ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
-          : preference;
+        // Without a stored choice, the first load follows the operating system.
+        if (!theme) theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
         root.setAttribute('data-theme', theme);
-        root.setAttribute('data-theme-preference', preference);
+        root.setAttribute('data-theme-preference', theme);
         root.style.colorScheme = theme;
       })();
     </script>
     <style>
-      html, body { margin: 0; min-height: 100vh; background: #F3F5F8; }
-      html[data-theme="dark"], html[data-theme="dark"] body { background: #0A1119; }
-      html[data-surface="display"], html[data-surface="display"] body { background: #070D14; }
+      html, body { margin: 0; min-height: 100vh; background: #F7F7F8; }
+      html[data-theme="dark"], html[data-theme="dark"] body { background: #1A1A1A; }
+      html[data-surface="display"], html[data-surface="display"] body { background: #111111; }
       html[data-display-tone="light"], html[data-display-tone="light"] body { background: #FFFFFF; }
       #root { min-height: 100vh; }
     </style>
     <link rel="preload" as="image" href="/brand/apolloon-logo.png" fetchpriority="high" />
-    <link rel="preload" as="font" type="font/woff2" href="/fonts/barlow-latin-400-normal.woff2" crossorigin />
-    <link rel="preload" as="font" type="font/woff2" href="/fonts/barlow-condensed-latin-700-normal.woff2" crossorigin />
+    <link rel="preload" as="font" type="font/woff2" href="/fonts/geist-latin-wght-normal.woff2" crossorigin />
     <script>
       window.__APOLLOON_STATE_PROMISE__ = fetch('/api/state').then(function (response) {
         if (!response.ok) throw new Error('Serverstatus laden mislukt (' + response.status + ')');

@@ -113,7 +113,7 @@ export function OutsideDisplay() {
     };
   }, []);
 
-  const presentation = useDisplayPresentation('light');
+  const [presentation] = useDisplayPresentation('outside', 'light');
 
   return (
     <main className={`display-root display-root--outside display-root--${presentation}`}>
@@ -137,7 +137,7 @@ export function OutsideDisplay() {
 
 export function InsideDisplay() {
   const { runners, labels, race } = useAppData(selectInsideDisplayData);
-  const presentation = useDisplayPresentation('dark');
+  const [presentation, setPresentation] = useDisplayPresentation('inside', 'dark');
   const activeRunner = runners.find((runner) => runner.id === race.activeRunnerId) || null;
   const nextRunner = getNextWaitingRunner(runners);
   const { laps } = useRaceHistory({ scope: 'full' });
@@ -181,7 +181,7 @@ export function InsideDisplay() {
     <main className={`display-root display-root--inside display-root--${presentation}`}>
       <header className="inside-header">
         <DisplayBrand />
-        <h1>24 urenloop</h1>
+        <h1 className="visually-hidden">24 urenloop, live standen</h1>
         <dl className="inside-totals">
           <div>
             <dt>Racetijd</dt>
@@ -279,8 +279,8 @@ export function InsideDisplay() {
                 <strong>{rankingRunnerLabel(runner)}</strong>
                 <em>
                   {rankingMode === 'coefficient'
-                    ? `${formatCoefficient(runner.coefficientTotal)} ptn · ${runner.lapCount} toeren`
-                    : `${runner.lapCount} toeren · gem. ${formatDurationMs(runner.averageLapMs)}`}
+                    ? `${formatCoefficient(runner.coefficientTotal)} ptn · ${runner.lapCount} rondes`
+                    : `${runner.lapCount} rondes · gem. ${formatDurationMs(runner.averageLapMs)}`}
                 </em>
               </li>
             ))}
@@ -299,6 +299,22 @@ export function InsideDisplay() {
                 ))}
               </select>
             </label>
+            <div className="inside-presentation" role="group" aria-label="Weergave van dit scherm">
+              <button
+                className={`inside-control-button${presentation === 'light' ? ' is-active' : ''}`}
+                aria-pressed={presentation === 'light'}
+                onClick={() => setPresentation('light')}
+              >
+                Licht
+              </button>
+              <button
+                className={`inside-control-button${presentation === 'dark' ? ' is-active' : ''}`}
+                aria-pressed={presentation === 'dark'}
+                onClick={() => setPresentation('dark')}
+              >
+                Donker
+              </button>
+            </div>
             <p className="inside-ranking-rotation-note">
               {prefersReducedMotion
                 ? 'Automatisch wisselen is uitgeschakeld'
@@ -320,10 +336,10 @@ export function InsideDisplay() {
         <section className="display-panel inside-competitions">
           <div className="inside-panel-heading">
             <h2>Competities</h2>
-            <span>toeren van doel</span>
+            <span>rondes van doel</span>
           </div>
           {competitions.length ? (
-            <div className={`competition-list${competitionRowCount > 7 ? ' is-dense' : ''}`}>
+            <div className={`competition-list${competitionRowCount > 9 ? ' is-dense' : ''}`}>
             {competitions.map((competition) => (
             <div key={competition.kind} className="competition">
               <h3>{competition.title}</h3>
@@ -332,14 +348,14 @@ export function InsideDisplay() {
                   <LabelBadge label={stat.label} />
                   <div className="progress-track">
                     <span
-                      title={stat.target > 0 ? `${stat.laps} van ${stat.target} toeren` : `${stat.laps} toeren`}
+                      title={stat.target > 0 ? `${stat.laps} van ${stat.target} rondes` : `${stat.laps} rondes`}
                       style={{
                         width: `${stat.target > 0 ? Math.min(100, stat.percent) : competition.maxLaps > 0 ? (stat.laps / competition.maxLaps) * 100 : 0}%`,
                         background: stat.label.color,
                       }}
                     />
                   </div>
-                  <em>{stat.target > 0 ? `${stat.laps} / ${stat.target}` : `${stat.laps} toeren`}</em>
+                  <em>{stat.target > 0 ? `${stat.laps} / ${stat.target}` : `${stat.laps} rondes`}</em>
                 </div>
               ))}
             </div>
@@ -356,13 +372,41 @@ function runnerLabelWithoutDash(runner: Pick<Runner, 'runnerNumber' | 'name'>) {
   return runner.runnerNumber ? `${runner.runnerNumber} ${runner.name}` : runner.name;
 }
 
-/** Displays keep a fixed presentation; `?thema=licht|donker` overrides it for one screen. */
-function useDisplayPresentation(defaultPresentation: 'light' | 'dark'): 'light' | 'dark' {
+type DisplayPresentation = 'light' | 'dark';
+
+/**
+ * Displays keep their own presentation, independent of the operator theme.
+ * Order: `?thema=licht|donker` in the URL, then the choice made on this display
+ * (remembered by this browser), then the default for the screen.
+ */
+function useDisplayPresentation(
+  display: 'inside' | 'outside',
+  defaultPresentation: DisplayPresentation
+): [DisplayPresentation, (next: DisplayPresentation) => void] {
+  const storageKey = `apolloon.display.${display}`;
   const searchString = useRouterState({ select: (state) => state.location.searchStr });
   const requested = new URLSearchParams(searchString).get('thema');
-  if (requested === 'licht') return 'light';
-  if (requested === 'donker') return 'dark';
-  return defaultPresentation;
+  const [stored, setStored] = React.useState<DisplayPresentation | null>(() => {
+    try {
+      const value = window.localStorage.getItem(storageKey);
+      return value === 'light' || value === 'dark' ? value : null;
+    } catch {
+      return null;
+    }
+  });
+  const choose = React.useCallback((next: DisplayPresentation) => {
+    try {
+      window.localStorage.setItem(storageKey, next);
+    } catch {
+      // Keep the choice for this session only.
+    }
+    setStored(next);
+  }, [storageKey]);
+  const presentation = requested === 'licht' ? 'light' : requested === 'donker' ? 'dark' : stored ?? defaultPresentation;
+  React.useLayoutEffect(() => {
+    document.documentElement.dataset.displayTone = presentation;
+  }, [presentation]);
+  return [presentation, choose];
 }
 
 function rankingRunnerLabel(runner: { runnerName: string; runnerNumber: string | null }) {
@@ -448,7 +492,7 @@ function OutsideBurgieFlash({ event }: { event: RaceEvent }) {
 
 function eventRunnerLabel(event: RaceEvent) {
   if (!event.runnerName) return 'Publiek moment';
-  return event.runnerNumber ? `${event.runnerNumber} - ${event.runnerName}` : event.runnerName;
+  return event.runnerNumber ? `${event.runnerNumber} ${event.runnerName}` : event.runnerName;
 }
 
 function buildLabelStats(labels: Label[], runners: Runner[], laps: LapRecord[]) {

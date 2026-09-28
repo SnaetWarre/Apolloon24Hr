@@ -1,32 +1,5 @@
 /* Kobe's tactiek: live target tracking and historical deep dive. */
 
-.tactics-hero {
-  align-items: center;
-}
-
-.tactics-live-badge,
-.tactics-source-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  min-height: 30px;
-  margin-left: auto;
-  padding: 0 10px;
-  border-radius: var(--radius-sm);
-  background: var(--go-wash);
-  color: var(--go-ink);
-  font-size: 14px;
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-.tactics-live-badge i {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--go);
-}
-
 .tactics-section-stack {
   display: grid;
   gap: var(--space-4);
@@ -121,7 +94,7 @@
 }
 
 .tactics-goal-input {
-  font: 700 22px var(--font-display);
+  font: 600 22px var(--font-display);
 }
 
 .tactics-filter-pair {
@@ -130,17 +103,39 @@
   gap: var(--space-2);
 }
 
-.tactics-hour-editor,
 .tactics-analysis-details {
   border-top: 1px solid var(--line);
   padding-top: var(--space-3);
 }
 
+.tactics-hour-editor {
+  padding-block: var(--space-3);
+}
+
+.tactics-hour-editor[open] {
+  padding-bottom: var(--space-4);
+}
+
+.tactics-hour-editor .tactics-hourly-grid {
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+}
+
+/* Section titles carry the meaning; small kickers above them only add noise. */
+.analysis-section-header .page-kicker {
+  display: none;
+}
+
+.tactics-lap-tables .table-wrap {
+  max-height: 360px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+
 .tactics-hour-editor summary,
 .tactics-analysis-details > summary {
   padding: 6px 0;
-  color: var(--brand-ink);
-  font-weight: 600;
+  color: var(--ink);
+  font-weight: 550;
   cursor: pointer;
 }
 
@@ -224,7 +219,7 @@
   border-bottom: 1px solid var(--line-2);
   background: transparent;
   color: var(--ink);
-  font: 700 17px var(--font-display);
+  font: 600 17px var(--font-display);
 }
 
 .tactics-hourly-grid input:focus {
@@ -251,7 +246,6 @@
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: var(--space-5);
-  border-left: var(--rail) solid var(--brand);
 }
 
 .tactics-reference-notice--expanded {
@@ -446,7 +440,7 @@
   border-bottom: 1px solid var(--line-2);
   background: transparent;
   color: var(--ink);
-  font: 700 24px var(--font-display);
+  font: 600 24px var(--font-display);
 }
 
 .tactics-diagnostic-grid {
@@ -478,7 +472,7 @@
 }
 
 .tactics-break-even-result strong {
-  font: 700 26px var(--font-display);
+  font: 600 26px var(--font-display);
 }
 
 .tactics-lap-tables {
@@ -523,6 +517,10 @@
   .tactics-reference-notice,
   .tactics-reference-notice--expanded {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .tactics-hour-editor .tactics-hourly-grid {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
   }
 
   .tactics-control-grid,

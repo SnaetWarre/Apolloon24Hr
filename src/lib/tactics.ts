@@ -118,7 +118,8 @@ export function buildTargetPaces(targetLaps: number, referenceTeam: HistoricalTe
 
   const referenceCapacity = referencePaces.reduce((laps, paceSeconds) => laps + 3_600 / paceSeconds, 0);
   const paceScale = referenceCapacity / safeTargetLaps;
-  return referencePaces.map((paceSeconds) => roundToTenth(paceSeconds * paceScale));
+  // Keep full precision: rounding each hour to 0.1 s shifted a 1095-lap target to 1094.4 laps.
+  return referencePaces.map((paceSeconds) => paceSeconds * paceScale);
 }
 
 export function targetLapCountAt(hourlyPacesSeconds: number[], elapsedHours: number): number {
@@ -219,6 +220,19 @@ export function recentMedianPaceSeconds(laps: LapRecord[], recentLapCount: numbe
   return median(recentDurations);
 }
 
+/**
+ * Uncertainty of the average pace from recent laps: the standard error
+ * (sample standard deviation / sqrt(n)). A single lap's spread would be far too
+ * wide as a sustained offset for the rest of the race.
+ */
+export function paceUncertaintySeconds(durationsSeconds: number[]): number {
+  const count = durationsSeconds.length;
+  if (count < 2) return 0;
+  const average = durationsSeconds.reduce((sum, value) => sum + value, 0) / count;
+  const variance = durationsSeconds.reduce((sum, value) => sum + (value - average) ** 2, 0) / (count - 1);
+  return Math.sqrt(variance / count);
+}
+
 export function teamById(race: HistoricalRace | null, teamId: number): HistoricalTeam | null {
   return race?.teams.find((team) => team.teamId === teamId) ?? null;
 }
@@ -244,7 +258,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function fillMissingPaces(paces: Array<number | null>, fallbackPace: number): number[] {
   const validPaces = paces.filter((pace): pace is number => pace != null && pace > 0);
   const centralPace = median(validPaces) ?? fallbackPace;
-  return paces.map((pace) => roundToTenth(pace ?? centralPace));
+  return paces.map((pace) => pace ?? centralPace);
 }
 
 function upperBound(sortedValues: number[], maximumValue: number): number {

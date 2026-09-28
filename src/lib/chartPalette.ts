@@ -1,8 +1,8 @@
 import { Chart } from 'chart.js';
 import { useResolvedTheme, type ResolvedTheme } from '../app/theme';
 
-Chart.defaults.font.family = '"Barlow", ui-sans-serif, system-ui, sans-serif';
-Chart.defaults.font.size = 13;
+Chart.defaults.font.family = '"Geist", ui-sans-serif, system-ui, sans-serif';
+Chart.defaults.font.size = 12;
 
 // Chart.js draws on canvas, so it cannot use CSS variables directly.
 // Every getter reads the current theme token; charts rebuild when useChartTheme() changes.

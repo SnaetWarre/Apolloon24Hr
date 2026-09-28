@@ -41,7 +41,7 @@ export function LabelAdminRow({
     <div className="label-admin-row">
       <LabelBadge label={label} />
       <label className="label-target-editor">
-        Doel toeren
+        <span className="label-target-editor__caption">Doel (rondes)</span>
         <input
           className="input input--number"
           type="number"
@@ -52,7 +52,7 @@ export function LabelAdminRow({
         />
       </label>
       <label className="label-target-editor">
-        Positie
+        <span className="label-target-editor__caption">Positie</span>
         <input
           className="input input--number"
           type="number"
@@ -65,7 +65,7 @@ export function LabelAdminRow({
       <button className="btn btn--sm" onClick={saveLabelSettings} disabled={saving}>
         {saving ? 'Opslaan...' : 'Opslaan'}
       </button>
-      <button className="btn btn--danger" onClick={onDelete}>
+      <button className="btn btn--sm btn--quiet btn--danger-outline" onClick={onDelete}>
         Verwijder
       </button>
       {error && <span className="warning-inline">{error}</span>}

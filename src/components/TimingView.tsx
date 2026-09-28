@@ -2,10 +2,11 @@ import React from 'react';
 import { ModalDialog } from './ModalDialog';
 import { useAppActions, useAppData, useClusterStatus, useRaceHistory } from '../app/index';
 import { formatClockTimeMs, formatDurationMs, nowMs } from '../lib/time';
-import { getNextWaitingRunner, runnerLabel } from '../lib/runners';
+import { getNextWaitingRunner } from '../lib/runners';
 import type { LiveAppSnapshot, Runner } from '../types';
 import { LabelBadge } from './LabelBadge';
 import { RunnerName } from './RunnerName';
+import { PageHeader } from './PageHeader';
 import { LIVE_MILLISECOND_INTERVAL_MS, useClockTick } from '../lib/useAnimationFrameTick';
 
 const selectTimingData = ({ runners, race }: LiveAppSnapshot) => ({ runners, race });
@@ -40,7 +41,6 @@ export function TimingView() {
   const activePreviousLap = activeRunner
     ? activeRunnerLaps.find((lap) => lap.runnerId === activeRunner.id) || null
     : null;
-  const handoffPreview = buildHandoffPreview(activeRunner, nextRunner);
 
   const runExclusiveRaceAction = React.useCallback(
     async (action: () => Promise<unknown>, successMessage: string | null): Promise<boolean> => {
@@ -164,10 +164,10 @@ export function TimingView() {
 
   return (
     <>
-      <div className="page-head page-head--compact">
-        <h1>Timing</h1>
-        <p>Spatie of Enter klokt de huidige loper af en start de volgende.</p>
-      </div>
+      <PageHeader
+        title="Timing"
+        meta={<span>Spatie of Enter klokt de huidige loper af en start de volgende.</span>}
+      />
 
       <div className="timing-workspace">
         <section className={`timing-station${activeRunner ? ' is-running' : ''}`} aria-label="Timing bedienen">
@@ -217,12 +217,6 @@ export function TimingView() {
             </div>
           </div>
 
-          <div className="handoff-preview">
-            <span className="handoff-preview__baton" aria-hidden="true"><i />Wissel</span>
-            <span>
-              {race.raceFinishedAt ? 'Race afgesloten. Hervat alleen bewust via de knop hieronder.' : handoffPreview}
-            </span>
-          </div>
 
           <div className="timing-actions">
             <button className="btn btn--primary btn--xl" onClick={runHandoff} disabled={handoffDisabled}>
@@ -295,6 +289,14 @@ export function TimingView() {
             {!activeRunner && !nextRunner && !race.raceFinishedAt && !timingBlocked && (
               <p className="timing-feedback__hint">Zet in Wachtrij een opgewarmde loper klaar om te starten.</p>
             )}
+            {activeRunner && !nextRunner && !race.raceFinishedAt && !timingBlocked && (
+              <p className="timing-feedback__hint timing-feedback__hint--warn">
+                Niemand klaar in de wachtrij. Na afklokken loopt er niemand op de piste.
+              </p>
+            )}
+            {race.raceFinishedAt && (
+              <p className="timing-feedback__hint">Race afgesloten. Spatie en Enter doen niets meer; hervat alleen bewust met de knop.</p>
+            )}
           </div>
 
           <div className="timing-footer">
@@ -303,10 +305,6 @@ export function TimingView() {
               <strong>
                 {race.raceStartedAt ? formatClockTimeMs(race.raceStartedAt).split('.')[0] : 'Nog niet'}
               </strong>
-            </div>
-            <div className="stat-panel">
-              <span className="muted-label">Wachtrij</span>
-              <strong>{waitingCount} {waitingCount === 1 ? 'loper' : 'lopers'} klaar</strong>
             </div>
             <button className="btn timing-undo" onClick={undo} disabled={handoffBusy || timingBlocked}>
               Laatste wissel ongedaan maken
@@ -450,18 +448,5 @@ function isTextEntryTarget(target: HTMLElement | null) {
 
 function shortRunnerName(runner: Runner) {
   const firstName = runner.name.trim().split(/\s+/)[0] || runner.name;
-  return runner.runnerNumber ? `${runner.runnerNumber} - ${firstName}` : firstName;
-}
-
-function buildHandoffPreview(activeRunner: Runner | null, nextRunner: Runner | null) {
-  if (activeRunner && nextRunner) {
-    return `${runnerLabel(activeRunner)} wordt afgeklokt, ${runnerLabel(nextRunner)} start`;
-  }
-  if (!activeRunner && nextRunner) {
-    return `${runnerLabel(nextRunner)} start`;
-  }
-  if (activeRunner && !nextRunner) {
-    return 'Huidige loper wordt afgeklokt; geen volgende loper klaar';
-  }
-  return 'Geen loper klaar in de wachtrij';
+  return runner.runnerNumber ? `${runner.runnerNumber} ${firstName}` : firstName;
 }

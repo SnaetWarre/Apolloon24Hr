@@ -1,60 +1,66 @@
-/* Timing: one station with a fixed action slot, plus the upcoming runners and recent laps. */
+/* Timing: one station with a fixed action slot, plus upcoming runners and recent laps. */
 
 .timing-workspace {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(320px, 400px);
-  gap: var(--space-5);
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 380px);
+  gap: var(--space-4);
   align-items: start;
 }
 
 .timing-station {
-  position: relative;
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
   min-width: 0;
-  padding: var(--space-5) var(--space-6) var(--space-5) calc(var(--space-6) + 6px);
+  padding: var(--space-5) var(--space-6);
   border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   background: var(--surface);
-  overflow: hidden;
-}
-
-/* The baton rail: blue while someone is on the track. */
-.timing-station::before {
-  content: "";
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 6px;
-  background: var(--line-2);
-}
-
-.timing-station.is-running::before {
-  background: var(--brand);
 }
 
 .timing-station__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   color: var(--ink-3);
-  font-size: 14px;
-  font-weight: 600;
+  font-size: 12.5px;
+}
+
+.timing-station.is-running .timing-station__label::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--go);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--go) 20%, transparent);
 }
 
 .timing-now {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-3) var(--space-4);
-  min-height: 50px;
+  gap: var(--space-2) var(--space-4);
+  min-height: 40px;
 }
 
 .timing-now .runner-name--lg {
-  gap: var(--space-4);
-  font: 700 clamp(32px, 3.4vw, 46px)/1.02 var(--font-display);
+  gap: var(--space-3);
+  font-size: clamp(24px, 2.6vw, 32px);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+}
+
+.timing-now .bib--lg {
+  color: var(--ink-3);
+  font-weight: 500;
 }
 
 .timing-now__empty {
   color: var(--ink-3);
-  font: 700 clamp(30px, 3vw, 40px)/1.05 var(--font-display);
+  font-size: clamp(22px, 2.4vw, 28px);
+  font-weight: 500;
+  letter-spacing: -0.02em;
 }
 
 .timing-clock-row {
@@ -66,14 +72,17 @@
 
 .timing-clock {
   color: var(--ink);
-  font: 700 clamp(88px, 11vw, 156px)/0.86 var(--font-display);
-  letter-spacing: -0.01em;
+  font-size: clamp(72px, 8.5vw, 120px);
+  font-weight: 600;
+  line-height: 0.9;
+  letter-spacing: -0.045em;
   white-space: nowrap;
 }
 
 .timing-clock small {
-  font-size: 0.55em;
-  color: var(--ink-2);
+  color: var(--ink-3);
+  font-size: 0.5em;
+  letter-spacing: -0.02em;
 }
 
 .timing-clock--idle,
@@ -84,40 +93,11 @@
 .timing-clock-stats {
   display: flex;
   gap: var(--space-6);
-  padding-bottom: 10px;
+  padding-bottom: 8px;
 }
 
 .timing-clock-stats .stat-panel strong {
-  font-size: 24px;
-}
-
-.handoff-preview {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  padding: 10px 14px;
-  border-radius: var(--radius-sm);
-  background: var(--surface-2);
-  font-size: 15px;
-  overflow-wrap: anywhere;
-}
-
-.handoff-preview__baton {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  gap: var(--space-2);
-  color: var(--ink-3);
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.handoff-preview__baton i {
-  display: block;
-  width: 34px;
-  height: 6px;
-  border-radius: 3px;
-  background: var(--brand);
+  font-size: 18px;
 }
 
 .timing-actions .btn--xl {
@@ -128,26 +108,28 @@
 }
 
 .timing-actions .btn--xl:disabled {
-  border: 1.5px dashed var(--line-2);
-  background: var(--surface-2);
-  color: var(--ink-3);
+  border-style: dashed;
 }
 
 .timing-actions kbd {
   flex: none;
-  font-size: 14px;
 }
 
-/* Fixed-height zone so feedback never pushes the controls around. */
+/* Reserved zone so feedback never moves the controls. */
 .timing-feedback {
   display: grid;
   align-content: start;
   gap: var(--space-2);
-  min-height: 48px;
+  min-height: 42px;
 }
 
 .timing-feedback__hint {
   color: var(--ink-3);
+  font-size: 13.5px;
+}
+
+.timing-feedback__hint--warn {
+  color: var(--warn-ink);
 }
 
 .timing-footer {
@@ -160,7 +142,8 @@
 }
 
 .timing-footer .stat-panel strong {
-  font-size: 20px;
+  font-size: 15px;
+  font-weight: 500;
 }
 
 .timing-undo {
@@ -182,12 +165,13 @@
 
 .timing-upcoming li {
   display: grid;
-  grid-template-columns: 24px minmax(0, 1fr);
-  align-items: center;
+  grid-template-columns: 20px minmax(0, 1fr);
+  align-items: baseline;
   gap: var(--space-2);
-  padding: 8px 0;
+  padding: 7px 0;
   border-bottom: 1px solid var(--line);
-  font-weight: 600;
+  font-size: 13.5px;
+  font-weight: 500;
 }
 
 .timing-upcoming li:last-child {
@@ -196,6 +180,12 @@
 
 .timing-upcoming li:first-child .queue-position {
   color: var(--brand-ink);
+  font-weight: 600;
+}
+
+.timing-upcoming .queue-position {
+  min-width: 0;
+  text-align: left;
 }
 
 .timing-upcoming .empty-inline,
@@ -203,25 +193,29 @@
   padding: var(--space-2) 0;
 }
 
+.timing-log {
+  padding-bottom: var(--space-2);
+}
+
 .timing-log .table-wrap {
-  max-height: 420px;
-  margin: 0 calc(var(--space-5) * -1);
-}
-
-.timing-log table th:first-child,
-.timing-log table td:first-child {
-  padding-left: var(--space-5);
-}
-
-.timing-log table th:last-child,
-.timing-log table td:last-child {
-  padding-right: var(--space-5);
+  max-height: 400px;
+  margin: 0 calc(var(--space-4) * -1);
 }
 
 .timing-log td,
 .timing-log th {
-  padding: 7px 8px;
+  padding: 6px 8px;
   white-space: nowrap;
+}
+
+.timing-log table th:first-child,
+.timing-log table td:first-child {
+  padding-left: var(--space-4);
+}
+
+.timing-log table th:last-child,
+.timing-log table td:last-child {
+  padding-right: var(--space-4);
 }
 
 .timing-log td.cell-runner {
@@ -240,26 +234,22 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
-  padding: var(--space-2) 2px;
+  padding: 0 2px;
 }
 
 .danger-zone h2 {
   color: var(--ink-3);
-  font: 500 14px/1.2 var(--font-body);
+  font-size: 12.5px;
+  font-weight: 400;
 }
 
 @media (max-width: 1100px) {
   .timing-workspace {
-    grid-template-columns: minmax(0, 1fr) 320px;
+    grid-template-columns: minmax(0, 1fr) 300px;
   }
 
   .timing-station {
-    padding: var(--space-4) var(--space-4) var(--space-4) calc(var(--space-4) + 6px);
-  }
-
-  .timing-actions .btn--xl {
-    min-height: 76px;
-    font-size: 26px;
+    padding: var(--space-4);
   }
 }
 

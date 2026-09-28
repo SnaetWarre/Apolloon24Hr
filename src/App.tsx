@@ -1,6 +1,7 @@
 import React from 'react';
 import { Link, Outlet, useNavigate, useRouterState } from '@tanstack/react-router';
 import { AppHeader } from './components/AppHeader';
+import { PageHeader } from './components/PageHeader';
 import { KanbanBoard } from './components/KanbanBoard';
 import { RolePicker } from './components/RolePicker';
 import { RunnerProfileModal } from './components/RunnerProfileModal';
@@ -14,13 +15,16 @@ import {
   LazyOutsideDisplay,
   preloadAdminView,
   preloadAnalysisView,
+  preloadDisplayViews,
   preloadKobeTacticsView,
 } from './lazyViews';
 import { getNextWaitingRunner } from './lib/runners';
 import { LiveDuration, LiveElapsed } from './components/LiveTime';
 import { RunnerName } from './components/RunnerName';
 import { ThemeSwitch } from './components/ThemeSwitch';
+import { Icon, type IconName } from './components/Icon';
 import { setDocumentSurface } from './app/theme';
+import { useSidebarCollapsed } from './app/sidebar';
 import { deriveSystemStatus } from './lib/systemStatus';
 import type { LiveAppSnapshot } from './types';
 
@@ -69,8 +73,9 @@ export function AppRoot() {
   return (
     <Shell>
       <a className="skip-link" href="#workspace">Naar inhoud</a>
-      <TopBar />
-      <main id="workspace" className="workspace" tabIndex={-1}><Outlet /></main>
+      <AppShellFrame>
+        <main id="workspace" className="workspace" tabIndex={-1}><Outlet /></main>
+      </AppShellFrame>
     </Shell>
   );
 }
@@ -89,7 +94,7 @@ export function QueuePage() {
 
   return (
     <>
-      <h1 className="visually-hidden">Wachtrij en wisselzone</h1>
+      <PageHeader title="Wachtrij" actions={<AppHeader onOpenProfile={setProfileRunnerId} />} />
       <section className="race-strip" aria-label="Wisselzone">
         <div className="race-strip__now">
           <span className="race-strip__label">Nu op de piste</span>
@@ -111,11 +116,6 @@ export function QueuePage() {
           <span className="race-strip__runner">{waitingCount} {waitingCount === 1 ? 'loper' : 'lopers'}</span>
         </div>
       </section>
-      <AppHeader
-        onOpenProfile={(runnerId) => {
-          setProfileRunnerId(runnerId);
-        }}
-      />
       <KanbanBoard onOpenProfile={setProfileRunnerId} />
       {profileRunnerId && (
         <RunnerProfileModal runnerId={profileRunnerId} onClose={() => setProfileRunnerId(null)} />
@@ -217,50 +217,98 @@ function RouteLoadBoundary({
   return <React.Suspense fallback={fallback}>{children}</React.Suspense>;
 }
 
-const NAVIGATION_ITEMS: ReadonlyArray<{
-  path: '/' | '/queue' | '/timing' | '/analysis' | '/tactics' | '/admin';
-  label: string;
-  preload?: () => void;
+type NavigationPath = '/' | '/queue' | '/timing' | '/analysis' | '/tactics' | '/admin' | '/display/inside' | '/display/outside';
+
+const NAVIGATION_GROUPS: ReadonlyArray<{
+  title: string | null;
+  items: ReadonlyArray<{ path: NavigationPath; label: string; icon: IconName; preload?: () => void }>;
 }> = [
-  { path: '/', label: 'Start' },
-  { path: '/queue', label: 'Wachtrij' },
-  { path: '/timing', label: 'Timing' },
-  { path: '/analysis', label: 'Analyse', preload: preloadAnalysisView },
-  { path: '/tactics', label: "Kobe's tactiek", preload: preloadKobeTacticsView },
-  { path: '/admin', label: 'Beheer', preload: preloadAdminView },
+  { title: null, items: [{ path: '/', label: 'Overzicht', icon: 'overview' }] },
+  {
+    title: 'Wedstrijd',
+    items: [
+      { path: '/queue', label: 'Wachtrij', icon: 'queue' },
+      { path: '/timing', label: 'Timing', icon: 'timing' },
+    ],
+  },
+  {
+    title: 'Opvolgen',
+    items: [
+      { path: '/analysis', label: 'Analyse', icon: 'analysis', preload: preloadAnalysisView },
+      { path: '/tactics', label: "Kobe's tactiek", icon: 'tactics', preload: preloadKobeTacticsView },
+    ],
+  },
+  {
+    title: 'Publieksschermen',
+    items: [
+      { path: '/display/inside', label: 'Binnenscherm', icon: 'displayInside', preload: preloadDisplayViews },
+      { path: '/display/outside', label: 'Buitenscherm', icon: 'displayOutside', preload: preloadDisplayViews },
+    ],
+  },
+  { title: 'Systeem', items: [{ path: '/admin', label: 'Beheer', icon: 'admin', preload: preloadAdminView }] },
 ];
 
-function TopBar() {
+function AppShellFrame({ children }: { children: React.ReactNode }) {
+  const [collapsed, toggleCollapsed] = useSidebarCollapsed();
+  return (
+    <div className={`app-shell${collapsed ? ' is-collapsed' : ''}`}>
+      <Sidebar collapsed={collapsed} onToggle={toggleCollapsed} />
+      {children}
+    </div>
+  );
+}
+
+function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
 
   return (
-    <header className="top-bar">
-      <Link className="top-bar__brand" to="/" aria-label="Apolloon, naar de startpagina">
-        <span className="brand-mark" aria-hidden="true" />
-      </Link>
-      <nav className="top-bar__nav" aria-label="Hoofdnavigatie">
-        {NAVIGATION_ITEMS.map((navigationItem) => {
-          const isCurrentPage = pathname === navigationItem.path;
-          return (
-            <Link
-              key={navigationItem.path}
-              className="nav-link"
-              aria-current={isCurrentPage ? 'page' : undefined}
-              onPointerEnter={navigationItem.preload}
-              onFocus={navigationItem.preload}
-              to={navigationItem.path}
-            >
-              {navigationItem.label}
-            </Link>
-          );
-        })}
+    <aside className="sidebar">
+      <div className="sidebar__top">
+        <Link className="sidebar__brand" to="/" aria-label="Apolloon, naar het overzicht">
+          <span className="brand-mark" aria-hidden="true" />
+        </Link>
+        <button
+          type="button"
+          className="sidebar__toggle"
+          onClick={onToggle}
+          aria-expanded={!collapsed}
+          aria-label={collapsed ? 'Zijbalk uitklappen' : 'Zijbalk inklappen'}
+          title={`${collapsed ? 'Zijbalk uitklappen' : 'Zijbalk inklappen'} (Ctrl+B)`}
+        >
+          <Icon name="panelLeft" />
+        </button>
+      </div>
+      <nav className="sidebar__nav" aria-label="Hoofdnavigatie">
+        {NAVIGATION_GROUPS.map((group) => (
+          <div key={group.title ?? 'home'} className="sidebar__group">
+            {group.title && <span className="sidebar__group-title">{group.title}</span>}
+            {group.items.map((navigationItem) => {
+              const isCurrentPage = pathname === navigationItem.path;
+              return (
+                <Link
+                  key={navigationItem.path}
+                  className="nav-link"
+                  aria-current={isCurrentPage ? 'page' : undefined}
+                  onPointerEnter={navigationItem.preload}
+                  onFocus={navigationItem.preload}
+                  to={navigationItem.path}
+                  title={navigationItem.label}
+                >
+                  <Icon name={navigationItem.icon} />
+                  <span className="nav-link__label">{navigationItem.label}</span>
+                </Link>
+              );
+            })}
+          </div>
+        ))}
       </nav>
-      <div className="top-bar__status">
+      <div className="sidebar__footer">
+        <SystemStatusRow />
         <RaceClock />
-        <SystemStatusChip />
+        <HostAddress />
         <ThemeSwitch />
       </div>
-    </header>
+    </aside>
   );
 }
 
@@ -268,30 +316,68 @@ const selectRaceClockData = ({ race }: LiveAppSnapshot) => ({ race });
 
 function RaceClock() {
   const { race } = useAppData(selectRaceClockData);
-  if (!race.raceStartedAt) return <span className="status-chip status-chip--plain">Race niet gestart</span>;
-  if (race.raceFinishedAt) return <span className="status-chip status-chip--plain">Race afgesloten</span>;
   return (
-    <span className="status-chip status-chip--plain" title="Tijd sinds de start van de race">
-      Race <strong><LiveElapsed startedAt={race.raceStartedAt} /></strong>
-    </span>
+    <div className="sidebar-row" title="Tijd sinds de start van de race">
+      <span className="sidebar-row__label">Race</span>
+      <span className="sidebar-row__value">
+        {!race.raceStartedAt
+          ? 'Niet gestart'
+          : race.raceFinishedAt
+            ? 'Afgesloten'
+            : <LiveElapsed startedAt={race.raceStartedAt} />}
+      </span>
+    </div>
   );
 }
 
-function SystemStatusChip() {
+const selectHostData = ({ host }: LiveAppSnapshot) => ({ host });
+
+function HostAddress() {
+  const { host } = useAppData(selectHostData);
+  const [copied, setCopied] = React.useState(false);
+  if (!host) return null;
+
+  async function copy() {
+    if (!host) return;
+    try {
+      await navigator.clipboard.writeText(host.url);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setCopied(false);
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      className="sidebar-row sidebar-row--button"
+      onClick={() => void copy()}
+      title={`Adres voor andere laptops kopiëren: ${host.url}`}
+    >
+      <span className="visually-hidden">Adres voor andere laptops kopiëren:</span>
+      <span className="sidebar-row__address">{copied ? 'Gekopieerd' : host.url.replace(/^https?:\/\//, '')}</span>
+      <Icon name={copied ? 'check' : 'copy'} size={14} />
+    </button>
+  );
+}
+
+/** Quiet when healthy; a coloured row with the reason when something needs attention. */
+function SystemStatusRow() {
   const { cluster, error } = useClusterStatus();
   const status = deriveSystemStatus(cluster, error);
   if (!status) return null;
   return (
     <Link
       to="/admin"
-      className={`status-chip status-chip--${status.tone}`}
+      className={`system-status system-status--${status.tone}`}
       title={`${status.title}: ${status.detail}. Open Beheer voor details.`}
       onPointerEnter={preloadAdminView}
     >
-      <span className="status-chip__dot" aria-hidden="true" />
-      <span role={status.tone === 'error' ? 'alert' : 'status'} aria-live="polite" aria-atomic="true">
-        <strong>{status.title}</strong>
-        <span className="status-chip__detail"> {status.detail}</span>
+      <span className="system-status__dot" aria-hidden="true" />
+      <span role={status.tone === 'error' ? 'alert' : 'status'} aria-live="polite" aria-atomic="true" className="system-status__text">
+        <strong>{status.tone === 'healthy' ? 'Systeem in orde' : status.title}</strong>
+        <span>{status.detail}</span>
       </span>
     </Link>
   );

@@ -13,8 +13,10 @@ body {
   min-height: 100vh;
   background: var(--bg);
   color: var(--ink);
-  font: 400 15px/1.45 var(--font-body);
+  font: 400 14px/1.5 var(--font-body);
   font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+  letter-spacing: -0.003em;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -23,16 +25,15 @@ h1, h2, h3, h4, p {
   margin: 0;
 }
 
-h1, h2 {
-  font-family: var(--font-display);
-  font-weight: 700;
-  line-height: 1.05;
-  letter-spacing: 0;
+h1, h2, h3 {
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
 }
 
-h1 { font-size: 32px; }
-h2 { font-size: 21px; font-weight: 600; }
-h3 { font-size: 15px; font-weight: 600; line-height: 1.25; }
+h1 { font-size: 15px; }
+h2 { font-size: 14px; }
+h3 { font-size: 13px; }
 
 button,
 input,
@@ -52,16 +53,16 @@ img {
 }
 
 strong, b {
-  font-weight: 600;
+  font-weight: 550;
 }
 
 :focus-visible {
-  outline: 3px solid var(--focus);
+  outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
 
 ::selection {
-  background: color-mix(in srgb, var(--brand) 35%, transparent);
+  background: color-mix(in srgb, var(--brand) 30%, transparent);
 }
 
 [hidden] {

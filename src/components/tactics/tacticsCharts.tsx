@@ -13,7 +13,7 @@ import {
 import { chartTooltipColors, useChartTheme, workspaceChartPalette } from '../../lib/chartPalette';
 import { RACE_DURATION_HOURS, type HourlyPacePoint, type RaceProgressPoint } from '../../lib/tactics';
 import type { LiveTrendPoint, TimeGapPoint } from '../../lib/tacticsDeepDive';
-import { formatPaceSeconds, formatRaceHour } from './tacticsFormat';
+import { formatPaceSeconds, formatRaceHour, formatSignedGap } from './tacticsFormat';
 
 Chart.register(
   CategoryScale,
@@ -221,7 +221,7 @@ export function LiveTimeGapChart({ points }: { points: TimeGapPoint[] }) {
           },
         ],
       },
-      options: sharedLineChartOptions('Tijdskloof op VTK', (value) => `${Number(value) > 0 ? '+' : ''}${Math.round(Number(value))}s`),
+      options: sharedLineChartOptions('Tijdskloof op VTK', (value) => formatSignedGap(Number(value))),
     });
     return () => chart.destroy();
   }, [chartTheme, points]);
@@ -295,7 +295,7 @@ export function sharedLineChartOptions(
     interaction: { mode: 'nearest', intersect: false },
     parsing: false,
     plugins: {
-      legend: { position: 'top', labels: { boxWidth: 14, color: workspaceChartPalette.text, font: { weight: 'bold' } } },
+      legend: { position: 'top', labels: { boxWidth: 14, color: workspaceChartPalette.text, font: { weight: 500 } } },
       tooltip: {
         ...chartTooltipColors(),
         callbacks: {
@@ -313,13 +313,13 @@ export function sharedLineChartOptions(
         type: 'linear',
         min: 0,
         max: RACE_DURATION_HOURS,
-        title: { display: true, text: 'Uren sinds de start', color: workspaceChartPalette.muted, font: { weight: 'bold' } },
+        title: { display: true, text: 'Uren sinds de start', color: workspaceChartPalette.muted, font: { weight: 500 } },
         ticks: { color: workspaceChartPalette.muted, stepSize: 2, callback: (value) => `${value}u` },
         grid: { color: workspaceChartPalette.grid },
       },
       y: {
         beginAtZero: yAxisTitle === 'Cumulatieve rondes',
-        title: { display: true, text: yAxisTitle, color: workspaceChartPalette.muted, font: { weight: 'bold' } },
+        title: { display: true, text: yAxisTitle, color: workspaceChartPalette.muted, font: { weight: 500 } },
         ticks: { color: workspaceChartPalette.muted, callback: (value) => yTickFormatter(value) },
         grid: { color: workspaceChartPalette.grid },
       },

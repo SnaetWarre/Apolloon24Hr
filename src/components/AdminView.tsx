@@ -1,4 +1,7 @@
+import { Link } from '@tanstack/react-router';
 import { SectionNavigation } from './SectionNavigation';
+import { PageHeader } from './PageHeader';
+import { Icon } from './Icon';
 import React from 'react';
 import { useAppActions, useAppData, useClusterStatus } from '../app/index';
 import { labelKindTitle } from './LabelBadge';
@@ -281,7 +284,7 @@ export function AdminView() {
     try {
       const event = await burgieGepakt();
       const runnerText = event.runnerName
-        ? ` voor ${event.runnerNumber ? `${event.runnerNumber} - ` : ''}${event.runnerName}`
+        ? ` voor ${event.runnerNumber ? `${event.runnerNumber} ` : ''}${event.runnerName}`
         : '';
       setEventMessage({ tone: 'success', text: `Burgie gepakt opgeslagen om ${formatClockTimeMs(event.occurredAt)}${runnerText}.` });
     } catch (err) {
@@ -386,12 +389,7 @@ export function AdminView() {
 
   return (
     <>
-      <div className="hero hero--compact">
-        <div>
-          <h1 className="app-title">Beheer</h1>
-          <p className="tagline">Lopers, ploegen en instellingen voor de wedstrijd.</p>
-        </div>
-      </div>
+      <PageHeader title="Beheer" />
 
       <div className="management-workspace">
         <aside className="management-navigation">
@@ -402,11 +400,6 @@ export function AdminView() {
             onSectionChange={setActiveSection}
             attentionIds={readiness === 'ready' ? [] : (['system'] as AdminSection[])}
           />
-          {readiness !== 'ready' && (
-            <button className="management-health" onClick={() => setActiveSection('system')}>
-              Systeem vraagt aandacht <span>Bekijk verbinding en herstel</span>
-            </button>
-          )}
         </aside>
         <div className="management-content">
           <section hidden={activeSection !== 'labels'} className="panel">
@@ -741,41 +734,65 @@ export function AdminView() {
             )}
 
             <section hidden={activeSection !== 'public'} className="panel admin-dashboard__public-event">
-              <h2>Publiek moment</h2>
-              <p className="panel-copy">Slaat het moment op en toont de flash alleen op het buitenscherm.</p>
-              <button
-                className="btn btn--primary btn--xl"
-                onClick={triggerBurgieGepakt}
-                disabled={eventSaving}
-              >
-                {eventSaving ? 'Opslaan...' : 'Burgie gepakt'}
-              </button>
-              <div className="form-row form-row--plain public-record-mode-row">
-                <label htmlFor="public-record-mode">
-                  <strong>Recordflits</strong>
-                </label>
-                <select
-                  id="public-record-mode"
-                  className="input"
-                  value={settings.publicRecordMode}
-                  onChange={(event) => void changePublicRecordMode(event.target.value as PublicRecordMode)}
-                  disabled={recordModeSaving}
-                >
-                  <option value="off">Uit</option>
-                  <option value="day">Dagrecord</option>
-                  <option value="two_hour">Per 2 uur</option>
-                  <option value="hour">Per uur</option>
-                </select>
+              <h2>Publieke momenten</h2>
+              <p className="panel-copy">Wat het publiek op het Buitenscherm ziet, bovenop de huidige en volgende loper.</p>
+              <div className="public-moments">
+                <div className="public-moment">
+                  <h3>Burgie gepakt</h3>
+                  <p>Toont 8 seconden “Burgie gepakt, ZINGEN” met de loper die nu op de piste is, en bewaart het moment in de analyse.</p>
+                  <button
+                    className="btn btn--primary"
+                    onClick={triggerBurgieGepakt}
+                    disabled={eventSaving}
+                  >
+                    {eventSaving ? 'Opslaan...' : 'Burgie gepakt'}
+                  </button>
+                </div>
+                <div className="public-moment">
+                  <h3 id="public-record-mode">Recordflits</h3>
+                  <p>Een nieuwe snelste ronde verschijnt 8 seconden groot op het Buitenscherm.</p>
+                  <div className="segmented-control" role="group" aria-labelledby="public-record-mode">
+                    {([
+                      ['off', 'Uit'],
+                      ['day', 'Dagrecord'],
+                      ['two_hour', 'Per 2 uur'],
+                      ['hour', 'Per uur'],
+                    ] as const).map(([mode, label]) => (
+                      <button
+                        key={mode}
+                        type="button"
+                        className={settings.publicRecordMode === mode ? 'is-active' : ''}
+                        aria-pressed={settings.publicRecordMode === mode}
+                        disabled={recordModeSaving}
+                        onClick={() => {
+                          if (settings.publicRecordMode !== mode) void changePublicRecordMode(mode);
+                        }}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <div className="public-links">
+                <Link className="btn btn--sm" to="/display/outside">
+                  <Icon name="displayOutside" size={14} />
+                  Buitenscherm openen
+                </Link>
+                <Link className="btn btn--sm" to="/display/inside">
+                  <Icon name="displayInside" size={14} />
+                  Binnenscherm openen
+                </Link>
               </div>
               <AdminNoticeBanner notice={eventMessage} />
             </section>
 
             <section hidden={activeSection !== 'preparation'} className="panel admin-dashboard__import">
-              <h2>Google Sheets CSV import</h2>
+              <h2>Inschrijvingen importeren</h2>
               <p className="panel-copy">
-                Import zet nieuwe lopers in de ingeschreven databank. Ze verschijnen pas op het bord wanneer
-                je ze activeert in Telsysteem 1.
-                Een formulierexport met E-mailadres en Voornaam + naam neemt het spreadsheetrijnummer als lopersnummer en bewaart alle inschrijvingsantwoorden in het profiel.
+                Kies de CSV-export van het inschrijvingsformulier. Nieuwe lopers komen in de databank en verschijnen
+                op het bord zodra je ze aanmeldt in Wachtrij. Het rijnummer wordt het lopersnummer en alle antwoorden
+                komen in het profiel.
               </p>
               <div className="file-import-row">
                 <label className="file-picker">
@@ -796,9 +813,10 @@ export function AdminView() {
 
             <section hidden={activeSection !== 'labels'} className="panel admin-dashboard__labels">
               <h2>Labels</h2>
-              <div className="form-row">
+              <div className="form-row label-create-row">
                 <input
                   className="input"
+                  aria-label="Naam van het nieuwe label"
                   value={labelName}
                   onChange={(event) => setLabelName(event.target.value)}
                   placeholder="Nieuw label"

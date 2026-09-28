@@ -65,7 +65,7 @@ function buildSystemStatus(input: {
     return {
       tone: 'error',
       title: 'Synchronisatieconflict',
-      detail: 'Timing is gepauzeerd tot het conflict in Admin is opgelost',
+      detail: 'Timing is gepauzeerd tot het conflict in Beheer is opgelost',
     };
   }
   if ((cluster.clockSkewMs ?? 0) > 2_000) {
