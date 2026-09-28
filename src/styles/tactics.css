@@ -1,0 +1,532 @@
+/* Kobe's tactiek: live target tracking and historical deep dive. */
+
+.tactics-section-stack {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.tactics-live-stats {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+.tactics-live-stats .stat-panel:nth-child(4n) {
+  border-right: 1px solid var(--line);
+}
+
+.tactics-live-stats .stat-panel:nth-child(6n) {
+  border-right: 0;
+}
+
+.tactics-live-stats .stat-panel {
+  border-bottom: 0;
+}
+
+.tactics-stat {
+  display: grid;
+  align-content: start;
+  gap: 2px;
+}
+
+.tactics-stat small {
+  overflow: hidden;
+  color: var(--ink-3);
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tactics-stat--positive strong {
+  color: var(--go-ink);
+}
+
+.tactics-stat--negative strong {
+  color: var(--stop-ink);
+}
+
+.tactics-stat-unit {
+  margin-left: 5px;
+  color: var(--ink-3);
+  font: 500 14px var(--font-body);
+}
+
+.tactics-planning-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.tactics-planning-layout > .panel {
+  min-width: 0;
+}
+
+.tactics-control-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(170px, 1fr));
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.tactics-planning-layout .tactics-control-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.tactics-control-grid > label,
+.tactics-filter-pair label,
+.tactics-compact-select {
+  display: grid;
+  gap: 6px;
+}
+
+.tactics-control-grid label > span,
+.tactics-compact-select span,
+.tactics-dataset-summary > span {
+  color: var(--ink-2);
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.tactics-group-label {
+  margin-top: var(--space-2);
+  color: var(--ink-3);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.tactics-goal-input {
+  font: 600 22px var(--font-display);
+}
+
+.tactics-filter-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.tactics-analysis-details {
+  border-top: 1px solid var(--line);
+  padding-top: var(--space-3);
+}
+
+.tactics-hour-editor {
+  padding-block: var(--space-3);
+}
+
+.tactics-hour-editor[open] {
+  padding-bottom: var(--space-4);
+}
+
+.tactics-hour-editor .tactics-hourly-grid {
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+}
+
+/* Section titles carry the meaning; small kickers above them only add noise. */
+.analysis-section-header .page-kicker {
+  display: none;
+}
+
+.tactics-lap-tables .table-wrap {
+  max-height: 360px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+
+.tactics-hour-editor summary,
+.tactics-analysis-details > summary {
+  padding: 6px 0;
+  color: var(--ink);
+  font-weight: 550;
+  cursor: pointer;
+}
+
+.tactics-analysis-details {
+  margin-top: var(--space-2);
+}
+
+.tactics-analysis-details > summary {
+  padding-bottom: var(--space-3);
+}
+
+.tactics-hourly-header,
+.tactics-panel-heading,
+.tactics-dataset-manager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.tactics-hourly-header {
+  align-items: center;
+  margin: var(--space-3) 0;
+}
+
+.tactics-hourly-header > div {
+  display: grid;
+  gap: 2px;
+}
+
+.tactics-hourly-header span,
+.tactics-dataset-manager p,
+.tactics-reference-notice p,
+.tactics-empty-state p {
+  color: var(--ink-3);
+  font-size: 13.5px;
+}
+
+.tactics-hourly-grid {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(90px, 1fr));
+  gap: var(--space-2);
+}
+
+.tactics-planning-layout .tactics-hourly-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.tactics-hourly-grid > label {
+  display: grid;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.tactics-hourly-grid > label.is-past {
+  background: var(--surface-2);
+}
+
+.tactics-hourly-grid > label > span {
+  color: var(--ink-3);
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.tactics-hourly-grid label div {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.tactics-hourly-grid input {
+  width: 100%;
+  min-width: 0;
+  padding: 3px 0;
+  border: 0;
+  border-bottom: 1px solid var(--line-2);
+  background: transparent;
+  color: var(--ink);
+  font: 600 17px var(--font-display);
+}
+
+.tactics-hourly-grid input:focus {
+  outline: none;
+  border-bottom-color: var(--brand);
+}
+
+.tactics-hourly-grid em {
+  color: var(--ink-3);
+  font-size: 11.5px;
+  font-style: normal;
+}
+
+.tactics-chart-card {
+  min-height: 420px;
+}
+
+.tactics-chart-card canvas {
+  height: 420px !important;
+}
+
+.tactics-reference-notice {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-5);
+}
+
+.tactics-reference-notice--expanded {
+  min-height: 260px;
+  grid-template-columns: minmax(0, 1.4fr) minmax(220px, 0.6fr);
+}
+
+.tactics-reference-notice h2,
+.tactics-dataset-manager h2,
+.tactics-empty-state h2 {
+  margin: 4px 0 6px;
+}
+
+.tactics-dataset-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.tactics-dataset-manager > div:first-child {
+  min-width: 0;
+}
+
+.tactics-dataset-manager h2 {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tactics-control-grid--historical {
+  grid-template-columns: minmax(180px, 0.6fr) minmax(180px, 0.6fr) minmax(260px, 1.4fr);
+  margin-bottom: 0;
+}
+
+.tactics-control-grid--drafting {
+  grid-template-columns: repeat(6, minmax(130px, 1fr));
+}
+
+.tactics-inline-controls .tactics-control-grid {
+  margin-bottom: 0;
+}
+
+.tactics-dataset-summary {
+  display: grid;
+  align-content: center;
+  gap: 2px;
+  min-width: 0;
+  padding-left: var(--space-4);
+  border-left: 1px solid var(--line);
+}
+
+.tactics-dataset-summary strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tactics-dataset-summary small {
+  color: var(--ink-3);
+}
+
+.tactics-empty-state {
+  display: grid;
+  min-height: 260px;
+  place-content: center;
+  text-align: center;
+}
+
+.tactics-panel-heading .analysis-section-header {
+  margin-bottom: var(--space-3);
+}
+
+.tactics-lap-status,
+.tactics-significance {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 22px;
+  padding: 0 7px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  color: var(--ink-2);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.tactics-lap-status--valid,
+.tactics-significance.is-significant {
+  background: var(--go-wash);
+  color: var(--go-ink);
+}
+
+.tactics-lap-status--warning {
+  background: var(--warn-wash);
+  color: var(--warn-ink);
+}
+
+.tactics-deep-nav {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.tactics-deep-nav button {
+  display: grid;
+  gap: 2px;
+  min-width: 150px;
+  padding: 11px var(--space-3);
+  border: 0;
+  border-right: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.tactics-deep-nav button:last-child {
+  border-right: 0;
+}
+
+.tactics-deep-nav button:hover {
+  background: var(--surface-2);
+}
+
+.tactics-deep-nav button.is-active {
+  background: var(--brand-wash);
+  box-shadow: inset 0 -3px 0 var(--brand);
+}
+
+.tactics-deep-nav strong {
+  font-size: 14px;
+}
+
+.tactics-deep-nav small {
+  overflow: hidden;
+  color: var(--ink-3);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tactics-team-key {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.tactics-team-key i {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+}
+
+.tactics-ranking-table tr.is-selected td {
+  background: var(--brand-wash);
+}
+
+.tactics-summary-table {
+  margin-bottom: var(--space-3);
+}
+
+.tactics-number-control {
+  position: relative;
+}
+
+.tactics-number-control .input {
+  padding-right: 34px;
+}
+
+.tactics-number-control em {
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  color: var(--ink-3);
+  font-size: 12px;
+  font-style: normal;
+  transform: translateY(-50%);
+}
+
+.tactics-stat--control input {
+  width: 100%;
+  padding: 3px 0;
+  border: 0;
+  border-bottom: 1px solid var(--line-2);
+  background: transparent;
+  color: var(--ink);
+  font: 600 24px var(--font-display);
+}
+
+.tactics-diagnostic-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-5);
+}
+
+.tactics-diagnostic-grid h3 {
+  margin-bottom: var(--space-2);
+}
+
+.tactics-break-even-controls {
+  grid-template-columns: minmax(180px, 0.7fr) minmax(180px, 0.7fr) minmax(300px, 1.6fr);
+  align-items: end;
+}
+
+.tactics-break-even-result {
+  display: grid;
+  gap: 2px;
+  padding-left: var(--space-4);
+  border-left: 1px solid var(--line);
+}
+
+.tactics-break-even-result span,
+.tactics-break-even-result small {
+  color: var(--ink-3);
+  font-size: 13px;
+}
+
+.tactics-break-even-result strong {
+  font: 600 26px var(--font-display);
+}
+
+.tactics-lap-tables {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.tactics-suspicious-details {
+  padding: var(--space-3);
+  border: 1px solid var(--warn-line);
+  border-radius: var(--radius-sm);
+  background: var(--warn-wash);
+}
+
+.tactics-suspicious-details summary {
+  color: var(--warn-ink);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.tactics-suspicious-details[open] summary {
+  margin-bottom: var(--space-2);
+}
+
+@media (max-width: 1200px) {
+  .tactics-live-stats {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .tactics-live-stats .stat-panel:nth-child(3n) {
+    border-right: 0;
+  }
+
+  .tactics-live-stats .stat-panel:nth-child(-n + 3) {
+    border-bottom: 1px solid var(--line);
+  }
+}
+
+@media (max-width: 1000px) {
+  .tactics-planning-layout,
+  .tactics-diagnostic-grid,
+  .tactics-reference-notice,
+  .tactics-reference-notice--expanded {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .tactics-hour-editor .tactics-hourly-grid {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+
+  .tactics-control-grid,
+  .tactics-control-grid--historical,
+  .tactics-control-grid--drafting,
+  .tactics-break-even-controls {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

@@ -63,7 +63,7 @@ export function buildEventReadiness(
     label: 'Databaseopslag',
     level: 'ready',
     detail: backup.database.compactionRecommended
-      ? 'De database bevat herbruikbare lege ruimte. Dit is geen dataprobleem; verklein het bestand na de race in Admin.'
+      ? 'De database bevat herbruikbare lege ruimte. Dit is geen dataprobleem; verklein het bestand na de race via Beheer › Systeem en herstel.'
       : 'Het databasebestand bevat geen overmatige vrije ruimte.',
   });
 
@@ -125,7 +125,7 @@ export function buildEventReadiness(
     level: deadLetters > 0 ? 'warning' : 'ready',
     detail:
       deadLetters > 0
-        ? `${deadLetters} synchronisatie-actie${deadLetters === 1 ? ' is' : 's zijn'} in quarantaine gezet (foute data overgeslagen zodat de sync doorloopt). Controleer in Admin wat er mist.`
+        ? `${deadLetters} synchronisatie-actie${deadLetters === 1 ? ' is' : 's zijn'} in quarantaine gezet (foute data overgeslagen zodat de sync doorloopt). Controleer in Beheer wat er mist.`
         : 'Er staan geen acties in quarantaine.',
   });
 

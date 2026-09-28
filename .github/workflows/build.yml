@@ -58,6 +58,8 @@ jobs:
         run: node scripts/package-smoke.mjs
 
       - name: Upload Windows installer
+        # Storage quota must not hide a successful build and package smoke test.
+        continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
           name: windows-installer
@@ -97,6 +99,8 @@ jobs:
         run: xvfb-run -a node scripts/package-smoke.mjs
 
       - name: Upload Linux AppImage
+        # Storage quota must not hide a successful build and package smoke test.
+        continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
           name: linux-appimage

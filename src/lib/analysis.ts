@@ -330,9 +330,9 @@ export function isFastestLapForRecordMode(
 }
 
 export function publicRecordModeTitle(mode: PublicRecordMode): string {
-  if (mode === 'hour') return 'NEW HOUR RECORD';
-  if (mode === 'two_hour') return 'NEW 2H RECORD';
-  return 'NEW DAY RECORD';
+  if (mode === 'hour') return 'Snelste ronde van dit uur';
+  if (mode === 'two_hour') return 'Snelste ronde van deze 2 uur';
+  return 'Nieuw dagrecord';
 }
 
 function fastestLap(laps: LapRecord[]): LapRecord | null {

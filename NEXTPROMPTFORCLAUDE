@@ -1,0 +1,73 @@
+Je werkt in /home/warre/Documents/apolloon als product designer én frontend engineer. Onderzoek de bestaande applicatie, ontwerp een eigen visuele richting en voer die vervolgens volledig door in de werkende app. Dit is een opdracht voor een echte redesign, niet alleen voor een concept, een los prototype of een lijst met aanbevelingen.
+
+Apolloon ondersteunt een 24 urenloop. Vrijwilligers gebruiken laptops om lopers toe te voegen, de wachtrij te beheren, rondes te timen, wedstrijddata te bekijken en het systeem gezond te houden. Twee aparte schermen tonen informatie aan publiek en deelnemers. De app draait lokaal op evenementlaptops en kan ook via een browser op het lokale netwerk worden geopend. Tijdens een wedstrijd moeten mensen snel en foutloos kunnen handelen, ook bij fel daglicht, 's nachts, met veel lopers of wanneer de verbinding aandacht vraagt.
+
+Maak de interface veel sterker als geheel: mooier, duidelijker, sneller te lezen en prettiger om langdurig te gebruiken. Beoordeel de echte taken van de gebruikers. Een opvallende screenshot is geen succes als de wachtrij, timing of beheer er trager of onveiliger door wordt.
+
+Onderzoek eerst de echte applicatie: alle routes, de huidige CSS, de bestaande screenshots en de belangrijkste workflows. Begin bij de huidige branch en `git status`. Bewaar niet-gerelateerde wijzigingen. Lees `docs/codebase-map.md`, de actuele route- en componentstructuur en de relevante ontwerpdocumenten. Controleer oudere bevindingen tegen de huidige code. Als je een branch nodig hebt, gebruik een gewone Git-branch, geen worktree.
+
+Start een wegwerpbare lokale ontwikkelomgeving met representatieve seeddata. Inspecteer de echte schermen in een browser, inclusief volle, lege en problematische toestanden. Gebruik geen productiegegevens voor ontwerp- of testwerk. Loop echte taken door: loper opzoeken en toevoegen, opwarming en wachtrij beheren, loper wisselen en ronde opslaan, analyse filteren, scenario's aanpassen, instellingen wijzigen en een publieksscherm gebruiken. Identificeer waar de huidige UI mensen vertraagt en welke patronen al goed werken.
+
+Maak daarna zelf een nieuwe, interactieve HTML-designbrief voor een volledige visuele herwerking van Apolloon, inclusief een goed uitgewerkt licht en donker thema. Gebruik die brief als werkdocument en voer de gekozen richting in dezelfde opdracht door in de app. Stop niet na het HTML-bestand.
+
+Je krijgt vrijwel volledige creatieve vrijheid. De enige vaste visuele eis is dat Apolloon-blauw `#0D78D3` herkenbaar in de identiteit aanwezig blijft. Kies zelf typografie, compositie, navigatie, dichtheid, oppervlakken, accentkleuren, details en beeldtaal. Je mag de bestaande vormgeving ingrijpend veranderen wanneer dat het product beter maakt. Neem de ontwerpen uit `docs/theme-redesign-brief.html` niet over; die zijn afgekeurd. Je mag het bestand alleen bekijken om te zien welke technische vragen eerder opdoken. Begin visueel vanaf nul. Bestaande screenshots zijn bewijs van de huidige werking, geen stijlgids.
+
+De brief moet:
+- Meerdere duidelijk verschillende, overtuigende ontwerprichtingen tonen met interactieve previews van echte Apolloon-schermen. Kies zelf de sterkste richting en motiveer die keuze.
+- Zowel licht als donker laten zien, met aandacht voor gebruik overdag en tijdens een lange nachtshift.
+- Alle operatorpagina’s meenemen: Start, Wachtrij, Timing, Analyse, Kobe’s tactiek en Beheer.
+- Zelf beoordelen wat de beste aanpak is voor het Binnen- en Buitenscherm. Die hoeven de operator-themaschakelaar niet te volgen als dat hun leesbaarheid schaadt.
+- Een voorstel doen voor waar en hoe je tussen Licht, Donker en Systeem wisselt.
+- Uitleggen welke bestaande functies en snelle handelingen behouden moeten blijven, vooral bij Timing en Wachtrij.
+- Een concreet technisch implementatieplan bevatten dat aansluit op de huidige React- en CSS-structuur.
+
+Maak de previews zorgvuldig genoeg dat ik de richtingen echt kan beoordelen. Laat schermen, thema's en belangrijke toestanden vergelijken. Gebruik realistische Nederlandse inhoud uit de app. Vermijd generieke dashboardtemplates, willekeurige kaartjes, decoratieve gradients en een verzameling losse mooie componenten zonder samenhang. Ontwikkel een eigen identiteit die bij Apolloon, sport en betrouwbare operationele software past. Verdedig je keuzes kort en eerlijk.
+
+Lever één zelfstandig HTML-bestand op in `docs/` en open het in mijn browser. Implementeer daarna de gekozen richting in de bestaande React/Vite-app. Maak ook de werkende app lokaal zichtbaar of geef een directe manier om het resultaat te bekijken.
+
+## Thema: Licht, Donker en Systeem
+
+Ontwerp een overtuigend licht thema voor gebruik overdag en een even zorgvuldig donker thema voor avond en nacht. Geen van beide mag aanvoelen als een automatische kleureninversie. De gebruiker moet eenvoudig kunnen kiezen tussen Licht, Donker en Systeem vanaf elke operatorroute, ook vanaf Start. Bepaal zelf de beste plaats en vorm voor die bediening, zolang ze duidelijk, bereikbaar en niet storend is tijdens het timen.
+
+Bewaar de keuze per browser of laptop, niet als gedeelde wedstrijdinstelling. Systeem volgt de voorkeur van het besturingssysteem en reageert wanneer die verandert. Navigeren of herladen mag de keuze niet verliezen. Voorkom een verkeerde lichtflits bij het openen. Zorg dat formulieren, dialogen, tabellen, waarschuwingen, focus, hover, disabled states, grafieken, logo's en laadschermen echt in beide thema's kloppen.
+
+Behandel het Binnen- en Buitenscherm als aparte presentaties voor kijkafstand en daglicht. Je mag hun vormgeving volledig herdenken, maar beslis bewust of ze het operator-thema volgen of hun eigen vaste presentatie krijgen. Een operator die op zijn laptop van thema wisselt, mag niet onverwacht een publieksscherm onleesbaar maken.
+
+## Het volledige product, niet alleen de eerste viewport
+
+- **Start:** een duidelijke ingang naar het werk, zonder belangrijke routes te verstoppen. Behoud de mogelijkheid om het lokale adres te kopiëren.
+- **Wachtrij en wisselzone:** huidige en volgende loper, zoeken, toevoegen, opwarming, wachtvolgorde, gelopen lopers, labels, directe acties, profiel en status. Maak dit bruikbaar bij veel lopers en lange namen.
+- **Timing:** huidige loper, grote lopende tijd, ondubbelzinnige volgende actie, aankomende lopers, recente rondes, fouten en waarschuwingen. De hoofdactie moet in één oogopslag te vinden zijn en stabiel op zijn plek blijven.
+- **Analyse:** filters, samenvattingen, tabellen, grafieken en exports. Houd duidelijk welke data gefilterd wordt en welke export de volledige wedstrijd bevat.
+- **Kobe's tactiek:** live doelverloop, scenario-invoer, historische vergelijking, grafieken en gedetailleerde analyses. Maak complexe informatie leesbaar zonder de berekeningen te veranderen.
+- **Beheer:** wedstrijdvoorbereiding, lopers, labels en tijdelijke ploegen, publieke momenten, koppeling van laptops, synchronisatie, backups en herstel. Geef belangrijke systeemproblemen de juiste prioriteit zonder het hele scherm in een waarschuwing te veranderen.
+- **Binnenscherm:** laatste drie lopers met huidige, beste en gemiddelde ronde; ranking, labelselectie en progressie. Leesbaarheid vanaf afstand gaat voor operator-dichtheid.
+- **Buitenscherm:** huidige en volgende loper, labels en speciale records of publieke momenten. Test lange namen, grote schermen en veel omgevingslicht.
+
+Ontwerp ook de toestanden die gewone mockups overslaan: eerste start, nog geen lopers of rondes, laden, geen zoekresultaten, fout bij opslaan, verbroken verbinding, verouderde data, uitgeschakelde actie, synchronisatieconflict, backupwaarschuwing, volle tabellen en bevestigingen voor gevaarlijke acties. Schrijf heldere Nederlandse interfacecopy die uitlegt wat iemand moet doen.
+
+## Functionaliteit is een harde voorwaarde
+
+Een redesign mag de race niet moeilijker of minder veilig maken. Behoud bestaande datacontracten en wedstrijdregels. Verander backendlogica alleen als je een concrete functionele fout ontdekt die binnen deze opdracht moet worden opgelost, en onderbouw dat apart. Controleer in elk geval:
+
+- Spatie en Enter op Timing, inclusief focus op knoppen en tekstvelden, exactly-once gedrag, ongedaan maken, race beëindigen en bevestigingen.
+- Wie de timing mag bedienen, wanneer een noodovername mogelijk is en hoe conflicten timing blokkeren.
+- Wachtrijvolgorde bij filters, direct verplaatsen, pointer- en toetsenbordbediening, drag-and-drop, profieltoegang en gelopen lopers opnieuw klaarzetten.
+- Loper zoeken en toevoegen, direct kunnen typen na openen, validatie, foutmeldingen en behoud van onopgeslagen invoer.
+- Analysefilters en sectiewissels, exports, chartdata, scenario-invoer en historische vergelijkingen.
+- Beheerformulieren die hun concept bewaren bij sectiewissels, plus koppeling, synchronisatie en herstelstatus.
+- De automatische rankingwissel op het Binnenscherm, pauzeren, `prefers-reduced-motion`, en tijdelijke publieke overlays op het Buitenscherm.
+
+Verplaats of vervang bedieningen alleen wanneer de nieuwe werkstroom aantoonbaar duidelijker is. Een nieuw thema mag nooit een raceactie uitvoeren, formulier resetten, grafiekdata veranderen of wachtrij herordenen.
+
+## Bouwkwaliteit
+
+Implementeer de herwerking in de bestaande React/Vite-app. Gebruik een helder systeem van semantische stijltokens en goed afgebakende componentstijlen. Verwijder achterhaalde regels terwijl je migreert; stapel geen honderden nieuwe uitzonderingen boven op `src/styles.css` en `src/workspace.css`. Controleer alle harde kleuren in Chart.js, inclusief assen, grid, legenda, tooltips en datasets. Laat grafieken correct reageren op een themawissel zonder hun data te wijzigen.
+
+Houd navigatie, laden en interacties snel. Voeg geen zware dependency of ingewikkeld nieuw framework toe zonder duidelijke winst. Respecteer toetsenbordgebruik, zichtbare focus, voldoende contrast, aanraakdoelen, verkleinde beweging en leesbaarheid op echte laptopformaten. Ontwerp voor grote publieke schermen apart. Gebruik animatie alleen waar die een statusverandering of handeling verduidelijkt.
+
+## Verificatie en oplevering
+
+Maak voor/na-beelden met dezelfde seed, viewport en toestand. Bekijk de operatorroutes op gewone en smallere laptopformaten, en beide publieksschermen op hun beoogde verhoudingen. Controleer beide thema's en de bijzondere toestanden. Test echte browserinteracties, niet alleen screenshots. Gebruik de passende verificatie uit `package.json`, waaronder `npm test`, `npm run check`, relevante E2E- en browserchecks, plus `git diff --check`. Voeg alleen nieuwe tests toe wanneer ze een echt regressierisico afdekken.
+
+Lever uiteindelijk de interactieve HTML-designbrief, een volledig doorgevoerde werkende redesign, visuele evidence voor alle routes, en een korte uitleg van ontwerpkeuzes, gewijzigde bestanden, functionele controles en bekende beperkingen. Controleer voor je afrondt of de app echt beter werkt tijdens de 24 urenloop. Noem een ontwerp niet af op basis van alleen een mooie preview of een geslaagde build. Verander geen productiegegevens en claim geen deployment zonder die daadwerkelijk uit te voeren en te verifiëren.

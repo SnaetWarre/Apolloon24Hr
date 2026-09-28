@@ -19,6 +19,8 @@ type NetProfile = {
   apipa: boolean;
   suggestion: { ip: string; prefixLength: number; gateway: string | null } | null;
   eventUrl: string | null;
+  primaryWired: boolean | null;
+  lastElevation: { id: string; state: 'waiting' | 'finished' | 'failed'; message: string | null } | null;
 };
 
 type Phase =
@@ -86,16 +88,27 @@ export function NetworkSetupPanel() {
 
   /** Poll tot het adres echt vast (of terug automatisch) is, of de tijd om is. */
   const pollUntil = React.useCallback(
-    (done: (next: NetProfile) => boolean, onDone: () => void, onTimeout: () => void) => {
+    (
+      elevationId: string | null,
+      done: (next: NetProfile) => boolean,
+      onDone: () => void,
+      onFailed: (message: string) => void,
+      onTimeout: () => void
+    ) => {
       stopPolling();
       let tries = 0;
       pollTimer.current = window.setInterval(() => {
         tries += 1;
         void (async () => {
           const next = await refresh();
+          const elevation = next?.lastElevation;
           if (next && done(next)) {
             stopPolling();
             onDone();
+          } else if (elevationId && elevation?.id === elevationId && elevation.state === 'failed') {
+            // The password prompt was refused or could not open; stop waiting right away.
+            stopPolling();
+            onFailed(elevation.message || 'De netwerkwijziging is mislukt. Er is niets veranderd.');
           } else if (tries >= 45) {
             stopPolling();
             onTimeout();
@@ -119,7 +132,7 @@ export function NetworkSetupPanel() {
           gateway: gatewayInput.trim() || null,
         }),
       });
-      const body = (await response.json()) as { ok: boolean; error?: string };
+      const body = (await response.json()) as { ok: boolean; error?: string; elevationId?: string | null };
       if (!body.ok) {
         setError(body.error || 'Vastzetten mislukt.');
         setPhase('idle');
@@ -127,13 +140,19 @@ export function NetworkSetupPanel() {
       }
       setPhase('waiting-make');
       const permissionHint = profile?.elevateHint || 'Het systeem vraagt nu om toestemming';
-      setMessage(`${permissionHint} — bevestig op deze laptop en wacht tot ik “Gelukt!” zeg…`);
+      setMessage(`${permissionHint} — bevestig op deze laptop en wacht op de melding “Gelukt!”…`);
       const wanted = ipInput.trim();
       pollUntil(
+        body.elevationId ?? null,
         (next) => next.primary !== null && next.primary.address === wanted && next.primary.dhcp === false,
         () => {
           setPhase('idle');
           setMessage(`Gelukt! Dit adres is nu vast: ${wanted}. Andere apparaten blijven bereikbaar op http://${wanted}:5173.`);
+        },
+        (failure) => {
+          setPhase('idle');
+          setMessage(null);
+          setError(failure);
         },
         () => {
           setPhase('idle');
@@ -155,7 +174,7 @@ export function NetworkSetupPanel() {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ eventOver: true, confirmText: undoText.trim().toUpperCase() }),
       });
-      const body = (await response.json()) as { ok: boolean; error?: string };
+      const body = (await response.json()) as { ok: boolean; error?: string; elevationId?: string | null };
       if (!body.ok) {
         setError(body.error || 'Terugzetten mislukt.');
         setPhase('idle');
@@ -163,14 +182,20 @@ export function NetworkSetupPanel() {
       }
       setPhase('waiting-revert');
       const permissionHint = profile?.elevateHint || 'Het systeem vraagt nu om toestemming';
-      setMessage(`${permissionHint} — bevestig op deze laptop en wacht tot ik “Gelukt!” zeg…`);
+      setMessage(`${permissionHint} — bevestig op deze laptop en wacht op de melding “Gelukt!”…`);
       pollUntil(
+        body.elevationId ?? null,
         (next) => next.primary !== null && next.primary.dhcp === true,
         () => {
           setPhase('idle');
           setEventOverChecked(false);
           setUndoText('');
           setMessage('Gelukt! Dit toestel haalt zijn adres weer automatisch op. Vergeet niet ook de kabel eruit te halen als je naar school-wifi gaat.');
+        },
+        (failure) => {
+          setPhase('idle');
+          setMessage(null);
+          setError(failure);
         },
         () => {
           setPhase('idle');
@@ -261,9 +286,17 @@ export function NetworkSetupPanel() {
               </>
             ) : (
               <>, bevestig de toestemmingsvraag</>
-            )}
-            , wacht tot ik <strong>“Gelukt!”</strong> zeg. Herhaal dit op elke laptop met een ander adres.
+            )}{' '}
+            en wacht op de melding <strong>“Gelukt!”</strong>. Herhaal dit op elke laptop met een ander adres.
           </p>
+          {profile.primaryWired === false && (
+            <div className="warning-banner">
+              <span>
+                <strong>Deze laptop is via wifi verbonden.</strong> Steek de netwerkkabel in: alleen een bedrade
+                verbinding wordt vastgezet, zodat je wifi thuis of op school nooit verandert.
+              </span>
+            </div>
+          )}
           <div className="form-row">
             <label>
               Vast adres voor deze laptop
@@ -301,7 +334,7 @@ export function NetworkSetupPanel() {
             <button
               className="btn btn--primary"
               onClick={() => { setError(null); setMessage(null); setPhase('confirm-make'); }}
-              disabled={busy || !ipInput.trim()}
+              disabled={busy || !ipInput.trim() || profile.primaryWired === false}
             >
               {busy ? 'Bezig met controleren…' : 'Maak dit adres vast'}
             </button>
@@ -412,7 +445,7 @@ export function NetworkSetupPanel() {
         <div className="warning-banner" role="alert">
           {error}
           {error.includes('alleen op de laptop zelf') && (
-            <> Open Admin op die laptop zelf (dus niet via het netwerk) en probeer het daar.</>
+            <> Open Beheer op die laptop zelf (dus niet via het netwerk) en probeer het daar.</>
           )}
         </div>
       )}

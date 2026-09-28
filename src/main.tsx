@@ -4,8 +4,7 @@ import { RouterProvider } from '@tanstack/react-router';
 import { createRoot } from 'react-dom/client';
 import { queryClient } from './app/index';
 import { router } from './router';
-import './styles.css';
-import './workspace.css';
+import './styles/index.css';
 
 const container = document.getElementById('root');
 if (!container) {

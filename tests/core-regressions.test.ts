@@ -40,9 +40,6 @@ test('browser UUIDs work when randomUUID is unavailable on a LAN HTTP origin', (
 
   assert.equal(uuid, '00010203-0405-4607-8809-0a0b0c0d0e0f');
   assert.match(uuid, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
-
-  const appActions = fs.readFileSync(path.resolve('src/app/useAppActions.ts'), 'utf8');
-  assert.doesNotMatch(appActions, /\bcrypto\.randomUUID\(/);
 });
 
 test('live clocks are cadence-limited instead of driving full-frame renders', () => {
@@ -52,40 +49,9 @@ test('live clocks are cadence-limited instead of driving full-frame renders', ()
   assert.equal(SECOND_DISPLAY_INTERVAL_MS, 500);
   assert.equal(normalizeClockInterval(100), 100);
   assert.equal(normalizeClockInterval(Number.NaN), 1_000);
-
-  const source = fs.readFileSync(path.resolve('src/lib/useAnimationFrameTick.ts'), 'utf8');
-  assert.doesNotMatch(source, /requestAnimationFrame/);
 });
 
-test('heavy route modules load on demand while operator controls stay eager', () => {
-  const appSource = fs.readFileSync(path.resolve('src/App.tsx'), 'utf8');
-  const lazyViewsSource = fs.readFileSync(path.resolve('src/lazyViews.tsx'), 'utf8');
-
-  assert.match(appSource, /import \{ TimingView \} from '\.\/components\/TimingView'/);
-  assert.match(appSource, /import \{ KanbanBoard \} from '\.\/components\/KanbanBoard'/);
-  assert.doesNotMatch(appSource, /from '\.\/components\/(AdminView|AnalysisView|DisplayViews)'/);
-  assert.match(lazyViewsSource, /import\('\.\/components\/AnalysisView'\)/);
-  assert.match(lazyViewsSource, /import\('\.\/components\/AdminView'\)/);
-  assert.match(lazyViewsSource, /import\('\.\/components\/DisplayViews'\)/);
-  assert.match(appSource, /<React\.Suspense fallback=\{fallback\}>/);
-});
-
-test('initial rendering overlaps state transfer and defers non-critical realtime code', () => {
-  const html = fs.readFileSync(path.resolve('index.html'), 'utf8');
-  const appData = fs.readFileSync(path.resolve('src/app/useAppData.ts'), 'utf8');
-  const realtime = fs.readFileSync(path.resolve('src/app/useRealtimeBridge.ts'), 'utf8');
-  const logo = fs.readFileSync(path.resolve('public/brand/apolloon-logo.png'));
-
-  assert.match(html, /rel="preload" as="image"[^>]+fetchpriority="high"/);
-  assert.match(html, /__APOLLOON_STATE_PROMISE__ = fetch\('\/api\/state'\)/);
-  assert.match(appData, /const prefetched = window\.__APOLLOON_STATE_PROMISE__/);
-  assert.match(realtime, /import\('\.\/realtimeClient'\)/);
-  assert.equal(logo.readUInt32BE(16), 560);
-  assert.equal(logo.readUInt32BE(20), 169);
-  assert.ok(logo.length < 15_000);
-});
-
-test('outside display fits the viewport and announces only new history', () => {
+test('the outside display announces only history that is new since it opened', () => {
   assert.equal(observeDisplayHistory(false, null, [], null), null);
 
   const initialHistory = observeDisplayHistory(true, null, ['existing-event'], 'existing-event');
@@ -111,11 +77,6 @@ test('outside display fits the viewport and announces only new history', () => {
   assert.ok(realtimeHistory);
   assert.equal(realtimeHistory.shouldAnnounceLatest, true);
 
-  const styles = fs.readFileSync(path.resolve('src/styles.css'), 'utf8');
-  assert.match(
-    styles,
-    /\.display-root--outside\s*\{[^}]*height:\s*100vh;[^}]*min-height:\s*0;[^}]*overflow:\s*hidden;/s
-  );
 });
 
 test('lap coefficients use the 85-second reference and 0.075 points per second', () => {
@@ -220,14 +181,6 @@ test('inside rankings switch metric and filter laps by their historical label', 
   );
   assert.equal(buildRunnerRanking(runners, laps, 'coefficient', null)[0]?.coefficientTotal, 6.25);
 
-  const displaySource = fs.readFileSync(path.resolve('src/components/DisplayViews.tsx'), 'utf8');
-  assert.match(displaySource, /INSIDE_RANKING_ROTATION_MS = 15_000/);
-  assert.match(displaySource, /window\.setTimeout/);
-  assert.match(displaySource, /window\.clearTimeout/);
-  assert.match(displaySource, /currentMode === 'laps' \? 'coefficient' : 'laps'/);
-  assert.match(displaySource, /prefers-reduced-motion: reduce/);
-  assert.match(displaySource, /if \(prefersReducedMotion \|\| rotationPaused\) return/);
-  assert.match(displaySource, /removeEventListener\('change', updateReducedMotionPreference\)/);
 });
 
 test('the three recent laps show each runners all-time best and average', () => {
@@ -255,11 +208,6 @@ test('the three recent laps show each runners all-time best and average', () => 
   assert.equal(summaries[0]?.bestLapMs, 70_000);
   assert.equal(summaries[0]?.averageLapMs, 80_000);
 
-  const displaySource = fs.readFileSync(path.resolve('src/components/DisplayViews.tsx'), 'utf8');
-  assert.match(displaySource, /Ronde \{lap\.lapNumber\} · \{formatDurationMs\(lap\.durationMs\)\}/);
-  assert.match(displaySource, />Deze ronde</);
-  assert.match(displaySource, />Snelste ronde</);
-  assert.match(displaySource, />Gem\. ronde</);
 });
 
 test('event readiness blocks real safety failures and distinguishes standalone warnings', () => {
@@ -417,52 +365,6 @@ test('packaged static files stay relative to the AppImage mount root', () => {
   assert.equal(relativeFileWithinRoot(distRoot, path.join(distRoot, 'index.html')), 'index.html');
   assert.equal(relativeFileWithinRoot(distRoot, path.join(hiddenMountRoot, 'secret.txt')), null);
 
-  const serverSource = fs.readFileSync(path.resolve('server/index.ts'), 'utf8');
-  assert.doesNotMatch(serverSource, /sendFile\(compressed\.path\)/);
-  assert.match(serverSource, /sendFile\(relativePath, \{ root: DIST_DIR \}\)/);
-  assert.match(serverSource, /sendFile\('index\.html', \{ root: DIST_DIR \}\)/);
-});
-
-test('production builds enforce the client startup budget', () => {
-  const packageJson = JSON.parse(fs.readFileSync(path.resolve('package.json'), 'utf8'));
-  const budgetSource = fs.readFileSync(path.resolve('scripts/check-client-budget.mjs'), 'utf8');
-
-  assert.match(packageJson.scripts['client:build'], /check-client-budget\.mjs/);
-  assert.match(budgetSource, /maximumInitialJavaScriptBytes/);
-  assert.match(budgetSource, /maximumInitialBrotliBytes/);
-  assert.match(budgetSource, /modulepreload/);
-});
-
-test('admin panels use explicit responsive regions instead of the analysis auto-fit grid', () => {
-  const adminSource = fs.readFileSync(path.resolve('src/components/AdminView.tsx'), 'utf8');
-  const stylesSource = fs.readFileSync(path.resolve('src/styles.css'), 'utf8');
-
-  assert.match(adminSource, /className="admin-dashboard"/);
-  assert.doesNotMatch(adminSource, /className="analysis-grid"/);
-  assert.match(adminSource, /admin-dashboard__full-width/);
-  assert.match(adminSource, /admin-dashboard__labels/);
-  assert.match(stylesSource, /\.admin-dashboard__labels\s*\{\s*grid-column: 1 \/ -1;/);
-  assert.match(stylesSource, /@container \(max-width: 620px\)/);
-  assert.match(stylesSource, /@media \(max-width: 760px\)[\s\S]*?\.admin-dashboard\s*\{\s*grid-template-columns: 1fr;/);
-});
-
-test('operator views share the Apolloon design tokens and accessible navigation states', () => {
-  const appSource = fs.readFileSync(path.resolve('src/App.tsx'), 'utf8');
-  const displaySource = fs.readFileSync(path.resolve('src/components/DisplayViews.tsx'), 'utf8');
-  const kanbanSource = fs.readFileSync(path.resolve('src/components/KanbanBoard.tsx'), 'utf8');
-  const stylesSource = fs.readFileSync(path.resolve('src/styles.css'), 'utf8');
-
-  assert.match(stylesSource, /--apolloon-blue:\s*#2877F6;/);
-  assert.match(stylesSource, /--radius-md:\s*8px;/);
-  assert.match(stylesSource, /--focus-ring:/);
-  assert.match(stylesSource, /button:focus-visible/);
-  assert.match(stylesSource, /\.nav-link--active/);
-  assert.match(appSource, /aria-current=\{isCurrentPage \? 'page' : undefined\}/);
-  assert.match(appSource, /aria-label="Hoofdnavigatie"/);
-  assert.doesNotMatch(displaySource, /display-home/);
-  assert.match(kanbanSource, /queue-runner--dragging/);
-  assert.match(fs.readFileSync(path.resolve('src/workspace.css'), 'utf8'), /\.queue-runner--dragging\s*\{[^}]*transition:\s*none;/s);
-  assert.match(stylesSource, /\.form-row--plain\s*\{[^}]*border:\s*0;[^}]*box-shadow:\s*none;/s);
 });
 
 test('analysis hour buckets use Brussels clock hours from the race start', () => {

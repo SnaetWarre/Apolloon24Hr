@@ -62,10 +62,10 @@ try {
   await savePrompt.getByRole('button', { name: 'Verder bewerken' }).click();
   assert.equal(await profileDialog.getByRole('textbox', { name: 'Naam', exact: true }).inputValue(), '');
   await profileDialog.getByRole('textbox', { name: 'Naam', exact: true }).fill('Valid draft');
-  await profileDialog.getByRole('spinbutton', { name: 'Doelstelling toeren' }).fill('-1');
+  await profileDialog.getByRole('spinbutton', { name: 'Doel (rondes)' }).fill('-1');
   await profileDialog.getByRole('button', { name: 'Opslaan', exact: true }).click();
-  await profileDialog.getByText('Doelstelling toeren moet een geheel getal van 0 of meer zijn.', { exact: true }).waitFor();
-  await profileDialog.getByRole('spinbutton', { name: 'Doelstelling toeren' }).fill('2');
+  await profileDialog.getByText('Het doel moet een geheel aantal rondes zijn (0 of meer).', { exact: true }).waitFor();
+  await profileDialog.getByRole('spinbutton', { name: 'Doel (rondes)' }).fill('2');
   await page.route('**/trpc/runners.update*', (route) => route.abort());
   await page.keyboard.press('Escape');
   await savePrompt.getByRole('button', { name: 'Opslaan', exact: true }).click();

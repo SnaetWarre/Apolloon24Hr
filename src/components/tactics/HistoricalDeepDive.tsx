@@ -1,4 +1,5 @@
 import React from 'react';
+import { useChartTheme } from '../../lib/chartPalette';
 import type { HistoricalRace, HistoricalTeam } from '../../lib/tactics';
 import {
   analyzeDrafting,
@@ -75,6 +76,8 @@ export function HistoricalDeepDive({
   secondTeam: HistoricalTeam;
 }) {
   const [section, setSection] = React.useState<DeepDiveSection>('overview');
+  // Chart configurations are built during render; re-render them with the new theme colours.
+  useChartTheme();
 
   return (
     <>

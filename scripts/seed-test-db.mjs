@@ -185,6 +185,7 @@ function seedRunners(count, nowMs) {
       historicalAvgMs,
       historicalBestMs: historicalBestMsForIndex(index, scenario, historicalAvgMs),
       registrationSource,
+      registration: registrationSource === 'import' ? fictionalRegistration(index, name, nowMs) : null,
       status: 'registered',
       statusSince: nowMs - statusAgeMsForIndex(index, scenario),
       notes:
@@ -206,6 +207,34 @@ function seedRunners(count, nowMs) {
   }
 
   return runners;
+}
+
+// Fictional form answers so profiles, filters and hours can be tested.
+// Uses example.be addresses and 0470 00 xx xx numbers; never real people.
+function fictionalRegistration(index, name, nowMs) {
+  const slug = name.toLowerCase().normalize('NFD').replace(/[^a-z ]/g, '').trim().split(/\s+/).join('.');
+  const studyPhases = ['1ste bachelor', '2de bachelor', '3de bachelor', 'master', 'alumnus'];
+  const hourBlocks = [
+    '20-21u (dinsdag)', '21-22u (dinsdag)', '22-23u (dinsdag)', '23-00u (dinsdag)',
+    '00-01u (woensdag)', '01-02u (woensdag)', '02-03u (woensdag)', '03-04u (woensdag)',
+    '08-09u (woensdag)', '12-13u (woensdag)', '16-17u (woensdag)', '19-20u (woensdag)',
+  ];
+  const firstBlock = (index * 3) % hourBlocks.length;
+  const pace = 72 + (index % 9) * 3;
+  return {
+    submittedAt: new Date(nowMs - (30 - (index % 20)) * 86_400_000).toLocaleString('nl-BE'),
+    email: `${slug || `loper${index}`}@example.be`,
+    phone: `0470 00 ${String(10 + (index % 90)).padStart(2, '0')} ${String((index * 7) % 100).padStart(2, '0')}`,
+    studyPhase: studyPhases[index % studyPhases.length],
+    estimatedLaps: String(6 + (index % 10)),
+    estimatedPace: `${Math.floor(pace / 60)}:${String(pace % 60).padStart(2, '0')}`,
+    maxLapsPerBlock: String(3 + (index % 4)),
+    availableHours: [0, 1, 4].map((offset) => hourBlocks[(firstBlock + offset) % hourBlocks.length]),
+    reuseConsent: index % 5 === 0 ? 'Nee' : 'Ja',
+    flexibility: index % 3 === 0 ? 'Ik kan inspringen als het moet' : 'Enkel op de opgegeven uren',
+    remarks: index % 7 === 0 ? 'Liefst niet twee blokken na elkaar.' : '',
+    categories: [],
+  };
 }
 
 function seedReadyQueue(runners, nowMs) {
