@@ -1,77 +1,59 @@
 import React from 'react';
 import { Link } from '@tanstack/react-router';
-import { useAppData } from '../app/index';
+import { useAppData, useClusterStatus } from '../app/index';
 import { preloadAdminView, preloadAnalysisView, preloadDisplayViews, preloadKobeTacticsView } from '../lazyViews';
+import { getNextWaitingRunner } from '../lib/runners';
+import { deriveSystemStatus } from '../lib/systemStatus';
+import { RunnerName } from './RunnerName';
 import type { LiveAppSnapshot } from '../types';
 
-const selectHostData = ({ host }: LiveAppSnapshot) => ({ host });
+const selectStartData = ({ host, runners, race }: LiveAppSnapshot) => ({ host, runners, race });
 
-const ROLE_GROUPS = [
+const FOLLOW_UP_LINKS = [
   {
-    title: 'Wedstrijd bedienen',
-    isOperatorGroup: true,
-    roles: [
-      {
-        path: '/queue',
-        title: 'Wachtrij & wisselzone',
-        description: 'Lopers toevoegen, opwarmen en de wachtrij beheren.',
-        preload: undefined,
-      },
-      {
-        path: '/timing',
-        title: 'Timing',
-        description: 'De huidige loper afklokken en de volgende starten.',
-        preload: undefined,
-      },
-    ],
+    path: '/analysis',
+    title: 'Analyse',
+    description: 'Rondetijden, lopers en ploegen. Exports van de volledige wedstrijd.',
+    preload: preloadAnalysisView,
   },
   {
-    title: 'Analyse en beheer',
-    isOperatorGroup: false,
-    roles: [
-      {
-        path: '/analysis',
-        title: 'Analyse en export',
-        description: 'Live rondedata bekijken en exporteren.',
-        preload: preloadAnalysisView,
-      },
-      {
-        path: '/tactics',
-        title: "Kobe's tactiek",
-        description: 'Live wedstrijdstrategie en historische vergelijkingen.',
-        preload: preloadKobeTacticsView,
-      },
-      {
-        path: '/admin',
-        title: 'Beheer',
-        description: 'Import, labels en wedstrijdinstellingen beheren.',
-        preload: preloadAdminView,
-      },
-    ],
+    path: '/tactics',
+    title: "Kobe's tactiek",
+    description: 'Live doelverloop en vergelijking met vorige edities.',
+    preload: preloadKobeTacticsView,
   },
   {
-    title: 'Publieksschermen',
-    isOperatorGroup: false,
-    roles: [
-      {
-        path: '/display/inside',
-        title: 'Binnenscherm',
-        description: 'Rankings en progressie van lopers en ploegen.',
-        preload: preloadDisplayViews,
-      },
-      {
-        path: '/display/outside',
-        title: 'Buitenscherm',
-        description: 'De huidige en volgende loper op de piste.',
-        preload: preloadDisplayViews,
-      },
-    ],
+    path: '/admin',
+    title: 'Beheer',
+    description: 'Voorbereiding, lopers, labels, publiek, systeem en herstel.',
+    preload: preloadAdminView,
+  },
+] as const;
+
+const DISPLAY_LINKS = [
+  {
+    path: '/display/inside',
+    title: 'Binnenscherm',
+    description: 'Grote tv: live loper, laatste rondes, ranking en competities.',
+    note: 'Vast donker',
+  },
+  {
+    path: '/display/outside',
+    title: 'Buitenscherm',
+    description: 'Aan de piste: huidige en volgende loper, records en publieke momenten.',
+    note: 'Vast licht',
   },
 ] as const;
 
 export function RolePicker() {
-  const { host } = useAppData(selectHostData);
+  const { host, runners, race } = useAppData(selectStartData);
+  const { cluster, error: clusterError } = useClusterStatus();
+  const systemStatus = deriveSystemStatus(cluster, clusterError);
   const [copied, setCopied] = React.useState(false);
+  const activeRunner = runners.find((runner) => runner.id === race.activeRunnerId) || null;
+  const nextRunner = getNextWaitingRunner(runners);
+  const waitingCount = runners.filter((runner) => runner.status === 'waiting').length;
+  const warmingCount = runners.filter((runner) => runner.status === 'warming_up').length;
 
   async function copyHostUrl() {
     if (!host) return;
@@ -85,45 +67,84 @@ export function RolePicker() {
   }
 
   return (
-    <>
-      <div className="hero home-hero">
-        <img className="hero-logo" src="/brand/apolloon-logo.png" alt="Apolloon" width={560} height={169} fetchPriority="high" />
-        <div className="hero__content">
-          <h1 className="app-title">Elke ronde telt.</h1>
-          <p className="tagline">Je werkplek voor de 24 urenloop.</p>
+    <div className="start">
+      <div className="start__intro">
+        <h1>Elke ronde telt.</h1>
+        <p>Kies waar je staat. Je keuze voor licht of donker blijft op deze laptop bewaard.</p>
+        <div className="start-work">
+          <Link className="work-card" to="/queue">
+            <span className="work-card__place">Wisselzone</span>
+            <span className="work-card__title">Wachtrij</span>
+            <span className="work-card__text">Lopers aanmelden, opwarmen en klaarzetten.</span>
+            <span className="work-card__live">
+              {nextRunner ? (
+                <>
+                  <RunnerName runner={nextRunner} /> is volgende
+                </>
+              ) : warmingCount ? (
+                `${warmingCount} aan het opwarmen, niemand klaar`
+              ) : (
+                'Nog niemand aangemeld'
+              )}
+            </span>
+          </Link>
+          <Link className="work-card" to="/timing">
+            <span className="work-card__place">Finishlijn</span>
+            <span className="work-card__title">Timing</span>
+            <span className="work-card__text">Afklokken en de volgende loper starten.</span>
+            <span className="work-card__live">
+              {activeRunner ? (
+                <>
+                  <RunnerName runner={activeRunner} /> loopt
+                </>
+              ) : race.raceFinishedAt ? (
+                'Race afgesloten'
+              ) : waitingCount ? (
+                `${waitingCount} klaar om te starten`
+              ) : (
+                'Wacht op de eerste loper'
+              )}
+            </span>
+          </Link>
         </div>
+        {host && (
+          <div className="host-address">
+            <span>Open op een andere laptop</span>
+            <code>{host.url}</code>
+            <button type="button" className="btn btn--sm" onClick={() => void copyHostUrl()}>
+              {copied ? 'Gekopieerd' : 'Kopieer adres'}
+            </button>
+          </div>
+        )}
       </div>
-      <div className="role-sections">
-        {ROLE_GROUPS.map((roleGroup) => (
-          <section key={roleGroup.title} className={`role-section${roleGroup.isOperatorGroup ? ' role-section--operations' : ''}`}>
-            <h2>{roleGroup.title}</h2>
-            <div className="role-grid">
-              {roleGroup.roles.map((role) => (
-                <Link
-                  key={role.path}
-                  className="role-card"
-                  to={role.path}
-                  onPointerEnter={role.preload}
-                  onFocus={role.preload}
-                >
-                  <span>
-                    <span className="role-card__title">{role.title}</span>
-                    <small>{role.description}</small>
-                  </span>
-                </Link>
-              ))}
-            </div>
-          </section>
-        ))}
-      </div>
-      {host && (
-        <div className="host-hint host-hint--with-copy">
-          Open op een andere laptop: <strong>{host.url}</strong>
-          <button type="button" className="btn btn--ghost btn--sm" onClick={() => void copyHostUrl()}>
-            {copied ? 'Gekopieerd!' : 'Kopieer'}
-          </button>
-        </div>
-      )}
-    </>
+      <nav className="start-links" aria-label="Overige onderdelen">
+        <h2>Opvolgen en beheren</h2>
+        <ul>
+          {FOLLOW_UP_LINKS.map((link) => (
+            <li key={link.path}>
+              <Link className="start-link" to={link.path} onPointerEnter={link.preload} onFocus={link.preload}>
+                <strong>{link.title}</strong>
+                <span>{link.description}</span>
+                {link.path === '/admin' && systemStatus && (
+                  <em className={`start-link__status start-link__status--${systemStatus.tone}`}>{systemStatus.title}</em>
+                )}
+              </Link>
+            </li>
+          ))}
+        </ul>
+        <h2>Publieksschermen</h2>
+        <ul>
+          {DISPLAY_LINKS.map((link) => (
+            <li key={link.path}>
+              <Link className="start-link" to={link.path} onPointerEnter={preloadDisplayViews} onFocus={preloadDisplayViews}>
+                <strong>{link.title}</strong>
+                <span>{link.description}</span>
+                <em>{link.note}</em>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </nav>
+    </div>
   );
 }

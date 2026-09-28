@@ -17,6 +17,7 @@ import { useSecondTick } from '../lib/useAnimationFrameTick';
 import { kanbanCollisionDetection, resolveKanbanDrop } from '../lib/kanban';
 import type { LiveAppSnapshot, Runner, RunnerStatus } from '../types';
 import { LabelBadge } from './LabelBadge';
+import { RunnerName } from './RunnerName';
 
 const selectKanbanData = ({ runners }: LiveAppSnapshot) => ({ runners });
 
@@ -25,13 +26,21 @@ const COLUMNS: { key: RunnerStatus; title: string }[] = [
   { key: 'waiting', title: 'Klaar om te lopen' },
 ];
 
+// Warming up this long is worth a glance; it never blocks anything.
+const LONG_WARM_UP_MS = 10 * 60_000;
+
 function TimerBadge({ runner }: { runner: Runner }) {
   const running = Boolean(runner.statusSince && runner.status !== 'ran');
   useSecondTick(running);
-  if (!runner.statusSince || runner.status === 'ran') return null;
+  if (!runner.statusSince || runner.status === 'ran') return <span className="timer-badge" />;
+  const elapsedMs = nowMs() - runner.statusSince;
+  const long = runner.status === 'warming_up' && elapsedMs >= LONG_WARM_UP_MS;
   return (
-    <span className="timer-badge" title="Tijd in deze status (mm:ss)">
-      {formatElapsedSeconds(nowMs() - runner.statusSince)}
+    <span
+      className={`timer-badge${long ? ' timer-badge--long' : ''}`}
+      title={long ? 'Al meer dan 10 minuten aan het opwarmen (mm:ss)' : 'Tijd in deze status (mm:ss)'}
+    >
+      {formatElapsedSeconds(elapsedMs)}
     </span>
   );
 }
@@ -224,8 +233,8 @@ export const KanbanBoard: React.FC<{ onOpenProfile: (runnerId: string) => void }
                     {search.trim()
                       ? 'Geen lopers voor dit filter. Wis het filter om iedereen te zien.'
                       : column.key === 'warming_up'
-                        ? 'Meld een loper aan via Loper zoeken of Nieuwe loper.'
-                        : 'Verplaats een opgewarmde loper naar de wachtrij.'}
+                        ? 'Nog niemand aan het opwarmen. Zoek een loper op nummer of naam, of voeg een nieuwe loper toe.'
+                        : 'De wachtrij is leeg. Sleep een opgewarmde loper hierheen of kies “Naar wachtrij”.'}
                   </p>
                 )}
               </QueueLane>
@@ -256,7 +265,7 @@ export const KanbanBoard: React.FC<{ onOpenProfile: (runnerId: string) => void }
           <div className="queue-runner queue-runner--overlay">
             <span className="queue-drag" aria-hidden="true">⠿</span>
             <div className="queue-identity">
-              <span className="runner-title">{draggedRunner.runnerNumber} · {draggedRunner.name}</span>
+              <span className="runner-title"><RunnerName runner={draggedRunner} /></span>
               <span className="queue-runner__details">Loslaten om te verplaatsen</span>
             </div>
           </div>
@@ -344,10 +353,10 @@ function QueueRunnerRow({
             {queuePosition + 1}
           </span>
         )}
-        <button className="queue-identity" onClick={() => onOpenProfile(runner.id)} title="Profiel openen">
+        <button className="queue-identity" onClick={() => onOpenProfile(runner.id)} title={`${runner.name}: profiel openen`}>
           <span className="runner-title">
-            <span className="runner-number">{runner.runnerNumber || '-'}</span>
-            {runner.name}
+            <RunnerName runner={runner} />
+            {queuePosition === 0 && <span className="queue-next-tag">Volgende</span>}
           </span>
           <span className="queue-runner__details">
             {runner.labels.map((label) => (
@@ -356,7 +365,7 @@ function QueueRunnerRow({
             <span
               title={runner.bestLapMs ? `Snelste ronde ${formatDurationMs(runner.bestLapMs)}` : undefined}
             >
-              {runner.lapCount} toeren
+              {runner.lapCount} {runner.lapCount === 1 ? 'toer' : 'toeren'}
             </span>
             {runner.registration?.studyPhase && <span>{runner.registration.studyPhase}</span>}
             {runner.registration?.estimatedPace && <span>Tempo {runner.registration.estimatedPace}</span>}
@@ -365,14 +374,18 @@ function QueueRunnerRow({
         </button>
         <TimerBadge runner={runner} />
         <div className="queue-row-actions" onPointerDown={(event) => event.stopPropagation()}>
-          <button className="btn btn--secondary btn--sm" onClick={() => onOpenProfile(runner.id)} aria-label={`Profiel van ${runner.name} openen`}>
+          <button className="btn btn--quiet btn--sm" onClick={() => onOpenProfile(runner.id)} aria-label={`Profiel van ${runner.name} openen`}>
             Profiel
           </button>
-          <button className="btn btn--sm" disabled={actionBusy} onClick={onAdvance}>
-            {runner.status === 'warming_up' ? 'Naar wachtrij →' : 'Opwarmen'}
+          <button
+            className={`btn btn--sm${runner.status === 'warming_up' ? ' btn--advance' : ''}`}
+            disabled={actionBusy}
+            onClick={onAdvance}
+          >
+            {runner.status === 'warming_up' ? 'Naar wachtrij' : 'Opwarmen'}
           </button>
           {isCompleted && (
-            <button className="btn btn--secondary btn--sm" disabled={actionBusy} onClick={onToggleHidden}>
+            <button className="btn btn--quiet btn--sm" disabled={actionBusy} onClick={onToggleHidden}>
               {runner.hiddenFromQueue ? 'Terug tonen' : 'Verberg'}
             </button>
           )}

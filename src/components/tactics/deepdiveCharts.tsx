@@ -1,4 +1,4 @@
-import { workspaceChartPalette } from '../../lib/chartPalette';
+import { chartTooltipColors, useChartTheme, workspaceChartPalette } from '../../lib/chartPalette';
 import React from 'react';
 import {
   BarController,
@@ -71,7 +71,7 @@ export function TeamLapTimelineChart({ team }: { team: HistoricalTeam }) {
             borderColor: 'transparent',
             pointRadius: 2,
           },
-          xySeries('Lopende mediaan (20)', rollingMedianPoints, '#e2e8f0', 2),
+          xySeries('Lopende mediaan (20)', rollingMedianPoints, workspaceChartPalette.strong, 2),
         ],
       },
       options: xyChartOptions('Rondetijd', formatSeconds),
@@ -185,7 +185,7 @@ export function HalfHourDifferenceChart({
           label: `Team ${firstTeam.teamId} min team ${secondTeam.teamId}`,
           data: points.map((point) => point.differenceSeconds),
           backgroundColor: points.map((point) => point.differenceSeconds == null
-            ? '#cbd5e1'
+            ? workspaceChartPalette.neutral
             : point.differenceSeconds > 0 ? teamColor(secondTeam.teamId) : teamColor(firstTeam.teamId)),
           borderRadius: 3,
         }],
@@ -251,8 +251,8 @@ export function TimeGapChart({ points, firstTeam, secondTeam }: { points: Return
       type: 'line',
       data: {
         datasets: [
-          xySeries(`Tijdskloof team ${firstTeam.teamId} op team ${secondTeam.teamId}`, points.map((point) => ({ x: point.raceHour, y: point.gapSeconds })), '#4d9fff', 3),
-          xySeries('Gelijke stand', [{ x: 0, y: 0 }, { x: 24, y: 0 }], '#94a3b8', 1, [6, 5]),
+          xySeries(`Tijdskloof team ${firstTeam.teamId} op team ${secondTeam.teamId}`, points.map((point) => ({ x: point.raceHour, y: point.gapSeconds })), workspaceChartPalette.accent, 3),
+          xySeries('Gelijke stand', [{ x: 0, y: 0 }, { x: 24, y: 0 }], workspaceChartPalette.neutral, 1, [6, 5]),
         ],
       },
       options: xyChartOptions('Tijdsverschil', formatSignedSeconds),
@@ -274,8 +274,8 @@ export function SameLapGapChart({
       type: 'line',
       data: {
         datasets: [
-          xySeries(`Team ${firstTeam.teamId} tegenover team ${secondTeam.teamId}`, points.map((point) => ({ x: point.raceHour, y: point.gapSeconds })), '#4d9fff', 3),
-          xySeries('Gelijke ronde-index', [{ x: 0, y: 0 }, { x: 24, y: 0 }], '#94a3b8', 1, [6, 5]),
+          xySeries(`Team ${firstTeam.teamId} tegenover team ${secondTeam.teamId}`, points.map((point) => ({ x: point.raceHour, y: point.gapSeconds })), workspaceChartPalette.accent, 3),
+          xySeries('Gelijke ronde-index', [{ x: 0, y: 0 }, { x: 24, y: 0 }], workspaceChartPalette.neutral, 1, [6, 5]),
         ],
       },
       options: xyChartOptions('Tijdsverschil', formatSignedSeconds),
@@ -294,7 +294,7 @@ export function HourlyGainChart({ points, firstTeam, secondTeam }: { points: Ret
           data: points.map((point) => point.lapDifference),
           backgroundColor: points.map((point) => point.lapDifference > 0
             ? teamColor(secondTeam.teamId)
-            : point.lapDifference < 0 ? teamColor(firstTeam.teamId) : '#cbd5e1'),
+            : point.lapDifference < 0 ? teamColor(firstTeam.teamId) : workspaceChartPalette.neutral),
           borderRadius: 4,
         }],
       },
@@ -341,10 +341,10 @@ export function RaceLeadChart({
           xySeries(
             `Voorsprong team ${firstTeam.teamId} in rondes`,
             points.map((point) => ({ x: point.raceHour, y: point.lapDifference })),
-            '#4d9fff',
+            workspaceChartPalette.accent,
             3
           ),
-          xySeries('Gelijke stand', [{ x: 0, y: 0 }, { x: 24, y: 0 }], '#94a3b8', 1, [6, 5]),
+          xySeries('Gelijke stand', [{ x: 0, y: 0 }, { x: 24, y: 0 }], workspaceChartPalette.neutral, 1, [6, 5]),
         ],
       },
       options: xyChartOptions(
@@ -407,7 +407,7 @@ export function BreakEvenChart({ points, targetLaps, teamId }: { points: ReturnT
       data: {
         datasets: [
           xySeries(`Projectie team ${teamId}`, points.map((point) => ({ x: point.improvementSeconds, y: point.projectedLaps })), teamColor(teamId), 3),
-          xySeries('Te kloppen resultaat', [{ x: 0, y: targetLaps }, { x: points[points.length - 1]?.improvementSeconds ?? 15, y: targetLaps }], '#9aa3b2', 2, [6, 5]),
+          xySeries('Te kloppen resultaat', [{ x: 0, y: targetLaps }, { x: points[points.length - 1]?.improvementSeconds ?? 15, y: targetLaps }], workspaceChartPalette.target, 2, [6, 5]),
         ],
       },
       options: xyChartOptions('Totaal rondes', (value) => String(Math.round(Number(value))), false, 'Verbetering per ronde (s)'),
@@ -587,11 +587,12 @@ export function SectionHeader({ kicker, title, text }: { kicker: string; title: 
 
 export function ChartPanel({ configuration }: { configuration: ChartConfiguration }) {
   const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
+  const chartTheme = useChartTheme();
   React.useEffect(() => {
     if (!canvasRef.current) return undefined;
     const chart = new Chart(canvasRef.current, configuration);
     return () => chart.destroy();
-  }, [configuration]);
+  }, [chartTheme, configuration]);
   return <div className="analysis-chart-card tactics-chart-card"><canvas ref={canvasRef} /></div>;
 }
 
@@ -663,7 +664,7 @@ export function categoryChartOptions(
 export function chartPlugins(formatter: (value: number) => string) {
   return {
     legend: { position: 'top' as const, labels: { boxWidth: 14, color: workspaceChartPalette.text, font: { weight: 'bold' as const } } },
-    tooltip: { callbacks: { label: (context: { dataset: { label?: string }; parsed: { y: number | null } }) => `${context.dataset.label}: ${context.parsed.y == null ? 'geen data' : formatter(context.parsed.y)}` } },
+    tooltip: { ...chartTooltipColors(), callbacks: { label: (context: { dataset: { label?: string }; parsed: { y: number | null } }) => `${context.dataset.label}: ${context.parsed.y == null ? 'geen data' : formatter(context.parsed.y)}` } },
   };
 }
 
@@ -672,8 +673,8 @@ export function axisTitle(text: string) {
 }
 
 export function teamColor(teamId: number, fallbackIndex = 0): string {
-  if (teamId === 1) return '#38a1ff';
-  if (teamId === 4) return '#F0B400';
+  if (teamId === 1) return workspaceChartPalette.live;
+  if (teamId === 4) return workspaceChartPalette.rival;
   const alternatives = ['#009E73', '#D55E00', '#CC79A7', '#7F3FBF', '#8B4513', '#64748b'];
   return alternatives[fallbackIndex % alternatives.length];
 }

@@ -111,7 +111,7 @@ test('outside display fits the viewport and announces only new history', () => {
   assert.ok(realtimeHistory);
   assert.equal(realtimeHistory.shouldAnnounceLatest, true);
 
-  const styles = fs.readFileSync(path.resolve('src/styles.css'), 'utf8');
+  const styles = fs.readFileSync(path.resolve('src/styles/displays.css'), 'utf8');
   assert.match(
     styles,
     /\.display-root--outside\s*\{[^}]*height:\s*100vh;[^}]*min-height:\s*0;[^}]*overflow:\s*hidden;/s
@@ -256,7 +256,8 @@ test('the three recent laps show each runners all-time best and average', () => 
   assert.equal(summaries[0]?.averageLapMs, 80_000);
 
   const displaySource = fs.readFileSync(path.resolve('src/components/DisplayViews.tsx'), 'utf8');
-  assert.match(displaySource, /Ronde \{lap\.lapNumber\} · \{formatDurationMs\(lap\.durationMs\)\}/);
+  assert.match(displaySource, /ronde \{lap\.lapNumber\}/);
+  assert.match(displaySource, /<strong>\{formatDurationMs\(lap\.durationMs\)\}<\/strong>/);
   assert.match(displaySource, />Deze ronde</);
   assert.match(displaySource, />Snelste ronde</);
   assert.match(displaySource, />Gem\. ronde</);
@@ -435,33 +436,36 @@ test('production builds enforce the client startup budget', () => {
 
 test('admin panels use explicit responsive regions instead of the analysis auto-fit grid', () => {
   const adminSource = fs.readFileSync(path.resolve('src/components/AdminView.tsx'), 'utf8');
-  const stylesSource = fs.readFileSync(path.resolve('src/styles.css'), 'utf8');
+  const stylesSource = fs.readFileSync(path.resolve('src/styles/admin.css'), 'utf8');
 
   assert.match(adminSource, /className="admin-dashboard"/);
   assert.doesNotMatch(adminSource, /className="analysis-grid"/);
   assert.match(adminSource, /admin-dashboard__full-width/);
   assert.match(adminSource, /admin-dashboard__labels/);
-  assert.match(stylesSource, /\.admin-dashboard__labels\s*\{\s*grid-column: 1 \/ -1;/);
-  assert.match(stylesSource, /@container \(max-width: 620px\)/);
-  assert.match(stylesSource, /@media \(max-width: 760px\)[\s\S]*?\.admin-dashboard\s*\{\s*grid-template-columns: 1fr;/);
+  // One section at a time in a single explicit column; never an auto-fit card grid.
+  assert.match(stylesSource, /\.admin-dashboard\s*\{\s*display: grid;\s*gap:/);
+  assert.doesNotMatch(stylesSource, /\.admin-dashboard\s*\{[^}]*auto-fit/);
+  assert.match(stylesSource, /@media \(max-width: 900px\)[\s\S]*?\.management-workspace\s*\{\s*grid-template-columns: minmax\(0, 1fr\);/);
 });
 
 test('operator views share the Apolloon design tokens and accessible navigation states', () => {
   const appSource = fs.readFileSync(path.resolve('src/App.tsx'), 'utf8');
   const displaySource = fs.readFileSync(path.resolve('src/components/DisplayViews.tsx'), 'utf8');
   const kanbanSource = fs.readFileSync(path.resolve('src/components/KanbanBoard.tsx'), 'utf8');
-  const stylesSource = fs.readFileSync(path.resolve('src/styles.css'), 'utf8');
+  const readStyles = (name: string) => fs.readFileSync(path.resolve('src/styles', name), 'utf8');
+  const tokensSource = readStyles('tokens.css');
+  const stylesSource = readStyles('primitives.css');
 
-  assert.match(stylesSource, /--apolloon-blue:\s*#2877F6;/);
-  assert.match(stylesSource, /--radius-md:\s*8px;/);
-  assert.match(stylesSource, /--focus-ring:/);
-  assert.match(stylesSource, /button:focus-visible/);
-  assert.match(stylesSource, /\.nav-link--active/);
+  assert.match(tokensSource, /--apolloon-blue:\s*#0D78D3;/);
+  assert.match(tokensSource, /--radius-md:\s*8px;/);
+  assert.match(tokensSource, /--focus:/);
+  assert.match(readStyles('base.css'), /:focus-visible\s*\{\s*outline: 3px solid var\(--focus\);/);
+  assert.match(readStyles('shell.css'), /\.nav-link\[aria-current="page"\]/);
   assert.match(appSource, /aria-current=\{isCurrentPage \? 'page' : undefined\}/);
   assert.match(appSource, /aria-label="Hoofdnavigatie"/);
   assert.doesNotMatch(displaySource, /display-home/);
   assert.match(kanbanSource, /queue-runner--dragging/);
-  assert.match(fs.readFileSync(path.resolve('src/workspace.css'), 'utf8'), /\.queue-runner--dragging\s*\{[^}]*transition:\s*none;/s);
+  assert.match(readStyles('queue.css'), /\.queue-runner--dragging\s*\{[^}]*transition:\s*none;/s);
   assert.match(stylesSource, /\.form-row--plain\s*\{[^}]*border:\s*0;[^}]*box-shadow:\s*none;/s);
 });
 

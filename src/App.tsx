@@ -5,7 +5,7 @@ import { KanbanBoard } from './components/KanbanBoard';
 import { RolePicker } from './components/RolePicker';
 import { RunnerProfileModal } from './components/RunnerProfileModal';
 import { TimingView } from './components/TimingView';
-import { useAppData, useConnectionLost, useRealtimeBridge } from './app/index';
+import { useAppData, useClusterStatus, useConnectionLost, useRealtimeBridge } from './app/index';
 import {
   LazyAdminView,
   LazyAnalysisView,
@@ -16,8 +16,12 @@ import {
   preloadAnalysisView,
   preloadKobeTacticsView,
 } from './lazyViews';
-import { getNextWaitingRunner, runnerLabel } from './lib/runners';
-import { LiveDuration } from './components/LiveTime';
+import { getNextWaitingRunner } from './lib/runners';
+import { LiveDuration, LiveElapsed } from './components/LiveTime';
+import { RunnerName } from './components/RunnerName';
+import { ThemeSwitch } from './components/ThemeSwitch';
+import { setDocumentSurface } from './app/theme';
+import { deriveSystemStatus } from './lib/systemStatus';
 import type { LiveAppSnapshot } from './types';
 
 const selectConnectionData = () => ({});
@@ -29,12 +33,17 @@ export function AppRoot() {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const displayRoute = pathname.startsWith('/display/');
 
+  React.useLayoutEffect(() => {
+    setDocumentSurface(displayRoute ? 'display' : 'operator');
+  }, [displayRoute]);
+
   if (error) {
     return (
       <Shell>
-        <div className="empty-state">
-          <h1>Kan niet verbinden met de lokale server</h1>
-          <p>{error.message}</p>
+        <div className="app-state" role="alert">
+          <span className="brand-mark brand-mark--lg" role="img" aria-label="Apolloon" />
+          <h1>Geen verbinding met de lokale server</h1>
+          <p>{error.message}. Controleer of de Apolloon-app op deze laptop draait en probeer opnieuw.</p>
           <button className="btn btn--primary" onClick={() => void refresh()}>
             Opnieuw proberen
           </button>
@@ -44,25 +53,24 @@ export function AppRoot() {
   }
 
   if (!initialized) {
+    if (displayRoute) return <div className="display-loading" role="status">Wedstrijddata laden…</div>;
     return (
       <Shell>
-        <div className="empty-state">
-          <h1>Apolloon telsysteem</h1>
-          <p>Lokale data wordt geladen...</p>
+        <div className="app-state" role="status">
+          <span className="brand-mark brand-mark--lg" role="img" aria-label="Apolloon" />
+          <p>Wedstrijddata laden…</p>
         </div>
       </Shell>
     );
   }
-
-  const outlet = <Outlet />;
 
   if (displayRoute) return (<><ConnectionBanner /><Outlet /></>);
 
   return (
     <Shell>
       <a className="skip-link" href="#workspace">Naar inhoud</a>
-      {pathname !== '/' && <TopNav />}
-      <main id="workspace" tabIndex={-1}>{outlet}</main>
+      <TopBar />
+      <main id="workspace" className="workspace" tabIndex={-1}><Outlet /></main>
     </Shell>
   );
 }
@@ -77,29 +85,32 @@ export function QueuePage() {
 
   const activeRunner = runners.find((runner) => runner.id === race.activeRunnerId) || null;
   const nextRunner = getNextWaitingRunner(runners);
+  const waitingCount = runners.filter((runner) => runner.status === 'waiting').length;
 
   return (
     <>
-      <div className="queue-heading">
-      <div className="hero hero--compact">
-        <div>
-          <span className="page-kicker">Telsysteem 1</span>
-          <h1 className="app-title">Wachtrij &amp; wisselzone</h1>
-          <p className="tagline">Van opwarming tot de volgende ronde.</p>
-        </div>
-      </div>
-      <div className="race-strip">
-        <div>
-          <span className="muted-label">Nu op de piste</span>
-          <strong>{activeRunner ? runnerLabel(activeRunner) : 'Nog niemand gestart'}</strong>
-          {race.activeStartedAt && <LiveDuration startedAt={race.activeStartedAt} />}
+      <h1 className="visually-hidden">Wachtrij en wisselzone</h1>
+      <section className="race-strip" aria-label="Wisselzone">
+        <div className="race-strip__now">
+          <span className="race-strip__label">Nu op de piste</span>
+          <span className="race-strip__runner">
+            {activeRunner ? <RunnerName runner={activeRunner} /> : 'Nog niemand gestart'}
+          </span>
+          {race.activeStartedAt && activeRunner && (
+            <LiveDuration startedAt={race.activeStartedAt} className="race-strip__time" refreshMs={1_000} format="seconds" />
+          )}
         </div>
         <div>
-          <span className="muted-label">Volgende</span>
-          <strong>{nextRunner ? runnerLabel(nextRunner) : 'Geen loper in wachtrij'}</strong>
+          <span className="race-strip__label">Volgende</span>
+          <span className="race-strip__runner">
+            {nextRunner ? <RunnerName runner={nextRunner} /> : 'Niemand klaar'}
+          </span>
         </div>
-      </div>
-      </div>
+        <div>
+          <span className="race-strip__label">Klaar om te lopen</span>
+          <span className="race-strip__runner">{waitingCount} {waitingCount === 1 ? 'loper' : 'lopers'}</span>
+        </div>
+      </section>
       <AppHeader
         onOpenProfile={(runnerId) => {
           setProfileRunnerId(runnerId);
@@ -160,10 +171,11 @@ export function InsideDisplayPage() {
 export function NotFoundPage() {
   const navigate = useNavigate();
   return (
-    <div className="empty-state">
-      <h1>Onbekende pagina</h1>
+    <div className="app-state">
+      <h1>Deze pagina bestaat niet</h1>
+      <p>Kies een werkplek op de startpagina.</p>
       <button className="btn btn--primary" onClick={() => void navigate({ to: '/' })}>
-        Terug naar start
+        Naar start
       </button>
     </div>
   );
@@ -183,7 +195,7 @@ function ConnectionBanner() {
   if (!connectionLost) return null;
   return (
     <div className="connection-banner" role="alert">
-      Verbinding met de server verbroken — probeert opnieuw te verbinden…
+      <strong>Verbinding met de server verbroken.</strong> Live gegevens kunnen verouderd zijn. Er wordt opnieuw verbonden…
     </div>
   );
 }
@@ -198,46 +210,41 @@ function RouteLoadBoundary({
   displayMode?: boolean;
 }) {
   const fallback = (
-    <div className={displayMode ? 'display-loading' : 'empty-state'}>
+    <div className={displayMode ? 'display-loading' : 'app-state app-state--inline'} role="status">
       <p>{loadingMessage}</p>
     </div>
   );
   return <React.Suspense fallback={fallback}>{children}</React.Suspense>;
 }
 
-function TopNav() {
+const NAVIGATION_ITEMS: ReadonlyArray<{
+  path: '/' | '/queue' | '/timing' | '/analysis' | '/tactics' | '/admin';
+  label: string;
+  preload?: () => void;
+}> = [
+  { path: '/', label: 'Start' },
+  { path: '/queue', label: 'Wachtrij' },
+  { path: '/timing', label: 'Timing' },
+  { path: '/analysis', label: 'Analyse', preload: preloadAnalysisView },
+  { path: '/tactics', label: "Kobe's tactiek", preload: preloadKobeTacticsView },
+  { path: '/admin', label: 'Beheer', preload: preloadAdminView },
+];
+
+function TopBar() {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
-  const navigationItems: ReadonlyArray<{
-    path: '/' | '/queue' | '/timing' | '/analysis' | '/tactics' | '/admin';
-    label: string;
-    preload?: () => void;
-  }> = [
-    { path: '/', label: 'Start' },
-    { path: '/queue', label: 'Wachtrij' },
-    { path: '/timing', label: 'Timing' },
-    { path: '/analysis', label: 'Analyse', preload: preloadAnalysisView },
-    { path: '/tactics', label: "Kobe's tactiek", preload: preloadKobeTacticsView },
-    { path: '/admin', label: 'Beheer', preload: preloadAdminView },
-  ];
 
   return (
-    <nav className="top-nav" aria-label="Hoofdnavigatie">
-      <Link
-        className="top-nav__brand"
-        to="/"
-        aria-label="Naar de startpagina"
-      >
-        <span className="top-nav__logo">
-          <img src="/brand/apolloon-logo.png" alt="" width={560} height={169} />
-        </span>
+    <header className="top-bar">
+      <Link className="top-bar__brand" to="/" aria-label="Apolloon, naar de startpagina">
+        <span className="brand-mark" aria-hidden="true" />
       </Link>
-      <div className="top-nav__links">
-        {navigationItems.map((navigationItem) => {
+      <nav className="top-bar__nav" aria-label="Hoofdnavigatie">
+        {NAVIGATION_ITEMS.map((navigationItem) => {
           const isCurrentPage = pathname === navigationItem.path;
           return (
             <Link
               key={navigationItem.path}
-              className={`nav-link${isCurrentPage ? ' nav-link--active' : ''}`}
+              className="nav-link"
               aria-current={isCurrentPage ? 'page' : undefined}
               onPointerEnter={navigationItem.preload}
               onFocus={navigationItem.preload}
@@ -247,7 +254,45 @@ function TopNav() {
             </Link>
           );
         })}
+      </nav>
+      <div className="top-bar__status">
+        <RaceClock />
+        <SystemStatusChip />
+        <ThemeSwitch />
       </div>
-    </nav>
+    </header>
+  );
+}
+
+const selectRaceClockData = ({ race }: LiveAppSnapshot) => ({ race });
+
+function RaceClock() {
+  const { race } = useAppData(selectRaceClockData);
+  if (!race.raceStartedAt) return <span className="status-chip status-chip--plain">Race niet gestart</span>;
+  if (race.raceFinishedAt) return <span className="status-chip status-chip--plain">Race afgesloten</span>;
+  return (
+    <span className="status-chip status-chip--plain" title="Tijd sinds de start van de race">
+      Race <strong><LiveElapsed startedAt={race.raceStartedAt} /></strong>
+    </span>
+  );
+}
+
+function SystemStatusChip() {
+  const { cluster, error } = useClusterStatus();
+  const status = deriveSystemStatus(cluster, error);
+  if (!status) return null;
+  return (
+    <Link
+      to="/admin"
+      className={`status-chip status-chip--${status.tone}`}
+      title={`${status.title}: ${status.detail}. Open Beheer voor details.`}
+      onPointerEnter={preloadAdminView}
+    >
+      <span className="status-chip__dot" aria-hidden="true" />
+      <span role={status.tone === 'error' ? 'alert' : 'status'} aria-live="polite" aria-atomic="true">
+        <strong>{status.title}</strong>
+        <span className="status-chip__detail"> {status.detail}</span>
+      </span>
+    </Link>
   );
 }

@@ -1,4 +1,5 @@
 import React from 'react';
+import { useChartTheme } from '../lib/chartPalette';
 import { SectionNavigation } from './SectionNavigation';
 import { useAppData, useRaceHistory } from '../app/index';
 import {
@@ -65,6 +66,8 @@ type TacticsSection = 'live' | 'historical';
 const selectTacticsData = ({ race }: LiveAppSnapshot) => ({ race });
 
 export function KobeTacticsView() {
+  // Chart configurations are built during render; re-render them with the new theme colours.
+  useChartTheme();
   const { race } = useAppData(selectTacticsData);
   useClockTick(30_000, race.raceStartedAt != null && race.raceFinishedAt == null);
   const { laps, loading: historyLoading, error: historyError } = useRaceHistory({ scope: 'full' });

@@ -1,0 +1,132 @@
+/*
+ * Piste design tokens.
+ * Components only use the semantic names below; raw colours live here.
+ * Light is chalk white for daylight, dark is a night-track navy for long shifts.
+ * Public displays define their own fixed palettes in displays.css.
+ */
+:root {
+  --font-body: "Barlow", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: "Barlow Condensed", "Barlow", ui-sans-serif, system-ui, sans-serif;
+
+  --apolloon-blue: #0D78D3;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  --radius-sm: 5px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --rail: 4px;
+
+  --control-h: 40px;
+  --control-h-sm: 32px;
+  --topbar-h: 56px;
+}
+
+:root,
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #F3F5F8;
+  --surface: #FFFFFF;
+  --surface-2: #EBEFF4;
+  --surface-3: #DFE5EC;
+  --ink: #0C1A2B;
+  --ink-2: #3F4E63;
+  --ink-3: #5F6E83;
+  --line: #D6DEE8;
+  --line-2: #B7C3D1;
+
+  --brand: var(--apolloon-blue);
+  --brand-hover: #0B68B8;
+  --brand-ink: #0A62AE;
+  --brand-wash: #E4F0FB;
+  --on-brand: #FFFFFF;
+  --focus: #0D78D3;
+
+  --go: #12804A;
+  --go-ink: #0C6B3C;
+  --go-wash: #E3F4EA;
+  --go-line: #9ED3B5;
+  --warn: #B36200;
+  --warn-ink: #8A4B00;
+  --warn-wash: #FDF0DC;
+  --warn-line: #EFC585;
+  --stop: #C0262D;
+  --stop-ink: #A71F26;
+  --stop-wash: #FCE8E8;
+  --stop-line: #EFA9AC;
+
+  --bib: #FFFFFF;
+  --bib-line: #0C1A2B;
+  --overlay: rgb(12 26 43 / 0.45);
+  --shadow-overlay: 0 24px 64px rgb(12 26 43 / 0.22);
+  --shadow-drag: 0 12px 28px rgb(12 26 43 / 0.18);
+
+  --chart-text: #3F4E63;
+  --chart-muted: #5F6E83;
+  --chart-grid: #E1E7EF;
+  --series-live: #0D78D3;
+  --series-live-fill: rgb(13 120 211 / 0.18);
+  --series-target: #7C8A9E;
+  --series-own: #7C3AED;
+  --series-rival: #B7791F;
+  --series-strong: #0C1A2B;
+  --series-neutral: #8A97A8;
+  --series-accent: #0A62AE;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0A1119;
+  --surface: #111A25;
+  --surface-2: #182330;
+  --surface-3: #22303F;
+  --ink: #E4EAF1;
+  --ink-2: #A9B6C6;
+  --ink-3: #8593A5;
+  --line: #223040;
+  --line-2: #344558;
+
+  --brand: var(--apolloon-blue);
+  --brand-hover: #1A86E3;
+  --brand-ink: #6FB5F4;
+  --brand-wash: #0E2842;
+  --on-brand: #FFFFFF;
+  --focus: #6FB5F4;
+
+  --go: #45C486;
+  --go-ink: #7FD9AA;
+  --go-wash: #0D2A1D;
+  --go-line: #1F5A3C;
+  --warn: #F2AA45;
+  --warn-ink: #F6C27A;
+  --warn-wash: #2D2111;
+  --warn-line: #6A4A1C;
+  --stop: #FF7A7A;
+  --stop-ink: #FFA3A3;
+  --stop-wash: #34171A;
+  --stop-line: #7A3035;
+
+  --bib: #1B2735;
+  --bib-line: #5A6B80;
+  --overlay: rgb(3 7 12 / 0.7);
+  --shadow-overlay: 0 24px 64px rgb(0 0 0 / 0.5);
+  --shadow-drag: 0 12px 28px rgb(0 0 0 / 0.45);
+
+  --chart-text: #C3CEDB;
+  --chart-muted: #8593A5;
+  --chart-grid: #1F2B39;
+  --series-live: #3A9BEF;
+  --series-live-fill: rgb(58 155 239 / 0.22);
+  --series-target: #8C9AAD;
+  --series-own: #A78BFA;
+  --series-rival: #E3B341;
+  --series-strong: #E4EAF1;
+  --series-neutral: #7D8B9D;
+  --series-accent: #6FB5F4;
+}

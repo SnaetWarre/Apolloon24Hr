@@ -120,7 +120,7 @@ try {
   await rpc.runners.setStatus.mutate({ id: firstRunner.id, status: 'waiting' });
   await rpc.race.handoff.mutate(await expectation());
   await page.goto(`${baseUrl}/timing`);
-  const previousLapPanel = page.locator('.stat-panel').filter({ hasText: 'Vorige ronde huidige loper' });
+  const previousLapPanel = page.locator('.stat-panel').filter({ hasText: 'Vorige ronde' });
   await waitUntil(async () => /[0-9]/.test(await previousLapPanel.locator('strong').innerText()));
   const recentHistory = await (await fetch(`${baseUrl}/api/history?scope=recent&limit=250`)).json();
   assert.equal(recentHistory.laps.some((lap) => lap.runnerId === firstRunner.id), false);

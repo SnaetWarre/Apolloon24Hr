@@ -1,5 +1,5 @@
 import { SectionNavigation } from './SectionNavigation';
-import { workspaceChartPalette } from '../lib/chartPalette';
+import { chartTooltipColors, useChartTheme, workspaceChartPalette } from '../lib/chartPalette';
 import React from 'react';
 import {
   BarController,
@@ -136,10 +136,26 @@ export function AnalysisView() {
 
   return (
     <>
-      <div className="hero hero--compact">
-        <div>
-          <h1 className="app-title">Analyse</h1>
-          <p className="tagline">Grafieken op basis van de geselecteerde ploegen en categorieën.</p>
+      <div className="page-head">
+        <h1>Analyse</h1>
+        <span
+          className={`analysis-scope-summary${filteredLaps.length < laps.length ? ' analysis-scope-summary--partial' : ''}`}
+          role="status"
+        >
+          {enabledLabels.length} van {analysisLabels.length} labels aan, {filteredLaps.length} van {laps.length} rondes
+        </span>
+        <div className="page-head__actions">
+          <details className="analysis-export">
+            <summary className="btn">Volledige wedstrijd exporteren</summary>
+            <div className="analysis-export__menu">
+              <p>Exports bevatten altijd alle rondes en gebeurtenissen. De labelfilters op dit scherm tellen niet mee.</p>
+              <a className="btn btn--primary" href="/api/export/laps.csv">Rondes (CSV)</a>
+              <a className="btn btn--quiet" href="/api/export/laps.json">Rondes (laps.json)</a>
+              <a className="btn btn--quiet" href="/api/export/current-state.json">Volledige toestand (current-state.json)</a>
+              <a className="btn btn--quiet" href="/api/export/events.csv">Gebeurtenissen (events.csv)</a>
+              <a className="btn btn--quiet" href="/api/export/events.json">Gebeurtenissen (events.json)</a>
+            </div>
+          </details>
         </div>
       </div>
 
@@ -177,27 +193,6 @@ export function AnalysisView() {
               onToggle={toggleLabel}
             />
           </section>
-          <details className="analysis-downloads">
-            <summary>Downloads</summary>
-            <p className="panel-copy">Volledige wedstrijddata; exports volgen de schermfilters niet.</p>
-            <div className="export-row export-row--secondary">
-              <a className="btn btn--primary" href="/api/export/laps.csv">
-                Download CSV
-              </a>
-              <a className="btn btn--ghost" href="/api/export/laps.json">
-                Download laps.json
-              </a>
-              <a className="btn btn--ghost" href="/api/export/current-state.json">
-                Download current-state.json
-              </a>
-              <a className="btn btn--ghost" href="/api/export/events.csv">
-                Download events.csv
-              </a>
-              <a className="btn btn--ghost" href="/api/export/events.json">
-                Download events.json
-              </a>
-            </div>
-          </details>{' '}
         </aside>
         <div className="analysis-content">
           <div className="stats-grid stats-grid--analysis">
@@ -470,6 +465,7 @@ function LabelTogglePicker({
 
 function RollingLapTrendChart({ points }: { points: ReturnType<typeof buildRollingLapTrend> }) {
   const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
+  const chartTheme = useChartTheme();
 
   React.useEffect(() => {
     const canvas = canvasRef.current;
@@ -485,8 +481,8 @@ function RollingLapTrendChart({ points }: { points: ReturnType<typeof buildRolli
               x: point.raceHour,
               y: point.averageMs / 1000,
             })),
-            borderColor: '#2877F6',
-            backgroundColor: '#2877F6',
+            borderColor: workspaceChartPalette.live,
+            backgroundColor: workspaceChartPalette.live,
             borderWidth: 3,
             pointRadius: 0,
             pointHoverRadius: 5,
@@ -514,6 +510,7 @@ function RollingLapTrendChart({ points }: { points: ReturnType<typeof buildRolli
             },
           },
           tooltip: {
+            ...chartTooltipColors(),
             callbacks: {
               title(items) {
                 const point = points[items[0]?.dataIndex ?? 0];
@@ -576,7 +573,7 @@ function RollingLapTrendChart({ points }: { points: ReturnType<typeof buildRolli
 
     const chart = new Chart(canvas, config);
     return () => chart.destroy();
-  }, [points]);
+  }, [chartTheme, points]);
 
   if (!points.length) return <EmptyAnalyticsState message="Geen rondes binnen deze selectie." />;
   return (
@@ -588,6 +585,7 @@ function RollingLapTrendChart({ points }: { points: ReturnType<typeof buildRolli
 
 function RacePaceChart({ buckets }: { buckets: ReturnType<typeof buildTimeBuckets> }) {
   const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
+  const chartTheme = useChartTheme();
 
   React.useEffect(() => {
     const canvas = canvasRef.current;
@@ -602,8 +600,8 @@ function RacePaceChart({ buckets }: { buckets: ReturnType<typeof buildTimeBucket
             type: 'bar',
             label: 'Rondes per uur',
             data: buckets.map((bucket) => bucket.count),
-            backgroundColor: 'rgba(40, 119, 246, 0.18)',
-            borderColor: '#2877F6',
+            backgroundColor: workspaceChartPalette.liveFill,
+            borderColor: workspaceChartPalette.live,
             borderWidth: 1,
             borderRadius: 4,
             maxBarThickness: 160,
@@ -615,8 +613,8 @@ function RacePaceChart({ buckets }: { buckets: ReturnType<typeof buildTimeBucket
             type: 'line',
             label: 'Gemiddelde rondetijd',
             data: buckets.map((bucket) => (bucket.averageMs == null ? null : bucket.averageMs / 1000)),
-            borderColor: workspaceChartPalette.text,
-            backgroundColor: workspaceChartPalette.text,
+            borderColor: workspaceChartPalette.strong,
+            backgroundColor: workspaceChartPalette.strong,
             borderWidth: 3,
             pointRadius: 4,
             pointHoverRadius: 6,
@@ -644,6 +642,7 @@ function RacePaceChart({ buckets }: { buckets: ReturnType<typeof buildTimeBucket
             },
           },
           tooltip: {
+            ...chartTooltipColors(),
             callbacks: {
               label(context) {
                 if (context.dataset.yAxisID === 'seconds') {
@@ -706,7 +705,7 @@ function RacePaceChart({ buckets }: { buckets: ReturnType<typeof buildTimeBucket
 
     const chart = new Chart(canvas, config);
     return () => chart.destroy();
-  }, [buckets]);
+  }, [buckets, chartTheme]);
 
   if (!buckets.length) return <EmptyAnalyticsState message="Zet minstens een ploeg aan om de grafiek te tonen." />;
   return (

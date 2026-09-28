@@ -1,11 +1,12 @@
 import React from 'react';
 import { ModalDialog } from './ModalDialog';
 import { useAppActions, useAppData, useClusterStatus, useRaceHistory } from '../app/index';
-import { formatClockTimeMs, formatDurationMs } from '../lib/time';
+import { formatClockTimeMs, formatDurationMs, nowMs } from '../lib/time';
 import { getNextWaitingRunner, runnerLabel } from '../lib/runners';
 import type { LiveAppSnapshot, Runner } from '../types';
 import { LabelBadge } from './LabelBadge';
-import { LiveDuration } from './LiveTime';
+import { RunnerName } from './RunnerName';
+import { LIVE_MILLISECOND_INTERVAL_MS, useClockTick } from '../lib/useAnimationFrameTick';
 
 const selectTimingData = ({ runners, race }: LiveAppSnapshot) => ({ runners, race });
 
@@ -148,167 +149,197 @@ export function TimingView() {
     );
   }
 
+  const waitingCount = runners.filter((runner) => runner.status === 'waiting').length;
+  const handoffDisabled = handoffBusy || timingBlocked || (!activeRunner && !nextRunner);
+  const handoffLabel = handoffBusy
+    ? 'Bezig...'
+    : timingBlocked
+      ? 'Timing geblokkeerd'
+      : race.raceFinishedAt && nextRunner ? `Race hervatten met ${shortRunnerName(nextRunner)}`
+      : activeRunner
+        ? nextRunner
+          ? `Klok ${shortRunnerName(activeRunner)} af, start ${shortRunnerName(nextRunner)}`
+          : `Klok ${shortRunnerName(activeRunner)} af`
+        : nextRunner ? `Start ${shortRunnerName(nextRunner)}` : 'Geen loper klaar';
+
   return (
     <>
-      <div className="hero hero--compact">
-        <div>
-          <span className="page-kicker">Telsysteem 2</span>
-          <h1 className="app-title">Timing</h1>
-          <p className="tagline">Snelle tijdsregistratie en gecontroleerde loperswissel.</p>
-        </div>
+      <div className="page-head page-head--compact">
+        <h1>Timing</h1>
+        <p>Spatie of Enter klokt de huidige loper af en start de volgende.</p>
       </div>
 
       <div className="timing-workspace">
-        <section className="timing-station" aria-label="Timing bedienen">
-          <TimingRunner
-            title="Huidige loper"
-            runner={activeRunner}
-            empty="Nog niemand actief"
-            accent
-            extra={
-              activeRunner && race.activeStartedAt ? (
-                <LiveDuration startedAt={race.activeStartedAt} className="live-time" />
-              ) : null
-            }
-          />
-          <div className="handoff-preview">
-            <span className="muted-label">{race.raceFinishedAt ? 'Race afgesloten' : 'Bij volgende spatie/enter'}</span>
-            <strong>{race.raceFinishedAt ? 'Race afgesloten. Hervat bewust via de knop hieronder.' : handoffPreview}</strong>
+        <section className={`timing-station${activeRunner ? ' is-running' : ''}`} aria-label="Timing bedienen">
+          <span className="timing-station__label">
+            {race.raceFinishedAt ? 'Race afgesloten' : activeRunner ? 'Nu op de piste' : 'Nog niemand op de piste'}
+          </span>
+          <div className="timing-now">
+            {activeRunner ? (
+              <>
+                <RunnerName runner={activeRunner} size="lg" />
+                {activeRunner.labels.length > 0 && (
+                  <div className="label-list">
+                    {activeRunner.labels.map((label) => (
+                      <LabelBadge key={label.id} label={label} />
+                    ))}
+                  </div>
+                )}
+              </>
+            ) : (
+              <span className="timing-now__empty">
+                {race.raceFinishedAt ? 'Niemand actief' : nextRunner ? 'Klaar om te starten' : 'Wacht op de eerste loper'}
+              </span>
+            )}
           </div>
 
-          {controlledElsewhere && (
-            <div className="warning-banner">
-              {timingControl?.state === 'remote-reachable' ? (
-                <span>
-                  De timing wordt bediend op{' '}
-                  <strong>{timingControl.controllerUrl || 'een andere bereikbare laptop'}</strong>. Gebruik
-                  die laptop of draag de timing daar gecontroleerd over.
-                </span>
-              ) : (
-                <>
-                  <span>
-                    De timinglaptop is niet bereikbaar. Controleer eerst fysiek dat die app gestopt is.
-                    {timingControl?.takeoverAllowed
-                      ? ' De lokale replica bevat alles tot de laatste geslaagde synchronisatie; een noodovername is nu mogelijk.'
-                      : timingControl?.forcedTakeoverAllowed
-                        ? ' De lokale replica is mogelijk onvolledig. Alleen een geforceerde noodovername is beschikbaar.'
-                        : timingControl?.localReplicaCaughtUp
-                          ? ` Noodovername wordt beschikbaar om ${formatClockTimeMs(
-                              timingControl.takeoverAvailableAt || Date.now()
-                            )}.`
-                          : ` De lokale replica is mogelijk onvolledig. Herstel bij voorkeur de verbinding; geforceerde noodovername wordt beschikbaar om ${formatClockTimeMs(
-                              timingControl?.forcedTakeoverAvailableAt || Date.now()
-                            )}.`}
-                  </span>
-                  <button
-                    className="btn btn--ghost"
-                    onClick={() => void emergencyTakeover()}
-                    disabled={
-                      handoffBusy ||
-                      (!timingControl?.takeoverAllowed && !timingControl?.forcedTakeoverAllowed)
-                    }
-                  >
-                    {timingControl?.forcedTakeoverAllowed
-                      ? 'Geforceerde noodovername'
-                      : 'Noodovername starten'}
-                  </button>
-                </>
-              )}
+          <div className="timing-clock-row">
+            {activeRunner && race.activeStartedAt ? (
+              <TimingClock startedAt={race.activeStartedAt} />
+            ) : (
+              <span className="timing-clock timing-clock--idle" aria-hidden="true">0:00<small>.0</small></span>
+            )}
+            <div className="timing-clock-stats">
+              <div className="stat-panel">
+                <span className="muted-label">Vorige ronde</span>
+                <strong>
+                  {runnerHistoryError
+                    ? 'Niet beschikbaar'
+                    : activePreviousLap
+                      ? formatDurationMs(activePreviousLap.durationMs)
+                      : activeRunner && runnerHistoryLoading ? 'Laden...' : '—'}
+                </strong>
+              </div>
+              <div className="stat-panel">
+                <span className="muted-label">Snelste ronde</span>
+                <strong>{activeRunner?.bestLapMs ? formatDurationMs(activeRunner.bestLapMs) : '—'}</strong>
+              </div>
             </div>
-          )}
+          </div>
 
-          {hasSyncConflict && (
-            <div className="warning-banner">
-              Er zijn twee verschillende timinggeschiedenissen gevonden. Timing is veilig gepauzeerd. Kies in
-              Admin welke laptop de correcte geschiedenis bevat.
-            </div>
-          )}
+          <div className="handoff-preview">
+            <span className="handoff-preview__baton" aria-hidden="true"><i />Wissel</span>
+            <span>
+              {race.raceFinishedAt ? 'Race afgesloten. Hervat alleen bewust via de knop hieronder.' : handoffPreview}
+            </span>
+          </div>
 
           <div className="timing-actions">
-            <button
-              className="btn btn--primary btn--xl"
-              onClick={runHandoff}
-              disabled={handoffBusy || timingBlocked || (!activeRunner && !nextRunner)}
-            >
-              <span>
-                {handoffBusy
-                  ? 'Bezig...'
-                  : race.raceFinishedAt && nextRunner ? `Race hervatten met ${shortRunnerName(nextRunner)}`
-                  : activeRunner
-                    ? nextRunner
-                      ? `Klok ${shortRunnerName(activeRunner)} af → start ${shortRunnerName(nextRunner)}`
-                      : `Klok ${shortRunnerName(activeRunner)} af`
-                    : nextRunner ? `Start ${shortRunnerName(nextRunner)}` : 'Geen loper klaar'}
-              </span>
-              {!race.raceFinishedAt && <kbd>Spatie / Enter</kbd>}
-            </button>
-            <button className="btn btn--ghost timing-undo" onClick={undo} disabled={handoffBusy || timingBlocked}>
-              Laatste wissel ongedaan maken
+            <button className="btn btn--primary btn--xl" onClick={runHandoff} disabled={handoffDisabled}>
+              <span>{handoffLabel}</span>
+              {!race.raceFinishedAt && !handoffDisabled && <kbd>Spatie / Enter</kbd>}
             </button>
           </div>
 
-          {actionError && (
-            <div className="warning-banner" role="alert">
-              {actionError}
-            </div>
-          )}
-          {lastAction && (
-            <div className="success-banner" role="status">
-              {lastAction}
-            </div>
-          )}
+          <div className="timing-feedback">
+            {controlledElsewhere && (
+              <div className="warning-banner warning-banner--blocking">
+                {timingControl?.state === 'remote-reachable' ? (
+                  <span>
+                    <strong>Timing wordt elders bediend.</strong> De timing loopt op{' '}
+                    <strong>{timingControl.controllerUrl || 'een andere bereikbare laptop'}</strong>. Gebruik
+                    die laptop of draag de timing daar gecontroleerd over.
+                  </span>
+                ) : (
+                  <>
+                    <span>
+                      <strong>Timinglaptop niet bereikbaar.</strong> Controleer eerst fysiek dat die app gestopt is.
+                      {timingControl?.takeoverAllowed
+                        ? ' De lokale replica bevat alles tot de laatste geslaagde synchronisatie; een noodovername is nu mogelijk.'
+                        : timingControl?.forcedTakeoverAllowed
+                          ? ' De lokale replica is mogelijk onvolledig. Alleen een geforceerde noodovername is beschikbaar.'
+                          : timingControl?.localReplicaCaughtUp
+                            ? ` Noodovername wordt beschikbaar om ${formatClockTimeMs(
+                                timingControl.takeoverAvailableAt || Date.now()
+                              )}.`
+                            : ` De lokale replica is mogelijk onvolledig. Herstel bij voorkeur de verbinding; geforceerde noodovername wordt beschikbaar om ${formatClockTimeMs(
+                                timingControl?.forcedTakeoverAvailableAt || Date.now()
+                              )}.`}
+                    </span>
+                    <button
+                      className="btn"
+                      onClick={() => void emergencyTakeover()}
+                      disabled={
+                        handoffBusy ||
+                        (!timingControl?.takeoverAllowed && !timingControl?.forcedTakeoverAllowed)
+                      }
+                    >
+                      {timingControl?.forcedTakeoverAllowed
+                        ? 'Geforceerde noodovername'
+                        : 'Noodovername starten'}
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
 
-          <div className="stats-grid">
+            {hasSyncConflict && (
+              <div className="warning-banner warning-banner--blocking">
+                <span>
+                  <strong>Synchronisatieconflict.</strong> Er zijn twee verschillende timinggeschiedenissen gevonden.
+                  Timing is veilig gepauzeerd. Kies in Beheer welke laptop de correcte geschiedenis bevat.
+                </span>
+              </div>
+            )}
+
+            {actionError && (
+              <div className="warning-banner warning-banner--blocking" role="alert">
+                {actionError}
+              </div>
+            )}
+            {lastAction && (
+              <div className="success-banner" role="status">
+                {lastAction}
+              </div>
+            )}
+            {!activeRunner && !nextRunner && !race.raceFinishedAt && !timingBlocked && (
+              <p className="timing-feedback__hint">Zet in Wachtrij een opgewarmde loper klaar om te starten.</p>
+            )}
+          </div>
+
+          <div className="timing-footer">
             <div className="stat-panel">
-              <span className="muted-label">Race start</span>
+              <span className="muted-label">Race gestart</span>
               <strong>
-                {race.raceStartedAt ? formatClockTimeMs(race.raceStartedAt) : 'Nog niet gestart'}
-              </strong>
-            </div>
-            <div className="stat-panel">
-              <span className="muted-label">Vorige ronde huidige loper</span>
-              <strong>
-                {runnerHistoryError
-                  ? 'Vorige ronde niet beschikbaar'
-                  : activePreviousLap
-                    ? formatDurationMs(activePreviousLap.durationMs)
-                    : activeRunner && runnerHistoryLoading ? 'Laden...' : 'Geen vorige ronde'}
+                {race.raceStartedAt ? formatClockTimeMs(race.raceStartedAt).split('.')[0] : 'Nog niet'}
               </strong>
             </div>
             <div className="stat-panel">
               <span className="muted-label">Wachtrij</span>
-              <strong>{runners.filter((runner) => runner.status === 'waiting').length} lopers klaar</strong>
+              <strong>{waitingCount} {waitingCount === 1 ? 'loper' : 'lopers'} klaar</strong>
             </div>
+            <button className="btn timing-undo" onClick={undo} disabled={handoffBusy || timingBlocked}>
+              Laatste wissel ongedaan maken
+            </button>
           </div>
         </section>
         <aside className="timing-sidebar">
-          <section className="timing-upcoming" aria-label="Komende lopers">
-            <header>
+          <section className="panel timing-upcoming" aria-label="Komende lopers">
+            <header className="panel-header">
               <h2>Hierna op de piste</h2>
-              <span>{runners.filter((runner) => runner.status === 'waiting').length} lopers klaar</span>
+              <span>{waitingCount} klaar</span>
             </header>
             {upcomingRunners.length ? (
               <ol>
                 {upcomingRunners.map((runner, index) => (
                   <li key={runner.id}>
                     <span className="queue-position">{index + 1}</span>
-                    <div>
-                      <strong>{runnerLabel(runner)}</strong>
-                      {index === 0 && <small>Start bij de volgende wissel</small>}
-                    </div>
+                    <RunnerName runner={runner} />
                   </li>
                 ))}
               </ol>
             ) : (
-              <p className="empty-inline">Geen loper in de wachtrij. Voeg lopers toe via Telsysteem 1.</p>
+              <p className="empty-inline">Niemand klaar. Zet lopers klaar via Wachtrij.</p>
             )}
           </section>
-          <section className="timing-log">
-            <h2>Laatste 10 rondes</h2>
+          <section className="panel timing-log">
+            <header className="panel-header">
+              <h2>Laatste 10 rondes</h2>
+            </header>
             {historyError && (
               <div className="warning-banner" role="alert">
-                Rondes konden niet worden bijgewerkt.
-                <button className="btn btn--ghost" onClick={() => void refreshHistory()}>
+                <span>Rondes konden niet worden bijgewerkt.</span>
+                <button className="btn btn--sm" onClick={() => void refreshHistory()}>
                   Opnieuw proberen
                 </button>
               </div>
@@ -318,21 +349,22 @@ export function TimingView() {
                 <table>
                   <thead>
                     <tr>
-                      <th>Tijd</th>
-                      <th>Nr.</th>
-                      <th>Naam</th>
-                      <th>Ronde</th>
-                      <th>Rondetijd</th>
+                      <th>Binnen</th>
+                      <th>Loper</th>
+                      <th className="num">Ronde</th>
+                      <th className="num">Rondetijd</th>
                     </tr>
                   </thead>
                   <tbody>
                     {recentLaps.map((lap) => (
                       <tr key={lap.id}>
-                        <td>{formatClockTimeMs(lap.finishedAt)}</td>
-                        <td>{lap.runnerNumber || '-'}</td>
-                        <td>{lap.runnerName}</td>
-                        <td>{lap.lapNumber}</td>
-                        <td>{formatDurationMs(lap.durationMs)}</td>
+                        <td>{formatClockTimeMs(lap.finishedAt).split('.')[0]}</td>
+                        <td className="cell-runner" title={lap.runnerName}>
+                          {lap.runnerNumber && <span className="cell-number">{lap.runnerNumber}</span>}
+                          {lap.runnerName}
+                        </td>
+                        <td className="num">{lap.lapNumber}</td>
+                        <td className="num"><strong>{formatDurationMs(lap.durationMs)}</strong></td>
                       </tr>
                     ))}
                   </tbody>
@@ -342,28 +374,28 @@ export function TimingView() {
               <div className="empty-inline">{historyLoading ? 'Rondes laden...' : historyError ? 'Rondes niet beschikbaar' : 'Nog geen rondes geregistreerd'}</div>
             )}
           </section>
+          <section className="danger-zone">
+            <h2>Race afsluiten</h2>
+            <button
+              className="btn btn--danger-outline btn--sm"
+              onClick={() => setFinishConfirmStep(1)}
+              disabled={handoffBusy || timingBlocked}
+            >
+              Race beëindigen
+            </button>
+          </section>
         </aside>
       </div>
-      <section className="danger-zone">
-        <h2>Race afsluiten</h2>
-        <button
-          className="btn btn--danger"
-          onClick={() => setFinishConfirmStep(1)}
-          disabled={handoffBusy || timingBlocked}
-        >
-          Race beëindigen
-        </button>
-      </section>
 
       {finishConfirmStep > 0 && (
         <ModalDialog label="Race afsluiten" onRequestClose={() => { if (!handoffBusy) setFinishConfirmStep(0); }}>
-          <div className="confirm-modal finish-confirm">
+          <div className="confirm-modal confirm-modal--danger">
             {finishConfirmStep === 1 ? (
               <>
                 <h3>Race beëindigen?</h3>
-                <p>Dit stopt de actieve loper zonder extra ronde.</p>
+                <p>De actieve loper stopt zonder extra ronde. Daarna vraagt de app nog één keer om bevestiging.</p>
                 <div className="modal-actions">
-                  <button className="btn btn--ghost" onClick={() => setFinishConfirmStep(0)} disabled={handoffBusy}>
+                  <button className="btn" onClick={() => setFinishConfirmStep(0)} disabled={handoffBusy}>
                     Annuleer
                   </button>
                   <button className="btn btn--primary" onClick={() => setFinishConfirmStep(2)}>
@@ -374,9 +406,9 @@ export function TimingView() {
             ) : (
               <>
                 <h3>Definitief afsluiten</h3>
-                <p>Bevestig alleen als de race echt afgerond is.</p>
+                <p>Bevestig alleen als de race echt afgerond is. Spatie en Enter doen daarna niets meer op dit scherm.</p>
                 <div className="modal-actions">
-                  <button className="btn btn--ghost" onClick={() => setFinishConfirmStep(0)} disabled={handoffBusy}>
+                  <button className="btn" onClick={() => setFinishConfirmStep(0)} disabled={handoffBusy}>
                     Annuleer
                   </button>
                   <button className="btn btn--danger" onClick={finish} disabled={handoffBusy}>
@@ -389,6 +421,16 @@ export function TimingView() {
         </ModalDialog>
       )}
     </>
+  );
+}
+
+function TimingClock({ startedAt }: { startedAt: number }) {
+  useClockTick(LIVE_MILLISECOND_INTERVAL_MS);
+  const [main, fraction = '0'] = formatDurationMs(nowMs() - startedAt).split('.');
+  return (
+    <span className="timing-clock live-time" role="timer" aria-label="Lopende rondetijd">
+      {main}<small>.{fraction.slice(0, 1)}</small>
+    </span>
   );
 }
 
@@ -406,42 +448,6 @@ function isTextEntryTarget(target: HTMLElement | null) {
   return Boolean(target.closest('input, textarea, select, [contenteditable="true"]'));
 }
 
-function TimingRunner({
-  title,
-  runner,
-  empty,
-  accent,
-  extra,
-}: {
-  title: string;
-  runner: Runner | null;
-  empty: string;
-  accent?: boolean;
-  extra?: React.ReactNode;
-}) {
-  return (
-    <section className={`timing-runner${accent ? ' timing-runner--active' : ''}`}>
-      <span className="muted-label">{title}</span>
-      {runner ? (
-        <>
-          <strong>
-            {runner.runnerNumber && <span>{runner.runnerNumber} - </span>}
-            {runner.name}
-          </strong>
-          <div className="display-labels">
-            {runner.labels.map((label) => (
-              <LabelBadge key={label.id} label={label} />
-            ))}
-          </div>
-          {extra}
-        </>
-      ) : (
-        <strong>{empty}</strong>
-      )}
-    </section>
-  );
-}
-
 function shortRunnerName(runner: Runner) {
   const firstName = runner.name.trim().split(/\s+/)[0] || runner.name;
   return runner.runnerNumber ? `${runner.runnerNumber} - ${firstName}` : firstName;
@@ -449,7 +455,7 @@ function shortRunnerName(runner: Runner) {
 
 function buildHandoffPreview(activeRunner: Runner | null, nextRunner: Runner | null) {
   if (activeRunner && nextRunner) {
-    return `${runnerLabel(activeRunner)} wordt afgeklokt -> ${runnerLabel(nextRunner)} start`;
+    return `${runnerLabel(activeRunner)} wordt afgeklokt, ${runnerLabel(nextRunner)} start`;
   }
   if (!activeRunner && nextRunner) {
     return `${runnerLabel(nextRunner)} start`;

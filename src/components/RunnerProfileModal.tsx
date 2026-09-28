@@ -153,7 +153,7 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
             </p>
           </div>
           <button className="icon-btn" onClick={requestClose} aria-label="Sluiten">
-            x
+            ✕
           </button>
         </div>
 

@@ -10,7 +10,7 @@ import {
   Tooltip,
   type ChartConfiguration,
 } from 'chart.js';
-import { workspaceChartPalette } from '../../lib/chartPalette';
+import { chartTooltipColors, useChartTheme, workspaceChartPalette } from '../../lib/chartPalette';
 import { RACE_DURATION_HOURS, type HourlyPacePoint, type RaceProgressPoint } from '../../lib/tactics';
 import type { LiveTrendPoint, TimeGapPoint } from '../../lib/tacticsDeepDive';
 import { formatPaceSeconds, formatRaceHour } from './tacticsFormat';
@@ -76,15 +76,16 @@ export function RaceProgressChart({
   rivalLabel?: string;
 }) {
   const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
+  const chartTheme = useChartTheme();
 
   React.useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !points.length) return undefined;
     const datasets: ChartConfiguration<'line'>['data']['datasets'] = [];
-    if (showLive) datasets.push(lineDataset('Apolloon live', points, 'liveLaps', '#2877F6', 4));
-    if (showTarget) datasets.push(lineDataset('Doelverloop', points, 'targetLaps', '#9aa3b2', 2, [8, 6]));
-    datasets.push(lineDataset(ownLabel, points, 'ownHistoricalLaps', '#7c3aed', 2, [7, 5], true));
-    datasets.push(lineDataset(rivalLabel, points, 'rivalHistoricalLaps', '#d59d00', 2, [7, 5], true));
+    if (showLive) datasets.push(lineDataset('Apolloon live', points, 'liveLaps', workspaceChartPalette.live, 4));
+    if (showTarget) datasets.push(lineDataset('Doelverloop', points, 'targetLaps', workspaceChartPalette.target, 2, [8, 6]));
+    datasets.push(lineDataset(ownLabel, points, 'ownHistoricalLaps', workspaceChartPalette.own, 2, [7, 5], true));
+    datasets.push(lineDataset(rivalLabel, points, 'rivalHistoricalLaps', workspaceChartPalette.rival, 2, [7, 5], true));
 
     const chart = new Chart(canvas, {
       type: 'line',
@@ -92,7 +93,7 @@ export function RaceProgressChart({
       options: sharedLineChartOptions('Cumulatieve rondes', (value) => `${Math.round(Number(value))}`),
     });
     return () => chart.destroy();
-  }, [ownLabel, points, rivalLabel, showLive, showTarget]);
+  }, [chartTheme, ownLabel, points, rivalLabel, showLive, showTarget]);
 
   return <ChartCanvas canvasRef={canvasRef} />;
 }
@@ -111,15 +112,16 @@ export function HourlyPaceChart({
   rivalLabel?: string;
 }) {
   const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
+  const chartTheme = useChartTheme();
 
   React.useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !points.length) return undefined;
     const datasets: ChartConfiguration<'line'>['data']['datasets'] = [];
-    if (showActual) datasets.push(paceDataset('Werkelijk live', points, 'actualSeconds', '#2877F6', 4));
-    if (showPlan) datasets.push(paceDataset('Doeltempo', points, 'plannedSeconds', '#9aa3b2', 2, [8, 6]));
-    datasets.push(paceDataset(ownLabel, points, 'ownHistoricalSeconds', '#7c3aed', 2));
-    datasets.push(paceDataset(rivalLabel, points, 'rivalHistoricalSeconds', '#d59d00', 2));
+    if (showActual) datasets.push(paceDataset('Werkelijk live', points, 'actualSeconds', workspaceChartPalette.live, 4));
+    if (showPlan) datasets.push(paceDataset('Doeltempo', points, 'plannedSeconds', workspaceChartPalette.target, 2, [8, 6]));
+    datasets.push(paceDataset(ownLabel, points, 'ownHistoricalSeconds', workspaceChartPalette.own, 2));
+    datasets.push(paceDataset(rivalLabel, points, 'rivalHistoricalSeconds', workspaceChartPalette.rival, 2));
 
     const chart = new Chart(canvas, {
       type: 'line',
@@ -127,13 +129,14 @@ export function HourlyPaceChart({
       options: sharedLineChartOptions('Mediaan rondetijd', (value) => formatPaceSeconds(Number(value))),
     });
     return () => chart.destroy();
-  }, [ownLabel, points, rivalLabel, showActual, showPlan]);
+  }, [chartTheme, ownLabel, points, rivalLabel, showActual, showPlan]);
 
   return <ChartCanvas canvasRef={canvasRef} />;
 }
 
 export function LiveTrendChart({ points }: { points: LiveTrendPoint[] }) {
   const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
+  const chartTheme = useChartTheme();
 
   React.useEffect(() => {
     const canvas = canvasRef.current;
@@ -160,21 +163,22 @@ export function LiveTrendChart({ points }: { points: LiveTrendPoint[] }) {
       type: 'line',
       data: {
         datasets: [
-          trendDataset('Apolloon live', 'liveSeconds', '#2877F6', 4),
-          trendDataset('Apolloon vorig jaar', 'ownHistoricalSeconds', '#7c3aed', 2, [7, 5]),
-          trendDataset('VTK vorig jaar', 'rivalHistoricalSeconds', '#d59d00', 2, [7, 5]),
+          trendDataset('Apolloon live', 'liveSeconds', workspaceChartPalette.live, 4),
+          trendDataset('Apolloon vorig jaar', 'ownHistoricalSeconds', workspaceChartPalette.own, 2, [7, 5]),
+          trendDataset('VTK vorig jaar', 'rivalHistoricalSeconds', workspaceChartPalette.rival, 2, [7, 5]),
         ],
       },
       options: sharedLineChartOptions('Mediaan rondetijd per kwartier', (value) => formatPaceSeconds(Number(value))),
     });
     return () => chart.destroy();
-  }, [points]);
+  }, [chartTheme, points]);
 
   return <ChartCanvas canvasRef={canvasRef} />;
 }
 
 export function LiveTimeGapChart({ points }: { points: TimeGapPoint[] }) {
   const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
+  const chartTheme = useChartTheme();
 
   React.useEffect(() => {
     const canvas = canvasRef.current;
@@ -189,8 +193,8 @@ export function LiveTimeGapChart({ points }: { points: TimeGapPoint[] }) {
           {
             label: 'Werkelijke tijdskloof',
             data: actualPoints.map((point) => ({ x: point.raceHour, y: point.gapSeconds })),
-            borderColor: '#e2e8f0',
-            backgroundColor: '#e2e8f0',
+            borderColor: workspaceChartPalette.strong,
+            backgroundColor: workspaceChartPalette.strong,
             borderWidth: 3,
             pointRadius: 0,
             tension: 0.2,
@@ -199,8 +203,8 @@ export function LiveTimeGapChart({ points }: { points: TimeGapPoint[] }) {
             label: 'Voorspeld met doelschema',
             data: [...(lastActualPoint ? [lastActualPoint] : []), ...predictionPoints]
               .map((point) => ({ x: point.raceHour, y: point.gapSeconds })),
-            borderColor: '#2877F6',
-            backgroundColor: '#2877F6',
+            borderColor: workspaceChartPalette.live,
+            backgroundColor: workspaceChartPalette.live,
             borderWidth: 3,
             borderDash: [8, 6],
             pointRadius: 0,
@@ -209,8 +213,8 @@ export function LiveTimeGapChart({ points }: { points: TimeGapPoint[] }) {
           {
             label: 'Gelijke stand',
             data: [{ x: 0, y: 0 }, { x: 24, y: 0 }],
-            borderColor: '#94a3b8',
-            backgroundColor: '#94a3b8',
+            borderColor: workspaceChartPalette.neutral,
+            backgroundColor: workspaceChartPalette.neutral,
             borderWidth: 1,
             borderDash: [5, 5],
             pointRadius: 0,
@@ -220,7 +224,7 @@ export function LiveTimeGapChart({ points }: { points: TimeGapPoint[] }) {
       options: sharedLineChartOptions('Tijdskloof op VTK', (value) => `${Number(value) > 0 ? '+' : ''}${Math.round(Number(value))}s`),
     });
     return () => chart.destroy();
-  }, [points]);
+  }, [chartTheme, points]);
 
   return <ChartCanvas canvasRef={canvasRef} />;
 }
@@ -293,6 +297,7 @@ export function sharedLineChartOptions(
     plugins: {
       legend: { position: 'top', labels: { boxWidth: 14, color: workspaceChartPalette.text, font: { weight: 'bold' } } },
       tooltip: {
+        ...chartTooltipColors(),
         callbacks: {
           title(items) { return items[0] ? `Race-uur ${formatRaceHour(Number(items[0].parsed.x))}` : ''; },
           label(context) {
