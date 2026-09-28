@@ -186,7 +186,15 @@ The seeded scenarios are:
 - `live`: 60 runners, an active race, queue data, display data, and lap history.
 - `large`: 120 runners and about 250 laps for stress-testing the board, displays, admin page, and analysis page.
 
-The older `npm run seed:test` and `npm run seed:test:live` commands are still available as aliases for the ready and live scenarios.
+## Building Installers
+
+Installers are written to `release/`. Build each one on its own platform:
+
+```text
+npm run electron:build:win     Windows installer (on Windows)
+npm run electron:build:linux   Linux AppImage
+npm run electron:build:mac     macOS dmg and zip (on macOS)
+```
 
 ## Exports
 

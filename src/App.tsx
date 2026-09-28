@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link, Outlet, useNavigate, useRouterState } from '@tanstack/react-router';
-import { AppHeader } from './components/AppHeader';
+import { QueueActions } from './components/QueueActions';
 import { PageHeader } from './components/PageHeader';
 import { KanbanBoard } from './components/KanbanBoard';
 import { RolePicker } from './components/RolePicker';
@@ -95,7 +95,7 @@ export function QueuePage() {
 
   return (
     <>
-      <PageHeader title="Wachtrij" actions={<AppHeader onOpenProfile={setProfileRunnerId} />} />
+      <PageHeader title="Wachtrij" actions={<QueueActions onOpenProfile={setProfileRunnerId} />} />
       <section className="race-strip" aria-label="Wisselzone">
         <div className="race-strip__now">
           <span className="race-strip__label">Nu op de piste</span>

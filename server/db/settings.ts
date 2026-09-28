@@ -1,8 +1,8 @@
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'node:crypto';
 import { publicRecordModeSchema, type PublicRecordMode, type AppSettings } from '../../shared/schemas.js';
 import { one, run, runUncaptured, markAppDataChanged } from './connection.js';
 
-export const DEFAULT_PUBLIC_RECORD_MODE: PublicRecordMode = 'day';
+const DEFAULT_PUBLIC_RECORD_MODE: PublicRecordMode = 'day';
 
 export function getSetting(key: string): string | null {
   return one<{ value: string }>('SELECT value FROM settings WHERE key = ?', [key])?.value ?? null;
@@ -44,5 +44,5 @@ export function ensureLocalSetting(key: string, create: () => string): string {
 }
 
 export function ensureHostId(): string {
-  return ensureLocalSetting('host_id', uuidv4);
+  return ensureLocalSetting('host_id', randomUUID);
 }

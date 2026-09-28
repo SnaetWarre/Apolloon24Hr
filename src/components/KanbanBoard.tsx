@@ -11,7 +11,7 @@ import {
   type DragEndEvent,
 } from '@dnd-kit/core';
 import { useAppActions, useAppData } from '../app/index';
-import { useAppStore } from '../store';
+import { useBoardSearch } from '../app/boardSearch';
 import { formatDurationMs, formatElapsedSeconds, nowMs } from '../lib/time';
 import { useSecondTick } from '../lib/useAnimationFrameTick';
 import { kanbanCollisionDetection, resolveKanbanDrop } from '../lib/kanban';
@@ -64,7 +64,7 @@ function compareByStatusSinceDesc(a: Runner, b: Runner) {
 
 export const KanbanBoard: React.FC<{ onOpenProfile: (runnerId: string) => void }> = ({ onOpenProfile }) => {
   const { runners } = useAppData(selectKanbanData);
-  const search = useAppStore((state) => state.search);
+  const search = useBoardSearch();
   const { setStatus, moveInQueue, hideRunner, unhideRunner } = useAppActions();
   const [showHiddenRan, setShowHiddenRan] = React.useState(false);
   const [actionError, setActionError] = React.useState<string | null>(null);

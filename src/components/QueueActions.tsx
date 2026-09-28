@@ -1,14 +1,11 @@
 import React from 'react';
-import { useAppStore } from '../store';
+import { setBoardSearch, useBoardSearch } from '../app/boardSearch';
 import { Icon } from './Icon';
 import { RunnerActivationModal, RunnerAddModal } from './RunnerEntryModals';
 
 /** Queue page actions: filter the board, add a new runner, or check a runner in. */
-export const AppHeader: React.FC<{ onOpenProfile?: (runnerId: string) => void }> = ({
-  onOpenProfile,
-}) => {
-  const search = useAppStore((state) => state.search);
-  const setSearch = useAppStore((state) => state.setSearch);
+export function QueueActions({ onOpenProfile }: { onOpenProfile?: (runnerId: string) => void }) {
+  const search = useBoardSearch();
   const [activationOpen, setActivationOpen] = React.useState(false);
   const [addOpen, setAddOpen] = React.useState(false);
   const filterRef = React.useRef<HTMLInputElement>(null);
@@ -23,14 +20,14 @@ export const AppHeader: React.FC<{ onOpenProfile?: (runnerId: string) => void }>
           aria-label="Filter dit bord"
           placeholder="Filter bord"
           value={search}
-          onChange={(event) => setSearch(event.target.value)}
+          onChange={(event) => setBoardSearch(event.target.value)}
         />
         {search && (
           <button
             type="button"
             className="board-search__clear"
             onClick={() => {
-              setSearch('');
+              setBoardSearch('');
               filterRef.current?.focus();
             }}
             aria-label="Filter wissen"
@@ -50,10 +47,10 @@ export const AppHeader: React.FC<{ onOpenProfile?: (runnerId: string) => void }>
         <RunnerActivationModal
           onClose={() => setActivationOpen(false)}
           onOpenProfile={onOpenProfile}
-          onActivated={() => setSearch('')}
+          onActivated={() => setBoardSearch('')}
         />
       )}
-      {addOpen && <RunnerAddModal onClose={() => setAddOpen(false)} onAdded={() => setSearch('')} />}
+      {addOpen && <RunnerAddModal onClose={() => setAddOpen(false)} onAdded={() => setBoardSearch('')} />}
     </>
   );
-};
+}

@@ -1,5 +1,4 @@
 import crypto from 'node:crypto';
-import { v4 as uuidv4 } from 'uuid';
 import { all } from './connection.js';
 import { ensureHostId, ensureLocalSetting, getSetting, setLocalSetting } from './settings.js';
 import { type ReplicationIdentity } from './types.js';
@@ -7,7 +6,7 @@ import { type ReplicationIdentity } from './types.js';
 export function ensureReplicationIdentity(): ReplicationIdentity {
   return {
     hostId: ensureHostId(),
-    clusterId: ensureLocalSetting('replication_cluster_id', () => process.env.CLUSTER_ID?.trim() || uuidv4()),
+    clusterId: ensureLocalSetting('replication_cluster_id', () => process.env.CLUSTER_ID?.trim() || crypto.randomUUID()),
     clusterSecret: ensureLocalSetting(
       'replication_cluster_secret',
       () => process.env.CLUSTER_SECRET?.trim() || crypto.randomBytes(32).toString('hex')

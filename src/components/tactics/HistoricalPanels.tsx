@@ -135,7 +135,7 @@ export function HistoricalDatasetManager({
   );
 }
 
-export function HistoricalFilePicker({
+function HistoricalFilePicker({
   onHistoricalRaceLoad,
   compact = false,
 }: {

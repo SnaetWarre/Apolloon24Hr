@@ -96,7 +96,20 @@ New test files are picked up automatically; name integration tests
 `*.e2e.test.ts` so they run in the slower suite.
 
 Browser checks in `scripts/validation/` (`workflow-ui`, `dialog-ui`, `theme-ui`)
-run against a disposable ready-seeded server; see `docs/workflow-audit.md`.
+drive headless Chromium through Playwright. Each needs a fresh ready seed,
+because it changes runners and race state:
+
+```text
+npm run build
+npx tsx scripts/seed-test-db.mjs --scenario=ready --data-path=.test-data/ui
+DATA_PATH=.test-data/ui CLUSTER_ENABLED=false BACKUP_ENABLED=false PORT=3187 \
+  NODE_ENV=production node dist-server/server/index.js
+APOLLOON_TEST_URL=http://127.0.0.1:3187 node scripts/validation/workflow-ui.mjs
+```
+
+Set `PLAYWRIGHT_MODULE` and `CHROMIUM_EXECUTABLE` when Playwright is not
+installed in this project.
+
 The design rationale lives in `docs/apolloon-redesign-brief.html`.
 
 `npm run test:e2e` performs a production build and exercises the HTTP/runtime paths, including one-to-five-node replication, reconnects, bootstrap replacement, concurrent edits, and timing conflicts.

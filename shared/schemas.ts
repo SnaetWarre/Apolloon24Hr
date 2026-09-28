@@ -130,7 +130,7 @@ export const hostInfoSchema = z.object({
 });
 export type HostInfo = z.infer<typeof hostInfoSchema>;
 
-export const clusterRoleSchema = z.enum(['standalone', 'local-first']);
+const clusterRoleSchema = z.enum(['standalone', 'local-first']);
 export type ClusterRole = z.infer<typeof clusterRoleSchema>;
 
 export const clusterCompatibilitySchema = z.object({
@@ -200,7 +200,7 @@ export const backupStatusSchema = z.object({
 });
 export type BackupStatus = z.infer<typeof backupStatusSchema>;
 
-export const timingControlStateSchema = z.enum([
+const timingControlStateSchema = z.enum([
   'unassigned',
   'local',
   'remote-reachable',

@@ -1,4 +1,4 @@
-export function formatSecondsAsMmSs(totalSeconds: number | undefined | null): string {
+function formatSecondsAsMmSs(totalSeconds: number | undefined | null): string {
   if (totalSeconds == null || Number.isNaN(totalSeconds)) return '—';
   const totalMilliseconds = Math.max(0, Math.floor(totalSeconds * 1000));
   const milliseconds = totalMilliseconds % 1000;

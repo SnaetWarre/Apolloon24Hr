@@ -150,7 +150,7 @@ export function projectedLapCount(
   return projectedLaps;
 }
 
-export function buildLiveHourlyPaces(
+function buildLiveHourlyPaces(
   laps: LapRecord[],
   raceStartedAt: number
 ): Array<number | null> {

@@ -193,10 +193,6 @@ select.input {
   width: 104px;
 }
 
-.input--name {
-  min-width: 220px;
-}
-
 .input--color {
   width: 48px;
   padding: 3px;
@@ -319,12 +315,6 @@ input[type="radio"] {
   color: var(--ink-3);
   font-size: 13px;
   overflow-wrap: anywhere;
-}
-
-.export-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
 }
 
 /* ---------- Segmented control and section tabs ---------- */
@@ -645,7 +635,6 @@ input[type="radio"] {
   font-size: 13.5px;
 }
 
-.empty-state,
 .app-state {
   display: grid;
   gap: var(--space-3);

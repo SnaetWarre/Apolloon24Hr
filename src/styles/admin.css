@@ -182,18 +182,6 @@
   color: var(--ink-2);
 }
 
-.public-record-mode-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-3);
-}
-
-.public-record-mode-row .input {
-  width: auto;
-  min-width: 220px;
-}
-
 .management-content .table-wrap {
   max-height: 65dvh;
 }
@@ -263,11 +251,6 @@
 .label-create-row > .input--color {
   width: 44px;
   height: var(--control-h);
-}
-
-.label-swatch {
-  width: 18px;
-  height: 18px;
 }
 
 .temporary-team-list {

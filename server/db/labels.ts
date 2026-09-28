@@ -1,4 +1,4 @@
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'node:crypto';
 import { type Label, type LabelInput, type LabelPatch } from '../../shared/schemas.js';
 import { all, one, run, transaction } from './connection.js';
 import { canonicalLabelName, cleanInt, cleanText, parseStringArray } from './values.js';
@@ -48,7 +48,7 @@ export function ensureTemporaryTeamRow(labelId: string): void {
   run('INSERT OR IGNORE INTO temporary_teams (label_id, active, activated_at) VALUES (?, 0, NULL)', [labelId]);
 }
 
-export function isActiveTemporaryTeam(labelId: string): boolean {
+function isActiveTemporaryTeam(labelId: string): boolean {
   return Boolean(one<{ active: number }>('SELECT active FROM temporary_teams WHERE label_id = ?', [labelId])?.active);
 }
 
@@ -99,7 +99,7 @@ export function createLabelRecord(input: LabelInput, id: string, now: number): L
 }
 
 export function createLabel(input: LabelInput): Label {
-  return createLabelRecord(input, uuidv4(), Date.now());
+  return createLabelRecord(input, randomUUID(), Date.now());
 }
 
 export function updateLabel(id: string, fields: LabelPatch): Label | null {

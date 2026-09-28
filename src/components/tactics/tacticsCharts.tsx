@@ -25,7 +25,7 @@ Chart.register(
   Tooltip
 );
 
-export const MAX_CHART_PIXEL_RATIO = 1.5;
+const MAX_CHART_PIXEL_RATIO = 1.5;
 
 export function TacticsStat({
   label,
@@ -229,7 +229,7 @@ export function LiveTimeGapChart({ points }: { points: TimeGapPoint[] }) {
   return <ChartCanvas canvasRef={canvasRef} />;
 }
 
-export function ChartCanvas({ canvasRef }: { canvasRef: React.RefObject<HTMLCanvasElement | null> }) {
+function ChartCanvas({ canvasRef }: { canvasRef: React.RefObject<HTMLCanvasElement | null> }) {
   return (
     <div className="analysis-chart-card tactics-chart-card">
       <canvas ref={canvasRef} />
@@ -237,7 +237,7 @@ export function ChartCanvas({ canvasRef }: { canvasRef: React.RefObject<HTMLCanv
   );
 }
 
-export function lineDataset(
+function lineDataset(
   label: string,
   points: RaceProgressPoint[],
   valueKey: keyof Pick<RaceProgressPoint, 'liveLaps' | 'targetLaps' | 'ownHistoricalLaps' | 'rivalHistoricalLaps'>,
@@ -261,7 +261,7 @@ export function lineDataset(
   };
 }
 
-export function paceDataset(
+function paceDataset(
   label: string,
   points: HourlyPacePoint[],
   valueKey: keyof Pick<HourlyPacePoint, 'plannedSeconds' | 'actualSeconds' | 'ownHistoricalSeconds' | 'rivalHistoricalSeconds'>,
@@ -283,7 +283,7 @@ export function paceDataset(
   };
 }
 
-export function sharedLineChartOptions(
+function sharedLineChartOptions(
   yAxisTitle: string,
   yTickFormatter: (value: string | number) => string
 ): ChartConfiguration<'line'>['options'] {

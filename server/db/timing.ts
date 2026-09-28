@@ -1,4 +1,4 @@
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'node:crypto';
 import { type RaceEvent, type RaceState } from '../../shared/schemas.js';
 import { one, run, transaction } from './connection.js';
 import { getLapCount, getRaceEventById } from './history.js';
@@ -22,7 +22,7 @@ type HandoffSnapshot = {
 export function createBurgieGepaktEvent(nowMs = Date.now()): RaceEvent {
   const activeRunnerId = getRaceState().activeRunnerId;
   const activeRunner = activeRunnerId ? getRunnerById(activeRunnerId) : null;
-  const id = uuidv4();
+  const id = randomUUID();
   run(
     `INSERT INTO race_events (
       id,
@@ -64,7 +64,7 @@ export function performHandoff(nowMs = Date.now()):
     return { ok: false, error: 'empty_queue' };
   }
 
-  const lapId = activeRunnerId ? uuidv4() : null;
+  const lapId = activeRunnerId ? randomUUID() : null;
   const affectedIds = [activeRunnerId, nextRunner?.id].filter((id): id is string => Boolean(id));
   const snapshot: HandoffSnapshot = {
     raceState,
@@ -76,7 +76,7 @@ export function performHandoff(nowMs = Date.now()):
     run(
       `INSERT INTO handoff_history (id, created_at, payload_json, undone)
        VALUES (?, ?, ?, 0)`,
-      [uuidv4(), nowMs, JSON.stringify(snapshot)]
+      [randomUUID(), nowMs, JSON.stringify(snapshot)]
     );
 
     if (activeRunnerId) {

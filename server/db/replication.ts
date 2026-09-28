@@ -1,6 +1,5 @@
 import crypto from 'node:crypto';
 import path from 'node:path';
-import { v4 as uuidv4 } from 'uuid';
 import { type AppSnapshot } from '../../shared/schemas.js';
 import {
   compactStoredLapLabels,
@@ -155,7 +154,7 @@ export function commitReplicatedWrite<T>(input: {
   action: () => T;
 }): T {
   const identity = ensureReplicationIdentity();
-  const id = input.id || uuidv4();
+  const id = input.id || crypto.randomUUID();
   const existing = getReplicationOperation(id);
   if (existing) {
     if (existing.type !== input.type || stableJson(existing.payload) !== stableJson(input.payload ?? null)) {
@@ -722,7 +721,7 @@ export async function installReplicationBootstrap(input: {
     }
   }
 
-  const backupPath = path.join(DATA_DIR, `app.before-cluster-join-${Date.now()}-${uuidv4().slice(0, 8)}.sqlite`);
+  const backupPath = path.join(DATA_DIR, `app.before-cluster-join-${Date.now()}-${crypto.randomUUID().slice(0, 8)}.sqlite`);
   await getDb().backup(backupPath);
   transaction(() => {
     runUncaptured('DELETE FROM replication_peer_progress');

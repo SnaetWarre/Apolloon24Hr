@@ -92,9 +92,3 @@ export function formatRaceHourWindow(raceStartedAt: number, raceHour: number): s
 export function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, value));
 }
-
-export function standardDeviation(values: number[]): number {
-  if (!values.length) return 0;
-  const average = values.reduce((sum, value) => sum + value, 0) / values.length;
-  return Math.sqrt(values.reduce((sum, value) => sum + (value - average) ** 2, 0) / values.length);
-}

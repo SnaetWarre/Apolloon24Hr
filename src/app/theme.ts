@@ -6,7 +6,7 @@ import React from 'react';
 export type ThemePreference = 'light' | 'dark';
 export type ResolvedTheme = ThemePreference;
 
-export const THEME_STORAGE_KEY = 'apolloon.theme';
+const THEME_STORAGE_KEY = 'apolloon.theme';
 const DARK_QUERY = '(prefers-color-scheme: dark)';
 
 const listeners = new Set<() => void>();
@@ -58,7 +58,7 @@ export function setThemePreference(next: ThemePreference): void {
   notify();
 }
 
-export function getResolvedTheme(): ResolvedTheme {
+function getResolvedTheme(): ResolvedTheme {
   return preference;
 }
 
