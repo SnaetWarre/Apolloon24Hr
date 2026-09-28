@@ -26,6 +26,7 @@ import { Icon, type IconName } from './components/Icon';
 import { setDocumentSurface } from './app/theme';
 import { useSidebarCollapsed } from './app/sidebar';
 import { deriveSystemStatus } from './lib/systemStatus';
+import { useCopyText } from './lib/clipboard';
 import type { LiveAppSnapshot } from './types';
 
 const selectConnectionData = () => ({});
@@ -334,25 +335,14 @@ const selectHostData = ({ host }: LiveAppSnapshot) => ({ host });
 
 function HostAddress() {
   const { host } = useAppData(selectHostData);
-  const [copied, setCopied] = React.useState(false);
+  const [copied, copy] = useCopyText(host?.url ?? null);
   if (!host) return null;
-
-  async function copy() {
-    if (!host) return;
-    try {
-      await navigator.clipboard.writeText(host.url);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 2000);
-    } catch {
-      setCopied(false);
-    }
-  }
 
   return (
     <button
       type="button"
       className="sidebar-row sidebar-row--button"
-      onClick={() => void copy()}
+      onClick={copy}
       title={`Adres voor andere laptops kopiëren: ${host.url}`}
     >
       <span className="visually-hidden">Adres voor andere laptops kopiëren:</span>

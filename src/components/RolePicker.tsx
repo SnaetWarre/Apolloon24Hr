@@ -4,6 +4,7 @@ import { useAppData, useClusterStatus, useRaceHistory } from '../app/index';
 import { preloadAdminView, preloadAnalysisView } from '../lazyViews';
 import { getNextWaitingRunner } from '../lib/runners';
 import { deriveSystemStatus } from '../lib/systemStatus';
+import { useCopyText } from '../lib/clipboard';
 import { formatClockTimeMs, formatDurationMs } from '../lib/time';
 import { Icon } from './Icon';
 import { LiveDuration, LiveElapsed } from './LiveTime';
@@ -19,7 +20,7 @@ export function RolePicker() {
   const { laps: recentLaps, loading: lapsLoading } = useRaceHistory({ scope: 'recent', limit: 8 });
   const { cluster, error: clusterError } = useClusterStatus();
   const systemStatus = deriveSystemStatus(cluster, clusterError);
-  const [copied, setCopied] = React.useState(false);
+  const [copied, copyHostUrl] = useCopyText(host?.url ?? null);
 
   const activeRunner = runners.find((runner) => runner.id === race.activeRunnerId) || null;
   const nextRunner = getNextWaitingRunner(runners);
@@ -37,17 +38,6 @@ export function RolePicker() {
     ? totalLaps / ((race.raceFinishedAt ?? latestLapAt) - race.raceStartedAt) * 3_600_000
     : null;
 
-  async function copyHostUrl() {
-    if (!host) return;
-    try {
-      await navigator.clipboard.writeText(host.url);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 2000);
-    } catch {
-      setCopied(false);
-    }
-  }
-
   return (
     <>
       <PageHeader
@@ -62,7 +52,7 @@ export function RolePicker() {
           </span>
         }
         actions={host && (
-          <button type="button" className="btn btn--sm" onClick={() => void copyHostUrl()} title={host.url}>
+          <button type="button" className="btn btn--sm" onClick={copyHostUrl} title={host.url}>
             <Icon name={copied ? 'check' : 'copy'} size={14} />
             {copied ? 'Gekopieerd' : 'Adres voor andere laptop kopiëren'}
           </button>
