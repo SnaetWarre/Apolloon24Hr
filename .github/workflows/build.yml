@@ -1,5 +1,7 @@
 name: Build App
 
+# Pull requests verify installers; tagged releases distribute them.
+
 on:
   pull_request:
     branches: [main]
@@ -51,20 +53,9 @@ jobs:
         
       - name: Build Windows app
         run: npm run electron:build:win
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         
       - name: Smoke test Windows package
         run: node scripts/package-smoke.mjs
-
-      - name: Upload Windows installer
-        # Storage quota must not hide a successful build and package smoke test.
-        continue-on-error: true
-        uses: actions/upload-artifact@v7
-        with:
-          name: windows-installer
-          path: release/*.exe
-          retention-days: 1
 
   build-linux:
     runs-on: ubuntu-latest
@@ -92,20 +83,9 @@ jobs:
         
       - name: Build Linux app
         run: npm run electron:build:linux
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         
       - name: Smoke test Linux AppImage
         run: xvfb-run -a node scripts/package-smoke.mjs
-
-      - name: Upload Linux AppImage
-        # Storage quota must not hide a successful build and package smoke test.
-        continue-on-error: true
-        uses: actions/upload-artifact@v7
-        with:
-          name: linux-appimage
-          path: release/*.AppImage
-          retention-days: 1
 
   required-ci:
     name: Required CI
