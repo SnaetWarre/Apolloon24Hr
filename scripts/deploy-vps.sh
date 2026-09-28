@@ -12,8 +12,73 @@ VPS_PUBLIC_APP_PORT="${VPS_PUBLIC_APP_PORT:-${VPS_APP_PORT}}"
 VPS_NODE_VERSION="${VPS_NODE_VERSION:-22.12.0}"
 DEPLOY_SKIP_BUILD="${DEPLOY_SKIP_BUILD:-0}"
 DEPLOY_ARTIFACT="${DEPLOY_ARTIFACT:-}"
+DEPLOY_FORCE="${DEPLOY_FORCE:-0}"
 
 target="${VPS_USER}@${VPS_HOST}"
+remote_shell='flock -w 600 /run/lock/apolloon-deploy.lock bash -s'
+if [[ "${VPS_USER}" != root ]]; then
+  remote_shell="sudo -n ${remote_shell}"
+fi
+
+# A clean checkout of the running commit needs no rebuild or service restart.
+# Explicit artifacts, prebuilt output, and forced deploys may differ from HEAD.
+if [[ "${DEPLOY_FORCE}" != "1" && -z "${DEPLOY_ARTIFACT}" && "${DEPLOY_SKIP_BUILD}" != "1" ]] &&
+   git rev-parse --verify HEAD >/dev/null 2>&1 &&
+   [[ -z "$(git status --porcelain --untracked-files=normal)" ]]; then
+  commit_short="$(git rev-parse --short HEAD)"
+  current_release="$(ssh -o StrictHostKeyChecking=yes -o BatchMode=yes "${target}" "${remote_shell}" -- \
+    "${VPS_APP_DIR}" "${VPS_DATA_DIR}" "${VPS_SERVICE_NAME}" "${VPS_APP_PORT}" \
+    "${VPS_PUBLIC_HOST}" "${VPS_PUBLIC_APP_PORT}" "${commit_short}" <<'REMOTE_CHECK'
+set -euo pipefail
+
+app_dir="$1"
+data_dir="$2"
+service_name="$3"
+app_port="$4"
+public_host="$5"
+public_app_port="$6"
+commit_short="$7"
+service_file="/etc/systemd/system/${service_name}.service"
+
+current_release="$(readlink -f "${app_dir}/current" 2>/dev/null || true)"
+[[ "${current_release}" == "${app_dir}/releases/"* ]] || exit 0
+release_id="${current_release##*/}"
+[[ "${release_id}" =~ ^[0-9]{14}-${commit_short}-[0-9]+$ ]] || exit 0
+systemctl is-active --quiet "${service_name}.service" || exit 0
+
+# Changes to deploy settings must still update the service, even at the same commit.
+for setting in \
+  "WorkingDirectory=${app_dir}/current" \
+  "Environment=DATA_PATH=${data_dir}" \
+  "Environment=PORT=${app_port}" \
+  "Environment=PUBLIC_HOST=${public_host}" \
+  "Environment=PUBLIC_APP_PORT=${public_app_port}" \
+  "Environment=APOLLOON_RELEASE_ID=${release_id}"; do
+  grep -Fxq -- "${setting}" "${service_file}" || exit 0
+done
+
+health_json="$(curl -fsS --max-time 3 "http://127.0.0.1:${app_port}/api/health" 2>/dev/null)" || exit 0
+command -v node >/dev/null 2>&1 || exit 0
+printf '%s' "${health_json}" | node -e '
+let input = "";
+process.stdin.on("data", (chunk) => { input += chunk; });
+process.stdin.on("end", () => {
+  try {
+    const health = JSON.parse(input);
+    if (health.ok && health.database?.ready && health.releaseId === process.argv[1]) {
+      process.stdout.write(health.releaseId);
+    }
+  } catch { /* An invalid health response requires a fresh deployment. */ }
+});
+' "${release_id}"
+REMOTE_CHECK
+)"
+  if [[ -n "${current_release}" ]]; then
+    echo "Apolloon is already healthy at ${current_release}; skipping build, upload, and restart."
+    exit 0
+  fi
+fi
+
 release_id="$(date -u +%Y%m%d%H%M%S)-$(git rev-parse --short HEAD 2>/dev/null || echo manual)-${RANDOM}${RANDOM}"
 tmp_dir="$(mktemp -d)"
 
@@ -50,10 +115,6 @@ scp -o StrictHostKeyChecking=yes -o BatchMode=yes "${DEPLOY_ARTIFACT}" "${target
 
 echo "Installing release ${release_id} on ${target}"
 # Hold the server-side lock for the entire install, including manual deploys.
-remote_shell='flock -w 600 /run/lock/apolloon-deploy.lock bash -s'
-if [[ "${VPS_USER}" != root ]]; then
-  remote_shell="sudo -n ${remote_shell}"
-fi
 ssh -o StrictHostKeyChecking=yes -o BatchMode=yes "${target}" "${remote_shell}" -- \
   "${remote_artifact}" \
   "${VPS_APP_DIR}" \
