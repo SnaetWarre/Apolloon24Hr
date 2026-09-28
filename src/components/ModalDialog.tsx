@@ -1,5 +1,10 @@
 import React from 'react';
 
+/** Page-level keyboard shortcuts must stay quiet while a modal owns the keyboard. */
+export function isModalDialogOpen(): boolean {
+  return document.querySelector('dialog[open]') !== null;
+}
+
 /** Native modal behavior keeps keyboard focus and pointer actions in the top dialog. */
 export function ModalDialog({
   label,

@@ -1,4 +1,3 @@
-import React from 'react';
 import type { Label } from '../types';
 
 export function LabelBadge({ label, compact = false }: { label: Label; compact?: boolean }) {

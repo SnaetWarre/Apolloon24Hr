@@ -19,13 +19,9 @@ import {
   smoothPacePoints,
   summarizeHistoricalTeams,
   summarizeHistoricalWindow,
-  type DraftingTeamAnalysis,
-  type PacePoint,
 } from '../../lib/tacticsDeepDive';
-import { formatDurationMs } from '../../lib/time';
 import {
   BreakEvenChart,
-  ChartPanel,
   ConsistencyChart,
   CumulativeRaceChart,
   DeepStat,
@@ -363,7 +359,7 @@ function RaceSection({ firstTeam, secondTeam }: { firstTeam: HistoricalTeam; sec
           title="Wie lag wanneer voor?"
           text={`Boven nul lag team ${firstTeam.teamId} voor, onder nul team ${secondTeam.teamId}. De tweede as rekent hetzelfde verschil om met ${lapLengthMeters} meter per ronde.`}
         />
-        <RaceLeadChart points={raceLead} firstTeam={firstTeam} secondTeam={secondTeam} lapLengthMeters={lapLengthMeters} />
+        <RaceLeadChart points={raceLead} firstTeam={firstTeam} lapLengthMeters={lapLengthMeters} />
       </section>
     </div>
   );

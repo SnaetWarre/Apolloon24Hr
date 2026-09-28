@@ -84,13 +84,25 @@ try {
   await page.keyboard.press('Space');
   await page.keyboard.press('Enter');
   assert.ok((await snapshot()).race.raceFinishedAt);
-  page.once('dialog', (dialog) => dialog.dismiss());
+  const resumePrompt = page.getByRole('dialog', { name: 'Race hervatten?', exact: true });
   await page.getByRole('button', { name: 'Race hervatten' }).click();
+  await resumePrompt.getByRole('button', { name: 'Annuleer', exact: true }).click();
+  await resumePrompt.waitFor({ state: 'detached' });
   assert.equal((await snapshot()).race.activeRunnerId, null);
-  page.once('dialog', (dialog) => dialog.accept());
   await page.getByRole('button', { name: 'Race hervatten' }).click();
+  await resumePrompt.getByRole('button', { name: 'Race hervatten', exact: true }).click();
   await waitUntil(async () => (await snapshot()).race.activeRunnerId === secondRunner.id);
   console.log('PASS finished race ignores timing shortcuts and requires confirmed resumption');
+
+  const raceBeforeUndoPrompt = (await snapshot()).race;
+  const undoPrompt = page.getByRole('dialog', { name: 'Laatste wissel ongedaan maken?', exact: true });
+  await page.getByRole('button', { name: 'Laatste wissel ongedaan maken', exact: true }).click();
+  await page.keyboard.press('Space');
+  await undoPrompt.waitFor({ state: 'detached' });
+  const raceAfterUndoPrompt = (await snapshot()).race;
+  assert.equal(raceAfterUndoPrompt.activeRunnerId, raceBeforeUndoPrompt.activeRunnerId);
+  assert.equal(raceAfterUndoPrompt.activeStartedAt, raceBeforeUndoPrompt.activeStartedAt);
+  console.log('PASS Space inside a timing confirmation cancels it without recording a handoff');
 
   await rpc.runners.setStatus.mutate({ id: firstRunner.id, status: 'warming_up' });
   await page.goto(`${baseUrl}/queue`);
@@ -101,8 +113,9 @@ try {
   await page.getByText('Dit profiel is intussen elders gewijzigd.', { exact: false }).waitFor();
   assert.equal(await nameInput.inputValue(), 'Unsaved local draft');
   assert.equal(await page.getByRole('button', { name: 'Opslaan', exact: true }).isDisabled(), true);
-  page.once('dialog', (dialog) => dialog.accept());
   await page.getByRole('button', { name: 'Nieuwste profiel laden' }).click();
+  await page.getByRole('dialog', { name: 'Nieuwste profiel laden?', exact: true })
+    .getByRole('button', { name: 'Nieuwste laden', exact: true }).click();
   assert.equal(await nameInput.inputValue(), firstRunner.name);
   assert.equal(await page.getByRole('textbox', { name: 'Notities' }).inputValue(), 'Remote operator edit');
   await rpc.runners.update.mutate({ id: firstRunner.id, fields: { notes: 'Clean draft auto refresh' } });

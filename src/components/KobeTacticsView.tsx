@@ -20,17 +20,13 @@ import {
   teamById,
   validLiveLaps,
   type HistoricalRace,
-  type HourlyPacePoint,
-  type RaceProgressPoint,
 } from '../lib/tactics';
 import {
   buildLiveQuarterHourTrend,
   buildLiveRivalTimeGap,
   projectScenarioRange,
-  type LiveTrendPoint,
-  type TimeGapPoint,
 } from '../lib/tacticsDeepDive';
-import { formatClockTimeMs, formatDurationMs, nowMs } from '../lib/time';
+import { nowMs } from '../lib/time';
 import { useClockTick } from '../lib/useAnimationFrameTick';
 import type { LapRecord, LiveAppSnapshot } from '../types';
 import { HistoricalAnalysisSection, HistoricalDataNotice, HistoricalDatasetManager } from './tactics/HistoricalPanels';

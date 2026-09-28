@@ -1,4 +1,3 @@
-import React from 'react';
 import { Link } from '@tanstack/react-router';
 import { useAppData, useClusterStatus, useRaceHistory } from '../app/index';
 import { preloadAdminView, preloadAnalysisView } from '../lazyViews';

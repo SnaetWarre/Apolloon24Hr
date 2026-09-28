@@ -1,5 +1,7 @@
 import React from 'react';
 import { LabelBadge } from '../LabelBadge';
+import { useConfirm } from '../ConfirmDialog';
+import { isModalDialogOpen } from '../ModalDialog';
 import { formatClockTimeMs } from '../../lib/time';
 import { compareRunnerIdentity } from './adminFormat';
 import { RunnerIdentity } from './RunnerIdentity';
@@ -23,6 +25,7 @@ export function TemporaryTeamAdminCard({
   onSetActive: (labelId: string, active: boolean) => Promise<TemporaryTeam>;
   onSetSchedule: (labelId: string, startsAt: number, endsAt: number) => Promise<TemporaryTeam>;
 }) {
+  const confirm = useConfirm();
   const [selectedIds, setSelectedIds] = React.useState<string[]>(team.memberRunnerIds);
   const [query, setQuery] = React.useState('');
   const [membersOpen, setMembersOpen] = React.useState(false);
@@ -70,8 +73,14 @@ export function TemporaryTeamAdminCard({
     setMembersOpen(true);
   }
 
-  function closeMembers() {
-    if (dirty && !window.confirm('Niet-opgeslagen wijzigingen aan de ledenlijst weggooien?')) return;
+  async function closeMembers() {
+    if (dirty && !(await confirm({
+      title: 'Wijzigingen weggooien?',
+      message: 'De aanpassingen aan de ledenlijst zijn nog niet opgeslagen.',
+      confirmLabel: 'Weggooien',
+      cancelLabel: 'Verder bewerken',
+      tone: 'danger',
+    }))) return;
     setMembersOpen(false);
   }
 
@@ -93,9 +102,9 @@ export function TemporaryTeamAdminCard({
   React.useEffect(() => {
     if (!membersOpen) return undefined;
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key !== 'Escape') return;
+      if (event.key !== 'Escape' || isModalDialogOpen()) return;
       event.preventDefault();
-      closeMembers();
+      void closeMembers();
     }
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
@@ -104,7 +113,11 @@ export function TemporaryTeamAdminCard({
   async function changeActive() {
     if (busy) return;
     const action = team.active ? 'deactiveren' : 'activeren';
-    if (!window.confirm(`${label.name} ${action} voor ${team.memberRunnerIds.length} lopers?`)) return;
+    if (!(await confirm({
+      title: `${label.name} ${action}?`,
+      message: `Dit geldt voor ${team.memberRunnerIds.length} lopers.`,
+      confirmLabel: team.active ? 'Deactiveren' : 'Activeren',
+    }))) return;
     setBusy(true);
     setFeedback(null);
     try {

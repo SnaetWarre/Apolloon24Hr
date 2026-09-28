@@ -24,6 +24,10 @@ Shared contracts live in `shared/`. Anything imported by both client and server 
 - `src/components/`: route-level screens and reusable UI pieces.
   - `KobeTacticsView.tsx`: live API-backed tactics and the historical workspace shell.
   - `tactics/HistoricalDeepDive.tsx`: detailed historical charts, diagnostics, and drafting controls.
+  - `ModalDialog.tsx`: native modal `<dialog>` wrapper; `isModalDialogOpen()`
+    lets page-level shortcuts (timing Space/Enter) stay quiet under a dialog.
+  - `ConfirmDialog.tsx`: `useConfirm()` returns an awaitable in-app confirmation.
+    Use it instead of `window.confirm`, which freezes the live clocks.
 - `src/lib/`: browser-side helpers and app-specific utility functions.
   - `tactics.ts`: historical race validation, live comparison, and target-scenario calculations for Kobe's tactiek.
   - `tacticsDeepDive.ts`: detailed historical statistics, race-gap models, live uncertainty, and drafting tests.
@@ -74,7 +78,8 @@ backup retention, and the event-day recovery runbook.
 - `scripts/electron-build.mjs`: packaged Electron build wrapper.
 - `scripts/ensure-lan-dev-firewall.mjs`: development firewall helper.
 - `.dev-data/` and `.test-data/` are disposable local databases.
-- `data/app.db` is the normal local app database.
+- `data/app.db` is the normal local app database. Local databases are git-ignored;
+  seed a fresh one with `npm run db:dev:seed` instead of committing one.
 - `backups/` contains verified point-in-time recovery snapshots outside releases.
 
 ## Quality Gates
@@ -82,10 +87,13 @@ backup retention, and the event-day recovery runbook.
 Use these before handing off changes:
 
 ```text
-npm run typecheck
-npm test
-npm run test:e2e
+npm run typecheck   # client, server, and tests (tsconfig.tests.json)
+npm test            # every tests/*.test.{ts,mjs} except *.e2e.test.ts
+npm run test:e2e    # every tests/*.e2e.test.ts
 ```
+
+New test files are picked up automatically; name integration tests
+`*.e2e.test.ts` so they run in the slower suite.
 
 Browser checks in `scripts/validation/` (`workflow-ui`, `dialog-ui`, `theme-ui`)
 run against a disposable ready-seeded server; see `docs/workflow-audit.md`.

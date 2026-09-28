@@ -1,5 +1,6 @@
 import React from 'react';
 import { ModalDialog } from './ModalDialog';
+import { useConfirm } from './ConfirmDialog';
 import { runnerFormError } from '../lib/runnerForm';
 import { useAppActions, useAppData } from '../app/index';
 import type { Label, LiveAppSnapshot, Runner } from '../types';
@@ -206,14 +207,22 @@ export function RunnerAddModal({ onClose, onAdded }: { onClose: () => void; onAd
   const [error, setError] = React.useState<string | null>(null);
   const saveBusyRef = React.useRef(false);
   const runnerNumberInputRef = React.useRef<HTMLInputElement>(null);
+  const confirm = useConfirm();
 
-  function requestClose() {
+  async function requestClose() {
     if (saveBusyRef.current) return;
     const hasDraft = selectedLabels.length > 0 || [
       runnerNumber, name, targetLaps, notes,
       historicalAvgMinutes, historicalAvgSeconds, historicalBestMinutes, historicalBestSeconds,
     ].some((input) => input.trim());
-    if (hasDraft && !window.confirm('Nieuwe loper sluiten zonder opslaan? Je invoer gaat verloren.')) return;
+    if (hasDraft && !(await confirm({
+      title: 'Nieuwe loper sluiten?',
+      message: 'Je invoer is nog niet opgeslagen en gaat verloren.',
+      confirmLabel: 'Sluiten zonder opslaan',
+      cancelLabel: 'Verder invullen',
+      tone: 'danger',
+    }))) return;
+    if (saveBusyRef.current) return;
     onClose();
   }
 

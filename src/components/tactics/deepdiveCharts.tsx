@@ -14,24 +14,18 @@ import {
   Tooltip,
   type ChartConfiguration,
 } from 'chart.js';
-import type { HistoricalRace, HistoricalTeam } from '../../lib/tactics';
+import type { HistoricalTeam } from '../../lib/tactics';
 import {
-  analyzeDrafting,
   buildBreakEvenSensitivity,
   buildHalfHourPaceDifferences,
   buildHourlyConsistency,
   buildHourlyLapGains,
-  buildQuarterHourPaces,
   buildRaceLeadCurve,
   buildSameLapIndexGap,
   buildTimeGapCurve,
-  calculateBreakEven,
   calculateNightPenalty,
-  defaultSlowLapThreshold,
   findPaceChanges,
   findSlowLaps,
-  smoothPacePoints,
-  summarizeHistoricalTeams,
   summarizeHistoricalWindow,
   type DraftingTeamAnalysis,
   type PacePoint,
@@ -325,12 +319,10 @@ export function CumulativeRaceChart({ firstTeam, secondTeam }: { firstTeam: Hist
 export function RaceLeadChart({
   points,
   firstTeam,
-  secondTeam,
   lapLengthMeters,
 }: {
   points: ReturnType<typeof buildRaceLeadCurve>;
   firstTeam: HistoricalTeam;
-  secondTeam: HistoricalTeam;
   lapLengthMeters: number;
 }) {
   return (

@@ -6,6 +6,7 @@ import React from 'react';
 import { useAppActions, useAppData, useClusterStatus } from '../app/index';
 import { labelKindTitle } from './LabelBadge';
 import { RunnerProfileModal } from './RunnerProfileModal';
+import { useConfirm } from './ConfirmDialog';
 import { formatClockTimeMs } from '../lib/time';
 import { buildEventReadiness, readinessSummary } from '../lib/readiness';
 import { AdminRunnerTable } from './admin/AdminRunnerTable';
@@ -43,6 +44,7 @@ const ADMIN_SECTIONS: ReadonlyArray<{ id: AdminSection; label: string }> = [
 ];
 
 export function AdminView() {
+  const confirm = useConfirm();
   const [activeSection, setActiveSection] = React.useState<AdminSection>('preparation');
   const { labels, runners, settings, temporaryTeams, host, race } = useAppData(selectAdminData);
   const { cluster, error: clusterError } = useClusterStatus();
@@ -136,9 +138,12 @@ export function AdminView() {
     const pairingCode = remotePairingCode.trim();
     if (!remoteUrl || !pairingCode || clusterSaving) return;
     if (
-      !window.confirm(
-        'Deze laptop neemt de volledige database van de andere laptop over. De huidige database wordt eerst als herstelkopie bewaard. Doorgaan?'
-      )
+      !(await confirm({
+        title: 'Database van de andere laptop overnemen?',
+        message: 'Deze laptop neemt de volledige database van de andere laptop over. De huidige database wordt eerst als herstelkopie bewaard.',
+        confirmLabel: 'Koppelen en overnemen',
+        tone: 'danger',
+      }))
     ) {
       return;
     }
@@ -157,9 +162,12 @@ export function AdminView() {
 
   async function chooseConflictVersion(conflictId: string, selectedOperationId: string) {
     if (
-      !window.confirm(
-        'Deze timingversie wordt de gekozen geschiedenis voor alle laptops. Controleer het tijdstip zorgvuldig. Doorgaan?'
-      )
+      !(await confirm({
+        title: 'Deze timingversie kiezen?',
+        message: 'Deze versie wordt de gekozen geschiedenis voor alle laptops. Controleer het tijdstip zorgvuldig.',
+        confirmLabel: 'Versie kiezen',
+        tone: 'danger',
+      }))
     ) {
       return;
     }
@@ -178,9 +186,11 @@ export function AdminView() {
 
   async function transferTiming(targetHostId: string, targetUrl: string) {
     if (
-      !window.confirm(
-        `Timing gecontroleerd overdragen naar ${targetUrl}? Deze laptop kan daarna niet meer klokken.`
-      )
+      !(await confirm({
+        title: 'Timing overdragen?',
+        message: `De timing gaat naar ${targetUrl}. Deze laptop kan daarna niet meer klokken.`,
+        confirmLabel: 'Timing overdragen',
+      }))
     ) {
       return;
     }
@@ -213,9 +223,11 @@ export function AdminView() {
   async function compactStorage() {
     if (compactionSaving || !cluster?.backup.database.compactionRecommended) return;
     if (
-      !window.confirm(
-        'Apolloon maakt eerst een geverifieerde herstelbackup en verkleint daarna het SQLite-bestand. Dit kan alleen wanneer de race niet actief is. Doorgaan?'
-      )
+      !(await confirm({
+        title: 'Database verkleinen?',
+        message: 'Apolloon maakt eerst een geverifieerde herstelbackup en verkleint daarna het SQLite-bestand. Dit kan alleen wanneer de race niet actief is.',
+        confirmLabel: 'Verkleinen',
+      }))
     )
       return;
     setCompactionSaving(true);
@@ -308,7 +320,12 @@ export function AdminView() {
   }
 
   async function removeLabel(id: string, name: string) {
-    if (!window.confirm(`Label ${name} verwijderen? Dit verwijdert het label ook van lopers.`)) return;
+    if (!(await confirm({
+      title: `Label ${name} verwijderen?`,
+      message: 'Dit verwijdert het label ook van lopers.',
+      confirmLabel: 'Label verwijderen',
+      tone: 'danger',
+    }))) return;
     setLabelMessage(null);
     try {
       await deleteLabel(id);
@@ -377,7 +394,12 @@ export function AdminView() {
 
   async function removeRunner(runner: Runner) {
     if (runner.lapCount > 0 || runner.status === 'running') return;
-    if (!window.confirm(`Loper ${runner.name} definitief verwijderen?`)) return;
+    if (!(await confirm({
+      title: `${runner.name} definitief verwijderen?`,
+      message: 'Dit kan niet ongedaan gemaakt worden.',
+      confirmLabel: 'Definitief verwijderen',
+      tone: 'danger',
+    }))) return;
     setRunnerMessage(null);
     try {
       await deleteRunner(runner.id);

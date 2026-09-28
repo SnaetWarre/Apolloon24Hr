@@ -1,5 +1,6 @@
 import React from 'react';
-import { ModalDialog } from './ModalDialog';
+import { isModalDialogOpen, ModalDialog } from './ModalDialog';
+import { useConfirm } from './ConfirmDialog';
 import { useAppActions, useAppData, useClusterStatus, useRaceHistory } from '../app/index';
 import { formatClockTimeMs, formatDurationMs, nowMs } from '../lib/time';
 import { getNextWaitingRunner } from '../lib/runners';
@@ -24,6 +25,7 @@ export function TimingView() {
   const [lastAction, setLastAction] = React.useState<string | null>(null);
   const [finishConfirmStep, setFinishConfirmStep] = React.useState<0 | 1 | 2>(0);
   const handoffBusyRef = React.useRef(false);
+  const confirm = useConfirm();
   const controlledElsewhere = Boolean(
     cluster?.timingControllerHostId && cluster.timingControllerHostId !== cluster.hostId
   );
@@ -68,7 +70,12 @@ export function TimingView() {
     if (timingBlocked || finishConfirmStep > 0 || (!activeRunner && !nextRunner)) return;
     if (
       race.raceFinishedAt &&
-      !window.confirm('De race is afgesloten. Wil je de race hervatten en de volgende loper starten?')
+      !(await confirm({
+        title: 'Race hervatten?',
+        message: 'De race is afgesloten. Hervatten start de volgende loper.',
+        confirmLabel: 'Race hervatten',
+        tone: 'danger',
+      }))
     ) return;
     await runExclusiveRaceAction(
       async () => {
@@ -83,7 +90,7 @@ export function TimingView() {
       },
       null
     );
-  }, [activeRunner, nextRunner, finishConfirmStep, race.raceFinishedAt, handoff, runExclusiveRaceAction, startNext, timingBlocked]);
+  }, [activeRunner, nextRunner, finishConfirmStep, race.raceFinishedAt, confirm, handoff, runExclusiveRaceAction, startNext, timingBlocked]);
 
   React.useEffect(() => {
     // Navigation buttons can stay focused when this route opens. In that case,
@@ -98,7 +105,7 @@ export function TimingView() {
       if (
         event.defaultPrevented || event.ctrlKey || event.altKey || event.metaKey || event.isComposing ||
         !isHandoffKey(event) || isTextEntryTarget(target) ||
-        finishConfirmStep > 0 || timingBlocked || race.raceFinishedAt
+        finishConfirmStep > 0 || timingBlocked || race.raceFinishedAt || isModalDialogOpen()
       ) return;
       // Space is the dedicated timing control on this screen, even if a button
       // still has focus. Keep Enter's normal button/link behaviour intact.
@@ -113,7 +120,12 @@ export function TimingView() {
 
   async function undo() {
     if (handoffBusyRef.current) return;
-    if (!window.confirm('Laatste handoff ongedaan maken?')) return;
+    if (!(await confirm({
+      title: 'Laatste wissel ongedaan maken?',
+      message: 'Wachtrij, actieve loper en eventuele ronde gaan terug naar de toestand van vóór de laatste wissel.',
+      confirmLabel: 'Ongedaan maken',
+      tone: 'danger',
+    }))) return;
     await runExclusiveRaceAction(undoLastHandoff, null);
   }
 
@@ -133,11 +145,14 @@ export function TimingView() {
       return;
     const force = !timingControl.localReplicaCaughtUp;
     if (
-      !window.confirm(
-        force
-          ? 'GEFORCEERDE noodovername: deze laptop is mogelijk niet volledig gesynchroniseerd. Bevestig dat de vorige timinglaptop gestopt is en aanvaard dat de laatste timingacties kunnen ontbreken. Doorgaan?'
-          : 'Noodovername timing: bevestig dat de vorige timinglaptop gestopt of definitief losgekoppeld is. Als die laptop verder klokt, ontstaan twee timinggeschiedenissen. Doorgaan?'
-      )
+      !(await confirm({
+        title: force ? 'Geforceerde noodovername' : 'Noodovername timing',
+        message: force
+          ? 'Deze laptop is mogelijk niet volledig gesynchroniseerd. Bevestig dat de vorige timinglaptop gestopt is en aanvaard dat de laatste timingacties kunnen ontbreken.'
+          : 'Bevestig dat de vorige timinglaptop gestopt of definitief losgekoppeld is. Als die laptop verder klokt, ontstaan twee timinggeschiedenissen.',
+        confirmLabel: force ? 'Geforceerd overnemen' : 'Timing overnemen',
+        tone: 'danger',
+      }))
     ) {
       return;
     }

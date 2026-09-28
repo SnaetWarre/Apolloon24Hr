@@ -1,4 +1,3 @@
-import React from 'react';
 import type { Runner } from '../../types';
 
 export function RunnerIdentity({ runner, detail }: { runner: Runner; detail?: string }) {

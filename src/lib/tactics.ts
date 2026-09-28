@@ -283,7 +283,3 @@ function median(values: number[]): number | null {
 function validPace(paceSeconds: number | undefined): number {
   return Number.isFinite(paceSeconds) && Number(paceSeconds) > 0 ? Number(paceSeconds) : 1;
 }
-
-function roundToTenth(value: number): number {
-  return Math.round(value * 10) / 10;
-}

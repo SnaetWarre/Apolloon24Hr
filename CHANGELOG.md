@@ -4,6 +4,17 @@ All notable changes to the Leuven 24h Runner Tracker will be documented in this 
 
 ## [Unreleased]
 
+### Changed
+
+- Bevestigingen zijn in-app dialogen i.p.v. browserpop-ups: de live klokken en
+  realtime updates lopen door terwijl een vraag openstaat, en de knoppen zeggen
+  wat ze doen ("Timing overnemen", "Definitief verwijderen", ...)
+
+### Fixed
+
+- Spatie of Enter in een open dialoog op het timingscherm registreert geen
+  wissel meer
+
 ## [3.1.0] - 2026-09-22
 
 Race-hardening bovenop 3.0.0. Ook deze versie synchroniseert alleen met gelijke
