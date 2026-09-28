@@ -1,5 +1,7 @@
 import React from 'react';
+import { useChartTheme } from '../lib/chartPalette';
 import { SectionNavigation } from './SectionNavigation';
+import { PageHeader } from './PageHeader';
 import { useAppData, useRaceHistory } from '../app/index';
 import {
   DEFAULT_MAXIMUM_LAP_SECONDS,
@@ -10,6 +12,7 @@ import {
   buildTargetPaces,
   formatSignedLapDifference,
   historicalLapCountAt,
+  paceUncertaintySeconds,
   parseHistoricalRace,
   projectedLapCount,
   recentMedianPaceSeconds,
@@ -46,7 +49,6 @@ import {
   formatRaceHourWindow,
   loadStoredHistoricalRace,
   loadStoredTacticsScenario,
-  standardDeviation,
   type StoredTacticsScenario,
   type TargetProfile,
 } from './tactics/tacticsFormat';
@@ -65,6 +67,8 @@ type TacticsSection = 'live' | 'historical';
 const selectTacticsData = ({ race }: LiveAppSnapshot) => ({ race });
 
 export function KobeTacticsView() {
+  // Chart configurations are built during render; re-render them with the new theme colours.
+  useChartTheme();
   const { race } = useAppData(selectTacticsData);
   useClockTick(30_000, race.raceStartedAt != null && race.raceFinishedAt == null);
   const { laps, loading: historyLoading, error: historyError } = useRaceHistory({ scope: 'full' });
@@ -125,18 +129,14 @@ export function KobeTacticsView() {
 
   return (
     <>
-      <div className="hero hero--compact tactics-hero">
-        <div>
-          <h1 className="app-title">Kobe&apos;s tactiek</h1>
-          <p className="tagline">
-            Vergelijk vorige edities en stuur het doelverloop bij met de live data uit Apolloon.
-          </p>
-        </div>
-        <div className="tactics-live-badge" role="status">
-          <i />
-          {historyLoading ? 'Live data laden' : `${laps.length} rondes live gekoppeld`}
-        </div>
-      </div>
+      <PageHeader
+        title="Kobe's tactiek"
+        meta={
+          <span className="header-tag header-tag--live" role="status">
+            {historyLoading ? 'Live data laden' : `${laps.length} rondes live gekoppeld`}
+          </span>
+        }
+      />
 
       {historyError && (
         <div className="warning-banner" role="alert">
@@ -263,14 +263,14 @@ function LiveTacticsSection({
   const suspiciousLapCount = laps.length - cleanLaps.length;
   const expectedLapsNow = targetLapCountAt(targetPaces, elapsedHours);
   const currentPaceSeconds = recentMedianPaceSeconds(cleanLaps, recentLapCount);
-  const recentPaceSpreadSeconds = standardDeviation(
+  const recentPaceUncertaintySeconds = paceUncertaintySeconds(
     cleanLaps.slice(-recentLapCount).map((lap) => lap.durationMs / 1_000)
   );
   const scenarioRange = projectScenarioRange(
     cleanLaps.length,
     elapsedHours,
     targetPaces,
-    recentPaceSpreadSeconds
+    recentPaceUncertaintySeconds
   );
   const recentPaceProjection = currentPaceSeconds == null
     ? null
@@ -326,13 +326,13 @@ function LiveTacticsSection({
           label="Op schema"
           value={formatSignedLapDifference(cleanLaps.length - expectedLapsNow)}
           unit="rondes"
-          detail={`${expectedLapsNow.toFixed(1)} rondes verwacht`}
+          detail={`${expectedLapsNow.toLocaleString('nl-BE', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} verwacht op dit moment`}
           tone={cleanLaps.length >= expectedLapsNow ? 'positive' : 'negative'}
         />
         <TacticsStat
-          label="Projectie na 24u"
+          label="Eindstand op doelschema"
           value={Math.round(scenarioRange.expectedLaps).toLocaleString('nl-BE')}
-          detail={`${Math.round(scenarioRange.pessimisticLaps)}-${Math.round(scenarioRange.optimisticLaps)} op recente spreiding`}
+          detail={`${Math.round(scenarioRange.pessimisticLaps)}–${Math.round(scenarioRange.optimisticLaps)} bij ±${recentPaceUncertaintySeconds.toFixed(1)} s op het tempo`}
         />
         <TacticsStat
           label={`Tempo laatste ${recentLapCount}`}
@@ -342,16 +342,16 @@ function LiveTacticsSection({
             : `${Math.round(recentPaceProjection)} rondes bij dit tempo`}
         />
         <TacticsStat
-          label="Vs. Apolloon vorig jaar"
+          label="Tegenover Apolloon vorig jaar"
           value={formatSignedLapDifference(ownHistoricalLapsNow == null ? null : cleanLaps.length - ownHistoricalLapsNow)}
           unit="rondes"
-          detail={`Bron: ${historicalSourceName}`}
+          detail={`Op hetzelfde moment, ${historicalSourceName}`}
         />
         <TacticsStat
-          label="Vs. VTK vorig jaar"
+          label="Tegenover VTK vorig jaar"
           value={formatSignedLapDifference(rivalHistoricalLapsNow == null ? null : cleanLaps.length - rivalHistoricalLapsNow)}
           unit="rondes"
-          detail={`Bron: ${historicalSourceName}`}
+          detail={`Op hetzelfde moment, ${historicalSourceName}`}
         />
       </section>
 
@@ -360,7 +360,7 @@ function LiveTacticsSection({
         <TacticsSectionHeader
           kicker="Voortgang"
           title="Live tegenover doel en vorig jaar"
-          text="Elke nieuwe ronde uit het telsysteem wordt automatisch toegevoegd. De stippellijn toont het gekozen doelverloop tot het einde van de race. De vorig-jaarlijnen staan standaard uit; klik op de legenda om ze te tonen."
+          text="Stippellijn: het doelverloop. Klik in de legenda om vorig jaar te tonen."
         />
         <RaceProgressChart points={progressPoints} showLive showTarget />
       </section>
@@ -368,13 +368,13 @@ function LiveTacticsSection({
       <section className="panel tactics-scenario-panel">
         <TacticsSectionHeader
           kicker="Scenario"
-          title="Doelverloop simuleren"
-          text="Kies een einddoel en gebruik een vlak tempo of het dag-nachtverloop van vorig jaar als vertrekpunt. Pas daarna elk uur afzonderlijk aan."
+          title="Doelverloop"
+          text="Einddoel en verloop als basis. Per uur aanpassen kan onder de grafiek."
         />
         <div className="tactics-control-grid">
           <p className="tactics-group-label">Doelstelling</p>
           <label>
-            <span>Doel na 24 uur · gem. {formatPaceSeconds(86_400 / targetLaps)}</span>
+            <span>Rondes na 24 uur, gemiddeld {formatPaceSeconds(86_400 / targetLaps)}</span>
             <input
               className="input tactics-goal-input"
               type="number"
@@ -404,9 +404,9 @@ function LiveTacticsSection({
               <option value="vtk" disabled={!rivalHistoricalTeam}>VTK vorig jaar</option>
             </select>
           </label>
-          <p className="tactics-group-label">Filter voor tempo</p>
+          <p className="tactics-group-label">Geldige rondes</p>
           <label>
-            <span>Recente rondes voor huidig tempo</span>
+            <span>Rondes voor huidig tempo</span>
             <input
               className="input"
               type="number"
@@ -419,7 +419,7 @@ function LiveTacticsSection({
           </label>
           <div className="tactics-filter-pair">
             <label>
-              <span>Minimum ronde</span>
+              <span>Kortste (s)</span>
               <input
                 className="input"
                 type="number"
@@ -430,7 +430,7 @@ function LiveTacticsSection({
               />
             </label>
             <label>
-              <span>Maximum ronde</span>
+              <span>Langste (s)</span>
               <input
                 className="input"
                 type="number"
@@ -443,7 +443,11 @@ function LiveTacticsSection({
           </div>
         </div>
 
-        <details className="tactics-hour-editor">
+      </section>
+
+      </div>
+
+        <details className="panel tactics-hour-editor">
           <summary>Doeltempo per uur aanpassen</summary>
         <div className="tactics-hourly-header">
           <div>
@@ -459,7 +463,7 @@ function LiveTacticsSection({
         </div>
         <div className="tactics-hourly-grid">
           {targetPaces.map((paceSeconds, raceHour) => (
-            <label key={raceHour} className={raceHour <= elapsedHours ? 'is-past' : ''}>
+            <label key={raceHour} className={raceHour + 1 <= elapsedHours ? 'is-past' : ''}>
               <span>{formatRaceHourWindow(raceStartedAt, raceHour)}</span>
               <div>
                 <input
@@ -482,9 +486,6 @@ function LiveTacticsSection({
           ))}
         </div>
         </details>
-      </section>
-
-      </div>
 
       <details className="tactics-analysis-details">
         <summary>Tempotrends, vergelijking &amp; rondecontrole</summary>
@@ -492,7 +493,7 @@ function LiveTacticsSection({
         <TacticsSectionHeader
           kicker="Tempo"
           title="Gepland en werkelijk tempo per uur"
-          text="Lagere rondetijden zijn sneller. Zo ziet ge meteen in welk uur het plan gewonnen of verloren wordt."
+          text="Lager is sneller. Zo zie je per uur waar het plan gewonnen of verloren wordt."
         />
         <HourlyPaceChart points={pacePoints} showPlan showActual />
       </section>
@@ -501,7 +502,7 @@ function LiveTacticsSection({
         <TacticsSectionHeader
           kicker="Kwartiertrend"
           title="Live tempo tegenover vorig jaar"
-          text="De kwartiermedianen tonen sneller waar het huidige tempo afwijkt van Apolloon en VTK vorig jaar dan de bredere uurblokken."
+          text="Mediaan per kwartier, tegenover Apolloon en VTK vorig jaar."
         />
         <LiveTrendChart points={trendPoints} />
       </section>
@@ -510,7 +511,7 @@ function LiveTacticsSection({
         <TacticsSectionHeader
           kicker="Tijdskloof"
           title="Werkelijke en voorspelde achterstand op VTK vorig jaar"
-          text="Positief betekent achterstand. Na het huidige racemoment rekent de stippellijn verder met het ingestelde doeltempo per uur."
+          text="Positief is achterstand. Vanaf nu rekent de stippellijn met het doeltempo per uur."
         />
         {rivalTimeGapPoints.length
           ? <LiveTimeGapChart points={rivalTimeGapPoints} />
@@ -522,7 +523,7 @@ function LiveTacticsSection({
           <TacticsSectionHeader
             kicker="Controle"
             title="Laatste rondes"
-            text="Rechtstreeks uit Apolloon, inclusief rondes die buiten de ingestelde realistische grenzen vallen."
+            text="Alle rondes, ook die buiten de geldige grenzen vallen en dus niet meetellen."
           />
           <span className="tactics-source-pill">Live API</span>
         </div>

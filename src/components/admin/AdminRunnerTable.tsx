@@ -57,16 +57,16 @@ export function AdminRunnerTable({
           const runner = row.original;
           return (
             <div className="runner-admin-actions">
-              <button className="btn btn--sm btn--fixed" onClick={() => onOpenProfile(runner.id)}>
+              <button className="btn btn--sm" onClick={() => onOpenProfile(runner.id)}>
                 Profiel
               </button>
               {runner.hiddenFromQueue && (
-                <button className="btn btn--sm btn--fixed" onClick={() => void onRestore(runner)}>
+                <button className="btn btn--sm" onClick={() => void onRestore(runner)}>
                   Terug tonen
                 </button>
               )}
               <button
-                className="btn btn--danger btn--fixed"
+                className="btn btn--sm btn--quiet btn--danger-outline"
                 onClick={() => void onRemove(runner)}
                 disabled={runner.lapCount > 0 || runner.status === 'running'}
               >

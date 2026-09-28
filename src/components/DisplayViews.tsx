@@ -1,9 +1,9 @@
 import React from 'react';
-import { useNavigate } from '@tanstack/react-router';
+import { useNavigate, useRouterState } from '@tanstack/react-router';
 import { useAppData, useRaceHistory } from '../app/index';
-import { isFastestLapForRecordMode, publicRecordModeTitle } from '../lib/analysis';
-import { formatClockTimeMs, formatDurationMs } from '../lib/time';
-import { getNextWaitingRunner, lapRunnerLabel, runnerLabel } from '../lib/runners';
+import { buildKpis, isFastestLapForRecordMode, publicRecordModeTitle } from '../lib/analysis';
+import { formatClockTimeMs, formatDurationMs, formatElapsedSeconds } from '../lib/time';
+import { getNextWaitingRunner, lapRunnerLabel } from '../lib/runners';
 import { observeDisplayHistory } from '../lib/displayHistory';
 import {
   buildRecentLapSummaries,
@@ -12,7 +12,8 @@ import {
   type RankingMode,
 } from '../lib/ranking';
 import type { Label, LapRecord, LiveAppSnapshot, PublicRecordMode, RaceEvent, Runner } from '../types';
-import { LabelBadge } from './LabelBadge';
+import { LabelBadge, labelKindOrder, labelKindTitle } from './LabelBadge';
+import { LiveDuration, LiveElapsed } from './LiveTime';
 
 const OUTSIDE_ALERT_VISIBLE_MS = 8_000;
 const INSIDE_RANKING_ROTATION_MS = 15_000;
@@ -21,7 +22,7 @@ const selectOutsideDisplayData = ({ runners, race, settings }: LiveAppSnapshot) 
   race,
   settings,
 });
-const selectInsideDisplayData = ({ runners, labels }: LiveAppSnapshot) => ({ runners, labels });
+const selectInsideDisplayData = ({ runners, labels, race }: LiveAppSnapshot) => ({ runners, labels, race });
 
 export function OutsideDisplay() {
   const { runners, race, settings } = useAppData(selectOutsideDisplayData);
@@ -112,26 +113,18 @@ export function OutsideDisplay() {
     };
   }, []);
 
+  const [presentation] = useDisplayPresentation('outside', 'light');
+
   return (
-    <main className="display-root display-root--outside">
+    <main className={`display-root display-root--outside display-root--${presentation}`}>
+      <DisplayBrand />
       <section className="outside-band outside-band--current">
-        <DisplayBrand tone="light" />
-        <div className="outside-runner">
-          <span className="display-kicker">Nu op de piste</span>
-          <strong className="display-runner-name">
-            {activeRunner ? runnerLabel(activeRunner) : 'Nog niemand gestart'}
-          </strong>
-          {activeRunner && <DisplayLabels labels={activeRunner.labels} />}
-        </div>
+        <span className="display-kicker">Nu op de piste</span>
+        <DisplayRunner runner={activeRunner} empty="Nog niemand gestart" />
       </section>
       <section className="outside-band outside-band--next">
-        <div className="outside-runner outside-runner--next">
-          <span className="display-kicker">Volgende racer</span>
-          <strong className="display-runner-name">
-            {nextRunner ? runnerLabel(nextRunner) : 'Geen loper in wachtrij'}
-          </strong>
-          {nextRunner && <DisplayLabels labels={nextRunner.labels} />}
-        </div>
+        <span className="display-kicker">Volgende loper</span>
+        <DisplayRunner runner={nextRunner} empty="Geen loper in de wachtrij" />
       </section>
       {burgieEvent ? (
         <OutsideBurgieFlash event={burgieEvent} />
@@ -143,7 +136,10 @@ export function OutsideDisplay() {
 }
 
 export function InsideDisplay() {
-  const { runners, labels } = useAppData(selectInsideDisplayData);
+  const { runners, labels, race } = useAppData(selectInsideDisplayData);
+  const [presentation, setPresentation] = useDisplayPresentation('inside', 'dark');
+  const activeRunner = runners.find((runner) => runner.id === race.activeRunnerId) || null;
+  const nextRunner = getNextWaitingRunner(runners);
   const { laps } = useRaceHistory({ scope: 'full' });
   const [rankingMode, setRankingMode] = React.useState<RankingMode>('laps');
   const [rankingLabelId, setRankingLabelId] = React.useState<string | null>(null);
@@ -155,8 +151,8 @@ export function InsideDisplay() {
     () => buildRunnerRanking(runners, laps, rankingMode, rankingLabelId).slice(0, 10),
     [laps, rankingLabelId, rankingMode, runners]
   );
-  const labelStats = React.useMemo(
-    () => buildLabelStats(labels, runners, laps),
+  const competitions = React.useMemo(
+    () => groupCompetitions(buildLabelStats(labels, runners, laps)),
     [labels, laps, runners]
   );
 
@@ -176,56 +172,123 @@ export function InsideDisplay() {
     return () => window.clearTimeout(rotationTimeout);
   }, [prefersReducedMotion, rankingMode, rotationPaused]);
 
+  const rotationActive = !prefersReducedMotion && !rotationPaused;
+  const competitionRowCount = competitions.reduce((total, competition) => total + competition.stats.length, 0);
+  // Same definition as Analyse, so the public and operator screens agree.
+  const lapsPerHour = React.useMemo(() => buildKpis(laps, race).lapsPerHour, [laps, race]);
+
   return (
-    <main className="display-root display-root--inside">
+    <main className={`display-root display-root--inside display-root--${presentation}`}>
       <header className="inside-header">
-        <DisplayBrand tone="light" />
-        <div>
-          <h1>Live standen</h1>
-          <span>{laps.length} rondes geregistreerd</span>
-        </div>
+        <DisplayBrand />
+        <h1 className="visually-hidden">24 urenloop, live standen</h1>
+        <dl className="inside-totals">
+          <div>
+            <dt>Racetijd</dt>
+            <dd>{race.raceStartedAt ? (race.raceFinishedAt ? formatElapsedSeconds(race.raceFinishedAt - race.raceStartedAt) : <LiveElapsed startedAt={race.raceStartedAt} />) : '0:00'}</dd>
+          </div>
+          <div>
+            <dt>Rondes</dt>
+            <dd>{laps.length.toLocaleString('nl-BE')}</dd>
+          </div>
+          <div>
+            <dt>Per uur</dt>
+            <dd>{lapsPerHour == null ? '—' : lapsPerHour.toLocaleString('nl-BE', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}</dd>
+          </div>
+        </dl>
       </header>
-      <div className="inside-grid">
-        <section className="display-panel inside-recent-laps">
-          <h2>Laatste 3 lopers</h2>
+
+      <div className="inside-live">
+        <section className="inside-now" aria-label="Nu op de piste">
+          <span className="inside-now__label">Nu op de piste</span>
+          <strong className="inside-now__runner">{activeRunner ? runnerLabelWithoutDash(activeRunner) : 'Nog niemand gestart'}</strong>
+          {activeRunner && race.activeStartedAt && (
+            <LiveDuration startedAt={race.activeStartedAt} className="inside-now__time" refreshMs={1_000} format="seconds" />
+          )}
+          <span className="inside-now__next">
+            Volgende: <strong>{nextRunner ? runnerLabelWithoutDash(nextRunner) : 'niemand klaar'}</strong>
+          </span>
+        </section>
+        <section className="inside-recent-laps" aria-label="Laatste 3 lopers">
+          <h2 className="visually-hidden">Laatste 3 lopers</h2>
           {recentLapSummaries.length ? (
-            <div className="recent-lap-list">
-              {recentLapSummaries.map(({ lap, bestLapMs, averageLapMs }, index) => (
-                <article key={lap.id} className={`recent-lap-row${index === 0 ? ' is-latest' : ''}`}>
-                  <div className="recent-lap-card-header">
-                    <span>{index === 0 ? 'Net binnen' : `Binnen om ${formatDisplayClockTime(lap.finishedAt)}`}</span>
-                    <span>Ronde {lap.lapNumber} · {formatDurationMs(lap.durationMs)}</span>
+            recentLapSummaries.map(({ lap, bestLapMs, averageLapMs }, index) => (
+              <article key={lap.id} className={`recent-lap-row${index === 0 ? ' is-latest' : ''}`}>
+                <span className="recent-lap-card-header">
+                  {index === 0 ? 'Net binnen' : `Binnen om ${formatDisplayClockTime(lap.finishedAt)}`}, ronde {lap.lapNumber}
+                </span>
+                <strong className="recent-lap-runner">{lap.runnerNumber ? `${lap.runnerNumber} ${lap.runnerName}` : lap.runnerName}</strong>
+                <div className="recent-lap-times">
+                  <div className="recent-lap-time recent-lap-time--current">
+                    <span>Deze ronde</span>
+                    <strong>{formatDurationMs(lap.durationMs)}</strong>
                   </div>
-                  <div className="recent-lap-runner">
-                    <strong>{lapRunnerLabel(lap)}</strong>
-                    <DisplayLabels labels={lap.labels} />
+                  <div className="recent-lap-time">
+                    <span>Snelste ronde</span>
+                    <strong>{formatDurationMs(bestLapMs)}</strong>
                   </div>
-                  <div className="recent-lap-times">
-                    <div className="recent-lap-time recent-lap-time--current">
-                      <span>Deze ronde</span>
-                      <strong>{formatDurationMs(lap.durationMs)}</strong>
-                    </div>
-                    <div className="recent-lap-time">
-                      <span>Snelste ronde</span>
-                      <strong>{formatDurationMs(bestLapMs)}</strong>
-                    </div>
-                    <div className="recent-lap-time">
-                      <span>Gem. ronde</span>
-                      <strong>{formatDurationMs(averageLapMs)}</strong>
-                    </div>
+                  <div className="recent-lap-time">
+                    <span>Gem. ronde</span>
+                    <strong>{formatDurationMs(averageLapMs)}</strong>
                   </div>
-                </article>
-              ))}
-            </div>
+                </div>
+              </article>
+            ))
           ) : (
-            <div className="empty-inline">Nog geen rondes geregistreerd</div>
+            <div className="inside-empty">De eerste rondes verschijnen hier zodra de timing start.</div>
           )}
         </section>
+      </div>
+
+      <div className="inside-board">
         <section className="display-panel inside-ranking-panel">
           <div className="inside-panel-heading">
             <h2>Ranking</h2>
+            <div className="inside-ranking-modes" role="group" aria-label="Rangschikking op basis van">
+              <button
+                className={rankingMode === 'laps' ? 'is-active' : ''}
+                onClick={() => setRankingMode('laps')}
+                aria-pressed={rankingMode === 'laps'}
+              >
+                Meeste rondes
+              </button>
+              <button
+                className={rankingMode === 'coefficient' ? 'is-active' : ''}
+                onClick={() => setRankingMode('coefficient')}
+                aria-pressed={rankingMode === 'coefficient'}
+              >
+                Punten
+              </button>
+            </div>
+          </div>
+          <div className="inside-ranking-rotation" aria-hidden="true">
+            {rotationActive && (
+              <i key={rankingMode} style={{ animationDuration: `${INSIDE_RANKING_ROTATION_MS}ms` }} />
+            )}
+          </div>
+          <p className="inside-ranking-modes-help">
+            {rankingMode === 'coefficient'
+              ? 'Punten: snellere rondes scoren hoger; het tijdvak van aankomst telt mee.'
+              : 'Meeste rondes; bij gelijke stand telt het snelste gemiddelde.'}
+            {rankingLabelId ? ` Label: ${rankingLabels.find((label) => label.id === rankingLabelId)?.name ?? ''}.` : ''}
+          </p>
+          <ol className="ranking-list">
+            {ranking.map((runner, index) => (
+              <li key={runner.runnerId} className="ranking-row">
+                <span>{index + 1}</span>
+                <strong>{rankingRunnerLabel(runner)}</strong>
+                <em>
+                  {rankingMode === 'coefficient'
+                    ? `${formatCoefficient(runner.coefficientTotal)} ptn · ${runner.lapCount} rondes`
+                    : `${runner.lapCount} rondes · gem. ${formatDurationMs(runner.averageLapMs)}`}
+                </em>
+              </li>
+            ))}
+            {!ranking.length && <li className="inside-empty">Nog geen rondes voor deze selectie</li>}
+          </ol>
+          <div className="inside-controls">
             <label className="ranking-label-filter">
-              <span>Filter</span>
+              <span>Label</span>
               <select
                 value={rankingLabelId ?? ''}
                 onChange={(event) => setRankingLabelId(event.target.value || null)}
@@ -236,25 +299,22 @@ export function InsideDisplay() {
                 ))}
               </select>
             </label>
-          </div>
-          <div className="inside-ranking-modes" aria-label="Rangschikking op basis van">
-            <button
-              className={rankingMode === 'laps' ? 'is-active' : ''}
-              onClick={() => setRankingMode('laps')}
-              aria-pressed={rankingMode === 'laps'}
-            >
-              Meeste rondes
-            </button>
-            <button
-              className={rankingMode === 'coefficient' ? 'is-active' : ''}
-              onClick={() => setRankingMode('coefficient')}
-              aria-pressed={rankingMode === 'coefficient'}
-            >
-              Punten (tempo en tijdstip)
-            </button>
-          </div>
-          <small className="inside-ranking-modes-help">Snellere rondes scoren hoger; het tijdvak van aankomst telt mee.</small>
-          <div className="inside-ranking-rotation-row">
+            <div className="inside-presentation" role="group" aria-label="Weergave van dit scherm">
+              <button
+                className={`inside-control-button${presentation === 'light' ? ' is-active' : ''}`}
+                aria-pressed={presentation === 'light'}
+                onClick={() => setPresentation('light')}
+              >
+                Licht
+              </button>
+              <button
+                className={`inside-control-button${presentation === 'dark' ? ' is-active' : ''}`}
+                aria-pressed={presentation === 'dark'}
+                onClick={() => setPresentation('dark')}
+              >
+                Donker
+              </button>
+            </div>
             <p className="inside-ranking-rotation-note">
               {prefersReducedMotion
                 ? 'Automatisch wisselen is uitgeschakeld'
@@ -264,7 +324,7 @@ export function InsideDisplay() {
             </p>
             {!prefersReducedMotion && (
               <button
-                className="btn btn--ghost btn--sm"
+                className="inside-control-button"
                 aria-pressed={rotationPaused}
                 onClick={() => setRotationPaused((paused) => !paused)}
               >
@@ -272,56 +332,85 @@ export function InsideDisplay() {
               </button>
             )}
           </div>
-          <div className="ranking-list">
-            {ranking.map((runner, index) => (
-              <div key={runner.runnerId} className="ranking-row">
-                <span>{index + 1}</span>
-                <strong>{rankingRunnerLabel(runner)}</strong>
-                <em>
-                  {rankingMode === 'coefficient'
-                    ? `${formatCoefficient(runner.coefficientTotal)} punten · ${runner.lapCount} toeren`
-                    : `${runner.lapCount} toeren · ${formatDurationMs(runner.averageLapMs)} gem.`}
-                </em>
-              </div>
-            ))}
-            {!ranking.length && <div className="empty-inline">Nog geen rondes voor deze selectie</div>}
-          </div>
         </section>
-        <section className="display-panel">
-          <h2>Progressie per label</h2>
-          <div className="progress-list">
-            {labelStats.map((stat) => (
-              <div key={stat.label.id} className="progress-item">
-                <div>
-                  <strong>
-                    <LabelBadge label={stat.label} />
-                  </strong>
-                  <span>
-                    {stat.laps} toeren
-                    {stat.target > 0 ? ` / doel ${stat.target}` : ''}
-                  </span>
-                </div>
-                <div className="progress-track">
-                  <span
-                    title={`${stat.laps} van ${stat.target} toeren`}
-                    style={{
-                      width: `${stat.target > 0 ? Math.min(100, Math.max(stat.percent, 5)) : 0}%`,
-                      background: stat.label.color,
-                    }}
-                  />
-                </div>
-                <em>{stat.target > 0 ? `${Math.round(stat.percent)}%` : `${stat.runnerCount} lopers`}</em>
-              </div>
-            ))}
+        <section className="display-panel inside-competitions">
+          <div className="inside-panel-heading">
+            <h2>Competities</h2>
+            <span>rondes van doel</span>
           </div>
+          {competitions.length ? (
+            <div className={`competition-list${competitionRowCount > 9 ? ' is-dense' : ''}`}>
+            {competitions.map((competition) => (
+            <div key={competition.kind} className="competition">
+              <h3>{competition.title}</h3>
+              {competition.stats.map((stat, index) => (
+                <div key={stat.label.id} className={`progress-item${index === 0 && stat.laps > 0 ? ' is-leading' : ''}`}>
+                  <LabelBadge label={stat.label} />
+                  <div className="progress-track">
+                    <span
+                      title={stat.target > 0 ? `${stat.laps} van ${stat.target} rondes` : `${stat.laps} rondes`}
+                      style={{
+                        width: `${stat.target > 0 ? Math.min(100, stat.percent) : competition.maxLaps > 0 ? (stat.laps / competition.maxLaps) * 100 : 0}%`,
+                        background: stat.label.color,
+                      }}
+                    />
+                  </div>
+                  <em>{stat.target > 0 ? `${stat.laps} / ${stat.target}` : `${stat.laps} rondes`}</em>
+                </div>
+              ))}
+            </div>
+          ))}
+            </div>
+          ) : <div className="inside-empty">Nog geen labels met lopers.</div>}
         </section>
       </div>
     </main>
   );
 }
 
+function runnerLabelWithoutDash(runner: Pick<Runner, 'runnerNumber' | 'name'>) {
+  return runner.runnerNumber ? `${runner.runnerNumber} ${runner.name}` : runner.name;
+}
+
+type DisplayPresentation = 'light' | 'dark';
+
+/**
+ * Displays keep their own presentation, independent of the operator theme.
+ * Order: `?thema=licht|donker` in the URL, then the choice made on this display
+ * (remembered by this browser), then the default for the screen.
+ */
+function useDisplayPresentation(
+  display: 'inside' | 'outside',
+  defaultPresentation: DisplayPresentation
+): [DisplayPresentation, (next: DisplayPresentation) => void] {
+  const storageKey = `apolloon.display.${display}`;
+  const searchString = useRouterState({ select: (state) => state.location.searchStr });
+  const requested = new URLSearchParams(searchString).get('thema');
+  const [stored, setStored] = React.useState<DisplayPresentation | null>(() => {
+    try {
+      const value = window.localStorage.getItem(storageKey);
+      return value === 'light' || value === 'dark' ? value : null;
+    } catch {
+      return null;
+    }
+  });
+  const choose = React.useCallback((next: DisplayPresentation) => {
+    try {
+      window.localStorage.setItem(storageKey, next);
+    } catch {
+      // Keep the choice for this session only.
+    }
+    setStored(next);
+  }, [storageKey]);
+  const presentation = requested === 'licht' ? 'light' : requested === 'donker' ? 'dark' : stored ?? defaultPresentation;
+  React.useLayoutEffect(() => {
+    document.documentElement.dataset.displayTone = presentation;
+  }, [presentation]);
+  return [presentation, choose];
+}
+
 function rankingRunnerLabel(runner: { runnerName: string; runnerNumber: string | null }) {
-  return runner.runnerNumber ? `${runner.runnerNumber} - ${runner.runnerName}` : runner.runnerName;
+  return runner.runnerNumber ? `${runner.runnerNumber} ${runner.runnerName}` : runner.runnerName;
 }
 
 function formatCoefficient(coefficient: number) {
@@ -335,21 +424,34 @@ function formatDisplayClockTime(finishedAt: number) {
   return formatClockTimeMs(finishedAt).split('.')[0];
 }
 
-function DisplayBrand({ tone }: { tone: 'light' | 'dark' }) {
+function DisplayBrand() {
   const navigate = useNavigate();
   return (
-    <div className={`display-brand display-brand--${tone}`}>
+    <div className="display-brand">
       <button
         type="button"
         className="display-brand__home"
         onClick={() => void navigate({ to: '/' })}
-        aria-label="Terug naar start"
+        aria-label="Apolloon, terug naar start"
         title="Terug naar start"
       >
-        <img src="/brand/apolloon-logo.png" alt="Apolloon" width={560} height={169} fetchPriority="high" />
+        <span className="brand-mark" aria-hidden="true" />
       </button>
       <span>you&apos;ll never walk alone</span>
     </div>
+  );
+}
+
+function DisplayRunner({ runner, empty }: { runner: Runner | null; empty: string }) {
+  if (!runner) return <strong className="display-runner-name display-runner-name--empty">{empty}</strong>;
+  return (
+    <>
+      <div className="display-runner">
+        {runner.runnerNumber && <span className="display-bib">{runner.runnerNumber}</span>}
+        <strong className="display-runner-name">{runner.name}</strong>
+      </div>
+      <DisplayLabels labels={runner.labels} />
+    </>
   );
 }
 
@@ -390,7 +492,7 @@ function OutsideBurgieFlash({ event }: { event: RaceEvent }) {
 
 function eventRunnerLabel(event: RaceEvent) {
   if (!event.runnerName) return 'Publiek moment';
-  return event.runnerNumber ? `${event.runnerNumber} - ${event.runnerName}` : event.runnerName;
+  return event.runnerNumber ? `${event.runnerNumber} ${event.runnerName}` : event.runnerName;
 }
 
 function buildLabelStats(labels: Label[], runners: Runner[], laps: LapRecord[]) {
@@ -436,4 +538,25 @@ function buildLabelStats(labels: Label[], runners: Runner[], laps: LapRecord[]) 
         (a.label.sortOrder ?? 9999) - (b.label.sortOrder ?? 9999) ||
         a.label.name.localeCompare(b.label.name)
     );
+}
+
+function groupCompetitions(stats: ReturnType<typeof buildLabelStats>) {
+  const groups = new Map<string, typeof stats>();
+  for (const stat of stats) {
+    const kindTitle = labelKindTitle(stat.label.kind);
+    groups.set(kindTitle, [...(groups.get(kindTitle) ?? []), stat]);
+  }
+  return [...groups.entries()]
+    .map(([title, groupStats]) => ({
+      kind: title,
+      title,
+      order: labelKindOrder(groupStats[0].label.kind),
+      maxLaps: Math.max(0, ...groupStats.map((stat) => stat.laps)),
+      // Within a competition the leader goes first: progress towards target, otherwise laps.
+      stats: [...groupStats].sort((first, second) =>
+        (second.target > 0 && first.target > 0 ? second.percent - first.percent : 0) ||
+        second.laps - first.laps ||
+        first.label.name.localeCompare(second.label.name, 'nl-BE')),
+    }))
+    .sort((first, second) => first.order - second.order);
 }

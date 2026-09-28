@@ -209,7 +209,7 @@ app.post('/api/net/make-static', (req, res) => {
   if (!isLoopbackAddress(req.socket.remoteAddress)) {
     res.status(403).json({
       ok: false,
-      error: 'Dit kan alleen op de laptop zelf (open Admin op die laptop, niet via het netwerk).',
+      error: 'Dit kan alleen op de laptop zelf (open Beheer op die laptop, niet via het netwerk).',
     });
     return;
   }
@@ -229,7 +229,7 @@ app.post('/api/net/revert-dhcp', (req, res) => {
   if (!isLoopbackAddress(req.socket.remoteAddress)) {
     res.status(403).json({
       ok: false,
-      error: 'Dit kan alleen op de laptop zelf (open Admin op die laptop, niet via het netwerk).',
+      error: 'Dit kan alleen op de laptop zelf (open Beheer op die laptop, niet via het netwerk).',
     });
     return;
   }

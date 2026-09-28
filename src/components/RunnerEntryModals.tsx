@@ -333,7 +333,7 @@ export function RunnerAddModal({ onClose, onAdded }: { onClose: () => void; onAd
           </summary>
           <div className="form-grid">
             <label>
-              Doelstelling toeren
+              Doel (rondes)
               <input
                 className="input"
                 type="number"

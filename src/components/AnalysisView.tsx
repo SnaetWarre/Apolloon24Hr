@@ -1,5 +1,7 @@
 import { SectionNavigation } from './SectionNavigation';
-import { workspaceChartPalette } from '../lib/chartPalette';
+import { PageHeader } from './PageHeader';
+import { Icon } from './Icon';
+import { chartTooltipColors, useChartTheme, workspaceChartPalette } from '../lib/chartPalette';
 import React from 'react';
 import {
   BarController,
@@ -136,12 +138,30 @@ export function AnalysisView() {
 
   return (
     <>
-      <div className="hero hero--compact">
-        <div>
-          <h1 className="app-title">Analyse</h1>
-          <p className="tagline">Grafieken op basis van de geselecteerde ploegen en categorieën.</p>
-        </div>
-      </div>
+      <PageHeader
+        title="Analyse"
+        meta={
+          <span
+            className={`header-tag${filteredLaps.length < laps.length ? ' header-tag--partial' : ''}`}
+            role="status"
+          >
+            {filteredLaps.length} van {laps.length} rondes, {enabledLabels.length} van {analysisLabels.length} labels
+          </span>
+        }
+        actions={
+          <details className="analysis-export">
+            <summary className="btn btn--sm"><Icon name="download" size={14} />Exporteren</summary>
+            <div className="analysis-export__menu">
+              <p>Exports bevatten altijd de volledige wedstrijd. De labelfilters op dit scherm tellen niet mee.</p>
+              <a className="btn btn--quiet btn--sm" href="/api/export/laps.csv">Rondes (CSV)</a>
+              <a className="btn btn--quiet btn--sm" href="/api/export/laps.json">Rondes (JSON)</a>
+              <a className="btn btn--quiet btn--sm" href="/api/export/current-state.json">Volledige toestand (JSON)</a>
+              <a className="btn btn--quiet btn--sm" href="/api/export/events.csv">Gebeurtenissen (CSV)</a>
+              <a className="btn btn--quiet btn--sm" href="/api/export/events.json">Gebeurtenissen (JSON)</a>
+            </div>
+          </details>
+        }
+      />
 
       {historyLoading && (
         <div className="host-hint" role="status">
@@ -159,8 +179,8 @@ export function AnalysisView() {
           <section className="panel analysis-filter-panel">
             <div className="panel-heading-row">
               <SectionHeader
-                title="Ploegen aan/uit"
-                text={`${filteredLaps.length} van ${laps.length} rondes tellen mee. Een ronde telt zodra minstens een van haar labels aan staat.`}
+                title="Labels"
+                text="Een ronde telt mee zodra één van haar labels aan staat."
               />
               <div className="analysis-filter-actions">
                 <button className="btn btn--ghost" onClick={enableAllLabels}>
@@ -177,37 +197,16 @@ export function AnalysisView() {
               onToggle={toggleLabel}
             />
           </section>
-          <details className="analysis-downloads">
-            <summary>Downloads</summary>
-            <p className="panel-copy">Volledige wedstrijddata; exports volgen de schermfilters niet.</p>
-            <div className="export-row export-row--secondary">
-              <a className="btn btn--primary" href="/api/export/laps.csv">
-                Download CSV
-              </a>
-              <a className="btn btn--ghost" href="/api/export/laps.json">
-                Download laps.json
-              </a>
-              <a className="btn btn--ghost" href="/api/export/current-state.json">
-                Download current-state.json
-              </a>
-              <a className="btn btn--ghost" href="/api/export/events.csv">
-                Download events.csv
-              </a>
-              <a className="btn btn--ghost" href="/api/export/events.json">
-                Download events.json
-              </a>
-            </div>
-          </details>{' '}
         </aside>
         <div className="analysis-content">
           <div className="stats-grid stats-grid--analysis">
-            <StatPanel label="Geselecteerde toeren" value={kpis.count.toString()} />
+            <StatPanel label="Rondes" value={kpis.count.toString()} />
             <StatPanel label="Gemiddelde ronde" value={formatDurationMs(kpis.averageMs)} hero />
             <StatPanel label="Mediaan" value={formatDurationMs(kpis.medianMs)} />
             <StatPanel label="Snelste" value={formatDurationMs(kpis.bestMs)} />
             <StatPanel label="Traagste" value={formatDurationMs(kpis.slowestMs)} />
-            <StatPanel label="Toeren / uur" value={formatNumber(kpis.lapsPerHour, 1)} hero />
-            <StatPanel label="Projectie 24u" value={formatNumber(kpis.projected24hLaps, 0)} hero />
+            <StatPanel label="Rondes per uur" value={formatNumber(kpis.lapsPerHour, 1)} hero />
+            <StatPanel label="Projectie na 24 uur" value={formatNumber(kpis.projected24hLaps, 0)} hero />
             <StatPanel label="Burgie gepakt" value={burgieEventCount.toString()} />
           </div>
 
@@ -222,16 +221,16 @@ export function AnalysisView() {
               <div className="analysis-charts">
                 <section className="panel analysis-pace-panel">
                   <SectionHeader
-                    title="Toertjestempo over tijd"
-                    text="Balken tonen hoeveel rondes er per uur liepen. De lijn toont hoe snel die rondes gemiddeld waren."
+                    title="Rondes en tempo per uur"
+                    text="Balken: aantal rondes per uur. Lijn: gemiddelde rondetijd in dat uur."
                   />
                   <RacePaceChart buckets={timeBuckets} />
                 </section>
 
                 <section className="panel analysis-trend-panel">
                   <SectionHeader
-                    title="Rondeduurtrend"
-                    text="Blauwe lijn met het rolling gemiddelde van Apolloon-rondetijden over de race."
+                    title="Rondetijd over de race"
+                    text="Voortschrijdend gemiddelde van de rondetijden."
                   />
                   <RollingLapTrendChart points={rollingLapTrend} />
                 </section>
@@ -247,7 +246,7 @@ export function AnalysisView() {
                 <section className="panel">
                   <SectionHeader
                     title="Rondeverdeling"
-                    text="Vaste zones van 5 seconden, van 1:00 tot 1:30+."
+                    text="Aantal rondes per zone van 5 seconden."
                   />
                   <DistributionChart bins={distribution} />
                 </section>
@@ -255,7 +254,7 @@ export function AnalysisView() {
                 <section className="panel">
                   <SectionHeader
                     title="Snelste rondes"
-                    text="Bekijk de snelste ronde binnen de huidige selectie per dag, per 2 uur of per uur."
+                    text="Binnen de huidige selectie."
                   />
                   <FastestLapWindowList
                     mode={fastestWindowMode}
@@ -271,8 +270,8 @@ export function AnalysisView() {
               <section className="panel">
                 <div className="panel-heading-row">
                   <SectionHeader
-                    title="Loper inzichten"
-                    text="Zoek op nummer of naam. Sorteer op aantallen, tempo of consistentie binnen de selectie."
+                    title="Lopers"
+                    text="Binnen de huidige selectie. Sorteer op rondes, tempo of regelmaat."
                   />
                   <input
                     className="input input--search analysis-runner-search"
@@ -318,7 +317,7 @@ export function AnalysisView() {
               <section className="panel">
                 <SectionHeader
                   title="Gemiddelde per label"
-                  text="Een loper kan in meerdere labels zitten; labels kunnen dus overlappen."
+                  text="Een loper kan in meerdere labels zitten, dus labels overlappen."
                 />
                 <LabelComparisonList comparisons={labelComparisons} />
               </section>
@@ -470,6 +469,7 @@ function LabelTogglePicker({
 
 function RollingLapTrendChart({ points }: { points: ReturnType<typeof buildRollingLapTrend> }) {
   const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
+  const chartTheme = useChartTheme();
 
   React.useEffect(() => {
     const canvas = canvasRef.current;
@@ -485,8 +485,8 @@ function RollingLapTrendChart({ points }: { points: ReturnType<typeof buildRolli
               x: point.raceHour,
               y: point.averageMs / 1000,
             })),
-            borderColor: '#2877F6',
-            backgroundColor: '#2877F6',
+            borderColor: workspaceChartPalette.live,
+            backgroundColor: workspaceChartPalette.live,
             borderWidth: 3,
             pointRadius: 0,
             pointHoverRadius: 5,
@@ -510,10 +510,11 @@ function RollingLapTrendChart({ points }: { points: ReturnType<typeof buildRolli
             labels: {
               boxWidth: 14,
               color: workspaceChartPalette.text,
-              font: { weight: 'bold' },
+              font: { weight: 500 },
             },
           },
           tooltip: {
+            ...chartTooltipColors(),
             callbacks: {
               title(items) {
                 const point = points[items[0]?.dataIndex ?? 0];
@@ -536,7 +537,7 @@ function RollingLapTrendChart({ points }: { points: ReturnType<typeof buildRolli
               display: true,
               text: 'Tijd sinds start (u:mm)',
               color: workspaceChartPalette.muted,
-              font: { weight: 'bold' },
+              font: { weight: 500 },
             },
             ticks: {
               color: workspaceChartPalette.muted,
@@ -558,7 +559,7 @@ function RollingLapTrendChart({ points }: { points: ReturnType<typeof buildRolli
               display: true,
               text: 'Gemiddelde rondetijd',
               color: workspaceChartPalette.muted,
-              font: { weight: 'bold' },
+              font: { weight: 500 },
             },
             ticks: {
               color: workspaceChartPalette.muted,
@@ -576,7 +577,7 @@ function RollingLapTrendChart({ points }: { points: ReturnType<typeof buildRolli
 
     const chart = new Chart(canvas, config);
     return () => chart.destroy();
-  }, [points]);
+  }, [chartTheme, points]);
 
   if (!points.length) return <EmptyAnalyticsState message="Geen rondes binnen deze selectie." />;
   return (
@@ -588,6 +589,7 @@ function RollingLapTrendChart({ points }: { points: ReturnType<typeof buildRolli
 
 function RacePaceChart({ buckets }: { buckets: ReturnType<typeof buildTimeBuckets> }) {
   const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
+  const chartTheme = useChartTheme();
 
   React.useEffect(() => {
     const canvas = canvasRef.current;
@@ -602,8 +604,8 @@ function RacePaceChart({ buckets }: { buckets: ReturnType<typeof buildTimeBucket
             type: 'bar',
             label: 'Rondes per uur',
             data: buckets.map((bucket) => bucket.count),
-            backgroundColor: 'rgba(40, 119, 246, 0.18)',
-            borderColor: '#2877F6',
+            backgroundColor: workspaceChartPalette.liveFill,
+            borderColor: workspaceChartPalette.live,
             borderWidth: 1,
             borderRadius: 4,
             maxBarThickness: 160,
@@ -615,8 +617,8 @@ function RacePaceChart({ buckets }: { buckets: ReturnType<typeof buildTimeBucket
             type: 'line',
             label: 'Gemiddelde rondetijd',
             data: buckets.map((bucket) => (bucket.averageMs == null ? null : bucket.averageMs / 1000)),
-            borderColor: workspaceChartPalette.text,
-            backgroundColor: workspaceChartPalette.text,
+            borderColor: workspaceChartPalette.strong,
+            backgroundColor: workspaceChartPalette.strong,
             borderWidth: 3,
             pointRadius: 4,
             pointHoverRadius: 6,
@@ -640,10 +642,11 @@ function RacePaceChart({ buckets }: { buckets: ReturnType<typeof buildTimeBucket
             labels: {
               boxWidth: 14,
               color: workspaceChartPalette.text,
-              font: { weight: 'bold' },
+              font: { weight: 500 },
             },
           },
           tooltip: {
+            ...chartTooltipColors(),
             callbacks: {
               label(context) {
                 if (context.dataset.yAxisID === 'seconds') {
@@ -662,7 +665,7 @@ function RacePaceChart({ buckets }: { buckets: ReturnType<typeof buildTimeBucket
               display: true,
               text: 'Rondes per uur',
               color: workspaceChartPalette.muted,
-              font: { weight: 'bold' },
+              font: { weight: 500 },
             },
             ticks: {
               precision: 0,
@@ -679,7 +682,7 @@ function RacePaceChart({ buckets }: { buckets: ReturnType<typeof buildTimeBucket
               display: true,
               text: 'Gemiddelde rondetijd',
               color: workspaceChartPalette.muted,
-              font: { weight: 'bold' },
+              font: { weight: 500 },
             },
             ticks: {
               color: workspaceChartPalette.muted,
@@ -694,7 +697,7 @@ function RacePaceChart({ buckets }: { buckets: ReturnType<typeof buildTimeBucket
           x: {
             ticks: {
               color: workspaceChartPalette.muted,
-              font: { weight: 'bold' },
+              font: { weight: 500 },
             },
             grid: {
               display: false,
@@ -706,7 +709,7 @@ function RacePaceChart({ buckets }: { buckets: ReturnType<typeof buildTimeBucket
 
     const chart = new Chart(canvas, config);
     return () => chart.destroy();
-  }, [buckets]);
+  }, [buckets, chartTheme]);
 
   if (!buckets.length) return <EmptyAnalyticsState message="Zet minstens een ploeg aan om de grafiek te tonen." />;
   return (
@@ -715,7 +718,7 @@ function RacePaceChart({ buckets }: { buckets: ReturnType<typeof buildTimeBucket
         <canvas ref={canvasRef} />
       </div>
       {buckets.length < 2 && (
-        <p className="chart-note">Nog maar één uur met rondes — de trend wordt zichtbaar naarmate de race vordert.</p>
+        <p className="chart-note">Nog maar één uur met rondes. De trend wordt zichtbaar naarmate de race vordert.</p>
       )}
     </>
   );
@@ -893,5 +896,5 @@ function nullableAsc(a: number | null, b: number | null) {
 }
 
 function formatLapRunner(lap: Pick<FastestLapWindow['lap'], 'runnerName' | 'runnerNumber'>) {
-  return lap.runnerNumber ? `${lap.runnerNumber} - ${lap.runnerName}` : lap.runnerName;
+  return lap.runnerNumber ? `${lap.runnerNumber} ${lap.runnerName}` : lap.runnerName;
 }

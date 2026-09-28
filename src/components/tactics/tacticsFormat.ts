@@ -57,6 +57,20 @@ export function formatPaceSeconds(seconds: number | null): string {
   return formatDurationMs(seconds * 1_000);
 }
 
+/** Signed time gap for axes and tooltips: "+45 s", "-2:05", "+1:02:30". */
+export function formatSignedGap(seconds: number): string {
+  if (!Number.isFinite(seconds)) return '—';
+  const sign = seconds > 0 ? '+' : seconds < 0 ? '-' : '';
+  const total = Math.round(Math.abs(seconds));
+  if (total < 60) return `${sign}${total} s`;
+  const hours = Math.floor(total / 3_600);
+  const minutes = Math.floor((total % 3_600) / 60);
+  const rest = String(total % 60).padStart(2, '0');
+  return hours
+    ? `${sign}${hours}:${String(minutes).padStart(2, '0')}:${rest}`
+    : `${sign}${minutes}:${rest}`;
+}
+
 export function formatRaceHour(hours: number): string {
   const totalMinutes = Math.max(0, Math.round(hours * 60));
   const wholeHours = Math.floor(totalMinutes / 60);

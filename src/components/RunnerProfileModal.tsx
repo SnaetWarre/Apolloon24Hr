@@ -116,7 +116,7 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
 
   async function removeFromQueueFlow() {
     if (!runner || !isQueueRemovalStatus(runner.status)) return;
-    if (!window.confirm('Loper terug buiten Telsysteem 1 zetten?')) return;
+    if (!window.confirm('Loper uit de wachtrij en opwarming halen?')) return;
 
     const runnerName = runner.name;
     setQueueActionBusy(true);
@@ -124,7 +124,7 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
     setQueueActionError(null);
     try {
       await setStatus(runner.id, 'registered');
-      setQueueActionMessage(`${runnerName} staat terug buiten Telsysteem 1.`);
+      setQueueActionMessage(`${runnerName} staat niet meer in de wachtrij of opwarming.`);
     } catch (err) {
       setQueueActionError(err instanceof Error ? err.message : 'Loper terugzetten mislukt');
     } finally {
@@ -146,14 +146,21 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
           <div>
             <span className="modal-kicker">Lopersprofiel</span>
             <h2>{runnerTitle(runner)}</h2>
-            <p>
-              {runner.lapCount} toeren
-              {runner.bestLapMs ? ` · snelste ${formatDurationMs(runner.bestLapMs)}` : ''}
-              {runner.averageLapMs ? ` · gemiddeld ${formatDurationMs(runner.averageLapMs)}` : ''}
-            </p>
+            {runner.registration && (runner.registration.phone || runner.registration.email) ? (
+              <p className="profile-contact">
+                {runner.registration.phone && (
+                  <a href={`tel:${runner.registration.phone.replace(/\s+/g, '')}`}>{runner.registration.phone}</a>
+                )}
+                {runner.registration.email && (
+                  <a href={`mailto:${runner.registration.email}`}>{runner.registration.email}</a>
+                )}
+              </p>
+            ) : (
+              <p>{runner.registrationSource === 'manual' ? 'Manueel toegevoegd, geen inschrijving' : 'Geen inschrijvingsgegevens'}</p>
+            )}
           </div>
           <button className="icon-btn" onClick={requestClose} aria-label="Sluiten">
-            x
+            ✕
           </button>
         </div>
 
@@ -167,12 +174,16 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
             </strong>
           </div>
           <div className="profile-stat">
-            <span className="muted-label">Totaal toeren</span>
+            <span className="muted-label">Rondes</span>
             <strong>{runner.lapCount}</strong>
           </div>
           <div className="profile-stat">
             <span className="muted-label">Laatste ronde</span>
-            <strong>{latestLap ? formatDurationMs(latestLap.durationMs) : 'Nog geen ronde'}</strong>
+            <strong>{latestLap ? formatDurationMs(latestLap.durationMs) : '—'}</strong>
+          </div>
+          <div className="profile-stat">
+            <span className="muted-label">Snelste ronde</span>
+            <strong>{runner.bestLapMs ? formatDurationMs(runner.bestLapMs) : '—'}</strong>
           </div>
         </div>
 
@@ -180,9 +191,6 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
           <section className="profile-registration" aria-label="Inschrijvingsgegevens">
             <h3>Inschrijvingsgegevens</h3>
             <div className="profile-registration__grid">
-              <RegistrationField label="Ingeschreven op" value={runner.registration.submittedAt} />
-              <RegistrationField label="E-mailadres" value={runner.registration.email} />
-              <RegistrationField label="GSM-nummer" value={runner.registration.phone} />
               <RegistrationField label="Studiefase" value={runner.registration.studyPhase} />
               <RegistrationField label="Geschat totaal rondjes" value={runner.registration.estimatedLaps} />
               <RegistrationField label="Geschat gemiddeld tempo op 515 m" value={runner.registration.estimatedPace} />
@@ -192,6 +200,7 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
               <RegistrationField label="Categorieën" value={runner.registration.categories.join(', ')} />
               <RegistrationField label="Toestemming voor hergebruik" value={runner.registration.reuseConsent} />
               <RegistrationField label="Opmerking bij inschrijving" value={runner.registration.remarks} />
+              <RegistrationField label="Ingeschreven op" value={runner.registration.submittedAt} />
             </div>
           </section>
         )}
@@ -234,7 +243,7 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
             <input className="input" value={name} onChange={(event) => setName(event.target.value)} />
           </label>
           <label>
-            Doelstelling toeren
+            Doel (rondes)
             <input
               className="input"
               type="number"
@@ -286,7 +295,7 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
         {queueRemovalLabel && (
           <section className="profile-queue-action">
             <div>
-              <h3>Telsysteem 1</h3>
+              <h3>Wachtrij</h3>
               <p>Haal deze loper uit de actieve lijst zonder profiel of rondedata te verwijderen.</p>
             </div>
             <button className="btn btn--ghost" onClick={removeFromQueueFlow} disabled={queueActionBusy}>
@@ -345,8 +354,10 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
   );
 }
 
+/** Empty answers are left out so the filled-in ones stand out. */
 function RegistrationField({ label, value }: { label: string; value: string }) {
-  return <div className="profile-registration__field"><span className="muted-label">{label}</span><strong>{value || 'Niet ingevuld'}</strong></div>;
+  if (!value.trim()) return null;
+  return <div className="profile-registration__field"><span className="muted-label">{label}</span><span>{value}</span></div>;
 }
 
 function isQueueRemovalStatus(status: RunnerStatus) {
@@ -360,7 +371,7 @@ function queueRemovalButtonLabel(status: RunnerStatus) {
 }
 
 function runnerTitle(runner: Pick<Runner, 'runnerNumber' | 'name'>) {
-  return runner.runnerNumber ? `${runner.runnerNumber} - ${runner.name}` : runner.name;
+  return runner.runnerNumber ? `${runner.runnerNumber} ${runner.name}` : runner.name;
 }
 
 function isDirty({

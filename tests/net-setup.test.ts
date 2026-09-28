@@ -19,6 +19,11 @@ import {
   sameSubnet,
   shQuote,
   validateStaticRequest,
+  buildWindowsLauncherCommand,
+  describeElevationFailure,
+  isWirelessWindowsAdapter,
+  isWiredNmConnectionType,
+  isWirelessMacService,
 } from '../server/net-setup.ts';
 
 test('only real loopback callers may change host networking', () => {
@@ -159,4 +164,37 @@ test('Linux and macOS command builders quote names and carry validated values', 
   const macGw = buildMacOsSetManualCommand('Ethernet', '192.168.1.211', '255.255.255.0', '192.168.1.1');
   assert.ok(macGw.endsWith('192.168.1.1'));
   assert.equal(buildMacOsRevertDhcpCommand('Ethernet'), `networksetup -setdhcp 'Ethernet'`);
+});
+
+test('only wired connections may be pinned, never wifi', () => {
+  assert.equal(isWiredNmConnectionType('802-3-ethernet'), true);
+  assert.equal(isWiredNmConnectionType('ethernet'), true);
+  assert.equal(isWiredNmConnectionType('802-11-wireless'), false);
+  assert.equal(isWiredNmConnectionType('wifi'), false);
+  assert.equal(isWirelessMacService('Wi-Fi'), true);
+  assert.equal(isWirelessMacService('USB 10/100/1000 LAN'), false);
+});
+
+test('a missing polkit agent or refused prompt is explained instead of silently waited on', () => {
+  const noAgent = describeElevationFailure(
+    'linux',
+    127,
+    "Error creating textual authentication agent: Error opening current controlling terminal for the process (`/dev/tty')"
+  );
+  assert.match(noAgent, /geen polkit-agent/);
+  assert.match(describeElevationFailure('linux', 126, ''), /geweigerd/);
+  assert.match(describeElevationFailure('darwin', 1, 'execution error: User canceled. (-128)'), /geannuleerd/);
+});
+
+test('Windows waits for the UAC prompt and reports a refusal or a missing cable', () => {
+  const command = buildWindowsLauncherCommand('QUJD');
+  assert.match(command, /Start-Process powershell\.exe -Verb RunAs -Wait -PassThru/);
+  assert.match(command, /'-EncodedCommand','QUJD'/);
+  assert.match(command, /catch \{ \[Console\]::Error\.WriteLine\('UAC_CANCELLED'\); exit 1223 \}/);
+  assert.match(describeElevationFailure('win32', 1223, 'UAC_CANCELLED'), /geweigerd/);
+  assert.match(describeElevationFailure('win32', 11, ''), /Steek de netwerkkabel in/);
+  assert.equal(isWirelessWindowsAdapter('Wi-Fi'), true);
+  assert.equal(isWirelessWindowsAdapter('WLAN 2'), true);
+  assert.equal(isWirelessWindowsAdapter('Ethernet'), false);
+  assert.equal(isWirelessWindowsAdapter('Ethernet 2'), false);
 });

@@ -1,4 +1,7 @@
+import { Link } from '@tanstack/react-router';
 import { SectionNavigation } from './SectionNavigation';
+import { PageHeader } from './PageHeader';
+import { Icon } from './Icon';
 import React from 'react';
 import { useAppActions, useAppData, useClusterStatus } from '../app/index';
 import { labelKindTitle } from './LabelBadge';
@@ -64,12 +67,12 @@ export function AdminView() {
   } = useAppActions();
   const [csvText, setCsvText] = React.useState('');
   const [csvFileName, setCsvFileName] = React.useState('');
-  const [message, setMessage] = React.useState<string | null>(null);
+  const [message, setMessage] = React.useState<AdminNotice | null>(null);
   const [importing, setImporting] = React.useState(false);
-  const [eventMessage, setEventMessage] = React.useState<string | null>(null);
+  const [eventMessage, setEventMessage] = React.useState<AdminNotice | null>(null);
   const [eventSaving, setEventSaving] = React.useState(false);
   const [recordModeSaving, setRecordModeSaving] = React.useState(false);
-  const [runnerMessage, setRunnerMessage] = React.useState<string | null>(null);
+  const [runnerMessage, setRunnerMessage] = React.useState<AdminNotice | null>(null);
   const [runnerQuery, setRunnerQuery] = React.useState('');
   const [runnerHour, setRunnerHour] = React.useState('');
   const [labelName, setLabelName] = React.useState('');
@@ -78,15 +81,15 @@ export function AdminView() {
   const [labelImageUrl, setLabelImageUrl] = React.useState('');
   const [labelTargetLaps, setLabelTargetLaps] = React.useState('');
   const [labelSortOrder, setLabelSortOrder] = React.useState('');
-  const [labelMessage, setLabelMessage] = React.useState<string | null>(null);
+  const [labelMessage, setLabelMessage] = React.useState<AdminNotice | null>(null);
   const [addingLabel, setAddingLabel] = React.useState(false);
   const [profileRunnerId, setProfileRunnerId] = React.useState<string | null>(null);
   const [remoteClusterUrl, setRemoteClusterUrl] = React.useState('');
   const [remotePairingCode, setRemotePairingCode] = React.useState('');
-  const [clusterMessage, setClusterMessage] = React.useState<string | null>(null);
+  const [clusterMessage, setClusterMessage] = React.useState<AdminNotice | null>(null);
   const [clusterSaving, setClusterSaving] = React.useState(false);
   const [backupSaving, setBackupSaving] = React.useState(false);
-  const [backupMessage, setBackupMessage] = React.useState<string | null>(null);
+  const [backupMessage, setBackupMessage] = React.useState<AdminNotice | null>(null);
   const [compactionSaving, setCompactionSaving] = React.useState(false);
   const [clusterConflicts, setClusterConflicts] = React.useState<
     Array<{
@@ -121,7 +124,7 @@ export function AdminView() {
         if (active) setClusterConflicts(conflicts);
       })
       .catch(() => {
-        if (active) setClusterMessage('De lijst met syncconflicten kon niet geladen worden.');
+        if (active) setClusterMessage({ tone: 'error', text: 'De lijst met syncconflicten kon niet geladen worden.' });
       });
     return () => {
       active = false;
@@ -144,11 +147,9 @@ export function AdminView() {
     try {
       const result = await joinCluster(remoteUrl, pairingCode);
       setRemotePairingCode('');
-      setClusterMessage(
-        `Gekoppeld. De vorige lokale database staat veilig in ${result.backupFile || 'een herstelkopie'}.`
-      );
+      setClusterMessage({ tone: 'success', text: `Gekoppeld. De vorige lokale database staat veilig in ${result.backupFile || 'een herstelkopie'}.` });
     } catch (err) {
-      setClusterMessage(err instanceof Error ? err.message : 'Koppelen mislukt');
+      setClusterMessage({ tone: 'error', text: err instanceof Error ? err.message : 'Koppelen mislukt' });
     } finally {
       setClusterSaving(false);
     }
@@ -167,9 +168,9 @@ export function AdminView() {
     try {
       await resolveConflict(conflictId, selectedOperationId);
       setClusterConflicts((current) => current.filter((item) => item.id !== conflictId));
-      setClusterMessage('Syncconflict opgelost; de gekozen timing wordt naar alle laptops gekopieerd.');
+      setClusterMessage({ tone: 'success', text: 'Syncconflict opgelost; de gekozen timing wordt naar alle laptops gekopieerd.' });
     } catch (err) {
-      setClusterMessage(err instanceof Error ? err.message : 'Conflict oplossen mislukt');
+      setClusterMessage({ tone: 'error', text: err instanceof Error ? err.message : 'Conflict oplossen mislukt' });
     } finally {
       setClusterSaving(false);
     }
@@ -187,9 +188,9 @@ export function AdminView() {
     setClusterMessage(null);
     try {
       await transferTimingControl(targetHostId);
-      setClusterMessage(`Timing is overgedragen naar ${targetUrl}.`);
+      setClusterMessage({ tone: 'success', text: `Timing is overgedragen naar ${targetUrl}.` });
     } catch (err) {
-      setClusterMessage(err instanceof Error ? err.message : 'Timing overdragen mislukt');
+      setClusterMessage({ tone: 'error', text: err instanceof Error ? err.message : 'Timing overdragen mislukt' });
     } finally {
       setClusterSaving(false);
     }
@@ -201,9 +202,9 @@ export function AdminView() {
     setBackupMessage(null);
     try {
       const backup = await createBackup();
-      setBackupMessage(`Backup gecontroleerd en opgeslagen om ${formatClockTimeMs(backup.createdAt)}.`);
+      setBackupMessage({ tone: 'success', text: `Backup gecontroleerd en opgeslagen om ${formatClockTimeMs(backup.createdAt)}.` });
     } catch (err) {
-      setBackupMessage(err instanceof Error ? err.message : 'Backup maken mislukt');
+      setBackupMessage({ tone: 'error', text: err instanceof Error ? err.message : 'Backup maken mislukt' });
     } finally {
       setBackupSaving(false);
     }
@@ -221,11 +222,9 @@ export function AdminView() {
     setBackupMessage(null);
     try {
       const result = await compactDatabase();
-      setBackupMessage(
-        `Database veilig verkleind van ${formatFileSize(result.before.fileBytes)} naar ${formatFileSize(result.after.fileBytes)}.`
-      );
+      setBackupMessage({ tone: 'success', text: `Database veilig verkleind van ${formatFileSize(result.before.fileBytes)} naar ${formatFileSize(result.after.fileBytes)}.` });
     } catch (err) {
-      setBackupMessage(err instanceof Error ? err.message : 'Database compactie mislukt');
+      setBackupMessage({ tone: 'error', text: err instanceof Error ? err.message : 'Database compactie mislukt' });
     } finally {
       setCompactionSaving(false);
     }
@@ -237,9 +236,9 @@ export function AdminView() {
     setImporting(true);
     try {
       const summary = await importRunnersCsv(csvText);
-      setMessage(summary);
+      setMessage({ tone: 'success', text: summary });
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : 'Import mislukt');
+      setMessage({ tone: 'error', text: err instanceof Error ? err.message : 'Import mislukt' });
     } finally {
       setImporting(false);
     }
@@ -273,7 +272,7 @@ export function AdminView() {
       setLabelTargetLaps('');
       setLabelSortOrder('');
     } catch (err) {
-      setLabelMessage(err instanceof Error ? err.message : 'Label toevoegen mislukt');
+      setLabelMessage({ tone: 'error', text: err instanceof Error ? err.message : 'Label toevoegen mislukt' });
     } finally {
       setAddingLabel(false);
     }
@@ -285,11 +284,11 @@ export function AdminView() {
     try {
       const event = await burgieGepakt();
       const runnerText = event.runnerName
-        ? ` voor ${event.runnerNumber ? `${event.runnerNumber} - ` : ''}${event.runnerName}`
+        ? ` voor ${event.runnerNumber ? `${event.runnerNumber} ` : ''}${event.runnerName}`
         : '';
-      setEventMessage(`Burgie gepakt opgeslagen om ${formatClockTimeMs(event.occurredAt)}${runnerText}.`);
+      setEventMessage({ tone: 'success', text: `Burgie gepakt opgeslagen om ${formatClockTimeMs(event.occurredAt)}${runnerText}.` });
     } catch (err) {
-      setEventMessage(err instanceof Error ? err.message : 'Burgie gepakt opslaan mislukt');
+      setEventMessage({ tone: 'error', text: err instanceof Error ? err.message : 'Burgie gepakt opslaan mislukt' });
     } finally {
       setEventSaving(false);
     }
@@ -300,9 +299,9 @@ export function AdminView() {
     setRecordModeSaving(true);
     try {
       const nextSettings = await updatePublicRecordMode(publicRecordMode);
-      setEventMessage(`Recordflits staat op ${publicRecordModeLabel(nextSettings.publicRecordMode)}.`);
+      setEventMessage({ tone: 'success', text: `Recordflits staat op ${publicRecordModeLabel(nextSettings.publicRecordMode)}.` });
     } catch (err) {
-      setEventMessage(err instanceof Error ? err.message : 'Recordflits aanpassen mislukt');
+      setEventMessage({ tone: 'error', text: err instanceof Error ? err.message : 'Recordflits aanpassen mislukt' });
     } finally {
       setRecordModeSaving(false);
     }
@@ -313,9 +312,9 @@ export function AdminView() {
     setLabelMessage(null);
     try {
       await deleteLabel(id);
-      setLabelMessage(`${name} is verwijderd.`);
+      setLabelMessage({ tone: 'success', text: `${name} is verwijderd.` });
     } catch (err) {
-      setLabelMessage(err instanceof Error ? err.message : 'Label verwijderen mislukt');
+      setLabelMessage({ tone: 'error', text: err instanceof Error ? err.message : 'Label verwijderen mislukt' });
     }
   }
 
@@ -370,9 +369,9 @@ export function AdminView() {
     setRunnerMessage(null);
     try {
       await unhideRunner(runner.id);
-      setRunnerMessage(`${runner.name} is terug zichtbaar.`);
+      setRunnerMessage({ tone: 'success', text: `${runner.name} is terug zichtbaar.` });
     } catch (err) {
-      setRunnerMessage(err instanceof Error ? err.message : 'Loper terug tonen mislukt');
+      setRunnerMessage({ tone: 'error', text: err instanceof Error ? err.message : 'Loper terug tonen mislukt' });
     }
   }
 
@@ -382,20 +381,15 @@ export function AdminView() {
     setRunnerMessage(null);
     try {
       await deleteRunner(runner.id);
-      setRunnerMessage(`${runner.name} is definitief verwijderd.`);
+      setRunnerMessage({ tone: 'success', text: `${runner.name} is definitief verwijderd.` });
     } catch (err) {
-      setRunnerMessage(err instanceof Error ? err.message : 'Loper verwijderen mislukt');
+      setRunnerMessage({ tone: 'error', text: err instanceof Error ? err.message : 'Loper verwijderen mislukt' });
     }
   }
 
   return (
     <>
-      <div className="hero hero--compact">
-        <div>
-          <h1 className="app-title">Beheer</h1>
-          <p className="tagline">Lopers, ploegen en instellingen voor de wedstrijd.</p>
-        </div>
-      </div>
+      <PageHeader title="Beheer" />
 
       <div className="management-workspace">
         <aside className="management-navigation">
@@ -406,11 +400,6 @@ export function AdminView() {
             onSectionChange={setActiveSection}
             attentionIds={readiness === 'ready' ? [] : (['system'] as AdminSection[])}
           />
-          {readiness !== 'ready' && (
-            <button className="management-health" onClick={() => setActiveSection('system')}>
-              Systeem vraagt aandacht <span>Bekijk verbinding en herstel →</span>
-            </button>
-          )}
         </aside>
         <div className="management-content">
           <section hidden={activeSection !== 'labels'} className="panel">
@@ -470,7 +459,7 @@ export function AdminView() {
                 </div>
               )}
               <ul className="readiness-list">
-                {readinessChecks.map((check) => (
+                {sortReadinessChecks(readinessChecks).map((check) => (
                   <li className={`readiness-check readiness-check--${check.level}`} key={check.id}>
                     <span className="readiness-check__marker" aria-hidden="true">
                       {check.level === 'ready' ? '✓' : check.level === 'warning' ? '!' : '×'}
@@ -483,7 +472,7 @@ export function AdminView() {
                           className="btn btn--ghost btn--sm readiness-check-action"
                           onClick={() => setActiveSection('system')}
                         >
-                          Naar Systeem &amp; herstel →
+                          Naar Systeem &amp; herstel
                         </button>
                       )}
                     </span>
@@ -600,7 +589,7 @@ export function AdminView() {
                     ))}
                   </div>
                 ))}
-                {clusterMessage && <div className="host-hint">{clusterMessage}</div>}
+                <AdminNoticeBanner notice={clusterMessage} />
                 {(cluster.deadLetterCount ?? 0) > 0 && (
                   <div className="warning-banner" role="alert">
                     {cluster.deadLetterCount} synchronisatie-actie{(cluster.deadLetterCount ?? 0) === 1 ? ' is' : 's zijn'} in
@@ -740,50 +729,70 @@ export function AdminView() {
                   replica's beschermen tegen een defect toestel; deze versies beschermen ook tegen een fout
                   die naar alle laptops wordt gesynchroniseerd.
                 </p>
-                {backupMessage && (
-                  <div className="success-banner" role="status" aria-live="polite">
-                    {backupMessage}
-                  </div>
-                )}
+                <AdminNoticeBanner notice={backupMessage} />
               </section>
             )}
 
             <section hidden={activeSection !== 'public'} className="panel admin-dashboard__public-event">
-              <h2>Publiek moment</h2>
-              <p className="panel-copy">Slaat het moment op en toont de flash alleen op het buitenscherm.</p>
-              <button
-                className="btn btn--primary btn--xl"
-                onClick={triggerBurgieGepakt}
-                disabled={eventSaving}
-              >
-                {eventSaving ? 'Opslaan...' : 'Burgie gepakt'}
-              </button>
-              <div className="form-row form-row--plain public-record-mode-row">
-                <label htmlFor="public-record-mode">
-                  <strong>Recordflits</strong>
-                </label>
-                <select
-                  id="public-record-mode"
-                  className="input"
-                  value={settings.publicRecordMode}
-                  onChange={(event) => void changePublicRecordMode(event.target.value as PublicRecordMode)}
-                  disabled={recordModeSaving}
-                >
-                  <option value="off">Uit</option>
-                  <option value="day">Dagrecord</option>
-                  <option value="two_hour">Per 2 uur</option>
-                  <option value="hour">Per uur</option>
-                </select>
+              <h2>Publieke momenten</h2>
+              <p className="panel-copy">Wat het publiek op het Buitenscherm ziet, bovenop de huidige en volgende loper.</p>
+              <div className="public-moments">
+                <div className="public-moment">
+                  <h3>Burgie gepakt</h3>
+                  <p>Toont 8 seconden “Burgie gepakt, ZINGEN” met de loper die nu op de piste is, en bewaart het moment in de analyse.</p>
+                  <button
+                    className="btn btn--primary"
+                    onClick={triggerBurgieGepakt}
+                    disabled={eventSaving}
+                  >
+                    {eventSaving ? 'Opslaan...' : 'Burgie gepakt'}
+                  </button>
+                </div>
+                <div className="public-moment">
+                  <h3 id="public-record-mode">Recordflits</h3>
+                  <p>Een nieuwe snelste ronde verschijnt 8 seconden groot op het Buitenscherm.</p>
+                  <div className="segmented-control" role="group" aria-labelledby="public-record-mode">
+                    {([
+                      ['off', 'Uit'],
+                      ['day', 'Dagrecord'],
+                      ['two_hour', 'Per 2 uur'],
+                      ['hour', 'Per uur'],
+                    ] as const).map(([mode, label]) => (
+                      <button
+                        key={mode}
+                        type="button"
+                        className={settings.publicRecordMode === mode ? 'is-active' : ''}
+                        aria-pressed={settings.publicRecordMode === mode}
+                        disabled={recordModeSaving}
+                        onClick={() => {
+                          if (settings.publicRecordMode !== mode) void changePublicRecordMode(mode);
+                        }}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
-              {eventMessage && <div className="host-hint">{eventMessage}</div>}
+              <div className="public-links">
+                <Link className="btn btn--sm" to="/display/outside">
+                  <Icon name="displayOutside" size={14} />
+                  Buitenscherm openen
+                </Link>
+                <Link className="btn btn--sm" to="/display/inside">
+                  <Icon name="displayInside" size={14} />
+                  Binnenscherm openen
+                </Link>
+              </div>
+              <AdminNoticeBanner notice={eventMessage} />
             </section>
 
             <section hidden={activeSection !== 'preparation'} className="panel admin-dashboard__import">
-              <h2>Google Sheets CSV import</h2>
+              <h2>Inschrijvingen importeren</h2>
               <p className="panel-copy">
-                Import zet nieuwe lopers in de ingeschreven databank. Ze verschijnen pas op het bord wanneer
-                je ze activeert in Telsysteem 1.
-                Een formulierexport met E-mailadres en Voornaam + naam neemt het spreadsheetrijnummer als lopersnummer en bewaart alle inschrijvingsantwoorden in het profiel.
+                Kies de CSV-export van het inschrijvingsformulier. Nieuwe lopers komen in de databank en verschijnen
+                op het bord zodra je ze aanmeldt in Wachtrij. Het rijnummer wordt het lopersnummer en alle antwoorden
+                komen in het profiel.
               </p>
               <div className="file-import-row">
                 <label className="file-picker">
@@ -799,14 +808,15 @@ export function AdminView() {
                   {importing ? 'Importeren...' : 'Importeren'}
                 </button>
               </div>
-              {message && <div className="host-hint">{message}</div>}
+              <AdminNoticeBanner notice={message} />
             </section>
 
             <section hidden={activeSection !== 'labels'} className="panel admin-dashboard__labels">
               <h2>Labels</h2>
-              <div className="form-row">
+              <div className="form-row label-create-row">
                 <input
                   className="input"
+                  aria-label="Naam van het nieuwe label"
                   value={labelName}
                   onChange={(event) => setLabelName(event.target.value)}
                   placeholder="Nieuw label"
@@ -858,7 +868,7 @@ export function AdminView() {
                 </button>
               </div>
 
-              {labelMessage && <div className="host-hint">{labelMessage}</div>}
+              <AdminNoticeBanner notice={labelMessage} />
 
               <div className="label-admin-list">
                 {groupLabels(labels).map(([kind, groupedLabels]) => (
@@ -909,7 +919,7 @@ export function AdminView() {
               {runnerStatusCounts ? ` · ${runnerStatusCounts}` : ''}
             </p>
             {runnerHour && <p className="panel-copy">Beschikbaarheid komt uit de inschrijving. De status toont de huidige stap in de app, niet de fysieke locatie.</p>}
-            {runnerMessage && <div className="host-hint">{runnerMessage}</div>}
+            <AdminNoticeBanner notice={runnerMessage} />
             <div className="table-wrap">
               <AdminRunnerTable
                 runners={adminRunners}
@@ -944,5 +954,27 @@ export function AdminView() {
         </div>
       </div>
     </>
+  );
+}
+
+const READINESS_ORDER = { blocked: 0, warning: 1, ready: 2 } as const;
+
+// Blocking problems first; the order within a level stays as defined in readiness.ts.
+function sortReadinessChecks<Check extends { level: keyof typeof READINESS_ORDER }>(checks: Check[]): Check[] {
+  return checks
+    .map((check, index) => ({ check, index }))
+    .sort((first, second) =>
+      READINESS_ORDER[first.check.level] - READINESS_ORDER[second.check.level] || first.index - second.index)
+    .map(({ check }) => check);
+}
+
+type AdminNotice = { tone: 'success' | 'error'; text: string };
+
+function AdminNoticeBanner({ notice }: { notice: AdminNotice | null }) {
+  if (!notice) return null;
+  return notice.tone === 'error' ? (
+    <div className="warning-banner warning-banner--blocking" role="alert">{notice.text}</div>
+  ) : (
+    <div className="success-banner" role="status" aria-live="polite">{notice.text}</div>
   );
 }

@@ -1,129 +1,193 @@
 import React from 'react';
 import { Link } from '@tanstack/react-router';
-import { useAppData } from '../app/index';
-import { preloadAdminView, preloadAnalysisView, preloadDisplayViews, preloadKobeTacticsView } from '../lazyViews';
+import { useAppData, useClusterStatus, useRaceHistory } from '../app/index';
+import { preloadAdminView, preloadAnalysisView } from '../lazyViews';
+import { getNextWaitingRunner } from '../lib/runners';
+import { deriveSystemStatus } from '../lib/systemStatus';
+import { useCopyText } from '../lib/clipboard';
+import { formatClockTimeMs, formatDurationMs } from '../lib/time';
+import { Icon } from './Icon';
+import { LiveDuration, LiveElapsed } from './LiveTime';
+import { PageHeader } from './PageHeader';
+import { RunnerName } from './RunnerName';
 import type { LiveAppSnapshot } from '../types';
 
-const selectHostData = ({ host }: LiveAppSnapshot) => ({ host });
+const selectOverviewData = ({ host, runners, race }: LiveAppSnapshot) => ({ host, runners, race });
 
-const ROLE_GROUPS = [
-  {
-    title: 'Wedstrijd bedienen',
-    isOperatorGroup: true,
-    roles: [
-      {
-        path: '/queue',
-        title: 'Wachtrij & wisselzone',
-        description: 'Lopers toevoegen, opwarmen en de wachtrij beheren.',
-        preload: undefined,
-      },
-      {
-        path: '/timing',
-        title: 'Timing',
-        description: 'De huidige loper afklokken en de volgende starten.',
-        preload: undefined,
-      },
-    ],
-  },
-  {
-    title: 'Analyse en beheer',
-    isOperatorGroup: false,
-    roles: [
-      {
-        path: '/analysis',
-        title: 'Analyse en export',
-        description: 'Live rondedata bekijken en exporteren.',
-        preload: preloadAnalysisView,
-      },
-      {
-        path: '/tactics',
-        title: "Kobe's tactiek",
-        description: 'Live wedstrijdstrategie en historische vergelijkingen.',
-        preload: preloadKobeTacticsView,
-      },
-      {
-        path: '/admin',
-        title: 'Beheer',
-        description: 'Import, labels en wedstrijdinstellingen beheren.',
-        preload: preloadAdminView,
-      },
-    ],
-  },
-  {
-    title: 'Publieksschermen',
-    isOperatorGroup: false,
-    roles: [
-      {
-        path: '/display/inside',
-        title: 'Binnenscherm',
-        description: 'Rankings en progressie van lopers en ploegen.',
-        preload: preloadDisplayViews,
-      },
-      {
-        path: '/display/outside',
-        title: 'Buitenscherm',
-        description: 'De huidige en volgende loper op de piste.',
-        preload: preloadDisplayViews,
-      },
-    ],
-  },
-] as const;
-
+/** Overzicht: what is happening in the race right now, at a glance. */
 export function RolePicker() {
-  const { host } = useAppData(selectHostData);
-  const [copied, setCopied] = React.useState(false);
+  const { host, runners, race } = useAppData(selectOverviewData);
+  const { laps: recentLaps, loading: lapsLoading } = useRaceHistory({ scope: 'recent', limit: 8 });
+  const { cluster, error: clusterError } = useClusterStatus();
+  const systemStatus = deriveSystemStatus(cluster, clusterError);
+  const [copied, copyHostUrl] = useCopyText(host?.url ?? null);
 
-  async function copyHostUrl() {
-    if (!host) return;
-    try {
-      await navigator.clipboard.writeText(host.url);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 2000);
-    } catch {
-      setCopied(false);
-    }
-  }
+  const activeRunner = runners.find((runner) => runner.id === race.activeRunnerId) || null;
+  const nextRunner = getNextWaitingRunner(runners);
+  const warmingCount = runners.filter((runner) => runner.status === 'warming_up').length;
+  const waitingCount = runners.filter((runner) => runner.status === 'waiting').length;
+  const ranCount = runners.filter((runner) => runner.lapCount > 0).length;
+  const totalLaps = runners.reduce((sum, runner) => sum + runner.lapCount, 0);
+  const fastestRunner = runners.reduce<(typeof runners)[number] | null>(
+    (best, runner) => (runner.bestLapMs && (!best?.bestLapMs || runner.bestLapMs < best.bestLapMs) ? runner : best),
+    null
+  );
+  // Same definition as Analyse: laps divided by the time until the latest lap.
+  const latestLapAt = recentLaps[0]?.finishedAt ?? null;
+  const lapsPerHour = race.raceStartedAt && latestLapAt && latestLapAt > race.raceStartedAt
+    ? totalLaps / ((race.raceFinishedAt ?? latestLapAt) - race.raceStartedAt) * 3_600_000
+    : null;
 
   return (
     <>
-      <div className="hero home-hero">
-        <img className="hero-logo" src="/brand/apolloon-logo.png" alt="Apolloon" width={560} height={169} fetchPriority="high" />
-        <div className="hero__content">
-          <h1 className="app-title">Elke ronde telt.</h1>
-          <p className="tagline">Je werkplek voor de 24 urenloop.</p>
-        </div>
-      </div>
-      <div className="role-sections">
-        {ROLE_GROUPS.map((roleGroup) => (
-          <section key={roleGroup.title} className={`role-section${roleGroup.isOperatorGroup ? ' role-section--operations' : ''}`}>
-            <h2>{roleGroup.title}</h2>
-            <div className="role-grid">
-              {roleGroup.roles.map((role) => (
-                <Link
-                  key={role.path}
-                  className="role-card"
-                  to={role.path}
-                  onPointerEnter={role.preload}
-                  onFocus={role.preload}
-                >
-                  <span>
-                    <span className="role-card__title">{role.title}</span>
-                    <small>{role.description}</small>
-                  </span>
-                </Link>
-              ))}
-            </div>
-          </section>
-        ))}
-      </div>
-      {host && (
-        <div className="host-hint host-hint--with-copy">
-          Open op een andere laptop: <strong>{host.url}</strong>
-          <button type="button" className="btn btn--ghost btn--sm" onClick={() => void copyHostUrl()}>
-            {copied ? 'Gekopieerd!' : 'Kopieer'}
+      <PageHeader
+        title="Overzicht"
+        meta={
+          <span>
+            {!race.raceStartedAt
+              ? 'Race nog niet gestart'
+              : race.raceFinishedAt
+                ? 'Race afgesloten'
+                : `Gestart om ${formatClockTimeMs(race.raceStartedAt).slice(0, 5)}`}
+          </span>
+        }
+        actions={host && (
+          <button type="button" className="btn btn--sm" onClick={copyHostUrl} title={host.url}>
+            <Icon name={copied ? 'check' : 'copy'} size={14} />
+            {copied ? 'Gekopieerd' : 'Adres voor andere laptop kopiëren'}
           </button>
+        )}
+      />
+      <div className="overview">
+        <section className="overview-kpis" aria-label="Kerncijfers">
+          <div>
+            <span>Racetijd</span>
+            <strong>
+              {!race.raceStartedAt
+                ? '0:00'
+                : race.raceFinishedAt
+                  ? formatDurationMs(race.raceFinishedAt - race.raceStartedAt).split('.')[0]
+                  : <LiveElapsed startedAt={race.raceStartedAt} />}
+            </strong>
+          </div>
+          <div>
+            <span>Rondes</span>
+            <strong>{totalLaps.toLocaleString('nl-BE')}</strong>
+          </div>
+          <div>
+            <span>Rondes per uur</span>
+            <strong>
+              {lapsPerHour == null
+                ? '—'
+                : lapsPerHour.toLocaleString('nl-BE', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
+            </strong>
+          </div>
+          <div>
+            <span>Snelste ronde</span>
+            <strong>{fastestRunner?.bestLapMs ? formatDurationMs(fastestRunner.bestLapMs) : '—'}</strong>
+            {fastestRunner?.bestLapMs ? <small><RunnerName runner={fastestRunner} /></small> : null}
+          </div>
+        </section>
+
+        <div className="overview-row">
+          <section className="panel overview-track">
+            <header className="panel-header">
+              <h2>Op de piste</h2>
+              <Link className="btn btn--sm btn--quiet" to="/timing">Naar Timing<Icon name="arrowRight" size={14} /></Link>
+            </header>
+            {activeRunner ? (
+              <div className="overview-track__now">
+                <span className="overview-track__runner"><RunnerName runner={activeRunner} /></span>
+                {race.activeStartedAt && (
+                  <LiveDuration startedAt={race.activeStartedAt} className="overview-track__time" refreshMs={1_000} format="seconds" />
+                )}
+              </div>
+            ) : (
+              <p className="overview-empty">
+                {race.raceFinishedAt
+                  ? 'De race is afgesloten.'
+                  : runners.length === 0
+                    ? 'Nog geen lopers. Importeer de inschrijvingen in Beheer of voeg lopers toe in Wachtrij.'
+                    : waitingCount
+                      ? 'Nog niemand op de piste. Start de eerste loper in Timing.'
+                      : 'Nog niemand op de piste. Zet eerst lopers klaar in Wachtrij.'}
+              </p>
+            )}
+            <p className="overview-track__next">
+              Volgende: <strong>{nextRunner ? <RunnerName runner={nextRunner} /> : 'niemand klaar'}</strong>
+            </p>
+          </section>
+
+          <section className="panel overview-queue">
+            <header className="panel-header">
+              <h2>Wisselzone</h2>
+              <Link className="btn btn--sm btn--quiet" to="/queue">Naar Wachtrij<Icon name="arrowRight" size={14} /></Link>
+            </header>
+            <dl className="overview-counts">
+              <div><dt>Opwarmen</dt><dd>{warmingCount}</dd></div>
+              <div><dt>Klaar</dt><dd>{waitingCount}</dd></div>
+              <div><dt>Met rondes</dt><dd>{ranCount}</dd></div>
+            </dl>
+            {waitingCount < 3 && race.raceStartedAt && !race.raceFinishedAt && (
+              <p className="overview-warning">
+                Nog maar {waitingCount} {waitingCount === 1 ? 'loper' : 'lopers'} klaar. Zet lopers klaar in Wachtrij.
+              </p>
+            )}
+          </section>
         </div>
-      )}
+
+        <div className="overview-row">
+          <section className="panel overview-laps">
+            <header className="panel-header">
+              <h2>Laatste rondes</h2>
+              <Link className="btn btn--sm btn--quiet" to="/analysis" onPointerEnter={preloadAnalysisView}>
+                Naar Analyse<Icon name="arrowRight" size={14} />
+              </Link>
+            </header>
+            {recentLaps.length ? (
+              <table>
+                <tbody>
+                  {recentLaps.map((lap) => (
+                    <tr key={lap.id}>
+                      <td className="overview-laps__time">{formatClockTimeMs(lap.finishedAt).slice(0, 8)}</td>
+                      <td className="cell-runner">
+                        {lap.runnerNumber && <span className="cell-number">{lap.runnerNumber}</span>}
+                        {lap.runnerName}
+                      </td>
+                      <td className="num overview-laps__lap">ronde {lap.lapNumber}</td>
+                      <td className="num"><strong>{formatDurationMs(lap.durationMs)}</strong></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <p className="overview-empty">{lapsLoading ? 'Rondes laden...' : 'Nog geen rondes geregistreerd.'}</p>
+            )}
+          </section>
+
+          <section className="panel overview-system">
+            <header className="panel-header">
+              <h2>Systeem</h2>
+              <Link className="btn btn--sm btn--quiet" to="/admin" onPointerEnter={preloadAdminView}>
+                Naar Beheer<Icon name="arrowRight" size={14} />
+              </Link>
+            </header>
+            {systemStatus && (
+              <div className={`overview-status overview-status--${systemStatus.tone}`}>
+                <span className="system-status__dot" aria-hidden="true" />
+                <div>
+                  <strong>{systemStatus.tone === 'healthy' ? 'Alles in orde' : systemStatus.title}</strong>
+                  <span>{systemStatus.detail}</span>
+                </div>
+              </div>
+            )}
+            <dl className="overview-facts">
+              <div><dt>Adres voor andere laptops</dt><dd>{host?.url ?? '—'}</dd></div>
+              <div><dt>Lopers in de databank</dt><dd>{runners.length}</dd></div>
+            </dl>
+          </section>
+        </div>
+      </div>
     </>
   );
 }

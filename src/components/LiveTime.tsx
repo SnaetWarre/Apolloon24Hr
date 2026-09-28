@@ -9,13 +9,20 @@ export function LiveDuration({
   startedAt,
   className,
   refreshMs = LIVE_MILLISECOND_INTERVAL_MS,
+  format = 'milliseconds',
 }: {
   startedAt: number;
   className?: string;
   refreshMs?: number;
+  format?: 'milliseconds' | 'seconds';
 }) {
   useClockTick(refreshMs);
-  return <span className={className}>{formatDurationMs(nowMs() - startedAt)}</span>;
+  const elapsedMs = nowMs() - startedAt;
+  return (
+    <span className={className}>
+      {format === 'seconds' ? formatElapsedSeconds(elapsedMs) : formatDurationMs(elapsedMs)}
+    </span>
+  );
 }
 
 export function LiveElapsed({
