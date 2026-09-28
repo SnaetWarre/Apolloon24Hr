@@ -4,12 +4,12 @@ This deploy path runs Apolloon on the VPS itself. It does not need a reverse SSH
 
 ## What Gets Deployed
 
-`npm run deploy:vps` builds the app locally, uploads a tarball, and installs it as a systemd service on the VPS.
+`npm run deploy:vps` builds the app locally, uploads a tarball, and installs it as a systemd service on the VPS. When a clean checkout of the same commit is already running and healthy with the requested service settings, it exits before building or restarting the service.
 
 The release code goes to:
 
 ```text
-/opt/apolloon/releases/<timestamp>-<git-sha>
+/opt/apolloon/releases/<timestamp>-<git-sha>-<random-suffix>
 /opt/apolloon/current -> latest release
 ```
 
@@ -54,6 +54,14 @@ Default target is the existing VPS from the tunnel script:
 ```bash
 npm run deploy:vps
 ```
+
+To redeploy the same commit, for example after changing local build environment variables, run:
+
+```bash
+DEPLOY_FORCE=1 npm run deploy:vps
+```
+
+The fast check does not apply to a checkout with uncommitted files, an explicit `DEPLOY_ARTIFACT`, or `DEPLOY_SKIP_BUILD=1`. It also falls through to a full deploy when the service is stopped, unhealthy, or configured differently.
 
 Override values when needed:
 
