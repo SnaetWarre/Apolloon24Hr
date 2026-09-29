@@ -121,23 +121,27 @@ function OverviewSection({
     <div className="tactics-section-stack">
       <section className="stats-grid stats-grid--analysis tactics-live-stats" aria-label="Historische kerncijfers">
         <DeepStat
-          label={`Team ${firstTeam.teamId}`}
+          label={firstTeam.teamName}
           value={`${firstSummary.laps} rondes`}
           detail={`Mediaan ${formatSeconds(firstSummary.medianSeconds)}`}
         />
         <DeepStat
-          label={`Team ${secondTeam.teamId}`}
+          label={secondTeam.teamName}
           value={`${secondSummary.laps} rondes`}
           detail={`Mediaan ${formatSeconds(secondSummary.medianSeconds)}`}
         />
         <DeepStat
           label="Verschil na 24u"
           value={signedNumber(firstSummary.laps - secondSummary.laps)}
-          detail={`Team ${firstTeam.teamId} tegenover team ${secondTeam.teamId}`}
+          detail={`${firstTeam.teamName} tegenover ${secondTeam.teamName}`}
         />
         <DeepStat
           label="Meest consistent"
-          value={`Team ${firstSummary.standardDeviationSeconds <= secondSummary.standardDeviationSeconds ? firstTeam.teamId : secondTeam.teamId}`}
+          value={
+            firstSummary.standardDeviationSeconds <= secondSummary.standardDeviationSeconds
+              ? firstTeam.teamName
+              : secondTeam.teamName
+          }
           detail="Laagste spreiding over alle rondes"
         />
       </section>
@@ -172,7 +176,7 @@ function OverviewSection({
                   <td>
                     <span className="tactics-team-key">
                       <i style={{ background: teamColor(summary.teamId, index) }} />
-                      Team {summary.teamId}
+                      {summary.teamName}
                     </span>
                   </td>
                   <td>
@@ -194,7 +198,7 @@ function OverviewSection({
         <div className="tactics-panel-heading">
           <SectionHeader
             kicker="Rondeduur over 24 uur"
-            title={`Alle passages van team ${detailTeam.teamId}`}
+            title={`Alle passages van ${detailTeam.teamName}`}
             text="Elke stip is een geregistreerde ronde. De donkere lijn is de lopende mediaan over twintig rondes, zoals in Kobe zijn oorspronkelijke analyse."
           />
           <label className="tactics-compact-select">
@@ -206,7 +210,7 @@ function OverviewSection({
             >
               {historicalRace.teams.map((team) => (
                 <option key={team.teamId} value={team.teamId}>
-                  Team {team.teamId}
+                  {team.teamName}
                 </option>
               ))}
             </select>
@@ -218,7 +222,7 @@ function OverviewSection({
       <section className="panel">
         <SectionHeader
           kicker="Verdeling"
-          title={`Rondetijdfrequentie van team ${firstTeam.teamId} en team ${secondTeam.teamId}`}
+          title={`Rondetijdfrequentie van ${firstTeam.teamName} en ${secondTeam.teamName}`}
           text="Aantal rondes per interval van twee seconden. Zo ziet ge niet alleen het gemiddelde, maar ook de volledige vorm en uitschieters."
         />
         <DurationDistributionChart firstTeam={firstTeam} secondTeam={secondTeam} />
@@ -297,7 +301,7 @@ function TempoSection({ firstTeam, secondTeam }: { firstTeam: HistoricalTeam; se
         <SectionHeader
           kicker="Onderling verschil"
           title="Verschil in gemiddeld tempo per halfuur"
-          text={`Positief betekent dat team ${firstTeam.teamId} trager was; negatief betekent dat team ${firstTeam.teamId} sneller was dan team ${secondTeam.teamId}.`}
+          text={`Positief betekent dat ${firstTeam.teamName} trager was; negatief betekent dat ${firstTeam.teamName} sneller was dan ${secondTeam.teamName}.`}
         />
         <HalfHourDifferenceChart points={halfHourDifferences} firstTeam={firstTeam} secondTeam={secondTeam} />
       </section>
@@ -359,14 +363,14 @@ function RaceSection({ firstTeam, secondTeam }: { firstTeam: HistoricalTeam; sec
     <div className="tactics-section-stack">
       <section className="stats-grid stats-grid--analysis tactics-live-stats">
         <DeepStat
-          label={`Tijdskloof team ${firstTeam.teamId}`}
+          label={`Tijdskloof ${firstTeam.teamName}`}
           value={formatSignedSeconds(finalTimeGap)}
-          detail={`Positief betekent achter op team ${secondTeam.teamId}`}
+          detail={`Positief betekent achter op ${secondTeam.teamName}`}
         />
         <DeepStat
           label="Rondeverschil"
           value={signedNumber(-finalLapGap)}
-          detail={`Team ${firstTeam.teamId} tegenover team ${secondTeam.teamId}`}
+          detail={`${firstTeam.teamName} tegenover ${secondTeam.teamName}`}
         />
         <DeepStat
           label="Afstandsverschil"
@@ -389,8 +393,8 @@ function RaceSection({ firstTeam, secondTeam }: { firstTeam: HistoricalTeam; sec
       <section className="panel">
         <SectionHeader
           kicker="Tijdsachterstand"
-          title={`Hoeveel tijd lag team ${firstTeam.teamId} voor of achter?`}
-          text={`Benaderde tijd om op elk moment dezelfde voortgang als team ${secondTeam.teamId} te halen. Positief is achterstand.`}
+          title={`Hoeveel tijd lag ${firstTeam.teamName} voor of achter?`}
+          text={`Benaderde tijd om op elk moment dezelfde voortgang als ${secondTeam.teamName} te halen. Positief is achterstand.`}
         />
         <TimeGapChart points={timeGap} firstTeam={firstTeam} secondTeam={secondTeam} />
       </section>
@@ -399,7 +403,7 @@ function RaceSection({ firstTeam, secondTeam }: { firstTeam: HistoricalTeam; sec
         <SectionHeader
           kicker="Dezelfde ronde-index"
           title="Tijdsverschil bij exact dezelfde ronde"
-          text={`Vergelijkt ronde 1 met ronde 1, ronde 2 met ronde 2 enzovoort. Positief betekent dat team ${firstTeam.teamId} die ronde-index later bereikte.`}
+          text={`Vergelijkt ronde 1 met ronde 1, ronde 2 met ronde 2 enzovoort. Positief betekent dat ${firstTeam.teamName} die ronde-index later bereikte.`}
         />
         <SameLapGapChart points={sameLapGap} firstTeam={firstTeam} secondTeam={secondTeam} />
       </section>
@@ -407,7 +411,7 @@ function RaceSection({ firstTeam, secondTeam }: { firstTeam: HistoricalTeam; sec
       <section className="panel">
         <SectionHeader
           kicker="Uur per uur"
-          title={`Gewonnen of verloren rondes tegenover team ${secondTeam.teamId}`}
+          title={`Gewonnen of verloren rondes tegenover ${secondTeam.teamName}`}
           text="Een positieve balk betekent dat team B dat uur meer rondes liep; negatief betekent winst voor team A."
         />
         <HourlyGainChart points={hourlyGains} firstTeam={firstTeam} secondTeam={secondTeam} />
@@ -426,7 +430,7 @@ function RaceSection({ firstTeam, secondTeam }: { firstTeam: HistoricalTeam; sec
         <SectionHeader
           kicker="Leiderschap en afstand"
           title="Wie lag wanneer voor?"
-          text={`Boven nul lag team ${firstTeam.teamId} voor, onder nul team ${secondTeam.teamId}. De tweede as rekent hetzelfde verschil om met ${lapLengthMeters} meter per ronde.`}
+          text={`Boven nul lag ${firstTeam.teamName} voor, onder nul ${secondTeam.teamName}. De tweede as rekent hetzelfde verschil om met ${lapLengthMeters} meter per ronde.`}
         />
         <RaceLeadChart points={raceLead} firstTeam={firstTeam} lapLengthMeters={lapLengthMeters} />
       </section>
@@ -486,22 +490,22 @@ function DiagnosticsSection({ firstTeam, secondTeam }: { firstTeam: HistoricalTe
 
       <section className="stats-grid stats-grid--analysis tactics-live-stats">
         <DeepStat
-          label={`Trage rondes team ${firstTeam.teamId}`}
+          label={`Trage rondes ${firstTeam.teamName}`}
           value={String(firstSlowLaps.length)}
           detail={`${percentage(firstSlowLaps.length, firstTeam.lapDurationsMs.length)} boven de grens`}
         />
         <DeepStat
-          label={`Trage rondes team ${secondTeam.teamId}`}
+          label={`Trage rondes ${secondTeam.teamName}`}
           value={String(secondSlowLaps.length)}
           detail={`${percentage(secondSlowLaps.length, secondTeam.lapDurationsMs.length)} boven de grens`}
         />
         <DeepStat
-          label={`Temposprongen team ${firstTeam.teamId}`}
+          label={`Temposprongen ${firstTeam.teamName}`}
           value={String(firstChanges.length)}
           detail={`Meer dan ${paceChangeThresholdSeconds}s verschil`}
         />
         <DeepStat
-          label={`Temposprongen team ${secondTeam.teamId}`}
+          label={`Temposprongen ${secondTeam.teamName}`}
           value={String(secondChanges.length)}
           detail={`Meer dan ${paceChangeThresholdSeconds}s verschil`}
         />
@@ -524,16 +528,10 @@ function DiagnosticsSection({ firstTeam, secondTeam }: { firstTeam: HistoricalTe
       </section>
 
       <section className="panel tactics-diagnostic-grid">
-        <DiagnosticTable title={`Grootste trage rondes team ${firstTeam.teamId}`} laps={firstSlowLaps.slice(0, 10)} />
-        <DiagnosticTable title={`Grootste trage rondes team ${secondTeam.teamId}`} laps={secondSlowLaps.slice(0, 10)} />
-        <PaceChangeTable
-          title={`Sterkste temposprongen team ${firstTeam.teamId}`}
-          changes={firstChanges.slice(0, 10)}
-        />
-        <PaceChangeTable
-          title={`Sterkste temposprongen team ${secondTeam.teamId}`}
-          changes={secondChanges.slice(0, 10)}
-        />
+        <DiagnosticTable title={`Grootste trage rondes ${firstTeam.teamName}`} laps={firstSlowLaps.slice(0, 10)} />
+        <DiagnosticTable title={`Grootste trage rondes ${secondTeam.teamName}`} laps={secondSlowLaps.slice(0, 10)} />
+        <PaceChangeTable title={`Sterkste temposprongen ${firstTeam.teamName}`} changes={firstChanges.slice(0, 10)} />
+        <PaceChangeTable title={`Sterkste temposprongen ${secondTeam.teamName}`} changes={secondChanges.slice(0, 10)} />
       </section>
 
       <section className="panel">
@@ -550,8 +548,8 @@ function DiagnosticsSection({ firstTeam, secondTeam }: { firstTeam: HistoricalTe
               value={improvingTeamId}
               onChange={(event) => setImprovingTeamId(Number(event.target.value))}
             >
-              <option value={firstTeam.teamId}>Team {firstTeam.teamId}</option>
-              <option value={secondTeam.teamId}>Team {secondTeam.teamId}</option>
+              <option value={firstTeam.teamId}>{firstTeam.teamName}</option>
+              <option value={secondTeam.teamId}>{secondTeam.teamName}</option>
             </select>
           </label>
           <NumberControl
@@ -575,11 +573,7 @@ function DiagnosticsSection({ firstTeam, secondTeam }: { firstTeam: HistoricalTe
             </div>
           )}
         </div>
-        <BreakEvenChart
-          points={sensitivity}
-          targetLaps={targetTeam.cumulativeLapTimesMs.length}
-          teamId={improvingTeam.teamId}
-        />
+        <BreakEvenChart points={sensitivity} targetLaps={targetTeam.cumulativeLapTimesMs.length} team={improvingTeam} />
       </section>
     </div>
   );

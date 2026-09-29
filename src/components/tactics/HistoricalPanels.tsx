@@ -17,7 +17,7 @@ export function HistoricalAnalysisSection({
   onHistoricalRaceLoad: (jsonText: string, fileName: string) => void;
   onHistoricalRaceClear: () => void;
 }) {
-  const availableTeamIds = historicalRace?.teams.map((team) => team.teamId) ?? [];
+  const availableTeams = historicalRace?.teams ?? [];
   const [firstTeamId, setFirstTeamId] = React.useState(APOLLOON_TEAM_ID);
   const [secondTeamId, setSecondTeamId] = React.useState(VTK_TEAM_ID);
 
@@ -44,9 +44,9 @@ export function HistoricalAnalysisSection({
               value={firstTeam?.teamId ?? ''}
               onChange={(event) => setFirstTeamId(Number(event.target.value))}
             >
-              {availableTeamIds.map((teamId) => (
-                <option key={teamId} value={teamId}>
-                  Team {teamId}
+              {availableTeams.map((team) => (
+                <option key={team.teamId} value={team.teamId}>
+                  {team.teamName}
                 </option>
               ))}
             </select>
@@ -58,9 +58,9 @@ export function HistoricalAnalysisSection({
               value={secondTeam?.teamId ?? ''}
               onChange={(event) => setSecondTeamId(Number(event.target.value))}
             >
-              {availableTeamIds.map((teamId) => (
-                <option key={teamId} value={teamId}>
-                  Team {teamId}
+              {availableTeams.map((team) => (
+                <option key={team.teamId} value={team.teamId}>
+                  {team.teamName}
                 </option>
               ))}
             </select>

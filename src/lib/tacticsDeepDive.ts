@@ -5,6 +5,7 @@ const RACE_SECONDS = 24 * 3_600;
 
 export type PaceSummary = {
   teamId: number;
+  teamName: string;
   laps: number;
   medianSeconds: number;
   p10Seconds: number;
@@ -101,6 +102,7 @@ export type GroupComparison = {
 
 export type DraftingTeamAnalysis = {
   teamId: number;
+  teamName: string;
   signedGapSeconds: number[];
   lapDurationsSeconds: number[];
   proximityBins: Array<{ label: string; medianSeconds: number | null; count: number }>;
@@ -113,6 +115,7 @@ export function summarizeHistoricalTeams(race: HistoricalRace): PaceSummary[] {
       const durationsSeconds = team.lapDurationsMs.map((durationMs) => durationMs / 1_000);
       return {
         teamId: team.teamId,
+        teamName: team.teamName,
         laps: team.cumulativeLapTimesMs.length,
         medianSeconds: median(durationsSeconds) ?? 0,
         p10Seconds: quantile(durationsSeconds, 0.1) ?? 0,
@@ -502,6 +505,7 @@ export function analyzeDrafting(
 
   return {
     teamId: focusTeam.teamId,
+    teamName: focusTeam.teamName,
     signedGapSeconds,
     lapDurationsSeconds: focusLaps.durationsSeconds,
     proximityBins,

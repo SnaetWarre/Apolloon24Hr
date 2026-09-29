@@ -35,6 +35,17 @@ test('historical race parser validates and derives individual lap durations', ()
   assert.deepEqual(raceWithQuivrDuplicate.teams[0].cumulativeLapTimesMs, [80_000, 90_000]);
 });
 
+test('historical race parser keeps team names and falls back to the team number', () => {
+  const race = parseHistoricalRace(
+    '[{"teamId":1,"teamName":" Apolloon ","lapTimes":[60000]},{"teamId":2,"teamName":"","lapTimes":[60000]},{"teamId":3,"lapTimes":[60000]}]'
+  );
+
+  assert.deepEqual(
+    race.teams.map((team) => team.teamName),
+    ['Apolloon', 'Team 2', 'Team 3']
+  );
+});
+
 test('historical lap lookup returns the completed count at a race moment', () => {
   const [team] = parseHistoricalRace('[{"teamId":1,"lapTimes":[60000,120000,181000]}]').teams;
 
@@ -126,6 +137,9 @@ test('bundled Quivr 2025 data is valid and contains the Apolloon and VTK referen
   assert.equal(bundledReference.teams.length, 21);
   assert.equal(bundledReference.teams.find((team) => team.teamId === 1)?.cumulativeLapTimesMs.length, 1_095);
   assert.equal(bundledReference.teams.find((team) => team.teamId === 4)?.cumulativeLapTimesMs.length, 1_102);
+  assert.equal(bundledReference.teams.find((team) => team.teamId === 1)?.teamName, 'Apolloon');
+  assert.equal(bundledReference.teams.find((team) => team.teamId === 4)?.teamName, 'VTK');
+  assert.ok(bundledReference.teams.every((team) => !team.teamName.startsWith('Team ')));
 });
 
 function lap(id: string, finishedAt: number, durationMs: number): LapRecord {

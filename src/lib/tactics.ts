@@ -6,6 +6,8 @@ export const DEFAULT_MAXIMUM_LAP_SECONDS = 140;
 
 export type HistoricalTeam = {
   teamId: number;
+  /** Name from the export, or "Team <id>" when the file only has numbers. */
+  teamName: string;
   cumulativeLapTimesMs: number[];
   lapDurationsMs: number[];
 };
@@ -60,6 +62,8 @@ export function parseHistoricalRace(jsonText: string): HistoricalRace {
     if (seenTeamIds.has(teamId)) throw new Error(`Team ${teamId} staat meer dan één keer in het bestand.`);
     seenTeamIds.add(teamId);
     if (!Array.isArray(entry.lapTimes)) throw new Error(`Team ${teamId} heeft geen lijst met rondetijden.`);
+    const teamName =
+      typeof entry.teamName === 'string' && entry.teamName.trim() ? entry.teamName.trim() : `Team ${teamId}`;
 
     const cumulativeLapTimesMs = entry.lapTimes
       .map((rawTimestamp, lapIndex) => {
@@ -74,6 +78,7 @@ export function parseHistoricalRace(jsonText: string): HistoricalRace {
 
     return {
       teamId,
+      teamName,
       cumulativeLapTimesMs,
       lapDurationsMs: cumulativeLapTimesMs.map((timestamp, index) =>
         index === 0 ? timestamp : timestamp - cumulativeLapTimesMs[index - 1]

@@ -61,7 +61,7 @@ export function TeamLapTimelineChart({ team }: { team: HistoricalTeam }) {
         data: {
           datasets: [
             {
-              label: `Rondes team ${team.teamId}`,
+              label: `Rondes ${team.teamName}`,
               data: rawPoints,
               backgroundColor: withOpacity(teamColor(team.teamId), 0.35),
               borderColor: 'transparent',
@@ -99,8 +99,8 @@ export function DurationDistributionChart({
         data: {
           labels,
           datasets: [
-            lineSeries(`Team ${firstTeam.teamId}`, frequency(firstSeconds), teamColor(firstTeam.teamId)),
-            lineSeries(`Team ${secondTeam.teamId}`, frequency(secondSeconds), teamColor(secondTeam.teamId)),
+            lineSeries(firstTeam.teamName, frequency(firstSeconds), teamColor(firstTeam.teamId)),
+            lineSeries(secondTeam.teamName, frequency(secondSeconds), teamColor(secondTeam.teamId)),
           ],
         },
         options: categoryChartOptions('Rondetijd (s)', 'Aantal rondes'),
@@ -121,7 +121,7 @@ export function DistributionRow({
       <td>
         <span className="tactics-team-key">
           <i style={{ background: teamColor(team.teamId) }} />
-          Team {team.teamId}
+          {team.teamName}
         </span>
       </td>
       <td>{summary.laps}</td>
@@ -168,8 +168,8 @@ export function WindowFrequencyChart({
         data: {
           labels,
           datasets: [
-            lineSeries(`Team ${firstTeam.teamId}`, frequency(firstDurations), teamColor(firstTeam.teamId)),
-            lineSeries(`Team ${secondTeam.teamId}`, frequency(secondDurations), teamColor(secondTeam.teamId)),
+            lineSeries(firstTeam.teamName, frequency(firstDurations), teamColor(firstTeam.teamId)),
+            lineSeries(secondTeam.teamName, frequency(secondDurations), teamColor(secondTeam.teamId)),
           ],
         },
         options: categoryChartOptions('Rondetijd (s)', 'Aantal rondes'),
@@ -211,7 +211,7 @@ export function HalfHourDifferenceChart({
           labels: points.map((point) => `${point.raceHour.toFixed(2)}u`),
           datasets: [
             {
-              label: `Team ${firstTeam.teamId} min team ${secondTeam.teamId}`,
+              label: `${firstTeam.teamName} min ${secondTeam.teamName}`,
               data: points.map((point) => point.differenceSeconds),
               backgroundColor: points.map((point) =>
                 point.differenceSeconds == null
@@ -246,40 +246,40 @@ export function ConsistencyChart({
         data: {
           datasets: [
             xySeries(
-              `Mediaan team ${firstTeam.teamId}`,
+              `Mediaan ${firstTeam.teamName}`,
               points.map((point) => ({ x: point.raceHour, y: point.firstSeconds })),
               teamColor(firstTeam.teamId),
               3
             ),
             xySeries(
-              `P10 team ${firstTeam.teamId}`,
+              `P10 ${firstTeam.teamName}`,
               points.map((point) => ({ x: point.raceHour, y: point.firstP10Seconds })),
               teamColor(firstTeam.teamId),
               1,
               [6, 5]
             ),
             xySeries(
-              `P90 team ${firstTeam.teamId}`,
+              `P90 ${firstTeam.teamName}`,
               points.map((point) => ({ x: point.raceHour, y: point.firstP90Seconds })),
               teamColor(firstTeam.teamId),
               1,
               [6, 5]
             ),
             xySeries(
-              `Mediaan team ${secondTeam.teamId}`,
+              `Mediaan ${secondTeam.teamName}`,
               points.map((point) => ({ x: point.raceHour, y: point.secondSeconds })),
               teamColor(secondTeam.teamId),
               3
             ),
             xySeries(
-              `P10 team ${secondTeam.teamId}`,
+              `P10 ${secondTeam.teamName}`,
               points.map((point) => ({ x: point.raceHour, y: point.secondP10Seconds })),
               teamColor(secondTeam.teamId),
               1,
               [6, 5]
             ),
             xySeries(
-              `P90 team ${secondTeam.teamId}`,
+              `P90 ${secondTeam.teamName}`,
               points.map((point) => ({ x: point.raceHour, y: point.secondP90Seconds })),
               teamColor(secondTeam.teamId),
               1,
@@ -309,13 +309,13 @@ export function StandardDeviationChart({
         data: {
           datasets: [
             xySeries(
-              `Spreiding team ${firstTeam.teamId}`,
+              `Spreiding ${firstTeam.teamName}`,
               points.map((point) => ({ x: point.raceHour, y: point.firstStandardDeviationSeconds })),
               teamColor(firstTeam.teamId),
               2
             ),
             xySeries(
-              `Spreiding team ${secondTeam.teamId}`,
+              `Spreiding ${secondTeam.teamName}`,
               points.map((point) => ({ x: point.raceHour, y: point.secondStandardDeviationSeconds })),
               teamColor(secondTeam.teamId),
               2
@@ -344,7 +344,7 @@ export function TimeGapChart({
         data: {
           datasets: [
             xySeries(
-              `Tijdskloof team ${firstTeam.teamId} op team ${secondTeam.teamId}`,
+              `Tijdskloof ${firstTeam.teamName} op ${secondTeam.teamName}`,
               points.map((point) => ({ x: point.raceHour, y: point.gapSeconds })),
               workspaceChartPalette.accent,
               3
@@ -383,7 +383,7 @@ export function SameLapGapChart({
         data: {
           datasets: [
             xySeries(
-              `Team ${firstTeam.teamId} tegenover team ${secondTeam.teamId}`,
+              `${firstTeam.teamName} tegenover ${secondTeam.teamName}`,
               points.map((point) => ({ x: point.raceHour, y: point.gapSeconds })),
               workspaceChartPalette.accent,
               3
@@ -423,7 +423,7 @@ export function HourlyGainChart({
           labels: points.map((point) => `${point.raceHour}u`),
           datasets: [
             {
-              label: `Team ${secondTeam.teamId} min team ${firstTeam.teamId}`,
+              label: `${secondTeam.teamName} min ${firstTeam.teamName}`,
               data: points.map((point) => point.lapDifference),
               backgroundColor: points.map((point) =>
                 point.lapDifference > 0
@@ -459,8 +459,8 @@ export function CumulativeRaceChart({
         type: 'line',
         data: {
           datasets: [
-            xySeries(`Team ${firstTeam.teamId}`, teamPoints(firstTeam), teamColor(firstTeam.teamId), 3),
-            xySeries(`Team ${secondTeam.teamId}`, teamPoints(secondTeam), teamColor(secondTeam.teamId), 3),
+            xySeries(firstTeam.teamName, teamPoints(firstTeam), teamColor(firstTeam.teamId), 3),
+            xySeries(secondTeam.teamName, teamPoints(secondTeam), teamColor(secondTeam.teamId), 3),
           ],
         },
         options: xyChartOptions('Cumulatieve rondes', (value) => String(Math.round(Number(value))), true),
@@ -485,7 +485,7 @@ export function RaceLeadChart({
         data: {
           datasets: [
             xySeries(
-              `Voorsprong team ${firstTeam.teamId} in rondes`,
+              `Voorsprong ${firstTeam.teamName} in rondes`,
               points.map((point) => ({ x: point.raceHour, y: point.lapDifference })),
               workspaceChartPalette.accent,
               3
@@ -547,25 +547,25 @@ export function DiagnosticTimelineChart({
         data: {
           datasets: [
             diagnosticSeries(
-              `Trage rondes team ${firstTeam.teamId}`,
+              `Trage rondes ${firstTeam.teamName}`,
               firstSlowLaps,
               teamColor(firstTeam.teamId),
               'circle'
             ),
             diagnosticSeries(
-              `Temposprongen team ${firstTeam.teamId}`,
+              `Temposprongen ${firstTeam.teamName}`,
               firstChanges,
               teamColor(firstTeam.teamId),
               'triangle'
             ),
             diagnosticSeries(
-              `Trage rondes team ${secondTeam.teamId}`,
+              `Trage rondes ${secondTeam.teamName}`,
               secondSlowLaps,
               teamColor(secondTeam.teamId),
               'circle'
             ),
             diagnosticSeries(
-              `Temposprongen team ${secondTeam.teamId}`,
+              `Temposprongen ${secondTeam.teamName}`,
               secondChanges,
               teamColor(secondTeam.teamId),
               'triangle'
@@ -581,11 +581,11 @@ export function DiagnosticTimelineChart({
 export function BreakEvenChart({
   points,
   targetLaps,
-  teamId,
+  team,
 }: {
   points: ReturnType<typeof buildBreakEvenSensitivity>;
   targetLaps: number;
-  teamId: number;
+  team: HistoricalTeam;
 }) {
   return (
     <ChartPanel
@@ -594,9 +594,9 @@ export function BreakEvenChart({
         data: {
           datasets: [
             xySeries(
-              `Projectie team ${teamId}`,
+              `Projectie ${team.teamName}`,
               points.map((point) => ({ x: point.improvementSeconds, y: point.projectedLaps })),
-              teamColor(teamId),
+              teamColor(team.teamId),
               3
             ),
             xySeries(
@@ -637,12 +637,12 @@ export function DraftingProximityChart({
           labels: firstAnalysis.proximityBins.map((bin) => bin.label),
           datasets: [
             lineSeries(
-              `Team ${firstAnalysis.teamId}`,
+              firstAnalysis.teamName,
               firstAnalysis.proximityBins.map((bin) => bin.medianSeconds),
               teamColor(firstAnalysis.teamId)
             ),
             lineSeries(
-              `Team ${secondAnalysis.teamId}`,
+              secondAnalysis.teamName,
               secondAnalysis.proximityBins.map((bin) => bin.medianSeconds),
               teamColor(secondAnalysis.teamId)
             ),
@@ -662,7 +662,7 @@ export function DraftingScatterChart({
   secondAnalysis: DraftingTeamAnalysis;
 }) {
   const scatterSeries = (analysis: DraftingTeamAnalysis) => ({
-    label: `Team ${analysis.teamId}`,
+    label: analysis.teamName,
     data: analysis.signedGapSeconds.map((signedGap, lapIndex) => ({
       x: signedGap,
       y: analysis.lapDurationsSeconds[lapIndex],
@@ -676,12 +676,7 @@ export function DraftingScatterChart({
     const visiblePoints = analysis.signedGapSeconds
       .map((signedGap, lapIndex) => ({ x: signedGap, y: analysis.lapDurationsSeconds[lapIndex] }))
       .filter((point) => Number.isFinite(point.x) && Math.abs(point.x) <= 35);
-    return xySeries(
-      `Trend team ${analysis.teamId}`,
-      linearTrend(visiblePoints, -35, 35),
-      teamColor(analysis.teamId),
-      3
-    );
+    return xySeries(`Trend ${analysis.teamName}`, linearTrend(visiblePoints, -35, 35), teamColor(analysis.teamId), 3);
   };
   return (
     <ChartPanel
@@ -745,7 +740,7 @@ export function DraftingResultsTable({ analyses }: { analyses: DraftingTeamAnaly
             analysis.comparisons.map((comparison) => (
               <tr key={`${analysis.teamId}-${comparison.label}`}>
                 <td>
-                  <strong>Team {analysis.teamId}</strong>
+                  <strong>{analysis.teamName}</strong>
                 </td>
                 <td>{comparison.label}</td>
                 <td>{comparison.firstCount}</td>
@@ -837,7 +832,7 @@ export function NightPenaltyStat({
 }) {
   return (
     <DeepStat
-      label={`Nachtpenalty team ${team.teamId}`}
+      label={`Nachtpenalty ${team.teamName}`}
       value={penalty.penaltySeconds == null ? 'Geen data' : `${signedNumber(penalty.penaltySeconds, 1)}s`}
       detail={`Dag ${formatNullableSeconds(penalty.dayMedianSeconds)}, nacht ${formatNullableSeconds(penalty.nightMedianSeconds)}`}
     />
@@ -930,13 +925,13 @@ function xyLineConfiguration(
     data: {
       datasets: [
         xySeries(
-          `Team ${firstTeam.teamId}`,
+          firstTeam.teamName,
           points.map((point) => ({ x: point.raceHour, y: point.firstSeconds })),
           teamColor(firstTeam.teamId),
           3
         ),
         xySeries(
-          `Team ${secondTeam.teamId}`,
+          secondTeam.teamName,
           points.map((point) => ({ x: point.raceHour, y: point.secondSeconds })),
           teamColor(secondTeam.teamId),
           3

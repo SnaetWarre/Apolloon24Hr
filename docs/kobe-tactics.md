@@ -37,6 +37,13 @@ milliseconds since the race start:
 ]
 ```
 
+An optional `teamName` per entry is shown in place of the number; entries
+without one appear as "Team <id>". The organiser export only contains numbers,
+so the bundled 2025 file has the names added from the official 24urenloop.be
+ranking. Quivr reuses team numbers between editions, but not always for the
+same team (number 20 was Project Unseen in 2025 and Auxilium in 2026), so a new
+edition's names belong in its own file.
+
 An object with the list under a `teams` property is accepted as well. The file
 is validated before use and stored in browser-local storage after the first
 selection. A replacement therefore survives application restarts on that
