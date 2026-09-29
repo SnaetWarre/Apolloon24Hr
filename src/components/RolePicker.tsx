@@ -3,6 +3,7 @@ import { useAppData, useClusterStatus, useRaceHistory } from '../app/index';
 import { getNextWaitingRunner } from '../lib/runners';
 import { deriveSystemStatus } from '../lib/systemStatus';
 import { useCopyText } from '../lib/clipboard';
+import { useArrivals } from '../lib/motion';
 import { formatClockTimeMs, formatDurationMs } from '../lib/time';
 import { Icon } from './Icon';
 import { LiveDuration, LiveElapsed } from './LiveTime';
@@ -36,24 +37,47 @@ export function RolePicker() {
     race.raceStartedAt && latestLapAt && latestLapAt > race.raceStartedAt
       ? (totalLaps / ((race.raceFinishedAt ?? latestLapAt) - race.raceStartedAt)) * 3_600_000
       : null;
+  const lapsPerHourText =
+    lapsPerHour == null
+      ? '—'
+      : lapsPerHour.toLocaleString('nl-BE', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  const fastestLapText = fastestRunner?.bestLapMs ? formatDurationMs(fastestRunner.bestLapMs) : '—';
+  const activeRunnerKey = activeRunner?.id ?? 'none';
+  const nextRunnerKey = nextRunner?.id ?? 'none';
+
+  // Values and runners that changed since the page opened get a small move; nothing moves on load.
+  const changed = useArrivals([
+    `laps:${totalLaps}`,
+    `pace:${lapsPerHourText}`,
+    `best:${fastestLapText}`,
+    `active:${activeRunnerKey}`,
+    `next:${nextRunnerKey}`,
+  ]);
+  const tick = (id: string) => (changed.has(id) ? 'value-tick' : undefined);
+  const newLapIds = useArrivals(
+    recentLaps.map((lap) => lap.id),
+    !lapsLoading
+  );
 
   return (
     <>
       <PageHeader
         title="Overzicht"
         meta={
-          <span>
-            {!race.raceStartedAt
-              ? 'Race nog niet gestart'
-              : race.raceFinishedAt
-                ? 'Race afgesloten'
-                : `Gestart om ${formatClockTimeMs(race.raceStartedAt).slice(0, 5)}`}
-          </span>
+          !race.raceStartedAt ? (
+            <span>Race nog niet gestart</span>
+          ) : race.raceFinishedAt ? (
+            <span>Race afgesloten</span>
+          ) : (
+            <span className="header-tag header-tag--live">
+              Gestart om {formatClockTimeMs(race.raceStartedAt).slice(0, 5)}
+            </span>
+          )
         }
         actions={
           host && (
             <button type="button" className="btn btn--sm" onClick={copyHostUrl} title={host.url}>
-              <Icon name={copied ? 'check' : 'copy'} size={14} />
+              <Icon name={copied ? 'check' : 'copy'} size={14} className={copied ? 'icon--pop' : undefined} />
               {copied ? 'Gekopieerd' : 'Adres voor andere laptop kopiëren'}
             </button>
           )
@@ -75,19 +99,21 @@ export function RolePicker() {
           </div>
           <div>
             <span>Rondes</span>
-            <strong>{totalLaps.toLocaleString('nl-BE')}</strong>
+            <strong key={totalLaps} className={tick(`laps:${totalLaps}`)}>
+              {totalLaps.toLocaleString('nl-BE')}
+            </strong>
           </div>
           <div>
             <span>Rondes per uur</span>
-            <strong>
-              {lapsPerHour == null
-                ? '—'
-                : lapsPerHour.toLocaleString('nl-BE', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
+            <strong key={lapsPerHourText} className={tick(`pace:${lapsPerHourText}`)}>
+              {lapsPerHourText}
             </strong>
           </div>
           <div>
             <span>Snelste ronde</span>
-            <strong>{fastestRunner?.bestLapMs ? formatDurationMs(fastestRunner.bestLapMs) : '—'}</strong>
+            <strong key={fastestLapText} className={tick(`best:${fastestLapText}`)}>
+              {fastestLapText}
+            </strong>
             {fastestRunner?.bestLapMs ? (
               <small>
                 <RunnerName runner={fastestRunner} />
@@ -106,7 +132,10 @@ export function RolePicker() {
               </Link>
             </header>
             {activeRunner ? (
-              <div className="overview-track__now">
+              <div
+                key={activeRunnerKey}
+                className={`overview-track__now${changed.has(`active:${activeRunnerKey}`) ? ' rise-in' : ''}`}
+              >
                 <span className="overview-track__runner">
                   <RunnerName runner={activeRunner} />
                 </span>
@@ -131,7 +160,10 @@ export function RolePicker() {
               </p>
             )}
             <p className="overview-track__next">
-              Volgende: <strong>{nextRunner ? <RunnerName runner={nextRunner} /> : 'niemand klaar'}</strong>
+              Volgende:{' '}
+              <strong key={nextRunnerKey} className={tick(`next:${nextRunnerKey}`)}>
+                {nextRunner ? <RunnerName runner={nextRunner} /> : 'niemand klaar'}
+              </strong>
             </p>
           </section>
 
@@ -178,7 +210,7 @@ export function RolePicker() {
               <table>
                 <tbody>
                   {recentLaps.map((lap) => (
-                    <tr key={lap.id}>
+                    <tr key={lap.id} className={newLapIds.has(lap.id) ? 'is-new' : undefined}>
                       <td className="overview-laps__time">{formatClockTimeMs(lap.finishedAt).slice(0, 8)}</td>
                       <td className="cell-runner">
                         {lap.runnerNumber && <span className="cell-number">{lap.runnerNumber}</span>}

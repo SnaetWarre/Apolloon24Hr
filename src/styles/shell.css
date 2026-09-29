@@ -493,6 +493,14 @@
   color: var(--ink-3);
 }
 
+.overview-row .panel-header .btn .icon {
+  transition: transform var(--dur-1) var(--ease-out);
+}
+
+.overview-row .panel-header .btn:hover .icon {
+  transform: translateX(2px);
+}
+
 .overview-track__now {
   display: flex;
   flex-wrap: wrap;
@@ -523,6 +531,7 @@
 }
 
 .overview-track__next strong {
+  display: inline-block;
   color: var(--ink);
   font-weight: 550;
 }
@@ -556,6 +565,7 @@
   margin-top: var(--space-3);
   color: var(--warn-ink);
   font-size: 13px;
+  animation: notice-in var(--dur-2) var(--ease-out) backwards;
 }
 
 .overview-empty {
@@ -582,6 +592,15 @@
   white-space: nowrap;
 }
 
+/* A lap that landed while this page was open rises in and its wash fades. */
+.overview-laps tr.is-new {
+  animation: rise-in var(--dur-3) var(--ease-out) backwards;
+}
+
+.overview-laps tr.is-new td {
+  animation: wash-out 1.2s var(--ease-out) backwards;
+}
+
 .overview-status {
   display: flex;
   align-items: flex-start;
@@ -590,6 +609,7 @@
   border: 1px solid var(--go-line);
   border-radius: var(--radius-sm);
   background: var(--go-wash);
+  transition: background-color var(--dur-2) var(--ease-out), border-color var(--dur-2) var(--ease-out);
 }
 
 .overview-status > div {

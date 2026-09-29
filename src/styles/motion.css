@@ -138,6 +138,25 @@
   }
 }
 
+/* A highlight wash that fades away: this row just arrived. */
+@keyframes wash-out {
+  from {
+    background-color: var(--wash, var(--brand-wash));
+  }
+  to {
+    background-color: transparent;
+  }
+}
+
 .icon--pop {
   animation: pop var(--dur-3) var(--ease-spring) backwards;
+}
+
+/* Add these only to elements that changed after the page loaded (see useArrivals). */
+.value-tick {
+  animation: value-tick var(--dur-2) var(--ease-out) backwards;
+}
+
+.rise-in {
+  animation: rise-in var(--dur-2) var(--ease-out) backwards;
 }
