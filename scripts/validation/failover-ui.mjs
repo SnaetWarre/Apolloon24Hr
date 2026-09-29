@@ -21,20 +21,25 @@ async function status(url) {
   return (await fetch(`${url}/api/cluster/status`)).json();
 }
 
-for (const url of otherUrls) {
-  const join = await fetch(`${url}/trpc/cluster.join`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ url: firstUrl }),
-  });
-  assert.equal(join.ok, true, await join.text());
-}
-await waitUntil(async () => (await status(firstUrl)).state === 'healthy');
-
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const browser = await chromium.launch({ headless: true, executablePath: process.env.CHROMIUM_EXECUTABLE });
 try {
   const electronAgent = 'Mozilla/5.0 Chrome/140.0 Electron/44.3.0 Safari/537.36';
+
+  // Each new laptop lists the first one by itself; linking is one click and a confirmation.
+  for (const url of otherUrls) {
+    const setup = await browser.newPage({ userAgent: electronAgent });
+    await setup.goto(`${url}/admin`);
+    await setup.locator('.management-navigation').getByText('Systeem & herstel').click();
+    const found = setup.locator('.cluster-peer-row', { hasText: new URL(firstUrl).host });
+    await found.getByRole('button', { name: 'Koppelen' }).click({ timeout: 15_000 });
+    await setup.getByRole('dialog').getByRole('button', { name: 'Koppelen' }).click();
+    await setup.getByText(/^Gekoppeld\./).waitFor({ timeout: 20_000 });
+    await setup.close();
+  }
+  await waitUntil(async () => (await status(firstUrl)).state === 'healthy');
+  console.log('PASS a new laptop finds the others by itself and links in one click');
+
   const tv = await browser.newPage();
   const electron = await browser.newPage({ userAgent: electronAgent });
   const desk = await browser.newPage({ userAgent: electronAgent, viewport: { width: 1280, height: 800 } });

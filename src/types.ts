@@ -13,6 +13,7 @@ export type {
   LabelPatch,
   LapRecord,
   LiveAppSnapshot,
+  NearbyGroup,
   PublicRecordMode,
   RaceEvent,
   RaceEventType,

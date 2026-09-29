@@ -61,6 +61,9 @@ async function startLaptop(name, { seed, cluster }) {
       PORT: String(port),
       CLUSTER_ENABLED: cluster ? 'true' : 'false',
       CLUSTER_SELF_URL: url,
+      // Laptops on one machine announce themselves on loopback.
+      CLUSTER_DISCOVERY_ADDRESS: '127.255.255.255',
+      CLUSTER_DISCOVERY_PORT: String(20_000 + (process.pid % 20_000)),
       BACKUP_ENABLED: 'false',
     },
     stdio: ['ignore', 'ignore', 'inherit'],

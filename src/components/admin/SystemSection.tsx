@@ -4,7 +4,7 @@ import { describeGroup } from '../../lib/systemStatus';
 import { formatClockTimeMs } from '../../lib/time';
 import { useConfirm } from '../ConfirmDialog';
 import { NetworkSetupPanel } from '../NetworkSetupPanel';
-import type { BackupStatus, ClusterStatus, Runner } from '../../types';
+import type { BackupStatus, ClusterStatus, NearbyGroup, Runner } from '../../types';
 import { AdminNoticeBanner, useAdminAction } from './AdminNotice';
 import { formatFileSize, formatRelativeAge } from './adminFormat';
 
@@ -21,7 +21,7 @@ export function SystemSection({
 }) {
   return (
     <>
-      {cluster?.enabled && <ClusterPanel cluster={cluster} hostUrl={hostUrl} />}
+      {cluster?.enabled && <ClusterPanel cluster={cluster} hostUrl={hostUrl} runnerCount={runners.length} />}
       <section className="panel">
         <NetworkSetupPanel />
       </section>
@@ -47,20 +47,27 @@ export function SystemSection({
   );
 }
 
-function ClusterPanel({ cluster, hostUrl }: { cluster: ClusterStatus; hostUrl: string }) {
+function ClusterPanel({
+  cluster,
+  hostUrl,
+  runnerCount,
+}: {
+  cluster: ClusterStatus;
+  hostUrl: string;
+  runnerCount: number;
+}) {
   const confirm = useConfirm();
   const { joinGroup, continueAlone } = useAppActions();
   const { pending, notice, run } = useAdminAction();
   const [otherUrl, setOtherUrl] = React.useState('');
   const group = describeGroup(cluster);
+  const busy = pending || Boolean(cluster.busy);
 
-  async function join() {
-    const url = otherUrl.trim();
+  async function join(url: string, found?: NearbyGroup) {
     if (!url || pending) return;
     const confirmed = await confirm({
       title: 'Deze laptop koppelen?',
-      message:
-        'Deze laptop neemt alle gegevens van de andere laptops over en werkt daarna mee. Wat nu op deze laptop staat, wordt eerst als backup bewaard.',
+      message: `Deze laptop neemt alle gegevens van ${found ? `${shortUrl(found.url)} (${countLabel(found.runners, 'loper', 'lopers')})` : 'de andere laptops'} over en werkt daarna mee. Wat nu op deze laptop staat (${countLabel(runnerCount, 'loper', 'lopers')}), wordt eerst als backup bewaard.`,
       confirmLabel: 'Koppelen',
       tone: 'danger',
     });
@@ -95,9 +102,9 @@ function ClusterPanel({ cluster, hostUrl }: { cluster: ClusterStatus; hostUrl: s
     <section className="panel">
       <h2>Laptops koppelen</h2>
       <p className="panel-copy">
-        Gekoppelde laptops hebben elk alle gegevens, en op elke laptop kan je werken. Een wijziging is pas bewaard als
-        minstens {cluster.majority === 1 ? 'deze laptop' : `${cluster.majority} laptops`} ze hebben. Valt een laptop
-        uit, dan werken de andere vanzelf verder.
+        {cluster.members.length === 1
+          ? 'Koppel deze laptop met de andere: dan heeft elke laptop alle gegevens, kan je op elke laptop werken, en werken de andere vanzelf verder als er één uitvalt.'
+          : `Gekoppelde laptops hebben elk alle gegevens, en op elke laptop kan je werken. Een wijziging is pas bewaard als minstens ${cluster.majority} laptops ze hebben. Valt een laptop uit, dan werken de andere vanzelf verder.`}
       </p>
       <div className={`host-hint cluster-state cluster-state--${group.tone}`} role="status">
         <strong>{group.title}</strong> · {group.detail}
@@ -106,7 +113,7 @@ function ClusterPanel({ cluster, hostUrl }: { cluster: ClusterStatus; hostUrl: s
         cluster.members.map((member) => (
           <div className="host-hint cluster-peer-row" key={member.hostId}>
             <strong>
-              {member.url.replace(/^https?:\/\//, '')}
+              {shortUrl(member.url)}
               {member.self && ' (deze laptop)'}
             </strong>
             <span>
@@ -140,32 +147,66 @@ function ClusterPanel({ cluster, hostUrl }: { cluster: ClusterStatus; hostUrl: s
       )}
       {cluster.members.length === 1 ? (
         <>
-          <p className="panel-copy">
-            Adres van deze laptop: <strong>{hostUrl}</strong>. Koppel een andere laptop door daar dit adres in te
-            vullen, of vul hier het adres van een laptop in die al gekoppeld is:
-          </p>
-          <div className="form-row">
-            <input
-              className="input"
-              value={otherUrl}
-              onChange={(event) => setOtherUrl(event.target.value)}
-              placeholder="http://192.168.1.20:5173"
-              inputMode="url"
-              aria-label="Adres van een andere laptop"
-            />
-            <button
-              className="btn btn--primary btn--fixed"
-              onClick={() => void join()}
-              disabled={!otherUrl.trim() || pending || Boolean(cluster.busy)}
-            >
-              {pending || cluster.busy ? 'Bezig...' : 'Koppelen'}
-            </button>
-          </div>
+          <p className="panel-copy">Laptops op dit netwerk waarmee deze laptop kan samenwerken:</p>
+          {cluster.nearby.length ? (
+            cluster.nearby.map((found) => (
+              <div className="host-hint cluster-peer-row" key={found.url}>
+                <strong>{shortUrl(found.url)}</strong>
+                <span>
+                  {countLabel(found.laptops, 'laptop', 'laptops')} · {countLabel(found.runners, 'loper', 'lopers')}
+                </span>
+                {found.compatible ? (
+                  <button className="btn btn--primary" onClick={() => void join(found.url, found)} disabled={busy}>
+                    {busy ? 'Bezig...' : 'Koppelen'}
+                  </button>
+                ) : (
+                  <span>andere versie ({found.appVersion}): installeer overal dezelfde versie</span>
+                )}
+              </div>
+            ))
+          ) : (
+            <div className="host-hint">
+              Nog geen andere laptops gevonden. Staat Apolloon aan op de andere laptops, en hangen ze aan hetzelfde
+              netwerk?
+            </div>
+          )}
+          <details className="host-hint cluster-manual-join">
+            <summary>Laptop niet in de lijst? Vul het adres in</summary>
+            <p className="panel-copy">
+              Het adres staat onderaan de zijbalk van die laptop. Deze laptop heeft adres <strong>{hostUrl}</strong>.
+            </p>
+            <div className="form-row">
+              <input
+                className="input"
+                value={otherUrl}
+                onChange={(event) => setOtherUrl(event.target.value)}
+                placeholder="http://192.168.1.20:5173"
+                inputMode="url"
+                aria-label="Adres van een andere laptop"
+              />
+              <button
+                className="btn btn--primary btn--fixed"
+                onClick={() => void join(otherUrl.trim())}
+                disabled={!otherUrl.trim() || busy}
+              >
+                {busy ? 'Bezig...' : 'Koppelen'}
+              </button>
+            </div>
+          </details>
         </>
       ) : (
-        <p className="panel-copy">
-          Nog een laptop koppelen? Vul op die laptop dit adres in: <strong>{hostUrl}</strong>.
-        </p>
+        <>
+          {cluster.nearby.map((found) => (
+            <div className="host-hint" key={found.url}>
+              Nieuwe laptop gevonden: <strong>{shortUrl(found.url)}</strong>. Open daar Beheer › Systeem & herstel en
+              klik op Koppelen naast deze groep.
+            </div>
+          ))}
+          <p className="panel-copy">
+            Nog een laptop toevoegen? Open op die laptop Beheer › Systeem & herstel en klik op Koppelen naast deze groep
+            (adres <strong>{hostUrl}</strong>).
+          </p>
+        </>
       )}
       <div className="host-hint">
         <strong>Deze versie:</strong> Apolloon {cluster.appVersion} · schema {cluster.schemaVersion}
@@ -173,6 +214,14 @@ function ClusterPanel({ cluster, hostUrl }: { cluster: ClusterStatus; hostUrl: s
       <AdminNoticeBanner notice={notice} />
     </section>
   );
+}
+
+function shortUrl(url: string): string {
+  return url.replace(/^https?:\/\//, '');
+}
+
+function countLabel(count: number, one: string, many: string): string {
+  return `${count} ${count === 1 ? one : many}`;
 }
 
 function BackupPanel({ backup }: { backup: BackupStatus }) {

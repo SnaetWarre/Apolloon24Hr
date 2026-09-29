@@ -18,6 +18,7 @@ import {
   type ClusterMember,
 } from './db.js';
 import { isClusterEnabled, readPositiveInt } from './env.js';
+import { currentUrl } from './discovery.js';
 import { peerFetch, readPeerError, selfUrl } from './peers.js';
 
 /*
@@ -139,9 +140,12 @@ function self(): ClusterMember {
   return { hostId: hostIdentity().hostId, url: selfUrl() };
 }
 
-/** The group from the replicated table; a laptop that never joined one is a group of one. */
+/**
+ * The group from the replicated table, at the addresses the laptops announce
+ * now; a laptop that never joined one is a group of one.
+ */
 export function members(): ClusterMember[] {
-  const stored = getClusterMembers();
+  const stored = getClusterMembers().map((member) => ({ ...member, url: currentUrl(member.hostId, member.url) }));
   return stored.some((member) => member.hostId === self().hostId) ? stored : [self(), ...stored];
 }
 

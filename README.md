@@ -11,7 +11,7 @@ Server port: 5173
 Event URL:   shown by the app, for example http://<laptop-lan-ip>:5173
 ```
 
-Browser and TV clients use automatic DHCP. Give the Electron laptops a fixed address so every screen keeps working after a cable or router restart. With access to the event router, a DHCP reservation does this. Without it, open Beheer › Systeem & herstel on the laptop itself and use **Vast netwerkadres**: it pins the wired adapter to its current address through the operating system's permission prompt (Windows, Linux with NetworkManager, macOS) and switches it back to DHCP after the event. The same panel offers the scripts in `public/event-network/` for manual use.
+Browser and TV clients use automatic DHCP. The Electron laptops find each other on the network by themselves (UDP broadcast on port 45737), also after their addresses change. Give them a fixed address anyway, so TVs and browser screens keep working after a cable or router restart. With access to the event router, a DHCP reservation does this. Without it, open Beheer › Systeem & herstel on the laptop itself and use **Vast netwerkadres**: it pins the wired adapter to its current address through the operating system's permission prompt (Windows, Linux with NetworkManager, macOS) and switches it back to DHCP after the event. The same panel offers the scripts in `public/event-network/` for manual use.
 
 ### Linked laptops
 
@@ -22,8 +22,8 @@ Normal event setup:
 ```text
 1. Plug the three Electron laptops into the same wired switch.
 2. Start Apolloon on the first laptop and import the registrations there.
-3. On the second and third laptop, open Beheer › Systeem & herstel,
-   enter the first laptop's Event URL, and choose "Koppelen".
+3. On the second and third laptop, open Beheer › Systeem & herstel.
+   The first laptop is listed by itself; click "Koppelen" next to it.
 4. Check Beheer › Voorbereiding: all three laptops must be reachable.
 5. Open any laptop's Event URL on the TVs and other screens.
 ```
@@ -40,6 +40,7 @@ Developer overrides:
 
 ```text
 CLUSTER_ENABLED=true             # enable linking laptops in development
+CLUSTER_DISCOVERY=false          # do not announce or listen on UDP 45737
 CLUSTER_SELF_URL=http://host:port  # address announced to other laptops (tests)
 ```
 

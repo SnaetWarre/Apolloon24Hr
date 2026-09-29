@@ -798,3 +798,15 @@
   border-color: var(--stop-line);
   background: var(--stop-wash);
 }
+
+.cluster-manual-join {
+  display: block;
+}
+
+.cluster-manual-join > summary {
+  cursor: pointer;
+}
+
+.cluster-manual-join .form-row {
+  margin-top: var(--space-2);
+}

@@ -52,6 +52,11 @@ are therefore not enough: then losing either one stops saving.
 - Browsers (TVs, extra screens) remember the laptops and reopen the same page
   on another laptop when theirs stays unreachable for about eight seconds. The
   Electron app always stays on its own laptop.
+- Every laptop announces itself on the LAN every two seconds (UDP broadcast,
+  port 45737). A laptop on its own lists the laptops it can join, so linking
+  is one click. Laptops of a group use the announcements to find each other
+  again when their addresses change; an announcement never joins or changes
+  data by itself.
 - Laptops only link when app version and database schema are identical.
 
 ```text
@@ -89,13 +94,15 @@ if this laptop had not received them yet.
 
 ### Laptop addresses
 
-Laptops and browsers reach each other by IP address. Give each laptop a fixed
-address: a DHCP reservation on the event router, or, when the router cannot
-be configured, Beheer › Systeem & herstel › Vast netwerkadres on each laptop.
-That panel pins the wired adapter through the operating system's permission
-prompt and switches it back to DHCP after the event; its scripts are also
-downloadable for manual use. A laptop whose address changes anyway tells the
-group its new address by itself.
+The laptops find each other by their announcements, also when every address
+changes at once (another router, new DHCP leases). Browsers (TVs, extra
+screens) only know the address they opened and the laptops they learned
+while connected, so give each laptop a fixed address anyway: a DHCP
+reservation on the event router, or, when the router cannot be configured,
+Beheer › Systeem & herstel › Vast netwerkadres on each laptop. That panel pins
+the wired adapter through the operating system's permission prompt, opens TCP
+5173 and UDP 45737 in the firewall, and switches the adapter back to DHCP
+after the event; its scripts are also downloadable for manual use.
 
 ## Backup Policy
 
@@ -149,9 +156,9 @@ Do this once with the three event laptops on the event router, with the
 people who will sit at them watching.
 
 1. Link the laptops: on the second and third laptop, open Beheer › Systeem ›
-   Laptops koppelen and enter the first laptop's address. Beheer ›
-   Voorbereiding shows "Alle 3 laptops zijn bereikbaar en hebben alle
-   gegevens."
+   Laptops koppelen and click Koppelen next to the first laptop, which is
+   listed by itself. Beheer › Voorbereiding shows "Alle 3 laptops zijn
+   bereikbaar en hebben alle gegevens."
 2. Open a TV page (`/display/outside`) in a browser on a fourth device.
 3. Start a practice race on the timing laptop and time a few laps.
 4. Pull the power (or battery) of the laptop that leads, unless that is the

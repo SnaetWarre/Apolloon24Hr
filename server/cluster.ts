@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import type { Express, NextFunction, Request, Response } from 'express';
 import { z } from 'zod';
-import type { ClusterMemberStatus, ClusterStatus, GroupState } from '../shared/schemas.js';
+import type { ClusterMemberStatus, ClusterStatus, GroupState, NearbyGroup } from '../shared/schemas.js';
 import { backupStatus } from './backups.js';
 import { setClusterClockOffset } from './clock.js';
 import {
@@ -29,6 +29,7 @@ import {
 } from './consensus.js';
 import {
   DATABASE_SCHEMA_VERSION,
+  countRunners,
   getClusterMembers,
   getLogHead,
   getSetting,
@@ -40,6 +41,7 @@ import {
   setLocalSetting,
   type ClusterMember,
 } from './db.js';
+import { currentUrl, heardLaptops, startDiscovery, stopDiscovery } from './discovery.js';
 import { APP_VERSION, isClusterEnabled, readPositiveInt } from './env.js';
 import {
   isIsolated,
@@ -117,9 +119,32 @@ export function clusterStatus(): ClusterStatus {
     selfUrl: selfUrl(),
     logHead: getLogHead().seq,
     memberUrls: [...new Set(memberStatuses.filter((member) => !member.self).map((member) => member.url))],
+    nearby: enabled ? nearbyGroups(new Set(group.map((member) => member.hostId))) : [],
     lastError: lastError ?? lastResyncProblem(),
     backup: backupStatus(),
   };
+}
+
+/** Other groups heard on the network, one entry each; laptops of this group's own lineage rejoin by themselves. */
+function nearbyGroups(ownMembers: Set<string>): NearbyGroup[] {
+  const clusterId = hostIdentity().clusterId;
+  const groups = new Map<string, NearbyGroup & { throughLeader: boolean }>();
+  for (const beacon of heardLaptops()) {
+    if (ownMembers.has(beacon.hostId) || beacon.clusterId === clusterId) continue;
+    const known = groups.get(beacon.clusterId);
+    const compatible = beacon.appVersion === APP_VERSION && beacon.schemaVersion === DATABASE_SCHEMA_VERSION;
+    groups.set(beacon.clusterId, {
+      url: known && (known.throughLeader || !beacon.leader) ? known.url : beacon.url,
+      throughLeader: Boolean(known?.throughLeader || beacon.leader),
+      laptops: Math.max(known?.laptops ?? 0, beacon.groupSize),
+      runners: Math.max(known?.runners ?? 0, beacon.runners),
+      appVersion: beacon.appVersion,
+      compatible: (known?.compatible ?? true) && compatible,
+    });
+  }
+  return [...groups.values()]
+    .map(({ throughLeader: _throughLeader, ...group }) => group)
+    .sort((a, b) => b.runners - a.runners || a.url.localeCompare(b.url));
 }
 
 function groupState(writable: boolean, statuses: ClusterMemberStatus[]): GroupState {
@@ -409,10 +434,11 @@ function knownPeers(): Record<string, string> {
 }
 
 function rememberPeers(): void {
-  const selfId = hostIdentity().hostId;
+  const { hostId: selfId, clusterId } = hostIdentity();
   const current = knownPeers();
   const next = { ...current };
   for (const member of members()) if (member.hostId !== selfId) next[member.hostId] = member.url;
+  for (const beacon of heardLaptops()) if (beacon.clusterId === clusterId) next[beacon.hostId] = beacon.url;
   const entries = Object.entries(next).slice(-MAX_KNOWN_PEERS);
   if (JSON.stringify(entries) !== JSON.stringify(Object.entries(current))) {
     setLocalSetting('cluster_known_peers_json', JSON.stringify(Object.fromEntries(entries)));
@@ -426,6 +452,11 @@ async function maintain(): Promise<void> {
   const stored = getClusterMembers();
   // The leader's address changed (a new DHCP lease): tell the group.
   if (stored.length && stored.find((member) => member.hostId === self.hostId)?.url !== self.url) addMember(self);
+  // Another laptop announces a new address: store it, so it also holds when announcements stop.
+  for (const member of stored) {
+    const announced = currentUrl(member.hostId, member.url);
+    if (member.hostId !== self.hostId && announced !== member.url) addMember({ hostId: member.hostId, url: announced });
+  }
 
   const group = new Set(members().map((member) => member.hostId));
   const identity = hostIdentity();
@@ -464,12 +495,25 @@ export function startClusterService(): void {
   if (!enabled) return;
   startedAt = Date.now();
   startConsensus();
+  startDiscovery(() => {
+    const identity = hostIdentity();
+    return {
+      hostId: identity.hostId,
+      clusterId: identity.clusterId,
+      appVersion: APP_VERSION,
+      schemaVersion: DATABASE_SCHEMA_VERSION,
+      leader: isLeader() && leaderAlive(),
+      groupSize: members().length,
+      runners: countRunners(),
+    };
+  });
   maintenanceTimer = setInterval(() => void maintain().catch(() => undefined), MAINTENANCE_MS);
   maintenanceTimer.unref();
 }
 
 export function stopClusterService(): void {
   stopConsensus();
+  stopDiscovery();
   if (maintenanceTimer) clearInterval(maintenanceTimer);
   maintenanceTimer = null;
 }

@@ -43,7 +43,6 @@ if ($PSCmdlet.ShouldProcess($adapter.Name, 'Enable DHCP')) {
   Get-NetIPAddress -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 | Format-Table IPAddress, PrefixLength, PrefixOrigin -AutoSize
 
   if ($RemoveFirewallRules) {
-    # The UDP rule is from versions before 4.0, which used UDP discovery.
     foreach ($name in @('Apolloon TCP 5173', 'Apolloon UDP 45737')) {
       Remove-NetFirewallRule -DisplayName $name -ErrorAction SilentlyContinue
       Write-Host "Removed firewall rule: $name" -ForegroundColor DarkGray

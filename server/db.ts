@@ -59,7 +59,7 @@ export {
   setTemporaryTeamSchedule,
   activeTemporaryTeamsKey,
 } from './db/teams.js';
-export { getAllRunners, getRunnerById, getRunnerRegistrations } from './db/runner-queries.js';
+export { countRunners, getAllRunners, getRunnerById, getRunnerRegistrations } from './db/runner-queries.js';
 export { insertRunner, updateRunner, upsertRunnerFromImport, deleteRunner } from './db/runners.js';
 export { hideRunnerInQueue, unhideRunnerInQueue, updateRunnerStatus, updateWaitingOrder } from './db/queue.js';
 export { getRaceState } from './db/race-state.js';

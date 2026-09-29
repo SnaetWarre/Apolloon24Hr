@@ -48,8 +48,9 @@ De database migreert automatisch naar schema 13 en bewaart eerst een kopie
   dagelijkse/uurlijkse bewaring zijn weg
 - Beheer is opgesplitst per onderdeel
 - De wachtrijstatus staat op de loper zelf in plaats van in een aparte tabel
-- Vast netwerkadres en de scripts openen alleen nog TCP 5173: UDP 45737 was
-  voor de automatische laptopdetectie, die niet meer bestaat
+- Laptops vinden elkaar zelf op het netwerk (UDP 45737): een nieuwe laptop
+  toont de andere in Beheer en koppelt met één klik, en gekoppelde laptops
+  vinden elkaar terug als hun adressen veranderen (bv. een andere router)
 - Code wordt gecontroleerd met oxlint en opgemaakt met oxfmt; de
   browsercontroles draaien in CI
 

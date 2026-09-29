@@ -8,6 +8,9 @@ import { createTRPCClient, httpBatchLink } from '@trpc/client';
 import type { AppRouter } from '../server/router.ts';
 import type { AppSnapshot, ClusterStatus, LiveAppSnapshot, RaceHistory } from '../shared/schemas.ts';
 
+/** Laptops in these tests announce themselves on loopback, on a port of their own per test run. */
+const discoveryPort = 20_000 + (process.pid % 20_000);
+
 type RunningServer = {
   process: ChildProcess;
   port: number;
@@ -76,10 +79,16 @@ test('three laptops form one group, every laptop writes, and each holds everythi
     const second = await startServer({ port: await freePort(), dataPath: path.join(root, 'second') });
     servers.push(second);
     await client(second).runners.create.mutate({ name: 'Replaced by the join', runnerNumber: 'B-1' });
+    // A laptop on its own lists the laptops it could join, without anyone typing an address.
+    await waitFor(async () =>
+      (await fetchStatus(second)).nearby.some((group) => group.url === first.baseUrl && group.runners === 1)
+    );
     const joined = await client(second).cluster.join.mutate({ url: first.baseUrl });
     assert.match(joined.backupFile ?? '', /pre-join/);
     const third = await startServer({ port: await freePort(), dataPath: path.join(root, 'third') });
     servers.push(third);
+    await waitFor(async () => (await fetchStatus(third)).nearby.some((group) => group.laptops === 2));
+    assert.equal((await fetchStatus(third)).nearby.length, 1, 'the two linked laptops are listed as one group');
     // Joining through a laptop that does not lead works too.
     await client(third).cluster.join.mutate({ url: second.baseUrl });
     await waitFor(async () => (await fetchStatus(first)).state === 'healthy', 10_000);
@@ -274,6 +283,34 @@ test(
   }
 );
 
+test('the laptops find each other again when every address changes', { timeout: 60_000 }, async () => {
+  const root = testRoot('new-addresses');
+  const servers: RunningServer[] = [];
+  try {
+    await startGroup(root, servers);
+    await client(servers[0]).runners.create.mutate({ name: 'Before the new router', runnerNumber: 'N-1' });
+    await waitForSameState(servers[0], servers[1]);
+    await waitForSameState(servers[0], servers[2]);
+
+    // Like a router swap: every laptop comes back at an address the others never saw.
+    await Promise.all(servers.map(stopServer));
+    for (const [index, server] of servers.entries()) {
+      servers[index] = await startServer({ port: await freePort(), dataPath: server.dataPath });
+    }
+    await waitFor(async () => (await fetchStatus(servers[0])).state === 'healthy', 20_000);
+    await client(servers[2]).runners.create.mutate({ name: 'After the new router', runnerNumber: 'N-2' });
+    await waitForSameState(servers[2], servers[0]);
+    await waitForSameState(servers[2], servers[1]);
+    const urls = (await fetchStatus(servers[1])).members.map((member) => member.url).sort();
+    assert.deepEqual(urls, servers.map((server) => server.baseUrl).sort());
+  } catch (error) {
+    throw withServerOutput(error, ...servers);
+  } finally {
+    await Promise.all(servers.map(stopServer));
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('a write repeated after a takeover is applied once', { timeout: 30_000 }, async () => {
   const root = testRoot('repeat');
   const servers: RunningServer[] = [];
@@ -383,6 +420,9 @@ async function startServer(options: {
       CLUSTER_WRITE_DEADLINE_MS: '6000',
       CLUSTER_REQUEST_TIMEOUT_MS: '300',
       CLUSTER_TEST_FAULTS: 'true',
+      CLUSTER_DISCOVERY_ADDRESS: '127.255.255.255',
+      CLUSTER_DISCOVERY_PORT: String(discoveryPort),
+      CLUSTER_DISCOVERY_INTERVAL_MS: '200',
       BACKUP_ENABLED: 'false',
       APOLLOON_RELEASE_ID: 'e2e-test-release',
       APOLLOON_APP_VERSION: options.appVersion || '1.0.0',

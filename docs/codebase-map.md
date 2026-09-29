@@ -73,6 +73,7 @@ Shared contracts live in `shared/`. Anything imported by both client and server 
 - `server/consensus.ts`: leader election by majority (Raft), log replication, and majority commit.
 - `server/cluster.ts`: endpoints between laptops, joining, passing writes to the leader, and the group status.
 - `server/peers.ts`: requests between laptops and their addresses.
+- `server/discovery.ts`: UDP announcements so laptops find each other on the LAN.
 - `server/backups.ts` and `backup-verify-worker.ts`: scheduled, verified backups and retention.
 - `server/app-state.ts`: live snapshot and lap history scopes.
 - `server/http-json.ts`: gzip, ETags, and one serialization per data revision.
@@ -121,4 +122,4 @@ server, and drives headless Chromium through Playwright. Run
 
 The design rationale lives in `docs/apolloon-redesign-brief.html`.
 
-`npm run test:e2e` performs a production build and exercises the HTTP/runtime paths, including three laptops forming a group, the leader dying during a timed lap, catch-up after a restart, a laptop cut off from the others, continuing alone, exactly-once repeats, and version mismatches.
+`npm run test:e2e` performs a production build and exercises the HTTP/runtime paths, including three laptops forming a group, the leader dying during a timed lap, catch-up after a restart, a laptop cut off from the others, continuing alone, finding each other after every address changed, exactly-once repeats, and version mismatches.

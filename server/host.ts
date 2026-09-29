@@ -4,6 +4,8 @@ import { readPort } from './env.js';
 
 export const SERVER_PORT = readPort(process.env.PORT, 5173);
 export const PUBLIC_APP_PORT = readPort(process.env.PUBLIC_APP_PORT, SERVER_PORT);
+/** UDP port on which laptops announce themselves to each other. */
+export const DISCOVERY_PORT = readPort(process.env.CLUSTER_DISCOVERY_PORT, 45737);
 const EXPLICIT_PUBLIC_HOST = process.env.PUBLIC_HOST?.trim() || null;
 const HOST_CACHE_MS = 1_000;
 
@@ -31,15 +33,34 @@ function resolvePublicHost(): string {
 
 /** Physical IPv4 addresses other laptops can reach, most likely first: wired private ranges win. */
 export function lanAddresses(interfaces: NodeJS.Dict<os.NetworkInterfaceInfo[]> = safeNetworkInterfaces()): string[] {
-  const candidates: Array<{ address: string; score: number }> = [];
+  return lanNetworks(interfaces).map((network) => network.address);
+}
+
+/** The same addresses with their network's broadcast address. */
+export function lanNetworks(
+  interfaces: NodeJS.Dict<os.NetworkInterfaceInfo[]> = safeNetworkInterfaces()
+): Array<{ address: string; broadcastAddress: string }> {
+  const candidates: Array<{ address: string; broadcastAddress: string; score: number }> = [];
   for (const [name, addresses] of Object.entries(interfaces)) {
     for (const addressInfo of addresses ?? []) {
       if (addressInfo.family !== 'IPv4' || addressInfo.internal || !addressInfo.address) continue;
       const score = scoreInterfaceAddress(name, addressInfo.address);
-      if (score > 0) candidates.push({ address: addressInfo.address, score });
+      if (score <= 0) continue;
+      const broadcastAddress = ipv4BroadcastAddress(addressInfo.address, addressInfo.netmask);
+      candidates.push({ address: addressInfo.address, broadcastAddress, score });
     }
   }
-  return candidates.sort((a, b) => b.score - a.score).map((candidate) => candidate.address);
+  return candidates
+    .sort((a, b) => b.score - a.score)
+    .map(({ address, broadcastAddress }) => ({ address, broadcastAddress }));
+}
+
+function ipv4BroadcastAddress(address: string, netmask: string): string {
+  const mask = netmask.split('.').map(Number);
+  return address
+    .split('.')
+    .map((part, index) => (Number(part) | (~(mask[index] ?? 0) & 255)).toString())
+    .join('.');
 }
 
 function safeNetworkInterfaces(): NodeJS.Dict<os.NetworkInterfaceInfo[]> {

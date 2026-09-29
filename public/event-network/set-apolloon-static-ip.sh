@@ -112,7 +112,8 @@ nmcli con up "$CON"
 
 if command -v ufw >/dev/null 2>&1; then
   ufw allow 5173/tcp >/dev/null 2>&1 || true
-  echo "Firewall: poort 5173/tcp opengezet (ufw)."
+  ufw allow 45737/udp >/dev/null 2>&1 || true
+  echo "Firewall: poort 5173/tcp en 45737/udp opengezet (ufw)."
 fi
 
 echo "OK. Schermen verbinden met: http://$IP:5173"

@@ -2,7 +2,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { lanAddresses, PUBLIC_APP_PORT } from './host.js';
+import { DISCOVERY_PORT, lanAddresses, PUBLIC_APP_PORT } from './host.js';
 
 // Pins the host's wired adapter to a static address for the event LAN, and
 // undoes that afterwards. The OS permission prompt (UAC / password dialog)
@@ -630,6 +630,7 @@ export function buildLinuxSetStaticScript(
     `nmcli con up ${quoted}`,
     `if command -v ufw >/dev/null 2>&1; then`,
     `  ufw allow ${PUBLIC_APP_PORT}/tcp >/dev/null 2>&1 || true`,
+    `  ufw allow ${DISCOVERY_PORT}/udp >/dev/null 2>&1 || true`,
     `fi`,
   ].join('\n');
 }
@@ -672,6 +673,9 @@ function buildWindowsSetStaticScript(ip: string, prefixLength: number, gateway: 
       : `Set-DnsClientServerAddress -InterfaceIndex $ifIndex -ResetServerAddresses | Out-Null`,
     `if (-not (Get-NetFirewallRule -DisplayName 'Apolloon TCP ${PUBLIC_APP_PORT}' -ErrorAction SilentlyContinue)) {`,
     `  New-NetFirewallRule -DisplayName 'Apolloon TCP ${PUBLIC_APP_PORT}' -Direction Inbound -Protocol TCP -LocalPort ${PUBLIC_APP_PORT} -Action Allow -Profile Any | Out-Null`,
+    `}`,
+    `if (-not (Get-NetFirewallRule -DisplayName 'Apolloon UDP ${DISCOVERY_PORT}' -ErrorAction SilentlyContinue)) {`,
+    `  New-NetFirewallRule -DisplayName 'Apolloon UDP ${DISCOVERY_PORT}' -Direction Inbound -Protocol UDP -LocalPort ${DISCOVERY_PORT} -Action Allow -Profile Any | Out-Null`,
     `}`,
   ].join('\r\n');
 }

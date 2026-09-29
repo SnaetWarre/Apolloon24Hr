@@ -172,6 +172,16 @@ export type ClusterMemberStatus = {
   caughtUp: boolean;
 };
 
+/** Laptops heard on the network that belong to another group, so a laptop on its own can join them in one click. */
+export type NearbyGroup = {
+  /** A laptop of that group to join through. */
+  url: string;
+  laptops: number;
+  runners: number;
+  appVersion: string;
+  compatible: boolean;
+};
+
 export type ClusterStatus = {
   enabled: boolean;
   hostId: string;
@@ -192,6 +202,7 @@ export type ClusterStatus = {
   logHead: number;
   /** Other laptops in the group, so browsers can switch when this one goes away. */
   memberUrls: string[];
+  nearby: NearbyGroup[];
   lastError: string | null;
   backup: BackupStatus;
 };

@@ -36,6 +36,7 @@ function threeLaptops(overrides: Partial<ClusterStatus> = {}): ClusterStatus {
     selfUrl: 'http://host-a:5173',
     logHead: 12,
     memberUrls: ['http://host-b:5173', 'http://host-c:5173'],
+    nearby: [],
     lastError: null,
     backup: {
       enabled: true,

@@ -46,4 +46,5 @@ Machine-to-machine endpoints between Electron laptops, refused with HTTP 426 whe
 - `POST /api/cluster/vote`: a (pre-)vote request during an election.
 - `GET /api/cluster/snapshot`: a full database image for a joining or diverged laptop.
 - `POST /api/cluster/members`: a laptop asks the leader to join the group.
+- UDP 45737 (`server/discovery.ts`): a JSON announcement broadcast every two seconds, used to find laptops; it never changes data.
 - Forwarded writes are ordinary tRPC calls with `x-apolloon-forwarded: 1` and `x-apolloon-request-id`; the leader answers with `x-apolloon-log-seq`, the entry to wait for.

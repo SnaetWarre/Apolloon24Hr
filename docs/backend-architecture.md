@@ -20,6 +20,7 @@ server/index.ts
   |
   |-- server/consensus.ts ----- leader election, log replication, majority commit
   |-- server/cluster.ts ------- peer endpoints, joining, forwarding writes, status
+  |-- server/discovery.ts ----- UDP announcements: finding laptops on the LAN
   |     |
   |     | HTTP: /api/cluster/append, /vote, /snapshot, /members
   |     v
@@ -137,7 +138,8 @@ Raft among the laptops in `cluster_members`:
 - "Continue alone" (`continueAlone`): only when no majority is reachable, a
   laptop becomes a group of one in a new term.
 - Two groups of the same lineage that went on separately find each other
-  through remembered addresses; the smaller one re-syncs from the larger.
+  through remembered and announced addresses; the smaller one re-syncs from
+  the larger.
 - `clusterStatus` sums it up for the screens: `solo`, `healthy`, `degraded`,
   `electing`, or `no-majority`.
 - Tests can cut a laptop off (`CLUSTER_TEST_FAULTS=true` with
@@ -157,6 +159,11 @@ Raft among the laptops in `cluster_members`:
 - `server/clock.ts`: the group clock, the leader's time as every laptop
   estimates it; data timestamps and timing use it.
 - `server/peers.ts`: requests between laptops and their addresses.
+- `server/discovery.ts`: every laptop broadcasts who it is (host, group,
+  address, version, leader, group size, runner count) every two seconds on UDP
+  45737. Group members use the announced addresses when theirs changed (the
+  leader stores them); a laptop on its own lists other groups to join. An
+  announcement never joins or changes anything by itself.
 - `server/static-files.ts`: packaged frontend, never outside the build root.
 - `shared/schemas.ts`: client/server contracts.
 
@@ -202,5 +209,6 @@ npm run test:ui
 The E2E suite starts real backend processes and covers standalone writes,
 three laptops forming a group and writing everywhere, the leader dying during
 a timed lap, a follower catching up after being off, a laptop cut off from
-the others, continuing alone after two laptops fail, exactly-once repeats,
+the others, continuing alone after two laptops fail, finding each other
+again after every address changed, exactly-once repeats,
 version mismatches, backups, and night teams across a restart.
