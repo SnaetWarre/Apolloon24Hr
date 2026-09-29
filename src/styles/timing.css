@@ -33,6 +33,8 @@
   border-radius: 50%;
   background: var(--go);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--go) 20%, transparent);
+  --live-ring: var(--go);
+  animation: live-ring 2.4s var(--ease-out) infinite;
 }
 
 .timing-now {
@@ -111,6 +113,22 @@
   border-style: dashed;
 }
 
+/* The press registered: the key lands and a ring leaves it, also for Spatie and Enter. */
+.timing-actions .btn--xl.is-pressed {
+  animation:
+    press var(--dur-2) var(--ease-out),
+    press-ring var(--dur-3) var(--ease-out);
+}
+
+@keyframes press-ring {
+  from {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--brand) 45%, transparent);
+  }
+  to {
+    box-shadow: 0 0 0 10px transparent;
+  }
+}
+
 .timing-actions kbd {
   flex: none;
 }
@@ -178,6 +196,10 @@
   border-bottom: 0;
 }
 
+.timing-upcoming li.is-new {
+  animation: rise-in var(--dur-2) var(--ease-out) backwards;
+}
+
 .timing-upcoming li:first-child .queue-position {
   color: var(--brand-ink);
   font-weight: 600;
@@ -223,6 +245,15 @@
   max-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* The lap that was just clocked rises into the list; its wash fades. */
+.timing-log tr.is-new {
+  animation: rise-in var(--dur-2) var(--ease-out) backwards;
+}
+
+.timing-log tr.is-new td {
+  animation: wash-out 1.2s var(--ease-out) backwards;
 }
 
 .timing-log .warning-banner {

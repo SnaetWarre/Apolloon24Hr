@@ -9,6 +9,7 @@ import type { LiveAppSnapshot, Runner } from '../types';
 import { LabelBadge } from './LabelBadge';
 import { RunnerName } from './RunnerName';
 import { PageHeader } from './PageHeader';
+import { useArrivals, usePulse } from '../lib/motion';
 import { forgetLapStart, rememberLapStart, timePress } from '../lib/pressTiming';
 import { LIVE_MILLISECOND_INTERVAL_MS, useClockTick } from '../lib/useClockTick';
 
@@ -35,6 +36,8 @@ export function TimingView() {
   const [finishConfirmStep, setFinishConfirmStep] = React.useState<0 | 1 | 2>(0);
   const handoffBusyRef = React.useRef(false);
   const confirm = useConfirm();
+  // A press flashes the key, also when it came from the keyboard.
+  const [pressed, flashPress] = usePulse(240);
   // While the laptops choose who orders the changes a press waits and then counts; without a majority nothing is saved.
   const timingBlocked = cluster?.state === 'no-majority';
 
@@ -48,7 +51,6 @@ export function TimingView() {
   const activePreviousLap = activeRunner
     ? activeRunnerLaps.find((lap) => lap.runnerId === activeRunner.id) || null
     : null;
-
   const runExclusiveRaceAction = React.useCallback(
     async (action: () => Promise<unknown>, successMessage: string | null): Promise<boolean> => {
       if (handoffBusyRef.current) return false;
@@ -112,6 +114,7 @@ export function TimingView() {
       timingBlocked,
     ]
   );
+  const handoffDisabled = handoffBusy || timingBlocked || (!activeRunner && !nextRunner);
 
   React.useEffect(() => {
     // Navigation buttons can stay focused when this route opens. In that case,
@@ -141,12 +144,13 @@ export function TimingView() {
       // still has focus. Keep Enter's normal button/link behaviour intact.
       if (event.key === 'Enter' && isInteractiveTarget(target)) return;
       event.preventDefault();
-      if (event.repeat || handoffBusy) return;
+      if (event.repeat || handoffBusy || handoffDisabled) return;
+      flashPress();
       void runHandoff(event.timeStamp);
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [finishConfirmStep, handoffBusy, runHandoff, timingBlocked, race.raceFinishedAt]);
+  }, [finishConfirmStep, flashPress, handoffBusy, handoffDisabled, runHandoff, timingBlocked, race.raceFinishedAt]);
 
   async function undo() {
     if (handoffBusyRef.current) return;
@@ -171,8 +175,31 @@ export function TimingView() {
     }
   }
 
+  const previousLapText = runnerHistoryError
+    ? 'Niet beschikbaar'
+    : activePreviousLap
+      ? formatDurationMs(activePreviousLap.durationMs)
+      : activeRunner && runnerHistoryLoading
+        ? 'Laden...'
+        : '—';
+  const bestLapText = activeRunner?.bestLapMs ? formatDurationMs(activeRunner.bestLapMs) : '—';
+  const activeKey = activeRunner?.id ?? 'none';
+  const startKey = race.activeStartedAt ?? 0;
+
+  // What changed after this screen opened moves briefly.
+  const changed = useArrivals([
+    `active:${activeKey}`,
+    `start:${startKey}`,
+    `prev:${previousLapText}`,
+    `best:${bestLapText}`,
+  ]);
+  const newLapIds = useArrivals(
+    recentLaps.map((lap) => lap.id),
+    !historyLoading
+  );
+  const newUpcomingIds = useArrivals(upcomingRunners.map((runner) => runner.id));
+
   const waitingCount = runners.filter((runner) => runner.status === 'waiting').length;
-  const handoffDisabled = handoffBusy || timingBlocked || (!activeRunner && !nextRunner);
   const handoffLabel = handoffBusy
     ? 'Bezig...'
     : timingBlocked
@@ -196,7 +223,7 @@ export function TimingView() {
           <span className="timing-station__label">
             {race.raceFinishedAt ? 'Race afgesloten' : activeRunner ? 'Nu op de piste' : 'Nog niemand op de piste'}
           </span>
-          <div className="timing-now">
+          <div key={activeKey} className={`timing-now${changed.has(`active:${activeKey}`) ? ' rise-in' : ''}`}>
             {activeRunner ? (
               <>
                 <RunnerName runner={activeRunner} size="lg" />
@@ -221,7 +248,7 @@ export function TimingView() {
 
           <div className="timing-clock-row">
             {activeRunner && race.activeStartedAt ? (
-              <TimingClock startedAt={race.activeStartedAt} />
+              <TimingClock key={startKey} startedAt={race.activeStartedAt} arrived={changed.has(`start:${startKey}`)} />
             ) : (
               <span className="timing-clock timing-clock--idle" aria-hidden="true">
                 0:00<small>.0</small>
@@ -230,27 +257,29 @@ export function TimingView() {
             <div className="timing-clock-stats">
               <div className="stat-panel">
                 <span className="muted-label">Vorige ronde</span>
-                <strong>
-                  {runnerHistoryError
-                    ? 'Niet beschikbaar'
-                    : activePreviousLap
-                      ? formatDurationMs(activePreviousLap.durationMs)
-                      : activeRunner && runnerHistoryLoading
-                        ? 'Laden...'
-                        : '—'}
+                <strong
+                  key={previousLapText}
+                  className={changed.has(`prev:${previousLapText}`) ? 'value-tick' : undefined}
+                >
+                  {previousLapText}
                 </strong>
               </div>
               <div className="stat-panel">
                 <span className="muted-label">Snelste ronde</span>
-                <strong>{activeRunner?.bestLapMs ? formatDurationMs(activeRunner.bestLapMs) : '—'}</strong>
+                <strong key={bestLapText} className={changed.has(`best:${bestLapText}`) ? 'value-tick' : undefined}>
+                  {bestLapText}
+                </strong>
               </div>
             </div>
           </div>
 
           <div className="timing-actions">
             <button
-              className="btn btn--primary btn--xl"
-              onClick={(event) => void runHandoff(event.timeStamp)}
+              className={`btn btn--primary btn--xl${pressed ? ' is-pressed' : ''}`}
+              onClick={(event) => {
+                flashPress();
+                void runHandoff(event.timeStamp);
+              }}
               disabled={handoffDisabled}
             >
               <span>{handoffLabel}</span>
@@ -274,7 +303,7 @@ export function TimingView() {
               </div>
             )}
             {lastAction && (
-              <div className="success-banner" role="status">
+              <div key={startKey} className="success-banner" role="status">
                 {lastAction}
               </div>
             )}
@@ -312,7 +341,7 @@ export function TimingView() {
             {upcomingRunners.length ? (
               <ol>
                 {upcomingRunners.map((runner, index) => (
-                  <li key={runner.id}>
+                  <li key={runner.id} className={newUpcomingIds.has(runner.id) ? 'is-new' : undefined}>
                     <span className="queue-position">{index + 1}</span>
                     <RunnerName runner={runner} />
                   </li>
@@ -347,7 +376,7 @@ export function TimingView() {
                   </thead>
                   <tbody>
                     {recentLaps.map((lap) => (
-                      <tr key={lap.id}>
+                      <tr key={lap.id} className={newLapIds.has(lap.id) ? 'is-new' : undefined}>
                         <td>{formatClockTimeMs(lap.finishedAt).split('.')[0]}</td>
                         <td className="cell-runner" title={lap.runnerName}>
                           {lap.runnerNumber && <span className="cell-number">{lap.runnerNumber}</span>}
@@ -433,11 +462,15 @@ export function TimingView() {
   );
 }
 
-function TimingClock({ startedAt }: { startedAt: number }) {
+function TimingClock({ startedAt, arrived }: { startedAt: number; arrived: boolean }) {
   useClockTick(LIVE_MILLISECOND_INTERVAL_MS);
   const [main, fraction = '0'] = formatDurationMs(nowMs() - startedAt).split('.');
   return (
-    <span className="timing-clock live-time" role="timer" aria-label="Lopende rondetijd">
+    <span
+      className={`timing-clock live-time${arrived ? ' value-tick' : ''}`}
+      role="timer"
+      aria-label="Lopende rondetijd"
+    >
       {main}
       <small>.{fraction.slice(0, 1)}</small>
     </span>
