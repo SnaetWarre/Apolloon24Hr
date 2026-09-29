@@ -171,15 +171,17 @@ export const KanbanBoard: React.FC<{ onOpenProfile: (runnerId: string) => void }
   }
 
   const draggedRunner = runners.find((runner) => runner.id === draggedRunnerId);
-  const dropAction = draggedRunnerId && dropTargetId
-    ? resolveKanbanDrop(draggedRunnerId, dropTargetId, filteredRunners)
-    : null;
+  const dropAction =
+    draggedRunnerId && dropTargetId ? resolveKanbanDrop(draggedRunnerId, dropTargetId, filteredRunners) : null;
 
   function renderRunnerRow(runner: Runner) {
     const queuePosition = queuePositionByRunnerId.get(runner.id) ?? -1;
-    const insertionEdge = dropAction?.type === 'move-in-queue' && dropAction.targetRunnerId === runner.id
-      ? (queuePositionByRunnerId.get(dropAction.runnerId) ?? -1) < queuePosition ? 'after' : 'before'
-      : undefined;
+    const insertionEdge =
+      dropAction?.type === 'move-in-queue' && dropAction.targetRunnerId === runner.id
+        ? (queuePositionByRunnerId.get(dropAction.runnerId) ?? -1) < queuePosition
+          ? 'after'
+          : 'before'
+        : undefined;
     return (
       <QueueRunnerRow
         key={runner.id}
@@ -189,9 +191,7 @@ export const KanbanBoard: React.FC<{ onOpenProfile: (runnerId: string) => void }
         insertionEdge={insertionEdge}
         onOpenProfile={onOpenProfile}
         onAdvance={() =>
-          void runQueueAction(() =>
-            setStatus(runner.id, runner.status === 'warming_up' ? 'waiting' : 'warming_up')
-          )
+          void runQueueAction(() => setStatus(runner.id, runner.status === 'warming_up' ? 'waiting' : 'warming_up'))
         }
         onToggleHidden={() => void (runner.hiddenFromQueue ? handleUnhide(runner.id) : handleHide(runner.id))}
       />
@@ -204,7 +204,10 @@ export const KanbanBoard: React.FC<{ onOpenProfile: (runnerId: string) => void }
       collisionDetection={kanbanCollisionDetection}
       onDragStart={({ active }) => setDraggedRunnerId(String(active.id))}
       onDragOver={({ over }) => setDropTargetId(over ? String(over.id) : null)}
-      onDragCancel={() => { setDraggedRunnerId(null); setDropTargetId(null); }}
+      onDragCancel={() => {
+        setDraggedRunnerId(null);
+        setDropTargetId(null);
+      }}
       onDragEnd={onDragEnd}
     >
       {actionError && (
@@ -222,12 +225,18 @@ export const KanbanBoard: React.FC<{ onOpenProfile: (runnerId: string) => void }
                 id={`column-${column.key}`}
                 title={column.title}
                 count={columnRunners.length}
-                totalCount={search.trim()
-                  ? runners.filter((runner) => runner.status === column.key && !runner.hiddenFromQueue).length
-                  : undefined}
-                dropHint={dropAction?.type === 'set-status' && dropAction.status === column.key
-                  ? column.key === 'waiting' ? 'Loslaten: achteraan in de wachtrij' : 'Loslaten: naar opwarming'
-                  : undefined}
+                totalCount={
+                  search.trim()
+                    ? runners.filter((runner) => runner.status === column.key && !runner.hiddenFromQueue).length
+                    : undefined
+                }
+                dropHint={
+                  dropAction?.type === 'set-status' && dropAction.status === column.key
+                    ? column.key === 'waiting'
+                      ? 'Loslaten: achteraan in de wachtrij'
+                      : 'Loslaten: naar opwarming'
+                    : undefined
+                }
               >
                 {columnRunners.map(renderRunnerRow)}
                 {!columnRunners.length && (
@@ -265,9 +274,13 @@ export const KanbanBoard: React.FC<{ onOpenProfile: (runnerId: string) => void }
       <DragOverlay dropAnimation={null} zIndex={2}>
         {draggedRunner && (
           <div className="queue-runner queue-runner--overlay">
-            <span className="queue-drag" aria-hidden="true">⠿</span>
+            <span className="queue-drag" aria-hidden="true">
+              ⠿
+            </span>
             <div className="queue-identity">
-              <span className="runner-title"><RunnerName runner={draggedRunner} /></span>
+              <span className="runner-title">
+                <RunnerName runner={draggedRunner} />
+              </span>
               <span className="queue-runner__details">Loslaten om te verplaatsen</span>
             </div>
           </div>
@@ -294,13 +307,23 @@ function QueueLane({
 }) {
   const { setNodeRef, isOver } = useDroppable({ id });
   return (
-    <section ref={setNodeRef} className={`queue-lane${isOver || dropHint ? ' queue-lane--over' : ''}`} aria-label={title}>
+    <section
+      ref={setNodeRef}
+      className={`queue-lane${isOver || dropHint ? ' queue-lane--over' : ''}`}
+      aria-label={title}
+    >
       <header>
         <h2>{title}</h2>
         {dropHint ? (
-          <span className="queue-drop-hint" role="status">{dropHint}</span>
+          <span className="queue-drop-hint" role="status">
+            {dropHint}
+          </span>
         ) : (
-          <span>{count}{totalCount !== undefined ? ` van ${totalCount}` : ''} {count === 1 && totalCount === undefined ? 'loper' : 'lopers'}</span>
+          <span>
+            {count}
+            {totalCount !== undefined ? ` van ${totalCount}` : ''}{' '}
+            {count === 1 && totalCount === undefined ? 'loper' : 'lopers'}
+          </span>
         )}
       </header>
       <div className="queue-lane__rows">{children}</div>
@@ -334,7 +357,10 @@ function QueueRunnerRow({
   const { setNodeRef: setDropRef } = useDroppable({ id: runner.id, disabled: isDragging });
   const isCompleted = runner.status === 'ran';
   return (
-    <div ref={setDropRef} className={insertionEdge ? `queue-drop-target queue-drop-target--${insertionEdge}` : undefined}>
+    <div
+      ref={setDropRef}
+      className={insertionEdge ? `queue-drop-target queue-drop-target--${insertionEdge}` : undefined}
+    >
       {insertionEdge && <span className="queue-insertion-label">Hier invoegen</span>}
       <div
         ref={setDragRef}
@@ -346,16 +372,19 @@ function QueueRunnerRow({
         }}
         className={`queue-runner${isDragging ? ' queue-runner--dragging' : ''}${queuePosition === 0 ? ' queue-runner--next' : ''}`}
       >
-        <span className="queue-drag" aria-hidden="true">⠿</span>
+        <span className="queue-drag" aria-hidden="true">
+          ⠿
+        </span>
         {queuePosition >= 0 && (
-          <span
-            className="queue-position"
-            title={queuePosition === 0 ? 'Volgende loper' : 'Positie in wachtrij'}
-          >
+          <span className="queue-position" title={queuePosition === 0 ? 'Volgende loper' : 'Positie in wachtrij'}>
             {queuePosition + 1}
           </span>
         )}
-        <button className="queue-identity" onClick={() => onOpenProfile(runner.id)} title={`${runner.name}: profiel openen`}>
+        <button
+          className="queue-identity"
+          onClick={() => onOpenProfile(runner.id)}
+          title={`${runner.name}: profiel openen`}
+        >
           <span className="runner-title">
             <RunnerName runner={runner} />
             {queuePosition === 0 && <span className="queue-next-tag">Volgende</span>}
@@ -365,9 +394,7 @@ function QueueRunnerRow({
               <LabelBadge key={label.id} label={label} compact />
             ))}
             {runner.lapCount > 0 && (
-              <span
-                title={runner.bestLapMs ? `Snelste ronde ${formatDurationMs(runner.bestLapMs)}` : undefined}
-              >
+              <span title={runner.bestLapMs ? `Snelste ronde ${formatDurationMs(runner.bestLapMs)}` : undefined}>
                 {runner.lapCount} {runner.lapCount === 1 ? 'ronde' : 'rondes'}
               </span>
             )}

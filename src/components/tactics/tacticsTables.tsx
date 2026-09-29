@@ -22,7 +22,11 @@ export function RecentLapsTable({
       {suspiciousLaps.length > 0 && (
         <details className="tactics-suspicious-details">
           <summary>Alle {suspiciousLaps.length} verdachte rondes bekijken</summary>
-          <LapReviewTable laps={suspiciousLaps} minimumLapSeconds={minimumLapSeconds} maximumLapSeconds={maximumLapSeconds} />
+          <LapReviewTable
+            laps={suspiciousLaps}
+            minimumLapSeconds={minimumLapSeconds}
+            maximumLapSeconds={maximumLapSeconds}
+          />
         </details>
       )}
     </div>
@@ -41,7 +45,15 @@ function LapReviewTable({
   return (
     <div className="table-wrap">
       <table className="analysis-table">
-        <thead><tr><th>Moment</th><th>Loper</th><th>Ronde</th><th>Tijd</th><th>Controle</th></tr></thead>
+        <thead>
+          <tr>
+            <th>Moment</th>
+            <th>Loper</th>
+            <th>Ronde</th>
+            <th>Tijd</th>
+            <th>Controle</th>
+          </tr>
+        </thead>
         <tbody>
           {laps.map((lap) => {
             const durationSeconds = lap.durationMs / 1_000;
@@ -49,10 +61,16 @@ function LapReviewTable({
             return (
               <tr key={lap.id}>
                 <td>{formatClockTimeMs(lap.finishedAt)}</td>
-                <td><strong>{lap.runnerName}</strong></td>
+                <td>
+                  <strong>{lap.runnerName}</strong>
+                </td>
                 <td>{lap.lapNumber}</td>
                 <td>{formatDurationMs(lap.durationMs)}</td>
-                <td><span className={`tactics-lap-status tactics-lap-status--${suspicious ? 'warning' : 'valid'}`}>{suspicious ? 'Nakijken' : 'Geldig'}</span></td>
+                <td>
+                  <span className={`tactics-lap-status tactics-lap-status--${suspicious ? 'warning' : 'valid'}`}>
+                    {suspicious ? 'Nakijken' : 'Geldig'}
+                  </span>
+                </td>
               </tr>
             );
           })}

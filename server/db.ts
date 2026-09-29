@@ -30,7 +30,12 @@ export async function initDb(): Promise<void> {
   ensureReplicationIdentity();
 }
 
-export type { ReplicationOperation, ReplicationIdentity, ReplicationConflict, ReplicationCheckpoint } from './db/types.js';
+export type {
+  ReplicationOperation,
+  ReplicationIdentity,
+  ReplicationConflict,
+  ReplicationCheckpoint,
+} from './db/types.js';
 export { getAppDataRevision, closeDb, backupDatabase } from './db/connection.js';
 export { databaseReadiness, databaseStorageStatus, compactDatabaseIfSafe } from './db/storage.js';
 export { getAppSettings, setPublicRecordMode } from './db/settings.js';

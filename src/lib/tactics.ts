@@ -86,9 +86,7 @@ export function validLiveLaps(
   return laps
     .filter(
       (lap) =>
-        lap.finishedAt >= raceStartedAt &&
-        lap.durationMs >= minimumDurationMs &&
-        lap.durationMs <= maximumDurationMs
+        lap.finishedAt >= raceStartedAt && lap.durationMs >= minimumDurationMs && lap.durationMs <= maximumDurationMs
     )
     .sort((firstLap, secondLap) => firstLap.finishedAt - secondLap.finishedAt);
 }
@@ -133,27 +131,19 @@ export function targetLapCountAt(hourlyPacesSeconds: number[], elapsedHours: num
   return expectedLaps;
 }
 
-export function projectedLapCount(
-  completedLaps: number,
-  elapsedHours: number,
-  hourlyPacesSeconds: number[]
-): number {
+export function projectedLapCount(completedLaps: number, elapsedHours: number, hourlyPacesSeconds: number[]): number {
   const boundedElapsedHours = Math.max(0, Math.min(RACE_DURATION_HOURS, elapsedHours));
   let projectedLaps = completedLaps;
   for (let raceHour = Math.floor(boundedElapsedHours); raceHour < RACE_DURATION_HOURS; raceHour += 1) {
-    const remainingHourFraction = raceHour === Math.floor(boundedElapsedHours)
-      ? 1 - (boundedElapsedHours - raceHour)
-      : 1;
+    const remainingHourFraction =
+      raceHour === Math.floor(boundedElapsedHours) ? 1 - (boundedElapsedHours - raceHour) : 1;
     if (remainingHourFraction <= 0) continue;
     projectedLaps += (remainingHourFraction * 3_600) / validPace(hourlyPacesSeconds[raceHour]);
   }
   return projectedLaps;
 }
 
-function buildLiveHourlyPaces(
-  laps: LapRecord[],
-  raceStartedAt: number
-): Array<number | null> {
+function buildLiveHourlyPaces(laps: LapRecord[], raceStartedAt: number): Array<number | null> {
   const durationsByHour = Array.from({ length: RACE_DURATION_HOURS }, () => [] as number[]);
   for (const lap of laps) {
     const raceHour = Math.floor((lap.finishedAt - raceStartedAt) / 3_600_000);
@@ -184,9 +174,7 @@ export function buildRaceProgress(input: {
     points.push({
       raceHour: pointHour,
       liveLaps: pointHour <= input.elapsedHours ? upperBound(liveFinishTimes, timestamp) : null,
-      targetLaps: pointHour <= RACE_DURATION_HOURS
-        ? targetLapCountAt(input.targetPacesSeconds, pointHour)
-        : null,
+      targetLaps: pointHour <= RACE_DURATION_HOURS ? targetLapCountAt(input.targetPacesSeconds, pointHour) : null,
       ownHistoricalLaps: historicalLapCountAt(input.ownHistoricalTeam, pointHour),
       rivalHistoricalLaps: historicalLapCountAt(input.rivalHistoricalTeam, pointHour),
     });
@@ -214,9 +202,7 @@ export function buildHourlyPaceComparison(input: {
 }
 
 export function recentMedianPaceSeconds(laps: LapRecord[], recentLapCount: number): number | null {
-  const recentDurations = laps
-    .slice(-Math.max(1, recentLapCount))
-    .map((lap) => lap.durationMs / 1_000);
+  const recentDurations = laps.slice(-Math.max(1, recentLapCount)).map((lap) => lap.durationMs / 1_000);
   return median(recentDurations);
 }
 

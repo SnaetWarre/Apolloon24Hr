@@ -35,13 +35,13 @@ export function loadStoredTacticsScenario(): StoredTacticsScenario | null {
   try {
     const storedScenario = JSON.parse(storedJson) as Partial<StoredTacticsScenario>;
     if (
-      typeof storedScenario.targetLaps !== 'number'
-      || !Number.isFinite(storedScenario.targetLaps)
-      || storedScenario.targetLaps < 1
-      || !['flat', 'apolloon', 'vtk'].includes(storedScenario.targetProfile ?? '')
-      || !Array.isArray(storedScenario.targetPaces)
-      || storedScenario.targetPaces.length !== RACE_DURATION_HOURS
-      || storedScenario.targetPaces.some((pace) => typeof pace !== 'number' || !Number.isFinite(pace) || pace <= 0)
+      typeof storedScenario.targetLaps !== 'number' ||
+      !Number.isFinite(storedScenario.targetLaps) ||
+      storedScenario.targetLaps < 1 ||
+      !['flat', 'apolloon', 'vtk'].includes(storedScenario.targetProfile ?? '') ||
+      !Array.isArray(storedScenario.targetPaces) ||
+      storedScenario.targetPaces.length !== RACE_DURATION_HOURS ||
+      storedScenario.targetPaces.some((pace) => typeof pace !== 'number' || !Number.isFinite(pace) || pace <= 0)
     ) {
       throw new Error('Ongeldig opgeslagen scenario.');
     }
@@ -66,9 +66,7 @@ export function formatSignedGap(seconds: number): string {
   const hours = Math.floor(total / 3_600);
   const minutes = Math.floor((total % 3_600) / 60);
   const rest = String(total % 60).padStart(2, '0');
-  return hours
-    ? `${sign}${hours}:${String(minutes).padStart(2, '0')}:${rest}`
-    : `${sign}${minutes}:${rest}`;
+  return hours ? `${sign}${hours}:${String(minutes).padStart(2, '0')}:${rest}` : `${sign}${minutes}:${rest}`;
 }
 
 export function formatRaceHour(hours: number): string {

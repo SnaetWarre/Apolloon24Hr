@@ -140,7 +140,8 @@ export function AdminView() {
     if (
       !(await confirm({
         title: 'Database van de andere laptop overnemen?',
-        message: 'Deze laptop neemt de volledige database van de andere laptop over. De huidige database wordt eerst als herstelkopie bewaard.',
+        message:
+          'Deze laptop neemt de volledige database van de andere laptop over. De huidige database wordt eerst als herstelkopie bewaard.',
         confirmLabel: 'Koppelen en overnemen',
         tone: 'danger',
       }))
@@ -152,7 +153,10 @@ export function AdminView() {
     try {
       const result = await joinCluster(remoteUrl, pairingCode);
       setRemotePairingCode('');
-      setClusterMessage({ tone: 'success', text: `Gekoppeld. De vorige lokale database staat veilig in ${result.backupFile || 'een herstelkopie'}.` });
+      setClusterMessage({
+        tone: 'success',
+        text: `Gekoppeld. De vorige lokale database staat veilig in ${result.backupFile || 'een herstelkopie'}.`,
+      });
     } catch (err) {
       setClusterMessage({ tone: 'error', text: err instanceof Error ? err.message : 'Koppelen mislukt' });
     } finally {
@@ -176,7 +180,10 @@ export function AdminView() {
     try {
       await resolveConflict(conflictId, selectedOperationId);
       setClusterConflicts((current) => current.filter((item) => item.id !== conflictId));
-      setClusterMessage({ tone: 'success', text: 'Syncconflict opgelost; de gekozen timing wordt naar alle laptops gekopieerd.' });
+      setClusterMessage({
+        tone: 'success',
+        text: 'Syncconflict opgelost; de gekozen timing wordt naar alle laptops gekopieerd.',
+      });
     } catch (err) {
       setClusterMessage({ tone: 'error', text: err instanceof Error ? err.message : 'Conflict oplossen mislukt' });
     } finally {
@@ -212,7 +219,10 @@ export function AdminView() {
     setBackupMessage(null);
     try {
       const backup = await createBackup();
-      setBackupMessage({ tone: 'success', text: `Backup gecontroleerd en opgeslagen om ${formatClockTimeMs(backup.createdAt)}.` });
+      setBackupMessage({
+        tone: 'success',
+        text: `Backup gecontroleerd en opgeslagen om ${formatClockTimeMs(backup.createdAt)}.`,
+      });
     } catch (err) {
       setBackupMessage({ tone: 'error', text: err instanceof Error ? err.message : 'Backup maken mislukt' });
     } finally {
@@ -225,7 +235,8 @@ export function AdminView() {
     if (
       !(await confirm({
         title: 'Database verkleinen?',
-        message: 'Apolloon maakt eerst een geverifieerde herstelbackup en verkleint daarna het SQLite-bestand. Dit kan alleen wanneer de race niet actief is.',
+        message:
+          'Apolloon maakt eerst een geverifieerde herstelbackup en verkleint daarna het SQLite-bestand. Dit kan alleen wanneer de race niet actief is.',
         confirmLabel: 'Verkleinen',
       }))
     )
@@ -234,7 +245,10 @@ export function AdminView() {
     setBackupMessage(null);
     try {
       const result = await compactDatabase();
-      setBackupMessage({ tone: 'success', text: `Database veilig verkleind van ${formatFileSize(result.before.fileBytes)} naar ${formatFileSize(result.after.fileBytes)}.` });
+      setBackupMessage({
+        tone: 'success',
+        text: `Database veilig verkleind van ${formatFileSize(result.before.fileBytes)} naar ${formatFileSize(result.after.fileBytes)}.`,
+      });
     } catch (err) {
       setBackupMessage({ tone: 'error', text: err instanceof Error ? err.message : 'Database compactie mislukt' });
     } finally {
@@ -298,7 +312,10 @@ export function AdminView() {
       const runnerText = event.runnerName
         ? ` voor ${event.runnerNumber ? `${event.runnerNumber} ` : ''}${event.runnerName}`
         : '';
-      setEventMessage({ tone: 'success', text: `Burgie gepakt opgeslagen om ${formatClockTimeMs(event.occurredAt)}${runnerText}.` });
+      setEventMessage({
+        tone: 'success',
+        text: `Burgie gepakt opgeslagen om ${formatClockTimeMs(event.occurredAt)}${runnerText}.`,
+      });
     } catch (err) {
       setEventMessage({ tone: 'error', text: err instanceof Error ? err.message : 'Burgie gepakt opslaan mislukt' });
     } finally {
@@ -311,7 +328,10 @@ export function AdminView() {
     setRecordModeSaving(true);
     try {
       const nextSettings = await updatePublicRecordMode(publicRecordMode);
-      setEventMessage({ tone: 'success', text: `Recordflits staat op ${publicRecordModeLabel(nextSettings.publicRecordMode)}.` });
+      setEventMessage({
+        tone: 'success',
+        text: `Recordflits staat op ${publicRecordModeLabel(nextSettings.publicRecordMode)}.`,
+      });
     } catch (err) {
       setEventMessage({ tone: 'error', text: err instanceof Error ? err.message : 'Recordflits aanpassen mislukt' });
     } finally {
@@ -320,12 +340,15 @@ export function AdminView() {
   }
 
   async function removeLabel(id: string, name: string) {
-    if (!(await confirm({
-      title: `Label ${name} verwijderen?`,
-      message: 'Dit verwijdert het label ook van lopers.',
-      confirmLabel: 'Label verwijderen',
-      tone: 'danger',
-    }))) return;
+    if (
+      !(await confirm({
+        title: `Label ${name} verwijderen?`,
+        message: 'Dit verwijdert het label ook van lopers.',
+        confirmLabel: 'Label verwijderen',
+        tone: 'danger',
+      }))
+    )
+      return;
     setLabelMessage(null);
     try {
       await deleteLabel(id);
@@ -336,9 +359,10 @@ export function AdminView() {
   }
 
   const availableHours = React.useMemo(
-    () => [...new Set(runners.flatMap((runner) => runner.registration?.availableHours ?? []))]
-      .sort((a, b) => {
-        const day = (hour: string) => hour.toLowerCase().includes('dinsdag') ? 0 : hour.toLowerCase().includes('woensdag') ? 1 : 2;
+    () =>
+      [...new Set(runners.flatMap((runner) => runner.registration?.availableHours ?? []))].sort((a, b) => {
+        const day = (hour: string) =>
+          hour.toLowerCase().includes('dinsdag') ? 0 : hour.toLowerCase().includes('woensdag') ? 1 : 2;
         return day(a) - day(b) || a.localeCompare(b, 'nl-BE', { numeric: true });
       }),
     [runners]
@@ -394,12 +418,15 @@ export function AdminView() {
 
   async function removeRunner(runner: Runner) {
     if (runner.lapCount > 0 || runner.status === 'running') return;
-    if (!(await confirm({
-      title: `${runner.name} definitief verwijderen?`,
-      message: 'Dit kan niet ongedaan gemaakt worden.',
-      confirmLabel: 'Definitief verwijderen',
-      tone: 'danger',
-    }))) return;
+    if (
+      !(await confirm({
+        title: `${runner.name} definitief verwijderen?`,
+        message: 'Dit kan niet ongedaan gemaakt worden.',
+        confirmLabel: 'Definitief verwijderen',
+        tone: 'danger',
+      }))
+    )
+      return;
     setRunnerMessage(null);
     try {
       await deleteRunner(runner.id);
@@ -427,7 +454,8 @@ export function AdminView() {
           <section hidden={activeSection !== 'labels'} className="panel">
             <h2>Tijdelijke nachtploegen</h2>
             <p className="panel-copy">
-              Plan wanneer de lopers tijdelijk van hun gewone speedteam naar deze ploeg gaan. Na het einduur keren ze automatisch terug.
+              Plan wanneer de lopers tijdelijk van hun gewone speedteam naar deze ploeg gaan. Na het einduur keren ze
+              automatisch terug.
             </p>
             <TemporaryTeamCreateForm runners={runners} allTeams={temporaryTeams} onCreate={createTemporaryTeam} />
             {temporaryTeams.length ? (
@@ -449,9 +477,7 @@ export function AdminView() {
                 })}
               </div>
             ) : (
-              <div className="empty-inline">
-                Nog geen tijdelijke nachtploegen. Maak hierboven de eerste aan.
-              </div>
+              <div className="empty-inline">Nog geen tijdelijke nachtploegen. Maak hierboven de eerste aan.</div>
             )}
           </section>
 
@@ -463,9 +489,7 @@ export function AdminView() {
               <div className="readiness-heading">
                 <div>
                   <h2>Wedstrijdgereedheid</h2>
-                  <p className="panel-copy">
-                    Eén overzicht van de herstel-, synchronisatie- en timingvoorwaarden.
-                  </p>
+                  <p className="panel-copy">Eén overzicht van de herstel-, synchronisatie- en timingvoorwaarden.</p>
                 </div>
                 <strong className={`readiness-summary readiness-summary--${readiness}`}>
                   {readiness === 'ready'
@@ -507,8 +531,8 @@ export function AdminView() {
               <section hidden={activeSection !== 'system'} className="panel admin-dashboard__full-width">
                 <h2>Laptops koppelen</h2>
                 <p className="panel-copy">
-                  Op deze laptop: <strong>{host.url}</strong>. Koppelcode:{' '}
-                  <strong>{cluster.pairingCode}</strong>. Geef beide aan de andere laptop.
+                  Op deze laptop: <strong>{host.url}</strong>. Koppelcode: <strong>{cluster.pairingCode}</strong>. Geef
+                  beide aan de andere laptop.
                 </p>
                 <p className="panel-copy">
                   {cluster.connectedHosts === 1
@@ -529,9 +553,7 @@ export function AdminView() {
                   <strong>Deze versie:</strong> app {cluster.compatibility.appVersion} · schema{' '}
                   {cluster.compatibility.schemaVersion} · replicatieformaat{' '}
                   {cluster.compatibility.replicationFormatVersion}
-                  {cluster.compatibility.releaseId
-                    ? ` · release ${cluster.compatibility.releaseId.slice(0, 12)}`
-                    : ''}
+                  {cluster.compatibility.releaseId ? ` · release ${cluster.compatibility.releaseId.slice(0, 12)}` : ''}
                 </div>
                 {cluster.peers.map((peer) => (
                   <div
@@ -596,8 +618,7 @@ export function AdminView() {
                 {clusterConflicts.map((conflict) => (
                   <div className="host-hint" key={conflict.id}>
                     <strong>{conflict.kind === 'timing' ? 'Timingconflict' : 'Dataconflict'}</strong> van{' '}
-                    {new Date(conflict.createdAt).toLocaleTimeString('nl-BE')}. Kies welke actie werkelijk
-                    gebeurd is.
+                    {new Date(conflict.createdAt).toLocaleTimeString('nl-BE')}. Kies welke actie werkelijk gebeurd is.
                     {conflict.operations.map((operation, index) => (
                       <button
                         className="btn btn--secondary"
@@ -614,9 +635,9 @@ export function AdminView() {
                 <AdminNoticeBanner notice={clusterMessage} />
                 {(cluster.deadLetterCount ?? 0) > 0 && (
                   <div className="warning-banner" role="alert">
-                    {cluster.deadLetterCount} synchronisatie-actie{(cluster.deadLetterCount ?? 0) === 1 ? ' is' : 's zijn'} in
-                    quarantaine gezet omdat de data fout was. De sync loopt door, maar controleer welke
-                    wijziging mist en voer die indien nodig opnieuw in.
+                    {cluster.deadLetterCount} synchronisatie-actie
+                    {(cluster.deadLetterCount ?? 0) === 1 ? ' is' : 's zijn'} in quarantaine gezet omdat de data fout
+                    was. De sync loopt door, maar controleer welke wijziging mist en voer die indien nodig opnieuw in.
                   </div>
                 )}
               </section>
@@ -641,11 +662,10 @@ export function AdminView() {
                 )}
                 {cluster.backup.latest ? (
                   <div className="backup-summary">
-                    <strong>Laatste backup:</strong>{' '}
-                    {new Date(cluster.backup.latest.createdAt).toLocaleString('nl-BE')} ·{' '}
-                    {formatRelativeAge(cluster.backup.latest.createdAt)} ·{' '}
-                    {formatFileSize(cluster.backup.latest.sizeBytes)} · gecontroleerd ·{' '}
-                    {cluster.backup.retainedCount} bewaard ({formatFileSize(cluster.backup.retainedBytes)})
+                    <strong>Laatste backup:</strong> {new Date(cluster.backup.latest.createdAt).toLocaleString('nl-BE')}{' '}
+                    · {formatRelativeAge(cluster.backup.latest.createdAt)} ·{' '}
+                    {formatFileSize(cluster.backup.latest.sizeBytes)} · gecontroleerd · {cluster.backup.retainedCount}{' '}
+                    bewaard ({formatFileSize(cluster.backup.retainedBytes)})
                     <div className="backup-checksum">
                       <span>SHA-256</span>
                       <code>{cluster.backup.latest.sha256}</code>
@@ -664,9 +684,7 @@ export function AdminView() {
                 {cluster.backup.diskLow && (
                   <div className="warning-banner" role="alert">
                     Weinig opslagruimte: nog{' '}
-                    {cluster.backup.diskFreeBytes === null
-                      ? 'onbekend'
-                      : formatFileSize(cluster.backup.diskFreeBytes)}{' '}
+                    {cluster.backup.diskFreeBytes === null ? 'onbekend' : formatFileSize(cluster.backup.diskFreeBytes)}{' '}
                     vrij; de veiligheidsgrens is {formatFileSize(cluster.backup.minimumFreeBytes)}.
                   </div>
                 )}
@@ -679,9 +697,7 @@ export function AdminView() {
                   </span>
                   <span>
                     <strong>Vrije opslag</strong>
-                    {cluster.backup.diskFreeBytes === null
-                      ? 'onbekend'
-                      : formatFileSize(cluster.backup.diskFreeBytes)}
+                    {cluster.backup.diskFreeBytes === null ? 'onbekend' : formatFileSize(cluster.backup.diskFreeBytes)}
                   </span>
                   <span>
                     <strong>SQLite-database</strong>
@@ -697,9 +713,8 @@ export function AdminView() {
                 {cluster.backup.database.compactionRecommended && (
                   <div className="database-storage-note" role="status">
                     <strong>Geen dataprobleem:</strong> de database bevat{' '}
-                    {formatFileSize(cluster.backup.database.reclaimableBytes)} lege ruimte die SQLite later
-                    opnieuw kan gebruiken. Het bestand is daarom{' '}
-                    {formatFileSize(cluster.backup.database.fileBytes)}, terwijl{' '}
+                    {formatFileSize(cluster.backup.database.reclaimableBytes)} lege ruimte die SQLite later opnieuw kan
+                    gebruiken. Het bestand is daarom {formatFileSize(cluster.backup.database.fileBytes)}, terwijl{' '}
                     {formatFileSize(cluster.backup.database.usedBytes)} werkelijk in gebruik is.
                     {cluster.backup.database.raceActive
                       ? ' Verkleinen kan veilig zodra de race afgelopen is.'
@@ -747,9 +762,9 @@ export function AdminView() {
                   )}
                 </div>
                 <p className="panel-copy">
-                  Download regelmatig een kopie naar een andere laptop of USB-stick. Gesynchroniseerde
-                  replica's beschermen tegen een defect toestel; deze versies beschermen ook tegen een fout
-                  die naar alle laptops wordt gesynchroniseerd.
+                  Download regelmatig een kopie naar een andere laptop of USB-stick. Gesynchroniseerde replica's
+                  beschermen tegen een defect toestel; deze versies beschermen ook tegen een fout die naar alle laptops
+                  wordt gesynchroniseerd.
                 </p>
                 <AdminNoticeBanner notice={backupMessage} />
               </section>
@@ -757,16 +772,17 @@ export function AdminView() {
 
             <section hidden={activeSection !== 'public'} className="panel admin-dashboard__public-event">
               <h2>Publieke momenten</h2>
-              <p className="panel-copy">Wat het publiek op het Buitenscherm ziet, bovenop de huidige en volgende loper.</p>
+              <p className="panel-copy">
+                Wat het publiek op het Buitenscherm ziet, bovenop de huidige en volgende loper.
+              </p>
               <div className="public-moments">
                 <div className="public-moment">
                   <h3>Burgie gepakt</h3>
-                  <p>Toont 8 seconden “Burgie gepakt, ZINGEN” met de loper die nu op de piste is, en bewaart het moment in de analyse.</p>
-                  <button
-                    className="btn btn--primary"
-                    onClick={triggerBurgieGepakt}
-                    disabled={eventSaving}
-                  >
+                  <p>
+                    Toont 8 seconden “Burgie gepakt, ZINGEN” met de loper die nu op de piste is, en bewaart het moment
+                    in de analyse.
+                  </p>
+                  <button className="btn btn--primary" onClick={triggerBurgieGepakt} disabled={eventSaving}>
                     {eventSaving ? 'Opslaan...' : 'Burgie gepakt'}
                   </button>
                 </div>
@@ -774,12 +790,14 @@ export function AdminView() {
                   <h3 id="public-record-mode">Recordflits</h3>
                   <p>Een nieuwe snelste ronde verschijnt 8 seconden groot op het Buitenscherm.</p>
                   <div className="segmented-control" role="group" aria-labelledby="public-record-mode">
-                    {([
-                      ['off', 'Uit'],
-                      ['day', 'Dagrecord'],
-                      ['two_hour', 'Per 2 uur'],
-                      ['hour', 'Per uur'],
-                    ] as const).map(([mode, label]) => (
+                    {(
+                      [
+                        ['off', 'Uit'],
+                        ['day', 'Dagrecord'],
+                        ['two_hour', 'Per 2 uur'],
+                        ['hour', 'Per uur'],
+                      ] as const
+                    ).map(([mode, label]) => (
                       <button
                         key={mode}
                         type="button"
@@ -812,9 +830,9 @@ export function AdminView() {
             <section hidden={activeSection !== 'preparation'} className="panel admin-dashboard__import">
               <h2>Inschrijvingen importeren</h2>
               <p className="panel-copy">
-                Kies de CSV-export van het inschrijvingsformulier. Nieuwe lopers komen in de databank en verschijnen
-                op het bord zodra je ze aanmeldt in Wachtrij. Het rijnummer wordt het lopersnummer en alle antwoorden
-                komen in het profiel.
+                Kies de CSV-export van het inschrijvingsformulier. Nieuwe lopers komen in de databank en verschijnen op
+                het bord zodra je ze aanmeldt in Wachtrij. Het rijnummer wordt het lopersnummer en alle antwoorden komen
+                in het profiel.
               </p>
               <div className="file-import-row">
                 <label className="file-picker">
@@ -849,11 +867,7 @@ export function AdminView() {
                   value={labelColor}
                   onChange={(event) => setLabelColor(event.target.value)}
                 />
-                <select
-                  className="input"
-                  value={labelKind}
-                  onChange={(event) => setLabelKind(event.target.value)}
-                >
+                <select className="input" value={labelKind} onChange={(event) => setLabelKind(event.target.value)}>
                   <option value="speedteam">Speedteam</option>
                   <option value="zustervereniging">Zustervereniging</option>
                   <option value="andere">Andere</option>
@@ -881,11 +895,7 @@ export function AdminView() {
                   onChange={(event) => setLabelSortOrder(event.target.value)}
                   placeholder="Positie"
                 />
-                <button
-                  className="btn btn--primary"
-                  onClick={addLabel}
-                  disabled={!labelName.trim() || addingLabel}
-                >
+                <button className="btn btn--primary" onClick={addLabel} disabled={!labelName.trim() || addingLabel}>
                   {addingLabel ? 'Toevoegen...' : 'Label toevoegen'}
                 </button>
               </div>
@@ -913,8 +923,7 @@ export function AdminView() {
           <section hidden={activeSection !== 'runners'} className="panel">
             <h2>Lopers beheren</h2>
             <p className="panel-copy">
-              Definitief verwijderen kan alleen voor lopers zonder rondes. Gelopen data blijft bewaard voor
-              analyse.
+              Definitief verwijderen kan alleen voor lopers zonder rondes. Gelopen data blijft bewaard voor analyse.
             </p>
             <div className="form-row form-row--plain">
               <input
@@ -931,7 +940,11 @@ export function AdminView() {
                 onChange={(event) => setRunnerHour(event.target.value)}
               >
                 <option value="">Alle beschikbare uren</option>
-                {availableHours.map((hour) => <option key={hour} value={hour}>{hour}</option>)}
+                {availableHours.map((hour) => (
+                  <option key={hour} value={hour}>
+                    {hour}
+                  </option>
+                ))}
               </select>
             </div>
             <p className="panel-copy" role="status">
@@ -940,7 +953,12 @@ export function AdminView() {
               {matchingAdminRunners.length > 150 ? ' · eerste 150 getoond' : ''}
               {runnerStatusCounts ? ` · ${runnerStatusCounts}` : ''}
             </p>
-            {runnerHour && <p className="panel-copy">Beschikbaarheid komt uit de inschrijving. De status toont de huidige stap in de app, niet de fysieke locatie.</p>}
+            {runnerHour && (
+              <p className="panel-copy">
+                Beschikbaarheid komt uit de inschrijving. De status toont de huidige stap in de app, niet de fysieke
+                locatie.
+              </p>
+            )}
             <AdminNoticeBanner notice={runnerMessage} />
             <div className="table-wrap">
               <AdminRunnerTable
@@ -985,8 +1003,10 @@ const READINESS_ORDER = { blocked: 0, warning: 1, ready: 2 } as const;
 function sortReadinessChecks<Check extends { level: keyof typeof READINESS_ORDER }>(checks: Check[]): Check[] {
   return checks
     .map((check, index) => ({ check, index }))
-    .sort((first, second) =>
-      READINESS_ORDER[first.check.level] - READINESS_ORDER[second.check.level] || first.index - second.index)
+    .sort(
+      (first, second) =>
+        READINESS_ORDER[first.check.level] - READINESS_ORDER[second.check.level] || first.index - second.index
+    )
     .map(({ check }) => check);
 }
 
@@ -995,8 +1015,12 @@ type AdminNotice = { tone: 'success' | 'error'; text: string };
 function AdminNoticeBanner({ notice }: { notice: AdminNotice | null }) {
   if (!notice) return null;
   return notice.tone === 'error' ? (
-    <div className="warning-banner warning-banner--blocking" role="alert">{notice.text}</div>
+    <div className="warning-banner warning-banner--blocking" role="alert">
+      {notice.text}
+    </div>
   ) : (
-    <div className="success-banner" role="status" aria-live="polite">{notice.text}</div>
+    <div className="success-banner" role="status" aria-live="polite">
+      {notice.text}
+    </div>
   );
 }

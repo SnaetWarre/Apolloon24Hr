@@ -42,9 +42,7 @@ test('schema migration removes the retired log and compaction never runs during 
       );
       INSERT INTO cluster_operations(payload_json) VALUES (randomblob(4 * 1024 * 1024));
     `);
-    legacy
-      .prepare("UPDATE settings SET value = ? WHERE key = 'replication_checkpoint_json'")
-      .run(legacyCheckpointJson);
+    legacy.prepare("UPDATE settings SET value = ? WHERE key = 'replication_checkpoint_json'").run(legacyCheckpointJson);
   } finally {
     legacy.close();
   }
@@ -59,24 +57,15 @@ test('schema migration removes the retired log and compaction never runs during 
         .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'cluster_operations'")
         .get();
       assert.equal(retiredTable, undefined);
-      assert.equal(
-        migrated.prepare("SELECT value FROM settings WHERE key = 'schema_version'").pluck().get(),
-        '12'
-      );
+      assert.equal(migrated.prepare("SELECT value FROM settings WHERE key = 'schema_version'").pluck().get(), '12');
       assert.equal(migrated.pragma('user_version', { simple: true }), 12);
       const compressedCheckpoint = String(
-        migrated
-          .prepare("SELECT value FROM settings WHERE key = 'replication_checkpoint_gzip_v1'")
-          .pluck()
-          .get()
+        migrated.prepare("SELECT value FROM settings WHERE key = 'replication_checkpoint_gzip_v1'").pluck().get()
       );
       assert.match(compressedCheckpoint, /^gzip-base64-v1:/);
       assert.ok(compressedCheckpoint.length < legacyCheckpointJson.length / 2);
       assert.equal(
-        migrated
-          .prepare("SELECT value FROM settings WHERE key = 'replication_checkpoint_json'")
-          .pluck()
-          .get(),
+        migrated.prepare("SELECT value FROM settings WHERE key = 'replication_checkpoint_json'").pluck().get(),
         undefined
       );
       assert.equal(migrated.pragma('quick_check', { simple: true }), 'ok');

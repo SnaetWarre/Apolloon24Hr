@@ -57,18 +57,20 @@ export function parseLabelsJson(value: unknown): Label[] {
     ) {
       return [];
     }
-    return [{
-      id: label.id,
-      name: label.name,
-      color: label.color,
-      icon: label.icon,
-      kind: label.kind,
-      imageUrl: typeof label.imageUrl === 'string' ? label.imageUrl : null,
-      targetLaps: Number.isSafeInteger(label.targetLaps) ? label.targetLaps! : null,
-      sortOrder: Number.isSafeInteger(label.sortOrder) ? label.sortOrder! : null,
-      ...(Number.isSafeInteger(label.createdAt) ? { createdAt: label.createdAt } : {}),
-      ...(Number.isSafeInteger(label.updatedAt) ? { updatedAt: label.updatedAt } : {}),
-    }];
+    return [
+      {
+        id: label.id,
+        name: label.name,
+        color: label.color,
+        icon: label.icon,
+        kind: label.kind,
+        imageUrl: typeof label.imageUrl === 'string' ? label.imageUrl : null,
+        targetLaps: Number.isSafeInteger(label.targetLaps) ? label.targetLaps! : null,
+        sortOrder: Number.isSafeInteger(label.sortOrder) ? label.sortOrder! : null,
+        ...(Number.isSafeInteger(label.createdAt) ? { createdAt: label.createdAt } : {}),
+        ...(Number.isSafeInteger(label.updatedAt) ? { updatedAt: label.updatedAt } : {}),
+      },
+    ];
   });
 }
 
@@ -87,7 +89,9 @@ export function serializeHistoricalLabels(labels: Label[]): string {
 }
 
 function normalizeName(name: unknown): string {
-  return String(name || '').trim().toLowerCase();
+  return String(name || '')
+    .trim()
+    .toLowerCase();
 }
 
 const FIRST_YEAR_ALIASES = new Set(['1ste jaars', '1e jaar', '1e jaars', 'eerste jaar', 'eerste jaars']);

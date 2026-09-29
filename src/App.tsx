@@ -58,7 +58,12 @@ export function AppRoot() {
   }
 
   if (!initialized) {
-    if (displayRoute) return <div className="display-loading" role="status">Wedstrijddata laden…</div>;
+    if (displayRoute)
+      return (
+        <div className="display-loading" role="status">
+          Wedstrijddata laden…
+        </div>
+      );
     return (
       <Shell>
         <div className="app-state" role="status">
@@ -69,13 +74,23 @@ export function AppRoot() {
     );
   }
 
-  if (displayRoute) return (<><ConnectionBanner /><Outlet /></>);
+  if (displayRoute)
+    return (
+      <>
+        <ConnectionBanner />
+        <Outlet />
+      </>
+    );
 
   return (
     <Shell>
-      <a className="skip-link" href="#workspace">Naar inhoud</a>
+      <a className="skip-link" href="#workspace">
+        Naar inhoud
+      </a>
       <AppShellFrame>
-        <main id="workspace" className="workspace" tabIndex={-1}><Outlet /></main>
+        <main id="workspace" className="workspace" tabIndex={-1}>
+          <Outlet />
+        </main>
       </AppShellFrame>
     </Shell>
   );
@@ -103,7 +118,12 @@ export function QueuePage() {
             {activeRunner ? <RunnerName runner={activeRunner} /> : 'Nog niemand gestart'}
           </span>
           {race.activeStartedAt && activeRunner && (
-            <LiveDuration startedAt={race.activeStartedAt} className="race-strip__time" refreshMs={1_000} format="seconds" />
+            <LiveDuration
+              startedAt={race.activeStartedAt}
+              className="race-strip__time"
+              refreshMs={1_000}
+              format="seconds"
+            />
           )}
         </div>
         <div>
@@ -114,13 +134,13 @@ export function QueuePage() {
         </div>
         <div>
           <span className="race-strip__label">Klaar om te lopen</span>
-          <span className="race-strip__runner">{waitingCount} {waitingCount === 1 ? 'loper' : 'lopers'}</span>
+          <span className="race-strip__runner">
+            {waitingCount} {waitingCount === 1 ? 'loper' : 'lopers'}
+          </span>
         </div>
       </section>
       <KanbanBoard onOpenProfile={setProfileRunnerId} />
-      {profileRunnerId && (
-        <RunnerProfileModal runnerId={profileRunnerId} onClose={() => setProfileRunnerId(null)} />
-      )}
+      {profileRunnerId && <RunnerProfileModal runnerId={profileRunnerId} onClose={() => setProfileRunnerId(null)} />}
     </>
   );
 }
@@ -196,7 +216,8 @@ function ConnectionBanner() {
   if (!connectionLost) return null;
   return (
     <div className="connection-banner" role="alert">
-      <strong>Verbinding met de server verbroken.</strong> Live gegevens kunnen verouderd zijn. Er wordt opnieuw verbonden…
+      <strong>Verbinding met de server verbroken.</strong> Live gegevens kunnen verouderd zijn. Er wordt opnieuw
+      verbonden…
     </div>
   );
 }
@@ -218,7 +239,15 @@ function RouteLoadBoundary({
   return <React.Suspense fallback={fallback}>{children}</React.Suspense>;
 }
 
-type NavigationPath = '/' | '/queue' | '/timing' | '/analysis' | '/tactics' | '/admin' | '/display/inside' | '/display/outside';
+type NavigationPath =
+  | '/'
+  | '/queue'
+  | '/timing'
+  | '/analysis'
+  | '/tactics'
+  | '/admin'
+  | '/display/inside'
+  | '/display/outside';
 
 const NAVIGATION_GROUPS: ReadonlyArray<{
   title: string | null;
@@ -321,11 +350,13 @@ function RaceClock() {
     <div className="sidebar-row" title="Tijd sinds de start van de race">
       <span className="sidebar-row__label">Race</span>
       <span className="sidebar-row__value">
-        {!race.raceStartedAt
-          ? 'Niet gestart'
-          : race.raceFinishedAt
-            ? 'Afgesloten'
-            : <LiveElapsed startedAt={race.raceStartedAt} />}
+        {!race.raceStartedAt ? (
+          'Niet gestart'
+        ) : race.raceFinishedAt ? (
+          'Afgesloten'
+        ) : (
+          <LiveElapsed startedAt={race.raceStartedAt} />
+        )}
       </span>
     </div>
   );
@@ -365,7 +396,12 @@ function SystemStatusRow() {
       onPointerEnter={preloadAdminView}
     >
       <span className="system-status__dot" aria-hidden="true" />
-      <span role={status.tone === 'error' ? 'alert' : 'status'} aria-live="polite" aria-atomic="true" className="system-status__text">
+      <span
+        role={status.tone === 'error' ? 'alert' : 'status'}
+        aria-live="polite"
+        aria-atomic="true"
+        className="system-status__text"
+      >
         <strong>{status.tone === 'healthy' ? 'Systeem in orde' : status.title}</strong>
         <span>{status.detail}</span>
       </span>

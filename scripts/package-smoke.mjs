@@ -10,18 +10,17 @@ const { version, build } = JSON.parse(readFileSync('package.json', 'utf8'));
 try {
   // Reserve an available port, then release it immediately before starting Electron.
   const socket = net.createServer();
-  await new Promise(resolve => socket.listen(0, '127.0.0.1', resolve));
+  await new Promise((resolve) => socket.listen(0, '127.0.0.1', resolve));
   const port = socket.address().port;
-  await new Promise(resolve => socket.close(resolve));
+  await new Promise((resolve) => socket.close(resolve));
   writeFileSync(path.join(temporary, '.env'), `PORT=${port}\nCLUSTER_ENABLED=false\n`);
   let executable;
   if (process.platform === 'win32') {
     executable = path.resolve('release', 'win-unpacked', `${build.productName}.exe`);
   } else if (process.platform === 'linux') {
-    const images = readdirSync('release').filter(file => file === `${build.productName}-${version}.AppImage`);
+    const images = readdirSync('release').filter((file) => file === `${build.productName}-${version}.AppImage`);
     assert.equal(images.length, 1, 'Expected exactly one AppImage');
-    execFileSync(path.resolve('release', images[0]), ['--appimage-extract'],
-      { cwd: temporary, stdio: 'ignore' });
+    execFileSync(path.resolve('release', images[0]), ['--appimage-extract'], { cwd: temporary, stdio: 'ignore' });
     executable = path.join(temporary, 'squashfs-root', 'AppRun');
   } else {
     throw new Error(`Unsupported smoke test platform: ${process.platform}`);
@@ -40,8 +39,11 @@ try {
       child.once('exit', resolve);
     });
     assert.equal(code, 0, 'Packaged Electron must exit successfully');
-    assert.deepEqual(JSON.parse(readFileSync(path.join(temporary, 'smoke-result.json'), 'utf8')),
-      { version, renderer: true, database: true });
+    assert.deepEqual(JSON.parse(readFileSync(path.join(temporary, 'smoke-result.json'), 'utf8')), {
+      version,
+      renderer: true,
+      database: true,
+    });
     console.log(`Package smoke passed: ${process.platform}, version ${version}, renderer and SQLite ready`);
   } finally {
     clearTimeout(timeout);

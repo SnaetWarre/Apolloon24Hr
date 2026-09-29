@@ -59,9 +59,7 @@ export function getRecentLaps(limit = 100): LapRecord[] {
 }
 
 export function getLapsForRunner(runnerId: string): LapRecord[] {
-  return all<LapRow>(`${LAP_SELECT_SQL} WHERE l.runner_id = ? ORDER BY l.finished_at DESC`, [runnerId]).map(
-    lapFromRow
-  );
+  return all<LapRow>(`${LAP_SELECT_SQL} WHERE l.runner_id = ? ORDER BY l.finished_at DESC`, [runnerId]).map(lapFromRow);
 }
 
 export function getLapById(id: string): LapRecord | null {

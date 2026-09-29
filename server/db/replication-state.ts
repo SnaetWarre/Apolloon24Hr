@@ -6,7 +6,10 @@ import { type ReplicationIdentity } from './types.js';
 export function ensureReplicationIdentity(): ReplicationIdentity {
   return {
     hostId: ensureHostId(),
-    clusterId: ensureLocalSetting('replication_cluster_id', () => process.env.CLUSTER_ID?.trim() || crypto.randomUUID()),
+    clusterId: ensureLocalSetting(
+      'replication_cluster_id',
+      () => process.env.CLUSTER_ID?.trim() || crypto.randomUUID()
+    ),
     clusterSecret: ensureLocalSetting(
       'replication_cluster_secret',
       () => process.env.CLUSTER_SECRET?.trim() || crypto.randomBytes(32).toString('hex')

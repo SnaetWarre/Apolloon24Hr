@@ -2,17 +2,20 @@ import type { QueryClient } from '@tanstack/react-query';
 import { io } from 'socket.io-client';
 import { trpc } from '../api';
 import { syncServerClock } from '../lib/time';
-import type { AppSettings, Label, LapRecord, LiveAppSnapshot, RaceEvent, RaceHistory, RaceState, Runner, TemporaryTeam } from '../types';
+import type {
+  AppSettings,
+  Label,
+  LapRecord,
+  LiveAppSnapshot,
+  RaceEvent,
+  RaceHistory,
+  RaceState,
+  Runner,
+  TemporaryTeam,
+} from '../types';
 import { historyKey, patchRaceHistories } from './history';
 import { markRealtimeConnected, markRealtimeDisconnected } from './realtimeConnection';
-import {
-  patchSnapshot,
-  prependById,
-  removeById,
-  snapshotKey,
-  upsertById,
-  upsertManyById,
-} from './snapshot';
+import { patchSnapshot, prependById, removeById, snapshotKey, upsertById, upsertManyById } from './snapshot';
 
 export function connectRealtime(activeQueryClient: QueryClient): () => void {
   let disposed = false;
@@ -113,10 +116,7 @@ export function connectRealtime(activeQueryClient: QueryClient): () => void {
   socket.on('race-events:patched', (events: RaceEvent[]) => {
     patchRaceHistories(activeQueryClient, (history) => ({
       ...history,
-      events:
-        history.scope === 'runner'
-          ? []
-          : limitHistory(history, events),
+      events: history.scope === 'runner' ? [] : limitHistory(history, events),
     }));
   });
   socket.on('settings:changed', (settings: AppSettings) => {
@@ -170,15 +170,10 @@ function patchHistoryLap(history: RaceHistory, lap: LapRecord): RaceHistory {
 }
 
 function historyLapsForScope(history: RaceHistory, laps: LapRecord[]): LapRecord[] {
-  const matching =
-    history.scope === 'runner'
-      ? laps.filter((lap) => lap.runnerId === history.runnerId)
-      : laps;
+  const matching = history.scope === 'runner' ? laps.filter((lap) => lap.runnerId === history.runnerId) : laps;
   return limitHistory(history, matching);
 }
 
 function limitHistory<T>(history: RaceHistory, items: T[]): T[] {
-  return history.scope === 'recent' && history.limit
-    ? items.slice(0, history.limit)
-    : items;
+  return history.scope === 'recent' && history.limit ? items.slice(0, history.limit) : items;
 }

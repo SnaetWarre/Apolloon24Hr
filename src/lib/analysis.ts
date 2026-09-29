@@ -149,11 +149,7 @@ function formatClockHourWindow(startedAt: number, raceHour: number): string {
   return `${BRUSSELS_HOUR_FORMATTER.format(windowStartedAt)}u-${BRUSSELS_HOUR_FORMATTER.format(windowStartedAt + 3_600_000)}u`;
 }
 
-export function buildRollingLapTrend(
-  laps: LapRecord[],
-  race: RaceState,
-  windowMinutes = 60
-): RollingLapTrendPoint[] {
+export function buildRollingLapTrend(laps: LapRecord[], race: RaceState, windowMinutes = 60): RollingLapTrendPoint[] {
   const startedAt = race.raceStartedAt ?? oldestLapTimestamp(laps);
   if (startedAt == null) return [];
 
@@ -172,10 +168,7 @@ export function buildRollingLapTrend(
     }
 
     const minimumFinishedAt = finishedAt - windowMs;
-    while (
-      windowStartIndex < groupEnd &&
-      sortedLaps[windowStartIndex].finishedAt < minimumFinishedAt
-    ) {
+    while (windowStartIndex < groupEnd && sortedLaps[windowStartIndex].finishedAt < minimumFinishedAt) {
       windowTotalMs -= sortedLaps[windowStartIndex].durationMs;
       windowStartIndex += 1;
     }
@@ -217,9 +210,7 @@ export function buildLabelComparisons(labels: Label[], laps: LapRecord[]): Label
     }))
     .filter((comparison) => comparison.count > 0)
     .sort(
-      (a, b) =>
-        (a.label.sortOrder ?? 9999) - (b.label.sortOrder ?? 9999) ||
-        a.label.name.localeCompare(b.label.name)
+      (a, b) => (a.label.sortOrder ?? 9999) - (b.label.sortOrder ?? 9999) || a.label.name.localeCompare(b.label.name)
     );
 }
 
@@ -271,7 +262,9 @@ export function buildRunnerInsights(runners: Runner[], laps: LapRecord[]): Runne
         ...calculateDurationStats(runnerLaps),
       };
     })
-    .sort((a, b) => b.count - a.count || (a.averageMs ?? Number.MAX_SAFE_INTEGER) - (b.averageMs ?? Number.MAX_SAFE_INTEGER));
+    .sort(
+      (a, b) => b.count - a.count || (a.averageMs ?? Number.MAX_SAFE_INTEGER) - (b.averageMs ?? Number.MAX_SAFE_INTEGER)
+    );
 }
 
 export function buildFastestLapWindows(

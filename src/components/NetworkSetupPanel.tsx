@@ -23,12 +23,7 @@ type NetProfile = {
   lastElevation: { id: string; state: 'waiting' | 'finished' | 'failed'; message: string | null } | null;
 };
 
-type Phase =
-  | 'idle'
-  | 'confirm-make'
-  | 'waiting-make'
-  | 'confirm-revert'
-  | 'waiting-revert';
+type Phase = 'idle' | 'confirm-make' | 'waiting-make' | 'confirm-revert' | 'waiting-revert';
 
 const UNDO_PHRASE = 'VOORBIJ';
 
@@ -147,7 +142,9 @@ export function NetworkSetupPanel() {
         (next) => next.primary !== null && next.primary.address === wanted && next.primary.dhcp === false,
         () => {
           setPhase('idle');
-          setMessage(`Gelukt! Dit adres is nu vast: ${wanted}. Andere apparaten blijven bereikbaar op http://${wanted}:5173.`);
+          setMessage(
+            `Gelukt! Dit adres is nu vast: ${wanted}. Andere apparaten blijven bereikbaar op http://${wanted}:5173.`
+          );
         },
         (failure) => {
           setPhase('idle');
@@ -156,7 +153,9 @@ export function NetworkSetupPanel() {
         },
         () => {
           setPhase('idle');
-          setError('Er is niets veranderd. Waarschijnlijk is de toestemming geweigerd of weggeklikt. Probeer het opnieuw.');
+          setError(
+            'Er is niets veranderd. Waarschijnlijk is de toestemming geweigerd of weggeklikt. Probeer het opnieuw.'
+          );
         }
       );
     } catch (err) {
@@ -190,7 +189,9 @@ export function NetworkSetupPanel() {
           setPhase('idle');
           setEventOverChecked(false);
           setUndoText('');
-          setMessage('Gelukt! Dit toestel haalt zijn adres weer automatisch op. Vergeet niet ook de kabel eruit te halen als je naar school-wifi gaat.');
+          setMessage(
+            'Gelukt! Dit toestel haalt zijn adres weer automatisch op. Vergeet niet ook de kabel eruit te halen als je naar school-wifi gaat.'
+          );
         },
         (failure) => {
           setPhase('idle');
@@ -235,14 +236,14 @@ export function NetworkSetupPanel() {
     <>
       <h2>Vast netwerkadres</h2>
       <p className="panel-copy">
-        Deze stap doe je <strong>één keer per laptop, op die laptop zelf</strong>, met de netwerkkabel
-        erin. Daarna verandert het adres nooit meer en blijven alle schermen werken.
+        Deze stap doe je <strong>één keer per laptop, op die laptop zelf</strong>, met de netwerkkabel erin. Daarna
+        verandert het adres nooit meer en blijven alle schermen werken.
       </p>
 
       {profile.apipa && (
         <div className="warning-banner" role="alert">
-          Deze laptop heeft nu een noodadres (169.254.x.x): er is geen netwerk gevonden. Controleer dat
-          de kabel in de switch zit en dat de switch aan staat.
+          Deze laptop heeft nu een noodadres (169.254.x.x): er is geen netwerk gevonden. Controleer dat de kabel in de
+          switch zit en dat de switch aan staat.
         </div>
       )}
 
@@ -270,8 +271,8 @@ export function NetworkSetupPanel() {
 
       {!profile.elevateMethod && (
         <div className="host-hint">
-          Automatisch vastzetten kan op dit toestel ({profile.platform}) niet vanuit de app. Doe het
-          handmatig, of download hieronder het script voor de Windows- en Linux-laptops.
+          Automatisch vastzetten kan op dit toestel ({profile.platform}) niet vanuit de app. Doe het handmatig, of
+          download hieronder het script voor de Windows- en Linux-laptops.
         </div>
       )}
 
@@ -281,9 +282,7 @@ export function NetworkSetupPanel() {
             <strong>Stap 1:</strong> controleer het adres hieronder (meestal klopt wat er al staat).{' '}
             <strong>Stap 2:</strong> klik op de knop
             {profile.elevateHint ? (
-              <>
-                , bevestig ({profile.elevateHint.toLowerCase()})
-              </>
+              <>, bevestig ({profile.elevateHint.toLowerCase()})</>
             ) : (
               <>, bevestig de toestemmingsvraag</>
             )}{' '}
@@ -323,7 +322,11 @@ export function NetworkSetupPanel() {
           </div>
           {phase === 'confirm-make' ? (
             <div className="form-row form-row--plain">
-              <button className="btn btn--primary" onClick={() => void startMakeStatic()} disabled={busy || !ipInput.trim()}>
+              <button
+                className="btn btn--primary"
+                onClick={() => void startMakeStatic()}
+                disabled={busy || !ipInput.trim()}
+              >
                 Ja, maak {ipInput.trim() || 'dit adres'} nu vast
               </button>
               <button className="btn btn--secondary" onClick={() => setPhase('idle')} disabled={busy}>
@@ -333,7 +336,11 @@ export function NetworkSetupPanel() {
           ) : (
             <button
               className="btn btn--primary"
-              onClick={() => { setError(null); setMessage(null); setPhase('confirm-make'); }}
+              onClick={() => {
+                setError(null);
+                setMessage(null);
+                setPhase('confirm-make');
+              }}
               disabled={busy || !ipInput.trim() || profile.primaryWired === false}
             >
               {busy ? 'Bezig met controleren…' : 'Maak dit adres vast'}
@@ -344,20 +351,19 @@ export function NetworkSetupPanel() {
 
       {isStatic && profile.primary && (
         <div className="host-hint">
-          <strong>Dit adres staat vast:</strong> {profile.primary.address}. Goed zo — hier hoef je niets
-          meer te doen tot het evenement voorbij is.
+          <strong>Dit adres staat vast:</strong> {profile.primary.address}. Goed zo — hier hoef je niets meer te doen
+          tot het evenement voorbij is.
         </div>
       )}
 
       {profile.elevateMethod && (
         <details className="host-hint">
           <summary>
-            <strong>Na het evenement: adres weer automatisch maken</strong> (hiervoor moet je twee keer
-            bevestigen)
+            <strong>Na het evenement: adres weer automatisch maken</strong> (hiervoor moet je twee keer bevestigen)
           </summary>
           <p className="panel-copy">
-            Zolang het adres vast staat, werkt school-wifi vaak <em>niet</em>. Zet het daarom na het
-            evenement terug. Dit kan pas als je hieronder bevestigt dat het evenement echt voorbij is.
+            Zolang het adres vast staat, werkt school-wifi vaak <em>niet</em>. Zet het daarom na het evenement terug.
+            Dit kan pas als je hieronder bevestigt dat het evenement echt voorbij is.
           </p>
           <label className="host-hint">
             <input
@@ -397,7 +403,11 @@ export function NetworkSetupPanel() {
           ) : (
             <button
               className="btn btn--secondary"
-              onClick={() => { setError(null); setMessage(null); setPhase('confirm-revert'); }}
+              onClick={() => {
+                setError(null);
+                setMessage(null);
+                setPhase('confirm-revert');
+              }}
               disabled={busy || !eventOverChecked || undoText.trim().toUpperCase() !== UNDO_PHRASE}
               title={
                 !eventOverChecked

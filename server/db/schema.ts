@@ -315,9 +315,7 @@ export function migrateSchema(): void {
         lap.id,
       ]);
     }
-    const active = one<{ runnerId: string | null }>(
-      'SELECT active_runner_id AS runnerId FROM race_state WHERE id = 1'
-    );
+    const active = one<{ runnerId: string | null }>('SELECT active_runner_id AS runnerId FROM race_state WHERE id = 1');
     if (active?.runnerId) {
       run('UPDATE race_state SET active_labels_json = ? WHERE id = 1', [
         JSON.stringify(labelsByRunner.get(active.runnerId) ?? []),
@@ -339,8 +337,7 @@ export function migrateSchema(): void {
   if (previousVersion < 9) {
     compactStoredLapLabels();
 
-    const storedCheckpoint =
-      getSetting(REPLICATION_CHECKPOINT_KEY) || getSetting(LEGACY_REPLICATION_CHECKPOINT_KEY);
+    const storedCheckpoint = getSetting(REPLICATION_CHECKPOINT_KEY) || getSetting(LEGACY_REPLICATION_CHECKPOINT_KEY);
     if (storedCheckpoint) {
       storeReplicationCheckpoint(decodeReplicationCheckpoint(storedCheckpoint));
     }

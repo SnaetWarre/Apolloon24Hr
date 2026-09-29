@@ -32,10 +32,7 @@ export function buildEventReadiness(
   checks.push({
     id: 'backup',
     label: 'Herstelbackup',
-    level:
-      !backup.enabled || backup.lastError || backupAge === null || backupAge > backupMaxAge
-        ? 'blocked'
-        : 'ready',
+    level: !backup.enabled || backup.lastError || backupAge === null || backupAge > backupMaxAge ? 'blocked' : 'ready',
     detail: !backup.enabled
       ? 'Automatische backups zijn uitgeschakeld.'
       : backup.lastError
@@ -77,9 +74,7 @@ export function buildEventReadiness(
           ? `${cluster.incompatiblePeerCount} laptop${cluster.incompatiblePeerCount === 1 ? '' : 's'} moet eerst worden bijgewerkt; synchronisatie is veilig geblokkeerd.`
           : `Schema ${cluster.compatibility.schemaVersion}, replicatieformaat ${cluster.compatibility.replicationFormatVersion} en app ${cluster.compatibility.appVersion} zijn compatibel.`,
     });
-    const synchronizedPeer = cluster.peers.some(
-      (peer) => peer.reachable && peer.synchronized
-    );
+    const synchronizedPeer = cluster.peers.some((peer) => peer.reachable && peer.synchronized);
     checks.push({
       id: 'replica',
       label: 'Live replica',

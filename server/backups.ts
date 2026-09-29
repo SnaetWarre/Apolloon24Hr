@@ -19,8 +19,7 @@ type BackupManifest = {
 
 const backupDirectory = path.join(DATA_ROOT, 'backups');
 const enabled =
-  process.env.BACKUP_ENABLED === 'true' ||
-  (process.env.BACKUP_ENABLED !== 'false' && process.env.NODE_ENV !== 'test');
+  process.env.BACKUP_ENABLED === 'true' || (process.env.BACKUP_ENABLED !== 'false' && process.env.NODE_ENV !== 'test');
 const intervalMs = readPositiveInt(process.env.BACKUP_INTERVAL_MS, 5 * 60_000);
 const initialDelayMs = readPositiveInt(process.env.BACKUP_INITIAL_DELAY_MS, 10_000);
 const minimumFreeBytes = readPositiveInt(process.env.BACKUP_MIN_FREE_BYTES, 2 * 1_024 ** 3);
@@ -151,10 +150,7 @@ export function backupManifest(record: BackupRecord): BackupManifest {
   };
 }
 
-export async function verifyStoredBackup(
-  record: BackupRecord,
-  filePath: string
-): Promise<void> {
+export async function verifyStoredBackup(record: BackupRecord, filePath: string): Promise<void> {
   try {
     const stat = await fs.promises.stat(filePath);
     if (stat.size !== record.sizeBytes) {
@@ -235,7 +231,9 @@ export function backupsToRetain(
 async function performBackup(reason: string): Promise<BackupRecord> {
   await fs.promises.mkdir(backupDirectory, { recursive: true });
   const createdAt = Date.now();
-  const hostSuffix = ensureReplicationIdentity().hostId.replace(/[^a-z0-9]/gi, '').slice(0, 8);
+  const hostSuffix = ensureReplicationIdentity()
+    .hostId.replace(/[^a-z0-9]/gi, '')
+    .slice(0, 8);
   const stamp = new Date(createdAt).toISOString().replace(/[-:.]/g, '');
   const fileName = `apolloon-${stamp}-${hostSuffix}-${reason}-${crypto.randomUUID().slice(0, 8)}.sqlite`;
   const finalPath = path.join(backupDirectory, fileName);
@@ -250,10 +248,7 @@ async function performBackup(reason: string): Promise<BackupRecord> {
     await removeBackupSidecars(partialPath);
     await syncFile(partialPath);
     await fs.promises.rename(partialPath, finalPath);
-    const [stat, sha256] = await Promise.all([
-      fs.promises.stat(finalPath),
-      hashFile(finalPath),
-    ]);
+    const [stat, sha256] = await Promise.all([fs.promises.stat(finalPath), hashFile(finalPath)]);
     const record: BackupRecord = {
       fileName,
       createdAt,
@@ -263,14 +258,12 @@ async function performBackup(reason: string): Promise<BackupRecord> {
       verified: true,
     };
     await writeMetadata(record);
-    records = [record, ...records.filter((item) => item.fileName !== fileName)]
-      .sort((a, b) => b.createdAt - a.createdAt);
+    records = [record, ...records.filter((item) => item.fileName !== fileName)].sort(
+      (a, b) => b.createdAt - a.createdAt
+    );
     published = true;
     await pruneBackups().catch((error) => {
-      console.warn(
-        'Old database backups could not be pruned:',
-        error instanceof Error ? error.message : String(error)
-      );
+      console.warn('Old database backups could not be pruned:', error instanceof Error ? error.message : String(error));
     });
     lastError = null;
     return record;
@@ -360,10 +353,7 @@ function scheduleNext(delayMs: number): void {
     nextScheduledAt = null;
     void createVerifiedBackup('scheduled')
       .catch((error) => {
-        console.warn(
-          'Scheduled database backup failed:',
-          error instanceof Error ? error.message : String(error)
-        );
+        console.warn('Scheduled database backup failed:', error instanceof Error ? error.message : String(error));
       })
       .finally(() => scheduleNext(intervalMs));
   }, delayMs);
@@ -404,14 +394,14 @@ async function removeBackupSidecars(filePath: string): Promise<void> {
 }
 
 async function removePartialBackup(filePath: string): Promise<void> {
-  await Promise.all([
-    fs.promises.rm(filePath, { force: true }),
-    removeBackupSidecars(filePath),
-  ]);
+  await Promise.all([fs.promises.rm(filePath, { force: true }), removeBackupSidecars(filePath)]);
 }
 
 function safeReason(value: string): string {
-  const cleaned = value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  const cleaned = value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
   return cleaned.slice(0, 32) || 'manual';
 }
 

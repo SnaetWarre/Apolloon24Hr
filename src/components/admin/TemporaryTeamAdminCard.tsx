@@ -74,13 +74,17 @@ export function TemporaryTeamAdminCard({
   }
 
   async function closeMembers() {
-    if (dirty && !(await confirm({
-      title: 'Wijzigingen weggooien?',
-      message: 'De aanpassingen aan de ledenlijst zijn nog niet opgeslagen.',
-      confirmLabel: 'Weggooien',
-      cancelLabel: 'Verder bewerken',
-      tone: 'danger',
-    }))) return;
+    if (
+      dirty &&
+      !(await confirm({
+        title: 'Wijzigingen weggooien?',
+        message: 'De aanpassingen aan de ledenlijst zijn nog niet opgeslagen.',
+        confirmLabel: 'Weggooien',
+        cancelLabel: 'Verder bewerken',
+        tone: 'danger',
+      }))
+    )
+      return;
     setMembersOpen(false);
   }
 
@@ -113,11 +117,14 @@ export function TemporaryTeamAdminCard({
   async function changeActive() {
     if (busy) return;
     const action = team.active ? 'deactiveren' : 'activeren';
-    if (!(await confirm({
-      title: `${label.name} ${action}?`,
-      message: `Dit geldt voor ${team.memberRunnerIds.length} lopers.`,
-      confirmLabel: team.active ? 'Deactiveren' : 'Activeren',
-    }))) return;
+    if (
+      !(await confirm({
+        title: `${label.name} ${action}?`,
+        message: `Dit geldt voor ${team.memberRunnerIds.length} lopers.`,
+        confirmLabel: team.active ? 'Deactiveren' : 'Activeren',
+      }))
+    )
+      return;
     setBusy(true);
     setFeedback(null);
     try {
@@ -138,7 +145,11 @@ export function TemporaryTeamAdminCard({
       const window = parseTeamWindow(start, end);
       setBusy(true);
       const updated = await onSetSchedule(team.labelId, window.startsAt, window.endsAt);
-      setFeedback(updated.active ? 'Planning opgeslagen. De ploeg is nu actief.' : 'Planning opgeslagen. De ploeg schakelt automatisch om.');
+      setFeedback(
+        updated.active
+          ? 'Planning opgeslagen. De ploeg is nu actief.'
+          : 'Planning opgeslagen. De ploeg schakelt automatisch om.'
+      );
       setEditingSchedule(false);
     } catch (error) {
       setFeedback(error instanceof Error ? error.message : 'Planning opslaan mislukt.');
@@ -154,61 +165,99 @@ export function TemporaryTeamAdminCard({
   return (
     <>
       <article className={`temporary-team-card${team.active ? ' is-active' : ''}`}>
-      <div className="panel-heading-row">
-        <div>
-          <LabelBadge label={label} />
-          <p className="panel-copy">
-            {team.active
-              ? `Actief sinds ${team.activatedAt ? formatClockTimeMs(team.activatedAt) : 'onbekend'}`
-              : `${team.memberRunnerIds.length} leden ingesteld`}
-          </p>
-        </div>
-        <span className={`status-badge${team.active ? ' status-badge--running' : ''}`}>
-          {team.active ? 'Actief' : 'Niet actief'}
-        </span>
-      </div>
-
-      <div className="temporary-team-summary">
-        <span className="muted-label">Huidige leden</span>
-        {memberNames.length ? (
-          <div className="temporary-team-member-preview">
-            {memberNames.slice(0, 5).map((runner) => (
-              <span key={runner.id}>{runner.runnerNumber ? `${runner.runnerNumber} · ` : ''}{runner.name}</span>
-            ))}
-            {memberNames.length > 5 && <em>+{memberNames.length - 5} andere</em>}
+        <div className="panel-heading-row">
+          <div>
+            <LabelBadge label={label} />
+            <p className="panel-copy">
+              {team.active
+                ? `Actief sinds ${team.activatedAt ? formatClockTimeMs(team.activatedAt) : 'onbekend'}`
+                : `${team.memberRunnerIds.length} leden ingesteld`}
+            </p>
           </div>
-        ) : (
-          <div className="empty-inline">Nog geen leden geselecteerd.</div>
+          <span className={`status-badge${team.active ? ' status-badge--running' : ''}`}>
+            {team.active ? 'Actief' : 'Niet actief'}
+          </span>
+        </div>
+
+        <div className="temporary-team-summary">
+          <span className="muted-label">Huidige leden</span>
+          {memberNames.length ? (
+            <div className="temporary-team-member-preview">
+              {memberNames.slice(0, 5).map((runner) => (
+                <span key={runner.id}>
+                  {runner.runnerNumber ? `${runner.runnerNumber} · ` : ''}
+                  {runner.name}
+                </span>
+              ))}
+              {memberNames.length > 5 && <em>+{memberNames.length - 5} andere</em>}
+            </div>
+          ) : (
+            <div className="empty-inline">Nog geen leden geselecteerd.</div>
+          )}
+        </div>
+        {team.startsAt !== null && team.endsAt !== null && (
+          <p className="temporary-team-schedule-summary">
+            <strong>Planning:</strong> {formatTeamWindow(team.startsAt)} tot {formatTeamWindow(team.endsAt)}
+            {team.active ? ' · Nu actief' : Date.now() >= team.endsAt ? ' · Afgelopen' : ' · Nog niet gestart'}
+          </p>
         )}
-      </div>
-      {team.startsAt !== null && team.endsAt !== null && (
-        <p className="temporary-team-schedule-summary">
-          <strong>Planning:</strong> {formatTeamWindow(team.startsAt)} tot {formatTeamWindow(team.endsAt)}
-          {team.active ? ' · Nu actief' : Date.now() >= team.endsAt ? ' · Afgelopen' : ' · Nog niet gestart'}
-        </p>
-      )}
-      {editingSchedule && (
-        <form className="temporary-team-schedule-edit" onSubmit={saveSchedule}>
-          <label className="stacked-label">Begin<input className="input" type="datetime-local" value={start} onChange={(event) => setStart(event.target.value)} required /></label>
-          <label className="stacked-label">Einde<input className="input" type="datetime-local" value={end} onChange={(event) => setEnd(event.target.value)} required /></label>
-          <button className="btn btn--primary btn--sm" disabled={busy}>Planning opslaan</button>
-          <button className="btn btn--ghost btn--sm" type="button" onClick={() => setEditingSchedule(false)} disabled={busy}>Annuleren</button>
-        </form>
-      )}
-      <div className="form-row form-row--plain">
-        <button className="btn btn--ghost" onClick={openMembers} disabled={busy}>
-          {team.active ? 'Ledenlijst bekijken' : 'Ledenlijst beheren'}
-        </button>
-        <button className="btn btn--ghost" onClick={() => setEditingSchedule(true)} disabled={busy || editingSchedule}>Planning aanpassen</button>
-        {team.startsAt === null && <button
-          className={`btn ${team.active ? 'btn--danger' : 'btn--primary'}`}
-          onClick={changeActive}
-          disabled={busy || (!team.active && team.memberRunnerIds.length === 0)}
-        >
-          {busy ? 'Bezig...' : team.active ? 'Deactiveren' : 'Activeren'}
-        </button>}
-      </div>
-      {feedback && <div className="host-hint">{feedback}</div>}
+        {editingSchedule && (
+          <form className="temporary-team-schedule-edit" onSubmit={saveSchedule}>
+            <label className="stacked-label">
+              Begin
+              <input
+                className="input"
+                type="datetime-local"
+                value={start}
+                onChange={(event) => setStart(event.target.value)}
+                required
+              />
+            </label>
+            <label className="stacked-label">
+              Einde
+              <input
+                className="input"
+                type="datetime-local"
+                value={end}
+                onChange={(event) => setEnd(event.target.value)}
+                required
+              />
+            </label>
+            <button className="btn btn--primary btn--sm" disabled={busy}>
+              Planning opslaan
+            </button>
+            <button
+              className="btn btn--ghost btn--sm"
+              type="button"
+              onClick={() => setEditingSchedule(false)}
+              disabled={busy}
+            >
+              Annuleren
+            </button>
+          </form>
+        )}
+        <div className="form-row form-row--plain">
+          <button className="btn btn--ghost" onClick={openMembers} disabled={busy}>
+            {team.active ? 'Ledenlijst bekijken' : 'Ledenlijst beheren'}
+          </button>
+          <button
+            className="btn btn--ghost"
+            onClick={() => setEditingSchedule(true)}
+            disabled={busy || editingSchedule}
+          >
+            Planning aanpassen
+          </button>
+          {team.startsAt === null && (
+            <button
+              className={`btn ${team.active ? 'btn--danger' : 'btn--primary'}`}
+              onClick={changeActive}
+              disabled={busy || (!team.active && team.memberRunnerIds.length === 0)}
+            >
+              {busy ? 'Bezig...' : team.active ? 'Deactiveren' : 'Activeren'}
+            </button>
+          )}
+        </div>
+        {feedback && <div className="host-hint">{feedback}</div>}
       </article>
 
       {membersOpen && (
@@ -218,13 +267,19 @@ export function TemporaryTeamAdminCard({
               <div>
                 <span className="muted-label">Tijdelijke nachtploeg</span>
                 <h2>Ledenlijst beheren</h2>
-                <p><LabelBadge label={label} /> · {selectedIds.length} geselecteerd</p>
+                <p>
+                  <LabelBadge label={label} /> · {selectedIds.length} geselecteerd
+                </p>
               </div>
-              <button className="icon-btn" onClick={closeMembers} aria-label="Sluiten">x</button>
+              <button className="icon-btn" onClick={closeMembers} aria-label="Sluiten">
+                x
+              </button>
             </div>
 
             {team.active && (
-              <div className="warning-banner">De ploeg is actief. Deactiveer ze eerst om de ledenlijst te wijzigen.</div>
+              <div className="warning-banner">
+                De ploeg is actief. Deactiveer ze eerst om de ledenlijst te wijzigen.
+              </div>
             )}
 
             <div className="temporary-team-member-manager">
@@ -237,19 +292,23 @@ export function TemporaryTeamAdminCard({
                   <strong>{selectedRunners.length}</strong>
                 </div>
                 <div className="temporary-team-member-list">
-                  {selectedRunners.length ? selectedRunners.map((runner) => (
-                    <div key={runner.id} className="temporary-team-member-row">
-                      <RunnerIdentity runner={runner} />
-                      {!team.active && (
-                        <button
-                          className="btn btn--danger btn--sm"
-                          onClick={() => setSelectedIds((current) => current.filter((id) => id !== runner.id))}
-                        >
-                          Verwijder
-                        </button>
-                      )}
-                    </div>
-                  )) : <div className="empty-inline">Nog niemand geselecteerd.</div>}
+                  {selectedRunners.length ? (
+                    selectedRunners.map((runner) => (
+                      <div key={runner.id} className="temporary-team-member-row">
+                        <RunnerIdentity runner={runner} />
+                        {!team.active && (
+                          <button
+                            className="btn btn--danger btn--sm"
+                            onClick={() => setSelectedIds((current) => current.filter((id) => id !== runner.id))}
+                          >
+                            Verwijder
+                          </button>
+                        )}
+                      </div>
+                    ))
+                  ) : (
+                    <div className="empty-inline">Nog niemand geselecteerd.</div>
+                  )}
                 </div>
               </section>
 
@@ -269,40 +328,51 @@ export function TemporaryTeamAdminCard({
                   placeholder="Zoek op nummer, naam of speedteam..."
                 />
                 <div className="temporary-team-member-list">
-                  {availableRunners.length ? availableRunners.map((runner) => {
-                    const assignedElsewhere = otherMemberIds.has(runner.id);
-                    const baseTeams = runner.labels.filter((item) => item.kind === 'speedteam');
-                    const invalidBaseTeam = baseTeams.length !== 1;
-                    return (
-                      <div key={runner.id} className={`temporary-team-member-row${assignedElsewhere || invalidBaseTeam ? ' is-disabled' : ''}`}>
-                        <RunnerIdentity
-                          runner={runner}
-                          detail={assignedElsewhere
-                            ? 'Zit al in een andere nachtploeg'
-                            : invalidBaseTeam
-                              ? 'Heeft niet exact één speedteam'
-                              : baseTeams[0].name}
-                        />
-                        <button
-                          className="btn btn--primary btn--sm"
-                          disabled={team.active || assignedElsewhere || invalidBaseTeam}
-                          onClick={() =>
-                            setSelectedIds((current) =>
-                              current.includes(runner.id) ? current : [...current, runner.id]
-                            )
-                          }
+                  {availableRunners.length ? (
+                    availableRunners.map((runner) => {
+                      const assignedElsewhere = otherMemberIds.has(runner.id);
+                      const baseTeams = runner.labels.filter((item) => item.kind === 'speedteam');
+                      const invalidBaseTeam = baseTeams.length !== 1;
+                      return (
+                        <div
+                          key={runner.id}
+                          className={`temporary-team-member-row${assignedElsewhere || invalidBaseTeam ? ' is-disabled' : ''}`}
                         >
-                          Voeg toe
-                        </button>
-                      </div>
-                    );
-                  }) : <div className="empty-inline">Geen lopers gevonden.</div>}
+                          <RunnerIdentity
+                            runner={runner}
+                            detail={
+                              assignedElsewhere
+                                ? 'Zit al in een andere nachtploeg'
+                                : invalidBaseTeam
+                                  ? 'Heeft niet exact één speedteam'
+                                  : baseTeams[0].name
+                            }
+                          />
+                          <button
+                            className="btn btn--primary btn--sm"
+                            disabled={team.active || assignedElsewhere || invalidBaseTeam}
+                            onClick={() =>
+                              setSelectedIds((current) =>
+                                current.includes(runner.id) ? current : [...current, runner.id]
+                              )
+                            }
+                          >
+                            Voeg toe
+                          </button>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div className="empty-inline">Geen lopers gevonden.</div>
+                  )}
                 </div>
               </section>
             </div>
 
             <div className="temporary-team-modal-actions">
-              <button className="btn btn--ghost" onClick={closeMembers}>Annuleren</button>
+              <button className="btn btn--ghost" onClick={closeMembers}>
+                Annuleren
+              </button>
               {!team.active && (
                 <button className="btn btn--primary" onClick={saveMembers} disabled={busy || !dirty}>
                   {busy ? 'Opslaan...' : `Ledenlijst opslaan (${selectedIds.length})`}

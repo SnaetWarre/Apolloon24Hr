@@ -37,13 +37,13 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
     ? isDirty({ runner: draftBaseline, runnerNumber, name, targetLaps, notes, selectedLabels })
     : false;
   const profileChangedElsewhere = Boolean(
-    runner && draftBaseline && runner.id === draftBaseline.id &&
+    runner &&
+    draftBaseline &&
+    runner.id === draftBaseline.id &&
     editableRunnerKey !== getEditableRunnerKey(draftBaseline)
   );
   const initializedRunnerId = React.useRef<string | null>(null);
-  const activeTemporaryTeam = temporaryTeams.find(
-    (team) => team.active && team.memberRunnerIds.includes(runnerId)
-  );
+  const activeTemporaryTeam = temporaryTeams.find((team) => team.active && team.memberRunnerIds.includes(runnerId));
 
   function loadLatestProfile() {
     if (!runner) return;
@@ -118,11 +118,14 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
 
   async function removeFromQueueFlow() {
     if (!runner || !isQueueRemovalStatus(runner.status)) return;
-    if (!(await confirm({
-      title: 'Uit de wachtrij halen?',
-      message: `${runner.name} verdwijnt uit de wachtrij en opwarming.`,
-      confirmLabel: 'Uit wachtrij halen',
-    }))) return;
+    if (
+      !(await confirm({
+        title: 'Uit de wachtrij halen?',
+        message: `${runner.name} verdwijnt uit de wachtrij en opwarming.`,
+        confirmLabel: 'Uit wachtrij halen',
+      }))
+    )
+      return;
 
     const runnerName = runner.name;
     setQueueActionBusy(true);
@@ -165,26 +168,36 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
               <span className="muted-label">Telefoon</span>
               {runner.registration?.phone ? (
                 <a href={`tel:${runner.registration.phone.replace(/\s+/g, '')}`}>{runner.registration.phone}</a>
-              ) : <span className="profile-essential-field__empty">Niet opgegeven</span>}
+              ) : (
+                <span className="profile-essential-field__empty">Niet opgegeven</span>
+              )}
             </div>
             <div className="profile-essential-field">
               <span className="muted-label">E-mail</span>
               {runner.registration?.email ? (
                 <a href={`mailto:${runner.registration.email}`}>{runner.registration.email}</a>
-              ) : <span className="profile-essential-field__empty">Niet opgegeven</span>}
+              ) : (
+                <span className="profile-essential-field__empty">Niet opgegeven</span>
+              )}
             </div>
             <div className="profile-essential-field profile-essential-field--hours">
               <span className="muted-label">Beschikbare uren</span>
               {runner.registration?.availableHours.length ? (
                 <div className="profile-hours">
-                  {runner.registration.availableHours.map((hour) => <span key={hour}>{hour}</span>)}
+                  {runner.registration.availableHours.map((hour) => (
+                    <span key={hour}>{hour}</span>
+                  ))}
                 </div>
-              ) : <span className="profile-essential-field__empty">Niet opgegeven</span>}
+              ) : (
+                <span className="profile-essential-field__empty">Niet opgegeven</span>
+              )}
             </div>
           </div>
           {!runner.registration && (
             <p className="profile-essentials__note">
-              {runner.registrationSource === 'manual' ? 'Manueel toegevoegd, geen inschrijving.' : 'Geen inschrijvingsgegevens.'}
+              {runner.registrationSource === 'manual'
+                ? 'Manueel toegevoegd, geen inschrijving.'
+                : 'Geen inschrijvingsgegevens.'}
             </p>
           )}
         </section>
@@ -193,9 +206,11 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
           <div className="profile-stat">
             <span className="muted-label">{statusSummary.title}</span>
             <strong>
-              {statusSummary.showsElapsed && runner.statusSince
-                ? <LiveElapsed startedAt={runner.statusSince} prefix="voor " />
-                : '—'}
+              {statusSummary.showsElapsed && runner.statusSince ? (
+                <LiveElapsed startedAt={runner.statusSince} prefix="voor " />
+              ) : (
+                '—'
+              )}
             </strong>
           </div>
           <div className="profile-stat">
@@ -219,7 +234,10 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
               <RegistrationField label="Studiefase" value={runner.registration.studyPhase} />
               <RegistrationField label="Geschat totaal rondjes" value={runner.registration.estimatedLaps} />
               <RegistrationField label="Geschat gemiddeld tempo op 515 m" value={runner.registration.estimatedPace} />
-              <RegistrationField label="Maximum rondjes per blok van 2 uur" value={runner.registration.maxLapsPerBlock} />
+              <RegistrationField
+                label="Maximum rondjes per blok van 2 uur"
+                value={runner.registration.maxLapsPerBlock}
+              />
               <RegistrationField label="Flexibiliteit" value={runner.registration.flexibility} />
               <RegistrationField label="Categorieën" value={runner.registration.categories.join(', ')} />
               <RegistrationField label="Toestemming voor hergebruik" value={runner.registration.reuseConsent} />
@@ -294,7 +312,9 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
                     <input
                       type="checkbox"
                       checked={selectedLabels.includes(label.id)}
-                      disabled={label.kind === 'temporary_team' || (Boolean(activeTemporaryTeam) && label.kind === 'speedteam')}
+                      disabled={
+                        label.kind === 'temporary_team' || (Boolean(activeTemporaryTeam) && label.kind === 'speedteam')
+                      }
                       onChange={() => toggleLabel(label.id)}
                     />
                     <span style={{ borderColor: label.color }}>
@@ -333,21 +353,33 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
         {queueActionError && <div className="warning-banner">{queueActionError}</div>}
         {profileChangedElsewhere && (
           <div className="warning-banner" role="alert">
-            Dit profiel is intussen elders gewijzigd. Je invoer is bewaard. Kopieer je aanpassingen voordat je de nieuwste versie laadt en opnieuw bewerkt.
-            <button className="btn btn--ghost" onClick={async () => {
-              if (await confirm({
-                title: 'Nieuwste profiel laden?',
-                message: 'Je niet-opgeslagen aanpassingen worden vervangen.',
-                confirmLabel: 'Nieuwste laden',
-                tone: 'danger',
-              })) {
-                loadLatestProfile();
-                setClosePromptOpen(false);
-              }
-            }}>Nieuwste profiel laden</button>
+            Dit profiel is intussen elders gewijzigd. Je invoer is bewaard. Kopieer je aanpassingen voordat je de
+            nieuwste versie laadt en opnieuw bewerkt.
+            <button
+              className="btn btn--ghost"
+              onClick={async () => {
+                if (
+                  await confirm({
+                    title: 'Nieuwste profiel laden?',
+                    message: 'Je niet-opgeslagen aanpassingen worden vervangen.',
+                    confirmLabel: 'Nieuwste laden',
+                    tone: 'danger',
+                  })
+                ) {
+                  loadLatestProfile();
+                  setClosePromptOpen(false);
+                }
+              }}
+            >
+              Nieuwste profiel laden
+            </button>
           </div>
         )}
-        {saveError && <div className="warning-banner" role="alert">{saveError}</div>}
+        {saveError && (
+          <div className="warning-banner" role="alert">
+            {saveError}
+          </div>
+        )}
 
         <div className="modal-actions">
           <button className="btn btn--ghost" onClick={requestClose}>
@@ -359,12 +391,23 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
         </div>
 
         {closePromptOpen && (
-          <ModalDialog label="Wijzigingen opslaan?" onRequestClose={() => { if (!saving) setClosePromptOpen(false); }}>
+          <ModalDialog
+            label="Wijzigingen opslaan?"
+            onRequestClose={() => {
+              if (!saving) setClosePromptOpen(false);
+            }}
+          >
             <div className="confirm-modal">
               <h3>Wijzigingen opslaan?</h3>
               <p>Er zijn aanpassingen aan dit lopersprofiel.</p>
-              {saveError && <div className="warning-banner" role="alert">{saveError}</div>}
-              {profileChangedElsewhere && <p role="alert">Dit profiel is elders gewijzigd. Kies Verder bewerken om je invoer te bekijken.</p>}
+              {saveError && (
+                <div className="warning-banner" role="alert">
+                  {saveError}
+                </div>
+              )}
+              {profileChangedElsewhere && (
+                <p role="alert">Dit profiel is elders gewijzigd. Kies Verder bewerken om je invoer te bekijken.</p>
+              )}
               <div className="modal-actions">
                 <button className="btn btn--ghost" onClick={() => setClosePromptOpen(false)} disabled={saving}>
                   Verder bewerken
@@ -372,7 +415,11 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
                 <button className="btn btn--ghost" onClick={onClose} disabled={saving}>
                   Niet opslaan
                 </button>
-                <button className="btn btn--primary" onClick={saveAndClose} disabled={saving || profileChangedElsewhere}>
+                <button
+                  className="btn btn--primary"
+                  onClick={saveAndClose}
+                  disabled={saving || profileChangedElsewhere}
+                >
                   {saving ? 'Opslaan...' : 'Opslaan'}
                 </button>
               </div>
@@ -387,7 +434,12 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
 /** Empty answers are left out so the filled-in ones stand out. */
 function RegistrationField({ label, value }: { label: string; value: string }) {
   if (!value.trim()) return null;
-  return <div className="profile-registration__field"><span className="muted-label">{label}</span><span>{value}</span></div>;
+  return (
+    <div className="profile-registration__field">
+      <span className="muted-label">{label}</span>
+      <span>{value}</span>
+    </div>
+  );
 }
 
 function isQueueRemovalStatus(status: RunnerStatus) {
@@ -419,7 +471,10 @@ function isDirty({
   notes: string;
   selectedLabels: string[];
 }) {
-  const currentLabels = runner.labels.map((label) => label.id).sort().join('|');
+  const currentLabels = runner.labels
+    .map((label) => label.id)
+    .sort()
+    .join('|');
   const nextLabels = [...selectedLabels].sort().join('|');
   return (
     runnerNumber.trim() !== (runner.runnerNumber || '') ||
@@ -438,7 +493,10 @@ function getEditableRunnerKey(runner: Runner) {
     runner.targetLaps ?? '',
     runner.notes || '',
     JSON.stringify(runner.registration),
-    runner.labels.map((label) => label.id).sort().join('|'),
+    runner.labels
+      .map((label) => label.id)
+      .sort()
+      .join('|'),
   ].join('\u0001');
 }
 

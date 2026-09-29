@@ -71,9 +71,7 @@ async function loadPackagedRenderer(window) {
 
 async function rendererHasContent(window) {
   if (window.isDestroyed()) return false;
-  return window.webContents.executeJavaScript(
-    "Boolean(document.getElementById('root')?.childElementCount)"
-  );
+  return window.webContents.executeJavaScript("Boolean(document.getElementById('root')?.childElementCount)");
 }
 
 function ensureEnvFile() {
@@ -92,13 +90,7 @@ async function startServer() {
     return;
   }
 
-  const serverPath = path.join(
-    process.resourcesPath,
-    'app.asar.unpacked',
-    'dist-server',
-    'server',
-    'index.js'
-  );
+  const serverPath = path.join(process.resourcesPath, 'app.asar.unpacked', 'dist-server', 'server', 'index.js');
 
   const envPath = path.join(app.getPath('userData'), '.env');
   const env = {
@@ -124,7 +116,7 @@ async function startServer() {
     stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
     env,
     cwd,
-    execArgv: []
+    execArgv: [],
   });
 
   serverProcess.on('error', (err) => {
@@ -180,8 +172,10 @@ if (!gotTheLock) {
         const response = await fetch(`${appUrl}/api/health`);
         const health = await response.json();
         if (!response.ok || !health.database?.ready) throw new Error('SQLite is not ready');
-        fs.writeFileSync(path.join(app.getPath('userData'), 'smoke-result.json'),
-          JSON.stringify({ version: app.getVersion(), renderer: true, database: true }));
+        fs.writeFileSync(
+          path.join(app.getPath('userData'), 'smoke-result.json'),
+          JSON.stringify({ version: app.getVersion(), renderer: true, database: true })
+        );
         app.quit();
       }
     } catch (error) {

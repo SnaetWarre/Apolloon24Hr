@@ -120,7 +120,13 @@ export function useAppActions() {
         await reconcileSnapshot();
         return team;
       },
-      async createTemporaryTeam(input: { name: string; color: string; startsAt: number; endsAt: number; runnerIds: string[] }) {
+      async createTemporaryTeam(input: {
+        name: string;
+        color: string;
+        startsAt: number;
+        endsAt: number;
+        runnerIds: string[];
+      }) {
         const team = await trpc.temporaryTeams.create.mutate(command(input));
         await reconcileSnapshot();
         return team;
@@ -164,27 +170,18 @@ export function useAppActions() {
         return event;
       },
       async updatePublicRecordMode(publicRecordMode: PublicRecordMode) {
-        const settings = await trpc.settings.updatePublicRecordMode.mutate(
-          command({ publicRecordMode })
-        );
+        const settings = await trpc.settings.updatePublicRecordMode.mutate(command({ publicRecordMode }));
         await reconcileSnapshot();
         return settings;
       },
-      async claimTimingControl(
-        expectedControllerHostId: string | null,
-        force = false
-      ) {
-        const result = await trpc.cluster.claimTimingControl.mutate(
-          command({ expectedControllerHostId, force })
-        );
+      async claimTimingControl(expectedControllerHostId: string | null, force = false) {
+        const result = await trpc.cluster.claimTimingControl.mutate(command({ expectedControllerHostId, force }));
         await activeQueryClient.invalidateQueries({ queryKey: ['cluster', 'status'] });
         await reconcileSnapshot();
         return result;
       },
       async transferTimingControl(targetHostId: string) {
-        const result = await trpc.cluster.transferTimingControl.mutate(
-          command({ targetHostId })
-        );
+        const result = await trpc.cluster.transferTimingControl.mutate(command({ targetHostId }));
         await activeQueryClient.invalidateQueries({ queryKey: ['cluster', 'status'] });
         await reconcileSnapshot();
         return result;
@@ -259,13 +256,8 @@ export function useAppActions() {
         await activeQueryClient.invalidateQueries({ queryKey: ['cluster', 'status'] });
         return result;
       },
-      async resolveConflict(
-        conflictId: string,
-        selectedOperationId: string
-      ) {
-        const result = await trpc.cluster.resolveConflict.mutate(
-          command({ conflictId, selectedOperationId })
-        );
+      async resolveConflict(conflictId: string, selectedOperationId: string) {
+        const result = await trpc.cluster.resolveConflict.mutate(command({ conflictId, selectedOperationId }));
         await activeQueryClient.invalidateQueries({ queryKey: snapshotKey });
         await activeQueryClient.invalidateQueries({ queryKey: historyKey });
         await activeQueryClient.invalidateQueries({ queryKey: ['cluster', 'status'] });

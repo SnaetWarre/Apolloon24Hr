@@ -200,12 +200,7 @@ export const backupStatusSchema = z.object({
 });
 export type BackupStatus = z.infer<typeof backupStatusSchema>;
 
-const timingControlStateSchema = z.enum([
-  'unassigned',
-  'local',
-  'remote-reachable',
-  'remote-unreachable',
-]);
+const timingControlStateSchema = z.enum(['unassigned', 'local', 'remote-reachable', 'remote-unreachable']);
 export type TimingControlState = z.infer<typeof timingControlStateSchema>;
 
 export const timingControlStatusSchema = z.object({
@@ -294,9 +289,12 @@ export const runnerInputSchema = z.object({
 });
 export type RunnerInput = z.infer<typeof runnerInputSchema>;
 
-export const runnerPatchSchema = runnerInputSchema.partial().omit({ id: true }).extend({
-  name: z.string().trim().min(1).optional(),
-});
+export const runnerPatchSchema = runnerInputSchema
+  .partial()
+  .omit({ id: true })
+  .extend({
+    name: z.string().trim().min(1).optional(),
+  });
 export type RunnerPatch = z.infer<typeof runnerPatchSchema>;
 
 export const labelInputSchema = z.object({
@@ -327,12 +325,14 @@ export const temporaryTeamActiveSchema = z.object({
   active: z.boolean(),
 });
 
-export const temporaryTeamScheduleSchema = z.object({
-  startsAt: z.number().int().nonnegative(),
-  endsAt: z.number().int().nonnegative(),
-}).refine((value) => value.endsAt > value.startsAt, {
-  message: 'Het einduur moet na het beginuur liggen',
-});
+export const temporaryTeamScheduleSchema = z
+  .object({
+    startsAt: z.number().int().nonnegative(),
+    endsAt: z.number().int().nonnegative(),
+  })
+  .refine((value) => value.endsAt > value.startsAt, {
+    message: 'Het einduur moet na het beginuur liggen',
+  });
 
 export const temporaryTeamCreateSchema = temporaryTeamScheduleSchema.safeExtend({
   name: z.string().trim().min(1),

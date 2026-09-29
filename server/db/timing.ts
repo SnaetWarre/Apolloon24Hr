@@ -53,9 +53,9 @@ export function createBurgieGepaktEvent(nowMs = Date.now()): RaceEvent {
  * The spacebar action: records the active runner's lap and starts the next
  * waiting runner. Stores what it replaced so the handoff can be undone.
  */
-export function performHandoff(nowMs = Date.now()):
-  | { ok: true; lapId: string | null; startedRunnerId: string | null }
-  | { ok: false; error: 'empty_queue' } {
+export function performHandoff(
+  nowMs = Date.now()
+): { ok: true; lapId: string | null; startedRunnerId: string | null } | { ok: false; error: 'empty_queue' } {
   const raceState = getRaceState();
   const activeRunnerId = raceState.activeRunnerId;
   const nextRunner = getNextWaitingRunner();

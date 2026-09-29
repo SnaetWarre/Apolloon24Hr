@@ -59,12 +59,7 @@ test('the outside display announces only history that is new since it opened', (
   assert.equal(initialHistory.shouldAnnounceLatest, false);
   assert.deepEqual([...initialHistory.knownIds], ['existing-event']);
 
-  const unchangedHistory = observeDisplayHistory(
-    true,
-    initialHistory.knownIds,
-    ['existing-event'],
-    'existing-event'
-  );
+  const unchangedHistory = observeDisplayHistory(true, initialHistory.knownIds, ['existing-event'], 'existing-event');
   assert.ok(unchangedHistory);
   assert.equal(unchangedHistory.shouldAnnounceLatest, false);
 
@@ -76,7 +71,6 @@ test('the outside display announces only history that is new since it opened', (
   );
   assert.ok(realtimeHistory);
   assert.equal(realtimeHistory.shouldAnnounceLatest, true);
-
 });
 
 test('lap coefficients use the 85-second reference and 0.075 points per second', () => {
@@ -101,12 +95,12 @@ test('lap coefficients use the 85-second reference and 0.075 points per second',
 test('lap points use the finishing time in Brussels across all six four-hour blocks', () => {
   const examples = [
     ['2026-09-23T22:00:00Z', 1.25], // 00:00 in Brussels
-    ['2026-09-24T02:00:00Z', 1.5],  // 04:00
-    ['2026-09-24T06:00:00Z', 1.5],  // 08:00
+    ['2026-09-24T02:00:00Z', 1.5], // 04:00
+    ['2026-09-24T06:00:00Z', 1.5], // 08:00
     ['2026-09-24T10:00:00Z', 1.25], // 12:00
-    ['2026-09-24T14:00:00Z', 1],    // 16:00
-    ['2026-09-24T18:00:00Z', 1],    // 20:00
-    ['2026-09-24T21:59:59Z', 1],    // 23:59
+    ['2026-09-24T14:00:00Z', 1], // 16:00
+    ['2026-09-24T18:00:00Z', 1], // 20:00
+    ['2026-09-24T21:59:59Z', 1], // 23:59
   ] as const;
 
   for (const [finishedAt, expectedPoints] of examples) {
@@ -123,10 +117,11 @@ test('lap points follow Brussels daylight saving time', () => {
 });
 
 test('lap points match the example totals in coeff_berekeningen.xlsx', () => {
-  const points = (finishedAt: string) => calculateLapPoints({
-    durationMs: 80_000,
-    finishedAt: Date.parse(finishedAt),
-  });
+  const points = (finishedAt: string) =>
+    calculateLapPoints({
+      durationMs: 80_000,
+      finishedAt: Date.parse(finishedAt),
+    });
 
   assert.equal(points('2026-09-23T18:00:00Z') + points('2026-09-23T22:00:00Z'), 3.09375);
   assert.equal(
@@ -180,7 +175,6 @@ test('inside rankings switch metric and filter laps by their historical label', 
     ['fast', 'steady']
   );
   assert.equal(buildRunnerRanking(runners, laps, 'coefficient', null)[0]?.coefficientTotal, 6.25);
-
 });
 
 test('the three recent laps show each runners all-time best and average', () => {
@@ -204,10 +198,12 @@ test('the three recent laps show each runners all-time best and average', () => 
     lap('recent-c', 'runner-c', 85_000, 2_000),
   ]);
 
-  assert.deepEqual(summaries.map((summary) => summary.lap.id), ['recent-a', 'recent-b', 'recent-c']);
+  assert.deepEqual(
+    summaries.map((summary) => summary.lap.id),
+    ['recent-a', 'recent-b', 'recent-c']
+  );
   assert.equal(summaries[0]?.bestLapMs, 70_000);
   assert.equal(summaries[0]?.averageLapMs, 80_000);
-
 });
 
 test('event readiness blocks real safety failures and distinguishes standalone warnings', () => {
@@ -324,10 +320,7 @@ test('event readiness blocks real safety failures and distinguishes standalone w
     race,
     now
   );
-  assert.equal(
-    compactableDatabaseReadiness.find((check) => check.id === 'database-size')?.level,
-    'ready'
-  );
+  assert.equal(compactableDatabaseReadiness.find((check) => check.id === 'database-size')?.level, 'ready');
   assert.equal(readinessSummary(compactableDatabaseReadiness), 'ready');
   assert.equal(
     readinessSummary(
@@ -345,11 +338,7 @@ test('event readiness blocks real safety failures and distinguishes standalone w
   );
   assert.equal(
     readinessSummary(
-      buildEventReadiness(
-        { ...cluster, enabled: false, role: 'standalone', peers: [], connectedHosts: 1 },
-        race,
-        now
-      )
+      buildEventReadiness({ ...cluster, enabled: false, role: 'standalone', peers: [], connectedHosts: 1 }, race, now)
     ),
     'warning'
   );
@@ -365,7 +354,6 @@ test('packaged static files stay relative to the AppImage mount root', () => {
   );
   assert.equal(relativeFileWithinRoot(distRoot, path.join(distRoot, 'index.html')), 'index.html');
   assert.equal(relativeFileWithinRoot(distRoot, path.join(hiddenMountRoot, 'secret.txt')), null);
-
 });
 
 test('analysis hour buckets use Brussels clock hours from the race start', () => {
@@ -531,7 +519,6 @@ test('kanban collision detection targets the exact empty column or runner under 
     pointerCoordinates: { x: 800, y: 150 },
   });
   assert.deepEqual(outsideBoardCollisions, []);
-
 });
 
 test('finishing a race retires the active runner without recording an extra lap', async () => {
@@ -582,10 +569,7 @@ test('reordering requires each waiting runner exactly once', async () => {
       return runner;
     });
 
-    assert.throws(
-      () => db.updateWaitingOrder([runners[2].id, runners[1].id]),
-      /volledige wachtrijvolgorde/
-    );
+    assert.throws(() => db.updateWaitingOrder([runners[2].id, runners[1].id]), /volledige wachtrijvolgorde/);
 
     db.updateWaitingOrder([runners[2].id, runners[0].id, runners[1].id]);
     const queueIndexes = new Map(db.getAllRunners().map((runner) => [runner.id, runner.queueIndex]));
@@ -669,9 +653,12 @@ test('Google Form import keeps every answer and preserves an existing runner on 
       Studiefase: '1ste bach',
       'Ik schat in totaal ... rondjes te lopen': '12',
       'Ik schat een gemiddelde van ... te lopen op 515m (gemiddelde van alle toertjes)': `1'17\"-1'19\"`,
-      'Maximum aantal rondjes dat je in een blok van 2 uur kan lopen. We verspreiden je max. aantal rondjes zo goed mogelijk over de opgegeven uren!': '3',
-      'Ik ben volgende uren beschikbaar om te lopen (zoveel mogelijk aanduiden!)\nPS: ben je 1ste bach student?': '20-21u (dinsdag), 03-04u (woensdag)',
-      'Ik geef hierbij toestemming dat mijn gegevens opnieuw mogen gebruikt worden in latere jaren in verband met de 24 urenloop.': 'Nee',
+      'Maximum aantal rondjes dat je in een blok van 2 uur kan lopen. We verspreiden je max. aantal rondjes zo goed mogelijk over de opgegeven uren!':
+        '3',
+      'Ik ben volgende uren beschikbaar om te lopen (zoveel mogelijk aanduiden!)\nPS: ben je 1ste bach student?':
+        '20-21u (dinsdag), 03-04u (woensdag)',
+      'Ik geef hierbij toestemming dat mijn gegevens opnieuw mogen gebruikt worden in latere jaren in verband met de 24 urenloop.':
+        'Nee',
       'Hoe flexibel ben jij binnen deze intervallen?': 'Een kwartier vroeger of later',
       'Nog iets dat wij best kunnen weten van hoe jij jouw 24-urenloop ziet?': 'Rustig beginnen',
       'Behoor je tot één van volgende categorieën?': 'Eerstejaars, Vrouw',
@@ -687,7 +674,9 @@ test('Google Form import keeps every answer and preserves an existing runner on 
     assert.equal(imported.registration?.remarks, 'Rustig beginnen');
     db.updateRunner(imported.id, { runnerNumber: '42', notes: 'Operatornote' });
     db.updateRunnerStatus({ id: imported.id, status: 'warming_up' });
-    const repeat = await caller.runners.importCsv({ csvText: Papa.unparse([{ ...row, 'Ik schat in totaal ... rondjes te lopen': '14' }]) });
+    const repeat = await caller.runners.importCsv({
+      csvText: Papa.unparse([{ ...row, 'Ik schat in totaal ... rondjes te lopen': '14' }]),
+    });
     assert.equal(repeat.updated, 1);
     assert.equal(db.getAllRunners().length, 1);
     const updated = db.getRunnerById(imported.id);
@@ -740,10 +729,7 @@ test('new runners cannot bypass timing state and waiting runners join the back o
 
     assert.equal(db.getRunnerById(first.id)?.queueIndex, 0);
     assert.equal(db.getRunnerById(second.id)?.queueIndex, 1);
-    assert.throws(
-      () => db.insertRunner({ name: 'Invalid active runner', status: 'running' }),
-      /timingscherm/
-    );
+    assert.throws(() => db.insertRunner({ name: 'Invalid active runner', status: 'running' }), /timingscherm/);
     assert.equal(db.getRaceState().activeRunnerId, null);
     assert.equal(db.getAllRunners().length, 2);
   } finally {
@@ -887,7 +873,10 @@ test('operational SQLite access paths stay indexed and direct lookups preserve r
     const lap = db.getAllLaps()[0];
     assert.ok(lap);
     assert.deepEqual(db.getLapById(lap.id), lap);
-    assert.deepEqual(db.getRunnerById(first.id), db.getAllRunners().find((runner) => runner.id === first.id));
+    assert.deepEqual(
+      db.getRunnerById(first.id),
+      db.getAllRunners().find((runner) => runner.id === first.id)
+    );
     assert.ok(db.getRunnerById(second.id));
 
     const inspectionDb = new Database(path.join(dataPath, 'data', 'app.db'), { readonly: true });

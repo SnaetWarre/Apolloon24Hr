@@ -464,15 +464,13 @@ export const appRouter = t.router({
 
   settings: t.router({
     current: t.procedure.query(() => getAppSettings()),
-    updatePublicRecordMode: t.procedure
-      .input(withCommandMeta(publicRecordModeUpdateSchema))
-      .mutation(({ input }) =>
-        commitWrite('settings.updatePublicRecordMode', input, () => {
-          const settings = setPublicRecordMode(input.publicRecordMode);
-          emitRealtime({ type: 'settings:changed', payload: settings });
-          return settings;
-        })
-      ),
+    updatePublicRecordMode: t.procedure.input(withCommandMeta(publicRecordModeUpdateSchema)).mutation(({ input }) =>
+      commitWrite('settings.updatePublicRecordMode', input, () => {
+        const settings = setPublicRecordMode(input.publicRecordMode);
+        emitRealtime({ type: 'settings:changed', payload: settings });
+        return settings;
+      })
+    ),
   }),
 });
 

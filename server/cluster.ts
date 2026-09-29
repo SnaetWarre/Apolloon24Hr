@@ -323,7 +323,9 @@ export function registerClusterRoutes(app: Express): void {
         return;
       }
       const remoteUrl = normalizeUrl(req.body?.remoteUrl);
-      const code = String(req.body?.pairingCode || '').trim().toUpperCase();
+      const code = String(req.body?.pairingCode || '')
+        .trim()
+        .toUpperCase();
       if (!remoteUrl || remoteUrl === currentSelfUrl() || !code) {
         res.status(400).json({ ok: false, error: 'vul een geldige laptop-URL en koppelcode in' });
         return;
@@ -599,9 +601,7 @@ function scheduleSync(delayMs = syncIntervalMs): void {
 
 function syncAllPeers(): Promise<void> {
   if (joinInProgress) return Promise.resolve();
-  syncPromise ??= Promise.all(
-    [...peers.values()].filter((peer) => Date.now() >= peer.nextProbeAt).map(syncPeer)
-  )
+  syncPromise ??= Promise.all([...peers.values()].filter((peer) => Date.now() >= peer.nextProbeAt).map(syncPeer))
     .then(() => undefined)
     .finally(() => {
       syncPromise = null;
@@ -817,7 +817,7 @@ function toClusterPeer(peer: PeerState, localVector: OperationVector): ClusterPe
     url: peer.url,
     reachable: peer.reachable,
     lastSeenAt: peer.lastSeenAt,
-    lastSeq: peer.id ? peer.vector[peer.id] ?? null : null,
+    lastSeq: peer.id ? (peer.vector[peer.id] ?? null) : null,
     synchronized: peer.compatibilityError === null && vectorCovers(peer.vector, localVector),
     operationVector: peer.vector,
     compatibility: peer.compatibility,
@@ -858,11 +858,21 @@ function responseErrorMessage(body: string): string {
 }
 
 function pairingCode(clusterSecret: string): string {
-  return crypto.createHash('sha256').update(`apolloon-pairing:${clusterSecret}`).digest('hex').slice(0, 8).toUpperCase();
+  return crypto
+    .createHash('sha256')
+    .update(`apolloon-pairing:${clusterSecret}`)
+    .digest('hex')
+    .slice(0, 8)
+    .toUpperCase();
 }
 
 function validPairingCode(value: unknown, clusterSecret: string): boolean {
-  return secureEqual(String(value || '').trim().toUpperCase(), pairingCode(clusterSecret));
+  return secureEqual(
+    String(value || '')
+      .trim()
+      .toUpperCase(),
+    pairingCode(clusterSecret)
+  );
 }
 
 function normalizeUrl(value: unknown): string {

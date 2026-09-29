@@ -120,9 +120,21 @@ function OverviewSection({
   return (
     <div className="tactics-section-stack">
       <section className="stats-grid stats-grid--analysis tactics-live-stats" aria-label="Historische kerncijfers">
-        <DeepStat label={`Team ${firstTeam.teamId}`} value={`${firstSummary.laps} rondes`} detail={`Mediaan ${formatSeconds(firstSummary.medianSeconds)}`} />
-        <DeepStat label={`Team ${secondTeam.teamId}`} value={`${secondSummary.laps} rondes`} detail={`Mediaan ${formatSeconds(secondSummary.medianSeconds)}`} />
-        <DeepStat label="Verschil na 24u" value={signedNumber(firstSummary.laps - secondSummary.laps)} detail={`Team ${firstTeam.teamId} tegenover team ${secondTeam.teamId}`} />
+        <DeepStat
+          label={`Team ${firstTeam.teamId}`}
+          value={`${firstSummary.laps} rondes`}
+          detail={`Mediaan ${formatSeconds(firstSummary.medianSeconds)}`}
+        />
+        <DeepStat
+          label={`Team ${secondTeam.teamId}`}
+          value={`${secondSummary.laps} rondes`}
+          detail={`Mediaan ${formatSeconds(secondSummary.medianSeconds)}`}
+        />
+        <DeepStat
+          label="Verschil na 24u"
+          value={signedNumber(firstSummary.laps - secondSummary.laps)}
+          detail={`Team ${firstTeam.teamId} tegenover team ${secondTeam.teamId}`}
+        />
         <DeepStat
           label="Meest consistent"
           value={`Team ${firstSummary.standardDeviationSeconds <= secondSummary.standardDeviationSeconds ? firstTeam.teamId : secondTeam.teamId}`}
@@ -139,19 +151,37 @@ function OverviewSection({
         <div className="table-wrap">
           <table className="analysis-table tactics-ranking-table">
             <thead>
-              <tr><th>#</th><th>Team</th><th>Rondes</th><th>Mediaan</th><th>P10-P90</th><th>Spreiding</th></tr>
+              <tr>
+                <th>#</th>
+                <th>Team</th>
+                <th>Rondes</th>
+                <th>Mediaan</th>
+                <th>P10-P90</th>
+                <th>Spreiding</th>
+              </tr>
             </thead>
             <tbody>
               {summaries.map((summary, index) => (
                 <tr
                   key={summary.teamId}
-                  className={summary.teamId === firstTeam.teamId || summary.teamId === secondTeam.teamId ? 'is-selected' : ''}
+                  className={
+                    summary.teamId === firstTeam.teamId || summary.teamId === secondTeam.teamId ? 'is-selected' : ''
+                  }
                 >
                   <td>{index + 1}</td>
-                  <td><span className="tactics-team-key"><i style={{ background: teamColor(summary.teamId, index) }} />Team {summary.teamId}</span></td>
-                  <td><strong>{summary.laps}</strong></td>
+                  <td>
+                    <span className="tactics-team-key">
+                      <i style={{ background: teamColor(summary.teamId, index) }} />
+                      Team {summary.teamId}
+                    </span>
+                  </td>
+                  <td>
+                    <strong>{summary.laps}</strong>
+                  </td>
                   <td>{formatSeconds(summary.medianSeconds)}</td>
-                  <td>{formatSeconds(summary.p10Seconds)} tot {formatSeconds(summary.p90Seconds)}</td>
+                  <td>
+                    {formatSeconds(summary.p10Seconds)} tot {formatSeconds(summary.p90Seconds)}
+                  </td>
                   <td>{summary.standardDeviationSeconds.toFixed(1)}s</td>
                 </tr>
               ))}
@@ -169,8 +199,16 @@ function OverviewSection({
           />
           <label className="tactics-compact-select">
             <span>Team in detail</span>
-            <select className="input" value={detailTeam.teamId} onChange={(event) => setDetailTeamId(Number(event.target.value))}>
-              {historicalRace.teams.map((team) => <option key={team.teamId} value={team.teamId}>Team {team.teamId}</option>)}
+            <select
+              className="input"
+              value={detailTeam.teamId}
+              onChange={(event) => setDetailTeamId(Number(event.target.value))}
+            >
+              {historicalRace.teams.map((team) => (
+                <option key={team.teamId} value={team.teamId}>
+                  Team {team.teamId}
+                </option>
+              ))}
             </select>
           </label>
         </div>
@@ -199,10 +237,7 @@ function TempoSection({ firstTeam, secondTeam }: { firstTeam: HistoricalTeam; se
     [endHour, firstTeam, secondTeam, startHour]
   );
   const smoothedPaces = React.useMemo(() => smoothPacePoints(quarterPaces), [quarterPaces]);
-  const consistency = React.useMemo(
-    () => buildHourlyConsistency(firstTeam, secondTeam),
-    [firstTeam, secondTeam]
-  );
+  const consistency = React.useMemo(() => buildHourlyConsistency(firstTeam, secondTeam), [firstTeam, secondTeam]);
   const halfHourDifferences = React.useMemo(
     () => buildHalfHourPaceDifferences(firstTeam, secondTeam, startHour, endHour),
     [endHour, firstTeam, secondTeam, startHour]
@@ -223,8 +258,20 @@ function TempoSection({ firstTeam, secondTeam }: { firstTeam: HistoricalTeam; se
         <div className="tactics-control-grid">
           <NumberControl label="Van race-uur" value={startHour} min={0} max={endHour - 1} onChange={setStartHour} />
           <NumberControl label="Tot race-uur" value={endHour} min={startHour + 1} max={24} onChange={setEndHour} />
-          <NumberControl label="Nacht vanaf" value={nightStartHour} min={0} max={nightEndHour - 1} onChange={setNightStartHour} />
-          <NumberControl label="Nacht tot" value={nightEndHour} min={nightStartHour + 1} max={24} onChange={setNightEndHour} />
+          <NumberControl
+            label="Nacht vanaf"
+            value={nightStartHour}
+            min={0}
+            max={nightEndHour - 1}
+            onChange={setNightStartHour}
+          />
+          <NumberControl
+            label="Nacht tot"
+            value={nightEndHour}
+            min={nightStartHour + 1}
+            max={24}
+            onChange={setNightEndHour}
+          />
         </div>
       </section>
 
@@ -263,7 +310,15 @@ function TempoSection({ firstTeam, secondTeam }: { firstTeam: HistoricalTeam; se
         />
         <div className="table-wrap tactics-summary-table">
           <table>
-            <thead><tr><th>Team</th><th>Rondes</th><th>Mediaan</th><th>IQR</th><th>Uitschieters</th></tr></thead>
+            <thead>
+              <tr>
+                <th>Team</th>
+                <th>Rondes</th>
+                <th>Mediaan</th>
+                <th>IQR</th>
+                <th>Uitschieters</th>
+              </tr>
+            </thead>
             <tbody>
               <DistributionRow team={firstTeam} summary={firstDistribution} />
               <DistributionRow team={secondTeam} summary={secondDistribution} />
@@ -308,11 +363,25 @@ function RaceSection({ firstTeam, secondTeam }: { firstTeam: HistoricalTeam; sec
           value={formatSignedSeconds(finalTimeGap)}
           detail={`Positief betekent achter op team ${secondTeam.teamId}`}
         />
-        <DeepStat label="Rondeverschil" value={signedNumber(-finalLapGap)} detail={`Team ${firstTeam.teamId} tegenover team ${secondTeam.teamId}`} />
-        <DeepStat label="Afstandsverschil" value={`${signedNumber(-finalLapGap * lapLengthMeters)} m`} detail={`${lapLengthMeters} meter per ronde`} />
+        <DeepStat
+          label="Rondeverschil"
+          value={signedNumber(-finalLapGap)}
+          detail={`Team ${firstTeam.teamId} tegenover team ${secondTeam.teamId}`}
+        />
+        <DeepStat
+          label="Afstandsverschil"
+          value={`${signedNumber(-finalLapGap * lapLengthMeters)} m`}
+          detail={`${lapLengthMeters} meter per ronde`}
+        />
         <label className="stat-panel tactics-stat tactics-stat--control">
           <span className="muted-label">Rondelengte</span>
-          <input type="number" min={1} step={10} value={lapLengthMeters} onChange={(event) => setLapLengthMeters(Math.max(1, Number(event.target.value) || 1))} />
+          <input
+            type="number"
+            min={1}
+            step={10}
+            value={lapLengthMeters}
+            onChange={(event) => setLapLengthMeters(Math.max(1, Number(event.target.value) || 1))}
+          />
           <small>meter</small>
         </label>
       </section>
@@ -366,7 +435,10 @@ function RaceSection({ firstTeam, secondTeam }: { firstTeam: HistoricalTeam; sec
 }
 
 function DiagnosticsSection({ firstTeam, secondTeam }: { firstTeam: HistoricalTeam; secondTeam: HistoricalTeam }) {
-  const suggestedThreshold = React.useMemo(() => defaultSlowLapThreshold(firstTeam, secondTeam), [firstTeam, secondTeam]);
+  const suggestedThreshold = React.useMemo(
+    () => defaultSlowLapThreshold(firstTeam, secondTeam),
+    [firstTeam, secondTeam]
+  );
   const [slowThresholdSeconds, setSlowThresholdSeconds] = React.useState(suggestedThreshold);
   const [paceChangeThresholdSeconds, setPaceChangeThresholdSeconds] = React.useState(8);
   const [improvingTeamId, setImprovingTeamId] = React.useState(firstTeam.teamId);
@@ -393,16 +465,46 @@ function DiagnosticsSection({ firstTeam, secondTeam }: { firstTeam: HistoricalTe
           text="Trage rondes zijn absolute uitschieters. Vermoedelijke wisselingen zijn plotse afwijkingen tegenover de vijf vorige rondes."
         />
         <div className="tactics-control-grid">
-          <NumberControl label="Trage ronde vanaf" suffix="s" value={slowThresholdSeconds} min={10} max={300} onChange={setSlowThresholdSeconds} />
-          <NumberControl label="Temposprong vanaf" suffix="s" value={paceChangeThresholdSeconds} min={1} max={60} onChange={setPaceChangeThresholdSeconds} />
+          <NumberControl
+            label="Trage ronde vanaf"
+            suffix="s"
+            value={slowThresholdSeconds}
+            min={10}
+            max={300}
+            onChange={setSlowThresholdSeconds}
+          />
+          <NumberControl
+            label="Temposprong vanaf"
+            suffix="s"
+            value={paceChangeThresholdSeconds}
+            min={1}
+            max={60}
+            onChange={setPaceChangeThresholdSeconds}
+          />
         </div>
       </section>
 
       <section className="stats-grid stats-grid--analysis tactics-live-stats">
-        <DeepStat label={`Trage rondes team ${firstTeam.teamId}`} value={String(firstSlowLaps.length)} detail={`${percentage(firstSlowLaps.length, firstTeam.lapDurationsMs.length)} boven de grens`} />
-        <DeepStat label={`Trage rondes team ${secondTeam.teamId}`} value={String(secondSlowLaps.length)} detail={`${percentage(secondSlowLaps.length, secondTeam.lapDurationsMs.length)} boven de grens`} />
-        <DeepStat label={`Temposprongen team ${firstTeam.teamId}`} value={String(firstChanges.length)} detail={`Meer dan ${paceChangeThresholdSeconds}s verschil`} />
-        <DeepStat label={`Temposprongen team ${secondTeam.teamId}`} value={String(secondChanges.length)} detail={`Meer dan ${paceChangeThresholdSeconds}s verschil`} />
+        <DeepStat
+          label={`Trage rondes team ${firstTeam.teamId}`}
+          value={String(firstSlowLaps.length)}
+          detail={`${percentage(firstSlowLaps.length, firstTeam.lapDurationsMs.length)} boven de grens`}
+        />
+        <DeepStat
+          label={`Trage rondes team ${secondTeam.teamId}`}
+          value={String(secondSlowLaps.length)}
+          detail={`${percentage(secondSlowLaps.length, secondTeam.lapDurationsMs.length)} boven de grens`}
+        />
+        <DeepStat
+          label={`Temposprongen team ${firstTeam.teamId}`}
+          value={String(firstChanges.length)}
+          detail={`Meer dan ${paceChangeThresholdSeconds}s verschil`}
+        />
+        <DeepStat
+          label={`Temposprongen team ${secondTeam.teamId}`}
+          value={String(secondChanges.length)}
+          detail={`Meer dan ${paceChangeThresholdSeconds}s verschil`}
+        />
       </section>
 
       <section className="panel">
@@ -424,8 +526,14 @@ function DiagnosticsSection({ firstTeam, secondTeam }: { firstTeam: HistoricalTe
       <section className="panel tactics-diagnostic-grid">
         <DiagnosticTable title={`Grootste trage rondes team ${firstTeam.teamId}`} laps={firstSlowLaps.slice(0, 10)} />
         <DiagnosticTable title={`Grootste trage rondes team ${secondTeam.teamId}`} laps={secondSlowLaps.slice(0, 10)} />
-        <PaceChangeTable title={`Sterkste temposprongen team ${firstTeam.teamId}`} changes={firstChanges.slice(0, 10)} />
-        <PaceChangeTable title={`Sterkste temposprongen team ${secondTeam.teamId}`} changes={secondChanges.slice(0, 10)} />
+        <PaceChangeTable
+          title={`Sterkste temposprongen team ${firstTeam.teamId}`}
+          changes={firstChanges.slice(0, 10)}
+        />
+        <PaceChangeTable
+          title={`Sterkste temposprongen team ${secondTeam.teamId}`}
+          changes={secondChanges.slice(0, 10)}
+        />
       </section>
 
       <section className="panel">
@@ -437,12 +545,24 @@ function DiagnosticsSection({ firstTeam, secondTeam }: { firstTeam: HistoricalTe
         <div className="tactics-control-grid tactics-break-even-controls">
           <label>
             <span>Welk team verbetert?</span>
-            <select className="input" value={improvingTeamId} onChange={(event) => setImprovingTeamId(Number(event.target.value))}>
+            <select
+              className="input"
+              value={improvingTeamId}
+              onChange={(event) => setImprovingTeamId(Number(event.target.value))}
+            >
               <option value={firstTeam.teamId}>Team {firstTeam.teamId}</option>
               <option value={secondTeam.teamId}>Team {secondTeam.teamId}</option>
             </select>
           </label>
-          <NumberControl label="Maximale verbetering" suffix="s" value={maximumImprovementSeconds} min={1} max={60} step={0.5} onChange={setMaximumImprovementSeconds} />
+          <NumberControl
+            label="Maximale verbetering"
+            suffix="s"
+            value={maximumImprovementSeconds}
+            min={1}
+            max={60}
+            step={0.5}
+            onChange={setMaximumImprovementSeconds}
+          />
           {breakEven && (
             <div className="tactics-break-even-result">
               <span>{breakEven.improvementSeconds > 0 ? 'Benodigd voor break-even' : 'Break-even al gehaald'}</span>
@@ -455,7 +575,11 @@ function DiagnosticsSection({ firstTeam, secondTeam }: { firstTeam: HistoricalTe
             </div>
           )}
         </div>
-        <BreakEvenChart points={sensitivity} targetLaps={targetTeam.cumulativeLapTimesMs.length} teamId={improvingTeam.teamId} />
+        <BreakEvenChart
+          points={sensitivity}
+          targetLaps={targetTeam.cumulativeLapTimesMs.length}
+          teamId={improvingTeam.teamId}
+        />
       </section>
     </div>
   );
@@ -468,16 +592,25 @@ function DraftingSection({ firstTeam, secondTeam }: { firstTeam: HistoricalTeam;
   const [farSeconds, setFarSeconds] = React.useState(15);
   const [minimumLapSeconds, setMinimumLapSeconds] = React.useState(55);
   const [maximumLapSeconds, setMaximumLapSeconds] = React.useState(140);
-  const options = React.useMemo(() => ({
-    startHour,
-    endHour,
-    closeSeconds,
-    farSeconds,
-    minimumLapSeconds,
-    maximumLapSeconds,
-  }), [closeSeconds, endHour, farSeconds, maximumLapSeconds, minimumLapSeconds, startHour]);
-  const firstAnalysis = React.useMemo(() => analyzeDrafting(firstTeam, secondTeam, options), [firstTeam, options, secondTeam]);
-  const secondAnalysis = React.useMemo(() => analyzeDrafting(secondTeam, firstTeam, options), [firstTeam, options, secondTeam]);
+  const options = React.useMemo(
+    () => ({
+      startHour,
+      endHour,
+      closeSeconds,
+      farSeconds,
+      minimumLapSeconds,
+      maximumLapSeconds,
+    }),
+    [closeSeconds, endHour, farSeconds, maximumLapSeconds, minimumLapSeconds, startHour]
+  );
+  const firstAnalysis = React.useMemo(
+    () => analyzeDrafting(firstTeam, secondTeam, options),
+    [firstTeam, options, secondTeam]
+  );
+  const secondAnalysis = React.useMemo(
+    () => analyzeDrafting(secondTeam, firstTeam, options),
+    [firstTeam, options, secondTeam]
+  );
 
   return (
     <div className="tactics-section-stack">
@@ -490,10 +623,38 @@ function DraftingSection({ firstTeam, secondTeam }: { firstTeam: HistoricalTeam;
         <div className="tactics-control-grid tactics-control-grid--drafting">
           <NumberControl label="Van race-uur" value={startHour} min={0} max={endHour - 1} onChange={setStartHour} />
           <NumberControl label="Tot race-uur" value={endHour} min={startHour + 1} max={24} onChange={setEndHour} />
-          <NumberControl label="Dichtbij tot" suffix="s" value={closeSeconds} min={1} max={farSeconds - 1} onChange={setCloseSeconds} />
-          <NumberControl label="Ver weg vanaf" suffix="s" value={farSeconds} min={closeSeconds + 1} max={120} onChange={setFarSeconds} />
-          <NumberControl label="Minimum ronde" suffix="s" value={minimumLapSeconds} min={1} max={maximumLapSeconds - 1} onChange={setMinimumLapSeconds} />
-          <NumberControl label="Maximum ronde" suffix="s" value={maximumLapSeconds} min={minimumLapSeconds + 1} max={300} onChange={setMaximumLapSeconds} />
+          <NumberControl
+            label="Dichtbij tot"
+            suffix="s"
+            value={closeSeconds}
+            min={1}
+            max={farSeconds - 1}
+            onChange={setCloseSeconds}
+          />
+          <NumberControl
+            label="Ver weg vanaf"
+            suffix="s"
+            value={farSeconds}
+            min={closeSeconds + 1}
+            max={120}
+            onChange={setFarSeconds}
+          />
+          <NumberControl
+            label="Minimum ronde"
+            suffix="s"
+            value={minimumLapSeconds}
+            min={1}
+            max={maximumLapSeconds - 1}
+            onChange={setMinimumLapSeconds}
+          />
+          <NumberControl
+            label="Maximum ronde"
+            suffix="s"
+            value={maximumLapSeconds}
+            min={minimumLapSeconds + 1}
+            max={300}
+            onChange={setMaximumLapSeconds}
+          />
         </div>
       </section>
 

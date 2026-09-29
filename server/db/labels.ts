@@ -32,10 +32,7 @@ function getLabel(id: string): Label | null {
 export function findLabelByName(name: unknown): Label | null {
   const labelName = canonicalLabelName(name);
   if (!labelName) return null;
-  return one<Label>(
-    `SELECT ${LABEL_COLUMNS} FROM labels l WHERE l.name = ? COLLATE NOCASE LIMIT 1`,
-    [labelName]
-  );
+  return one<Label>(`SELECT ${LABEL_COLUMNS} FROM labels l WHERE l.name = ? COLLATE NOCASE LIMIT 1`, [labelName]);
 }
 
 export function ensureLabel(name: unknown): Label | null {
@@ -137,17 +134,7 @@ export function updateLabel(id: string, fields: LabelPatch): Label | null {
          sort_order = ?,
          updated_at = ?
      WHERE id = ?`,
-    [
-      next.name,
-      next.color,
-      next.icon,
-      next.kind,
-      next.imageUrl,
-      next.targetLaps,
-      next.sortOrder,
-      Date.now(),
-      id,
-    ]
+    [next.name, next.color, next.icon, next.kind, next.imageUrl, next.targetLaps, next.sortOrder, Date.now(), id]
   );
 
   if (next.kind === TEMPORARY_TEAM_KIND) {

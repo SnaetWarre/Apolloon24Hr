@@ -122,9 +122,7 @@ export function updateRunner(id: string, fields: RunnerPatch): Runner | null {
     const activeTemporaryLabelId = getActiveTemporaryTeamLabelIdForRunner(id);
     if (activeTemporaryLabelId) {
       const requested = new Set(fields.labels);
-      const hasOrdinarySpeedteam = getLabels().some(
-        (label) => label.kind === 'speedteam' && requested.has(label.id)
-      );
+      const hasOrdinarySpeedteam = getLabels().some((label) => label.kind === 'speedteam' && requested.has(label.id));
       if (!requested.has(activeTemporaryLabelId) || hasOrdinarySpeedteam) {
         throw new Error('De speedteamploeg ligt vast zolang de tijdelijke nachtploeg actief is');
       }

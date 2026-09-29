@@ -195,9 +195,7 @@ function seedRunners(count, nowMs) {
     };
 
     const existing = existingByNumber.get(runnerNumber);
-    const runner = existing
-      ? db.updateRunner(existing.id, input)
-      : db.insertRunner(input);
+    const runner = existing ? db.updateRunner(existing.id, input) : db.insertRunner(input);
     db.updateRunnerStatus({
       id: runner.id,
       status: 'registered',
@@ -212,12 +210,27 @@ function seedRunners(count, nowMs) {
 // Fictional form answers so profiles, filters and hours can be tested.
 // Uses example.be addresses and 0470 00 xx xx numbers; never real people.
 function fictionalRegistration(index, name, nowMs) {
-  const slug = name.toLowerCase().normalize('NFD').replace(/[^a-z ]/g, '').trim().split(/\s+/).join('.');
+  const slug = name
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[^a-z ]/g, '')
+    .trim()
+    .split(/\s+/)
+    .join('.');
   const studyPhases = ['1ste bachelor', '2de bachelor', '3de bachelor', 'master', 'alumnus'];
   const hourBlocks = [
-    '20-21u (dinsdag)', '21-22u (dinsdag)', '22-23u (dinsdag)', '23-00u (dinsdag)',
-    '00-01u (woensdag)', '01-02u (woensdag)', '02-03u (woensdag)', '03-04u (woensdag)',
-    '08-09u (woensdag)', '12-13u (woensdag)', '16-17u (woensdag)', '19-20u (woensdag)',
+    '20-21u (dinsdag)',
+    '21-22u (dinsdag)',
+    '22-23u (dinsdag)',
+    '23-00u (dinsdag)',
+    '00-01u (woensdag)',
+    '01-02u (woensdag)',
+    '02-03u (woensdag)',
+    '03-04u (woensdag)',
+    '08-09u (woensdag)',
+    '12-13u (woensdag)',
+    '16-17u (woensdag)',
+    '19-20u (woensdag)',
   ];
   const firstBlock = (index * 3) % hourBlocks.length;
   const pace = 72 + (index % 9) * 3;
@@ -268,9 +281,7 @@ function seedLargeRace(runners, nowMs) {
 }
 
 function seedTemporaryTeams(runners) {
-  const eligible = runners.filter(
-    (runner) => runner.labels.filter((label) => label.kind === 'speedteam').length === 1
-  );
+  const eligible = runners.filter((runner) => runner.labels.filter((label) => label.kind === 'speedteam').length === 1);
   const definitions = [
     { name: 'Trojan', color: '#7c3aed', icon: 'TR', members: eligible.slice(0, 6) },
     { name: 'Trojan V2', color: '#db2777', icon: 'T2', members: eligible.slice(6, 12) },
@@ -283,7 +294,10 @@ function seedTemporaryTeams(runners) {
       kind: 'temporary_team',
       sortOrder: 25 + index,
     });
-    db.setTemporaryTeamMembers(label.id, definition.members.map((runner) => runner.id));
+    db.setTemporaryTeamMembers(
+      label.id,
+      definition.members.map((runner) => runner.id)
+    );
     return label.id;
   });
 }
@@ -293,9 +307,7 @@ function seedRandomLapHistory({ runners, nowMs, nightTeams = [] }) {
   const lapSchedule = buildLargeLapSchedule(runners, lapTargets);
   if (!lapSchedule.length) return;
 
-  const activeAfterHistory = pick(
-    runners.filter((runner) => runner.id !== lapSchedule[lapSchedule.length - 1].id)
-  );
+  const activeAfterHistory = pick(runners.filter((runner) => runner.id !== lapSchedule[lapSchedule.length - 1].id));
   const lapDurations = lapSchedule.map((runner, lapIndex) => randomLapDurationMs(runner, lapIndex));
   const totalDurationMs = lapDurations.reduce((sum, duration) => sum + duration, 0);
   const activeElapsedMs = randomInt(minutes(2), minutes(18));
@@ -349,15 +361,7 @@ function seedRandomLapHistory({ runners, nowMs, nightTeams = [] }) {
   seedLargeFinalStatuses(runners, nowMs, lapTargets);
 }
 
-function seedLapHistory({
-  runners,
-  lapCount,
-  nowMs,
-  startOffsetMs,
-  recycleDelayMs,
-  retireEvery,
-  hiddenRanCount,
-}) {
+function seedLapHistory({ runners, lapCount, nowMs, startOffsetMs, recycleDelayMs, retireEvery, hiddenRanCount }) {
   const startedAt = nowMs - startOffsetMs;
   db.performHandoff(startedAt);
   const ranRunnerIds = new Set();
@@ -445,9 +449,7 @@ function largeLapTargets(runners) {
   orderedRunners.forEach((runner, index) => {
     targets.set(
       runner.id,
-      index < guaranteedLapCounts.length
-        ? guaranteedLapCounts[index]
-        : weightedRandom(LARGE_LAP_COUNT_WEIGHTS)
+      index < guaranteedLapCounts.length ? guaranteedLapCounts[index] : weightedRandom(LARGE_LAP_COUNT_WEIGHTS)
     );
   });
 

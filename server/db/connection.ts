@@ -13,8 +13,7 @@ export const DB_FILE = path.join(DATA_DIR, 'app.db');
 const APP_DATA_TABLE_PATTERN =
   /\b(?:runners|labels|runner_labels|queue_entries|race_state|laps|race_events|temporary_teams|temporary_team_members)\b/i;
 
-const REPLICATION_TABLE_PATTERN =
-  /\b(?:replication_operations|replication_peer_progress|replication_conflicts)\b/;
+const REPLICATION_TABLE_PATTERN = /\b(?:replication_operations|replication_peer_progress|replication_conflicts)\b/;
 
 let database: Database.Database | null = null;
 
@@ -55,7 +54,9 @@ export function run(sql: string, params: SqlValue[] = []): Database.RunResult {
  * bookkeeping, checkpoint restores, and replaying statements received from peers.
  */
 export function runUncaptured(sql: string, params: SqlValue[] = []): Database.RunResult {
-  return getDb().prepare(sql).run(...params);
+  return getDb()
+    .prepare(sql)
+    .run(...params);
 }
 
 export function isReplicatedMutation(sql: string): boolean {

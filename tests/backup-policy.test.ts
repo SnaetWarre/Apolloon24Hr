@@ -50,10 +50,7 @@ test('online backups are verified, checksummed, and readable as independent SQLi
       fs.readdirSync(path.dirname(backupPath)).filter((entry) => entry.includes('.partial')),
       []
     );
-    assert.equal(
-      crypto.createHash('sha256').update(fs.readFileSync(backupPath)).digest('hex'),
-      record.sha256
-    );
+    assert.equal(crypto.createHash('sha256').update(fs.readFileSync(backupPath)).digest('hex'), record.sha256);
 
     const restored = new Database(backupPath, { readonly: true, fileMustExist: true });
     try {
@@ -110,18 +107,10 @@ test('retention keeps recent, hourly, daily, and bounded manual recovery points'
     verified: true as const,
   });
   const candidates = [
-    ...Array.from({ length: 36 }, (_, index) =>
-      record(`recent-${index}`, now - index * 5 * 60_000)
-    ),
-    ...Array.from({ length: 80 }, (_, index) =>
-      record(`hourly-${index}`, now - (index + 4) * 60 * 60_000)
-    ),
-    ...Array.from({ length: 35 }, (_, index) =>
-      record(`daily-${index}`, now - (index + 4) * 24 * 60 * 60_000)
-    ),
-    ...Array.from({ length: 25 }, (_, index) =>
-      record(`manual-${index}`, now - index * 1_000, 'manual')
-    ),
+    ...Array.from({ length: 36 }, (_, index) => record(`recent-${index}`, now - index * 5 * 60_000)),
+    ...Array.from({ length: 80 }, (_, index) => record(`hourly-${index}`, now - (index + 4) * 60 * 60_000)),
+    ...Array.from({ length: 35 }, (_, index) => record(`daily-${index}`, now - (index + 4) * 24 * 60 * 60_000)),
+    ...Array.from({ length: 25 }, (_, index) => record(`manual-${index}`, now - index * 1_000, 'manual')),
   ];
 
   const keep = backupsToRetain(candidates, now);

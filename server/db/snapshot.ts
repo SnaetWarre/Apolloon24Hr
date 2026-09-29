@@ -95,10 +95,7 @@ export function applySnapshot(snapshot: AppSnapshot): void {
         ]
       );
       for (const label of runner.labels) {
-        run('INSERT OR IGNORE INTO runner_labels (runner_id, label_id) VALUES (?, ?)', [
-          runner.id,
-          label.id,
-        ]);
+        run('INSERT OR IGNORE INTO runner_labels (runner_id, label_id) VALUES (?, ?)', [runner.id, label.id]);
       }
     }
 
@@ -133,7 +130,14 @@ export function applySnapshot(snapshot: AppSnapshot): void {
       run(
         `INSERT INTO temporary_teams (label_id, active, activated_at, starts_at, ends_at, schedule_owner_host_id)
          VALUES (?, ?, ?, ?, ?, ?)`,
-        [team.labelId, team.active ? 1 : 0, team.activatedAt ?? null, team.startsAt ?? null, team.endsAt ?? null, team.scheduleOwnerHostId ?? null]
+        [
+          team.labelId,
+          team.active ? 1 : 0,
+          team.activatedAt ?? null,
+          team.startsAt ?? null,
+          team.endsAt ?? null,
+          team.scheduleOwnerHostId ?? null,
+        ]
       );
       for (const runnerId of team.memberRunnerIds) {
         run(

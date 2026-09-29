@@ -36,9 +36,7 @@ export function RunnerActivationModal({
   const filteredMatches = React.useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return searchableRunners;
-    const exactNumberMatches = searchableRunners.filter(
-      (runner) => runner.runnerNumber?.trim().toLowerCase() === q
-    );
+    const exactNumberMatches = searchableRunners.filter((runner) => runner.runnerNumber?.trim().toLowerCase() === q);
     return exactNumberMatches.length
       ? exactNumberMatches
       : searchableRunners.filter((runner) => runnerMatchesQuery(runner, q));
@@ -95,11 +93,18 @@ export function RunnerActivationModal({
   return (
     <ModalDialog
       label="Loper zoeken"
-      onRequestClose={() => { if (!activationBusyRef.current) onClose(); }}
+      onRequestClose={() => {
+        if (!activationBusyRef.current) onClose();
+      }}
       initialFocusRef={searchInputRef}
     >
       <div className="modal">
-        <ModalHeader title="Loper zoeken" onClose={() => { if (!activationBusyRef.current) onClose(); }} />
+        <ModalHeader
+          title="Loper zoeken"
+          onClose={() => {
+            if (!activationBusyRef.current) onClose();
+          }}
+        />
         <input
           ref={searchInputRef}
           aria-label="Zoek op nummer, naam of label"
@@ -124,7 +129,11 @@ export function RunnerActivationModal({
           Meerdere lopers aanmelden
         </label>
         <p className="label-picker-help">Aan: dit venster blijft open na elke aanmelding.</p>
-        {activationNotice && <div className="success-banner" role="status">{activationNotice}</div>}
+        {activationNotice && (
+          <div className="success-banner" role="status">
+            {activationNotice}
+          </div>
+        )}
         {hasQuery && filteredMatches.length === 1 && isAvailableForActivation(filteredMatches[0]) && (
           <p className="label-picker-help">Enter: deze loper naar opwarming.</p>
         )}
@@ -133,9 +142,7 @@ export function RunnerActivationModal({
             {hasQuery
               ? `${filteredMatches.length} resultaat${filteredMatches.length === 1 ? '' : 'en'}`
               : `${searchableRunners.length} lopers in de databank`}
-            {filteredMatches.length > visibleMatches.length
-              ? ` · eerste ${visibleMatches.length} getoond`
-              : ''}
+            {filteredMatches.length > visibleMatches.length ? ` · eerste ${visibleMatches.length} getoond` : ''}
           </div>
           {filteredMatches.length === 0 && (
             <div className="empty-inline">
@@ -211,17 +218,29 @@ export function RunnerAddModal({ onClose, onAdded }: { onClose: () => void; onAd
 
   async function requestClose() {
     if (saveBusyRef.current) return;
-    const hasDraft = selectedLabels.length > 0 || [
-      runnerNumber, name, targetLaps, notes,
-      historicalAvgMinutes, historicalAvgSeconds, historicalBestMinutes, historicalBestSeconds,
-    ].some((input) => input.trim());
-    if (hasDraft && !(await confirm({
-      title: 'Nieuwe loper sluiten?',
-      message: 'Je invoer is nog niet opgeslagen en gaat verloren.',
-      confirmLabel: 'Sluiten zonder opslaan',
-      cancelLabel: 'Verder invullen',
-      tone: 'danger',
-    }))) return;
+    const hasDraft =
+      selectedLabels.length > 0 ||
+      [
+        runnerNumber,
+        name,
+        targetLaps,
+        notes,
+        historicalAvgMinutes,
+        historicalAvgSeconds,
+        historicalBestMinutes,
+        historicalBestSeconds,
+      ].some((input) => input.trim());
+    if (
+      hasDraft &&
+      !(await confirm({
+        title: 'Nieuwe loper sluiten?',
+        message: 'Je invoer is nog niet opgeslagen en gaat verloren.',
+        confirmLabel: 'Sluiten zonder opslaan',
+        cancelLabel: 'Verder invullen',
+        tone: 'danger',
+      }))
+    )
+      return;
     if (saveBusyRef.current) return;
     onClose();
   }
@@ -282,11 +301,7 @@ export function RunnerAddModal({ onClose, onAdded }: { onClose: () => void; onAd
   }
 
   return (
-    <ModalDialog
-      label="Nieuwe loper"
-      onRequestClose={requestClose}
-      initialFocusRef={runnerNumberInputRef}
-    >
+    <ModalDialog label="Nieuwe loper" onRequestClose={requestClose} initialFocusRef={runnerNumberInputRef}>
       <div className="modal" onKeyDown={handleKeyDown}>
         <ModalHeader title="Nieuwe loper" onClose={requestClose} />
 
@@ -307,33 +322,31 @@ export function RunnerAddModal({ onClose, onAdded }: { onClose: () => void; onAd
         </div>
 
         <div className="label-picker-groups">
-          {groupLabels(labels.filter((label) => label.kind !== 'temporary_team')).map(
-            ([kind, groupedLabels]) => (
-              <section key={kind} className="label-picker-group">
-                <h3>{labelKindTitle(kind)}</h3>
-                <p className="label-picker-help">Kies maximaal 1 optie.</p>
-                <div className="label-picker">
-                  {groupedLabels.map((label) => (
-                    <label key={label.id} className="check-pill">
-                      <input
-                        type="checkbox"
-                        checked={selectedLabels.includes(label.id)}
-                        onChange={() => toggleLabel(label.id)}
-                      />
-                      <span style={{ borderColor: label.color }}>
-                        {label.imageUrl ? (
-                          <img src={label.imageUrl} alt="" className="label-image" />
-                        ) : (
-                          <i className="label-dot" style={{ background: label.color }} />
-                        )}
-                        {label.name}
-                      </span>
-                    </label>
-                  ))}
-                </div>
-              </section>
-            )
-          )}
+          {groupLabels(labels.filter((label) => label.kind !== 'temporary_team')).map(([kind, groupedLabels]) => (
+            <section key={kind} className="label-picker-group">
+              <h3>{labelKindTitle(kind)}</h3>
+              <p className="label-picker-help">Kies maximaal 1 optie.</p>
+              <div className="label-picker">
+                {groupedLabels.map((label) => (
+                  <label key={label.id} className="check-pill">
+                    <input
+                      type="checkbox"
+                      checked={selectedLabels.includes(label.id)}
+                      onChange={() => toggleLabel(label.id)}
+                    />
+                    <span style={{ borderColor: label.color }}>
+                      {label.imageUrl ? (
+                        <img src={label.imageUrl} alt="" className="label-image" />
+                      ) : (
+                        <i className="label-dot" style={{ background: label.color }} />
+                      )}
+                      {label.name}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </section>
+          ))}
         </div>
 
         <details className="runner-extra-details">
@@ -400,15 +413,15 @@ export function RunnerAddModal({ onClose, onAdded }: { onClose: () => void; onAd
           </div>
           <label className="stacked-label">
             Notities
-            <textarea
-              className="input textarea"
-              value={notes}
-              onChange={(event) => setNotes(event.target.value)}
-            />
+            <textarea className="input textarea" value={notes} onChange={(event) => setNotes(event.target.value)} />
           </label>
         </details>
 
-        {error && <div className="warning-banner" role="alert">{error}</div>}
+        {error && (
+          <div className="warning-banner" role="alert">
+            {error}
+          </div>
+        )}
 
         <div className="modal-actions">
           <button className="btn btn--ghost" onClick={requestClose} disabled={saving}>
@@ -488,7 +501,10 @@ function runnerStatusLabel(runner: Runner) {
 }
 
 function runnerMatchesQuery(runner: Runner, query: string) {
-  const labelText = runner.labels.map((label) => label.name).join(' ').toLowerCase();
+  const labelText = runner.labels
+    .map((label) => label.name)
+    .join(' ')
+    .toLowerCase();
   return (
     runner.name.toLowerCase().includes(query) ||
     (runner.runnerNumber || '').toLowerCase().includes(query) ||

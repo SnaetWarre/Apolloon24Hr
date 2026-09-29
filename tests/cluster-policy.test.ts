@@ -41,15 +41,9 @@ test('UDP discovery only accepts payloads authenticated by the cluster secret', 
     'shared-cluster-secret'
   );
 
-  assert.deepEqual(
-    verifyDiscoveryPayload(payload, 'shared-cluster-secret'),
-    payload
-  );
+  assert.deepEqual(verifyDiscoveryPayload(payload, 'shared-cluster-secret'), payload);
   assert.equal(
-    verifyDiscoveryPayload(
-      { ...payload, url: 'http://attacker.invalid:5173' },
-      'shared-cluster-secret'
-    ),
+    verifyDiscoveryPayload({ ...payload, url: 'http://attacker.invalid:5173' }, 'shared-cluster-secret'),
     null
   );
   assert.equal(
@@ -73,9 +67,7 @@ test('cluster operation vectors reject malformed or unbounded peer input', () =>
   assert.equal(normalizeOperationVector({ a: 1.5 }), null);
   assert.equal(normalizeOperationVector([]), null);
   assert.equal(
-    normalizeOperationVector(
-      Object.fromEntries(Array.from({ length: 65 }, (_, index) => [`host-${index}`, index]))
-    ),
+    normalizeOperationVector(Object.fromEntries(Array.from({ length: 65 }, (_, index) => [`host-${index}`, index]))),
     null
   );
 });
@@ -93,24 +85,15 @@ test('cluster compatibility rejects unsafe version skew before SQL replication',
   };
 
   assert.equal(
-    clusterCompatibilityError(
-      { ...local, appVersion: '1.1.0', releaseId: 'remote-compatible' },
-      local
-    ),
+    clusterCompatibilityError({ ...local, appVersion: '1.1.0', releaseId: 'remote-compatible' }, local),
     null
   );
   assert.match(
-    clusterCompatibilityError(
-      { ...local, schemaVersion: 7, minimumSchemaVersion: 7 },
-      local
-    ) || '',
+    clusterCompatibilityError({ ...local, schemaVersion: 7, minimumSchemaVersion: 7 }, local) || '',
     /Upgrade vereist.*databaseschema/
   );
   assert.match(
-    clusterCompatibilityError(
-      { ...local, appVersion: '2.0.0', minimumAppVersion: '2.0.0' },
-      local
-    ) || '',
+    clusterCompatibilityError({ ...local, appVersion: '2.0.0', minimumAppVersion: '2.0.0' }, local) || '',
     /Upgrade vereist.*appversie/
   );
   assert.match(clusterCompatibilityError(null, local) || '', /compatibiliteitsinformatie/);

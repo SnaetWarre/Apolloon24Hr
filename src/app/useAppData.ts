@@ -1,14 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { setServerNowMs } from '../lib/time';
-import type {
-  AppSettings,
-  HostInfo,
-  Label,
-  LiveAppSnapshot,
-  RaceState,
-  Runner,
-  TemporaryTeam,
-} from '../types';
+import type { AppSettings, HostInfo, Label, LiveAppSnapshot, RaceState, Runner, TemporaryTeam } from '../types';
 import { defaultSettings, emptyRace, snapshotKey } from './snapshot';
 
 declare global {

@@ -5,12 +5,7 @@ import { buildKpis, isFastestLapForRecordMode, publicRecordModeTitle } from '../
 import { formatClockTimeMs, formatDurationMs, formatElapsedSeconds } from '../lib/time';
 import { getNextWaitingRunner, lapRunnerLabel } from '../lib/runners';
 import { observeDisplayHistory } from '../lib/displayHistory';
-import {
-  buildRecentLapSummaries,
-  buildRunnerRanking,
-  collectRankingLabels,
-  type RankingMode,
-} from '../lib/ranking';
+import { buildRecentLapSummaries, buildRunnerRanking, collectRankingLabels, type RankingMode } from '../lib/ranking';
 import type { Label, LapRecord, LiveAppSnapshot, PublicRecordMode, RaceEvent, Runner } from '../types';
 import { LabelBadge, labelKindOrder, labelKindTitle } from './LabelBadge';
 import { LiveDuration, LiveElapsed } from './LiveTime';
@@ -99,7 +94,6 @@ export function OutsideDisplay() {
         burgieTimeoutRef.current = null;
       }, OUTSIDE_ALERT_VISIBLE_MS);
     }
-
   }, [events, historyIsInitialized]);
 
   React.useEffect(() => {
@@ -167,7 +161,7 @@ export function InsideDisplay() {
   React.useEffect(() => {
     if (prefersReducedMotion || rotationPaused) return;
     const rotationTimeout = window.setTimeout(() => {
-      setRankingMode((currentMode) => currentMode === 'laps' ? 'coefficient' : 'laps');
+      setRankingMode((currentMode) => (currentMode === 'laps' ? 'coefficient' : 'laps'));
     }, INSIDE_RANKING_ROTATION_MS);
     return () => window.clearTimeout(rotationTimeout);
   }, [prefersReducedMotion, rankingMode, rotationPaused]);
@@ -185,7 +179,17 @@ export function InsideDisplay() {
         <dl className="inside-totals">
           <div>
             <dt>Racetijd</dt>
-            <dd>{race.raceStartedAt ? (race.raceFinishedAt ? formatElapsedSeconds(race.raceFinishedAt - race.raceStartedAt) : <LiveElapsed startedAt={race.raceStartedAt} />) : '0:00'}</dd>
+            <dd>
+              {race.raceStartedAt ? (
+                race.raceFinishedAt ? (
+                  formatElapsedSeconds(race.raceFinishedAt - race.raceStartedAt)
+                ) : (
+                  <LiveElapsed startedAt={race.raceStartedAt} />
+                )
+              ) : (
+                '0:00'
+              )}
+            </dd>
           </div>
           <div>
             <dt>Rondes</dt>
@@ -193,7 +197,11 @@ export function InsideDisplay() {
           </div>
           <div>
             <dt>Per uur</dt>
-            <dd>{lapsPerHour == null ? '—' : lapsPerHour.toLocaleString('nl-BE', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}</dd>
+            <dd>
+              {lapsPerHour == null
+                ? '—'
+                : lapsPerHour.toLocaleString('nl-BE', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
+            </dd>
           </div>
         </dl>
       </header>
@@ -201,9 +209,16 @@ export function InsideDisplay() {
       <div className="inside-live">
         <section className="inside-now" aria-label="Nu op de piste">
           <span className="inside-now__label">Nu op de piste</span>
-          <strong className="inside-now__runner">{activeRunner ? runnerLabelWithoutDash(activeRunner) : 'Nog niemand gestart'}</strong>
+          <strong className="inside-now__runner">
+            {activeRunner ? runnerLabelWithoutDash(activeRunner) : 'Nog niemand gestart'}
+          </strong>
           {activeRunner && race.activeStartedAt && (
-            <LiveDuration startedAt={race.activeStartedAt} className="inside-now__time" refreshMs={1_000} format="seconds" />
+            <LiveDuration
+              startedAt={race.activeStartedAt}
+              className="inside-now__time"
+              refreshMs={1_000}
+              format="seconds"
+            />
           )}
           <span className="inside-now__next">
             Volgende: <strong>{nextRunner ? runnerLabelWithoutDash(nextRunner) : 'niemand klaar'}</strong>
@@ -215,9 +230,12 @@ export function InsideDisplay() {
             recentLapSummaries.map(({ lap, bestLapMs, averageLapMs }, index) => (
               <article key={lap.id} className={`recent-lap-row${index === 0 ? ' is-latest' : ''}`}>
                 <span className="recent-lap-card-header">
-                  {index === 0 ? 'Net binnen' : `Binnen om ${formatDisplayClockTime(lap.finishedAt)}`}, ronde {lap.lapNumber}
+                  {index === 0 ? 'Net binnen' : `Binnen om ${formatDisplayClockTime(lap.finishedAt)}`}, ronde{' '}
+                  {lap.lapNumber}
                 </span>
-                <strong className="recent-lap-runner">{lap.runnerNumber ? `${lap.runnerNumber} ${lap.runnerName}` : lap.runnerName}</strong>
+                <strong className="recent-lap-runner">
+                  {lap.runnerNumber ? `${lap.runnerNumber} ${lap.runnerName}` : lap.runnerName}
+                </strong>
                 <div className="recent-lap-times">
                   <div className="recent-lap-time recent-lap-time--current">
                     <span>Deze ronde</span>
@@ -262,9 +280,7 @@ export function InsideDisplay() {
             </div>
           </div>
           <div className="inside-ranking-rotation" aria-hidden="true">
-            {rotationActive && (
-              <i key={rankingMode} style={{ animationDuration: `${INSIDE_RANKING_ROTATION_MS}ms` }} />
-            )}
+            {rotationActive && <i key={rankingMode} style={{ animationDuration: `${INSIDE_RANKING_ROTATION_MS}ms` }} />}
           </div>
           <p className="inside-ranking-modes-help">
             {rankingMode === 'coefficient'
@@ -289,13 +305,12 @@ export function InsideDisplay() {
           <div className="inside-controls">
             <label className="ranking-label-filter">
               <span>Label</span>
-              <select
-                value={rankingLabelId ?? ''}
-                onChange={(event) => setRankingLabelId(event.target.value || null)}
-              >
+              <select value={rankingLabelId ?? ''} onChange={(event) => setRankingLabelId(event.target.value || null)}>
                 <option value="">Alle labels</option>
                 {rankingLabels.map((label) => (
-                  <option key={label.id} value={label.id}>{label.name}</option>
+                  <option key={label.id} value={label.id}>
+                    {label.name}
+                  </option>
                 ))}
               </select>
             </label>
@@ -340,28 +355,33 @@ export function InsideDisplay() {
           </div>
           {competitions.length ? (
             <div className={`competition-list${competitionRowCount > 9 ? ' is-dense' : ''}`}>
-            {competitions.map((competition) => (
-            <div key={competition.kind} className="competition">
-              <h3>{competition.title}</h3>
-              {competition.stats.map((stat, index) => (
-                <div key={stat.label.id} className={`progress-item${index === 0 && stat.laps > 0 ? ' is-leading' : ''}`}>
-                  <LabelBadge label={stat.label} />
-                  <div className="progress-track">
-                    <span
-                      title={stat.target > 0 ? `${stat.laps} van ${stat.target} rondes` : `${stat.laps} rondes`}
-                      style={{
-                        width: `${stat.target > 0 ? Math.min(100, stat.percent) : competition.maxLaps > 0 ? (stat.laps / competition.maxLaps) * 100 : 0}%`,
-                        background: stat.label.color,
-                      }}
-                    />
-                  </div>
-                  <em>{stat.target > 0 ? `${stat.laps} / ${stat.target}` : `${stat.laps} rondes`}</em>
+              {competitions.map((competition) => (
+                <div key={competition.kind} className="competition">
+                  <h3>{competition.title}</h3>
+                  {competition.stats.map((stat, index) => (
+                    <div
+                      key={stat.label.id}
+                      className={`progress-item${index === 0 && stat.laps > 0 ? ' is-leading' : ''}`}
+                    >
+                      <LabelBadge label={stat.label} />
+                      <div className="progress-track">
+                        <span
+                          title={stat.target > 0 ? `${stat.laps} van ${stat.target} rondes` : `${stat.laps} rondes`}
+                          style={{
+                            width: `${stat.target > 0 ? Math.min(100, stat.percent) : competition.maxLaps > 0 ? (stat.laps / competition.maxLaps) * 100 : 0}%`,
+                            background: stat.label.color,
+                          }}
+                        />
+                      </div>
+                      <em>{stat.target > 0 ? `${stat.laps} / ${stat.target}` : `${stat.laps} rondes`}</em>
+                    </div>
+                  ))}
                 </div>
               ))}
             </div>
-          ))}
-            </div>
-          ) : <div className="inside-empty">Nog geen labels met lopers.</div>}
+          ) : (
+            <div className="inside-empty">Nog geen labels met lopers.</div>
+          )}
         </section>
       </div>
     </main>
@@ -394,15 +414,19 @@ function useDisplayPresentation(
       return null;
     }
   });
-  const choose = React.useCallback((next: DisplayPresentation) => {
-    try {
-      window.localStorage.setItem(storageKey, next);
-    } catch {
-      // Keep the choice for this session only.
-    }
-    setStored(next);
-  }, [storageKey]);
-  const presentation = requested === 'licht' ? 'light' : requested === 'donker' ? 'dark' : stored ?? defaultPresentation;
+  const choose = React.useCallback(
+    (next: DisplayPresentation) => {
+      try {
+        window.localStorage.setItem(storageKey, next);
+      } catch {
+        // Keep the choice for this session only.
+      }
+      setStored(next);
+    },
+    [storageKey]
+  );
+  const presentation =
+    requested === 'licht' ? 'light' : requested === 'donker' ? 'dark' : (stored ?? defaultPresentation);
   React.useLayoutEffect(() => {
     document.documentElement.dataset.displayTone = presentation;
   }, [presentation]);
@@ -497,10 +521,7 @@ function eventRunnerLabel(event: RaceEvent) {
 
 function buildLabelStats(labels: Label[], runners: Runner[], laps: LapRecord[]) {
   const totals = new Map(
-    labels.map((label) => [
-      label.id,
-      { label, runnerIds: new Set<string>(), laps: 0, calculatedTarget: 0 },
-    ])
+    labels.map((label) => [label.id, { label, runnerIds: new Set<string>(), laps: 0, calculatedTarget: 0 }])
   );
 
   for (const runner of runners) {
@@ -534,9 +555,7 @@ function buildLabelStats(labels: Label[], runners: Runner[], laps: LapRecord[]) 
       };
     })
     .sort(
-      (a, b) =>
-        (a.label.sortOrder ?? 9999) - (b.label.sortOrder ?? 9999) ||
-        a.label.name.localeCompare(b.label.name)
+      (a, b) => (a.label.sortOrder ?? 9999) - (b.label.sortOrder ?? 9999) || a.label.name.localeCompare(b.label.name)
     );
 }
 
@@ -553,10 +572,12 @@ function groupCompetitions(stats: ReturnType<typeof buildLabelStats>) {
       order: labelKindOrder(groupStats[0].label.kind),
       maxLaps: Math.max(0, ...groupStats.map((stat) => stat.laps)),
       // Within a competition the leader goes first: progress towards target, otherwise laps.
-      stats: [...groupStats].sort((first, second) =>
-        (second.target > 0 && first.target > 0 ? second.percent - first.percent : 0) ||
-        second.laps - first.laps ||
-        first.label.name.localeCompare(second.label.name, 'nl-BE')),
+      stats: [...groupStats].sort(
+        (first, second) =>
+          (second.target > 0 && first.target > 0 ? second.percent - first.percent : 0) ||
+          second.laps - first.laps ||
+          first.label.name.localeCompare(second.label.name, 'nl-BE')
+      ),
     }))
     .sort((first, second) => first.order - second.order);
 }

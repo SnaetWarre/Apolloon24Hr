@@ -1,5 +1,3 @@
-
-
 export type SqlValue = string | number | null;
 
 export type ReplicatedSqlStatement = {

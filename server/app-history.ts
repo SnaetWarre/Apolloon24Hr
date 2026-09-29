@@ -9,10 +9,7 @@ import {
   getRecentRaceEvents,
 } from './db.js';
 
-type HistoryRequest =
-  | { scope: 'full' }
-  | { scope: 'recent'; limit: number }
-  | { scope: 'runner'; runnerId: string };
+type HistoryRequest = { scope: 'full' } | { scope: 'recent'; limit: number } | { scope: 'runner'; runnerId: string };
 
 const cache = new Map<string, RaceHistory>();
 let cachedRevision = -1;

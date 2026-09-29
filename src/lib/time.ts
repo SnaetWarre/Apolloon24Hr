@@ -1,10 +1,6 @@
 let serverTimeOffsetMs = 0;
 
-export {
-  formatClockTimeMs,
-  formatDurationMs,
-  formatElapsedSeconds,
-} from '../../shared/time';
+export { formatClockTimeMs, formatDurationMs, formatElapsedSeconds } from '../../shared/time';
 
 function setServerTimeOffsetMs(offsetMs: number): void {
   if (!Number.isFinite(offsetMs)) return;

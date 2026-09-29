@@ -93,7 +93,10 @@ test('incompatible app versions are blocked before cluster synchronization', { t
     });
 
     const statuses = await Promise.all(ports.map(fetchStatus));
-    assert.deepEqual(statuses.map((status) => status.compatibility.appVersion), ['1.0.0', '2.0.0']);
+    assert.deepEqual(
+      statuses.map((status) => status.compatibility.appVersion),
+      ['1.0.0', '2.0.0']
+    );
     assert.ok(statuses.every((status) => status.knownHosts === 2));
   } catch (error) {
     throw withServerOutput(error, ...servers);
@@ -138,9 +141,7 @@ test('manual backup endpoint produces a downloadable verified SQLite snapshot', 
     assert.equal(status.retainedCount, 1);
     assert.equal(status.latest?.fileName, created.backup.fileName);
 
-    const manifestResponse = await fetch(
-      `${server.baseUrl}/api/backups/latest/manifest`
-    );
+    const manifestResponse = await fetch(`${server.baseUrl}/api/backups/latest/manifest`);
     const manifest = (await manifestResponse.json()) as {
       application: string;
       backup: { fileName: string; sha256: string };
@@ -153,11 +154,7 @@ test('manual backup endpoint produces a downloadable verified SQLite snapshot', 
     assert.equal(manifest.verification.sqliteQuickCheck, 'ok');
 
     const download = await fetch(`${server.baseUrl}/api/backups/latest`);
-    assert.equal(
-      download.ok,
-      true,
-      `HTTP ${download.status}: ${await download.clone().text()}\n${server.output()}`
-    );
+    assert.equal(download.ok, true, `HTTP ${download.status}: ${await download.clone().text()}\n${server.output()}`);
     const contents = Buffer.from(await download.arrayBuffer());
     assert.equal(download.headers.get('x-apolloon-backup-sha256'), created.backup.sha256);
     assert.equal(contents.subarray(0, 16).toString('binary'), 'SQLite format 3\u0000');
@@ -208,9 +205,7 @@ test('two writable Electron databases exchange operations in both directions', {
       const [a, b] = await Promise.all(ports.map(fetchStatus));
       return a.connectedHosts === 2 && b.connectedHosts === 2;
     });
-    await waitFor(async () =>
-      (await fetchState(ports[1])).runners.some((runner) => runner.id === first.id)
-    );
+    await waitFor(async () => (await fetchState(ports[1])).runners.some((runner) => runner.id === first.id));
 
     const second = await createClient(ports[1]).runners.create.mutate({
       name: 'Created on B',
@@ -218,9 +213,7 @@ test('two writable Electron databases exchange operations in both directions', {
       _commandId: crypto.randomUUID(),
       _clientId: 'browser-b',
     });
-    await waitFor(async () =>
-      (await fetchState(ports[0])).runners.some((runner) => runner.id === second.id)
-    );
+    await waitFor(async () => (await fetchState(ports[0])).runners.some((runner) => runner.id === second.id));
 
     const states = await Promise.all(ports.map(fetchState));
     assert.deepEqual(normalizeState(states[0]), normalizeState(states[1]));
@@ -232,12 +225,29 @@ test('two writable Electron databases exchange operations in both directions', {
     await waitFor(async () => (await fetchState(ports[1])).runners.some((runner) => runner.id === nightRunner.id));
     const startsAt = Date.now() + 1_500;
     const team = await clientA.temporaryTeams.create.mutate({
-      name: 'Planned cluster team', color: '#7c3aed', runnerIds: [nightRunner.id],
-      startsAt, endsAt: startsAt + 2_000,
+      name: 'Planned cluster team',
+      color: '#7c3aed',
+      runnerIds: [nightRunner.id],
+      startsAt,
+      endsAt: startsAt + 2_000,
     });
-    await waitFor(async () => (await fetchState(ports[1])).temporaryTeams.some((item) => item.labelId === team.labelId));
-    await waitFor(async () => (await fetchState(ports[1])).runners.find((runner) => runner.id === nightRunner.id)?.labels.some((label) => label.id === team.labelId) ?? false, 8_000);
-    await waitFor(async () => (await fetchState(ports[1])).runners.find((runner) => runner.id === nightRunner.id)?.labels.some((label) => label.id === blue.id) ?? false, 8_000);
+    await waitFor(async () =>
+      (await fetchState(ports[1])).temporaryTeams.some((item) => item.labelId === team.labelId)
+    );
+    await waitFor(
+      async () =>
+        (await fetchState(ports[1])).runners
+          .find((runner) => runner.id === nightRunner.id)
+          ?.labels.some((label) => label.id === team.labelId) ?? false,
+      8_000
+    );
+    await waitFor(
+      async () =>
+        (await fetchState(ports[1])).runners
+          .find((runner) => runner.id === nightRunner.id)
+          ?.labels.some((label) => label.id === blue.id) ?? false,
+      8_000
+    );
   } catch (error) {
     throw withServerOutput(error, ...servers);
   } finally {
@@ -322,9 +332,10 @@ test('five nodes converge after concurrent low-volume writes', { timeout: 30_000
         })
       );
     }
-    await waitFor(async () =>
-      (await Promise.all(ports.map(fetchStatus))).every((status) => status.connectedHosts === 5)
-    , 12_000);
+    await waitFor(
+      async () => (await Promise.all(ports.map(fetchStatus))).every((status) => status.connectedHosts === 5),
+      12_000
+    );
 
     await Promise.all(
       ports.map((port, index) =>
@@ -395,19 +406,13 @@ test('joining a creator laptop imports its database and preserves a recovery bac
     const result = (await response.json()) as { ok: boolean; backupFile: string; error?: string };
     assert.equal(response.ok, true, result.error);
     assert.equal(result.ok, true);
-    assert.equal(
-      fs.existsSync(path.join(joiner.dataPath, 'data', result.backupFile)),
-      true
-    );
+    assert.equal(fs.existsSync(path.join(joiner.dataPath, 'data', result.backupFile)), true);
     const safetyMetadata = fs
       .readdirSync(path.join(joiner.dataPath, 'backups'))
       .filter((fileName) => fileName.endsWith('.sqlite.json'));
     assert.equal(safetyMetadata.length, 1);
     const safetyRecord = JSON.parse(
-      fs.readFileSync(
-        path.join(joiner.dataPath, 'backups', safetyMetadata[0]),
-        'utf8'
-      )
+      fs.readFileSync(path.join(joiner.dataPath, 'backups', safetyMetadata[0]), 'utf8')
     ) as { reason: string; verified: boolean; sha256: string };
     assert.equal(safetyRecord.reason, 'pre-cluster-join');
     assert.equal(safetyRecord.verified, true);
@@ -430,13 +435,8 @@ test('joining a creator laptop imports its database and preserves a recovery bac
       _commandId: crypto.randomUUID(),
       _clientId: 'joiner',
     });
-    await waitFor(async () =>
-      (await fetchState(creatorPort)).runners.some((runner) => runner.id === joinedWrite.id)
-    );
-    assert.deepEqual(
-      normalizeState(await fetchState(creatorPort)),
-      normalizeState(await fetchState(joinerPort))
-    );
+    await waitFor(async () => (await fetchState(creatorPort)).runners.some((runner) => runner.id === joinedWrite.id));
+    assert.deepEqual(normalizeState(await fetchState(creatorPort)), normalizeState(await fetchState(joinerPort)));
   } catch (error) {
     throw withServerOutput(error, creator, joiner);
   } finally {
@@ -445,143 +445,149 @@ test('joining a creator laptop imports its database and preserves a recovery bac
   }
 });
 
-test('an invalid replication operation is quarantined without stranding the valid ones', { timeout: 20_000 }, async () => {
-  const root = testRoot('atomic-batch');
-  const source = await startServer({
-    port: await freePort(),
-    dataPath: path.join(root, 'source'),
-  });
-  const target = await startServer({
-    port: await freePort(),
-    dataPath: path.join(root, 'target'),
-  });
-  try {
-    const sourceClient = createClient(source.port);
-    const first = await sourceClient.runners.create.mutate({
-      name: 'Atomic first',
-      runnerNumber: 'ATOMIC-1',
-      _commandId: crypto.randomUUID(),
-      _clientId: 'source',
+test(
+  'an invalid replication operation is quarantined without stranding the valid ones',
+  { timeout: 20_000 },
+  async () => {
+    const root = testRoot('atomic-batch');
+    const source = await startServer({
+      port: await freePort(),
+      dataPath: path.join(root, 'source'),
     });
-    const second = await sourceClient.runners.create.mutate({
-      name: 'Atomic second',
-      runnerNumber: 'ATOMIC-2',
-      _commandId: crypto.randomUUID(),
-      _clientId: 'source',
+    const target = await startServer({
+      port: await freePort(),
+      dataPath: path.join(root, 'target'),
     });
-    const sourceStatus = await fetchStatus(source.port);
-    const pullResponse = await postClusterExchange(source, {
-      hostId: 'observer',
-      url: 'http://127.0.0.1:59991',
-      vector: {},
-      operations: [],
-    });
-    assert.equal(pullResponse.ok, true);
-    const pulled = (await pullResponse.json()) as { operations: Array<Record<string, unknown>> };
-    assert.equal(pulled.operations.length, 2);
+    try {
+      const sourceClient = createClient(source.port);
+      const first = await sourceClient.runners.create.mutate({
+        name: 'Atomic first',
+        runnerNumber: 'ATOMIC-1',
+        _commandId: crypto.randomUUID(),
+        _clientId: 'source',
+      });
+      const second = await sourceClient.runners.create.mutate({
+        name: 'Atomic second',
+        runnerNumber: 'ATOMIC-2',
+        _commandId: crypto.randomUUID(),
+        _clientId: 'source',
+      });
+      const sourceStatus = await fetchStatus(source.port);
+      const pullResponse = await postClusterExchange(source, {
+        hostId: 'observer',
+        url: 'http://127.0.0.1:59991',
+        vector: {},
+        operations: [],
+      });
+      assert.equal(pullResponse.ok, true);
+      const pulled = (await pullResponse.json()) as { operations: Array<Record<string, unknown>> };
+      assert.equal(pulled.operations.length, 2);
 
-    // De gif-batch draagt een herkenbare loper (POISON-1) die nergens anders
-    // bestaat: als quarantaine werkt, mag die nooit in de database belanden,
-    // terwijl de geldige operatie ernaast gewoon wordt toegepast. ATOMIC-2 kan
-    // intussen óók via de normale background-sync binnenkomen (de exchange
-    // registreert source als peer), dus daarop valt niet deterministisch te
-    // asserten.
-    const poisonRunnerId = crypto.randomUUID();
-    const poisonNow = Date.now();
-    const invalidOperations = [
-      pulled.operations[0],
-      {
-        ...pulled.operations[1],
-        checksum: '0'.repeat(64),
-        statements: [
-          {
-            sql: 'INSERT INTO runners (id, runner_number, name, registration_source, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
-            params: [poisonRunnerId, 'POISON-1', 'Poison Runner', 'manual', poisonNow, poisonNow],
-          },
-        ],
-      },
-    ];
-    const invalidResponse = await postClusterExchange(target, {
-      clusterId: sourceStatus.clusterId,
-      hostId: sourceStatus.hostId,
-      url: source.baseUrl,
-      vector: { [sourceStatus.hostId]: 2 },
-      operations: invalidOperations,
-    });
-    // De foute operatie gaat in quarantaine; de geldige wordt gewoon toegepast.
-    assert.equal(invalidResponse.ok, true);
-    assert.equal(
-      (await fetchState(target.port)).runners.some((runner) => runner.id === first.id),
-      true
-    );
-    assert.equal(
-      (await fetchState(target.port)).runners.some((runner) => runner.runnerNumber === 'POISON-1'),
-      false
-    );
-    assert.equal((await fetchStatus(target.port)).deadLetterCount, 1);
-    assert.equal((await fetchStatus(target.port)).knownHosts, 2);
+      // De gif-batch draagt een herkenbare loper (POISON-1) die nergens anders
+      // bestaat: als quarantaine werkt, mag die nooit in de database belanden,
+      // terwijl de geldige operatie ernaast gewoon wordt toegepast. ATOMIC-2 kan
+      // intussen óók via de normale background-sync binnenkomen (de exchange
+      // registreert source als peer), dus daarop valt niet deterministisch te
+      // asserten.
+      const poisonRunnerId = crypto.randomUUID();
+      const poisonNow = Date.now();
+      const invalidOperations = [
+        pulled.operations[0],
+        {
+          ...pulled.operations[1],
+          checksum: '0'.repeat(64),
+          statements: [
+            {
+              sql: 'INSERT INTO runners (id, runner_number, name, registration_source, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+              params: [poisonRunnerId, 'POISON-1', 'Poison Runner', 'manual', poisonNow, poisonNow],
+            },
+          ],
+        },
+      ];
+      const invalidResponse = await postClusterExchange(target, {
+        clusterId: sourceStatus.clusterId,
+        hostId: sourceStatus.hostId,
+        url: source.baseUrl,
+        vector: { [sourceStatus.hostId]: 2 },
+        operations: invalidOperations,
+      });
+      // De foute operatie gaat in quarantaine; de geldige wordt gewoon toegepast.
+      assert.equal(invalidResponse.ok, true);
+      assert.equal(
+        (await fetchState(target.port)).runners.some((runner) => runner.id === first.id),
+        true
+      );
+      assert.equal(
+        (await fetchState(target.port)).runners.some((runner) => runner.runnerNumber === 'POISON-1'),
+        false
+      );
+      assert.equal((await fetchStatus(target.port)).deadLetterCount, 1);
+      assert.equal((await fetchStatus(target.port)).knownHosts, 2);
 
-    const retryResponse = await postClusterExchange(target, {
-      clusterId: sourceStatus.clusterId,
-      hostId: sourceStatus.hostId,
-      url: source.baseUrl,
-      vector: { [sourceStatus.hostId]: 2 },
-      operations: pulled.operations,
-    });
-    assert.equal(retryResponse.ok, true);
-    const targetRunnerIds = new Set(
-      (await fetchState(target.port)).runners.map((runner) => runner.id)
-    );
-    assert.equal(targetRunnerIds.has(first.id), true);
-    assert.equal(targetRunnerIds.has(second.id), true);
-  } catch (error) {
-    throw withServerOutput(error, source, target);
-  } finally {
-    await Promise.all([stopServer(source), stopServer(target)]);
-    fs.rmSync(root, { recursive: true, force: true });
+      const retryResponse = await postClusterExchange(target, {
+        clusterId: sourceStatus.clusterId,
+        hostId: sourceStatus.hostId,
+        url: source.baseUrl,
+        vector: { [sourceStatus.hostId]: 2 },
+        operations: pulled.operations,
+      });
+      assert.equal(retryResponse.ok, true);
+      const targetRunnerIds = new Set((await fetchState(target.port)).runners.map((runner) => runner.id));
+      assert.equal(targetRunnerIds.has(first.id), true);
+      assert.equal(targetRunnerIds.has(second.id), true);
+    } catch (error) {
+      throw withServerOutput(error, source, target);
+    } finally {
+      await Promise.all([stopServer(source), stopServer(target)]);
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   }
-});
+);
 
-test('a known peer changing address replaces its stale URL instead of duplicating the laptop', { timeout: 20_000 }, async () => {
-  const root = testRoot('peer-address-change');
-  const ports = await Promise.all([freePort(), freePort()]);
-  const a = await startServer({
-    port: ports[0],
-    dataPath: path.join(root, 'a'),
-    peers: [ports[1]],
-  });
-  let b: RunningServer | null = await startServer({
-    port: ports[1],
-    dataPath: path.join(root, 'b'),
-    peers: [ports[0]],
-  });
-  try {
-    await waitFor(async () => (await fetchStatus(a.port)).connectedHosts === 2);
-    const bStatus = await fetchStatus(b.port);
-    await stopServer(b);
-    b = null;
-
-    const replacementUrl = `http://127.0.0.1:${await freePort()}`;
-    const response = await postClusterExchange(a, {
-      hostId: bStatus.hostId,
-      url: replacementUrl,
-      vector: {},
-      operations: [],
+test(
+  'a known peer changing address replaces its stale URL instead of duplicating the laptop',
+  { timeout: 20_000 },
+  async () => {
+    const root = testRoot('peer-address-change');
+    const ports = await Promise.all([freePort(), freePort()]);
+    const a = await startServer({
+      port: ports[0],
+      dataPath: path.join(root, 'a'),
+      peers: [ports[1]],
     });
-    assert.equal(response.ok, true);
+    let b: RunningServer | null = await startServer({
+      port: ports[1],
+      dataPath: path.join(root, 'b'),
+      peers: [ports[0]],
+    });
+    try {
+      await waitFor(async () => (await fetchStatus(a.port)).connectedHosts === 2);
+      const bStatus = await fetchStatus(b.port);
+      await stopServer(b);
+      b = null;
 
-    const status = await fetchStatus(a.port);
-    const matchingPeers = status.peers.filter((peer) => peer.id === bStatus.hostId);
-    assert.equal(matchingPeers.length, 1);
-    assert.equal(matchingPeers[0].url, replacementUrl);
-    assert.equal(status.knownHosts, 2);
-  } catch (error) {
-    throw withServerOutput(error, a, b);
-  } finally {
-    await Promise.all([stopServer(a), stopServer(b)]);
-    fs.rmSync(root, { recursive: true, force: true });
+      const replacementUrl = `http://127.0.0.1:${await freePort()}`;
+      const response = await postClusterExchange(a, {
+        hostId: bStatus.hostId,
+        url: replacementUrl,
+        vector: {},
+        operations: [],
+      });
+      assert.equal(response.ok, true);
+
+      const status = await fetchStatus(a.port);
+      const matchingPeers = status.peers.filter((peer) => peer.id === bStatus.hostId);
+      assert.equal(matchingPeers.length, 1);
+      assert.equal(matchingPeers[0].url, replacementUrl);
+      assert.equal(status.knownHosts, 2);
+    } catch (error) {
+      throw withServerOutput(error, a, b);
+    } finally {
+      await Promise.all([stopServer(a), stopServer(b)]);
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   }
-});
+);
 
 test('concurrent offline edits of the same runner converge in canonical order', { timeout: 30_000 }, async () => {
   const root = testRoot('same-runner');
@@ -605,9 +611,7 @@ test('concurrent offline edits of the same runner converge in canonical order', 
       _commandId: crypto.randomUUID(),
       _clientId: 'a',
     });
-    await waitFor(async () =>
-      (await fetchState(ports[1])).runners.some((item) => item.id === runner.id)
-    );
+    await waitFor(async () => (await fetchState(ports[1])).runners.some((item) => item.id === runner.id));
 
     await stopServer(b);
     b = null;
@@ -645,15 +649,10 @@ test('concurrent offline edits of the same runner converge in canonical order', 
     });
     await waitFor(async () => {
       const states = await Promise.all(ports.map(fetchState));
-      const names = states.map(
-        (state) => state.runners.find((item) => item.id === runner.id)?.name
-      );
+      const names = states.map((state) => state.runners.find((item) => item.id === runner.id)?.name);
       return Boolean(names[0] && names[0] === names[1]);
     }, 12_000);
-    assert.deepEqual(
-      normalizeState(await fetchState(ports[0])),
-      normalizeState(await fetchState(ports[1]))
-    );
+    assert.deepEqual(normalizeState(await fetchState(ports[0])), normalizeState(await fetchState(ports[1])));
   } catch (error) {
     throw withServerOutput(error, a, b);
   } finally {
@@ -662,220 +661,208 @@ test('concurrent offline edits of the same runner converge in canonical order', 
   }
 });
 
-test('timing control transfers while connected and emergency takeover waits for failure confirmation', { timeout: 30_000 }, async () => {
-  const root = testRoot('timing-transfer');
-  const ports = await Promise.all([freePort(), freePort()]);
-  const a = await startServer({
-    port: ports[0],
-    dataPath: path.join(root, 'a'),
-    peers: [ports[1]],
-  });
-  let b: RunningServer | null = await startServer({
-    port: ports[1],
-    dataPath: path.join(root, 'b'),
-    peers: [ports[0]],
-  });
-  try {
-    await waitFor(async () =>
-      (await Promise.all(ports.map(fetchStatus))).every((status) => status.connectedHosts === 2)
-    );
-    const [aStatus, bStatus] = await Promise.all(ports.map(fetchStatus));
-    const clientA = createClient(a.port);
-    const clientB = createClient(b.port);
-    await clientA.cluster.claimTimingControl.mutate({
-      expectedControllerHostId: null,
-      force: false,
-      _commandId: crypto.randomUUID(),
-      _clientId: 'a',
-    });
-    await waitFor(async () =>
-      (await fetchStatus(b!.port)).timingControllerHostId === aStatus.hostId
-    );
-
-    await assert.rejects(
-      () =>
-        clientB.cluster.claimTimingControl.mutate({
-          expectedControllerHostId: aStatus.hostId,
-          force: false,
-          _commandId: crypto.randomUUID(),
-          _clientId: 'b',
-        }),
-      /nog bereikbaar|gecontroleerd over/i
-    );
-
-    await waitFor(async () => {
-      const status = await fetchStatus(a.port);
-      return status.peers.some(
-        (peer) => peer.id === bStatus.hostId && peer.synchronized
-      );
-    });
-    await clientA.cluster.transferTimingControl.mutate({
-      targetHostId: bStatus.hostId,
-      _commandId: crypto.randomUUID(),
-      _clientId: 'a',
-    });
-    await waitFor(async () => {
-      const statuses = await Promise.all(ports.map(fetchStatus));
-      return statuses.every(
-        (status) => status.timingControllerHostId === bStatus.hostId
-      );
-    });
-    assert.equal((await fetchStatus(a.port)).timingControl.state, 'remote-reachable');
-    assert.equal((await fetchStatus(b.port)).timingControl.state, 'local');
-
-    await stopServer(b);
-    b = null;
-    await waitFor(async () => (await fetchStatus(a.port)).timingControl.takeoverAllowed, 5_000);
-    const takeover = await clientA.cluster.claimTimingControl.mutate({
-      expectedControllerHostId: bStatus.hostId,
-      force: false,
-      _commandId: crypto.randomUUID(),
-      _clientId: 'a',
-    });
-    assert.equal(takeover.hostId, aStatus.hostId);
-    assert.ok(takeover.generation >= 3);
-    assert.equal((await fetchStatus(a.port)).timingControl.state, 'local');
-  } catch (error) {
-    throw withServerOutput(error, a, b);
-  } finally {
-    await Promise.all([stopServer(a), stopServer(b)]);
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test('split timing histories pause timing and can be resolved from the chosen laptop', { timeout: 35_000 }, async () => {
-  const root = testRoot('timing-conflict');
-  const ports = await Promise.all([freePort(), freePort()]);
-  let a: RunningServer | null = null;
-  let b: RunningServer | null = null;
-  try {
-    a = await startServer({
+test(
+  'timing control transfers while connected and emergency takeover waits for failure confirmation',
+  { timeout: 30_000 },
+  async () => {
+    const root = testRoot('timing-transfer');
+    const ports = await Promise.all([freePort(), freePort()]);
+    const a = await startServer({
       port: ports[0],
       dataPath: path.join(root, 'a'),
       peers: [ports[1]],
     });
-    b = await startServer({
+    let b: RunningServer | null = await startServer({
       port: ports[1],
       dataPath: path.join(root, 'b'),
       peers: [ports[0]],
     });
-    const clientA = createClient(ports[0]);
-    const runner = await clientA.runners.create.mutate({
-      name: 'Timing runner',
-      runnerNumber: 'TIME-1',
-      _commandId: crypto.randomUUID(),
-      _clientId: 'a',
-    });
-    await clientA.runners.setStatus.mutate({
-      id: runner.id,
-      status: 'waiting',
-      _commandId: crypto.randomUUID(),
-      _clientId: 'a',
-    });
-    await clientA.cluster.claimTimingControl.mutate({
-      expectedControllerHostId: null,
-      force: false,
-      _commandId: crypto.randomUUID(),
-      _clientId: 'a',
-    });
-    await waitFor(async () =>
-      (await fetchState(ports[1])).runners.some(
-        (item) => item.id === runner.id && item.status === 'waiting'
-      )
-    );
+    try {
+      await waitFor(async () =>
+        (await Promise.all(ports.map(fetchStatus))).every((status) => status.connectedHosts === 2)
+      );
+      const [aStatus, bStatus] = await Promise.all(ports.map(fetchStatus));
+      const clientA = createClient(a.port);
+      const clientB = createClient(b.port);
+      await clientA.cluster.claimTimingControl.mutate({
+        expectedControllerHostId: null,
+        force: false,
+        _commandId: crypto.randomUUID(),
+        _clientId: 'a',
+      });
+      await waitFor(async () => (await fetchStatus(b!.port)).timingControllerHostId === aStatus.hostId);
 
-    await stopServer(b);
-    b = null;
-    await clientA.race.startNext.mutate({
-      activeRunnerId: null,
-      activeStartedAt: null,
-      _commandId: crypto.randomUUID(),
-      _clientId: 'a',
-    });
-    await stopServer(a);
-    a = null;
+      await assert.rejects(
+        () =>
+          clientB.cluster.claimTimingControl.mutate({
+            expectedControllerHostId: aStatus.hostId,
+            force: false,
+            _commandId: crypto.randomUUID(),
+            _clientId: 'b',
+          }),
+        /nog bereikbaar|gecontroleerd over/i
+      );
 
-    b = await startServer({
-      port: ports[1],
-      dataPath: path.join(root, 'b'),
-    });
-    const clientB = createClient(ports[1]);
-    await waitFor(
-      async () => (await fetchStatus(ports[1])).timingControl.forcedTakeoverAllowed,
-      12_000
-    );
-    await clientB.cluster.claimTimingControl.mutate({
-      expectedControllerHostId: (await fetchStatus(ports[1])).timingControllerHostId,
-      force: true,
-      _commandId: crypto.randomUUID(),
-      _clientId: 'b',
-    });
-    await clientB.race.startNext.mutate({
-      activeRunnerId: null,
-      activeStartedAt: null,
-      _commandId: crypto.randomUUID(),
-      _clientId: 'b',
-    });
-    const bBranchStartedAt = (await fetchState(ports[1])).race.activeStartedAt;
-    const bHostId = (await fetchStatus(ports[1])).hostId;
-    assert.ok(bBranchStartedAt);
-    await stopServer(b);
-    b = null;
+      await waitFor(async () => {
+        const status = await fetchStatus(a.port);
+        return status.peers.some((peer) => peer.id === bStatus.hostId && peer.synchronized);
+      });
+      await clientA.cluster.transferTimingControl.mutate({
+        targetHostId: bStatus.hostId,
+        _commandId: crypto.randomUUID(),
+        _clientId: 'a',
+      });
+      await waitFor(async () => {
+        const statuses = await Promise.all(ports.map(fetchStatus));
+        return statuses.every((status) => status.timingControllerHostId === bStatus.hostId);
+      });
+      assert.equal((await fetchStatus(a.port)).timingControl.state, 'remote-reachable');
+      assert.equal((await fetchStatus(b.port)).timingControl.state, 'local');
 
-    a = await startServer({
-      port: ports[0],
-      dataPath: path.join(root, 'a'),
-      peers: [ports[1]],
-    });
-    b = await startServer({
-      port: ports[1],
-      dataPath: path.join(root, 'b'),
-      peers: [ports[0]],
-    });
-    await waitFor(async () => {
-      const statuses = await Promise.all(ports.map(fetchStatus));
-      return statuses.every((status) => status.conflictCount === 1);
-    }, 12_000);
-    assert.deepEqual(
-      normalizeState(await fetchState(ports[0])),
-      normalizeState(await fetchState(ports[1]))
-    );
-
-    const conflictsResponse = await fetch(`${a.baseUrl}/api/cluster/conflicts`);
-    const conflicts = (await conflictsResponse.json()) as Array<{
-      id: string;
-      kind: string;
-      operations: Array<{ id: string; originHostId: string }>;
-    }>;
-    assert.equal(conflicts.length, 1);
-    assert.equal(conflicts[0].kind, 'timing');
-    const selectedOperationId = conflicts[0].operations.find(
-      (operation) => operation.originHostId === bHostId
-    )?.id;
-    assert.ok(selectedOperationId);
-    await createClient(ports[0]).cluster.resolveConflict.mutate({
-      conflictId: conflicts[0].id,
-      selectedOperationId,
-      _commandId: crypto.randomUUID(),
-      _clientId: 'operator',
-    });
-    await waitFor(async () =>
-      (await Promise.all(ports.map(fetchStatus))).every(
-        (status) => status.conflictCount === 0
-      )
-    , 12_000);
-    assert.deepEqual(
-      normalizeState(await fetchState(ports[0])),
-      normalizeState(await fetchState(ports[1]))
-    );
-    assert.equal((await fetchState(ports[0])).race.activeStartedAt, bBranchStartedAt);
-  } catch (error) {
-    throw withServerOutput(error, a, b);
-  } finally {
-    await Promise.all([stopServer(a), stopServer(b)]);
-    fs.rmSync(root, { recursive: true, force: true });
+      await stopServer(b);
+      b = null;
+      await waitFor(async () => (await fetchStatus(a.port)).timingControl.takeoverAllowed, 5_000);
+      const takeover = await clientA.cluster.claimTimingControl.mutate({
+        expectedControllerHostId: bStatus.hostId,
+        force: false,
+        _commandId: crypto.randomUUID(),
+        _clientId: 'a',
+      });
+      assert.equal(takeover.hostId, aStatus.hostId);
+      assert.ok(takeover.generation >= 3);
+      assert.equal((await fetchStatus(a.port)).timingControl.state, 'local');
+    } catch (error) {
+      throw withServerOutput(error, a, b);
+    } finally {
+      await Promise.all([stopServer(a), stopServer(b)]);
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   }
-});
+);
+
+test(
+  'split timing histories pause timing and can be resolved from the chosen laptop',
+  { timeout: 35_000 },
+  async () => {
+    const root = testRoot('timing-conflict');
+    const ports = await Promise.all([freePort(), freePort()]);
+    let a: RunningServer | null = null;
+    let b: RunningServer | null = null;
+    try {
+      a = await startServer({
+        port: ports[0],
+        dataPath: path.join(root, 'a'),
+        peers: [ports[1]],
+      });
+      b = await startServer({
+        port: ports[1],
+        dataPath: path.join(root, 'b'),
+        peers: [ports[0]],
+      });
+      const clientA = createClient(ports[0]);
+      const runner = await clientA.runners.create.mutate({
+        name: 'Timing runner',
+        runnerNumber: 'TIME-1',
+        _commandId: crypto.randomUUID(),
+        _clientId: 'a',
+      });
+      await clientA.runners.setStatus.mutate({
+        id: runner.id,
+        status: 'waiting',
+        _commandId: crypto.randomUUID(),
+        _clientId: 'a',
+      });
+      await clientA.cluster.claimTimingControl.mutate({
+        expectedControllerHostId: null,
+        force: false,
+        _commandId: crypto.randomUUID(),
+        _clientId: 'a',
+      });
+      await waitFor(async () =>
+        (await fetchState(ports[1])).runners.some((item) => item.id === runner.id && item.status === 'waiting')
+      );
+
+      await stopServer(b);
+      b = null;
+      await clientA.race.startNext.mutate({
+        activeRunnerId: null,
+        activeStartedAt: null,
+        _commandId: crypto.randomUUID(),
+        _clientId: 'a',
+      });
+      await stopServer(a);
+      a = null;
+
+      b = await startServer({
+        port: ports[1],
+        dataPath: path.join(root, 'b'),
+      });
+      const clientB = createClient(ports[1]);
+      await waitFor(async () => (await fetchStatus(ports[1])).timingControl.forcedTakeoverAllowed, 12_000);
+      await clientB.cluster.claimTimingControl.mutate({
+        expectedControllerHostId: (await fetchStatus(ports[1])).timingControllerHostId,
+        force: true,
+        _commandId: crypto.randomUUID(),
+        _clientId: 'b',
+      });
+      await clientB.race.startNext.mutate({
+        activeRunnerId: null,
+        activeStartedAt: null,
+        _commandId: crypto.randomUUID(),
+        _clientId: 'b',
+      });
+      const bBranchStartedAt = (await fetchState(ports[1])).race.activeStartedAt;
+      const bHostId = (await fetchStatus(ports[1])).hostId;
+      assert.ok(bBranchStartedAt);
+      await stopServer(b);
+      b = null;
+
+      a = await startServer({
+        port: ports[0],
+        dataPath: path.join(root, 'a'),
+        peers: [ports[1]],
+      });
+      b = await startServer({
+        port: ports[1],
+        dataPath: path.join(root, 'b'),
+        peers: [ports[0]],
+      });
+      await waitFor(async () => {
+        const statuses = await Promise.all(ports.map(fetchStatus));
+        return statuses.every((status) => status.conflictCount === 1);
+      }, 12_000);
+      assert.deepEqual(normalizeState(await fetchState(ports[0])), normalizeState(await fetchState(ports[1])));
+
+      const conflictsResponse = await fetch(`${a.baseUrl}/api/cluster/conflicts`);
+      const conflicts = (await conflictsResponse.json()) as Array<{
+        id: string;
+        kind: string;
+        operations: Array<{ id: string; originHostId: string }>;
+      }>;
+      assert.equal(conflicts.length, 1);
+      assert.equal(conflicts[0].kind, 'timing');
+      const selectedOperationId = conflicts[0].operations.find((operation) => operation.originHostId === bHostId)?.id;
+      assert.ok(selectedOperationId);
+      await createClient(ports[0]).cluster.resolveConflict.mutate({
+        conflictId: conflicts[0].id,
+        selectedOperationId,
+        _commandId: crypto.randomUUID(),
+        _clientId: 'operator',
+      });
+      await waitFor(
+        async () => (await Promise.all(ports.map(fetchStatus))).every((status) => status.conflictCount === 0),
+        12_000
+      );
+      assert.deepEqual(normalizeState(await fetchState(ports[0])), normalizeState(await fetchState(ports[1])));
+      assert.equal((await fetchState(ports[0])).race.activeStartedAt, bBranchStartedAt);
+    } catch (error) {
+      throw withServerOutput(error, a, b);
+    } finally {
+      await Promise.all([stopServer(a), stopServer(b)]);
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
+);
 
 test('reusing a command id is exactly-once on the local database', { timeout: 12_000 }, async () => {
   const root = testRoot('idempotent');
@@ -981,8 +968,7 @@ async function startServer(options: {
       BACKUP_ENABLED: 'false',
       APOLLOON_RELEASE_ID: 'e2e-test-release',
       APOLLOON_APP_VERSION: options.appVersion || '1.0.0',
-      APOLLOON_MIN_COMPATIBLE_APP_VERSION:
-        options.minimumAppVersion || options.appVersion || '1.0.0',
+      APOLLOON_MIN_COMPATIBLE_APP_VERSION: options.minimumAppVersion || options.appVersion || '1.0.0',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -1056,11 +1042,7 @@ async function freePort(): Promise<number> {
   });
 }
 
-async function waitFor(
-  predicate: () => Promise<boolean>,
-  timeoutMs = 8_000,
-  intervalMs = 50
-): Promise<void> {
+async function waitFor(predicate: () => Promise<boolean>, timeoutMs = 8_000, intervalMs = 50): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (await predicate()) return;

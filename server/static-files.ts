@@ -49,9 +49,8 @@ export function registerStaticFrontend(app: Express): void {
     const encoding = req.acceptsEncodings('br', 'gzip');
     const extension = encoding === 'br' ? '.br' : encoding === 'gzip' ? '.gz' : null;
     const compressedPath = extension ? `${originalPath}${extension}` : null;
-    const relativePath = compressedPath && fs.existsSync(compressedPath)
-      ? relativeFileWithinRoot(DIST_DIR, compressedPath)
-      : null;
+    const relativePath =
+      compressedPath && fs.existsSync(compressedPath) ? relativeFileWithinRoot(DIST_DIR, compressedPath) : null;
     if (!relativePath) {
       next();
       return;
@@ -68,7 +67,10 @@ export function registerStaticFrontend(app: Express): void {
   app.use(
     express.static(DIST_DIR, {
       setHeaders(res, filePath) {
-        res.setHeader('Cache-Control', filePath.includes(`${path.sep}assets${path.sep}`) ? IMMUTABLE_CACHE : 'no-cache');
+        res.setHeader(
+          'Cache-Control',
+          filePath.includes(`${path.sep}assets${path.sep}`) ? IMMUTABLE_CACHE : 'no-cache'
+        );
       },
     })
   );

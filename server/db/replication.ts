@@ -18,7 +18,12 @@ import {
   runUncaptured,
   transaction,
 } from './connection.js';
-import { ensureReplicationIdentity, getReplicationVector, nextLocalHlc, observeRemoteHlc } from './replication-state.js';
+import {
+  ensureReplicationIdentity,
+  getReplicationVector,
+  nextLocalHlc,
+  observeRemoteHlc,
+} from './replication-state.js';
 import { deleteLocalSetting, getSetting, setLocalSetting, setSetting } from './settings.js';
 import { applySnapshot } from './snapshot.js';
 import {
@@ -60,7 +65,12 @@ const REPLICATION_OPERATION_SELECT = `SELECT
   applied_at AS appliedAt
 FROM replication_operations`;
 
-function operationFromRow({ payloadJson, statementsJson, resultJson, ...row }: ReplicationOperationRow): ReplicationOperation {
+function operationFromRow({
+  payloadJson,
+  statementsJson,
+  resultJson,
+  ...row
+}: ReplicationOperationRow): ReplicationOperation {
   return {
     ...row,
     payload: JSON.parse(payloadJson) as unknown,
@@ -229,7 +239,9 @@ export function getReplicationOperation(id: string): ReplicationOperation | null
 }
 
 export function getOpenReplicationConflictCount(): number {
-  return one<{ count: number }>(`SELECT COUNT(*) AS count FROM replication_conflicts WHERE status = 'open'`)?.count ?? 0;
+  return (
+    one<{ count: number }>(`SELECT COUNT(*) AS count FROM replication_conflicts WHERE status = 'open'`)?.count ?? 0
+  );
 }
 
 export function getReplicationConflicts(status: ReplicationConflict['status'] | 'all' = 'open'): ReplicationConflict[] {
@@ -306,7 +318,9 @@ export function finalizeReplicationConflict(
 
 /** Local operations not yet acknowledged by every known peer. */
 export function getPendingReplicationOperationCount(): number {
-  const peers = one<{ count: number }>('SELECT COUNT(DISTINCT peer_host_id) AS count FROM replication_peer_progress')?.count;
+  const peers = one<{ count: number }>(
+    'SELECT COUNT(DISTINCT peer_host_id) AS count FROM replication_peer_progress'
+  )?.count;
   if (!peers) return 0;
   const local = ensureReplicationIdentity().hostId;
   const acknowledged =
@@ -570,8 +584,7 @@ function assertValidReplicationOperation(operation: ReplicationOperation): void 
       !Array.isArray(item.params) ||
       item.params.length > 10_000 ||
       item.params.some(
-        (value) =>
-          value !== null && typeof value !== 'string' && (typeof value !== 'number' || !Number.isFinite(value))
+        (value) => value !== null && typeof value !== 'string' && (typeof value !== 'number' || !Number.isFinite(value))
       )
     ) {
       throw new Error(`invalid replicated statement for ${operation.id}`);
@@ -584,9 +597,12 @@ function assertValidReplicationOperation(operation: ReplicationOperation): void 
  * ones around them still apply; a sequence gap or too many origins rejects the
  * whole batch, since those can heal on their own or need an operator.
  */
-export function applyRemoteReplicationOperations(
-  operations: ReplicationOperation[]
-): { applied: number; duplicates: number; conflicts: number; quarantined: number } {
+export function applyRemoteReplicationOperations(operations: ReplicationOperation[]): {
+  applied: number;
+  duplicates: number;
+  conflicts: number;
+  quarantined: number;
+} {
   const identity = ensureReplicationIdentity();
   if (!Array.isArray(operations) || operations.length > 1_000) {
     throw new Error('invalid replication batch');
@@ -721,7 +737,10 @@ export async function installReplicationBootstrap(input: {
     }
   }
 
-  const backupPath = path.join(DATA_DIR, `app.before-cluster-join-${Date.now()}-${crypto.randomUUID().slice(0, 8)}.sqlite`);
+  const backupPath = path.join(
+    DATA_DIR,
+    `app.before-cluster-join-${Date.now()}-${crypto.randomUUID().slice(0, 8)}.sqlite`
+  );
   await getDb().backup(backupPath);
   transaction(() => {
     runUncaptured('DELETE FROM replication_peer_progress');

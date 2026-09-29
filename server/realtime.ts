@@ -1,12 +1,4 @@
-import type {
-  AppSettings,
-  Label,
-  LapRecord,
-  RaceEvent,
-  RaceState,
-  Runner,
-  TemporaryTeam,
-} from '../shared/schemas.js';
+import type { AppSettings, Label, LapRecord, RaceEvent, RaceState, Runner, TemporaryTeam } from '../shared/schemas.js';
 
 /** Socket.IO events the server emits; the event name is `type`. */
 type RealtimeEvent =

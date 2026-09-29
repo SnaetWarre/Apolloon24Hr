@@ -16,18 +16,21 @@ import {
 import type { LapRecord } from '../src/types';
 
 test('historical race parser validates and derives individual lap durations', () => {
-  const race = parseHistoricalRace(JSON.stringify({
-    teams: [
-      { teamId: 4, lapTimes: [80_000, 162_000] },
-      { teamId: 1, lapTimes: [75_000, 151_000, 228_000] },
-    ],
-  }));
-
-  assert.deepEqual(race.teams.map((team) => team.teamId), [1, 4]);
-  assert.deepEqual(race.teams[0].lapDurationsMs, [75_000, 76_000, 77_000]);
-  const raceWithQuivrDuplicate = parseHistoricalRace(
-    '[{"teamId":18,"lapTimes":[90000,80000,90000]}]'
+  const race = parseHistoricalRace(
+    JSON.stringify({
+      teams: [
+        { teamId: 4, lapTimes: [80_000, 162_000] },
+        { teamId: 1, lapTimes: [75_000, 151_000, 228_000] },
+      ],
+    })
   );
+
+  assert.deepEqual(
+    race.teams.map((team) => team.teamId),
+    [1, 4]
+  );
+  assert.deepEqual(race.teams[0].lapDurationsMs, [75_000, 76_000, 77_000]);
+  const raceWithQuivrDuplicate = parseHistoricalRace('[{"teamId":18,"lapTimes":[90000,80000,90000]}]');
   assert.deepEqual(raceWithQuivrDuplicate.teams[0].cumulativeLapTimesMs, [80_000, 90_000]);
 });
 
@@ -65,7 +68,10 @@ test('live filtering and projection use Apolloon lap records without file conver
   const filteredLaps = validLiveLaps(laps, raceStartedAt, 55, 140);
   const flatPaces = buildTargetPaces(720, null);
 
-  assert.deepEqual(filteredLaps.map((raceLap) => raceLap.id), ['valid-1', 'valid-2']);
+  assert.deepEqual(
+    filteredLaps.map((raceLap) => raceLap.id),
+    ['valid-1', 'valid-2']
+  );
   assert.equal(targetLapCountAt(flatPaces, 12), 360);
   assert.equal(Math.round(projectedLapCount(360, 12, flatPaces)), 720);
 
@@ -82,9 +88,7 @@ test('live filtering and projection use Apolloon lap records without file conver
 });
 
 test('bundled Quivr 2025 data is valid and contains the Apolloon and VTK reference teams', () => {
-  const bundledReference = parseHistoricalRace(
-    fs.readFileSync('public/reference/quivr-2025-lap-times.json', 'utf8')
-  );
+  const bundledReference = parseHistoricalRace(fs.readFileSync('public/reference/quivr-2025-lap-times.json', 'utf8'));
 
   assert.equal(bundledReference.teams.length, 21);
   assert.equal(bundledReference.teams.find((team) => team.teamId === 1)?.cumulativeLapTimesMs.length, 1_095);

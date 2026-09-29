@@ -13,10 +13,6 @@ export function observeDisplayHistory(
 
   return {
     knownIds: new Set(currentIds),
-    shouldAnnounceLatest: Boolean(
-      previouslyKnownIds &&
-        latestRelevantId &&
-        !previouslyKnownIds.has(latestRelevantId)
-    ),
+    shouldAnnounceLatest: Boolean(previouslyKnownIds && latestRelevantId && !previouslyKnownIds.has(latestRelevantId)),
   };
 }

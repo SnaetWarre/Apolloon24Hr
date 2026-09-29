@@ -47,7 +47,9 @@ export function ThemeSwitch() {
         return (
           <button
             key={option.value}
-            ref={(element) => { buttonRefs.current[index] = element; }}
+            ref={(element) => {
+              buttonRefs.current[index] = element;
+            }}
             type="button"
             role="radio"
             aria-checked={checked}

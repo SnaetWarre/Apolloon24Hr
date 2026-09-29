@@ -11,22 +11,13 @@ export function deriveSystemStatus(
 ): SystemStatus | null {
   const backupOverdue = Boolean(
     cluster?.backup.enabled &&
-      (!cluster.backup.latest ||
-        now - cluster.backup.latest.createdAt > cluster.backup.intervalMs * 3)
+    (!cluster.backup.latest || now - cluster.backup.latest.createdAt > cluster.backup.intervalMs * 3)
   );
   const backupUnhealthy = Boolean(
-    cluster &&
-      (!cluster.backup.enabled ||
-        cluster.backup.lastError ||
-        cluster.backup.diskLow ||
-        backupOverdue)
+    cluster && (!cluster.backup.enabled || cluster.backup.lastError || cluster.backup.diskLow || backupOverdue)
   );
-  const hasSynchronizedReplica = Boolean(
-    cluster?.peers.some((peer) => peer.reachable && peer.synchronized)
-  );
-  const replicationDegraded = Boolean(
-    cluster?.enabled && (!hasSynchronizedReplica || cluster.pendingOperations > 0)
-  );
+  const hasSynchronizedReplica = Boolean(cluster?.peers.some((peer) => peer.reachable && peer.synchronized));
+  const replicationDegraded = Boolean(cluster?.enabled && (!hasSynchronizedReplica || cluster.pendingOperations > 0));
   return buildSystemStatus({
     cluster,
     error,

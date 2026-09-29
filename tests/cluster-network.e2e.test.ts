@@ -49,12 +49,14 @@ async function udpSocket() {
   return socket;
 }
 
-async function startBackend(options: {
-  retryMs?: number;
-  timeoutMs?: number;
-  discoveryPort?: number;
-  syncIntervalMs?: number;
-} = {}) {
+async function startBackend(
+  options: {
+    retryMs?: number;
+    timeoutMs?: number;
+    discoveryPort?: number;
+    syncIntervalMs?: number;
+  } = {}
+) {
   const port = await unusedTcpPort();
   const reservation = await udpSocket();
   const discoveryPort = options.discoveryPort ?? reservation.address().port;
@@ -88,8 +90,12 @@ async function startBackend(options: {
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
-  child.stdout.on('data', (chunk) => { serverOutput += chunk; });
-  child.stderr.on('data', (chunk) => { serverOutput += chunk; });
+  child.stdout.on('data', (chunk) => {
+    serverOutput += chunk;
+  });
+  child.stderr.on('data', (chunk) => {
+    serverOutput += chunk;
+  });
   const baseUrl = `http://127.0.0.1:${port}`;
   const stop = async () => {
     if (child.exitCode === null) {
@@ -130,10 +136,18 @@ async function startPeer(options: { advertisedUrl?: string; delayMs?: number; ho
     exchanges += 1;
     const reply = () => {
       res.setHeader('content-type', 'application/json');
-      res.end(JSON.stringify({
-        protocol: 3, compatibility, clusterId, hostId,
-        url: advertisedUrl || baseUrl, vector: {}, operations: [], sentAt: Date.now(),
-      }));
+      res.end(
+        JSON.stringify({
+          protocol: 3,
+          compatibility,
+          clusterId,
+          hostId,
+          url: advertisedUrl || baseUrl,
+          vector: {},
+          operations: [],
+          sentAt: Date.now(),
+        })
+      );
     };
     if (replyDelayMs) {
       const pendingReply = setTimeout(() => {
@@ -159,13 +173,26 @@ async function startPeer(options: { advertisedUrl?: string; delayMs?: number; ho
 
 async function announce(discoveryPort: number, url: string, hostId = 'moving-laptop') {
   const socket = await udpSocket();
-  const packet = Buffer.from(JSON.stringify(signDiscoveryPayload({
-    app: 'apolloon', protocol: 3, compatibility, clusterId, hostId,
-    url, vector: {}, sentAt: Date.now(),
-  }, clusterSecret)));
+  const packet = Buffer.from(
+    JSON.stringify(
+      signDiscoveryPayload(
+        {
+          app: 'apolloon',
+          protocol: 3,
+          compatibility,
+          clusterId,
+          hostId,
+          url,
+          vector: {},
+          sentAt: Date.now(),
+        },
+        clusterSecret
+      )
+    )
+  );
   try {
     await new Promise<void>((resolve, reject) => {
-      socket.send(packet, discoveryPort, '127.0.0.1', (error) => error ? reject(error) : resolve());
+      socket.send(packet, discoveryPort, '127.0.0.1', (error) => (error ? reject(error) : resolve()));
     });
   } finally {
     socket.close();
@@ -228,14 +255,21 @@ test('a connected peer falls back to its other discovered interface after transp
 
 async function forwardBackend(targetUrl: string, bindAddress: string, port = 0) {
   const proxy = http.createServer((req, res) => {
-    const upstream = http.request(new URL(req.url || '/', targetUrl), {
-      method: req.method,
-      headers: req.headers,
-    }, (upstreamResponse) => {
-      res.writeHead(upstreamResponse.statusCode || 502, upstreamResponse.headers);
-      upstreamResponse.pipe(res);
+    const upstream = http.request(
+      new URL(req.url || '/', targetUrl),
+      {
+        method: req.method,
+        headers: req.headers,
+      },
+      (upstreamResponse) => {
+        res.writeHead(upstreamResponse.statusCode || 502, upstreamResponse.headers);
+        upstreamResponse.pipe(res);
+      }
+    );
+    upstream.on('error', () => {
+      res.writeHead(502);
+      res.end();
     });
-    upstream.on('error', () => { res.writeHead(502); res.end(); });
     res.on('close', () => upstream.destroy());
     req.pipe(upstream);
   });
@@ -261,9 +295,10 @@ test('running databases catch up both ways after their peer endpoint moves witho
   const oldAddress = process.platform === 'linux' ? '127.0.0.2' : '127.0.0.1';
   const newAddress = process.platform === 'linux' ? '127.0.0.3' : '127.0.0.1';
   let replicaRoute = await forwardBackend(replica.baseUrl, oldAddress);
-  const clientFor = (url: string) => createTRPCClient<AppRouter>({
-    links: [httpBatchLink({ url: `${url}/trpc` })],
-  });
+  const clientFor = (url: string) =>
+    createTRPCClient<AppRouter>({
+      links: [httpBatchLink({ url: `${url}/trpc` })],
+    });
   const controllerClient = clientFor(controller.baseUrl);
   const replicaClient = clientFor(replica.baseUrl);
   const replicaHostId = (await replica.status()).hostId;
@@ -278,19 +313,23 @@ test('running databases catch up both ways after their peer endpoint moves witho
     await waitUntil(async () => (await runnerIds(replica.baseUrl)).includes(beforeMove.id));
     await replicaRoute.stop();
     await waitUntil(async () => (await controller.status()).connectedHosts === 1);
-    const localWrite = await controllerClient.runners.create.mutate({ name: 'Controller offline', runnerNumber: 'MOVE-1' });
+    const localWrite = await controllerClient.runners.create.mutate({
+      name: 'Controller offline',
+      runnerNumber: 'MOVE-1',
+    });
     const remoteWrite = await replicaClient.runners.create.mutate({ name: 'Replica offline', runnerNumber: 'MOVE-2' });
-    replicaRoute = await forwardBackend(
-      replica.baseUrl, newAddress, oldAddress === newAddress ? 0 : replicaRoute.port
-    );
+    replicaRoute = await forwardBackend(replica.baseUrl, newAddress, oldAddress === newAddress ? 0 : replicaRoute.port);
     await announce(controller.discoveryPort, replicaRoute.url, replicaHostId);
     const expectedIds = [beforeMove.id, localWrite.id, remoteWrite.id].sort();
     await waitUntil(async () => {
       const [controllerIds, replicaIds] = await Promise.all([
-        runnerIds(controller.baseUrl), runnerIds(replica.baseUrl),
+        runnerIds(controller.baseUrl),
+        runnerIds(replica.baseUrl),
       ]);
-      return JSON.stringify(controllerIds) === JSON.stringify(expectedIds) &&
-        JSON.stringify(replicaIds) === JSON.stringify(expectedIds);
+      return (
+        JSON.stringify(controllerIds) === JSON.stringify(expectedIds) &&
+        JSON.stringify(replicaIds) === JSON.stringify(expectedIds)
+      );
     });
     const status = await controller.status();
     assert.equal(status.connectedHosts, 2);
@@ -324,25 +363,28 @@ test('sync keeps the reachable interface when a peer advertises another interfac
   }
 });
 
-for (const [outcome, delayMs] of [['reply', 400], ['timeout', 2_000]] as const) {
-test(`a late ${outcome} from the old address cannot undo rediscovery`, async () => {
-  const backend = await startBackend({ timeoutMs: 1_000, retryMs: 5_000 });
-  const oldPeer = await startPeer({ delayMs });
-  const newPeer = await startPeer();
-  try {
-    await announce(backend.discoveryPort, oldPeer.baseUrl);
-    await waitUntil(() => oldPeer.exchanges() >= 1);
-    await announce(backend.discoveryPort, newPeer.baseUrl);
-    await waitUntil(() => newPeer.exchanges() >= 1, 1_500);
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    const status = await backend.status();
-    assert.equal(status.connectedHosts, 2);
-    assert.equal(status.knownHosts, 2);
-    assert.equal(status.peers[0].url, newPeer.baseUrl);
-  } finally {
-    await Promise.all([backend.stop(), oldPeer.stop(), newPeer.stop()]);
-  }
-});
+for (const [outcome, delayMs] of [
+  ['reply', 400],
+  ['timeout', 2_000],
+] as const) {
+  test(`a late ${outcome} from the old address cannot undo rediscovery`, async () => {
+    const backend = await startBackend({ timeoutMs: 1_000, retryMs: 5_000 });
+    const oldPeer = await startPeer({ delayMs });
+    const newPeer = await startPeer();
+    try {
+      await announce(backend.discoveryPort, oldPeer.baseUrl);
+      await waitUntil(() => oldPeer.exchanges() >= 1);
+      await announce(backend.discoveryPort, newPeer.baseUrl);
+      await waitUntil(() => newPeer.exchanges() >= 1, 1_500);
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      const status = await backend.status();
+      assert.equal(status.connectedHosts, 2);
+      assert.equal(status.knownHosts, 2);
+      assert.equal(status.peers[0].url, newPeer.baseUrl);
+    } finally {
+      await Promise.all([backend.stop(), oldPeer.stop(), newPeer.stop()]);
+    }
+  });
 }
 
 test('inbound exchanges use the source interface instead of an unrelated advertised IP', async () => {
@@ -355,8 +397,14 @@ test('inbound exchanges use the source interface instead of an unrelated adverti
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-apolloon-cluster-secret': clusterSecret },
       body: JSON.stringify({
-        protocol: 3, compatibility, clusterId, hostId: peer.hostId,
-        url: unrelatedInterface.toString(), vector: {}, operations: [], sentAt: Date.now(),
+        protocol: 3,
+        compatibility,
+        clusterId,
+        hostId: peer.hostId,
+        url: unrelatedInterface.toString(),
+        vector: {},
+        operations: [],
+        sentAt: Date.now(),
       }),
     });
     assert.equal(response.status, 200);

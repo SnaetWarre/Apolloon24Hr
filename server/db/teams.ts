@@ -145,7 +145,12 @@ export function setTemporaryTeamActive(labelId: string, active: boolean, nowMs =
   return requireTemporaryTeam(labelId);
 }
 
-export function setTemporaryTeamSchedule(labelId: string, startsAt: number, endsAt: number, ownerHostId: string | null = null): TemporaryTeam {
+export function setTemporaryTeamSchedule(
+  labelId: string,
+  startsAt: number,
+  endsAt: number,
+  ownerHostId: string | null = null
+): TemporaryTeam {
   if (!Number.isSafeInteger(startsAt) || !Number.isSafeInteger(endsAt) || startsAt < 0 || endsAt <= startsAt) {
     throw new Error('Het einduur moet na het beginuur liggen');
   }

@@ -5,14 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const builderCli = path.join(
-  repoRoot,
-  'node_modules',
-  'electron-builder',
-  'out',
-  'cli',
-  'cli.js'
-);
+const builderCli = path.join(repoRoot, 'node_modules', 'electron-builder', 'out', 'cli', 'cli.js');
 const sqliteBindingPath = path.join(
   repoRoot,
   'node_modules',

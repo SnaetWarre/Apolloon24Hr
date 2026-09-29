@@ -106,7 +106,8 @@ export function describeElevationFailure(platform: NodeJS.Platform, exitCode: nu
     if (output.includes('authentication agent')) {
       return 'Er kon geen wachtwoordvenster openen: op deze Linux-desktop draait geen polkit-agent. Start er een (bijvoorbeeld polkit-kde-authentication-agent-1 of hyprpolkitagent) en probeer opnieuw, of gebruik het Linux-script hieronder.';
     }
-    if (exitCode === 126) return 'De toestemming is geweigerd of het wachtwoordvenster werd gesloten. Er is niets veranderd.';
+    if (exitCode === 126)
+      return 'De toestemming is geweigerd of het wachtwoordvenster werd gesloten. Er is niets veranderd.';
     if (exitCode === 127) return 'Het wachtwoord werd niet aanvaard. Er is niets veranderd.';
   }
   if (platform === 'win32') {
@@ -385,7 +386,13 @@ type LinuxNetState = {
 };
 
 function readLinuxNetState(iface: string, address: string): LinuxNetState {
-  const state: LinuxNetState = { connection: null, connectionType: null, dhcp: null, prefixLength: null, gateway: null };
+  const state: LinuxNetState = {
+    connection: null,
+    connectionType: null,
+    dhcp: null,
+    prefixLength: null,
+    gateway: null,
+  };
   if (!toolAvailable('nmcli')) return state;
   try {
     const active = readNmActiveConnections();
@@ -497,8 +504,9 @@ export function getNetProfile(): NetProfile {
   const adapters: NetAdapterProfile[] = currentLanNetworkEndpoints().map((endpoint) => {
     const alias = aliasByAddress.get(endpoint.address) || '';
     const aliasKey = alias.toLowerCase();
-    let dhcp: boolean | null = alias ? dhcpByAlias.get(aliasKey) ?? null : null;
-    let prefixLength: number | null = (alias ? prefixByAliasIp.get(`${aliasKey}|${endpoint.address}`) : undefined) ?? 24;
+    let dhcp: boolean | null = alias ? (dhcpByAlias.get(aliasKey) ?? null) : null;
+    let prefixLength: number | null =
+      (alias ? prefixByAliasIp.get(`${aliasKey}|${endpoint.address}`) : undefined) ?? 24;
     let connection: string | null = null;
     if (alias && platform === 'linux') {
       const linux = linuxState(alias, endpoint.address);
@@ -611,7 +619,12 @@ function launchElevatedMacOs(innerCommand: string): ElevationOutcome {
   return outcome;
 }
 
-export function buildLinuxSetStaticScript(connection: string, ip: string, prefixLength: number, gateway: string | null): string {
+export function buildLinuxSetStaticScript(
+  connection: string,
+  ip: string,
+  prefixLength: number,
+  gateway: string | null
+): string {
   const quoted = shQuote(connection);
   const gatewayPart = gateway ? ` ipv4.gateway ${gateway}` : '';
   return [
@@ -657,7 +670,9 @@ function buildWindowsSetStaticScript(ip: string, prefixLength: number, gateway: 
     `Get-NetRoute -InterfaceIndex $ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.DestinationPrefix -eq '0.0.0.0/0' } | ForEach-Object { Remove-NetRoute -InterfaceIndex $ifIndex -DestinationPrefix $_.DestinationPrefix -NextHop $_.NextHop -Confirm:$false -ErrorAction SilentlyContinue }`,
     `New-NetIPAddress -InterfaceIndex $ifIndex -IPAddress '${ip}' -PrefixLength ${prefixLength}${gatewayArgument} | Out-Null`,
     `Set-NetIPInterface -InterfaceIndex $ifIndex -Dhcp Disabled | Out-Null`,
-    gateway ? `# Router-LAN: laat DNS met rust.` : `Set-DnsClientServerAddress -InterfaceIndex $ifIndex -ResetServerAddresses | Out-Null`,
+    gateway
+      ? `# Router-LAN: laat DNS met rust.`
+      : `Set-DnsClientServerAddress -InterfaceIndex $ifIndex -ResetServerAddresses | Out-Null`,
     `foreach ($rule in @(@{ Name = 'Apolloon TCP ${APP_PORT}'; Proto = 'TCP'; Port = ${APP_PORT} }, @{ Name = 'Apolloon UDP ${DISCOVERY_PORT}'; Proto = 'UDP'; Port = ${DISCOVERY_PORT} })) {`,
     `  if (-not (Get-NetFirewallRule -DisplayName $rule.Name -ErrorAction SilentlyContinue)) {`,
     `    New-NetFirewallRule -DisplayName $rule.Name -Direction Inbound -Protocol $rule.Proto -LocalPort $rule.Port -Action Allow -Profile Any | Out-Null`,
