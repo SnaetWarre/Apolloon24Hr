@@ -171,7 +171,7 @@ function ClusterPanel({
             </div>
           )}
           <details className="host-hint cluster-manual-join">
-            <summary>Laptop niet in de lijst? Vul het adres in</summary>
+            <summary className="disclosure">Laptop niet in de lijst? Vul het adres in</summary>
             <p className="panel-copy">
               Het adres staat onderaan de zijbalk van die laptop. Deze laptop heeft adres <strong>{hostUrl}</strong>.
             </p>

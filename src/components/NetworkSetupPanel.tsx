@@ -358,8 +358,10 @@ export function NetworkSetupPanel() {
 
       {profile.elevateMethod && (
         <details className="host-hint">
-          <summary>
-            <strong>Na het evenement: adres weer automatisch maken</strong> (hiervoor moet je twee keer bevestigen)
+          <summary className="disclosure">
+            <span>
+              <strong>Na het evenement: adres weer automatisch maken</strong> (hiervoor moet je twee keer bevestigen)
+            </span>
           </summary>
           <p className="panel-copy">
             Zolang het adres vast staat, werkt school-wifi vaak <em>niet</em>. Zet het daarom na het evenement terug.

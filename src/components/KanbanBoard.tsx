@@ -12,6 +12,7 @@ import {
 } from '@dnd-kit/core';
 import { useAppActions, useAppData } from '../app/index';
 import { useBoardSearch } from '../app/boardSearch';
+import { useArrivals } from '../lib/motion';
 import { formatDurationMs, formatElapsedSeconds, nowMs } from '../lib/time';
 import { useSecondTick } from '../lib/useClockTick';
 import { kanbanCollisionDetection, resolveKanbanDrop } from '../lib/kanban';
@@ -174,6 +175,13 @@ export const KanbanBoard: React.FC<{ onOpenProfile: (runnerId: string) => void }
   const dropAction =
     draggedRunnerId && dropTargetId ? resolveKanbanDrop(draggedRunnerId, dropTargetId, filteredRunners) : null;
 
+  // A runner counts as arrived in a lane when the pair (lane, runner) is new, whatever the filter shows.
+  const arrivedIds = useArrivals(
+    runners
+      .filter((runner) => runner.status === 'warming_up' || runner.status === 'waiting' || runner.status === 'ran')
+      .map((runner) => `${runner.status}:${runner.id}`)
+  );
+
   function renderRunnerRow(runner: Runner) {
     const queuePosition = queuePositionByRunnerId.get(runner.id) ?? -1;
     const insertionEdge =
@@ -188,6 +196,7 @@ export const KanbanBoard: React.FC<{ onOpenProfile: (runnerId: string) => void }
         runner={runner}
         queuePosition={queuePosition}
         actionBusy={actionBusy}
+        arrived={arrivedIds.has(`${runner.status}:${runner.id}`)}
         insertionEdge={insertionEdge}
         onOpenProfile={onOpenProfile}
         onAdvance={() =>
@@ -253,7 +262,7 @@ export const KanbanBoard: React.FC<{ onOpenProfile: (runnerId: string) => void }
           })}
         </div>
         <details className="queue-completed">
-          <summary>
+          <summary className="disclosure">
             Heeft gelopen <span>{ranSorted.length}</span>
             <small>Terug laten opwarmen of verbergen</small>
           </summary>
@@ -306,6 +315,7 @@ function QueueLane({
   children: React.ReactNode;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id });
+  const changed = useArrivals([`count:${count}`]);
   return (
     <section
       ref={setNodeRef}
@@ -319,7 +329,7 @@ function QueueLane({
             {dropHint}
           </span>
         ) : (
-          <span>
+          <span key={count} className={changed.has(`count:${count}`) ? 'value-tick' : undefined}>
             {count}
             {totalCount !== undefined ? ` van ${totalCount}` : ''}{' '}
             {count === 1 && totalCount === undefined ? 'loper' : 'lopers'}
@@ -335,6 +345,7 @@ function QueueRunnerRow({
   runner,
   queuePosition,
   actionBusy,
+  arrived,
   onOpenProfile,
   onAdvance,
   insertionEdge,
@@ -343,6 +354,7 @@ function QueueRunnerRow({
   runner: Runner;
   queuePosition: number;
   actionBusy: boolean;
+  arrived: boolean;
   onOpenProfile: (runnerId: string) => void;
   onAdvance: () => void;
   insertionEdge?: 'before' | 'after';
@@ -370,7 +382,7 @@ function QueueRunnerRow({
         onKeyDown={(event) => {
           if (event.target === event.currentTarget) listeners?.onKeyDown?.(event);
         }}
-        className={`queue-runner${isDragging ? ' queue-runner--dragging' : ''}${queuePosition === 0 ? ' queue-runner--next' : ''}`}
+        className={`queue-runner${isDragging ? ' queue-runner--dragging' : ''}${queuePosition === 0 ? ' queue-runner--next' : ''}${arrived ? ' queue-runner--arrived' : ''}`}
       >
         <span className="queue-drag" aria-hidden="true">
           ⠿

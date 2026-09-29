@@ -21,7 +21,7 @@ export function RecentLapsTable({
       <LapReviewTable laps={recentLaps} minimumLapSeconds={minimumLapSeconds} maximumLapSeconds={maximumLapSeconds} />
       {suspiciousLaps.length > 0 && (
         <details className="tactics-suspicious-details">
-          <summary>Alle {suspiciousLaps.length} verdachte rondes bekijken</summary>
+          <summary className="disclosure">Alle {suspiciousLaps.length} verdachte rondes bekijken</summary>
           <LapReviewTable
             laps={suspiciousLaps}
             minimumLapSeconds={minimumLapSeconds}

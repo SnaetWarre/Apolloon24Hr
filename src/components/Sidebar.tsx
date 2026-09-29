@@ -155,7 +155,7 @@ function HostAddress() {
     >
       <span className="visually-hidden">Adres voor andere laptops kopiëren:</span>
       <span className="sidebar-row__address">{copied ? 'Gekopieerd' : host.url.replace(/^https?:\/\//, '')}</span>
-      <Icon name={copied ? 'check' : 'copy'} size={14} />
+      <Icon name={copied ? 'check' : 'copy'} size={14} className={copied ? 'icon--pop' : undefined} />
     </button>
   );
 }

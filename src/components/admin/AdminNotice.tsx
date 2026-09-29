@@ -36,12 +36,13 @@ export function useAdminAction() {
 
 export function AdminNoticeBanner({ notice }: { notice: AdminNotice | null }) {
   if (!notice) return null;
+  // Keyed on the text, so a repeated action drops its notice in again.
   return notice.tone === 'error' ? (
-    <div className="warning-banner warning-banner--blocking" role="alert">
+    <div key={notice.text} className="warning-banner warning-banner--blocking" role="alert">
       {notice.text}
     </div>
   ) : (
-    <div className="success-banner" role="status" aria-live="polite">
+    <div key={notice.text} className="success-banner" role="status" aria-live="polite">
       {notice.text}
     </div>
   );

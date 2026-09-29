@@ -6,6 +6,7 @@ import {
   normalizeClockInterval,
   SECOND_DISPLAY_INTERVAL_MS,
 } from '../src/lib/useClockTick.ts';
+import { createArrivalState, trackArrivals } from '../src/lib/motion.ts';
 import { createUuid } from '../src/lib/uuid.ts';
 import { relativeFileWithinRoot } from '../server/static-files.ts';
 import path from 'node:path';
@@ -53,6 +54,25 @@ test('the outside display announces only history that is new since it opened', (
   );
   assert.ok(realtimeHistory);
   assert.equal(realtimeHistory.shouldAnnounceLatest, true);
+});
+
+test('only items that arrive after the first render with data count as new', () => {
+  const state = createArrivalState();
+  assert.deepEqual([...trackArrivals(state, ['a', 'b'], false, 1_000)], [], 'nothing is new while loading');
+  assert.deepEqual([...trackArrivals(state, ['a', 'b'], true, 2_000)], [], 'the first data seeds silently');
+  assert.deepEqual([...trackArrivals(state, ['c', 'a', 'b'], true, 3_000)], ['c'], 'a later item is new');
+  assert.deepEqual([...trackArrivals(state, ['c', 'a', 'b'], true, 3_500)], ['c'], 'and stays new for a moment');
+  assert.deepEqual([...trackArrivals(state, ['c', 'a', 'b'], true, 5_000)], [], 'then settles');
+  assert.deepEqual([...trackArrivals(state, ['c', 'b'], true, 6_000)], [], 'leaving is silent');
+  assert.deepEqual([...trackArrivals(state, ['a', 'c', 'b'], true, 7_000)], ['a'], 'coming back arrives again');
+
+  const emptyStart = createArrivalState();
+  assert.deepEqual([...trackArrivals(emptyStart, [], true, 1_000)], []);
+  assert.deepEqual(
+    [...trackArrivals(emptyStart, ['first'], true, 2_000)],
+    ['first'],
+    'the first lap of a race arrives'
+  );
 });
 
 test('packaged static files stay relative to the AppImage mount root', () => {

@@ -1,5 +1,7 @@
 import React from 'react';
 import { useChartTheme } from '../lib/chartPalette';
+import { useArrivals } from '../lib/motion';
+import { Icon } from './Icon';
 import { SectionNavigation } from './SectionNavigation';
 import { PageHeader } from './PageHeader';
 import { useAppData, useRaceHistory } from '../app/index';
@@ -71,6 +73,8 @@ export function KobeTacticsView() {
     () => localStorage.getItem(HISTORICAL_RACE_NAME_STORAGE_KEY) || BUNDLED_REFERENCE_NAME
   );
   const [historicalError, setHistoricalError] = React.useState<string | null>(null);
+  // A section chosen after the page opened rises in; the first one is simply there.
+  const sectionChanged = useArrivals([`section:${section}`]).has(`section:${section}`);
 
   React.useEffect(() => {
     if (historicalRace) return;
@@ -146,26 +150,28 @@ export function KobeTacticsView() {
         onSectionChange={setSection}
       />
 
-      {section === 'live' ? (
-        <LiveTacticsSection
-          laps={laps}
-          raceStartedAt={race.raceStartedAt}
-          currentTimestamp={race.raceFinishedAt ?? nowMs()}
-          historicalRace={historicalRace}
-          historicalSourceName={historicalSourceName}
-          historicalError={historicalError}
-          onHistoricalRaceLoad={storeHistoricalRace}
-          onHistoricalRaceClear={clearHistoricalRace}
-        />
-      ) : (
-        <HistoricalAnalysisSection
-          historicalRace={historicalRace}
-          historicalSourceName={historicalSourceName}
-          historicalError={historicalError}
-          onHistoricalRaceLoad={storeHistoricalRace}
-          onHistoricalRaceClear={clearHistoricalRace}
-        />
-      )}
+      <div key={section} className={`tactics-section${sectionChanged ? ' rise-in' : ''}`}>
+        {section === 'live' ? (
+          <LiveTacticsSection
+            laps={laps}
+            raceStartedAt={race.raceStartedAt}
+            currentTimestamp={race.raceFinishedAt ?? nowMs()}
+            historicalRace={historicalRace}
+            historicalSourceName={historicalSourceName}
+            historicalError={historicalError}
+            onHistoricalRaceLoad={storeHistoricalRace}
+            onHistoricalRaceClear={clearHistoricalRace}
+          />
+        ) : (
+          <HistoricalAnalysisSection
+            historicalRace={historicalRace}
+            historicalSourceName={historicalSourceName}
+            historicalError={historicalError}
+            onHistoricalRaceLoad={storeHistoricalRace}
+            onHistoricalRaceClear={clearHistoricalRace}
+          />
+        )}
+      </div>
     </>
   );
 }
@@ -238,6 +244,7 @@ function LiveTacticsSection({
   if (raceStartedAt == null) {
     return (
       <section className="panel tactics-empty-state">
+        <Icon name="tactics" size={28} />
         <span className="page-kicker">Live race</span>
         <h2>Start eerst de wedstrijd</h2>
         <p>Zodra de race gestart is, verschijnen de live vergelijking en het doelverloop hier automatisch.</p>
@@ -438,7 +445,7 @@ function LiveTacticsSection({
       </div>
 
       <details className="panel tactics-hour-editor">
-        <summary>Doeltempo per uur aanpassen</summary>
+        <summary className="disclosure">Doeltempo per uur aanpassen</summary>
         <div className="tactics-hourly-header">
           <div>
             <strong>Doeltempo per race-uur</strong>
@@ -481,7 +488,7 @@ function LiveTacticsSection({
       </details>
 
       <details className="tactics-analysis-details">
-        <summary>Tempotrends, vergelijking &amp; rondecontrole</summary>
+        <summary className="disclosure">Tempotrends, vergelijking &amp; rondecontrole</summary>
         <section className="panel">
           <TacticsSectionHeader
             kicker="Tempo"
@@ -520,7 +527,7 @@ function LiveTacticsSection({
               title="Laatste rondes"
               text="Alle rondes, ook die buiten de geldige grenzen vallen en dus niet meetellen."
             />
-            <span className="tactics-source-pill">Live API</span>
+            <span className="status-badge">Live gegevens</span>
           </div>
           <RecentLapsTable laps={laps} minimumLapSeconds={minimumLapSeconds} maximumLapSeconds={maximumLapSeconds} />
         </section>

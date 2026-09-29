@@ -1,4 +1,5 @@
 import { chartTooltipColors, useChartTheme, workspaceChartPalette } from '../../lib/chartPalette';
+import { useArrivals } from '../../lib/motion';
 import React from 'react';
 import {
   BarController,
@@ -880,10 +881,13 @@ export function NumberControl({
 }
 
 export function DeepStat({ label, value, detail }: { label: string; value: string; detail: string }) {
+  const changed = useArrivals([value]).has(value);
   return (
     <div className="stat-panel tactics-stat">
       <span className="muted-label">{label}</span>
-      <strong>{value}</strong>
+      <strong key={value} className={changed ? 'value-tick' : undefined}>
+        {value}
+      </strong>
       <small>{detail}</small>
     </div>
   );
