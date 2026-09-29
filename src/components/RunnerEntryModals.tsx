@@ -350,7 +350,7 @@ export function RunnerAddModal({ onClose, onAdded }: { onClose: () => void; onAd
         </div>
 
         <details className="runner-extra-details">
-          <summary>
+          <summary className="disclosure">
             Extra gegevens <span>Doel, historische tijden en notities</span>
           </summary>
           <div className="form-grid">

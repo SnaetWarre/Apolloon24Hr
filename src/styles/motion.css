@@ -138,13 +138,14 @@
   }
 }
 
-/* A highlight wash that fades away: this row just arrived. */
+/* A highlight wash that fades away: this row just arrived.
+   Set --wash-to to the row's resting colour when that is not transparent. */
 @keyframes wash-out {
   from {
     background-color: var(--wash, var(--brand-wash));
   }
   to {
-    background-color: transparent;
+    background-color: var(--wash-to, transparent);
   }
 }
 

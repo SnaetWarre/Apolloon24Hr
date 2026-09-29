@@ -1,5 +1,6 @@
 import React from 'react';
 import { useAppData } from '../app/index';
+import { useArrivals } from '../lib/motion';
 import { getNextWaitingRunner } from '../lib/runners';
 import type { LiveAppSnapshot } from '../types';
 import { KanbanBoard } from './KanbanBoard';
@@ -21,6 +22,11 @@ export function QueuePage() {
   const activeRunner = runners.find((runner) => runner.id === race.activeRunnerId) || null;
   const nextRunner = getNextWaitingRunner(runners);
   const waitingCount = runners.filter((runner) => runner.status === 'waiting').length;
+  const activeKey = activeRunner?.id ?? 'none';
+  const nextKey = nextRunner?.id ?? 'none';
+  // Only a change after the page opened moves; the strip is still on load.
+  const changed = useArrivals([`active:${activeKey}`, `next:${nextKey}`, `waiting:${waitingCount}`]);
+  const moved = (id: string) => (changed.has(id) ? ' value-tick' : '');
 
   return (
     <>
@@ -28,7 +34,7 @@ export function QueuePage() {
       <section className="race-strip" aria-label="Wisselzone">
         <div className="race-strip__now">
           <span className="race-strip__label">Nu op de piste</span>
-          <span className="race-strip__runner">
+          <span key={activeKey} className={`race-strip__runner${moved(`active:${activeKey}`)}`}>
             {activeRunner ? <RunnerName runner={activeRunner} /> : 'Nog niemand gestart'}
           </span>
           {race.activeStartedAt && activeRunner && (
@@ -42,13 +48,13 @@ export function QueuePage() {
         </div>
         <div>
           <span className="race-strip__label">Volgende</span>
-          <span className="race-strip__runner">
+          <span key={nextKey} className={`race-strip__runner${moved(`next:${nextKey}`)}`}>
             {nextRunner ? <RunnerName runner={nextRunner} /> : 'Niemand klaar'}
           </span>
         </div>
         <div>
           <span className="race-strip__label">Klaar om te lopen</span>
-          <span className="race-strip__runner">
+          <span key={waitingCount} className={`race-strip__runner${moved(`waiting:${waitingCount}`)}`}>
             {waitingCount} {waitingCount === 1 ? 'loper' : 'lopers'}
           </span>
         </div>
