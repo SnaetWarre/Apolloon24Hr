@@ -198,6 +198,18 @@ export function createSchema(): void {
       FOREIGN KEY (runner_id) REFERENCES runners(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS cluster_members (
+      host_id TEXT PRIMARY KEY,
+      url TEXT NOT NULL,
+      added_at INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS forwarded_writes (
+      request_id TEXT PRIMARY KEY,
+      result_json TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS replication_log (
       seq INTEGER PRIMARY KEY,
       id TEXT NOT NULL UNIQUE,

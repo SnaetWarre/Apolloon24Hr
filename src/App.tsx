@@ -67,7 +67,7 @@ export function AppRoot() {
 
   return (
     <Shell switching={switching}>
-      <PrimaryUnreachableBanner />
+      <GroupProblemBanner />
       <a className="skip-link" href="#workspace">
         Naar inhoud
       </a>
@@ -135,14 +135,14 @@ function ConnectionBanner({ connectionLost, switching }: { connectionLost: boole
   );
 }
 
-/** Changes on this laptop go through the primary; say so when it cannot be reached. */
-function PrimaryUnreachableBanner() {
+/** Says so on every screen when changes cannot be saved, because too few laptops are reachable. */
+function GroupProblemBanner() {
   const { cluster } = useClusterStatus();
-  if (cluster?.role !== 'standby' || cluster.primary?.reachable) return null;
+  if (cluster?.state !== 'no-majority') return null;
   return (
-    <div className="standby-banner" role="alert">
-      <strong>De primaire laptop is niet bereikbaar.</strong> Je ziet de laatste gegevens, maar wijzigingen lukken pas
-      weer als die terug is. Is die uitgevallen, neem dan over in Beheer › Systeem.
+    <div className="group-banner" role="alert">
+      <strong>Te weinig laptops bereikbaar.</strong> Je ziet de laatste gegevens, maar wijzigingen worden pas weer
+      bewaard als een tweede laptop terug is. Zet die aan of controleer de netwerkkabel.
     </div>
   );
 }

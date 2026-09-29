@@ -627,7 +627,7 @@ input[type="radio"] {
   font-weight: 600;
 }
 
-.standby-banner {
+.group-banner {
   padding: 8px var(--space-4);
   border-bottom: 1px solid var(--warn-line);
   background: var(--warn-wash);

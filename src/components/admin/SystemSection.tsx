@@ -1,5 +1,6 @@
 import React from 'react';
 import { useAppActions } from '../../app/index';
+import { describeGroup } from '../../lib/systemStatus';
 import { formatClockTimeMs } from '../../lib/time';
 import { useConfirm } from '../ConfirmDialog';
 import { NetworkSetupPanel } from '../NetworkSetupPanel';
@@ -48,120 +49,88 @@ export function SystemSection({
 
 function ClusterPanel({ cluster, hostUrl }: { cluster: ClusterStatus; hostUrl: string }) {
   const confirm = useConfirm();
-  const { joinPrimary, promoteToPrimary } = useAppActions();
+  const { joinGroup, continueAlone } = useAppActions();
   const { pending, notice, run } = useAdminAction();
-  const [primaryUrl, setPrimaryUrl] = React.useState('');
+  const [otherUrl, setOtherUrl] = React.useState('');
+  const group = describeGroup(cluster);
 
   async function join() {
-    const url = primaryUrl.trim();
+    const url = otherUrl.trim();
     if (!url || pending) return;
     const confirmed = await confirm({
-      title: 'Standby worden van deze laptop?',
+      title: 'Deze laptop koppelen?',
       message:
-        'Deze laptop neemt de volledige database van de primaire laptop over en geeft voortaan elke wijziging aan die laptop door. De huidige database wordt eerst als backup bewaard.',
-      confirmLabel: 'Koppelen en overnemen',
+        'Deze laptop neemt alle gegevens van de andere laptops over en werkt daarna mee. Wat nu op deze laptop staat, wordt eerst als backup bewaard.',
+      confirmLabel: 'Koppelen',
       tone: 'danger',
     });
     if (!confirmed) return;
     const result = await run(
-      () => joinPrimary(url),
-      ({ backupFile }) => `Gekoppeld als standby. De vorige database staat in de backup ${backupFile}.`,
+      () => joinGroup(url),
+      ({ backupFile }) =>
+        backupFile ? `Gekoppeld. De vorige gegevens staan in de backup ${backupFile}.` : 'Gekoppeld.',
       'Koppelen mislukt'
     );
-    if (result) setPrimaryUrl('');
+    if (result) setOtherUrl('');
   }
 
-  async function promote() {
+  async function goOnAlone() {
     if (pending) return;
-    const planned = await confirm({
-      title: 'Deze laptop primair maken?',
+    const confirmed = await confirm({
+      title: 'Alleen verder werken?',
       message:
-        'De huidige primaire laptop geeft alles door en wordt standby. Werk daarna op deze laptop en open op browserlaptops en schermen het adres van deze laptop.',
-      confirmLabel: 'Primair maken',
-    });
-    if (!planned) return;
-    const outcome = await run(
-      () => promoteToPrimary(false),
-      ({ result }) =>
-        result === 'primary-unreachable'
-          ? 'De primaire laptop is niet bereikbaar.'
-          : 'Deze laptop is nu primair. De vorige primaire laptop volgt als standby.',
-      'Overnemen mislukt'
-    );
-    if (outcome?.result !== 'primary-unreachable') return;
-
-    const emergency = await confirm({
-      title: 'Noodovername: primaire laptop onbereikbaar',
-      message:
-        'Neem alleen over als de primaire laptop echt gestopt of losgekoppeld is. Wijzigingen van de laatste seconden die nog niet gekopieerd waren, kunnen ontbreken. Komt die laptop later terug, dan volgt hij automatisch deze laptop en bewaart hij zijn eigen data in een backup.',
-      confirmLabel: 'Noodovername',
+        'Doe dit alleen als de andere laptops echt kapot of weg zijn. Staan ze nog aan, controleer dan de netwerkkabel: dan werkt alles vanzelf weer. Wijzigingen van de laatste seconden op de andere laptops kunnen ontbreken. Komen ze later terug, dan nemen ze de gegevens van deze laptop over en bewaren ze hun eigen gegevens in een backup.',
+      confirmLabel: 'Alleen verder werken',
       tone: 'danger',
     });
-    if (emergency) {
-      await run(
-        () => promoteToPrimary(true),
-        'Noodovername gelukt. Controleer de laatste rondes.',
-        'Noodovername mislukt'
-      );
-    }
+    if (!confirmed) return;
+    await run(
+      continueAlone,
+      'Deze laptop werkt alleen verder. Koppel de andere laptops opnieuw zodra dat kan.',
+      'Mislukt'
+    );
   }
 
-  const primary = cluster.primary;
   return (
     <section className="panel">
       <h2>Laptops koppelen</h2>
-      {cluster.role === 'primary' ? (
-        <>
-          <p className="panel-copy">
-            Deze laptop is <strong>primair</strong>: alle wijzigingen gebeuren hier. Adres voor andere laptops:{' '}
-            <strong>{hostUrl}</strong>.
-          </p>
-          {cluster.standbys.length ? (
-            cluster.standbys.map((standby) => (
-              <div className="host-hint cluster-peer-row" key={standby.hostId}>
-                <strong>{standby.url}</strong>
-                <span>
-                  {!standby.reachable
-                    ? `niet bereikbaar; laatst gezien om ${formatClockTimeMs(standby.lastSeenAt)}`
-                    : standby.caughtUp
-                      ? 'standby, volledig bij'
-                      : 'standby, werkt bij'}
-                </span>
-              </div>
-            ))
-          ) : (
-            <div className="host-hint">
-              Nog geen standby. Open Beheer op een tweede laptop en koppel die met het adres hierboven.
-            </div>
-          )}
-        </>
-      ) : (
-        <>
-          <p className="panel-copy">
-            Deze laptop is <strong>standby</strong>: ze houdt een volledige kopie bij en geeft wijzigingen door aan{' '}
-            <strong>{primary?.url ?? 'onbekend'}</strong>
-            {primary?.reachable
-              ? primary.lagEntries
-                ? ` en haalt nog ${primary.lagEntries} wijzigingen op.`
-                : ' en is volledig bij.'
-              : primary?.lastContactAt
-                ? `, maar die is niet bereikbaar sinds ${formatClockTimeMs(primary.lastContactAt)}.`
-                : ', maar die is nog niet bereikt.'}
-          </p>
-          <div className="form-row form-row--plain">
-            <button
-              className="btn btn--primary"
-              onClick={() => void promote()}
-              disabled={pending || Boolean(cluster.busy)}
-            >
-              {pending ? 'Bezig...' : 'Deze laptop primair maken'}
-            </button>
+      <p className="panel-copy">
+        Gekoppelde laptops hebben elk alle gegevens, en op elke laptop kan je werken. Een wijziging is pas bewaard als
+        minstens {cluster.majority === 1 ? 'deze laptop' : `${cluster.majority} laptops`} ze hebben. Valt een laptop
+        uit, dan werken de andere vanzelf verder.
+      </p>
+      <div className={`host-hint cluster-state cluster-state--${group.tone}`} role="status">
+        <strong>{group.title}</strong> · {group.detail}
+      </div>
+      {cluster.members.length > 1 &&
+        cluster.members.map((member) => (
+          <div className="host-hint cluster-peer-row" key={member.hostId}>
+            <strong>
+              {member.url.replace(/^https?:\/\//, '')}
+              {member.self && ' (deze laptop)'}
+            </strong>
+            <span>
+              {!member.reachable
+                ? 'niet bereikbaar'
+                : member.self && !cluster.writable
+                  ? 'wacht op de andere laptops'
+                  : member.leader
+                    ? 'ordent de wijzigingen'
+                    : member.caughtUp
+                      ? 'heeft alles'
+                      : 'haalt wijzigingen op'}
+            </span>
           </div>
-        </>
-      )}
-      {cluster.competingPrimaryUrl && (
+        ))}
+      {cluster.state === 'no-majority' && (
         <div className="warning-banner" role="alert">
-          Ook {cluster.competingPrimaryUrl} is primair. Koppel één van beide opnieuw als standby.
+          <span>
+            Er zijn te weinig laptops bereikbaar om iets te bewaren. Zet de andere laptops aan of controleer de kabel.
+            Zijn ze echt kapot?{' '}
+            <button className="btn btn--secondary" onClick={() => void goOnAlone()} disabled={pending}>
+              Alleen verder werken
+            </button>
+          </span>
         </div>
       )}
       {cluster.lastError && (
@@ -169,27 +138,34 @@ function ClusterPanel({ cluster, hostUrl }: { cluster: ClusterStatus; hostUrl: s
           {cluster.lastError}
         </div>
       )}
-      {cluster.role === 'primary' && (
+      {cluster.members.length === 1 ? (
         <>
-          <p className="panel-copy">Of maak deze laptop standby van een andere, primaire laptop:</p>
+          <p className="panel-copy">
+            Adres van deze laptop: <strong>{hostUrl}</strong>. Koppel een andere laptop door daar dit adres in te
+            vullen, of vul hier het adres van een laptop in die al gekoppeld is:
+          </p>
           <div className="form-row">
             <input
               className="input"
-              value={primaryUrl}
-              onChange={(event) => setPrimaryUrl(event.target.value)}
+              value={otherUrl}
+              onChange={(event) => setOtherUrl(event.target.value)}
               placeholder="http://192.168.1.20:5173"
               inputMode="url"
-              aria-label="Adres van de primaire laptop"
+              aria-label="Adres van een andere laptop"
             />
             <button
               className="btn btn--primary btn--fixed"
               onClick={() => void join()}
-              disabled={!primaryUrl.trim() || pending}
+              disabled={!otherUrl.trim() || pending || Boolean(cluster.busy)}
             >
-              {pending ? 'Bezig...' : 'Standby worden'}
+              {pending || cluster.busy ? 'Bezig...' : 'Koppelen'}
             </button>
           </div>
         </>
+      ) : (
+        <p className="panel-copy">
+          Nog een laptop koppelen? Vul op die laptop dit adres in: <strong>{hostUrl}</strong>.
+        </p>
       )}
       <div className="host-hint">
         <strong>Deze versie:</strong> Apolloon {cluster.appVersion} · schema {cluster.schemaVersion}
@@ -277,8 +253,8 @@ function BackupPanel({ backup }: { backup: BackupStatus }) {
         )}
       </div>
       <p className="panel-copy">
-        Download regelmatig een kopie naar een andere laptop of USB-stick. De standby beschermt tegen een defect
-        toestel; deze versies beschermen ook tegen een fout die naar de standby gekopieerd is.
+        Download regelmatig een kopie naar een USB-stick. De gekoppelde laptops beschermen tegen een defect toestel;
+        deze versies beschermen ook tegen een fout die naar alle laptops gekopieerd is.
       </p>
       <AdminNoticeBanner notice={notice} />
     </section>

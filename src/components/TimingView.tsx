@@ -35,8 +35,8 @@ export function TimingView() {
   const [finishConfirmStep, setFinishConfirmStep] = React.useState<0 | 1 | 2>(0);
   const handoffBusyRef = React.useRef(false);
   const confirm = useConfirm();
-  // Laps are recorded on the primary; another laptop can time while it reaches the primary.
-  const timingBlocked = cluster?.role === 'standby' && !cluster.primary?.reachable;
+  // While the laptops choose who orders the changes a press waits and then counts; without a majority nothing is saved.
+  const timingBlocked = cluster?.state === 'no-majority';
 
   const activeRunner = runners.find((runner) => runner.id === race.activeRunnerId) || null;
   const nextRunner = getNextWaitingRunner(runners);
@@ -262,8 +262,8 @@ export function TimingView() {
             {timingBlocked && (
               <div className="warning-banner warning-banner--blocking">
                 <span>
-                  <strong>De primaire laptop is niet bereikbaar.</strong> Klokken lukt weer zodra die terug is. Is die
-                  uitgevallen, neem dan over in <Link to="/admin">Beheer</Link>.
+                  <strong>Timing staat stil.</strong> Klokken lukt weer zodra een tweede laptop terug is. Zijn de andere
+                  laptops echt kapot, ga dan alleen verder in <Link to="/admin">Beheer</Link>.
                 </span>
               </div>
             )}

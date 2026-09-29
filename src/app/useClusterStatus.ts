@@ -13,7 +13,7 @@ export function useClusterStatus(): {
       if (!response.ok) throw new Error(`Systeemstatus laden mislukt (${response.status})`);
       return response.json() as Promise<ClusterStatus>;
     },
-    refetchInterval: 5_000,
+    refetchInterval: 2_000,
     refetchOnWindowFocus: true,
   });
 

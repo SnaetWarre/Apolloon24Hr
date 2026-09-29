@@ -28,7 +28,8 @@ test('standalone mode stays writable and does not expose replication', { timeout
     assert.equal(runner.runnerNumber, 'SOLO-1');
     const status = await fetchStatus(server);
     assert.equal(status.enabled, false);
-    assert.equal(status.role, 'primary');
+    assert.equal(status.role, 'leader');
+    assert.equal(status.state, 'solo');
     assert.equal(status.writable, true);
 
     const health = (await (await fetch(`${server.baseUrl}/api/health`)).json()) as {
@@ -40,8 +41,8 @@ test('standalone mode stays writable and does not expose replication', { timeout
     assert.equal(health.releaseId, 'e2e-test-release');
     assert.equal(health.database.ready, true);
 
-    const pull = await fetch(`${server.baseUrl}/api/cluster/pull`, { method: 'POST' });
-    assert.equal(pull.status, 404);
+    const append = await fetch(`${server.baseUrl}/api/cluster/append`, { method: 'POST' });
+    assert.equal(append.status, 404);
   } finally {
     await stopServer(server);
     fs.rmSync(root, { recursive: true, force: true });
@@ -65,134 +66,163 @@ test('a manual backup can be downloaded as a SQLite file', { timeout: 15_000 }, 
   }
 });
 
-test(
-  'a standby joins, passes its writes to the primary, and catches up after a restart',
-  { timeout: 40_000 },
-  async () => {
-    const root = testRoot('standby');
-    const servers: RunningServer[] = [];
-    try {
-      const primary = await startServer({ port: await freePort(), dataPath: path.join(root, 'primary') });
-      servers.push(primary);
-      let standby = await startServer({ port: await freePort(), dataPath: path.join(root, 'standby') });
-      servers.push(standby);
+test('three laptops form one group, every laptop writes, and each holds everything', { timeout: 40_000 }, async () => {
+  const root = testRoot('group');
+  const servers: RunningServer[] = [];
+  try {
+    const first = await startServer({ port: await freePort(), dataPath: path.join(root, 'first') });
+    servers.push(first);
+    await client(first).runners.create.mutate({ name: 'Before the group', runnerNumber: 'A-1' });
+    const second = await startServer({ port: await freePort(), dataPath: path.join(root, 'second') });
+    servers.push(second);
+    await client(second).runners.create.mutate({ name: 'Replaced by the join', runnerNumber: 'B-1' });
+    const joined = await client(second).cluster.join.mutate({ url: first.baseUrl });
+    assert.match(joined.backupFile ?? '', /pre-join/);
+    const third = await startServer({ port: await freePort(), dataPath: path.join(root, 'third') });
+    servers.push(third);
+    // Joining through a laptop that does not lead works too.
+    await client(third).cluster.join.mutate({ url: second.baseUrl });
+    await waitFor(async () => (await fetchStatus(first)).state === 'healthy', 10_000);
 
-      await client(primary).runners.create.mutate({ name: 'Before join', runnerNumber: 'A-1' });
-      await client(standby).runners.create.mutate({ name: 'Replaced by the join', runnerNumber: 'B-1' });
-      const joined = await client(standby).cluster.join.mutate({ primaryUrl: primary.baseUrl });
-      assert.match(joined.backupFile, /pre-join/);
-      await waitForSameState(primary, standby);
-      assert.deepEqual(
-        (await fetchState(standby)).runners.map((runner) => runner.name),
-        ['Before join']
-      );
-
-      await client(primary).runners.create.mutate({ name: 'After join', runnerNumber: 'A-2' });
-      await waitForSameState(primary, standby);
-      // A write on the standby's own screen goes through the primary and is on both once it returns.
-      await client(standby).runners.create.mutate({ name: 'Written on the standby', runnerNumber: 'B-2' });
-      for (const server of [standby, primary]) {
-        assert.ok((await fetchState(server)).runners.some((runner) => runner.name === 'Written on the standby'));
-      }
-      await waitFor(async () =>
-        (await fetchStatus(primary)).standbys.some((entry) => entry.reachable && entry.caughtUp)
-      );
-      assert.equal((await fetchStatus(standby)).primary?.url, primary.baseUrl);
-
-      // More than one pull batch arrives while the standby is offline.
-      await stopServer(standby);
-      await Promise.all(
-        Array.from({ length: 520 }, (_, index) =>
-          client(primary).runners.create.mutate({ name: `Offline write ${index}`, runnerNumber: `OFF-${index}` })
+    for (const [index, server] of servers.entries()) {
+      await client(server).runners.create.mutate({ name: `Written on laptop ${index}`, runnerNumber: `W-${index}` });
+      // A write returns once a majority stored it, and the laptop it was made on shows it at once.
+      assert.ok((await fetchState(server)).runners.some((runner) => runner.name === `Written on laptop ${index}`));
+      const holders = await Promise.all(
+        servers.map(async (other) =>
+          (await fetchState(other)).runners.some((runner) => runner.name === `Written on laptop ${index}`)
         )
       );
-      standby = await startServer({ port: standby.port, dataPath: standby.dataPath });
-      servers[1] = standby;
-      await waitForSameState(primary, standby, 15_000);
-      assert.equal((await fetchStatus(standby)).role, 'standby');
-    } catch (error) {
-      throw withServerOutput(error, ...servers);
-    } finally {
-      await Promise.all(servers.map(stopServer));
-      fs.rmSync(root, { recursive: true, force: true });
+      assert.ok(holders.filter(Boolean).length >= 2, `only ${holders.filter(Boolean).length} laptop holds the write`);
     }
+    await waitForSameState(first, second);
+    await waitForSameState(first, third);
+    assert.deepEqual((await fetchState(third)).runners.map((runner) => runner.name).sort(), [
+      'Before the group',
+      'Written on laptop 0',
+      'Written on laptop 1',
+      'Written on laptop 2',
+    ]);
+    const status = await fetchStatus(third);
+    assert.equal(status.members.length, 3);
+    assert.equal(status.majority, 2);
+    assert.deepEqual(status.memberUrls.sort(), [first.baseUrl, second.baseUrl].sort());
+  } catch (error) {
+    throw withServerOutput(error, ...servers);
+  } finally {
+    await Promise.all(servers.map(stopServer));
+    fs.rmSync(root, { recursive: true, force: true });
   }
-);
+});
 
 test(
-  'a planned promotion hands over without losing writes and the old primary follows',
-  { timeout: 30_000 },
-  async () => {
-    const root = testRoot('planned');
-    const servers: RunningServer[] = [];
-    try {
-      const first = await startServer({ port: await freePort(), dataPath: path.join(root, 'first') });
-      const second = await startServer({ port: await freePort(), dataPath: path.join(root, 'second') });
-      servers.push(first, second);
-      await client(second).cluster.join.mutate({ primaryUrl: first.baseUrl });
-      const runner = await client(first).runners.create.mutate({
-        name: 'Handed over',
-        runnerNumber: 'H-1',
-        status: 'waiting',
-      });
-      await client(first).race.startNext.mutate({ activeRunnerId: null, activeStartedAt: null });
-
-      assert.deepEqual(await client(second).cluster.promote.mutate({ emergency: false }), { result: 'planned' });
-      const [firstStatus, secondStatus] = await Promise.all([fetchStatus(first), fetchStatus(second)]);
-      assert.equal(secondStatus.role, 'primary');
-      assert.equal(firstStatus.role, 'standby');
-      assert.equal(firstStatus.primary?.url, second.baseUrl);
-      assert.equal(secondStatus.epoch, 1);
-      assert.equal((await fetchState(second)).race.activeRunnerId, runner.id, 'the running lap moved along');
-
-      await client(second).runners.create.mutate({ name: 'After handover', runnerNumber: 'H-2' });
-      await waitForSameState(second, first);
-      await client(first).runners.create.mutate({ name: 'Via the old primary', runnerNumber: 'H-3' });
-      assert.ok((await fetchState(second)).runners.some((runner) => runner.name === 'Via the old primary'));
-    } catch (error) {
-      throw withServerOutput(error, ...servers);
-    } finally {
-      await Promise.all(servers.map(stopServer));
-      fs.rmSync(root, { recursive: true, force: true });
-    }
-  }
-);
-
-test(
-  'after an emergency takeover a returning old primary re-syncs and keeps its own writes in a backup',
+  'when the leading laptop dies mid-race, a lap pressed during the takeover counts once, at the press',
   { timeout: 40_000 },
   async () => {
-    const root = testRoot('emergency');
+    const root = testRoot('leader-dies');
     const servers: RunningServer[] = [];
     try {
-      let old = await startServer({ port: await freePort(), dataPath: path.join(root, 'old'), probeIntervalMs: 1_500 });
-      const survivor = await startServer({ port: await freePort(), dataPath: path.join(root, 'survivor') });
-      servers.push(old, survivor);
-      await client(survivor).cluster.join.mutate({ primaryUrl: old.baseUrl });
-      await client(old).runners.create.mutate({ name: 'Shared', runnerNumber: 'S-1' });
-      await waitForSameState(old, survivor);
+      await startGroup(root, servers);
+      const leader = await leaderOf(servers);
+      assert.ok(leader, 'a leader was chosen');
+      const [timing, other] = servers.filter((server) => server !== leader);
 
-      await stopServer(old);
-      assert.deepEqual(await client(survivor).cluster.promote.mutate({ emergency: false }), {
-        result: 'primary-unreachable',
+      const first = await client(timing).runners.create.mutate({
+        name: 'First',
+        runnerNumber: 'T-1',
+        status: 'waiting',
       });
-      assert.deepEqual(await client(survivor).cluster.promote.mutate({ emergency: true }), { result: 'emergency' });
-      await client(survivor).runners.create.mutate({ name: 'Written by the survivor', runnerNumber: 'S-2' });
+      await client(other).runners.create.mutate({ name: 'Second', runnerNumber: 'T-2', status: 'waiting' });
+      const startedAt = Date.now() - 4_000;
+      await client(timing).race.startNext.mutate({ activeRunnerId: null, activeStartedAt: null, pressedAt: startedAt });
+      await waitForSameState(leader, timing);
 
-      // The old primary comes back still believing it is primary and records a write before it notices.
-      old = await startServer({ port: old.port, dataPath: old.dataPath, probeIntervalMs: 1_500 });
-      servers[0] = old;
-      await client(old).runners.create.mutate({ name: 'Split-brain write', runnerNumber: 'S-3' });
+      await killServer(leader);
+      const pressedAt = Date.now();
+      await client(timing).race.handoff.mutate({
+        activeRunnerId: first.id,
+        activeStartedAt: startedAt,
+        pressedAt,
+        measuredDurationMs: pressedAt - startedAt,
+      });
 
-      await waitFor(async () => (await fetchStatus(old)).role === 'standby', 10_000);
-      await waitForSameState(survivor, old, 10_000);
-      assert.equal(
-        (await fetchState(old)).runners.some((runner) => runner.name === 'Split-brain write'),
-        false
+      const state = await fetchState(timing);
+      assert.equal(state.laps.length, 1, 'the lap is stored once');
+      assert.equal(state.laps[0]?.startedAt, startedAt);
+      assert.equal(state.laps[0]?.durationMs, pressedAt - startedAt, 'the lap ends at the key press');
+      await waitForSameState(timing, other);
+      const survivor = await fetchStatus(timing);
+      assert.equal(survivor.state, 'degraded');
+      assert.equal(survivor.members.filter((member) => !member.reachable).length, 1);
+
+      // The laptop comes back and catches up by itself.
+      const restarted = await startServer({ port: leader.port, dataPath: leader.dataPath });
+      servers[servers.indexOf(leader)] = restarted;
+      await waitForSameState(timing, restarted, 10_000);
+      await waitFor(async () => (await fetchStatus(timing)).state === 'healthy', 10_000);
+    } catch (error) {
+      throw withServerOutput(error, ...servers);
+    } finally {
+      await Promise.all(servers.map(stopServer));
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
+);
+
+test('a laptop that was off catches up by itself, also across many batches', { timeout: 60_000 }, async () => {
+  const root = testRoot('follower-off');
+  const servers: RunningServer[] = [];
+  try {
+    await startGroup(root, servers);
+    const leader = (await leaderOf(servers))!;
+    const offline = servers.find((server) => server !== leader)!;
+    await killServer(offline);
+    // Two of three laptops are a majority, so everything keeps working.
+    await Promise.all(
+      Array.from({ length: 520 }, (_, index) =>
+        client(leader).runners.create.mutate({ name: `Offline write ${index}`, runnerNumber: `OFF-${index}` })
+      )
+    );
+    const restarted = await startServer({ port: offline.port, dataPath: offline.dataPath });
+    servers[servers.indexOf(offline)] = restarted;
+    await waitForSameState(leader, restarted, 20_000);
+    assert.equal((await fetchStatus(restarted)).role, 'follower');
+  } catch (error) {
+    throw withServerOutput(error, ...servers);
+  } finally {
+    await Promise.all(servers.map(stopServer));
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test(
+  'a laptop cut off from the others saves nothing, and takes the group data when the cable is back',
+  { timeout: 40_000 },
+  async () => {
+    const root = testRoot('cut-off');
+    const servers: RunningServer[] = [];
+    try {
+      await startGroup(root, servers);
+      const cutOff = (await leaderOf(servers))!;
+      const others = servers.filter((server) => server !== cutOff);
+      await client(cutOff).runners.create.mutate({ name: 'Shared', runnerNumber: 'S-1' });
+
+      await isolate(cutOff, true);
+      await assert.rejects(
+        client(cutOff).runners.create.mutate({ name: 'Never confirmed', runnerNumber: 'S-2' }),
+        /Niet bevestigd|Niet opgeslagen/
       );
-      const backups = fs.readdirSync(path.join(old.dataPath, 'backups'));
+      await waitFor(async () => (await leaderOf(others)) !== null, 10_000);
+      await client(others[0]).runners.create.mutate({ name: 'Written by the majority', runnerNumber: 'S-3' });
+      assert.equal((await fetchStatus(cutOff)).writable, false);
+
+      await isolate(cutOff, false);
+      await waitForSameState(others[0], cutOff, 10_000);
+      const names = (await fetchState(cutOff)).runners.map((runner) => runner.name).sort();
+      assert.deepEqual(names, ['Shared', 'Written by the majority']);
+      const backups = fs.readdirSync(path.join(cutOff.dataPath, 'backups'));
       assert.ok(
-        backups.some((file) => file.includes('pre-standby-resync')),
+        backups.some((file) => file.includes('pre-resync')),
         backups.join(', ')
       );
     } catch (error) {
@@ -204,40 +234,68 @@ test(
   }
 );
 
-test('a standby times laps through the primary and says when the primary is gone', { timeout: 30_000 }, async () => {
-  const root = testRoot('forwarded-timing');
+test(
+  'with two laptops gone for good, the last one goes on alone and the others rejoin with its data',
+  { timeout: 60_000 },
+  async () => {
+    const root = testRoot('alone');
+    const servers: RunningServer[] = [];
+    try {
+      await startGroup(root, servers);
+      const [last, ...gone] = servers;
+      await client(last).runners.create.mutate({ name: 'Before', runnerNumber: 'L-1' });
+      await waitForSameState(last, gone[0]);
+      await waitForSameState(last, gone[1]);
+      await Promise.all(gone.map(killServer));
+
+      await waitFor(async () => (await fetchStatus(last)).state === 'no-majority', 15_000);
+      await assert.rejects(
+        client(last).runners.create.mutate({ name: 'Nobody to confirm', runnerNumber: 'L-2' }),
+        /Niet opgeslagen|Niet bevestigd/
+      );
+      await client(last).cluster.continueAlone.mutate();
+      await client(last).runners.create.mutate({ name: 'Alone', runnerNumber: 'L-3' });
+
+      for (const [index, server] of gone.entries()) {
+        const restarted = await startServer({ port: server.port, dataPath: server.dataPath });
+        servers[index + 1] = restarted;
+      }
+      await waitForSameState(last, servers[1], 15_000);
+      await waitForSameState(last, servers[2], 15_000);
+      assert.deepEqual((await fetchState(servers[2])).runners.map((runner) => runner.name).sort(), ['Alone', 'Before']);
+      await waitFor(async () => (await fetchStatus(last)).state === 'healthy', 15_000);
+      assert.equal((await fetchStatus(last)).members.length, 3);
+    } catch (error) {
+      throw withServerOutput(error, ...servers);
+    } finally {
+      await Promise.all(servers.map(stopServer));
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
+);
+
+test('a write repeated after a takeover is applied once', { timeout: 30_000 }, async () => {
+  const root = testRoot('repeat');
   const servers: RunningServer[] = [];
   try {
-    const primary = await startServer({ port: await freePort(), dataPath: path.join(root, 'primary') });
-    const standby = await startServer({ port: await freePort(), dataPath: path.join(root, 'standby') });
-    servers.push(primary, standby);
-    await client(standby).cluster.join.mutate({ primaryUrl: primary.baseUrl });
-
-    const first = await client(standby).runners.create.mutate({
-      name: 'First',
-      runnerNumber: 'T-1',
-      status: 'waiting',
-    });
-    await client(standby).runners.create.mutate({ name: 'Second', runnerNumber: 'T-2', status: 'waiting' });
-    const startedAt = Date.now() - 3_000;
-    await client(standby).race.startNext.mutate({ activeRunnerId: null, activeStartedAt: null, pressedAt: startedAt });
-    await client(standby).race.handoff.mutate({
-      activeRunnerId: first.id,
-      activeStartedAt: startedAt,
-      pressedAt: startedAt + 2_500,
-      measuredDurationMs: 2_498,
-    });
-    const [lap] = (await fetchState(primary)).laps;
-    assert.equal(lap?.startedAt, startedAt);
-    assert.equal(lap?.durationMs, 2_498, 'the lap is what the timing screen measured');
-    await waitForSameState(primary, standby);
-
-    await stopServer(primary);
-    await assert.rejects(
-      client(standby).runners.create.mutate({ name: 'Nobody to take it', runnerNumber: 'T-3' }),
-      /niet bereikbaar/
-    );
-    assert.equal((await fetchState(standby)).laps.length, 1, 'the standby still shows everything it had');
+    await startGroup(root, servers);
+    const leader = (await leaderOf(servers))!;
+    const send = async () => {
+      const response = await fetch(`${leader.baseUrl}/trpc/runners.create`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-apolloon-forwarded': '1',
+          'x-apolloon-request-id': 'repeated-request',
+        },
+        body: JSON.stringify({ name: 'Once', runnerNumber: 'ONCE-1' }),
+      });
+      assert.equal(response.ok, true, await response.clone().text());
+      return ((await response.json()) as { result: { data: { id: string } } }).result.data.id;
+    };
+    const [firstId, repeatId] = [await send(), await send()];
+    assert.equal(repeatId, firstId);
+    assert.equal((await fetchState(leader)).runners.filter((runner) => runner.name === 'Once').length, 1);
   } catch (error) {
     throw withServerOutput(error, ...servers);
   } finally {
@@ -250,11 +308,11 @@ test('laptops with different app versions refuse to couple', { timeout: 20_000 }
   const root = testRoot('versions');
   const servers: RunningServer[] = [];
   try {
-    const primary = await startServer({ port: await freePort(), dataPath: path.join(root, 'a'), appVersion: '1.0.0' });
+    const first = await startServer({ port: await freePort(), dataPath: path.join(root, 'a'), appVersion: '1.0.0' });
     const other = await startServer({ port: await freePort(), dataPath: path.join(root, 'b'), appVersion: '2.0.0' });
-    servers.push(primary, other);
-    await assert.rejects(client(other).cluster.join.mutate({ primaryUrl: primary.baseUrl }), /Upgrade vereist/);
-    const pull = await fetch(`${primary.baseUrl}/api/cluster/pull`, {
+    servers.push(first, other);
+    await assert.rejects(client(other).cluster.join.mutate({ url: first.baseUrl }), /Upgrade vereist/);
+    const append = await fetch(`${first.baseUrl}/api/cluster/append`, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -263,7 +321,7 @@ test('laptops with different app versions refuse to couple', { timeout: 20_000 }
       },
       body: '{}',
     });
-    assert.equal(pull.status, 426);
+    assert.equal(append.status, 426);
   } catch (error) {
     throw withServerOutput(error, ...servers);
   } finally {
@@ -276,12 +334,36 @@ function client(server: RunningServer) {
   return createTRPCClient<AppRouter>({ links: [httpBatchLink({ url: `${server.baseUrl}/trpc` })] });
 }
 
+/** Three laptops in one group, like at the event; pushed onto `servers` as they start so they are always stopped. */
+async function startGroup(root: string, servers: RunningServer[]): Promise<void> {
+  for (const name of ['a', 'b', 'c']) {
+    servers.push(await startServer({ port: await freePort(), dataPath: path.join(root, name) }));
+  }
+  for (const server of servers.slice(1)) await client(server).cluster.join.mutate({ url: servers[0].baseUrl });
+  await waitFor(async () => (await fetchStatus(servers[0])).state === 'healthy', 10_000);
+}
+
+async function leaderOf(servers: RunningServer[]): Promise<RunningServer | null> {
+  const statuses = await Promise.all(servers.map((server) => fetchStatus(server).catch(() => null)));
+  const index = statuses.findIndex((status) => status?.role === 'leader' && status.writable);
+  return index >= 0 ? servers[index] : null;
+}
+
+/** Simulates a pulled network cable. */
+async function isolate(server: RunningServer, isolated: boolean): Promise<void> {
+  const response = await fetch(`${server.baseUrl}/api/cluster/test/isolate`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ isolated }),
+  });
+  assert.equal(response.ok, true);
+}
+
 async function startServer(options: {
   port: number;
   dataPath: string;
   clusterEnabled?: boolean;
   appVersion?: string;
-  probeIntervalMs?: number;
 }): Promise<RunningServer> {
   fs.mkdirSync(options.dataPath, { recursive: true });
   const chunks: string[] = [];
@@ -295,9 +377,12 @@ async function startServer(options: {
       DATA_PATH: options.dataPath,
       CLUSTER_ENABLED: options.clusterEnabled === false ? 'false' : 'true',
       CLUSTER_SELF_URL: `http://127.0.0.1:${options.port}`,
-      CLUSTER_PULL_INTERVAL_MS: '50',
-      CLUSTER_PROBE_INTERVAL_MS: String(options.probeIntervalMs ?? 300),
-      CLUSTER_REQUEST_TIMEOUT_MS: '500',
+      CLUSTER_HEARTBEAT_MS: '50',
+      CLUSTER_ELECTION_TIMEOUT_MS: '400',
+      CLUSTER_COMMIT_TIMEOUT_MS: '1500',
+      CLUSTER_WRITE_DEADLINE_MS: '6000',
+      CLUSTER_REQUEST_TIMEOUT_MS: '300',
+      CLUSTER_TEST_FAULTS: 'true',
       BACKUP_ENABLED: 'false',
       APOLLOON_RELEASE_ID: 'e2e-test-release',
       APOLLOON_APP_VERSION: options.appVersion || '1.0.0',
@@ -329,6 +414,14 @@ async function stopServer(server: RunningServer | null): Promise<void> {
     server.process.kill('SIGKILL');
     await exited;
   }
+}
+
+/** A laptop that suddenly loses power. */
+async function killServer(server: RunningServer): Promise<void> {
+  if (server.process.exitCode !== null) return;
+  const exited = new Promise<void>((resolve) => server.process.once('exit', () => resolve()));
+  server.process.kill('SIGKILL');
+  await exited;
 }
 
 async function fetchState(server: RunningServer): Promise<AppSnapshot> {

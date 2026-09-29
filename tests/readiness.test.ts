@@ -2,36 +2,40 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { buildEventReadiness, readinessSummary } from '../src/lib/readiness.ts';
 import { deriveSystemStatus } from '../src/lib/systemStatus.ts';
-import type { ClusterStatus } from '../src/types.ts';
+import type { ClusterMemberStatus, ClusterStatus } from '../src/types.ts';
 
 const now = Date.UTC(2026, 7, 3, 20, 0, 0);
 
-function primaryWithStandby(overrides: Partial<ClusterStatus> = {}): ClusterStatus {
+function member(hostId: string, overrides: Partial<ClusterMemberStatus> = {}): ClusterMemberStatus {
+  return {
+    hostId,
+    url: `http://${hostId}:5173`,
+    self: hostId === 'host-a',
+    leader: hostId === 'host-a',
+    reachable: true,
+    caughtUp: true,
+    ...overrides,
+  };
+}
+
+function threeLaptops(overrides: Partial<ClusterStatus> = {}): ClusterStatus {
   return {
     enabled: true,
     hostId: 'host-a',
     clusterId: 'cluster',
-    role: 'primary',
-    epoch: 1,
     appVersion: '4.0.0',
     schemaVersion: 13,
+    role: 'leader',
+    term: 3,
+    state: 'healthy',
+    leader: { hostId: 'host-a', url: 'http://host-a:5173' },
+    members: [member('host-a'), member('host-b'), member('host-c')],
+    majority: 2,
     writable: true,
     busy: null,
     selfUrl: 'http://host-a:5173',
     logHead: 12,
-    primary: null,
-    standbys: [
-      {
-        hostId: 'host-b',
-        url: 'http://host-b:5173',
-        reachable: true,
-        lastSeenAt: now,
-        appliedSeq: 12,
-        caughtUp: true,
-      },
-    ],
-    memberUrls: ['http://host-b:5173'],
-    competingPrimaryUrl: null,
+    memberUrls: ['http://host-b:5173', 'http://host-c:5173'],
     lastError: null,
     backup: {
       enabled: true,
@@ -51,43 +55,38 @@ function primaryWithStandby(overrides: Partial<ClusterStatus> = {}): ClusterStat
   };
 }
 
-test('a primary with a caught-up standby and fresh backup is ready', () => {
-  assert.equal(readinessSummary(buildEventReadiness(primaryWithStandby(), now)), 'ready');
-  assert.equal(deriveSystemStatus(primaryWithStandby(), null, now)?.tone, 'healthy');
+test('three linked laptops with a fresh backup are ready', () => {
+  assert.equal(readinessSummary(buildEventReadiness(threeLaptops(), now)), 'ready');
+  const status = deriveSystemStatus(threeLaptops(), null, now);
+  assert.equal(status?.tone, 'healthy');
+  assert.equal(status?.detail, 'Gegevens op 3 laptops');
 });
 
-test('real safety failures block the event and a standalone laptop only warns', () => {
-  const cluster = primaryWithStandby();
+test('real safety failures block the event and a standalone installation only warns', () => {
+  const cluster = threeLaptops();
   assert.equal(
     readinessSummary(buildEventReadiness({ ...cluster, backup: { ...cluster.backup, diskLow: true } }, now)),
     'blocked'
   );
-  assert.equal(readinessSummary(buildEventReadiness({ ...cluster, standbys: [] }, now)), 'blocked');
   assert.equal(
-    readinessSummary(buildEventReadiness({ ...cluster, competingPrimaryUrl: 'http://host-c:5173' }, now)),
+    readinessSummary(buildEventReadiness({ ...cluster, state: 'solo', members: [member('host-a')] }, now)),
     'blocked'
   );
-  assert.equal(readinessSummary(buildEventReadiness({ ...cluster, enabled: false, standbys: [] }, now)), 'warning');
+  assert.equal(readinessSummary(buildEventReadiness({ ...cluster, enabled: false }, now)), 'warning');
 });
 
-test('a standby reports whether its primary is reachable', () => {
-  const standby = primaryWithStandby({
-    role: 'standby',
-    writable: false,
-    standbys: [],
-    primary: {
-      url: 'http://host-a:5173',
-      hostId: 'host-a',
-      reachable: true,
-      lastContactAt: now,
-      head: 12,
-      lagEntries: 0,
-    },
+test('a missing laptop warns while the others carry on, and too few laptops block', () => {
+  const degraded = threeLaptops({
+    state: 'degraded',
+    members: [member('host-a'), member('host-b'), member('host-c', { reachable: false, caughtUp: false })],
   });
-  assert.equal(readinessSummary(buildEventReadiness(standby, now)), 'ready');
-  assert.equal(deriveSystemStatus(standby, null, now)?.title, 'Gekoppeld als standby');
+  assert.equal(readinessSummary(buildEventReadiness(degraded, now)), 'warning');
+  assert.equal(deriveSystemStatus(degraded, null, now)?.title, 'Eén laptop onbereikbaar');
 
-  const orphaned = { ...standby, primary: { ...standby.primary!, reachable: false } };
-  assert.equal(readinessSummary(buildEventReadiness(orphaned, now)), 'blocked');
-  assert.equal(deriveSystemStatus(orphaned, null, now)?.tone, 'error');
+  const twoLaptops = threeLaptops({ members: [member('host-a'), member('host-b')] });
+  assert.equal(readinessSummary(buildEventReadiness(twoLaptops, now)), 'warning');
+
+  const stuck = threeLaptops({ state: 'no-majority', role: 'follower', writable: false, leader: null });
+  assert.equal(readinessSummary(buildEventReadiness(stuck, now)), 'blocked');
+  assert.equal(deriveSystemStatus(stuck, null, now)?.tone, 'error');
 });

@@ -61,21 +61,12 @@ export function buildEventReadiness(cluster: ClusterStatus | null, now = Date.no
     return checks;
   }
 
-  checks.push(cluster.role === 'primary' ? standbyCheck(cluster) : primaryCheck(cluster));
-
-  if (cluster.competingPrimaryUrl) {
-    checks.push({
-      id: 'competing-primary',
-      label: 'Eén primaire laptop',
-      level: 'blocked',
-      detail: `${cluster.competingPrimaryUrl} is ook primair. Koppel één van beide opnieuw als standby.`,
-    });
-  }
+  checks.push(groupCheck(cluster));
   if (cluster.lastError) {
     checks.push({
       id: 'cluster-error',
-      label: 'Synchronisatie',
-      level: 'blocked',
+      label: 'Laptops',
+      level: 'warning',
       detail: cluster.lastError,
     });
   }
@@ -83,33 +74,40 @@ export function buildEventReadiness(cluster: ClusterStatus | null, now = Date.no
   return checks;
 }
 
-function standbyCheck(cluster: ClusterStatus): ReadinessCheck {
-  const reachable = cluster.standbys.filter((standby) => standby.reachable);
-  const caughtUp = reachable.some((standby) => standby.caughtUp);
-  return {
+function groupCheck(cluster: ClusterStatus): ReadinessCheck {
+  const total = cluster.members.length;
+  const reachable = cluster.members.filter((member) => member.reachable).length;
+  const check = (level: ReadinessLevel, detail: string): ReadinessCheck => ({
     id: 'replica',
-    label: 'Standby-laptop',
-    level: caughtUp ? 'ready' : reachable.length ? 'warning' : 'blocked',
-    detail: caughtUp
-      ? `${reachable.length === 1 ? 'Een standby volgt' : `${reachable.length} standby's volgen`} deze laptop en ${reachable.length === 1 ? 'is' : 'zijn'} bij.`
-      : reachable.length
-        ? 'De standby werkt de laatste wijzigingen bij.'
-        : 'Geen bereikbare standby-laptop. Koppel een tweede laptop in Beheer › Systeem.',
-  };
-}
-
-function primaryCheck(cluster: ClusterStatus): ReadinessCheck {
-  const primary = cluster.primary;
-  return {
-    id: 'replica',
-    label: 'Primaire laptop',
-    level: !primary?.reachable ? 'blocked' : primary.lagEntries > 0 ? 'warning' : 'ready',
-    detail: !primary?.reachable
-      ? `De primaire laptop${primary?.url ? ` (${primary.url})` : ''} is niet bereikbaar. Neem over in Beheer als die gestopt is.`
-      : primary.lagEntries > 0
-        ? `Deze standby haalt nog ${primary.lagEntries} wijziging${primary.lagEntries === 1 ? '' : 'en'} op.`
-        : `Deze laptop is standby van ${primary.url} en is volledig bij.`,
-  };
+    label: 'Gekoppelde laptops',
+    level,
+    detail,
+  });
+  switch (cluster.state) {
+    case 'solo':
+      return check(
+        'blocked',
+        'Deze laptop staat er alleen voor. Koppel de andere laptops in Beheer › Systeem, zodat een defecte laptop geen gegevens kost.'
+      );
+    case 'electing':
+      return check('warning', 'De laptops kiezen wie de wijzigingen ordent. Dit duurt enkele seconden.');
+    case 'no-majority':
+      return check(
+        'blocked',
+        'Te weinig laptops bereikbaar: wijzigingen worden niet bewaard. Zet de andere laptops aan of controleer de netwerkkabel.'
+      );
+    case 'degraded':
+      return check(
+        'warning',
+        reachable < total
+          ? `${reachable} van de ${total} laptops zijn bereikbaar. Alles werkt nog; zet de andere laptop weer aan.`
+          : 'Een laptop haalt de laatste wijzigingen op.'
+      );
+    case 'healthy':
+      return total === 2
+        ? check('warning', 'Twee laptops gekoppeld. Koppel een derde: met twee stopt het bewaren als er één uitvalt.')
+        : check('ready', `Alle ${total} laptops zijn bereikbaar en hebben alle gegevens.`);
+  }
 }
 
 export function readinessSummary(checks: ReadinessCheck[]): ReadinessLevel {

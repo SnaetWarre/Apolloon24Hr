@@ -13,18 +13,29 @@ De database migreert automatisch naar schema 13 en bewaart eerst een kopie
 - Rondetijden komen uit het moment van de toetsdruk zelf en worden tussen twee
   drukken op dezelfde klok gemeten: netwerk, een drukke server of
   klokcorrecties veranderen een ronde niet meer
-- Elke laptop werkt in haar eigen venster: een standby geeft wijzigingen door
-  aan de primaire laptop
-- Alle laptops delen één klok (die van de primaire laptop), ook na een overname
+- Drie laptops vormen één groep en nemen vanzelf van elkaar over: valt een
+  laptop uit, dan kiezen de andere binnen enkele seconden wie de wijzigingen
+  ordent en werken ze gewoon verder. Een wijziging is pas bewaard als twee
+  laptops ze hebben, dus een uitgevallen laptop kost geen bevestigde gegevens
+- Een toetsdruk tijdens een overname wacht even en telt daarna één keer, met
+  de tijd van de druk
+- Elke laptop werkt in haar eigen venster; wijzigingen gaan vanzelf naar de
+  laptop die ze ordent
+- Een laptop die terugkomt (herstart of kabel terug) werkt zichzelf bij
+- De status zegt in gewone woorden hoe het gaat ("Alles veilig", "Eén laptop
+  onbereikbaar", "Te weinig laptops bereikbaar")
+- Alle laptops delen één klok, ook na een overname
 - Browsers en tv's schakelen vanzelf naar een andere laptop als de hunne
   wegvalt
 
 ### Changed
 
-- Eén primaire laptop legt alle wijzigingen vast; een standby-laptop houdt een
-  live kopie bij. Dit vervangt de synchronisatie waarbij elke laptop schreef:
-  geen syncconflicten, quarantaine, timingcontroller of koppelcode meer.
-  Overnemen kan gepland (zonder verlies) of als noodovername
+- De gekoppelde laptops kiezen bij meerderheid één laptop die alle wijzigingen
+  ordent; de andere houden een live kopie bij. Dit vervangt de synchronisatie
+  waarbij elke laptop los schreef: geen syncconflicten, quarantaine,
+  timingcontroller of koppelcode meer, en niemand hoeft handmatig over te
+  nemen. Alleen als twee van de drie laptops echt weg zijn, kan de laatste in
+  Beheer "Alleen verder werken"
 - Tijdelijke nachtploegen volgen hun planning zonder labels te herschrijven:
   leden kunnen altijd aangepast worden en zitten na afloop meteen terug in hun
   eigen speedteam

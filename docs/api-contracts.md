@@ -6,9 +6,9 @@ Three transports, three jobs. New features must follow these ownership rules so 
 
 Owns every validated write, plus queries that need input validation or should stay off the live snapshot.
 
-- Runner, label, queue, timing, night-team, settings, backup, and laptop-coupling commands.
+- Runner, label, queue, timing, night-team, settings, backup, and laptop-linking commands.
 - `runners.registrations`: registration answers with contact details, loaded only by profile and Beheer views.
-- Payloads are validated with Zod. Writes run on the primary; a standby passes them on to it.
+- Payloads are validated with Zod. Every laptop accepts writes; the leader commits them once a majority stored them, and the other laptops pass them on to it.
 - Timing commands carry the race state the operator saw.
 - Client entrypoint: `src/api.ts` (`trpc`), actions composed in `src/app/useAppActions.ts`.
 
@@ -32,16 +32,18 @@ Rule: reads that benefit from HTTP caching, curl, or file download stay here. Do
 
 Owns server push only, and pushes one thing: `state:revision` with the current data revision.
 
-- The server emits it after every committed change, after a standby replays new entries, and when a night team starts or stops.
+- The server emits it after every committed change, after a follower stores new entries, and when a night team starts or stops.
 - A client whose snapshot has another revision refetches everything under the `['app']` query key; unchanged responses come back as `304`.
 - On connect the server emits the current revision.
 
 Rule: do not add typed deltas or request/response flows on the socket; clients always refetch server state.
 
-## Laptop coupling (LAN only, `server/cluster.ts`)
+## Linked laptops (LAN only, `server/cluster.ts`)
 
 Machine-to-machine endpoints between Electron laptops, refused with HTTP 426 when app or schema versions differ:
 
-- `POST /api/cluster/pull`: a standby fetches log entries after its position.
-- `GET /api/cluster/snapshot`: a full database image to bootstrap or re-sync a standby.
-- `POST /api/cluster/handover`: a standby asks the primary to hand over during a planned promotion.
+- `POST /api/cluster/append`: the leader sends log entries (or a heartbeat); the answer carries the follower's log position.
+- `POST /api/cluster/vote`: a (pre-)vote request during an election.
+- `GET /api/cluster/snapshot`: a full database image for a joining or diverged laptop.
+- `POST /api/cluster/members`: a laptop asks the leader to join the group.
+- Forwarded writes are ordinary tRPC calls with `x-apolloon-forwarded: 1` and `x-apolloon-request-id`; the leader answers with `x-apolloon-log-seq`, the entry to wait for.

@@ -22,13 +22,26 @@ import {
 } from '../shared/schemas.js';
 import { createVerifiedBackup } from './backups.js';
 import { clusterNow } from './clock.js';
-import { assertWritable, forwardWrite, isFollowing, joinPrimary, promoteToPrimary } from './cluster.js';
+import {
+  NOT_CONFIRMED_MESSAGE,
+  NO_LEADER_MESSAGE,
+  assertWritable,
+  continueAlone,
+  forwardWrite,
+  joinGroup,
+  newRequestId,
+  writeDeadline,
+  writeTarget,
+} from './cluster.js';
+import { waitForCommit } from './consensus.js';
 import {
   createBurgieGepaktEvent,
   createLabel,
   deleteLabel,
   deleteRunner,
   finishRace,
+  findForwardedWrite,
+  getLogHead,
   getRaceState,
   getRunnerById,
   getRunnerRegistrations,
@@ -37,10 +50,12 @@ import {
   insertRunner,
   performHandoff,
   recordWrite,
+  saveForwardedWrite,
   setPublicRecordMode,
   setTemporaryTeamActive,
   setTemporaryTeamMembers,
   setTemporaryTeamSchedule,
+  touchForwardedWrite,
   undoLastHandoff,
   unhideRunnerInQueue,
   updateLabel,
@@ -50,55 +65,92 @@ import {
 } from './db.js';
 import { CsvImportError, importRunnersFromCsv } from './runner-import.js';
 
-/** `forwarded` marks a write another laptop passed on to this one. */
-export type RequestContext = { forwarded?: boolean };
+/**
+ * A write another laptop passed on is `forwarded` and carries that laptop's
+ * `requestId`; `reportLogSeq` tells it which log entry to wait for.
+ */
+export type RequestContext = {
+  forwarded?: boolean;
+  requestId?: string;
+  reportLogSeq?: (seq: number) => void;
+};
 
 const t = initTRPC.context<RequestContext>().create();
 
 type ErrorCode = ConstructorParameters<typeof TRPCError>[0]['code'];
 
-/** Error codes a primary can answer a forwarded write with; anything else is reported as a server error. */
+/** Error codes a leader can answer a forwarded write with; anything else is reported as a server error. */
 const FORWARDED_ERROR_CODES = new Set<string>(['BAD_REQUEST', 'NOT_FOUND', 'CONFLICT', 'SERVICE_UNAVAILABLE']);
 
 function fail(code: 'NOT_FOUND' | 'BAD_REQUEST' | 'CONFLICT', message: string): never {
   throw new TRPCError({ code, message });
 }
 
+function unavailable(message: string): never {
+  throw new TRPCError({ code: 'SERVICE_UNAVAILABLE', message });
+}
+
 /**
- * A mutation that changes event data. The main laptop commits it as one
- * replicated write; any other laptop passes the call on to the main laptop
- * and answers once its own copy has the change.
+ * A mutation that changes event data, callable on every laptop. The leader
+ * commits it as one replicated write and answers once a majority of laptops
+ * stored it. Any other laptop passes the call on to the leader, and repeats it
+ * at the next leader when the first one fails meanwhile, so a key press
+ * during a takeover still counts, once, with its original time.
  */
 function write<I, T>(action: (input: I) => T) {
   return async ({ input, path, ctx }: { input: I; path: string; ctx: RequestContext }): Promise<T> => {
-    if (isFollowing()) {
-      if (ctx.forwarded) {
-        throw new TRPCError({
-          code: 'SERVICE_UNAVAILABLE',
-          message: 'De laptops wisselen net van rol. Probeer opnieuw.',
-        });
-      }
-      const outcome = await forwardWrite<T>(path, input);
+    if (ctx.forwarded) return commitHere(path, () => action(input), ctx.requestId, ctx.reportLogSeq);
+    const deadline = writeDeadline();
+    let requestId: string | undefined;
+    for (;;) {
+      const target = await writeTarget(deadline);
+      if (target === null) unavailable(NO_LEADER_MESSAGE);
+      if (target === 'self') return commitHere(path, () => action(input), requestId);
+      requestId ??= newRequestId();
+      const outcome = await forwardWrite<T>(target, path, input, requestId);
       if (outcome.ok) return outcome.data;
+      if (outcome.retry && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        continue;
+      }
       const code = (FORWARDED_ERROR_CODES.has(outcome.code) ? outcome.code : 'INTERNAL_SERVER_ERROR') as ErrorCode;
       throw new TRPCError({ code, message: outcome.message });
     }
-    return commitWrite(path, () => action(input));
   };
 }
 
-function commitWrite<T>(type: string, action: () => T): T {
+/** Commits on this laptop, the leader, and waits until a majority holds the change. */
+async function commitHere<T>(
+  type: string,
+  action: () => T,
+  requestId?: string,
+  reportLogSeq?: (seq: number) => void
+): Promise<T> {
   try {
     assertWritable();
   } catch (error) {
-    throw new TRPCError({ code: 'SERVICE_UNAVAILABLE', message: (error as Error).message });
+    unavailable((error as Error).message);
   }
+  let result: T;
   try {
-    return recordWrite(type, action);
+    result = recordWrite(type, () => {
+      const earlier = requestId ? findForwardedWrite(requestId) : null;
+      if (requestId && earlier) {
+        touchForwardedWrite(requestId, clusterNow());
+        return earlier.result as T;
+      }
+      const outcome = action();
+      if (requestId) saveForwardedWrite(requestId, outcome, clusterNow());
+      return outcome;
+    });
   } catch (error) {
     if (error instanceof TRPCError) throw error;
     fail('CONFLICT', domainErrorMessage(error));
   }
+  const seq = getLogHead().seq;
+  reportLogSeq?.(seq);
+  if (!(await waitForCommit(seq))) unavailable(NOT_CONFIRMED_MESSAGE);
+  return result;
 }
 
 function domainErrorMessage(error: unknown): string {
@@ -116,15 +168,18 @@ function assertExpectedRaceState(expected: RaceStateExpectation): void {
   }
 }
 
+/** A press may wait this long during a takeover (the write deadline) and still keep its own time. */
+const PRESS_MAX_AGE_MS = 20_000;
+
 /**
- * The moment of the key press as the timing screen recorded it. A press more
- * than a few seconds from this laptop's clock means that screen's clock is
- * off, so the arrival time is used instead.
+ * The moment of the key press as the timing screen recorded it. A press older
+ * than any takeover wait, or in the future, means that screen's clock is off,
+ * so the arrival time is used instead.
  */
 function pressMoment(press: TimingPress): number {
   const now = clusterNow();
   const pressedAt = press.pressedAt;
-  const plausible = pressedAt !== undefined && pressedAt >= now - 10_000 && pressedAt <= now + 1_000;
+  const plausible = pressedAt !== undefined && pressedAt >= now - PRESS_MAX_AGE_MS && pressedAt <= now + 1_000;
   return Math.max(plausible ? pressedAt : now, press.activeStartedAt ?? 0);
 }
 
@@ -135,11 +190,9 @@ function requireTemporaryTeam(labelId: string): TemporaryTeam {
 export const appRouter = t.router({
   cluster: t.router({
     join: t.procedure
-      .input(z.object({ primaryUrl: z.string().trim().min(1).max(2_048) }))
-      .mutation(({ input }) => joinPrimary(input.primaryUrl)),
-    promote: t.procedure
-      .input(z.object({ emergency: z.boolean() }))
-      .mutation(({ input }) => promoteToPrimary(input.emergency)),
+      .input(z.object({ url: z.string().trim().min(1).max(2_048) }))
+      .mutation(({ input }) => joinGroup(input.url)),
+    continueAlone: t.procedure.mutation(() => continueAlone()),
   }),
 
   backups: t.router({

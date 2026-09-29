@@ -72,7 +72,11 @@ app.use(
   '/trpc',
   createExpressMiddleware({
     router: appRouter,
-    createContext: ({ req }) => ({ forwarded: req.header('x-apolloon-forwarded') === '1' }),
+    createContext: ({ req, res }) => ({
+      forwarded: req.header('x-apolloon-forwarded') === '1',
+      requestId: req.header('x-apolloon-request-id')?.slice(0, 128) || undefined,
+      reportLogSeq: (seq: number) => res.setHeader('x-apolloon-log-seq', String(seq)),
+    }),
   })
 );
 

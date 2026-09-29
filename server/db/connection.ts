@@ -34,13 +34,13 @@ function statement(sql: string): PreparedStatement {
   return prepared;
 }
 
-/** Application write: recorded into the active replicated write so standbys can replay it. */
+/** Application write: recorded into the active replicated write so the other laptops can replay it. */
 export function run(sql: string, params: SqlValue[] = []): Database.RunResult {
   writeCapture?.push({ sql, params: [...params] });
   return statement(sql).run(...params);
 }
 
-/** Write that is never replicated: host-local settings, the log itself, and replaying a primary's statements. */
+/** Write that is never replicated: host-local settings, the log itself, and replaying the leader's statements. */
 export function runUncaptured(sql: string, params: SqlValue[] = []): Database.RunResult {
   return statement(sql).run(...params);
 }

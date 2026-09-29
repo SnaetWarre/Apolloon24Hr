@@ -32,27 +32,24 @@ export async function initDb(): Promise<void> {
 
 export { getAppDataRevision, markAppDataChanged, onAppDataChanged, closeDb, backupDatabase } from './db/connection.js';
 export { databaseReadiness, databaseFileBytes } from './db/storage.js';
-export {
-  getAppSettings,
-  setPublicRecordMode,
-  hostIdentity,
-  getSetting,
-  setLocalSetting,
-  deleteLocalSetting,
-} from './db/settings.js';
+export { getAppSettings, setPublicRecordMode, hostIdentity, getSetting, setLocalSetting } from './db/settings.js';
 export {
   recordWrite,
   getClusterEpoch,
   getLogHead,
+  getLogEntryId,
   getLogEntriesAfter,
   canContinueFrom,
   applyLogEntries,
+  appendFromLeader,
   serializeDatabase,
   installDatabaseImage,
   replicationLogEntrySchema,
 } from './db/replication.js';
 export type { ReplicationLogEntry } from './db/types.js';
 export { DATABASE_SCHEMA_VERSION } from './db/schema.js';
+export { getClusterMembers, saveClusterMember, keepOnlyClusterMember, type ClusterMember } from './db/members.js';
+export { findForwardedWrite, saveForwardedWrite, touchForwardedWrite } from './db/forwarded-writes.js';
 export { getLabels, findLabelByName, createLabel, updateLabel, deleteLabel } from './db/labels.js';
 export {
   getTemporaryTeams,

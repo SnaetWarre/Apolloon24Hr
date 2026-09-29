@@ -782,3 +782,19 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+.cluster-state {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+
+.cluster-state--warning {
+  border-color: var(--warn-line);
+  background: var(--warn-wash);
+}
+
+.cluster-state--error {
+  border-color: var(--stop-line);
+  background: var(--stop-wash);
+}
