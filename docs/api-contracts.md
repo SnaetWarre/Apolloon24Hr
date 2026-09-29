@@ -12,7 +12,7 @@ Owns every validated write, plus queries that need input validation or should st
 - Timing commands carry the race state the operator saw.
 - Client entrypoint: `src/api.ts` (`trpc`), actions composed in `src/app/useAppActions.ts`.
 
-Rule: if the client sends data that changes state, it goes through tRPC. Do not add POST/PUT/DELETE under `/api` for application writes.
+Rule: if the client sends data that changes state, it goes through tRPC. Do not add POST/PUT/DELETE under `/api` for application writes; the network setup is the deliberate exception because it changes the laptop, not event data.
 
 ## Plain HTTP JSON (`/api/*`, `server/index.ts`)
 
@@ -22,6 +22,7 @@ Owns cacheable reads, file transfers, and operational endpoints.
 - Health: `GET /api/health` (readiness and release id).
 - Backups: `GET /api/backups/latest` (download).
 - Laptop status: `GET /api/cluster/status`.
+- Network setup (`server/net-setup.ts`): `GET /api/net/profile`, and `POST /api/net/make-static` and `POST /api/net/revert-dhcp`, which only accept requests from the laptop itself.
 - Exports (`server/exports.ts`): `GET /api/export/laps.csv|json`, `events.csv|json`, `current-state.json`.
 - Large responses use `server/http-json.ts` (`sendJson`): gzip, ETags, and one serialization per data revision.
 

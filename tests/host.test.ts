@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type os from 'node:os';
 import { isClusterEnabled } from '../server/env.ts';
-import { selectLanIp } from '../server/host.ts';
+import { lanAddresses } from '../server/host.ts';
 
 test('laptop coupling requires an explicit opt-in outside the packaged Electron app', () => {
   assert.equal(isClusterEnabled({ NODE_ENV: 'production' }), false);
@@ -19,15 +19,14 @@ test('the event URL prefers a wired private address over wifi and virtual adapte
     internal: false,
     cidr: `${value}/24`,
   });
-  assert.equal(
-    selectLanIp({
+  assert.deepEqual(
+    lanAddresses({
       lo: [{ ...address('127.0.0.1'), internal: true }],
       docker0: [address('172.17.0.1')],
       wlan0: [address('192.168.1.40')],
       enp3s0: [address('192.168.50.10')],
     }),
-    '192.168.50.10'
+    ['192.168.50.10', '192.168.1.40']
   );
-  assert.equal(selectLanIp({ wlan0: [address('10.0.0.8')] }), '10.0.0.8');
-  assert.equal(selectLanIp({ tailscale0: [address('100.64.0.1')] }), null);
+  assert.deepEqual(lanAddresses({ tailscale0: [address('100.64.0.1')] }), []);
 });

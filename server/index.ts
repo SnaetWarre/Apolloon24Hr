@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import http from 'node:http';
 import { createExpressMiddleware } from '@trpc/server/adapters/express';
-import express from 'express';
+import express, { type NextFunction, type Request, type Response } from 'express';
 import { Server as SocketIOServer } from 'socket.io';
 import { historyCacheKey, liveAppSnapshot, raceHistory, type HistoryRequest } from './app-state.js';
 import { backupStatus, latestBackupPath, startBackupService, stopBackupService } from './backups.js';
@@ -19,6 +19,7 @@ import { RELEASE_ID } from './env.js';
 import { registerExportRoutes } from './exports.js';
 import { hostInfo, SERVER_PORT } from './host.js';
 import { sendJson } from './http-json.js';
+import { getNetProfile, isLoopbackAddress, requestMakeStatic, requestRevertDhcp } from './net-setup.js';
 import { appRouter } from './router.js';
 import { registerStaticFrontend } from './static-files.js';
 
@@ -48,6 +49,22 @@ io.on('connection', (socket) => {
   socket.emit('state:revision', getAppDataRevision());
 });
 
+/**
+ * Changing the laptop's network is only allowed from the laptop itself, so a
+ * browser elsewhere on the LAN can never repoint it, and the OS permission
+ * prompt appears on the screen of the person asking.
+ */
+function requireLoopback(req: Request, res: Response, next: NextFunction): void {
+  if (isLoopbackAddress(req.socket.remoteAddress)) {
+    next();
+    return;
+  }
+  res.status(403).json({
+    ok: false,
+    error: 'Dit kan alleen op de laptop zelf (open Beheer op die laptop, niet via het netwerk).',
+  });
+}
+
 app.use(express.json({ limit: '20mb' }));
 registerClusterRoutes(app);
 app.use('/trpc', createExpressMiddleware({ router: appRouter }));
@@ -73,6 +90,29 @@ app.get('/api/time', (_req, res) => {
 
 app.get('/api/host-info', (_req, res) => {
   res.json(hostInfo());
+});
+
+app.get('/api/net/profile', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  try {
+    res.json({ ok: true, profile: getNetProfile() });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: error instanceof Error ? error.message : 'Netwerkprofiel lezen mislukt' });
+  }
+});
+
+app.post('/api/net/make-static', requireLoopback, (req, res) => {
+  const result = requestMakeStatic({
+    ip: req.body?.ip,
+    prefixLength: req.body?.prefixLength,
+    gateway: req.body?.gateway,
+  });
+  res.status(result.ok ? 200 : 400).json(result);
+});
+
+app.post('/api/net/revert-dhcp', requireLoopback, (req, res) => {
+  const result = requestRevertDhcp({ eventOver: req.body?.eventOver, confirmText: req.body?.confirmText });
+  res.status(result.ok ? 200 : 400).json(result);
 });
 
 app.get('/api/health', (_req, res) => {

@@ -2,6 +2,7 @@ import React from 'react';
 import { useAppActions } from '../../app/index';
 import { formatClockTimeMs } from '../../lib/time';
 import { useConfirm } from '../ConfirmDialog';
+import { NetworkSetupPanel } from '../NetworkSetupPanel';
 import type { BackupStatus, ClusterStatus, Runner } from '../../types';
 import { AdminNoticeBanner, useAdminAction } from './AdminNotice';
 import { formatFileSize, formatRelativeAge } from './adminFormat';
@@ -20,6 +21,9 @@ export function SystemSection({
   return (
     <>
       {cluster?.enabled && <ClusterPanel cluster={cluster} hostUrl={hostUrl} />}
+      <section className="panel">
+        <NetworkSetupPanel />
+      </section>
       {cluster && <BackupPanel backup={cluster.backup} />}
       <section className="panel">
         <h2>Database status</h2>

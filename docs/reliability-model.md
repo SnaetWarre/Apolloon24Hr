@@ -67,10 +67,12 @@ browser knows about.
 
 ### Laptop addresses
 
-Standbys and browsers reach the primary by its IP address. Give the primary a
-fixed address, preferably with a DHCP reservation on the event router. The
-scripts in `docs/event-network/` pin a wired adapter to a static address on
-Windows, Linux, and macOS when no router configuration is possible.
+Standbys and browsers reach the primary by its IP address. Give the primary
+and standby a fixed address: a DHCP reservation on the event router, or, when
+the router cannot be configured, Beheer › Systeem & herstel › Vast
+netwerkadres on each laptop. That panel pins the wired adapter through the
+operating system's permission prompt and switches it back to DHCP after the
+event; its scripts are also downloadable for manual use.
 
 ## Backup Policy
 

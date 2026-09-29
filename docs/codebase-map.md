@@ -71,6 +71,7 @@ Shared contracts live in `shared/`. Anything imported by both client and server 
 - `server/app-state.ts`: live snapshot and lap history scopes.
 - `server/http-json.ts`: gzip, ETags, and one serialization per data revision.
 - `server/host.ts`: event LAN URL selection.
+- `server/net-setup.ts`: pins the laptop's wired adapter to a static address (and back to DHCP) through the OS permission prompt; only callable from the laptop itself.
 
 See `docs/backend-architecture.md` for the complete process, write,
 replication, storage, and failure-handling model.
@@ -83,7 +84,7 @@ backup retention, and the event-day recovery runbook.
 - `scripts/electron-build.mjs`: packaged Electron build wrapper.
 - `scripts/ensure-lan-dev-firewall.mjs`: development firewall helper.
 - `scripts/validation/`: Playwright browser checks; `run.mjs` runs each against its own seeded server.
-- `docs/event-network/`: fallback scripts to pin a laptop to a static LAN address.
+- `public/event-network/`: static-address scripts, downloadable from Beheer for manual use.
 - `docs/beschrijving.txt` and `docs/notes.txt`: the original requirements and design notes.
 - `.dev-data/` and `.test-data/` are disposable local databases.
 - `data/app.db` is the normal local app database. Local databases are git-ignored;

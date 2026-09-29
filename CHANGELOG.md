@@ -25,17 +25,14 @@ De database migreert automatisch naar schema 13 en bewaart eerst een kopie
   geplande en 20 overige); database verkleinen, controlebestanden en de
   dagelijkse/uurlijkse bewaring zijn weg
 - Beheer is opgesplitst per onderdeel
+- Vast netwerkadres en de scripts openen alleen nog TCP 5173: UDP 45737 was
+  voor de automatische laptopdetectie, die niet meer bestaat
 - Code wordt gecontroleerd met oxlint en opgemaakt met oxfmt; de
   browsercontroles draaien in CI
 
 - Bevestigingen zijn in-app dialogen i.p.v. browserpop-ups: de live klokken en
   realtime updates lopen door terwijl een vraag openstaat, en de knoppen zeggen
   wat ze doen ("Timing overnemen", "Definitief verwijderen", ...)
-
-### Removed
-
-- Het paneel "Vast netwerkadres" in Beheer: gebruik een DHCP-reservatie op de
-  router, of de scripts in `docs/event-network/`
 
 ### Fixed
 

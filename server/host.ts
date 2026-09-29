@@ -23,27 +23,31 @@ function resolvePublicHost(): string {
   if (EXPLICIT_PUBLIC_HOST) return EXPLICIT_PUBLIC_HOST;
   const now = Date.now();
   if (now - cachedLanHostAt >= HOST_CACHE_MS) {
-    try {
-      cachedLanHost = selectLanIp(os.networkInterfaces());
-    } catch {
-      cachedLanHost = null;
-    }
+    cachedLanHost = lanAddresses()[0] ?? null;
     cachedLanHostAt = now;
   }
   return cachedLanHost || 'localhost';
 }
 
-/** The physical IPv4 address other laptops most likely reach: wired private ranges win. */
-export function selectLanIp(interfaces: NodeJS.Dict<os.NetworkInterfaceInfo[]>): string | null {
-  let best: { address: string; score: number } | null = null;
+/** Physical IPv4 addresses other laptops can reach, most likely first: wired private ranges win. */
+export function lanAddresses(interfaces: NodeJS.Dict<os.NetworkInterfaceInfo[]> = safeNetworkInterfaces()): string[] {
+  const candidates: Array<{ address: string; score: number }> = [];
   for (const [name, addresses] of Object.entries(interfaces)) {
     for (const addressInfo of addresses ?? []) {
       if (addressInfo.family !== 'IPv4' || addressInfo.internal || !addressInfo.address) continue;
       const score = scoreInterfaceAddress(name, addressInfo.address);
-      if (score > 0 && (!best || score > best.score)) best = { address: addressInfo.address, score };
+      if (score > 0) candidates.push({ address: addressInfo.address, score });
     }
   }
-  return best?.address ?? null;
+  return candidates.sort((a, b) => b.score - a.score).map((candidate) => candidate.address);
+}
+
+function safeNetworkInterfaces(): NodeJS.Dict<os.NetworkInterfaceInfo[]> {
+  try {
+    return os.networkInterfaces();
+  } catch {
+    return {};
+  }
 }
 
 function scoreInterfaceAddress(name: string, address: string): number {

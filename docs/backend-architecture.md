@@ -111,6 +111,9 @@ settings                replication_log
 - `server/app-state.ts`: live snapshot and history scopes.
 - `server/http-json.ts`: gzip, ETags, and one serialization per revision.
 - `server/host.ts`: picks the LAN address other laptops should use.
+- `server/net-setup.ts`: pins the wired adapter to a static address and back
+  to DHCP through the OS permission prompt. Its `/api/net/*` writes only
+  accept requests from the laptop itself.
 - `server/env.ts`: data root, app version, release id, and number parsing.
 - `server/static-files.ts`: packaged frontend, never outside the build root.
 - `shared/schemas.ts`: client/server contracts.

@@ -11,7 +11,7 @@ Server port: 5173
 Event URL:   shown by the app, for example http://<primary-lan-ip>:5173
 ```
 
-Browser and TV clients use automatic DHCP. Give the primary laptop a fixed address, preferably with a DHCP reservation on the event router, so every screen keeps working after a cable or router restart. `docs/event-network/` has fallback scripts that pin a wired adapter to a static address on Windows, Linux, and macOS.
+Browser and TV clients use automatic DHCP. Give the primary and standby laptops a fixed address so every screen keeps working after a cable or router restart. With access to the event router, a DHCP reservation does this. Without it, open Beheer › Systeem & herstel on the laptop itself and use **Vast netwerkadres**: it pins the wired adapter to its current address through the operating system's permission prompt (Windows, Linux with NetworkManager, macOS) and switches it back to DHCP after the event. The same panel offers the scripts in `public/event-network/` for manual use.
 
 ### Primary and standby
 
