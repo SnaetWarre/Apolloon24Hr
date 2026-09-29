@@ -5,6 +5,7 @@ import { buildKpis, isFastestLapForRecordMode, publicRecordModeTitle } from '../
 import { formatClockTimeMs, formatDurationMs, formatElapsedSeconds } from '../lib/time';
 import { getNextWaitingRunner, lapRunnerLabel } from '../lib/runners';
 import { observeDisplayHistory } from '../lib/displayHistory';
+import { useArrivals } from '../lib/motion';
 import { buildRecentLapSummaries, buildRunnerRanking, collectRankingLabels, type RankingMode } from '../lib/ranking';
 import type { Label, LapRecord, LiveAppSnapshot, PublicRecordMode, RaceEvent, Runner } from '../types';
 import { LabelBadge, labelKindOrder, labelKindTitle } from './LabelBadge';
@@ -108,22 +109,33 @@ export function OutsideDisplay() {
   }, []);
 
   const [presentation] = useDisplayPresentation('outside', 'light');
+  const activeKey = activeRunner?.id ?? 'none';
+  const nextKey = nextRunner?.id ?? 'none';
+  // A runner who takes over after the screen opened rises in; the first one is simply there.
+  const changed = useArrivals([`active:${activeKey}`, `next:${nextKey}`]);
 
   return (
     <main className={`display-root display-root--outside display-root--${presentation}`}>
       <DisplayBrand />
       <section className="outside-band outside-band--current">
         <span className="display-kicker">Nu op de piste</span>
-        <DisplayRunner runner={activeRunner} empty="Nog niemand gestart" />
+        <div
+          key={activeKey}
+          className={`outside-runner${changed.has(`active:${activeKey}`) ? ' outside-runner--in' : ''}`}
+        >
+          <DisplayRunner runner={activeRunner} empty="Nog niemand gestart" />
+        </div>
       </section>
       <section className="outside-band outside-band--next">
         <span className="display-kicker">Volgende loper</span>
-        <DisplayRunner runner={nextRunner} empty="Geen loper in de wachtrij" />
+        <div key={nextKey} className={`outside-runner${changed.has(`next:${nextKey}`) ? ' outside-runner--in' : ''}`}>
+          <DisplayRunner runner={nextRunner} empty="Geen loper in de wachtrij" />
+        </div>
       </section>
       {burgieEvent ? (
-        <OutsideBurgieFlash event={burgieEvent} />
+        <OutsideBurgieFlash key={burgieEvent.id} event={burgieEvent} />
       ) : recordLap ? (
-        <OutsideRecordFlash lap={recordLap} mode={settings.publicRecordMode} />
+        <OutsideRecordFlash key={recordLap.id} lap={recordLap} mode={settings.publicRecordMode} />
       ) : null}
     </main>
   );
@@ -490,9 +502,12 @@ function DisplayLabels({ labels }: { labels: Label[] }) {
   );
 }
 
+// The flash fades in, holds, and fades out just before it is removed.
+const flashStyle = { animationDuration: `${OUTSIDE_ALERT_VISIBLE_MS}ms` };
+
 function OutsideRecordFlash({ lap, mode }: { lap: LapRecord; mode: PublicRecordMode }) {
   return (
-    <section className="outside-record-flash" aria-live="polite">
+    <section className="outside-record-flash" style={flashStyle} aria-live="polite">
       <div className="record-flash-content">
         <span>{publicRecordModeTitle(mode)}</span>
         <strong>{formatDurationMs(lap.durationMs)}</strong>
@@ -504,7 +519,7 @@ function OutsideRecordFlash({ lap, mode }: { lap: LapRecord; mode: PublicRecordM
 
 function OutsideBurgieFlash({ event }: { event: RaceEvent }) {
   return (
-    <section className="outside-record-flash outside-record-flash--burgie" aria-live="polite">
+    <section className="outside-record-flash outside-record-flash--burgie" style={flashStyle} aria-live="polite">
       <div className="record-flash-content">
         <span>Burgie gepakt</span>
         <strong>ZINGEN</strong>

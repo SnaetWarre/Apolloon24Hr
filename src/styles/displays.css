@@ -50,6 +50,28 @@ html[data-display-tone="light"] body {
   letter-spacing: -0.01em;
 }
 
+/* Motion for the tv screens: larger and slower than on the laptops, readable from across a hall. */
+@keyframes display-rise {
+  from {
+    opacity: 0;
+    transform: translateY(1.6vh);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes display-live-ring {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--live-ring, currentColor) 45%, transparent);
+  }
+  70%,
+  100% {
+    box-shadow: 0 0 0 0.6em transparent;
+  }
+}
+
 .display-loading {
   display: grid;
   min-height: 100vh;
@@ -155,6 +177,20 @@ html[data-display-tone="light"] body {
   height: 0.45em;
   border-radius: 50%;
   background: var(--apolloon-blue);
+  --live-ring: var(--apolloon-blue);
+  animation: display-live-ring 2.4s var(--ease-out) infinite;
+}
+
+/* The runner and their labels move as one when a new runner takes over. */
+.outside-runner {
+  display: flex;
+  flex-direction: column;
+  gap: 2.2vh;
+  min-width: 0;
+}
+
+.outside-runner--in {
+  animation: display-rise var(--dur-3) var(--ease-out) backwards;
 }
 
 .display-runner {
@@ -217,7 +253,8 @@ html[data-display-tone="light"] body {
   background: var(--apolloon-blue);
   color: #FFFFFF;
   pointer-events: none;
-  animation: display-flash-in 360ms ease-out both;
+  /* The duration is set inline to the time the flash stays: it fades in, holds, and fades out. */
+  animation: display-flash 8s var(--ease-out) both;
 }
 
 .outside-record-flash--burgie {
@@ -235,22 +272,47 @@ html[data-display-tone="light"] body {
 .record-flash-content span {
   font: 500 clamp(32px, 3.4vw, 72px)/1 var(--font-body);
   opacity: 0.9;
+  animation: display-rise var(--dur-3) var(--ease-out) 120ms backwards;
 }
 
 .record-flash-content strong {
   font: 700 clamp(120px, 16vw, 320px)/0.9 var(--font-body);
   letter-spacing: -0.05em;
+  animation: display-pop 600ms var(--ease-spring) backwards;
 }
 
 .record-flash-content em {
   font: 600 clamp(36px, 3.8vw, 84px)/1 var(--font-body);
   font-style: normal;
   letter-spacing: -0.02em;
+  animation: display-rise var(--dur-3) var(--ease-out) 200ms backwards;
 }
 
-@keyframes display-flash-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
+@keyframes display-flash {
+  0% {
+    opacity: 0;
+  }
+  4% {
+    opacity: 1;
+  }
+  94% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* The big figure lands with a small overshoot, like a stamp. */
+@keyframes display-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.88);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 /* ---------- Binnenscherm ---------- */
@@ -728,7 +790,10 @@ html[data-display-tone="light"] body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .outside-record-flash {
+  .outside-record-flash,
+  .record-flash-content span,
+  .record-flash-content strong,
+  .record-flash-content em {
     animation: none;
   }
 
