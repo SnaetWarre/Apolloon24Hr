@@ -56,13 +56,7 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
   );
 }
 
-function ConfirmModal({
-  options,
-  onSettle,
-}: {
-  options: ConfirmOptions;
-  onSettle: (confirmed: boolean) => void;
-}) {
+function ConfirmModal({ options, onSettle }: { options: ConfirmOptions; onSettle: (confirmed: boolean) => void }) {
   const { title, message, confirmLabel = 'Bevestig', cancelLabel = 'Annuleer', tone = 'default' } = options;
   const cancelRef = React.useRef<HTMLButtonElement>(null);
   const confirmRef = React.useRef<HTMLButtonElement>(null);

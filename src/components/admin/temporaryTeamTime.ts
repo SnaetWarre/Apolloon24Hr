@@ -10,10 +10,16 @@ export function parseTeamWindow(start: string, end: string): { startsAt: number;
   if (!start || !end || !Number.isFinite(startsAt) || !Number.isFinite(endsAt)) {
     throw new Error('Vul een geldig begin- en eindmoment in.');
   }
-  if (endsAt <= startsAt) throw new Error('Het einduur moet na het beginuur liggen. Kies ook de juiste dag bij een nachtploeg.');
+  if (endsAt <= startsAt)
+    throw new Error('Het einduur moet na het beginuur liggen. Kies ook de juiste dag bij een nachtploeg.');
   return { startsAt, endsAt };
 }
 
 export function formatTeamWindow(ms: number): string {
-  return new Intl.DateTimeFormat('nl-BE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).format(ms);
+  return new Intl.DateTimeFormat('nl-BE', {
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(ms);
 }

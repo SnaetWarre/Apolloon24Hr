@@ -1,136 +1,97 @@
 # Reliability, Failover, And Backup Model
 
-Apolloon keeps SQLite as the storage engine on every Electron host. Reliability
-comes from separating three concerns that solve different failures:
+Apolloon keeps SQLite as the storage engine on every Electron laptop.
+Reliability comes from three separate mechanisms, each for a different failure:
 
-1. SQLite transactions protect one host from partial local writes.
-2. Operation replication keeps independent hosts synchronized.
-3. Versioned SQLite backups preserve older recovery points.
-
-A synchronized replica is not a backup. A bad operator action can be validly
-replicated to every host; an older point-in-time backup remains recoverable.
+1. SQLite transactions protect one laptop from partial writes.
+2. A standby laptop keeps a live copy, for when the primary laptop fails.
+3. Point-in-time backups keep older versions, for when a wrong action was
+   copied to every laptop.
 
 ## Why This Model
 
-Apolloon's event network may contain only two host-capable laptops and must keep
-working without WLAN, internet, PostgreSQL, or another managed service. A safe
-automatic leader election needs a majority. With two hosts, a network partition
-cannot be distinguished from a failed peer without risking two leaders.
+The critical path of the event runs from the wachtrij to the timing: timing
+starts whoever the queue put next. Every operator screen therefore has to see
+the same queue, which is simplest when one laptop owns all writes. Operator
+laptops and TVs are browsers on the same wired network as that laptop; if
+the network itself fails, no design keeps the stations talking to each other.
 
-For that reason Apolloon does not automatically promote a timing controller.
-The Raft safety model similarly elects a leader only with a majority:
-<https://raft.github.io/raft.pdf>.
+So Apolloon uses one primary and one or more standbys rather than laptops
+that all accept writes and merge later. A standby replays exactly what the
+primary committed, in the same order, so the two can never disagree about
+the queue or the laps. There is no automatic failover: with two laptops a
+broken cable and a dead laptop look the same, so an operator decides.
 
-SQLite's online backup API creates a consistent snapshot while the live source
-continues operating:
-<https://www.sqlite.org/backup.html>.
+## Primary And Standby
 
-## Write And Replication Policy
+- The primary writes every change and its replication log entry in one
+  SQLite transaction.
+- Each standby pulls new entries about four times per second and replays them.
+  A standby's data is at most a fraction of a second behind.
+- A standby is read-only. Its screens show live data with a banner that
+  names the primary.
+- A standby whose log no longer matches the primary (after a failover), or
+  that is further behind than the retained 5,000 entries, backs up its
+  database and installs a full copy from the primary.
+- Laptops only couple when app version and database schema are identical.
 
-- Registration, labels, queue changes, and other administrative work remain
-  locally writable on every host. Operation IDs make retries exactly-once and
-  canonical replay converges after reconnect.
-- Timing has exactly one assigned controller in normal operation.
-- A planned timing transfer must be initiated on the current controller and can
-  target only a reachable peer whose operation vector covers the controller's
-  complete vector.
-- An emergency takeover is refused while the controller is reachable. After it
-  becomes unreachable, a replica that covers the controller's last-known vector
-  waits ten seconds before enabling a normal takeover. This cannot prove that a
-  failed controller had no final, not-yet-replicated operation.
-- When the surviving host cannot prove that it has the controller's last-known
-  operation vector, the normal takeover stays disabled. A separate forced path
-  appears only after thirty seconds and explicitly warns that recent timing
-  actions may be absent. This is an availability escape hatch, not a claim of
-  data completeness.
-- The emergency confirmation explicitly requires the operator to stop or
-  disconnect the former timing app. No software running on the surviving side
-  of a partition can fence an isolated laptop by itself.
-- If both sides nevertheless record timing, Apolloon pauses timing after
-  reconnect and requires the operator to select the correct history.
+## Promotion
 
-UDP is discovery only. Signed discovery packets find known cluster members;
-authenticated HTTP exchanges carry replication operations.
+**Planned** (primary still reachable), from Beheer on the standby:
 
-### Laptop IP changes
+1. The standby asks the primary to hand over.
+2. The primary stops accepting writes and returns the entries the standby
+   does not have yet.
+3. The standby applies them and becomes primary with a higher epoch.
+4. The old primary becomes a standby of the new one. Nothing is lost.
 
-Paired desktop hosts identify each other by their persisted host IDs. With
-automatic address selection and UDP discovery enabled, an IP change does not
-require pairing again: the next signed announcement supplies the new address,
-and replication resumes once that address is reachable. A working route stays
-selected when another interface broadcasts; recently discovered alternatives
-are tried when the selected route fails. Old requests cannot roll back the
-new route or impose the previous address's retry delay on it.
+**Emergency** (primary unreachable):
 
-An IP change can interrupt HTTP connections. The desktop UI uses its own local
-backend and ordinary writes remain local during that interruption. Missing
-operations are exchanged after reconnecting. Timing ownership and conflict
-rules still apply; changing an IP does not automatically transfer timing.
+1. The operator confirms that the old primary is stopped or unplugged.
+2. The standby becomes primary with a higher epoch.
+3. Changes the old primary committed but the standby had not pulled yet
+   (the last fraction of a second) are missing from the live data. Check the
+   last laps on the timing screen.
 
-This requires both laptops to regain a shared, reachable IPv4 LAN with UDP
-discovery and HTTP allowed. Default discovery announcements are one second
-apart; actual recovery also depends on HTTP timeouts, sync scheduling, network
-availability, and packet loss. It is not a zero-interruption guarantee.
-Keep `PUBLIC_HOST` and `CLUSTER_SELF_URL` unset for automatic address changes;
-a manually pinned old IP continues to advertise that old IP. If discovery is
-disabled or broadcasts cannot cross the network, use reachable stable peer
-hostnames or update the configured peer URLs.
+If the old primary comes back, it sees a laptop with a higher epoch, becomes
+its standby, and re-syncs. Whatever it wrote after the failover is replaced,
+but stays in the `pre-standby-resync` backup it takes first.
 
-A browser opened at another laptop's literal IP remains tied to that URL. It
-cannot receive Apolloon's UDP discovery packets. Use each laptop's desktop app
-for local operation, or provide a stable LAN hostname for browser clients.
+No software on one side of a broken cable can stop the other side. If both
+laptops keep working as primary with the same epoch, Admin reports two
+primaries; re-join one as a standby.
 
-Every signed discovery, bootstrap, and delta exchange includes the database
-schema, replication format, application version, minimum compatible versions,
-and release identity. Apolloon rejects incompatible peers before applying SQL
-and shows an explicit update-required error in Admin. Update every host before
-changing a migration or replication compatibility range.
+Browser laptops keep the address they opened. After a failover, open the new
+primary's address; the red connection banner links to the other laptops this
+browser knows about.
+
+### Laptop addresses
+
+Standbys and browsers reach the primary by its IP address. Give the primary
+and standby a fixed address: a DHCP reservation on the event router, or, when
+the router cannot be configured, Beheer › Systeem & herstel › Vast
+netwerkadres on each laptop. That panel pins the wired adapter through the
+operating system's permission prompt and switches it back to DHCP after the
+event; its scripts are also downloadable for manual use.
 
 ## Backup Policy
 
-Every production host starts its own backup scheduler. The default interval is
-five minutes. A backup is published only after all of these steps succeed:
+Every laptop runs its own backup scheduler, every five minutes by default. A
+backup is kept only after all of these steps succeed:
 
-1. `better-sqlite3` creates a live online backup into a temporary file.
-2. A separate read-only connection runs `PRAGMA quick_check` and
-   `PRAGMA foreign_key_check`.
-3. Apolloon compacts that private copy with `VACUUM`; the live race database is
-   never vacuumed by this step.
-4. A separate read-only connection repeats both integrity checks.
-5. The file is flushed and atomically renamed.
-6. Apolloon calculates SHA-256 and stores metadata beside the snapshot.
+1. `better-sqlite3` creates an online backup into a temporary file.
+2. A worker thread converts it to a single rollback-journal file and runs
+   `PRAGMA quick_check` and `PRAGMA foreign_key_check`, so the checks never
+   delay a timing request.
+3. The file is flushed and atomically renamed.
 
-Published snapshots remain ordinary, directly restorable SQLite files; the
-compaction only prevents deleted/free pages from being copied into every
-recovery point.
-
-Automatic retention is tiered:
-
-- the 24 newest scheduled snapshots;
-- one snapshot per hour for 72 hours;
-- one snapshot per day for 30 days;
-- the 20 newest manual or safety snapshots.
-
-The retained set is additionally capped at 8 GiB by default. Apolloon removes
-the oldest scheduled recovery points first while preserving the newest overall,
-scheduled, and manual points. `BACKUP_MAX_TOTAL_BYTES` overrides the ceiling.
-
-Admin exposes the last verified backup, failure state, retained count, free
-disk space, next scheduled run, manual backup action, and downloads for both the
-latest snapshot and its control manifest. Before sending a snapshot Apolloon
-recomputes SHA-256 and repeats the SQLite integrity checks; a changed or corrupt
-file is refused. Downloading both files to another laptop or USB storage
-provides the off-device copy that a local disk cannot.
-
-Overlapping work is serialized. If a manual backup is requested while the
-scheduler is active, the manual request waits and then creates a distinct
-snapshot instead of being incorrectly reported as the scheduled snapshot.
-
-Backups live outside application releases:
+Retention keeps the 48 newest scheduled backups (four hours at the default
+interval) and the 20 newest manual and safety backups (taken before joining
+or re-syncing). Admin shows the last backup, failures, free disk space, and
+offers a backup download.
 
 ```text
-<DATA_PATH>/backups/*.sqlite
-<DATA_PATH>/backups/*.sqlite.json
+<DATA_PATH>/backups/apolloon-<time>-<reason>-<id>.sqlite
 ```
 
 Configuration overrides:
@@ -140,51 +101,29 @@ BACKUP_ENABLED=false
 BACKUP_INTERVAL_MS=300000
 BACKUP_INITIAL_DELAY_MS=10000
 BACKUP_MIN_FREE_BYTES=2147483648
-BACKUP_MAX_TOTAL_BYTES=8589934592
-TIMING_TAKEOVER_GRACE_MS=10000
-TIMING_FORCED_TAKEOVER_GRACE_MS=30000
 ```
-
-SQLite reuses deleted pages but does not normally shrink its file. Admin shows
-the physical, used, and reclaimable database sizes. When at least 16 MiB and 25
-percent are reclaimable, Apolloon offers guarded compaction. It first creates a
-verified safety backup and refuses to run while a race is active. Startup may
-perform the same compaction automatically only when the race is inactive.
-
-Replication checkpoints are stored locally as versioned gzip/base64 values.
-Bootstrap and synchronization still exchange the normal structured checkpoint,
-so compression does not leak into the wire format. Lap history stores only the
-label identity and presentation fields needed to render the historical lap;
-live label targets, ordering, and edit timestamps are not duplicated per lap.
 
 ## Recovery Runbook
 
-Prefer a surviving synchronized host: start a clean additional laptop and join
-it through Admin. Use a point-in-time backup when all replicas contain the same
-bad change or no live replica remains.
+Prefer the standby: promote it in Beheer. Use a point-in-time backup when the
+standby holds the same wrong change or no laptop survives.
 
-For restoration onto the same host:
+Restoring a backup on a laptop:
 
 1. Stop Apolloon completely.
 2. Preserve the complete current `<DATA_PATH>/data/` directory.
-3. Verify the selected snapshot with `PRAGMA quick_check` and compare its
-   SHA-256 with the adjacent metadata file or download response header.
-4. Replace `<DATA_PATH>/data/app.db` with the snapshot and remove stale
+3. Check the chosen backup with `PRAGMA quick_check`.
+4. Replace `<DATA_PATH>/data/app.db` with the backup and remove any
    `app.db-wal` and `app.db-shm` files.
-5. Restart Apolloon, confirm the runner/lap totals, then create a new manual
-   backup before reconnecting peers.
-
-Do not restore another laptop's raw snapshot onto a new host unless its stored
-host identity is regenerated. The normal and safer cross-host recovery path is
-to join from a surviving host.
+5. Restart Apolloon, check the runners and laps, then create a manual backup.
+6. Re-join any other laptop as a standby of this one.
 
 ## Event-Day Check
 
 Before timing starts:
 
-1. Confirm at least two reachable host replicas in the header.
-2. Confirm the header says the data is synchronized and backed up.
-3. Download one verified backup to a separate device.
-   Download its control manifest beside it.
-4. Perform a planned timing transfer once and transfer it back.
-5. Confirm both laptops show the same active runner and lap count.
+1. Beheer › Voorbereiding shows the standby as reachable and caught up.
+2. The last backup is recent; download one to a separate device.
+3. The clocks of the laptops differ by less than two seconds.
+4. Do a planned switch to the standby and back, and check both show the same
+   active runner and lap count.

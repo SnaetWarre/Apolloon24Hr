@@ -8,7 +8,6 @@ export default defineConfig({
   plugins: [react()],
   cacheDir: '.vite-cache',
   build: {
-    // Route modules are intentionally eager so operator navigation never waits on a chunk.
     chunkSizeWarningLimit: 800,
   },
   server: {

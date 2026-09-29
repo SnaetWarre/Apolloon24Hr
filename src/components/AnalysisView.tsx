@@ -101,10 +101,7 @@ export function AnalysisView() {
     () => buildLabelComparisons(enabledLabels, filteredLaps),
     [enabledLabels, filteredLaps]
   );
-  const runnerInsights = React.useMemo(
-    () => buildRunnerInsights(runners, filteredLaps),
-    [runners, filteredLaps]
-  );
+  const runnerInsights = React.useMemo(() => buildRunnerInsights(runners, filteredLaps), [runners, filteredLaps]);
   const visibleRunnerInsights = React.useMemo(
     () =>
       runnerInsights
@@ -150,14 +147,27 @@ export function AnalysisView() {
         }
         actions={
           <details className="analysis-export">
-            <summary className="btn btn--sm"><Icon name="download" size={14} />Exporteren</summary>
+            <summary className="btn btn--sm">
+              <Icon name="download" size={14} />
+              Exporteren
+            </summary>
             <div className="analysis-export__menu">
               <p>Exports bevatten altijd de volledige wedstrijd. De labelfilters op dit scherm tellen niet mee.</p>
-              <a className="btn btn--quiet btn--sm" href="/api/export/laps.csv">Rondes (CSV)</a>
-              <a className="btn btn--quiet btn--sm" href="/api/export/laps.json">Rondes (JSON)</a>
-              <a className="btn btn--quiet btn--sm" href="/api/export/current-state.json">Volledige toestand (JSON)</a>
-              <a className="btn btn--quiet btn--sm" href="/api/export/events.csv">Gebeurtenissen (CSV)</a>
-              <a className="btn btn--quiet btn--sm" href="/api/export/events.json">Gebeurtenissen (JSON)</a>
+              <a className="btn btn--quiet btn--sm" href="/api/export/laps.csv">
+                Rondes (CSV)
+              </a>
+              <a className="btn btn--quiet btn--sm" href="/api/export/laps.json">
+                Rondes (JSON)
+              </a>
+              <a className="btn btn--quiet btn--sm" href="/api/export/current-state.json">
+                Volledige toestand (JSON)
+              </a>
+              <a className="btn btn--quiet btn--sm" href="/api/export/events.csv">
+                Gebeurtenissen (CSV)
+              </a>
+              <a className="btn btn--quiet btn--sm" href="/api/export/events.json">
+                Gebeurtenissen (JSON)
+              </a>
             </div>
           </details>
         }
@@ -178,10 +188,7 @@ export function AnalysisView() {
         <aside className="analysis-scope">
           <section className="panel analysis-filter-panel">
             <div className="panel-heading-row">
-              <SectionHeader
-                title="Labels"
-                text="Een ronde telt mee zodra één van haar labels aan staat."
-              />
+              <SectionHeader title="Labels" text="Een ronde telt mee zodra één van haar labels aan staat." />
               <div className="analysis-filter-actions">
                 <button className="btn btn--ghost" onClick={enableAllLabels}>
                   Alles aan
@@ -191,11 +198,7 @@ export function AnalysisView() {
                 </button>
               </div>
             </div>
-            <LabelTogglePicker
-              labels={analysisLabels}
-              enabledLabelIds={enabledLabelIds}
-              onToggle={toggleLabel}
-            />
+            <LabelTogglePicker labels={analysisLabels} enabledLabelIds={enabledLabelIds} onToggle={toggleLabel} />
           </section>
         </aside>
         <div className="analysis-content">
@@ -228,10 +231,7 @@ export function AnalysisView() {
                 </section>
 
                 <section className="panel analysis-trend-panel">
-                  <SectionHeader
-                    title="Rondetijd over de race"
-                    text="Voortschrijdend gemiddelde van de rondetijden."
-                  />
+                  <SectionHeader title="Rondetijd over de race" text="Voortschrijdend gemiddelde van de rondetijden." />
                   <RollingLapTrendChart points={rollingLapTrend} />
                 </section>
               </div>
@@ -244,18 +244,12 @@ export function AnalysisView() {
 
               <div className="analysis-main-grid">
                 <section className="panel">
-                  <SectionHeader
-                    title="Rondeverdeling"
-                    text="Aantal rondes per zone van 5 seconden."
-                  />
+                  <SectionHeader title="Rondeverdeling" text="Aantal rondes per zone van 5 seconden." />
                   <DistributionChart bins={distribution} />
                 </section>
 
                 <section className="panel">
-                  <SectionHeader
-                    title="Snelste rondes"
-                    text="Binnen de huidige selectie."
-                  />
+                  <SectionHeader title="Snelste rondes" text="Binnen de huidige selectie." />
                   <FastestLapWindowList
                     mode={fastestWindowMode}
                     windows={fastestLapWindows}
@@ -281,10 +275,7 @@ export function AnalysisView() {
                   />
                 </div>
                 <div className="segmented-control analysis-sort-control">
-                  <button
-                    className={runnerSort === 'laps' ? 'is-active' : ''}
-                    onClick={() => setRunnerSort('laps')}
-                  >
+                  <button className={runnerSort === 'laps' ? 'is-active' : ''} onClick={() => setRunnerSort('laps')}>
                     Meeste rondes
                   </button>
                   <button
@@ -293,10 +284,7 @@ export function AnalysisView() {
                   >
                     Snelste gem.
                   </button>
-                  <button
-                    className={runnerSort === 'best' ? 'is-active' : ''}
-                    onClick={() => setRunnerSort('best')}
-                  >
+                  <button className={runnerSort === 'best' ? 'is-active' : ''} onClick={() => setRunnerSort('best')}>
                     Snelste ronde
                   </button>
                   <button
@@ -346,9 +334,7 @@ function mergeAnalysisLabels(currentLabels: Label[], laps: LapRecord[]): Label[]
 function StatPanel({ label, value, hero }: { label: string; value: string; hero?: boolean }) {
   const hasLongValue = value.length >= 10;
   return (
-    <div
-      className={`stat-panel${hasLongValue ? ' stat-panel--long-value' : ''}${hero ? ' stat-panel--hero' : ''}`}
-    >
+    <div className={`stat-panel${hasLongValue ? ' stat-panel--long-value' : ''}${hero ? ' stat-panel--hero' : ''}`}>
       <span className="muted-label">{label}</span>
       <strong title={value}>{value}</strong>
     </div>

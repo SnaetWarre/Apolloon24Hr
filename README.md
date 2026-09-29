@@ -1,82 +1,57 @@
 # Leuven 24h Runner Tracker
 
-Local-first telsysteem for the Apolloon 24 Urenloop setup. Every laptop running the packaged Electron app has its own complete, writable SQLite database. Browser-only laptops and TV screens connect to one of those Electron laptops through the wired local network.
+Telsysteem for the Apolloon 24 Urenloop. One Electron laptop is the **primary**: it holds the SQLite database and every operator screen and TV connects to it with a browser over the wired event network. A second Electron laptop runs as a **standby** that keeps a live, read-only copy and can take over.
 
 ## Event Network
-
-A single Electron laptop works on its own. With multiple Electron laptops, each one remains usable when the others disconnect and synchronizes its queued operations after reconnecting.
 
 Recommended defaults:
 
 ```text
 Server port: 5173
-Event URL:   shown by the app, for example http://<host-lan-ip>:5173
+Event URL:   shown by the app, for example http://<primary-lan-ip>:5173
 ```
 
-Browser and TV clients can use automatic DHCP. They do not store or replicate the database.
+Browser and TV clients use automatic DHCP. Give the primary and standby laptops a fixed address so every screen keeps working after a cable or router restart. With access to the event router, a DHCP reservation does this. Without it, open Beheer › Systeem & herstel on the laptop itself and use **Vast netwerkadres**: it pins the wired adapter to its current address through the operating system's permission prompt (Windows, Linux with NetworkManager, macOS) and switches it back to DHCP after the event. The same panel offers the scripts in `public/event-network/` for manual use.
 
-### Local-first laptop cluster
+### Primary and standby
 
-Cluster mode is enabled automatically in the packaged app. Linux, Windows, and macOS Electron builds use the same HTTP and UDP protocol and can participate in the same cluster.
-
-There is no database Primary, Kubernetes, or external message broker. One, two, three, or more connected Electron laptops remain locally writable for registration, queue, and administration work. Writes are committed to SQLite together with an idempotent operation record before the UI reports success. Peers exchange only missing operations and replay them in one canonical order, so reconnect order does not decide the final state.
+Laptop coupling is enabled in the packaged app. The primary accepts every change and records it in a replication log in the same SQLite transaction. Each standby pulls that log a few times per second and replays it, so it holds a byte-for-byte copy that is at most a fraction of a second behind.
 
 Normal event setup:
 
 ```text
 1. Plug the Electron laptops into the same wired switch.
-2. Start Apolloon on the laptop whose database should be the initial source.
-3. Open Admin and note its Event URL and eight-character pairing code.
-4. Start Apolloon on each additional laptop.
-5. On each additional laptop, open Admin, enter the creator URL and code, and confirm.
-6. Wait until the header shows the expected number of synchronized laptops.
-7. Open any shown Event URL on browser-only operator and display devices.
+2. Start Apolloon on the laptop that should be primary and import the registrations there.
+3. Start Apolloon on the second laptop, open Beheer › Systeem & herstel,
+   enter the primary's Event URL, and choose "Standby worden".
+4. Check Beheer › Voorbereiding: the standby must be reachable and caught up.
+5. Open the primary's Event URL on every operator laptop and TV.
 ```
 
-Joining deliberately replaces the additional laptop's current database with the creator's database. Before replacement, Apolloon stores a timestamped recovery copy beside its local database. After the first pairing, UDP discovery reconnects peers automatically on the local network. Fixed peer URLs remain available for tests and unusual network configurations.
+Becoming a standby replaces that laptop's database with the primary's; a backup of the old database is kept first. A standby is read-only and says so in a banner; its screens still show live data.
+
+**Planned switch** (for example to move the primary): on the standby, choose "Deze laptop primair maken". The primary hands over its last changes, becomes a standby of the new primary, and no data is lost.
+
+**Failure of the primary**: on the standby, choose "Deze laptop primair maken" and confirm the emergency takeover once the old primary is really stopped or unplugged. Changes from the last fraction of a second that had not been copied may be missing; check the last laps. Open the new primary's address on the browser laptops; the red connection banner links to it. If the old primary comes back, it notices the newer primary, follows it as a standby, and keeps anything it wrote in the meantime in a backup.
+
+Laptops only couple with the same Apolloon version and database schema; otherwise Admin shows an "Upgrade vereist" error.
 
 Developer overrides:
 
 ```text
-CLUSTER_ENABLED=false           # disable cluster behavior
-CLUSTER_ENABLED=true            # enable cluster behavior in development
-CLUSTER_PEERS=http://host:5173  # optional fixed peer list for tests
-CLUSTER_DISCOVERY=false         # disable UDP discovery
+CLUSTER_ENABLED=true             # enable laptop coupling in development
+CLUSTER_SELF_URL=http://host:port  # address announced to other laptops (tests)
 ```
 
-The header shows reachable replicas, changes waiting for synchronization, backup health, and sync conflicts. Timing is owned by one Electron laptop. The current controller can transfer timing only to a reachable, fully synchronized peer. A caught-up replica gets a guarded emergency takeover after controller loss; an explicit, longer-delayed forced path remains available when completeness cannot be proven. If two isolated laptops still create different timing histories, timing pauses after reconnect; an operator chooses the correct history in Admin. Queue and registration work remains available on a single surviving laptop.
-
-Peers exchange and validate their schema, replication format, app version,
-minimum compatible version, and release identity before bootstrap or SQL
-replication. Version skew is blocked and shown as an update-required error
-instead of failing halfway through synchronization.
-
-Admin includes a wedstrijdgereedheid checklist for backup freshness, free disk
-space, live replicas, clock skew, conflicts, and timing ownership. The system
-status continues refreshing in standalone mode, so backup failures on a VPS or
-single event laptop remain visible.
+Admin includes a wedstrijdgereedheid checklist for backup freshness, free disk space, the standby, and clock differences between the laptops.
 
 ### Recovery backups
 
-Every production host creates a verified SQLite snapshot every five minutes.
-Snapshots are integrity-checked, checksummed, retained in recent/hourly/daily
-tiers, and stored under `<DATA_PATH>/backups`. Admin can create and download a
-backup immediately. Download one to another laptop or USB storage before the
-event, because synchronized replicas and historical backups protect against
-different failures.
+Every host creates a verified SQLite backup every five minutes and keeps the latest 48 scheduled backups plus the latest 20 manual and safety backups under `<DATA_PATH>/backups`. Each backup is checked with `quick_check` and `foreign_key_check` off the main thread before it is kept, so checks never delay timing. Admin can create and download a backup immediately. Download one to another laptop or USB storage before the event: the standby protects against a broken laptop, a backup also protects against a wrong action that was copied to the standby.
 
-Backup downloads are re-verified against SQLite integrity checks and their
-SHA-256 immediately before transfer. Download the adjacent control manifest as
-well so the off-device copy remains independently verifiable.
+Screens receive only live state; lap history is loaded separately as full, recent, or per-runner data. Registration answers with contact details are loaded only where an operator needs them (profiles and Beheer).
 
-Normal screens receive only live state. Historical laps and events are loaded
-separately as full, recent, or per-runner data and transferred with fast gzip
-compression. Admin also reports SQLite free pages and can compact an inactive
-race database after creating a safety backup. Backup retention has both tiered
-age rules and a total-byte ceiling.
-
-See `docs/reliability-model.md` for the complete failover policy, retention
-rules, recovery procedure, and event-day checklist.
+See `docs/reliability-model.md` for the failover policy, retention rules, recovery procedure, and event-day checklist.
 
 ## Tech Stack
 
@@ -92,10 +67,10 @@ For hosting the app directly on the VPS without a laptop tunnel, see `docs/vps-d
 
 ## Running The Event
 
-1. Connect the host laptop to the local router/switch by Ethernet.
-2. Start the Electron app on the host laptop.
+1. Connect the primary and standby laptops to the local router/switch by Ethernet.
+2. Start the Electron app on both and couple the standby (see [Primary and standby](#primary-and-standby)).
 3. Allow the firewall prompt for port `5173` if Windows asks.
-4. Copy the Event URL shown on the host laptop.
+4. Copy the Event URL shown on the primary laptop.
 5. On every other laptop, open that Event URL. Do not use `localhost` on client laptops.
 6. Choose the role from the start page:
    - Telsysteem 1 - Wachtrij
@@ -106,6 +81,10 @@ For hosting the app directly on the VPS without a laptop tunnel, see `docs/vps-d
    - Admin / Import / Labels
 
 There is no password login. The physical local network is the trust boundary.
+
+## Night Teams
+
+A tijdelijke nachtploeg moves its members from their speedteam to the night team during a planned window. Labels are derived from the schedule: nothing is rewritten, so members are back in their own speedteam as soon as the window ends or the team is removed. Each lap keeps the labels of the moment its runner started.
 
 ## Registration Import
 
@@ -162,9 +141,14 @@ Development seed commands only use `.dev-data/`. They do not overwrite the norma
 Useful development checks:
 
 ```text
-npm run typecheck       Type-check client and server without packaging
-npm run check           Type-check everything and build the Vite client
+npm run typecheck       Type-check client, server, and tests
+npm run lint            Lint with oxlint
+npm run format          Format with oxfmt (format:check only reports)
+npm run check           Type-check, lint, format check, and build the Vite client
 npm run build           Type-check the client, build Vite, and compile the server
+npm test                Unit tests
+npm run test:e2e        Build, then run real servers (standby, failover, night teams)
+npm run test:ui         Browser checks against the build (npx playwright install chromium once)
 ```
 
 ```text

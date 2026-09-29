@@ -19,12 +19,9 @@ test('Electron server configuration follows PORT and preserves values containing
 });
 
 test('Electron can advertise a different public port without opening its window on that port', () => {
-  assert.deepEqual(
-    resolveServerAddress({ PORT: '5173', PUBLIC_APP_PORT: '80' }),
-    {
-      port: 5173,
-      publicPort: 80,
-      url: 'http://127.0.0.1:5173',
-    }
-  );
+  assert.deepEqual(resolveServerAddress({ PORT: '5173', PUBLIC_APP_PORT: '80' }), {
+    port: 5173,
+    publicPort: 80,
+    url: 'http://127.0.0.1:5173',
+  });
 });

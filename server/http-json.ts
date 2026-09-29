@@ -7,74 +7,58 @@ const gzipAsync = promisify(gzip);
 const MINIMUM_COMPRESSION_BYTES = 1_024;
 const MAX_CACHED_RESPONSES = 32;
 
-type CachedResponse = { etag: string; raw: Buffer; compressed: Promise<Buffer> | null };
+type Body = { etag: string; raw: Buffer; compressed: Promise<Buffer> | null };
 
-/** Serialized bodies keyed by the caller's cache key (e.g. data revision), oldest evicted first. */
-const responseCache = new Map<string, CachedResponse>();
+/** Serialized bodies by cache key (e.g. the data revision), oldest evicted first. */
+const responseCache = new Map<string, Body>();
 
+/**
+ * Sends JSON with an ETag and gzip. With a `cacheKey`, `build` runs once per
+ * key, so every client asking for the same revision shares one serialization.
+ */
 export async function sendJson(
   req: Request,
   res: Response,
-  value: unknown,
-  options: { cacheKey?: string; sensitive?: boolean } = {}
+  cacheKey: string | null,
+  build: () => unknown
 ): Promise<void> {
-  const entry = responseEntry(value, options.cacheKey);
-  if (options.cacheKey && req.header('if-none-match') === entry.etag) {
+  const body = cacheKey ? cachedBody(cacheKey, build) : createBody(build());
+  if (req.header('if-none-match') === body.etag) {
     res.status(304).end();
     return;
   }
 
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.setHeader('Vary', 'Accept-Encoding');
-  res.setHeader('ETag', entry.etag);
-  res.setHeader('Cache-Control', options.sensitive ? 'no-store' : 'no-cache');
-  res.setHeader('X-Apolloon-Uncompressed-Bytes', String(entry.raw.length));
+  res.setHeader('ETag', body.etag);
+  res.setHeader('Cache-Control', 'no-cache');
 
-  const acceptsGzip = req.acceptsEncodings('gzip') === 'gzip';
-  if (acceptsGzip && entry.raw.length >= MINIMUM_COMPRESSION_BYTES) {
-    entry.compressed ??= gzipAsync(entry.raw, {
+  if (req.acceptsEncodings('gzip') === 'gzip' && body.raw.length >= MINIMUM_COMPRESSION_BYTES) {
+    body.compressed ??= gzipAsync(body.raw, {
       level: zlibConstants.Z_BEST_SPEED,
     });
-    const body = await entry.compressed;
+    const compressed = await body.compressed;
     res.setHeader('Content-Encoding', 'gzip');
-    res.setHeader('Content-Length', String(body.length));
-    res.end(body);
+    res.setHeader('Content-Length', String(compressed.length));
+    res.end(compressed);
     return;
   }
 
-  res.setHeader('Content-Length', String(entry.raw.length));
-  res.end(entry.raw);
+  res.setHeader('Content-Length', String(body.raw.length));
+  res.end(body.raw);
 }
 
-/** Request body for a peer, gzipped once it is large enough to be worth it. */
-export async function encodedJsonRequest(
-  value: unknown
-): Promise<{ body: string | Blob; contentEncoding: 'gzip' | null }> {
-  const raw = Buffer.from(JSON.stringify(value));
-  if (raw.length < MINIMUM_COMPRESSION_BYTES) {
-    return { body: raw.toString('utf8'), contentEncoding: null };
-  }
-  const compressed = await gzipAsync(raw, { level: zlibConstants.Z_BEST_SPEED });
-  const body = compressed.buffer.slice(
-    compressed.byteOffset,
-    compressed.byteOffset + compressed.byteLength
-  ) as ArrayBuffer;
-  return { body: new Blob([body], { type: 'application/json' }), contentEncoding: 'gzip' };
+function cachedBody(cacheKey: string, build: () => unknown): Body {
+  const cached = responseCache.get(cacheKey);
+  if (cached) return cached;
+  const body = createBody(build());
+  responseCache.set(cacheKey, body);
+  if (responseCache.size > MAX_CACHED_RESPONSES) responseCache.delete(responseCache.keys().next().value as string);
+  return body;
 }
 
-function responseEntry(value: unknown, cacheKey?: string): CachedResponse {
-  if (cacheKey) {
-    const cached = responseCache.get(cacheKey);
-    if (cached) return cached;
-  }
+function createBody(value: unknown): Body {
   const raw = Buffer.from(JSON.stringify(value));
   const etag = `"${crypto.createHash('sha256').update(raw).digest('base64url').slice(0, 24)}"`;
-  const entry: CachedResponse = { etag, raw, compressed: null };
-  if (cacheKey) {
-    responseCache.set(cacheKey, entry);
-    if (responseCache.size > MAX_CACHED_RESPONSES) {
-      responseCache.delete(responseCache.keys().next().value as string);
-    }
-  }
-  return entry;
+  return { etag, raw, compressed: null };
 }

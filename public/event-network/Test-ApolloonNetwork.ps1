@@ -10,7 +10,6 @@
     - current IPv4, APIPA detection (169.254 = no DHCP and no static -> BAD)
     - gateway/DNS summary
     - ping to each peer, TCP 5173 to each peer (app), local TCP 5173 listener
-    - UDP 45737 socket bind (cluster discovery port free?)
     - prints the Event URL(s) this laptop advertises
   Exit 0 = all peers reachable on TCP 5173. Exit 1 = something needs fixing.
 .EXAMPLE
@@ -18,8 +17,7 @@
 #>
 param(
   [string[]]$Peers = @('192.168.10.11', '192.168.10.12', '192.168.10.13'),
-  [int]$AppPort = 5173,
-  [int]$DiscoveryPort = 45737
+  [int]$AppPort = 5173
 )
 
 $fail = $false
@@ -44,15 +42,6 @@ Write-Host '== Local app port ==' -ForegroundColor Cyan
 $listener = Get-NetTCPConnection -LocalPort $AppPort -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
 if ($listener) { Write-Host "Something listens on TCP $AppPort (good if Apolloon is running)." -ForegroundColor Green }
 else { Write-Warning "Nothing listens on TCP $AppPort. Start the Apolloon Electron app first." }
-
-Write-Host '== Discovery port ==' -ForegroundColor Cyan
-try {
-  $udp = New-Object Net.Sockets.UdpClient($DiscoveryPort)
-  $udp.Close()
-  Write-Host "UDP $DiscoveryPort is free to bind (good; Apolloon not running or port available)." -ForegroundColor DarkGray
-} catch {
-  Write-Host "UDP $DiscoveryPort is in use (ok if Apolloon is running on this laptop)." -ForegroundColor DarkGray
-}
 
 Write-Host '== Peers ==' -ForegroundColor Cyan
 foreach ($peer in $Peers) {

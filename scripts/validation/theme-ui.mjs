@@ -3,15 +3,19 @@
 import assert from 'node:assert/strict';
 
 const baseUrl = process.env.APOLLOON_TEST_URL;
-assert.ok(baseUrl && ['127.0.0.1', 'localhost'].includes(new URL(baseUrl).hostname), 'Use an explicitly configured disposable localhost server');
+assert.ok(
+  baseUrl && ['127.0.0.1', 'localhost'].includes(new URL(baseUrl).hostname),
+  'Use an explicitly configured disposable localhost server'
+);
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const browser = await chromium.launch({ headless: true, executablePath: process.env.CHROMIUM_EXECUTABLE });
 const snapshot = async () => (await fetch(`${baseUrl}/api/state`)).json();
-const theme = (page) => page.evaluate(() => ({
-  theme: document.documentElement.dataset.theme ?? null,
-  stored: localStorage.getItem('apolloon.theme'),
-  background: getComputedStyle(document.body).backgroundColor,
-}));
+const theme = (page) =>
+  page.evaluate(() => ({
+    theme: document.documentElement.dataset.theme ?? null,
+    stored: localStorage.getItem('apolloon.theme'),
+    background: getComputedStyle(document.body).backgroundColor,
+  }));
 
 try {
   // No flash: the inline script decides the theme before any application JavaScript runs.

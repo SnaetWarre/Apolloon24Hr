@@ -1,82 +1,52 @@
 import React from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQueryClient, type QueryKey } from '@tanstack/react-query';
 import { trpc } from '../api';
 import type {
-  LiveAppSnapshot,
   LabelInput,
   LabelPatch,
+  LiveAppSnapshot,
   PublicRecordMode,
   RaceStateExpectation,
   RunnerInput,
   RunnerPatch,
   RunnerStatus,
 } from '../types';
-import { snapshotKey } from './snapshot';
-import { historyKey } from './history';
-import { hasRealtimeConnection } from './useRealtimeBridge';
-import { createUuid } from '../lib/uuid';
-
-const CLIENT_ID_KEY = 'apolloon-client-id';
-let memoryClientId: string | null = null;
-
-function command<T extends object>(input: T): T & { _commandId: string; _clientId: string } {
-  return {
-    ...input,
-    _commandId: createUuid(),
-    _clientId: getClientId(),
-  };
-}
-
-function getClientId(): string {
-  if (memoryClientId) return memoryClientId;
-  const stored = window.localStorage.getItem(CLIENT_ID_KEY);
-  if (stored) {
-    memoryClientId = stored;
-    return stored;
-  }
-  memoryClientId = createUuid();
-  window.localStorage.setItem(CLIENT_ID_KEY, memoryClientId);
-  return memoryClientId;
-}
+import { appKey, clusterStatusKey, snapshotKey } from './snapshot';
 
 export function useAppActions() {
-  const activeQueryClient = useQueryClient();
+  const queryClient = useQueryClient();
 
-  const reconcileSnapshot = React.useCallback(async () => {
-    if (hasRealtimeConnection()) return;
-    await Promise.all([
-      activeQueryClient.invalidateQueries({ queryKey: snapshotKey }),
-      activeQueryClient.invalidateQueries({ queryKey: historyKey }),
-    ]);
-  }, [activeQueryClient]);
+  return React.useMemo(() => {
+    /** Wraps a server call so this screen shows its effect as soon as the call returns. */
+    function action<Args extends unknown[], Result>(
+      call: (...args: Args) => Promise<Result>,
+      refresh: QueryKey[] = [appKey]
+    ): (...args: Args) => Promise<Result> {
+      return async (...args) => {
+        const result = await call(...args);
+        await Promise.all(refresh.map((queryKey) => queryClient.invalidateQueries({ queryKey })));
+        return result;
+      };
+    }
 
-  const currentRaceExpectation = React.useCallback((): RaceStateExpectation => {
-    const snapshot = activeQueryClient.getQueryData<LiveAppSnapshot>(snapshotKey);
-    if (!snapshot) throw new Error('Timingstatus wordt nog geladen');
-    return {
-      activeRunnerId: snapshot.race.activeRunnerId,
-      activeStartedAt: snapshot.race.activeStartedAt,
+    const snapshot = () => queryClient.getQueryData<LiveAppSnapshot>(snapshotKey);
+
+    /** Timing actions send the race state this screen shows, so a stale press is refused. */
+    const raceExpectation = (): RaceStateExpectation => {
+      const race = snapshot()?.race;
+      if (!race) throw new Error('Timingstatus wordt nog geladen');
+      return {
+        activeRunnerId: race.activeRunnerId,
+        activeStartedAt: race.activeStartedAt,
+      };
     };
-  }, [activeQueryClient]);
 
-  return React.useMemo(
-    () => ({
-      async addRunner(input: string | RunnerInput) {
-        const body = typeof input === 'string' ? { name: input } : input;
-        await trpc.runners.create.mutate(command(body));
-        await reconcileSnapshot();
-      },
-      async updateRunner(id: string, input: RunnerPatch) {
-        await trpc.runners.update.mutate(command({ id, fields: input }));
-        await reconcileSnapshot();
-      },
-      async setStatus(id: string, status: RunnerStatus) {
-        await trpc.runners.setStatus.mutate(command({ id, status }));
-        await reconcileSnapshot();
-      },
-      async moveInQueue(id: string, targetId: string) {
-        const snapshot = activeQueryClient.getQueryData<LiveAppSnapshot>(snapshotKey);
-        const waiting = (snapshot?.runners ?? [])
+    return {
+      addRunner: action((input: RunnerInput) => trpc.runners.create.mutate(input)),
+      updateRunner: action((id: string, fields: RunnerPatch) => trpc.runners.update.mutate({ id, fields })),
+      setStatus: action((id: string, status: RunnerStatus) => trpc.runners.setStatus.mutate({ id, status })),
+      moveInQueue: action(async (id: string, targetId: string) => {
+        const waiting = (snapshot()?.runners ?? [])
           .filter((runner) => runner.status === 'waiting')
           .sort(
             (a, b) =>
@@ -88,190 +58,47 @@ export function useAppActions() {
         if (oldIndex === -1 || targetIndex === -1 || oldIndex === targetIndex) return;
         const [moved] = waiting.splice(oldIndex, 1);
         waiting.splice(targetIndex, 0, moved);
-        await trpc.runners.reorder.mutate(command({ ids: waiting.map((runner) => runner.id) }));
-        await reconcileSnapshot();
-      },
-      async deleteRunner(id: string) {
-        await trpc.runners.delete.mutate(command({ id }));
-        await reconcileSnapshot();
-      },
-      async hideRunner(id: string) {
-        await trpc.runners.hide.mutate(command({ id }));
-        await reconcileSnapshot();
-      },
-      async unhideRunner(id: string) {
-        await trpc.runners.unhide.mutate(command({ id }));
-        await reconcileSnapshot();
-      },
-      async createLabel(input: LabelInput) {
-        await trpc.labels.create.mutate(command(input));
-        await reconcileSnapshot();
-      },
-      async updateLabel(id: string, input: LabelPatch) {
-        await trpc.labels.update.mutate(command({ id, fields: input }));
-        await reconcileSnapshot();
-      },
-      async deleteLabel(id: string) {
-        await trpc.labels.delete.mutate(command({ id }));
-        await reconcileSnapshot();
-      },
-      async setTemporaryTeamMembers(labelId: string, runnerIds: string[]) {
-        const team = await trpc.temporaryTeams.setMembers.mutate(command({ labelId, runnerIds }));
-        await reconcileSnapshot();
-        return team;
-      },
-      async createTemporaryTeam(input: { name: string; color: string; startsAt: number; endsAt: number; runnerIds: string[] }) {
-        const team = await trpc.temporaryTeams.create.mutate(command(input));
-        await reconcileSnapshot();
-        return team;
-      },
-      async setTemporaryTeamSchedule(labelId: string, startsAt: number, endsAt: number) {
-        const team = await trpc.temporaryTeams.setSchedule.mutate(command({ labelId, startsAt, endsAt }));
-        await reconcileSnapshot();
-        return team;
-      },
-      async setTemporaryTeamActive(labelId: string, active: boolean) {
-        const team = await trpc.temporaryTeams.setActive.mutate(command({ labelId, active }));
-        await reconcileSnapshot();
-        return team;
-      },
-      async importRunnersCsv(csvText: string) {
-        const summary = await trpc.runners.importCsv.mutate(command({ csvText }));
-        await reconcileSnapshot();
+        await trpc.runners.reorder.mutate({
+          ids: waiting.map((runner) => runner.id),
+        });
+      }),
+      deleteRunner: action((id: string) => trpc.runners.delete.mutate({ id })),
+      hideRunner: action((id: string) => trpc.runners.hide.mutate({ id })),
+      unhideRunner: action((id: string) => trpc.runners.unhide.mutate({ id })),
+      importRunnersCsv: action(async (csvText: string) => {
+        const summary = await trpc.runners.importCsv.mutate({ csvText });
         return `${summary.created} aangemaakt, ${summary.updated} bijgewerkt, ${summary.skipped} overgeslagen`;
-      },
-      async handoff() {
-        const handoffResult = await trpc.race.handoff.mutate(command(currentRaceExpectation()));
-        await reconcileSnapshot();
-        return handoffResult;
-      },
-      async startNext() {
-        const handoffResult = await trpc.race.startNext.mutate(command(currentRaceExpectation()));
-        await reconcileSnapshot();
-        return handoffResult;
-      },
-      async undoLastHandoff() {
-        await trpc.race.undoLastHandoff.mutate(command(currentRaceExpectation()));
-        await reconcileSnapshot();
-      },
-      async finishRace() {
-        await trpc.race.finish.mutate(command(currentRaceExpectation()));
-        await reconcileSnapshot();
-      },
-      async burgieGepakt() {
-        const event = await trpc.events.burgieGepakt.mutate(command({}));
-        await reconcileSnapshot();
-        return event;
-      },
-      async updatePublicRecordMode(publicRecordMode: PublicRecordMode) {
-        const settings = await trpc.settings.updatePublicRecordMode.mutate(
-          command({ publicRecordMode })
-        );
-        await reconcileSnapshot();
-        return settings;
-      },
-      async claimTimingControl(
-        expectedControllerHostId: string | null,
-        force = false
-      ) {
-        const result = await trpc.cluster.claimTimingControl.mutate(
-          command({ expectedControllerHostId, force })
-        );
-        await activeQueryClient.invalidateQueries({ queryKey: ['cluster', 'status'] });
-        await reconcileSnapshot();
-        return result;
-      },
-      async transferTimingControl(targetHostId: string) {
-        const result = await trpc.cluster.transferTimingControl.mutate(
-          command({ targetHostId })
-        );
-        await activeQueryClient.invalidateQueries({ queryKey: ['cluster', 'status'] });
-        await reconcileSnapshot();
-        return result;
-      },
-      async createBackup() {
-        const response = await fetch('/api/backups', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ reason: 'manual' }),
-        });
-        const responseText = await response.text();
-        let result: {
-          ok?: boolean;
-          error?: string;
-          backup?: { fileName: string; createdAt: number };
-        };
-        try {
-          result = JSON.parse(responseText) as typeof result;
-        } catch {
-          result = { ok: false, error: responseText || `HTTP ${response.status}` };
-        }
-        if (!response.ok || !result.ok || !result.backup) {
-          throw new Error(result.error || `Backup mislukt (${response.status})`);
-        }
-        await activeQueryClient.invalidateQueries({ queryKey: ['cluster', 'status'] });
-        return result.backup;
-      },
-      async compactDatabase() {
-        const response = await fetch('/api/database/compact', { method: 'POST' });
-        const responseText = await response.text();
-        let result: {
-          ok?: boolean;
-          error?: string;
-          result?: {
-            before: { fileBytes: number };
-            after: { fileBytes: number };
-          };
-        };
-        try {
-          result = JSON.parse(responseText) as typeof result;
-        } catch {
-          result = { ok: false, error: responseText || `HTTP ${response.status}` };
-        }
-        if (!response.ok || !result.ok || !result.result) {
-          throw new Error(result.error || `Database compactie mislukt (${response.status})`);
-        }
-        await activeQueryClient.invalidateQueries({ queryKey: ['cluster', 'status'] });
-        return result.result;
-      },
-      async joinCluster(remoteUrl: string, pairingCode: string) {
-        const response = await fetch('/api/cluster/join', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ remoteUrl, pairingCode }),
-        });
-        const responseText = await response.text();
-        let result: {
-          ok?: boolean;
-          error?: string;
-          backupFile?: string;
-        };
-        try {
-          result = JSON.parse(responseText) as typeof result;
-        } catch {
-          result = { ok: false, error: responseText || `HTTP ${response.status}` };
-        }
-        if (!response.ok || !result.ok) {
-          throw new Error(result.error || `Koppelen mislukt (${response.status})`);
-        }
-        await activeQueryClient.invalidateQueries({ queryKey: snapshotKey });
-        await activeQueryClient.invalidateQueries({ queryKey: historyKey });
-        await activeQueryClient.invalidateQueries({ queryKey: ['cluster', 'status'] });
-        return result;
-      },
-      async resolveConflict(
-        conflictId: string,
-        selectedOperationId: string
-      ) {
-        const result = await trpc.cluster.resolveConflict.mutate(
-          command({ conflictId, selectedOperationId })
-        );
-        await activeQueryClient.invalidateQueries({ queryKey: snapshotKey });
-        await activeQueryClient.invalidateQueries({ queryKey: historyKey });
-        await activeQueryClient.invalidateQueries({ queryKey: ['cluster', 'status'] });
-        return result;
-      },
-    }),
-    [activeQueryClient, currentRaceExpectation, reconcileSnapshot]
-  );
+      }),
+      createLabel: action((input: LabelInput) => trpc.labels.create.mutate(input)),
+      updateLabel: action((id: string, fields: LabelPatch) => trpc.labels.update.mutate({ id, fields })),
+      deleteLabel: action((id: string) => trpc.labels.delete.mutate({ id })),
+      createTemporaryTeam: action(
+        (input: { name: string; color: string; startsAt: number; endsAt: number; runnerIds: string[] }) =>
+          trpc.temporaryTeams.create.mutate(input)
+      ),
+      setTemporaryTeamMembers: action((labelId: string, runnerIds: string[]) =>
+        trpc.temporaryTeams.setMembers.mutate({ labelId, runnerIds })
+      ),
+      setTemporaryTeamSchedule: action((labelId: string, startsAt: number, endsAt: number) =>
+        trpc.temporaryTeams.setSchedule.mutate({ labelId, startsAt, endsAt })
+      ),
+      setTemporaryTeamActive: action((labelId: string, active: boolean) =>
+        trpc.temporaryTeams.setActive.mutate({ labelId, active })
+      ),
+      handoff: action(() => trpc.race.handoff.mutate(raceExpectation())),
+      startNext: action(() => trpc.race.startNext.mutate(raceExpectation())),
+      undoLastHandoff: action(() => trpc.race.undoLastHandoff.mutate(raceExpectation())),
+      finishRace: action(() => trpc.race.finish.mutate(raceExpectation())),
+      burgieGepakt: action(() => trpc.events.burgieGepakt.mutate()),
+      updatePublicRecordMode: action((publicRecordMode: PublicRecordMode) =>
+        trpc.settings.updatePublicRecordMode.mutate({ publicRecordMode })
+      ),
+      createBackup: action(() => trpc.backups.create.mutate(), [clusterStatusKey]),
+      joinPrimary: action((primaryUrl: string) => trpc.cluster.join.mutate({ primaryUrl }), [appKey, clusterStatusKey]),
+      promoteToPrimary: action(
+        (emergency: boolean) => trpc.cluster.promote.mutate({ emergency }),
+        [appKey, clusterStatusKey]
+      ),
+    };
+  }, [queryClient]);
 }

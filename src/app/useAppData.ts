@@ -1,14 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { setServerNowMs } from '../lib/time';
-import type {
-  AppSettings,
-  HostInfo,
-  Label,
-  LiveAppSnapshot,
-  RaceState,
-  Runner,
-  TemporaryTeam,
-} from '../types';
+import type { AppSettings, HostInfo, Label, LiveAppSnapshot, RaceState, Runner, TemporaryTeam } from '../types';
 import { defaultSettings, emptyRace, snapshotKey } from './snapshot';
 
 declare global {
@@ -40,15 +31,11 @@ const emptySnapshot: LiveAppSnapshot = {
   race: emptyRace,
   settings: defaultSettings,
   revision: 0,
-  serverNowMs: 0,
-  host: {
-    hostIpHint: '',
-    port: 1,
-    url: '',
-  },
+  host: { hostIpHint: '', port: 1, url: '' },
 };
 
 async function fetchSnapshot(): Promise<LiveAppSnapshot> {
+  // index.html starts this request before the bundle loads; use it once.
   const prefetched = window.__APOLLOON_STATE_PROMISE__;
   if (prefetched) {
     delete window.__APOLLOON_STATE_PROMISE__;
@@ -68,11 +55,7 @@ export function useAppData<TSelected extends object>(
 ): (FullAppData | TSelected) & AppQueryState {
   const query = useQuery<LiveAppSnapshot, Error, LiveAppSnapshot | TSelected>({
     queryKey: snapshotKey,
-    queryFn: async () => {
-      const snapshot = await fetchSnapshot();
-      setServerNowMs(snapshot.serverNowMs);
-      return snapshot;
-    },
+    queryFn: fetchSnapshot,
     select: selector,
   });
 

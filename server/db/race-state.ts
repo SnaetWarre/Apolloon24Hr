@@ -24,11 +24,7 @@ export function getRaceState(): RaceState {
   };
 }
 
-export function isRaceActive(race: RaceState = getRaceState()): boolean {
-  return Boolean(race.activeRunnerId || (race.raceStartedAt && !race.raceFinishedAt));
-}
-
-/** Starts the runner's live lap, starting (or reopening) the race if needed. */
+/** Starts the runner's live lap, starting (or reopening) the race if needed. The lap keeps the labels of this moment. */
 export function startActiveRunner(runnerId: string, nowMs: number): void {
   run(
     `UPDATE race_state
@@ -38,7 +34,7 @@ export function startActiveRunner(runnerId: string, nowMs: number): void {
          race_finished_at = NULL,
          active_labels_json = ?
      WHERE id = 1`,
-    [runnerId, nowMs, nowMs, JSON.stringify(getRunnerLabels(runnerId))]
+    [runnerId, nowMs, nowMs, JSON.stringify(getRunnerLabels(runnerId, nowMs))]
   );
 }
 

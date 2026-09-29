@@ -70,12 +70,18 @@ function ensureWindows() {
       log('Windows: rule added. Inbound TCP ' + String(PORT) + ' is allowed.');
     } else {
       log(
-        'Windows: UAC may have been cancelled or the rule was not created — another device may not reach :' + String(PORT) + '.'
+        'Windows: UAC may have been cancelled or the rule was not created — another device may not reach :' +
+          String(PORT) +
+          '.'
       );
     }
   } else {
     log(
-      'Windows: could not start elevation (status ' + String(r.status) + '). Add an inbound allow rule for TCP ' + String(PORT) + ' in Windows Defender Firewall if needed.'
+      'Windows: could not start elevation (status ' +
+        String(r.status) +
+        '). Add an inbound allow rule for TCP ' +
+        String(PORT) +
+        ' in Windows Defender Firewall if needed.'
     );
   }
 }
@@ -101,7 +107,11 @@ function ensureLinuxUfw() {
     log('Linux: pkexec not found. To allow the port, run: sudo ufw allow ' + String(PORT) + '/tcp');
     return;
   }
-  log('Linux: a Polkit / password dialog may appear to add ufw allow ' + String(PORT) + '/tcp. You can cancel; dev will still start.');
+  log(
+    'Linux: a Polkit / password dialog may appear to add ufw allow ' +
+      String(PORT) +
+      '/tcp. You can cancel; dev will still start.'
+  );
   const r = spawnSync('pkexec', ['ufw', 'allow', `${String(PORT)}/tcp`], { stdio: 'inherit' });
   if (r.status === 0) {
     log('Linux (ufw): done.');
@@ -111,7 +121,11 @@ function ensureLinuxUfw() {
 }
 
 function ensureMac() {
-  log('macOS: if a remote device cannot connect, allow incoming connections for Node in System Settings when the system offers it, or for TCP ' + String(PORT) + ' in the firewall app you use.');
+  log(
+    'macOS: if a remote device cannot connect, allow incoming connections for Node in System Settings when the system offers it, or for TCP ' +
+      String(PORT) +
+      ' in the firewall app you use.'
+  );
 }
 
 function main() {

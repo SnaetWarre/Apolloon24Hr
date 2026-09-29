@@ -1,9 +1,5 @@
 import { formatDurationMs, formatElapsedSeconds, nowMs } from '../lib/time';
-import {
-  LIVE_MILLISECOND_INTERVAL_MS,
-  useClockTick,
-  useSecondTick,
-} from '../lib/useAnimationFrameTick';
+import { LIVE_MILLISECOND_INTERVAL_MS, useClockTick, useSecondTick } from '../lib/useClockTick';
 
 export function LiveDuration({
   startedAt,
@@ -25,13 +21,12 @@ export function LiveDuration({
   );
 }
 
-export function LiveElapsed({
-  startedAt,
-  prefix = '',
-}: {
-  startedAt: number;
-  prefix?: string;
-}) {
+export function LiveElapsed({ startedAt, prefix = '' }: { startedAt: number; prefix?: string }) {
   useSecondTick();
-  return <>{prefix}{formatElapsedSeconds(nowMs() - startedAt)}</>;
+  return (
+    <>
+      {prefix}
+      {formatElapsedSeconds(nowMs() - startedAt)}
+    </>
+  );
 }

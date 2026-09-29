@@ -1,3 +1,4 @@
+import type { AppSnapshot, LiveAppSnapshot, RaceHistory } from '../shared/schemas.js';
 import {
   getAllLaps,
   getAllRaceEvents,
@@ -5,56 +6,78 @@ import {
   getAppDataRevision,
   getAppSettings,
   getLabels,
+  getLapsForRunner,
   getRaceState,
+  getRecentLaps,
+  getRecentRaceEvents,
   getTemporaryTeams,
 } from './db.js';
+import { boundedHistoryLimit } from './db/values.js';
 import { hostInfo } from './host.js';
-import type { AppSnapshot, LiveAppSnapshot } from '../shared/schemas.js';
 
-let cachedLiveRevision = -1;
-let cachedLiveSnapshot: LiveAppSnapshot | null = null;
-let cachedFullRevision = -1;
-let cachedFullSnapshot: AppSnapshot | null = null;
-
+/** Everything the operator screens and displays show live, without lap history. */
 export function liveAppSnapshot(): LiveAppSnapshot {
-  const revision = getAppDataRevision();
-  if (!cachedLiveSnapshot || cachedLiveRevision !== revision) {
-    cachedLiveRevision = revision;
-    cachedLiveSnapshot = {
-      runners: getAllRunners(),
-      labels: getLabels(),
-      race: getRaceState(),
-      temporaryTeams: getTemporaryTeams(),
-      settings: getAppSettings(),
-      revision,
-      serverNowMs: 0,
-      host: hostInfo(),
-    };
-  }
-
   return {
-    ...cachedLiveSnapshot,
-    revision,
-    serverNowMs: Date.now(),
+    runners: getAllRunners(),
+    labels: getLabels(),
+    race: getRaceState(),
+    temporaryTeams: getTemporaryTeams(),
+    settings: getAppSettings(),
+    revision: getAppDataRevision(),
     host: hostInfo(),
   };
 }
 
 export function appSnapshot(): AppSnapshot {
+  return {
+    ...liveAppSnapshot(),
+    laps: getAllLaps(),
+    events: getAllRaceEvents(),
+  };
+}
+
+export type HistoryRequest =
+  | { scope: 'full' }
+  | { scope: 'recent'; limit: number }
+  | { scope: 'runner'; runnerId: string };
+
+export function raceHistory(request: HistoryRequest): RaceHistory {
   const revision = getAppDataRevision();
-  if (!cachedFullSnapshot || cachedFullRevision !== revision) {
-    cachedFullRevision = revision;
-    cachedFullSnapshot = {
-      ...liveAppSnapshot(),
-      laps: getAllLaps(),
-      events: getAllRaceEvents(),
+  if (request.scope === 'runner') {
+    return {
+      scope: 'runner',
+      runnerId: request.runnerId,
+      limit: null,
+      laps: getLapsForRunner(request.runnerId),
+      events: [],
+      revision,
+    };
+  }
+  if (request.scope === 'recent') {
+    const limit = boundedHistoryLimit(request.limit);
+    return {
+      scope: 'recent',
+      runnerId: null,
+      limit,
+      laps: getRecentLaps(limit),
+      events: getRecentRaceEvents(Math.min(limit, 100)),
+      revision,
     };
   }
 
   return {
-    ...cachedFullSnapshot,
+    scope: 'full',
+    runnerId: null,
+    limit: null,
+    laps: getAllLaps(),
+    events: getAllRaceEvents(),
     revision,
-    serverNowMs: Date.now(),
-    host: hostInfo(),
   };
+}
+
+export function historyCacheKey(request: HistoryRequest): string {
+  const revision = getAppDataRevision();
+  if (request.scope === 'runner') return `history:${revision}:runner:${request.runnerId}`;
+  if (request.scope === 'recent') return `history:${revision}:recent:${boundedHistoryLimit(request.limit)}`;
+  return `history:${revision}:full`;
 }

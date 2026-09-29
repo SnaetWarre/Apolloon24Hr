@@ -1,6 +1,5 @@
 import { Link } from '@tanstack/react-router';
 import { useAppData, useClusterStatus, useRaceHistory } from '../app/index';
-import { preloadAdminView, preloadAnalysisView } from '../lazyViews';
 import { getNextWaitingRunner } from '../lib/runners';
 import { deriveSystemStatus } from '../lib/systemStatus';
 import { useCopyText } from '../lib/clipboard';
@@ -33,9 +32,10 @@ export function RolePicker() {
   );
   // Same definition as Analyse: laps divided by the time until the latest lap.
   const latestLapAt = recentLaps[0]?.finishedAt ?? null;
-  const lapsPerHour = race.raceStartedAt && latestLapAt && latestLapAt > race.raceStartedAt
-    ? totalLaps / ((race.raceFinishedAt ?? latestLapAt) - race.raceStartedAt) * 3_600_000
-    : null;
+  const lapsPerHour =
+    race.raceStartedAt && latestLapAt && latestLapAt > race.raceStartedAt
+      ? (totalLaps / ((race.raceFinishedAt ?? latestLapAt) - race.raceStartedAt)) * 3_600_000
+      : null;
 
   return (
     <>
@@ -50,23 +50,27 @@ export function RolePicker() {
                 : `Gestart om ${formatClockTimeMs(race.raceStartedAt).slice(0, 5)}`}
           </span>
         }
-        actions={host && (
-          <button type="button" className="btn btn--sm" onClick={copyHostUrl} title={host.url}>
-            <Icon name={copied ? 'check' : 'copy'} size={14} />
-            {copied ? 'Gekopieerd' : 'Adres voor andere laptop kopiëren'}
-          </button>
-        )}
+        actions={
+          host && (
+            <button type="button" className="btn btn--sm" onClick={copyHostUrl} title={host.url}>
+              <Icon name={copied ? 'check' : 'copy'} size={14} />
+              {copied ? 'Gekopieerd' : 'Adres voor andere laptop kopiëren'}
+            </button>
+          )
+        }
       />
       <div className="overview">
         <section className="overview-kpis" aria-label="Kerncijfers">
           <div>
             <span>Racetijd</span>
             <strong>
-              {!race.raceStartedAt
-                ? '0:00'
-                : race.raceFinishedAt
-                  ? formatDurationMs(race.raceFinishedAt - race.raceStartedAt).split('.')[0]
-                  : <LiveElapsed startedAt={race.raceStartedAt} />}
+              {!race.raceStartedAt ? (
+                '0:00'
+              ) : race.raceFinishedAt ? (
+                formatDurationMs(race.raceFinishedAt - race.raceStartedAt).split('.')[0]
+              ) : (
+                <LiveElapsed startedAt={race.raceStartedAt} />
+              )}
             </strong>
           </div>
           <div>
@@ -84,7 +88,11 @@ export function RolePicker() {
           <div>
             <span>Snelste ronde</span>
             <strong>{fastestRunner?.bestLapMs ? formatDurationMs(fastestRunner.bestLapMs) : '—'}</strong>
-            {fastestRunner?.bestLapMs ? <small><RunnerName runner={fastestRunner} /></small> : null}
+            {fastestRunner?.bestLapMs ? (
+              <small>
+                <RunnerName runner={fastestRunner} />
+              </small>
+            ) : null}
           </div>
         </section>
 
@@ -92,13 +100,23 @@ export function RolePicker() {
           <section className="panel overview-track">
             <header className="panel-header">
               <h2>Op de piste</h2>
-              <Link className="btn btn--sm btn--quiet" to="/timing">Naar Timing<Icon name="arrowRight" size={14} /></Link>
+              <Link className="btn btn--sm btn--quiet" to="/timing">
+                Naar Timing
+                <Icon name="arrowRight" size={14} />
+              </Link>
             </header>
             {activeRunner ? (
               <div className="overview-track__now">
-                <span className="overview-track__runner"><RunnerName runner={activeRunner} /></span>
+                <span className="overview-track__runner">
+                  <RunnerName runner={activeRunner} />
+                </span>
                 {race.activeStartedAt && (
-                  <LiveDuration startedAt={race.activeStartedAt} className="overview-track__time" refreshMs={1_000} format="seconds" />
+                  <LiveDuration
+                    startedAt={race.activeStartedAt}
+                    className="overview-track__time"
+                    refreshMs={1_000}
+                    format="seconds"
+                  />
                 )}
               </div>
             ) : (
@@ -120,12 +138,24 @@ export function RolePicker() {
           <section className="panel overview-queue">
             <header className="panel-header">
               <h2>Wisselzone</h2>
-              <Link className="btn btn--sm btn--quiet" to="/queue">Naar Wachtrij<Icon name="arrowRight" size={14} /></Link>
+              <Link className="btn btn--sm btn--quiet" to="/queue">
+                Naar Wachtrij
+                <Icon name="arrowRight" size={14} />
+              </Link>
             </header>
             <dl className="overview-counts">
-              <div><dt>Opwarmen</dt><dd>{warmingCount}</dd></div>
-              <div><dt>Klaar</dt><dd>{waitingCount}</dd></div>
-              <div><dt>Met rondes</dt><dd>{ranCount}</dd></div>
+              <div>
+                <dt>Opwarmen</dt>
+                <dd>{warmingCount}</dd>
+              </div>
+              <div>
+                <dt>Klaar</dt>
+                <dd>{waitingCount}</dd>
+              </div>
+              <div>
+                <dt>Met rondes</dt>
+                <dd>{ranCount}</dd>
+              </div>
             </dl>
             {waitingCount < 3 && race.raceStartedAt && !race.raceFinishedAt && (
               <p className="overview-warning">
@@ -139,8 +169,9 @@ export function RolePicker() {
           <section className="panel overview-laps">
             <header className="panel-header">
               <h2>Laatste rondes</h2>
-              <Link className="btn btn--sm btn--quiet" to="/analysis" onPointerEnter={preloadAnalysisView}>
-                Naar Analyse<Icon name="arrowRight" size={14} />
+              <Link className="btn btn--sm btn--quiet" to="/analysis">
+                Naar Analyse
+                <Icon name="arrowRight" size={14} />
               </Link>
             </header>
             {recentLaps.length ? (
@@ -154,7 +185,9 @@ export function RolePicker() {
                         {lap.runnerName}
                       </td>
                       <td className="num overview-laps__lap">ronde {lap.lapNumber}</td>
-                      <td className="num"><strong>{formatDurationMs(lap.durationMs)}</strong></td>
+                      <td className="num">
+                        <strong>{formatDurationMs(lap.durationMs)}</strong>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -167,8 +200,9 @@ export function RolePicker() {
           <section className="panel overview-system">
             <header className="panel-header">
               <h2>Systeem</h2>
-              <Link className="btn btn--sm btn--quiet" to="/admin" onPointerEnter={preloadAdminView}>
-                Naar Beheer<Icon name="arrowRight" size={14} />
+              <Link className="btn btn--sm btn--quiet" to="/admin">
+                Naar Beheer
+                <Icon name="arrowRight" size={14} />
               </Link>
             </header>
             {systemStatus && (
@@ -181,8 +215,14 @@ export function RolePicker() {
               </div>
             )}
             <dl className="overview-facts">
-              <div><dt>Adres voor andere laptops</dt><dd>{host?.url ?? '—'}</dd></div>
-              <div><dt>Lopers in de databank</dt><dd>{runners.length}</dd></div>
+              <div>
+                <dt>Adres voor andere laptops</dt>
+                <dd>{host?.url ?? '—'}</dd>
+              </div>
+              <div>
+                <dt>Lopers in de databank</dt>
+                <dd>{runners.length}</dd>
+              </div>
             </dl>
           </section>
         </div>

@@ -124,7 +124,9 @@ test('nmcli active connections parse with escaped colons', () => {
 });
 
 test('nmcli device fields keep only the first colon as separator', () => {
-  const fields = parseNmcliDeviceFields('IP4.ADDRESS[1]:192.168.1.211/24\nIP4.GATEWAY:192.168.1.1\nGENERAL.STATE:100 (connected)\n');
+  const fields = parseNmcliDeviceFields(
+    'IP4.ADDRESS[1]:192.168.1.211/24\nIP4.GATEWAY:192.168.1.1\nGENERAL.STATE:100 (connected)\n'
+  );
   assert.equal(fields.get('IP4.ADDRESS[1]'), '192.168.1.211/24');
   assert.equal(fields.get('IP4.GATEWAY'), '192.168.1.1');
 });

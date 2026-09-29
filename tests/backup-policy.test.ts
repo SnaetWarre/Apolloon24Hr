@@ -1,154 +1,78 @@
 import assert from 'node:assert/strict';
-import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import Database from 'better-sqlite3';
+import type { BackupRecord } from '../shared/schemas.ts';
 
 const dataPath = path.resolve(`.tmp-test-backups-${process.pid}`);
 process.env.DATA_PATH = dataPath;
 process.env.NODE_ENV = 'test';
 process.env.BACKUP_ENABLED = 'false';
 
-test('online backups are verified, checksummed, and readable as independent SQLite files', async () => {
+test('online backups are verified off the main thread and restorable as single SQLite files', async () => {
   fs.rmSync(dataPath, { recursive: true, force: true });
   const db = await import('../server/db.ts');
   const backups = await import('../server/backups.ts');
   try {
     await db.initDb();
-    const runner = db.commitReplicatedWrite({
-      id: crypto.randomUUID(),
-      type: 'test.backup-runner',
-      payload: { name: 'Backup runner' },
-      action: () =>
-        db.insertRunner({
-          name: 'Backup runner',
-          runnerNumber: 'BACKUP-1',
-        }),
-    });
-
-    db.closeDb();
-    const bloated = new Database(path.join(dataPath, 'data', 'app.db'));
-    try {
-      bloated.exec(`
-        CREATE TABLE backup_compaction_payload (payload BLOB NOT NULL);
-        INSERT INTO backup_compaction_payload(payload) VALUES (randomblob(4 * 1024 * 1024));
-        DROP TABLE backup_compaction_payload;
-      `);
-    } finally {
-      bloated.close();
-    }
-    const liveDatabaseBytes = fs.statSync(path.join(dataPath, 'data', 'app.db')).size;
-    await db.initDb();
+    backups.startBackupService();
+    const runner = db.recordWrite('test.create', () =>
+      db.insertRunner({ name: 'Backup runner', runnerNumber: 'BACKUP-1' })
+    );
 
     const record = await backups.createVerifiedBackup('manual');
     const backupPath = path.join(dataPath, 'backups', record.fileName);
-    assert.equal(fs.existsSync(backupPath), true);
-    assert.equal(fs.existsSync(`${backupPath}.json`), true);
-    assert.ok(record.sizeBytes < liveDatabaseBytes / 2);
-    assert.deepEqual(
-      fs.readdirSync(path.dirname(backupPath)).filter((entry) => entry.includes('.partial')),
-      []
-    );
-    assert.equal(
-      crypto.createHash('sha256').update(fs.readFileSync(backupPath)).digest('hex'),
-      record.sha256
-    );
+    assert.deepEqual(fs.readdirSync(path.dirname(backupPath)), [record.fileName], 'no partial or sidecar files');
+    assert.equal(record.scheduled, false);
 
     const restored = new Database(backupPath, { readonly: true, fileMustExist: true });
     try {
-      const stored = restored
-        .prepare('SELECT name, runner_number AS runnerNumber FROM runners WHERE id = ?')
-        .get(runner.id) as { name: string; runnerNumber: string } | undefined;
-      assert.deepEqual(stored, { name: 'Backup runner', runnerNumber: 'BACKUP-1' });
-      assert.equal(restored.pragma('quick_check', { simple: true }), 'ok');
+      assert.equal(restored.pragma('journal_mode', { simple: true }), 'delete');
+      assert.deepEqual(
+        restored.prepare('SELECT name, runner_number AS runnerNumber FROM runners WHERE id = ?').get(runner.id),
+        {
+          name: 'Backup runner',
+          runnerNumber: 'BACKUP-1',
+        }
+      );
     } finally {
       restored.close();
     }
 
-    const status = backups.backupStatus();
-    assert.equal(status.latest?.fileName, record.fileName);
-    assert.equal(status.latest?.verified, true);
-    assert.equal(status.retainedCount, 1);
-    assert.ok((status.diskFreeBytes || 0) > 0);
-    assert.ok((status.diskTotalBytes || 0) >= (status.diskFreeBytes || 0));
-
-    const scheduledPromise = backups.createVerifiedBackup('scheduled');
-    const manualPromise = backups.createVerifiedBackup('manual-during-scheduled');
-    assert.equal(backups.backupStatus().queued, true);
-    const [scheduled, manual] = await Promise.all([scheduledPromise, manualPromise]);
-    assert.equal(scheduled.reason, 'scheduled');
-    assert.equal(manual.reason, 'manual-during-scheduled');
+    const [scheduled, manual] = await Promise.all([
+      backups.createVerifiedBackup('scheduled'),
+      backups.createVerifiedBackup('manual'),
+    ]);
+    assert.equal(scheduled.scheduled, true);
     assert.notEqual(scheduled.fileName, manual.fileName);
-    assert.equal(backups.backupStatus().retainedCount, 3);
-    assert.equal(backups.backupStatus().queued, false);
-
-    const compaction = await backups.compactDatabaseStorage();
-    assert.equal(compaction.compacted, true);
-    assert.equal(backups.backupStatus().latest?.reason, 'pre-database-compaction');
-    assert.equal(backups.backupStatus().maintenanceInProgress, false);
-
-    const manifest = backups.backupManifest(manual);
-    assert.equal(manifest.application, 'Apolloon');
-    assert.equal(manifest.backup.sha256, manual.sha256);
-    assert.equal(manifest.verification.sqliteQuickCheck, 'ok');
+    const status = backups.backupStatus();
+    assert.equal(status.retainedCount, 3);
+    assert.equal(status.inProgress, false);
+    assert.equal(backups.latestBackupPath()?.record.fileName, status.latest?.fileName);
+    assert.ok((status.diskFreeBytes ?? 0) > 0);
+    assert.ok(status.databaseBytes > 0);
   } finally {
+    await backups.stopBackupService();
     db.closeDb();
     fs.rmSync(dataPath, { recursive: true, force: true });
   }
 });
 
-test('retention keeps recent, hourly, daily, and bounded manual recovery points', async () => {
+test('retention keeps the newest scheduled and the newest other backups', async () => {
   const { backupsToRetain } = await import('../server/backups.ts');
-  const now = Date.UTC(2026, 7, 3, 20, 0, 0);
-  const record = (name: string, createdAt: number, reason = 'scheduled') => ({
-    fileName: `${name}.sqlite`,
-    createdAt,
-    reason,
-    sizeBytes: 1,
-    sha256: 'a'.repeat(64),
-    verified: true as const,
+  const record = (index: number, scheduled: boolean): BackupRecord => ({
+    fileName: `${scheduled ? 'scheduled' : 'manual'}-${index}`,
+    createdAt: index * 60_000,
+    sizeBytes: 1_024,
+    scheduled,
   });
   const candidates = [
-    ...Array.from({ length: 36 }, (_, index) =>
-      record(`recent-${index}`, now - index * 5 * 60_000)
-    ),
-    ...Array.from({ length: 80 }, (_, index) =>
-      record(`hourly-${index}`, now - (index + 4) * 60 * 60_000)
-    ),
-    ...Array.from({ length: 35 }, (_, index) =>
-      record(`daily-${index}`, now - (index + 4) * 24 * 60 * 60_000)
-    ),
-    ...Array.from({ length: 25 }, (_, index) =>
-      record(`manual-${index}`, now - index * 1_000, 'manual')
-    ),
+    ...Array.from({ length: 60 }, (_, index) => record(index, true)),
+    ...Array.from({ length: 25 }, (_, index) => record(index, false)),
   ];
-
-  const keep = backupsToRetain(candidates, now);
-  assert.equal([...keep].filter((name) => name.startsWith('manual-')).length, 20);
-  assert.equal(keep.has('recent-0.sqlite'), true);
-  assert.equal(keep.has('recent-23.sqlite'), true);
-  assert.equal(keep.has('daily-34.sqlite'), false);
-  assert.ok(keep.size < candidates.length);
-  assert.ok(keep.size <= 146);
-});
-
-test('retention enforces a byte ceiling while preserving the newest recovery points', async () => {
-  const { backupsToRetain } = await import('../server/backups.ts');
-  const now = Date.UTC(2026, 7, 3, 20, 0, 0);
-  const candidates = Array.from({ length: 8 }, (_, index) => ({
-    fileName: `scheduled-${index}.sqlite`,
-    createdAt: now - index * 5 * 60_000,
-    reason: 'scheduled',
-    sizeBytes: 10,
-    sha256: 'b'.repeat(64),
-    verified: true as const,
-  }));
-
-  const keep = backupsToRetain(candidates, now, 25);
-  const retainedBytes = candidates
-    .filter((record) => keep.has(record.fileName))
-    .reduce((total, record) => total + record.sizeBytes, 0);
-  assert.equal(keep.has('scheduled-0.sqlite'), true);
-  assert.ok(retainedBytes <= 25);
+  const keep = backupsToRetain(candidates);
+  assert.equal(keep.size, 48 + 20);
+  assert.ok(keep.has('scheduled-59') && !keep.has('scheduled-11'));
+  assert.ok(keep.has('manual-24') && !keep.has('manual-4'));
 });

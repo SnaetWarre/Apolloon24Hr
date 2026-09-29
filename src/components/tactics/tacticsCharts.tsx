@@ -15,15 +15,7 @@ import { RACE_DURATION_HOURS, type HourlyPacePoint, type RaceProgressPoint } fro
 import type { LiveTrendPoint, TimeGapPoint } from '../../lib/tacticsDeepDive';
 import { formatPaceSeconds, formatRaceHour, formatSignedGap } from './tacticsFormat';
 
-Chart.register(
-  CategoryScale,
-  Legend,
-  LinearScale,
-  LineController,
-  LineElement,
-  PointElement,
-  Tooltip
-);
+Chart.register(CategoryScale, Legend, LinearScale, LineController, LineElement, PointElement, Tooltip);
 
 const MAX_CHART_PIXEL_RATIO = 1.5;
 
@@ -83,7 +75,8 @@ export function RaceProgressChart({
     if (!canvas || !points.length) return undefined;
     const datasets: ChartConfiguration<'line'>['data']['datasets'] = [];
     if (showLive) datasets.push(lineDataset('Apolloon live', points, 'liveLaps', workspaceChartPalette.live, 4));
-    if (showTarget) datasets.push(lineDataset('Doelverloop', points, 'targetLaps', workspaceChartPalette.target, 2, [8, 6]));
+    if (showTarget)
+      datasets.push(lineDataset('Doelverloop', points, 'targetLaps', workspaceChartPalette.target, 2, [8, 6]));
     datasets.push(lineDataset(ownLabel, points, 'ownHistoricalLaps', workspaceChartPalette.own, 2, [7, 5], true));
     datasets.push(lineDataset(rivalLabel, points, 'rivalHistoricalLaps', workspaceChartPalette.rival, 2, [7, 5], true));
 
@@ -118,8 +111,10 @@ export function HourlyPaceChart({
     const canvas = canvasRef.current;
     if (!canvas || !points.length) return undefined;
     const datasets: ChartConfiguration<'line'>['data']['datasets'] = [];
-    if (showActual) datasets.push(paceDataset('Werkelijk live', points, 'actualSeconds', workspaceChartPalette.live, 4));
-    if (showPlan) datasets.push(paceDataset('Doeltempo', points, 'plannedSeconds', workspaceChartPalette.target, 2, [8, 6]));
+    if (showActual)
+      datasets.push(paceDataset('Werkelijk live', points, 'actualSeconds', workspaceChartPalette.live, 4));
+    if (showPlan)
+      datasets.push(paceDataset('Doeltempo', points, 'plannedSeconds', workspaceChartPalette.target, 2, [8, 6]));
     datasets.push(paceDataset(ownLabel, points, 'ownHistoricalSeconds', workspaceChartPalette.own, 2));
     datasets.push(paceDataset(rivalLabel, points, 'rivalHistoricalSeconds', workspaceChartPalette.rival, 2));
 
@@ -201,8 +196,10 @@ export function LiveTimeGapChart({ points }: { points: TimeGapPoint[] }) {
           },
           {
             label: 'Voorspeld met doelschema',
-            data: [...(lastActualPoint ? [lastActualPoint] : []), ...predictionPoints]
-              .map((point) => ({ x: point.raceHour, y: point.gapSeconds })),
+            data: [...(lastActualPoint ? [lastActualPoint] : []), ...predictionPoints].map((point) => ({
+              x: point.raceHour,
+              y: point.gapSeconds,
+            })),
             borderColor: workspaceChartPalette.live,
             backgroundColor: workspaceChartPalette.live,
             borderWidth: 3,
@@ -212,7 +209,10 @@ export function LiveTimeGapChart({ points }: { points: TimeGapPoint[] }) {
           },
           {
             label: 'Gelijke stand',
-            data: [{ x: 0, y: 0 }, { x: 24, y: 0 }],
+            data: [
+              { x: 0, y: 0 },
+              { x: 24, y: 0 },
+            ],
             borderColor: workspaceChartPalette.neutral,
             backgroundColor: workspaceChartPalette.neutral,
             borderWidth: 1,
@@ -264,7 +264,10 @@ function lineDataset(
 function paceDataset(
   label: string,
   points: HourlyPacePoint[],
-  valueKey: keyof Pick<HourlyPacePoint, 'plannedSeconds' | 'actualSeconds' | 'ownHistoricalSeconds' | 'rivalHistoricalSeconds'>,
+  valueKey: keyof Pick<
+    HourlyPacePoint,
+    'plannedSeconds' | 'actualSeconds' | 'ownHistoricalSeconds' | 'rivalHistoricalSeconds'
+  >,
   color: string,
   borderWidth: number,
   borderDash?: number[]
@@ -299,7 +302,9 @@ function sharedLineChartOptions(
       tooltip: {
         ...chartTooltipColors(),
         callbacks: {
-          title(items) { return items[0] ? `Race-uur ${formatRaceHour(Number(items[0].parsed.x))}` : ''; },
+          title(items) {
+            return items[0] ? `Race-uur ${formatRaceHour(Number(items[0].parsed.x))}` : '';
+          },
           label(context) {
             return context.parsed.y == null
               ? `${context.dataset.label}: geen data`
@@ -313,7 +318,12 @@ function sharedLineChartOptions(
         type: 'linear',
         min: 0,
         max: RACE_DURATION_HOURS,
-        title: { display: true, text: 'Uren sinds de start', color: workspaceChartPalette.muted, font: { weight: 500 } },
+        title: {
+          display: true,
+          text: 'Uren sinds de start',
+          color: workspaceChartPalette.muted,
+          font: { weight: 500 },
+        },
         ticks: { color: workspaceChartPalette.muted, stepSize: 2, callback: (value) => `${value}u` },
         grid: { color: workspaceChartPalette.grid },
       },

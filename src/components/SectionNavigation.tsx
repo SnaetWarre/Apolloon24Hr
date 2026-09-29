@@ -1,4 +1,3 @@
-
 export function SectionNavigation<SectionId extends string>({
   label,
   sections,

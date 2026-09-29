@@ -3,15 +3,17 @@ import { flexRender, getCoreRowModel, useReactTable, type ColumnDef } from '@tan
 import { LabelBadge } from '../LabelBadge';
 import { SourceBadge } from '../RunnerEntryModals';
 import { statusLabel } from './adminFormat';
-import type { Runner } from '../../types';
+import type { Runner, RunnerRegistration } from '../../types';
 
 export function AdminRunnerTable({
   runners,
+  registrations,
   onOpenProfile,
   onRestore,
   onRemove,
 }: {
   runners: Runner[];
+  registrations: Record<string, RunnerRegistration>;
   onOpenProfile: (runnerId: string) => void;
   onRestore: (runner: Runner) => Promise<void>;
   onRemove: (runner: Runner) => Promise<void>;
@@ -32,7 +34,7 @@ export function AdminRunnerTable({
       {
         header: 'Beschikbare uren',
         cell: ({ row }) => {
-          const hours = row.original.registration?.availableHours ?? [];
+          const hours = registrations[row.original.id]?.availableHours ?? [];
           return hours.length ? hours.join(', ') : 'Niet opgegeven';
         },
       },
@@ -77,7 +79,7 @@ export function AdminRunnerTable({
         },
       },
     ],
-    [onOpenProfile, onRemove, onRestore]
+    [onOpenProfile, onRemove, onRestore, registrations]
   );
 
   const table = useReactTable({

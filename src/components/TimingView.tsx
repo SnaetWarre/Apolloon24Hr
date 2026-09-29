@@ -1,4 +1,5 @@
 import React from 'react';
+import { Link } from '@tanstack/react-router';
 import { isModalDialogOpen, ModalDialog } from './ModalDialog';
 import { useConfirm } from './ConfirmDialog';
 import { useAppActions, useAppData, useClusterStatus, useRaceHistory } from '../app/index';
@@ -8,30 +9,33 @@ import type { LiveAppSnapshot, Runner } from '../types';
 import { LabelBadge } from './LabelBadge';
 import { RunnerName } from './RunnerName';
 import { PageHeader } from './PageHeader';
-import { LIVE_MILLISECOND_INTERVAL_MS, useClockTick } from '../lib/useAnimationFrameTick';
+import { LIVE_MILLISECOND_INTERVAL_MS, useClockTick } from '../lib/useClockTick';
 
 const selectTimingData = ({ runners, race }: LiveAppSnapshot) => ({ runners, race });
 
 export function TimingView() {
   const { runners, race } = useAppData(selectTimingData);
-  const { laps, loading: historyLoading, error: historyError, refresh: refreshHistory } =
-    useRaceHistory({ scope: 'recent', limit: 10 });
-  const { laps: activeRunnerLaps, loading: runnerHistoryLoading, error: runnerHistoryError } =
-    useRaceHistory({ scope: 'runner', runnerId: race.activeRunnerId || '' });
+  const {
+    laps,
+    loading: historyLoading,
+    error: historyError,
+    refresh: refreshHistory,
+  } = useRaceHistory({ scope: 'recent', limit: 10 });
+  const {
+    laps: activeRunnerLaps,
+    loading: runnerHistoryLoading,
+    error: runnerHistoryError,
+  } = useRaceHistory({ scope: 'runner', runnerId: race.activeRunnerId || '' });
   const { cluster } = useClusterStatus();
-  const { handoff, startNext, undoLastHandoff, finishRace, claimTimingControl } = useAppActions();
+  const { handoff, startNext, undoLastHandoff, finishRace } = useAppActions();
   const [actionError, setActionError] = React.useState<string | null>(null);
   const [handoffBusy, setHandoffBusy] = React.useState(false);
   const [lastAction, setLastAction] = React.useState<string | null>(null);
   const [finishConfirmStep, setFinishConfirmStep] = React.useState<0 | 1 | 2>(0);
   const handoffBusyRef = React.useRef(false);
   const confirm = useConfirm();
-  const controlledElsewhere = Boolean(
-    cluster?.timingControllerHostId && cluster.timingControllerHostId !== cluster.hostId
-  );
-  const timingControl = cluster?.timingControl ?? null;
-  const hasSyncConflict = Boolean(cluster?.conflictCount);
-  const timingBlocked = controlledElsewhere || hasSyncConflict;
+  // Only the primary laptop records laps; a standby shows the race read-only.
+  const timingBlocked = cluster?.role === 'standby';
 
   const activeRunner = runners.find((runner) => runner.id === race.activeRunnerId) || null;
   const nextRunner = getNextWaitingRunner(runners);
@@ -76,21 +80,29 @@ export function TimingView() {
         confirmLabel: 'Race hervatten',
         tone: 'danger',
       }))
-    ) return;
-    await runExclusiveRaceAction(
-      async () => {
-        const handoffResult = await (activeRunner ? handoff() : startNext());
-        setLastAction(
-          handoffResult.lapId
-            ? handoffResult.startedRunnerId
-              ? 'Ronde opgeslagen. Volgende loper gestart.'
-              : 'Ronde opgeslagen. Niemand actief; de wachtrij is leeg.'
-            : 'Loper gestart.'
-        );
-      },
-      null
-    );
-  }, [activeRunner, nextRunner, finishConfirmStep, race.raceFinishedAt, confirm, handoff, runExclusiveRaceAction, startNext, timingBlocked]);
+    )
+      return;
+    await runExclusiveRaceAction(async () => {
+      const handoffResult = await (activeRunner ? handoff() : startNext());
+      setLastAction(
+        handoffResult.lapId
+          ? handoffResult.startedRunnerId
+            ? 'Ronde opgeslagen. Volgende loper gestart.'
+            : 'Ronde opgeslagen. Niemand actief; de wachtrij is leeg.'
+          : 'Loper gestart.'
+      );
+    }, null);
+  }, [
+    activeRunner,
+    nextRunner,
+    finishConfirmStep,
+    race.raceFinishedAt,
+    confirm,
+    handoff,
+    runExclusiveRaceAction,
+    startNext,
+    timingBlocked,
+  ]);
 
   React.useEffect(() => {
     // Navigation buttons can stay focused when this route opens. In that case,
@@ -103,10 +115,19 @@ export function TimingView() {
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       if (
-        event.defaultPrevented || event.ctrlKey || event.altKey || event.metaKey || event.isComposing ||
-        !isHandoffKey(event) || isTextEntryTarget(target) ||
-        finishConfirmStep > 0 || timingBlocked || race.raceFinishedAt || isModalDialogOpen()
-      ) return;
+        event.defaultPrevented ||
+        event.ctrlKey ||
+        event.altKey ||
+        event.metaKey ||
+        event.isComposing ||
+        !isHandoffKey(event) ||
+        isTextEntryTarget(target) ||
+        finishConfirmStep > 0 ||
+        timingBlocked ||
+        race.raceFinishedAt ||
+        isModalDialogOpen()
+      )
+        return;
       // Space is the dedicated timing control on this screen, even if a button
       // still has focus. Keep Enter's normal button/link behaviour intact.
       if (event.key === 'Enter' && isInteractiveTarget(target)) return;
@@ -120,12 +141,15 @@ export function TimingView() {
 
   async function undo() {
     if (handoffBusyRef.current) return;
-    if (!(await confirm({
-      title: 'Laatste wissel ongedaan maken?',
-      message: 'Wachtrij, actieve loper en eventuele ronde gaan terug naar de toestand van vóór de laatste wissel.',
-      confirmLabel: 'Ongedaan maken',
-      tone: 'danger',
-    }))) return;
+    if (
+      !(await confirm({
+        title: 'Laatste wissel ongedaan maken?',
+        message: 'Wachtrij, actieve loper en eventuele ronde gaan terug naar de toestand van vóór de laatste wissel.',
+        confirmLabel: 'Ongedaan maken',
+        tone: 'danger',
+      }))
+    )
+      return;
     await runExclusiveRaceAction(undoLastHandoff, null);
   }
 
@@ -136,53 +160,25 @@ export function TimingView() {
     }
   }
 
-  async function emergencyTakeover() {
-    if (
-      !timingControl ||
-      !controlledElsewhere ||
-      (!timingControl.takeoverAllowed && !timingControl.forcedTakeoverAllowed)
-    )
-      return;
-    const force = !timingControl.localReplicaCaughtUp;
-    if (
-      !(await confirm({
-        title: force ? 'Geforceerde noodovername' : 'Noodovername timing',
-        message: force
-          ? 'Deze laptop is mogelijk niet volledig gesynchroniseerd. Bevestig dat de vorige timinglaptop gestopt is en aanvaard dat de laatste timingacties kunnen ontbreken.'
-          : 'Bevestig dat de vorige timinglaptop gestopt of definitief losgekoppeld is. Als die laptop verder klokt, ontstaan twee timinggeschiedenissen.',
-        confirmLabel: force ? 'Geforceerd overnemen' : 'Timing overnemen',
-        tone: 'danger',
-      }))
-    ) {
-      return;
-    }
-    await runExclusiveRaceAction(
-      () => claimTimingControl(timingControl.controllerHostId, force),
-      force
-        ? 'Deze laptop heeft de timing geforceerd overgenomen; controleer de laatste timingacties.'
-        : 'Deze laptop heeft de timing overgenomen.'
-    );
-  }
-
   const waitingCount = runners.filter((runner) => runner.status === 'waiting').length;
   const handoffDisabled = handoffBusy || timingBlocked || (!activeRunner && !nextRunner);
   const handoffLabel = handoffBusy
     ? 'Bezig...'
     : timingBlocked
       ? 'Timing geblokkeerd'
-      : race.raceFinishedAt && nextRunner ? `Race hervatten met ${shortRunnerName(nextRunner)}`
-      : activeRunner
-        ? nextRunner
-          ? `Klok ${shortRunnerName(activeRunner)} af, start ${shortRunnerName(nextRunner)}`
-          : `Klok ${shortRunnerName(activeRunner)} af`
-        : nextRunner ? `Start ${shortRunnerName(nextRunner)}` : 'Geen loper klaar';
+      : race.raceFinishedAt && nextRunner
+        ? `Race hervatten met ${shortRunnerName(nextRunner)}`
+        : activeRunner
+          ? nextRunner
+            ? `Klok ${shortRunnerName(activeRunner)} af, start ${shortRunnerName(nextRunner)}`
+            : `Klok ${shortRunnerName(activeRunner)} af`
+          : nextRunner
+            ? `Start ${shortRunnerName(nextRunner)}`
+            : 'Geen loper klaar';
 
   return (
     <>
-      <PageHeader
-        title="Timing"
-        meta={<span>Spatie of Enter klokt de huidige loper af en start de volgende.</span>}
-      />
+      <PageHeader title="Timing" meta={<span>Spatie of Enter klokt de huidige loper af en start de volgende.</span>} />
 
       <div className="timing-workspace">
         <section className={`timing-station${activeRunner ? ' is-running' : ''}`} aria-label="Timing bedienen">
@@ -203,7 +199,11 @@ export function TimingView() {
               </>
             ) : (
               <span className="timing-now__empty">
-                {race.raceFinishedAt ? 'Niemand actief' : nextRunner ? 'Klaar om te starten' : 'Wacht op de eerste loper'}
+                {race.raceFinishedAt
+                  ? 'Niemand actief'
+                  : nextRunner
+                    ? 'Klaar om te starten'
+                    : 'Wacht op de eerste loper'}
               </span>
             )}
           </div>
@@ -212,7 +212,9 @@ export function TimingView() {
             {activeRunner && race.activeStartedAt ? (
               <TimingClock startedAt={race.activeStartedAt} />
             ) : (
-              <span className="timing-clock timing-clock--idle" aria-hidden="true">0:00<small>.0</small></span>
+              <span className="timing-clock timing-clock--idle" aria-hidden="true">
+                0:00<small>.0</small>
+              </span>
             )}
             <div className="timing-clock-stats">
               <div className="stat-panel">
@@ -222,7 +224,9 @@ export function TimingView() {
                     ? 'Niet beschikbaar'
                     : activePreviousLap
                       ? formatDurationMs(activePreviousLap.durationMs)
-                      : activeRunner && runnerHistoryLoading ? 'Laden...' : '—'}
+                      : activeRunner && runnerHistoryLoading
+                        ? 'Laden...'
+                        : '—'}
                 </strong>
               </div>
               <div className="stat-panel">
@@ -232,7 +236,6 @@ export function TimingView() {
             </div>
           </div>
 
-
           <div className="timing-actions">
             <button className="btn btn--primary btn--xl" onClick={runHandoff} disabled={handoffDisabled}>
               <span>{handoffLabel}</span>
@@ -241,52 +244,17 @@ export function TimingView() {
           </div>
 
           <div className="timing-feedback">
-            {controlledElsewhere && (
-              <div className="warning-banner warning-banner--blocking">
-                {timingControl?.state === 'remote-reachable' ? (
-                  <span>
-                    <strong>Timing wordt elders bediend.</strong> De timing loopt op{' '}
-                    <strong>{timingControl.controllerUrl || 'een andere bereikbare laptop'}</strong>. Gebruik
-                    die laptop of draag de timing daar gecontroleerd over.
-                  </span>
-                ) : (
-                  <>
-                    <span>
-                      <strong>Timinglaptop niet bereikbaar.</strong> Controleer eerst fysiek dat die app gestopt is.
-                      {timingControl?.takeoverAllowed
-                        ? ' De lokale replica bevat alles tot de laatste geslaagde synchronisatie; een noodovername is nu mogelijk.'
-                        : timingControl?.forcedTakeoverAllowed
-                          ? ' De lokale replica is mogelijk onvolledig. Alleen een geforceerde noodovername is beschikbaar.'
-                          : timingControl?.localReplicaCaughtUp
-                            ? ` Noodovername wordt beschikbaar om ${formatClockTimeMs(
-                                timingControl.takeoverAvailableAt || Date.now()
-                              )}.`
-                            : ` De lokale replica is mogelijk onvolledig. Herstel bij voorkeur de verbinding; geforceerde noodovername wordt beschikbaar om ${formatClockTimeMs(
-                                timingControl?.forcedTakeoverAvailableAt || Date.now()
-                              )}.`}
-                    </span>
-                    <button
-                      className="btn"
-                      onClick={() => void emergencyTakeover()}
-                      disabled={
-                        handoffBusy ||
-                        (!timingControl?.takeoverAllowed && !timingControl?.forcedTakeoverAllowed)
-                      }
-                    >
-                      {timingControl?.forcedTakeoverAllowed
-                        ? 'Geforceerde noodovername'
-                        : 'Noodovername starten'}
-                    </button>
-                  </>
-                )}
-              </div>
-            )}
-
-            {hasSyncConflict && (
+            {timingBlocked && (
               <div className="warning-banner warning-banner--blocking">
                 <span>
-                  <strong>Synchronisatieconflict.</strong> Er zijn twee verschillende timinggeschiedenissen gevonden.
-                  Timing is veilig gepauzeerd. Kies in Beheer welke laptop de correcte geschiedenis bevat.
+                  <strong>Deze laptop is standby.</strong> Klok op de primaire laptop
+                  {cluster?.primary?.url ? (
+                    <>
+                      {' '}
+                      (<strong>{cluster.primary.url}</strong>)
+                    </>
+                  ) : null}
+                  . Is die uitgevallen, neem dan over in <Link to="/admin">Beheer</Link>.
                 </span>
               </div>
             )}
@@ -310,16 +278,16 @@ export function TimingView() {
               </p>
             )}
             {race.raceFinishedAt && (
-              <p className="timing-feedback__hint">Race afgesloten. Spatie en Enter doen niets meer; hervat alleen bewust met de knop.</p>
+              <p className="timing-feedback__hint">
+                Race afgesloten. Spatie en Enter doen niets meer; hervat alleen bewust met de knop.
+              </p>
             )}
           </div>
 
           <div className="timing-footer">
             <div className="stat-panel">
               <span className="muted-label">Race gestart</span>
-              <strong>
-                {race.raceStartedAt ? formatClockTimeMs(race.raceStartedAt).split('.')[0] : 'Nog niet'}
-              </strong>
+              <strong>{race.raceStartedAt ? formatClockTimeMs(race.raceStartedAt).split('.')[0] : 'Nog niet'}</strong>
             </div>
             <button className="btn timing-undo" onClick={undo} disabled={handoffBusy || timingBlocked}>
               Laatste wissel ongedaan maken
@@ -377,14 +345,22 @@ export function TimingView() {
                           {lap.runnerName}
                         </td>
                         <td className="num">{lap.lapNumber}</td>
-                        <td className="num"><strong>{formatDurationMs(lap.durationMs)}</strong></td>
+                        <td className="num">
+                          <strong>{formatDurationMs(lap.durationMs)}</strong>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
             ) : (
-              <div className="empty-inline">{historyLoading ? 'Rondes laden...' : historyError ? 'Rondes niet beschikbaar' : 'Nog geen rondes geregistreerd'}</div>
+              <div className="empty-inline">
+                {historyLoading
+                  ? 'Rondes laden...'
+                  : historyError
+                    ? 'Rondes niet beschikbaar'
+                    : 'Nog geen rondes geregistreerd'}
+              </div>
             )}
           </section>
           <section className="danger-zone">
@@ -401,7 +377,12 @@ export function TimingView() {
       </div>
 
       {finishConfirmStep > 0 && (
-        <ModalDialog label="Race afsluiten" onRequestClose={() => { if (!handoffBusy) setFinishConfirmStep(0); }}>
+        <ModalDialog
+          label="Race afsluiten"
+          onRequestClose={() => {
+            if (!handoffBusy) setFinishConfirmStep(0);
+          }}
+        >
           <div className="confirm-modal confirm-modal--danger">
             {finishConfirmStep === 1 ? (
               <>
@@ -419,7 +400,9 @@ export function TimingView() {
             ) : (
               <>
                 <h3>Definitief afsluiten</h3>
-                <p>Bevestig alleen als de race echt afgerond is. Spatie en Enter doen daarna niets meer op dit scherm.</p>
+                <p>
+                  Bevestig alleen als de race echt afgerond is. Spatie en Enter doen daarna niets meer op dit scherm.
+                </p>
                 <div className="modal-actions">
                   <button className="btn" onClick={() => setFinishConfirmStep(0)} disabled={handoffBusy}>
                     Annuleer
@@ -442,7 +425,8 @@ function TimingClock({ startedAt }: { startedAt: number }) {
   const [main, fraction = '0'] = formatDurationMs(nowMs() - startedAt).split('.');
   return (
     <span className="timing-clock live-time" role="timer" aria-label="Lopende rondetijd">
-      {main}<small>.{fraction.slice(0, 1)}</small>
+      {main}
+      <small>.{fraction.slice(0, 1)}</small>
     </span>
   );
 }

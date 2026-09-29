@@ -69,7 +69,11 @@ function subscribe(listener: () => void): () => void {
 }
 
 export function useThemePreference(): ThemePreference {
-  return React.useSyncExternalStore(subscribe, () => preference, () => 'light');
+  return React.useSyncExternalStore(
+    subscribe,
+    () => preference,
+    () => 'light'
+  );
 }
 
 export function useResolvedTheme(): ResolvedTheme {

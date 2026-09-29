@@ -1,11 +1,10 @@
-import { runnerRegistrationSchema, type Label, type Runner } from '../../shared/schemas.js';
+import { runnerRegistrationSchema, type Label, type Runner, type RunnerRegistration } from '../../shared/schemas.js';
 import { all, one } from './connection.js';
 import { getRunnerLabels, getRunnerLabelsMap } from './labels.js';
-import { cleanRegistrationSource, cleanStatus } from './values.js';
 
-type RunnerRow = Omit<Runner, 'labels' | 'hiddenFromQueue' | 'registration' | 'notes'> & {
+type RunnerRow = Omit<Runner, 'labels' | 'hiddenFromQueue' | 'notes' | 'estimatedPace'> & {
   notes: string | null;
-  registrationJson: string | null;
+  estimatedPace: string | null;
 };
 
 const RUNNER_SELECT_SQL = `
@@ -18,13 +17,13 @@ const RUNNER_SELECT_SQL = `
     r.historical_best_ms AS historicalBestMs,
     r.registration_source AS registrationSource,
     r.notes,
-    r.registration_json AS registrationJson,
+    json_extract(r.registration_json, '$.estimatedPace') AS estimatedPace,
     r.created_at AS createdAt,
     r.updated_at AS updatedAt,
-    COALESCE(q.status, 'registered') AS status,
-    q.status_since AS statusSince,
-    q.queue_index AS queueIndex,
-    q.hidden_at AS queueHiddenAt,
+    r.status,
+    r.status_since AS statusSince,
+    r.queue_index AS queueIndex,
+    r.hidden_at AS queueHiddenAt,
     COUNT(l.id) AS lapCount,
     MAX(l.duration_ms) AS slowestLapMs,
     MIN(l.duration_ms) AS bestLapMs,
@@ -38,26 +37,14 @@ const RUNNER_SELECT_SQL = `
       LIMIT 1
     ) AS lastLapMs
   FROM runners r
-  LEFT JOIN queue_entries q ON q.runner_id = r.id
   LEFT JOIN laps l ON l.runner_id = r.id
 `;
 
-function parseRegistration(value: string | null): Runner['registration'] {
-  if (!value) return null;
-  try {
-    return runnerRegistrationSchema.parse(JSON.parse(value));
-  } catch {
-    return null;
-  }
-}
-
-function runnerFromRow({ registrationJson, ...row }: RunnerRow, labels: Label[]): Runner {
+function runnerFromRow(row: RunnerRow, labels: Label[]): Runner {
   return {
     ...row,
-    registrationSource: cleanRegistrationSource(row.registrationSource),
     notes: row.notes ?? '',
-    registration: parseRegistration(registrationJson),
-    status: cleanStatus(row.status),
+    estimatedPace: row.estimatedPace || null,
     hiddenFromQueue: row.queueHiddenAt !== null,
     labels,
   };
@@ -69,14 +56,14 @@ export function getAllRunners(): Runner[] {
     `${RUNNER_SELECT_SQL}
      GROUP BY r.id
      ORDER BY
-       CASE COALESCE(q.status, 'registered')
+       CASE r.status
          WHEN 'running' THEN 0
          WHEN 'waiting' THEN 1
          WHEN 'warming_up' THEN 2
          WHEN 'ran' THEN 3
          ELSE 4
        END,
-       q.queue_index,
+       r.queue_index,
        r.name`
   ).map((row) => runnerFromRow(row, labelsByRunner.get(row.id) ?? []));
 }
@@ -86,14 +73,17 @@ export function getRunnerById(id: string): Runner | null {
   return row ? runnerFromRow(row, getRunnerLabels(id)) : null;
 }
 
-export function getRunnersByIds(ids: string[]): Runner[] {
-  const uniqueIds = [...new Set(ids)];
-  if (!uniqueIds.length) return [];
-  const labelsByRunner = getRunnerLabelsMap();
-  return all<RunnerRow>(
-    `${RUNNER_SELECT_SQL}
-     WHERE r.id IN (${uniqueIds.map(() => '?').join(', ')})
-     GROUP BY r.id`,
-    uniqueIds
-  ).map((row) => runnerFromRow(row, labelsByRunner.get(row.id) ?? []));
+/** Registration form answers (contact details included), kept out of the live snapshot. */
+export function getRunnerRegistrations(): Record<string, RunnerRegistration> {
+  const registrations: Record<string, RunnerRegistration> = {};
+  for (const row of all<{ id: string; registrationJson: string }>(
+    'SELECT id, registration_json AS registrationJson FROM runners WHERE registration_json IS NOT NULL'
+  )) {
+    try {
+      registrations[row.id] = runnerRegistrationSchema.parse(JSON.parse(row.registrationJson));
+    } catch {
+      // A malformed stored answer is left out rather than failing the whole list.
+    }
+  }
+  return registrations;
 }

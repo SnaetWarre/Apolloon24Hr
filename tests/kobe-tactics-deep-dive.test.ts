@@ -21,17 +21,22 @@ import {
 } from '../src/lib/tacticsDeepDive';
 import type { LapRecord } from '../src/types';
 
-const race = parseHistoricalRace(JSON.stringify([
-  { teamId: 1, lapTimes: cumulativeTimes([80, 80, 82, 81, 120, 82, 84, 86, 88, 90]) },
-  { teamId: 4, lapTimes: cumulativeTimes([78, 79, 80, 82, 83, 84, 85, 86, 87, 88, 89]) },
-]));
+const race = parseHistoricalRace(
+  JSON.stringify([
+    { teamId: 1, lapTimes: cumulativeTimes([80, 80, 82, 81, 120, 82, 84, 86, 88, 90]) },
+    { teamId: 4, lapTimes: cumulativeTimes([78, 79, 80, 82, 83, 84, 85, 86, 87, 88, 89]) },
+  ])
+);
 const firstTeam = race.teams[0];
 const secondTeam = race.teams[1];
 
 test('deep-dive summaries rank every team and retain distribution statistics', () => {
   const summaries = summarizeHistoricalTeams(race);
 
-  assert.deepEqual(summaries.map((summary) => summary.teamId), [4, 1]);
+  assert.deepEqual(
+    summaries.map((summary) => summary.teamId),
+    [4, 1]
+  );
   assert.equal(summaries[0].laps, 11);
   assert.ok(summaries[0].p10Seconds <= summaries[0].medianSeconds);
   assert.ok(summaries[0].p90Seconds >= summaries[0].medianSeconds);
@@ -59,7 +64,10 @@ test('race deep dive preserves time-gap sign and hourly gain totals', () => {
 
   assert.equal(timeGap[0].gapSeconds, 0);
   assert.ok(timeGap.some((point) => point.gapSeconds > 0));
-  assert.equal(hourlyGains.reduce((sum, point) => sum + point.lapDifference, 0), 1);
+  assert.equal(
+    hourlyGains.reduce((sum, point) => sum + point.lapDifference, 0),
+    1
+  );
   assert.equal(raceLead[0].lapDifference, 0);
   assert.ok(raceLead.some((point) => point.lapDifference !== 0));
 });
@@ -70,7 +78,10 @@ test('diagnostics find slow laps, pace changes, and a break-even pace', () => {
   const breakEven = calculateBreakEven(firstTeam, secondTeam);
   const sensitivity = buildBreakEvenSensitivity(firstTeam, 10);
 
-  assert.deepEqual(slowLaps.map((lap) => lap.durationSeconds), [120]);
+  assert.deepEqual(
+    slowLaps.map((lap) => lap.durationSeconds),
+    [120]
+  );
   assert.ok(paceChanges.some((lap) => lap.durationSeconds === 120));
   assert.ok(breakEven);
   assert.equal(breakEven.targetLaps, 11);
@@ -94,10 +105,12 @@ test('drafting analysis groups cleaned passages and reports all four comparisons
 });
 
 test('drafting cleanup keeps nearby laps when the median absolute deviation is zero', () => {
-  const lowVariationRace = parseHistoricalRace(JSON.stringify([
-    { teamId: 1, lapTimes: cumulativeTimes([80, 80, 80, 81]) },
-    { teamId: 4, lapTimes: cumulativeTimes([80, 80, 80, 80]) },
-  ]));
+  const lowVariationRace = parseHistoricalRace(
+    JSON.stringify([
+      { teamId: 1, lapTimes: cumulativeTimes([80, 80, 80, 81]) },
+      { teamId: 4, lapTimes: cumulativeTimes([80, 80, 80, 80]) },
+    ])
+  );
   const analysis = analyzeDrafting(lowVariationRace.teams[0], lowVariationRace.teams[1], {
     startHour: 0,
     endHour: 24,

@@ -9,9 +9,7 @@ function formatSecondsAsMmSs(totalSeconds: number | undefined | null): string {
   const fraction = milliseconds.toString().padStart(3, '0');
 
   if (hours > 0) {
-    return `${hours}:${minutes.toString().padStart(2, '0')}:${seconds
-      .toString()
-      .padStart(2, '0')}.${fraction}`;
+    return `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}.${fraction}`;
   }
 
   return `${minutes}:${seconds.toString().padStart(2, '0')}.${fraction}`;

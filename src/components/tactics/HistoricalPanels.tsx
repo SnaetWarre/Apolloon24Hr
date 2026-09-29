@@ -22,13 +22,7 @@ export function HistoricalAnalysisSection({
   const [secondTeamId, setSecondTeamId] = React.useState(VTK_TEAM_ID);
 
   if (!historicalRace) {
-    return (
-      <HistoricalDataNotice
-        error={historicalError}
-        onHistoricalRaceLoad={onHistoricalRaceLoad}
-        expanded
-      />
-    );
+    return <HistoricalDataNotice error={historicalError} onHistoricalRaceLoad={onHistoricalRaceLoad} expanded />;
   }
 
   const firstTeam = teamById(historicalRace, firstTeamId) ?? historicalRace.teams[0] ?? null;
@@ -45,14 +39,30 @@ export function HistoricalAnalysisSection({
         <div className="tactics-control-grid tactics-control-grid--historical">
           <label>
             <span>Eerste team</span>
-            <select className="input" value={firstTeam?.teamId ?? ''} onChange={(event) => setFirstTeamId(Number(event.target.value))}>
-              {availableTeamIds.map((teamId) => <option key={teamId} value={teamId}>Team {teamId}</option>)}
+            <select
+              className="input"
+              value={firstTeam?.teamId ?? ''}
+              onChange={(event) => setFirstTeamId(Number(event.target.value))}
+            >
+              {availableTeamIds.map((teamId) => (
+                <option key={teamId} value={teamId}>
+                  Team {teamId}
+                </option>
+              ))}
             </select>
           </label>
           <label>
             <span>Tweede team</span>
-            <select className="input" value={secondTeam?.teamId ?? ''} onChange={(event) => setSecondTeamId(Number(event.target.value))}>
-              {availableTeamIds.map((teamId) => <option key={teamId} value={teamId}>Team {teamId}</option>)}
+            <select
+              className="input"
+              value={secondTeam?.teamId ?? ''}
+              onChange={(event) => setSecondTeamId(Number(event.target.value))}
+            >
+              {availableTeamIds.map((teamId) => (
+                <option key={teamId} value={teamId}>
+                  Team {teamId}
+                </option>
+              ))}
             </select>
           </label>
           <div className="tactics-dataset-summary">
@@ -64,11 +74,7 @@ export function HistoricalAnalysisSection({
       </section>
 
       {firstTeam && secondTeam && (
-        <HistoricalDeepDive
-          historicalRace={historicalRace}
-          firstTeam={firstTeam}
-          secondTeam={secondTeam}
-        />
+        <HistoricalDeepDive historicalRace={historicalRace} firstTeam={firstTeam} secondTeam={secondTeam} />
       )}
 
       <HistoricalDatasetManager
@@ -97,9 +103,14 @@ export function HistoricalDataNotice({
         <span className="page-kicker">Eenmalige instelling</span>
         <h2>Laad de officiële resultaten van vorig jaar</h2>
         <p>
-          De huidige race komt automatisch uit Apolloon. Alleen de historische organisatordata moet één keer gekozen worden en blijft daarna op deze laptop bewaard.
+          De huidige race komt automatisch uit Apolloon. Alleen de historische organisatordata moet één keer gekozen
+          worden en blijft daarna op deze laptop bewaard.
         </p>
-        {error && <div className="warning-banner" role="alert">{error}</div>}
+        {error && (
+          <div className="warning-banner" role="alert">
+            {error}
+          </div>
+        )}
       </div>
       <HistoricalFilePicker onHistoricalRaceLoad={onHistoricalRaceLoad} />
     </section>
@@ -125,11 +136,17 @@ export function HistoricalDatasetManager({
         <span className="page-kicker">Referentiedata</span>
         <h2>{sourceName}</h2>
         <p>{teamCount} teams ingelezen en lokaal bewaard op deze laptop.</p>
-        {error && <div className="warning-banner" role="alert">{error}</div>}
+        {error && (
+          <div className="warning-banner" role="alert">
+            {error}
+          </div>
+        )}
       </div>
       <div className="tactics-dataset-actions">
         <HistoricalFilePicker onHistoricalRaceLoad={onHistoricalRaceLoad} compact />
-        <button className="btn btn--ghost" onClick={onHistoricalRaceClear}>Quivr 2025 herstellen</button>
+        <button className="btn btn--ghost" onClick={onHistoricalRaceClear}>
+          Quivr 2025 herstellen
+        </button>
       </div>
     </section>
   );

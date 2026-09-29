@@ -1,868 +1,618 @@
-import crypto from 'node:crypto';
-import dgram from 'node:dgram';
-import { isIP } from 'node:net';
-import path from 'node:path';
 import type { Express, NextFunction, Request, Response } from 'express';
-import {
-  appSnapshotSchema,
-  type AppSnapshot,
-  type ClusterCompatibility,
-  type ClusterPeer,
-  type ClusterStatus,
-  type TimingControlStatus,
-} from '../shared/schemas.js';
-import { appSnapshot } from './app-state.js';
+import { z } from 'zod';
+import type { ClusterStatus } from '../shared/schemas.js';
 import { backupStatus, createVerifiedBackup } from './backups.js';
 import {
-  CLUSTER_PROTOCOL_VERSION,
-  clusterCompatibilityError,
-  localClusterCompatibility,
-  parseClusterCompatibility,
-} from './cluster-compatibility.js';
-import { isClusterEnabled } from './cluster-policy.js';
-import {
-  isValidId,
-  normalizeOperationVector,
-  secureEqual,
-  signDiscoveryPayload,
-  verifyDiscoveryPayload,
-  type DiscoveryPayload,
-  type OperationVector,
-} from './cluster-protocol.js';
-import {
-  acknowledgeReplicationVector,
-  applyRemoteReplicationOperations,
-  databaseReadiness,
-  ensureReplicationCheckpoint,
-  ensureReplicationIdentity,
-  getAllReplicationOperations,
-  getAppDataRevision,
-  getDeadLetterCount,
-  getOpenReplicationConflictCount,
-  getPendingReplicationOperationCount,
-  getReplicationConflicts,
-  getReplicationOperationsMissing,
-  getReplicationVector,
-  getTimingControllerGeneration,
-  getTimingControllerHostId,
-  installReplicationBootstrap,
-  type ReplicationCheckpoint,
-  type ReplicationConflict,
-  type ReplicationIdentity,
-  type ReplicationOperation,
+  DATABASE_SCHEMA_VERSION,
+  applyLogEntries,
+  canContinueFrom,
+  deleteLocalSetting,
+  getClusterEpoch,
+  getLogEntriesAfter,
+  getLogHead,
+  getSetting,
+  hostIdentity,
+  installDatabaseImage,
+  replicationLogEntrySchema,
+  serializeDatabase,
+  setLocalSetting,
 } from './db.js';
-import { readPositiveInt } from './env.js';
-import { currentLanNetworkEndpoints, hostInfo, PUBLIC_APP_PORT } from './host.js';
-import { encodedJsonRequest, sendJson } from './http-json.js';
-import { emitRealtime } from './realtime.js';
+import { APP_VERSION, isClusterEnabled, readPositiveInt } from './env.js';
+import { hostInfo } from './host.js';
+import { sendJson } from './http-json.js';
 
-type PeerState = {
-  id: string | null;
-  url: string;
-  reachable: boolean;
-  lastSeenAt: number | null;
-  vector: OperationVector;
-  consecutiveFailures: number;
-  nextProbeAt: number;
-  unreachableSinceAt: number | null;
-  clockSkewMs: number | null;
-  compatibility: ClusterCompatibility | null;
-  compatibilityError: string | null;
-  /** Recently announced addresses (url -> last seen), tried when the current one fails. */
-  candidateUrls: Map<string, number>;
-  probeController: AbortController | null;
-};
+/*
+ * One primary laptop accepts every write and appends it to its replication
+ * log. Standbys pull that log and replay it, so each holds a full, read-only
+ * copy. Promoting a standby is always an operator decision: planned (the
+ * primary hands over and stops writing) or, when the primary is gone, an
+ * emergency takeover. A primary that learns of a newer primary becomes its
+ * standby; if it wrote anything in the meantime it re-syncs, and those writes
+ * survive only in the backup taken just before.
+ */
 
-type ExchangePayload = {
-  protocol: number;
-  compatibility: ClusterCompatibility;
-  clusterId: string;
-  hostId: string;
-  url: string;
-  vector: OperationVector;
-  operations: ReplicationOperation[];
-  sentAt: number;
-};
-
-type BootstrapPayload = {
-  protocol: number;
-  compatibility: ClusterCompatibility;
-  clusterId: string;
-  clusterSecret: string;
-  hostId: string;
-  url: string;
-  snapshot: AppSnapshot;
-  checkpoint: ReplicationCheckpoint;
-  operations: ReplicationOperation[];
-  conflicts: ReplicationConflict[];
-  timingControllerHostId: string | null;
-};
-
-const enabled = isClusterEnabled(process.env);
+const enabled = isClusterEnabled();
 const configuredSelfUrl = normalizeUrl(process.env.CLUSTER_SELF_URL);
-const discoveryEnabled = process.env.CLUSTER_DISCOVERY !== 'false';
-const discoveryPort = readPositiveInt(process.env.CLUSTER_DISCOVERY_PORT, 45737);
-const configuredDiscoveryAddress = process.env.CLUSTER_DISCOVERY_ADDRESS?.trim() || null;
-const discoveryIntervalMs = readPositiveInt(process.env.CLUSTER_DISCOVERY_INTERVAL_MS, 1_000);
-const syncIntervalMs = readPositiveInt(process.env.CLUSTER_SYNC_INTERVAL_MS, 350);
-const requestTimeoutMs = readPositiveInt(process.env.CLUSTER_REQUEST_TIMEOUT_MS, 1_500);
-const peerRetryBaseMs = readPositiveInt(process.env.CLUSTER_PEER_RETRY_MS, 750);
-const timingTakeoverGraceMs = readPositiveInt(process.env.TIMING_TAKEOVER_GRACE_MS, 10_000);
-const timingForcedTakeoverGraceMs = Math.max(
-  timingTakeoverGraceMs,
-  readPositiveInt(process.env.TIMING_FORCED_TAKEOVER_GRACE_MS, 30_000)
-);
-const candidateUrlLifetimeMs = Math.max(10_000, discoveryIntervalMs * 5);
-const MAX_CANDIDATE_URLS = 8;
-const BROADCAST_ALL = '255.255.255.255';
+const pullIntervalMs = readPositiveInt(process.env.CLUSTER_PULL_INTERVAL_MS, 250);
+const probeIntervalMs = readPositiveInt(process.env.CLUSTER_PROBE_INTERVAL_MS, 3_000);
+const requestTimeoutMs = readPositiveInt(process.env.CLUSTER_REQUEST_TIMEOUT_MS, 2_000);
+const reachableWindowMs = Math.max(3_000, pullIntervalMs * 8);
+const HANDOVER_MAX_LAG = 500;
+const MAX_MEMBERS = 16;
 
-const peers = new Map<string, PeerState>();
+type Busy = ClusterStatus['busy'];
 
-let discoverySocket: dgram.Socket | null = null;
-let discoveryHandle: NodeJS.Timeout | null = null;
-let syncHandle: NodeJS.Timeout | null = null;
-let syncPromise: Promise<void> | null = null;
-let identityCache: ReplicationIdentity | null = null;
-let joinInProgress = false;
-let clusterStartedAt = Date.now();
-let clusterStopping = false;
+type StandbyRecord = {
+  hostId: string;
+  url: string;
+  appliedSeq: number;
+  lastSeenAt: number;
+  clockSkewMs: number | null;
+};
 
-for (const peerUrl of (process.env.CLUSTER_PEERS || '').split(',')) {
-  addPeer(peerUrl);
+const standbys = new Map<string, StandbyRecord>();
+let primaryContact = {
+  hostId: null as string | null,
+  head: 0,
+  lastContactAt: null as number | null,
+};
+let busy: Busy = null;
+let lastError: string | null = null;
+let clockSkewMs: number | null = null;
+let competingPrimaryUrl: string | null = null;
+let pullTimer: NodeJS.Timeout | null = null;
+let pullInFlight: Promise<boolean> | null = null;
+let probeTimer: NodeJS.Timeout | null = null;
+let stopping = false;
+
+const peerRequestSchema = z.object({
+  clusterId: z.string().min(1).max(128),
+  hostId: z.string().min(1).max(128),
+  url: z.string().min(1).max(2_048),
+  after: z.number().int().nonnegative(),
+  afterId: z.string().max(128).nullable(),
+  clockSkewMs: z.number().nullable().optional(),
+});
+
+const pullResponseSchema = z.object({
+  hostId: z.string(),
+  clusterId: z.string(),
+  epoch: z.number().int().nonnegative(),
+  head: z.number().int().nonnegative(),
+  entries: z.array(replicationLogEntrySchema),
+  members: z.record(z.string(), z.string()),
+  serverNowMs: z.number(),
+});
+
+const handoverResponseSchema = pullResponseSchema.pick({
+  hostId: true,
+  epoch: true,
+  head: true,
+  entries: true,
+});
+
+const peerErrorSchema = z.object({
+  code: z.string().optional(),
+  error: z.string().optional(),
+  primaryUrl: z.string().nullable().optional(),
+});
+
+// Role and membership are host-local settings, so they survive restarts.
+
+function role(): ClusterStatus['role'] {
+  return enabled && getSetting('cluster_role') === 'standby' ? 'standby' : 'primary';
 }
 
-function clusterStatus(): ClusterStatus {
-  const identity = currentIdentity();
-  const peerList = [...peers.values()];
-  const reachable = peerList.filter((peer) => peer.reachable);
-  const localVector = getReplicationVector();
-  const skewSamples = reachable.flatMap((peer) => (peer.clockSkewMs === null ? [] : [Math.abs(peer.clockSkewMs)]));
+function primaryUrl(): string | null {
+  return role() === 'standby' ? getSetting('cluster_primary_url') : null;
+}
+
+function becomeStandby(url: string): void {
+  setLocalSetting('cluster_role', 'standby');
+  setLocalSetting('cluster_primary_url', url);
+  standbys.clear();
+  primaryContact = { hostId: null, head: 0, lastContactAt: null };
+  competingPrimaryUrl = null;
+}
+
+function becomePrimary(epoch: number): void {
+  deleteLocalSetting('cluster_role');
+  deleteLocalSetting('cluster_primary_url');
+  setLocalSetting('cluster_epoch', String(epoch));
+  primaryContact = { hostId: null, head: 0, lastContactAt: null };
+  lastError = null;
+}
+
+function adoptEpoch(epoch: number): void {
+  if (epoch > getClusterEpoch()) setLocalSetting('cluster_epoch', String(epoch));
+}
+
+/** Other laptops in this cluster by host id; used to find the primary again after a failover. */
+function knownMembers(): Record<string, string> {
+  try {
+    const parsed = z.record(z.string(), z.string()).safeParse(JSON.parse(getSetting('cluster_members_json') || '{}'));
+    return parsed.success ? parsed.data : {};
+  } catch {
+    return {};
+  }
+}
+
+function rememberMembers(members: Record<string, string>): void {
+  const selfId = hostIdentity().hostId;
+  const current = knownMembers();
+  const next = { ...current };
+  for (const [hostId, url] of Object.entries(members)) {
+    const normalized = normalizeUrl(url);
+    if (hostId !== selfId && normalized && normalized !== selfUrl()) next[hostId] = normalized;
+  }
+  const entries = Object.entries(next).slice(-MAX_MEMBERS);
+  if (JSON.stringify(entries) !== JSON.stringify(Object.entries(current))) {
+    setLocalSetting('cluster_members_json', JSON.stringify(Object.fromEntries(entries)));
+  }
+}
+
+export function clusterStatus(): ClusterStatus {
+  const identity = hostIdentity();
+  const currentRole = role();
+  const now = Date.now();
+  const head = getLogHead().seq;
+  const members = knownMembers();
+  const reachableStandbys = [...standbys.values()].filter((standby) => now - standby.lastSeenAt < reachableWindowMs);
+  const standbySkews = reachableStandbys.flatMap((standby) =>
+    standby.clockSkewMs === null ? [] : [Math.abs(standby.clockSkewMs)]
+  );
   return {
     enabled,
     hostId: identity.hostId,
     clusterId: identity.clusterId,
-    pairingCode: pairingCode(identity.clusterSecret),
-    role: enabled ? 'local-first' : 'standalone',
-    compatibility: currentCompatibility(),
-    incompatiblePeerCount: peerList.filter((peer) => peer.compatibilityError).length,
-    writable: true,
-    connectedHosts: 1 + reachable.length,
-    knownHosts: 1 + peerList.length,
-    pendingOperations: getPendingReplicationOperationCount(),
-    conflictCount: getOpenReplicationConflictCount(),
-    deadLetterCount: getDeadLetterCount(),
-    timingControllerHostId: getTimingControllerHostId(),
-    timingControl: timingControlStatus(),
-    clockSkewMs: skewSamples.length ? Math.max(...skewSamples) : null,
-    lastAppliedSeq: Object.values(localVector).reduce((total, seq) => total + seq, 0),
-    peers: peerList.map((peer) => toClusterPeer(peer, localVector)),
+    role: currentRole,
+    epoch: getClusterEpoch(),
+    appVersion: APP_VERSION,
+    schemaVersion: DATABASE_SCHEMA_VERSION,
+    writable: currentRole === 'primary' && !busy,
+    busy,
+    selfUrl: selfUrl(),
+    logHead: head,
+    primary:
+      currentRole === 'standby'
+        ? {
+            url: primaryUrl(),
+            hostId: primaryContact.hostId,
+            reachable: primaryContact.lastContactAt !== null && now - primaryContact.lastContactAt < reachableWindowMs,
+            lastContactAt: primaryContact.lastContactAt,
+            head: primaryContact.head,
+            lagEntries: Math.max(0, primaryContact.head - head),
+          }
+        : null,
+    standbys:
+      currentRole === 'primary'
+        ? [...standbys.values()].map((standby) => ({
+            ...standby,
+            reachable: now - standby.lastSeenAt < reachableWindowMs,
+            caughtUp: standby.appliedSeq >= head,
+          }))
+        : [],
+    memberUrls: [...new Set(Object.values(members))],
+    competingPrimaryUrl,
+    lastError,
+    clockSkewMs: currentRole === 'standby' ? clockSkewMs : standbySkews.length ? Math.max(...standbySkews) : null,
     backup: backupStatus(),
   };
 }
 
-function timingControlStatus(): TimingControlStatus {
-  const controllerHostId = getTimingControllerHostId();
-  const status: TimingControlStatus = {
-    state: 'unassigned',
-    controllerHostId,
-    generation: getTimingControllerGeneration(),
-    controllerUrl: null,
-    controllerLastSeenAt: null,
-    localReplicaCaughtUp: true,
-    takeoverAllowed: true,
-    takeoverAvailableAt: null,
-    forcedTakeoverAllowed: false,
-    forcedTakeoverAvailableAt: null,
-  };
-  if (!controllerHostId) return status;
-  if (controllerHostId === currentIdentity().hostId) {
-    return {
-      ...status,
-      state: 'local',
-      controllerUrl: currentSelfUrl(),
-      controllerLastSeenAt: Date.now(),
-      takeoverAllowed: false,
-    };
+/** Throws the message operators see when they try to change data on a standby. */
+export function assertWritable(): void {
+  if (role() === 'standby') {
+    const url = primaryUrl();
+    throw new Error(`Deze laptop is standby en alleen-lezen. Werk op de primaire laptop${url ? `: ${url}` : ''}.`);
   }
-
-  const controllerPeer = findPeerById(controllerHostId);
-  const localReplicaCaughtUp = Boolean(controllerPeer && vectorCovers(getReplicationVector(), controllerPeer.vector));
-  if (controllerPeer?.reachable) {
-    return {
-      ...status,
-      state: 'remote-reachable',
-      controllerUrl: controllerPeer.url,
-      controllerLastSeenAt: controllerPeer.lastSeenAt,
-      localReplicaCaughtUp,
-      takeoverAllowed: false,
-    };
-  }
-
-  // A replica that has everything the controller had may take over after a
-  // short grace period; an uncertain one only by explicit force, and later.
-  const now = Date.now();
-  const unreachableSince = controllerPeer?.unreachableSinceAt || controllerPeer?.lastSeenAt || clusterStartedAt;
-  const takeoverAvailableAt = enabled ? unreachableSince + timingTakeoverGraceMs : now;
-  const forcedTakeoverAvailableAt = enabled ? unreachableSince + timingForcedTakeoverGraceMs : now;
-  return {
-    ...status,
-    state: 'remote-unreachable',
-    controllerUrl: controllerPeer?.url || null,
-    controllerLastSeenAt: controllerPeer?.lastSeenAt || null,
-    localReplicaCaughtUp,
-    takeoverAllowed: localReplicaCaughtUp && now >= takeoverAvailableAt,
-    takeoverAvailableAt,
-    forcedTakeoverAllowed: !localReplicaCaughtUp && now >= forcedTakeoverAvailableAt,
-    forcedTakeoverAvailableAt,
-  };
-}
-
-function secondsUntil(timestamp: number | null): number {
-  return Math.max(1, Math.ceil(((timestamp || Date.now()) - Date.now()) / 1_000));
-}
-
-export function assertEmergencyTimingTakeoverAllowed(expectedControllerHostId: string | null, force: boolean): void {
-  if (getTimingControllerHostId() !== expectedControllerHostId) {
-    throw new Error('De timingtoewijzing is intussen gewijzigd. Vernieuw de status.');
-  }
-  const status = timingControlStatus();
-  if (status.state === 'unassigned' || status.state === 'local') return;
-  if (status.state === 'remote-reachable') {
-    throw new Error('De huidige timinglaptop is nog bereikbaar. Draag de timing daar gecontroleerd over.');
-  }
-  if (status.takeoverAllowed || (force && status.forcedTakeoverAllowed)) return;
-  if (!status.localReplicaCaughtUp) {
-    throw new Error(
-      status.forcedTakeoverAllowed
-        ? 'De lokale replica is niet zeker volledig. Bevestig een geforceerde noodovername.'
-        : `De lokale replica mist mogelijk timingdata. Wacht nog ${secondsUntil(status.forcedTakeoverAvailableAt)} seconden of herstel de verbinding.`
-    );
-  }
-  throw new Error(`Wacht nog ${secondsUntil(status.takeoverAvailableAt)} seconden voor een noodovername.`);
-}
-
-export function assertTimingTransferAllowed(targetHostId: string): void {
-  if (getOpenReplicationConflictCount() > 0) {
-    throw new Error('Los eerst het synchronisatieconflict op.');
-  }
-  if (getTimingControllerHostId() !== currentIdentity().hostId) {
-    throw new Error('Alleen de huidige timinglaptop kan een geplande overdracht starten.');
-  }
-  const target = findPeerById(targetHostId);
-  if (!target?.reachable) {
-    throw new Error('De gekozen laptop is niet bereikbaar.');
-  }
-  if (!vectorCovers(target.vector, getReplicationVector())) {
-    throw new Error('De gekozen laptop is nog niet volledig gesynchroniseerd. Wacht even.');
-  }
-}
-
-function protocolMismatchMessage(protocol: unknown): string {
-  return `Upgrade vereist: clusterprotocol ${String(protocol)} past niet bij ${CLUSTER_PROTOCOL_VERSION}.`;
-}
-
-function sendUpgradeRequired(res: Response, error: string): void {
-  res.status(426).json({ ok: false, code: 'UPGRADE_REQUIRED', error, compatibility: currentCompatibility() });
+  if (busy) throw new Error('Deze laptop wordt gekoppeld of gesynchroniseerd. Probeer zo opnieuw.');
 }
 
 export function registerClusterRoutes(app: Express): void {
   app.get('/api/cluster/status', (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
     res.json(clusterStatus());
   });
+  if (!enabled) return;
 
-  app.get('/api/cluster/hello', (_req, res) => {
-    res.json(discoveryPayload());
+  app.use(['/api/cluster/pull', '/api/cluster/snapshot', '/api/cluster/handover'], requireSameVersion);
+
+  app.post('/api/cluster/pull', (req, res, next) => {
+    const request = parsePeerRequest(req, res);
+    if (!request) return;
+    const identity = hostIdentity();
+    const url = normalizeUrl(request.url);
+    standbys.set(request.hostId, {
+      hostId: request.hostId,
+      url,
+      appliedSeq: request.after,
+      lastSeenAt: Date.now(),
+      clockSkewMs: request.clockSkewMs ?? null,
+    });
+    rememberMembers({ [request.hostId]: url });
+    sendJson(req, res, null, () => ({
+      hostId: identity.hostId,
+      clusterId: identity.clusterId,
+      epoch: getClusterEpoch(),
+      head: getLogHead().seq,
+      entries: getLogEntriesAfter(request.after),
+      members: { ...knownMembers(), [identity.hostId]: selfUrl() },
+      serverNowMs: Date.now(),
+    })).catch(next);
   });
 
-  if (!enabled) {
-    app.use('/api/cluster/sync', (_req, res) => {
-      res.status(404).json({ ok: false, error: 'cluster mode is disabled' });
+  app.get('/api/cluster/snapshot', (_req, res) => {
+    if (role() !== 'primary' || busy) {
+      sendPeerError(res, 409, 'not_primary', 'Deze laptop is niet primair.');
+      return;
+    }
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('X-Apolloon-Epoch', String(getClusterEpoch()));
+    res.end(serializeDatabase());
+  });
+
+  app.post('/api/cluster/handover', (req, res) => {
+    const request = parsePeerRequest(req, res, { allowRepeatedHandover: true });
+    if (!request) return;
+    const head = getLogHead().seq;
+    if (head - request.after > HANDOVER_MAX_LAG) {
+      sendPeerError(
+        res,
+        409,
+        'lagging',
+        `De standby loopt nog ${head - request.after} wijzigingen achter. Wacht even.`
+      );
+      return;
+    }
+    // From here on this laptop stops accepting writes; the caller promotes itself.
+    if (role() === 'primary') becomeStandby(normalizeUrl(request.url));
+    res.json({
+      hostId: hostIdentity().hostId,
+      epoch: getClusterEpoch(),
+      head,
+      entries: getLogEntriesAfter(request.after, HANDOVER_MAX_LAG),
     });
+  });
+}
+
+/** Validates a standby's request to the primary; answers and returns null when it cannot be served. */
+function parsePeerRequest(
+  req: Request,
+  res: Response,
+  options: { allowRepeatedHandover?: boolean } = {}
+): z.infer<typeof peerRequestSchema> | null {
+  const parsed = peerRequestSchema.safeParse(req.body);
+  if (!parsed.success) {
+    sendPeerError(res, 400, 'invalid_request', 'Ongeldig synchronisatieverzoek.');
+    return null;
+  }
+  const request = parsed.data;
+  // A handover whose response was lost is repeated; the old primary already follows the caller.
+  const repeatedHandover = options.allowRepeatedHandover && primaryUrl() === normalizeUrl(request.url);
+  if ((role() !== 'primary' || busy) && !repeatedHandover) {
+    sendPeerError(res, 409, 'not_primary', 'Deze laptop is niet primair.', {
+      primaryUrl: primaryUrl(),
+    });
+    return null;
+  }
+  if (request.clusterId !== hostIdentity().clusterId) {
+    sendPeerError(
+      res,
+      409,
+      'cluster_mismatch',
+      'Deze laptops horen bij een andere cluster. Koppel de standby opnieuw.'
+    );
+    return null;
+  }
+  if (!canContinueFrom(request.after, request.afterId)) {
+    sendPeerError(res, 409, 'bootstrap_required', 'De standby moet opnieuw volledig synchroniseren.');
+    return null;
+  }
+  return request;
+}
+
+function requireSameVersion(req: Request, res: Response, next: NextFunction): void {
+  const appVersion = req.header('x-apolloon-app-version') || 'onbekend';
+  const schemaVersion = Number(req.header('x-apolloon-schema-version'));
+  if (appVersion === APP_VERSION && schemaVersion === DATABASE_SCHEMA_VERSION) {
+    next();
     return;
   }
+  sendPeerError(res, 426, 'upgrade_required', versionMismatchMessage(appVersion));
+}
 
-  app.get(
-    '/api/cluster/bootstrap',
-    asyncJson(async (req, res) => {
-      const identity = currentIdentity();
-      if (!validPairingCode(req.query.code, identity.clusterSecret)) {
-        res.status(401).json({ ok: false, error: 'ongeldige koppelcode' });
-        return;
-      }
-      const compatibilityIssue = clusterCompatibilityError(compatibilityFromQuery(req), currentCompatibility());
-      if (compatibilityIssue) {
-        sendUpgradeRequired(res, compatibilityIssue);
-        return;
-      }
-      await sendJson(
-        req,
-        res,
-        {
-          protocol: CLUSTER_PROTOCOL_VERSION,
-          compatibility: currentCompatibility(),
-          clusterId: identity.clusterId,
-          clusterSecret: identity.clusterSecret,
-          hostId: identity.hostId,
-          url: currentSelfUrl(),
-          snapshot: appSnapshot(),
-          checkpoint: ensureReplicationCheckpoint(),
-          operations: getAllReplicationOperations(),
-          conflicts: getReplicationConflicts('all'),
-          timingControllerHostId: getTimingControllerHostId(),
-        } satisfies BootstrapPayload,
-        { sensitive: true }
-      );
-    })
-  );
+function versionMismatchMessage(otherVersion: string): string {
+  return `Upgrade vereist: deze laptop draait Apolloon ${APP_VERSION}, de andere ${otherVersion}. Installeer overal dezelfde versie.`;
+}
 
-  app.post(
-    '/api/cluster/join',
-    asyncJson(async (req, res) => {
-      if (joinInProgress) {
-        res.status(409).json({ ok: false, error: 'koppeling is al bezig' });
-        return;
-      }
-      const remoteUrl = normalizeUrl(req.body?.remoteUrl);
-      const code = String(req.body?.pairingCode || '').trim().toUpperCase();
-      if (!remoteUrl || remoteUrl === currentSelfUrl() || !code) {
-        res.status(400).json({ ok: false, error: 'vul een geldige laptop-URL en koppelcode in' });
-        return;
-      }
-
-      joinInProgress = true;
-      try {
-        const query = new URLSearchParams({ code, compatibility: JSON.stringify(currentCompatibility()) });
-        const response = await fetch(`${remoteUrl}/api/cluster/bootstrap?${query}`, {
-          signal: AbortSignal.timeout(Math.max(requestTimeoutMs, 10_000)),
-        });
-        if (!response.ok) {
-          const reason = await response.text();
-          throw new Error(
-            response.status === 401
-              ? 'De koppelcode klopt niet'
-              : responseErrorMessage(reason) ||
-                  `De andere laptop antwoordde met ${response.status}: ${reason.slice(0, 160)}`
-          );
-        }
-        const payload = (await response.json()) as Partial<BootstrapPayload>;
-        const remoteCompatibility = parseClusterCompatibility(payload.compatibility);
-        const compatibilityIssue =
-          clusterCompatibilityError(remoteCompatibility, currentCompatibility()) ||
-          (payload.protocol !== CLUSTER_PROTOCOL_VERSION ? protocolMismatchMessage(payload.protocol) : null);
-        if (compatibilityIssue) throw new Error(compatibilityIssue);
-        const parsedSnapshot = appSnapshotSchema.safeParse(payload.snapshot);
-        if (
-          !payload.clusterId ||
-          !payload.clusterSecret ||
-          !payload.hostId ||
-          !parsedSnapshot.success ||
-          !payload.checkpoint ||
-          !Array.isArray(payload.operations) ||
-          !Array.isArray(payload.conflicts)
-        ) {
-          throw new Error('De andere laptop stuurde geen geldige Apolloon-database');
-        }
-        await createVerifiedBackup('pre-cluster-join');
-        const result = await installReplicationBootstrap({
-          clusterId: payload.clusterId,
-          clusterSecret: payload.clusterSecret,
-          snapshot: parsedSnapshot.data,
-          checkpoint: payload.checkpoint,
-          operations: payload.operations,
-          conflicts: payload.conflicts,
-          timingControllerHostId: payload.timingControllerHostId || null,
-        });
-        identityCache = null;
-        peers.clear();
-        const joinedPeer = addPeer(payload.url || remoteUrl);
-        if (joinedPeer) {
-          joinedPeer.id = payload.hostId;
-          joinedPeer.compatibility = remoteCompatibility;
-          joinedPeer.compatibilityError = null;
-        }
-        emitRealtime({ type: 'state:revision', payload: getAppDataRevision() });
-        res.json({ ok: true, backupFile: path.basename(result.backupPath), status: clusterStatus() });
-      } finally {
-        joinInProgress = false;
-      }
-    })
-  );
-
-  app.get('/api/cluster/conflicts', (_req, res) => {
-    res.json(getReplicationConflicts());
-  });
-
-  app.post(
-    '/api/cluster/sync/exchange',
-    asyncJson(async (req, res) => {
-      const identity = currentIdentity();
-      if (!secureEqual(req.header('x-apolloon-cluster-secret'), identity.clusterSecret)) {
-        res.status(401).json({ ok: false, error: 'invalid cluster secret' });
-        return;
-      }
-      const payload = req.body as Partial<ExchangePayload>;
-      const remoteCompatibility = parseClusterCompatibility(payload.compatibility);
-      const compatibilityIssue = clusterCompatibilityError(remoteCompatibility, currentCompatibility());
-      if (payload.protocol !== CLUSTER_PROTOCOL_VERSION || compatibilityIssue || !remoteCompatibility) {
-        sendUpgradeRequired(res, compatibilityIssue || protocolMismatchMessage(payload.protocol));
-        return;
-      }
-      const peerUrl = normalizeUrl(payload.url);
-      if (
-        payload.clusterId !== identity.clusterId ||
-        !isValidId(payload.hostId) ||
-        !peerUrl ||
-        !payload.vector ||
-        !Array.isArray(payload.operations) ||
-        !Number.isSafeInteger(payload.sentAt)
-      ) {
-        // Older peers match this message to report a protocol problem.
-        res.status(409).json({ ok: false, error: 'cluster or protocol mismatch' });
-        return;
-      }
-      const vector = normalizeOperationVector(payload.vector);
-      if (!vector) {
-        res.status(409).json({ ok: false, error: 'invalid operation vector' });
-        return;
-      }
-      if (joinInProgress) {
-        res.status(503).json({ ok: false, error: 'cluster join in progress' });
-        return;
-      }
-      if (payload.hostId === identity.hostId) {
-        res.status(409).json({ ok: false, error: 'peer uses this host identity' });
-        return;
-      }
-
-      const result = applyRemoteReplicationOperations(payload.operations);
-      const peer = touchPeer(
-        incomingPeerUrl(peerUrl, req.socket.remoteAddress),
-        payload.hostId,
-        vector,
-        true,
-        remoteCompatibility
-      );
-      peer.clockSkewMs = payload.sentAt! - Date.now();
-      acknowledgeReplicationVector(payload.hostId, vector);
-      if (result.applied > 0 || result.conflicts > 0) {
-        emitRealtime({ type: 'state:revision', payload: getAppDataRevision() });
-      }
-
-      await sendJson(req, res, exchangePayload(identity, getReplicationOperationsMissing(vector)), {
-        sensitive: true,
-      });
-    })
-  );
+function sendPeerError(
+  res: Response,
+  status: number,
+  code: string,
+  error: string,
+  extra: Record<string, unknown> = {}
+): void {
+  res.status(status).json({ ok: false, code, error, ...extra });
 }
 
 export function startClusterService(): void {
   if (!enabled) return;
-  clusterStopping = false;
-  clusterStartedAt = Date.now();
-  startDiscovery();
-  scheduleSync(25);
+  stopping = false;
+  schedulePull(0);
+  probeTimer = setInterval(() => void probeMembers(), probeIntervalMs);
+  probeTimer.unref();
 }
 
 export function stopClusterService(): void {
-  clusterStopping = true;
-  if (discoveryHandle) clearInterval(discoveryHandle);
-  if (syncHandle) clearTimeout(syncHandle);
-  discoveryHandle = null;
-  syncHandle = null;
-  for (const peer of peers.values()) peer.probeController?.abort();
-  if (discoverySocket) {
-    try {
-      discoverySocket.close();
-    } catch {
-      // The socket may still be between creation and bind during shutdown.
-    }
-    discoverySocket = null;
-  }
+  stopping = true;
+  if (pullTimer) clearTimeout(pullTimer);
+  if (probeTimer) clearInterval(probeTimer);
+  pullTimer = null;
+  probeTimer = null;
 }
 
-function startDiscovery(): void {
-  if (!discoveryEnabled || discoverySocket || clusterStopping) return;
-  const socket = dgram.createSocket({ type: 'udp4', reuseAddr: true });
-  discoverySocket = socket;
-  socket.on('error', (error) => {
-    console.warn('Cluster discovery error:', error.message);
-    if (discoverySocket !== socket) return;
-    discoverySocket = null;
-    if (discoveryHandle) clearTimeout(discoveryHandle);
+function schedulePull(delayMs: number): void {
+  if (stopping) return;
+  pullTimer = setTimeout(async () => {
+    let more = false;
     try {
-      socket.close();
-    } catch {
-      // A failed bind can leave the socket already closed.
-    }
-    discoveryHandle = null;
-    if (!clusterStopping) {
-      discoveryHandle = setTimeout(startDiscovery, discoveryIntervalMs);
-      discoveryHandle.unref();
-    }
-  });
-  socket.on('message', (packet) => {
-    try {
-      const identity = currentIdentity();
-      const payload = verifyDiscoveryPayload(JSON.parse(packet.toString('utf8')), identity.clusterSecret);
-      if (
-        !payload ||
-        payload.clusterId !== identity.clusterId ||
-        payload.hostId === identity.hostId ||
-        !normalizeUrl(payload.url)
-      ) {
-        return;
+      if (role() === 'standby' && !busy) {
+        pullInFlight = pullOnce();
+        more = await pullInFlight;
       }
-      const peer = touchPeer(payload.url, payload.hostId, payload.vector, false, payload.compatibility);
-      peer.clockSkewMs = payload.sentAt - Date.now();
-    } catch {
-      // Ignore unrelated UDP traffic on the discovery port.
+    } catch (error) {
+      lastError = errorMessage(error);
+    } finally {
+      pullInFlight = null;
+      schedulePull(more ? 0 : pullIntervalMs);
     }
-  });
-  socket.bind(discoveryPort, '0.0.0.0', () => {
-    if (discoverySocket !== socket || clusterStopping) return;
-    try {
-      socket.setBroadcast(true);
-    } catch {
-      // Some test and container networks do not expose broadcast support.
-    }
-    broadcastDiscovery();
-    discoveryHandle = setInterval(broadcastDiscovery, discoveryIntervalMs);
-    discoveryHandle.unref();
-  });
+  }, delayMs);
+  pullTimer.unref();
 }
 
-function broadcastDiscovery(): void {
-  if (!discoverySocket) return;
-  for (const target of discoveryTargets()) {
-    const message = Buffer.from(JSON.stringify(discoveryPayload(target.advertisedUrl)));
-    discoverySocket.send(message, discoveryPort, target.broadcastAddress, (error) => {
-      if (error) {
-        console.warn(`Cluster discovery broadcast to ${target.broadcastAddress} failed:`, error.message);
-      }
-    });
+/** Fetches and replays the next batch; true when the primary has more waiting. */
+async function pullOnce(): Promise<boolean> {
+  const url = primaryUrl();
+  if (!url) {
+    lastError = 'Deze standby weet niet welke laptop primair is. Koppel opnieuw in Beheer.';
+    return false;
   }
-}
-
-function discoveryPayload(advertisedUrl = currentSelfUrl()): DiscoveryPayload {
-  const identity = currentIdentity();
-  return signDiscoveryPayload(
-    {
-      app: 'apolloon',
-      protocol: CLUSTER_PROTOCOL_VERSION,
-      compatibility: currentCompatibility(),
+  const identity = hostIdentity();
+  const head = getLogHead();
+  const startedAt = Date.now();
+  const response = await peerFetch(`${url}/api/cluster/pull`, {
+    method: 'POST',
+    body: {
       clusterId: identity.clusterId,
       hostId: identity.hostId,
-      url: advertisedUrl,
-      vector: getReplicationVector(),
-      sentAt: Date.now(),
+      url: selfUrl(),
+      after: head.seq,
+      afterId: head.id,
+      clockSkewMs,
     },
-    identity.clusterSecret
-  );
-}
+  }).catch(() => null);
+  if (!response) return false;
 
-/** Announces each LAN interface's own URL on that interface's broadcast address. */
-function discoveryTargets(): Array<{ broadcastAddress: string; advertisedUrl: string }> {
-  const selfTarget = (broadcastAddress: string) => [{ broadcastAddress, advertisedUrl: currentSelfUrl() }];
-  if (configuredDiscoveryAddress) return selfTarget(configuredDiscoveryAddress);
-  if (configuredSelfUrl || process.env.PUBLIC_HOST) return selfTarget(BROADCAST_ALL);
-  const targets = currentLanNetworkEndpoints().map((endpoint) => ({
-    broadcastAddress: endpoint.broadcastAddress,
-    advertisedUrl: `http://${endpoint.address}:${PUBLIC_APP_PORT}`,
-  }));
-  return targets.length ? targets : selfTarget(BROADCAST_ALL);
-}
+  if (!response.ok) {
+    const problem = await readPeerError(response);
+    if (problem.code === 'bootstrap_required') {
+      await resync(url);
+      return true;
+    }
+    if (problem.code === 'not_primary' && problem.primaryUrl && normalizeUrl(problem.primaryUrl) !== selfUrl()) {
+      becomeStandby(normalizeUrl(problem.primaryUrl));
+      return true;
+    }
+    lastError = problem.error || `De primaire laptop antwoordde met HTTP ${response.status}.`;
+    return false;
+  }
 
-function exchangePayload(identity: ReplicationIdentity, operations: ReplicationOperation[]): ExchangePayload {
-  return {
-    protocol: CLUSTER_PROTOCOL_VERSION,
-    compatibility: currentCompatibility(),
-    clusterId: identity.clusterId,
-    hostId: identity.hostId,
-    url: currentSelfUrl(),
-    vector: getReplicationVector(),
-    operations,
-    sentAt: Date.now(),
-  };
-}
-
-function scheduleSync(delayMs = syncIntervalMs): void {
-  if (clusterStopping) return;
-  if (syncHandle) clearTimeout(syncHandle);
-  syncHandle = setTimeout(() => {
-    syncHandle = null;
-    void syncAllPeers().finally(() => {
-      if (!clusterStopping) scheduleSync();
-    });
-  }, delayMs);
-  syncHandle.unref();
-}
-
-function syncAllPeers(): Promise<void> {
-  if (joinInProgress) return Promise.resolve();
-  syncPromise ??= Promise.all(
-    [...peers.values()].filter((peer) => Date.now() >= peer.nextProbeAt).map(syncPeer)
-  )
-    .then(() => undefined)
-    .finally(() => {
-      syncPromise = null;
-    });
-  return syncPromise;
-}
-
-async function syncPeer(peer: PeerState): Promise<void> {
-  const identity = currentIdentity();
-  const probeUrl = peer.url;
-  const lastSeenBeforeProbe = peer.lastSeenAt;
-  const probeController = new AbortController();
-  peer.probeController = probeController;
-  // Rediscovery, joining another cluster, or a newer inbound exchange can
-  // supersede this request while it awaits; a stale probe must not touch the peer.
-  const probeIsCurrent = () =>
-    !clusterStopping &&
-    !joinInProgress &&
-    identity === currentIdentity() &&
-    peers.get(probeUrl) === peer &&
-    peer.url === probeUrl &&
-    peer.probeController === probeController &&
-    !probeController.signal.aborted;
+  const payload = pullResponseSchema.parse(await response.json());
+  const receivedAt = Date.now();
   try {
-    const encoded = await encodedJsonRequest(exchangePayload(identity, getReplicationOperationsMissing(peer.vector)));
-    if (!probeIsCurrent()) return;
-    const response = await fetch(`${probeUrl}/api/cluster/sync/exchange`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-apolloon-cluster-secret': identity.clusterSecret,
-        ...(encoded.contentEncoding ? { 'content-encoding': encoded.contentEncoding } : {}),
-      },
-      body: encoded.body,
-      signal: AbortSignal.any([probeController.signal, AbortSignal.timeout(requestTimeoutMs)]),
-    });
-    if (!response.ok) {
-      const responseText = await response.text();
-      if (!probeIsCurrent()) return;
-      const responseError = responseErrorMessage(responseText);
-      if (
-        response.status === 426 ||
-        /upgrade vereist/i.test(responseError) ||
-        (response.status === 409 && /protocol mismatch/i.test(responseError))
-      ) {
-        peer.compatibilityError =
-          response.status === 409
-            ? 'Upgrade vereist of verkeerde cluster: de andere laptop herkent dit clusterprotocol niet. Controleer de cluster en werk beide laptops bij.'
-            : responseError || 'Upgrade vereist: de andere laptop gebruikt een incompatibele versie.';
-      }
-      throw new Error(responseError || `sync failed: ${response.status}`);
-    }
-    const remote = (await response.json()) as ExchangePayload;
-    if (!probeIsCurrent()) return;
-    const remoteVector = normalizeOperationVector(remote.vector);
-    const remoteCompatibility = parseClusterCompatibility(remote.compatibility);
-    const compatibilityIssue = clusterCompatibilityError(remoteCompatibility, currentCompatibility());
-    if (compatibilityIssue || !remoteCompatibility) {
-      peer.compatibility = remoteCompatibility;
-      peer.compatibilityError = compatibilityIssue;
-      throw new Error(compatibilityIssue ?? 'invalid sync response');
-    }
-    if (
-      remote.protocol !== CLUSTER_PROTOCOL_VERSION ||
-      remote.clusterId !== identity.clusterId ||
-      !isValidId(remote.hostId) ||
-      remote.hostId === identity.hostId ||
-      (peer.id !== null && remote.hostId !== peer.id) ||
-      !normalizeUrl(remote.url) ||
-      !remoteVector ||
-      !Array.isArray(remote.operations) ||
-      !Number.isSafeInteger(remote.sentAt)
-    ) {
-      throw new Error('invalid sync response');
-    }
-    const result = applyRemoteReplicationOperations(remote.operations);
-    // The request URL just worked. The peer's preferred interface may be on
-    // another network, so its advertised URL must not replace this proven route.
-    const confirmedPeer = touchPeer(probeUrl, remote.hostId, remoteVector, true, remoteCompatibility);
-    confirmedPeer.clockSkewMs = remote.sentAt - Date.now();
-    acknowledgeReplicationVector(remote.hostId, remoteVector);
-    // Quarantined operations alone change no data; the status poll reports them.
-    if (result.applied > 0 || result.conflicts > 0) {
-      emitRealtime({ type: 'state:revision', payload: getAppDataRevision() });
-    }
+    applyLogEntries(payload.entries);
   } catch (error) {
-    if (!probeIsCurrent() || peer.lastSeenAt !== lastSeenBeforeProbe) return;
-    if (peer.consecutiveFailures === 0) {
-      console.warn(`Cluster sync with ${peer.url} failed:`, error instanceof Error ? error.message : String(error));
-    }
-    if (peer.reachable || peer.unreachableSinceAt === null) {
-      peer.unreachableSinceAt = Date.now();
-    }
-    peer.reachable = false;
-    peer.consecutiveFailures += 1;
-    peer.nextProbeAt = Date.now() + Math.min(10_000, peerRetryBaseMs * 2 ** Math.min(peer.consecutiveFailures - 1, 4));
-    const alternateUrl = [...peer.candidateUrls.entries()].find(
-      ([url, seenAt]) => url !== probeUrl && Date.now() - seenAt < candidateUrlLifetimeMs
-    )?.[0];
-    if (alternateUrl) {
-      // Retire this failed route until another announcement refreshes it.
-      peer.candidateUrls.delete(probeUrl);
-      rekeyPeer(peer, alternateUrl);
-    }
+    // A standby's copy is disposable: rather than stall, fetch a fresh one.
+    console.warn('Standby could not replay the primary log; resynchronizing:', errorMessage(error));
+    await resync(url);
+    return true;
+  }
+  adoptEpoch(payload.epoch);
+  rememberMembers({ ...payload.members, [payload.hostId]: url });
+  primaryContact = {
+    hostId: payload.hostId,
+    head: payload.head,
+    lastContactAt: receivedAt,
+  };
+  clockSkewMs = payload.serverNowMs - (startedAt + (receivedAt - startedAt) / 2);
+  lastError = null;
+  return getLogHead().seq < payload.head;
+}
+
+async function resync(url: string): Promise<void> {
+  busy = 'bootstrapping';
+  try {
+    await bootstrapFrom(url, 'pre-standby-resync');
   } finally {
-    if (peer.probeController === probeController) peer.probeController = null;
+    busy = null;
   }
 }
 
-function findPeerById(hostId: string): PeerState | undefined {
-  return [...peers.values()].find((peer) => peer.id === hostId);
-}
-
-function addPeer(peerUrl: string): PeerState | null {
-  const url = normalizeUrl(peerUrl);
-  if (!url || url === currentSelfUrl()) return null;
-  const existing = peers.get(url);
-  if (existing) return existing;
-  const peer: PeerState = {
-    id: null,
-    url,
-    reachable: false,
-    lastSeenAt: null,
-    vector: {},
-    consecutiveFailures: 0,
-    nextProbeAt: 0,
-    unreachableSinceAt: Date.now(),
-    clockSkewMs: null,
-    compatibility: null,
-    compatibilityError: null,
-    candidateUrls: new Map([[url, Date.now()]]),
-    probeController: null,
-  };
-  peers.set(url, peer);
-  return peer;
+/** Replaces this laptop's data with the primary's, after a backup of what it had. */
+async function bootstrapFrom(url: string, backupReason: string): Promise<string> {
+  const response = await peerFetch(`${url}/api/cluster/snapshot`, {
+    timeoutMs: 60_000,
+  });
+  if (!response.ok) {
+    throw new Error((await readPeerError(response)).error || `Database ophalen mislukt (HTTP ${response.status}).`);
+  }
+  const epoch = Number(response.headers.get('x-apolloon-epoch') || 0);
+  const image = Buffer.from(await response.arrayBuffer());
+  const backup = await createVerifiedBackup(backupReason);
+  installDatabaseImage(image, DATABASE_SCHEMA_VERSION);
+  setLocalSetting('cluster_epoch', String(Number.isSafeInteger(epoch) ? epoch : 0));
+  return backup.fileName;
 }
 
 /**
- * Records a sign of life from a peer. `reachable` means we just exchanged data
- * with it at this URL; a discovery announcement alone only adds an address.
+ * A primary checks that no other laptop has been promoted past it; a standby
+ * that lost its primary looks for whichever laptop is primary now.
  */
-function touchPeer(
-  peerUrl: string,
-  peerId: string,
-  vector: OperationVector,
-  reachable: boolean,
-  compatibility: ClusterCompatibility
-): PeerState {
-  const url = normalizeUrl(peerUrl);
-  const peerAtUrl = peers.get(url);
-  const peer = findPeerById(peerId) ?? peerAtUrl ?? addPeer(url);
-  if (!peer) throw new Error('peer points to this host');
-  if (peerAtUrl && peerAtUrl !== peer) peers.delete(peerAtUrl.url);
-  const isNewAddress = rememberPeerUrl(peer, url);
-  if (reachable || (!peer.reachable && isNewAddress)) rekeyPeer(peer, url);
-  peer.id = peerId;
-  peer.vector = vector;
-  peer.compatibility = compatibility;
-  peer.compatibilityError = clusterCompatibilityError(compatibility, currentCompatibility());
-  if (reachable) {
-    peer.reachable = peer.compatibilityError === null;
-    peer.lastSeenAt = Date.now();
-    peer.consecutiveFailures = 0;
-    peer.nextProbeAt = 0;
-    peer.unreachableSinceAt = null;
+async function probeMembers(): Promise<void> {
+  if (busy || stopping) return;
+  const currentRole = role();
+  const lastContact = primaryContact.lastContactAt;
+  if (currentRole === 'standby' && lastContact !== null && Date.now() - lastContact < probeIntervalMs) return;
+
+  const identity = hostIdentity();
+  const statuses = await Promise.all(
+    Object.values(knownMembers()).map(async (url) => ({
+      url,
+      status: await fetchStatus(url).catch(() => null),
+    }))
+  );
+  const primaries = statuses.filter(
+    (entry): entry is { url: string; status: ClusterStatus } =>
+      Boolean(entry.status) &&
+      entry.status!.enabled &&
+      entry.status!.role === 'primary' &&
+      entry.status!.clusterId === identity.clusterId &&
+      entry.status!.hostId !== identity.hostId
+  );
+  if (busy || role() !== currentRole) return;
+  const epoch = getClusterEpoch();
+  const newest = primaries.sort((a, b) => b.status.epoch - a.status.epoch)[0];
+
+  if (currentRole === 'primary') {
+    if (newest && newest.status.epoch > epoch) {
+      becomeStandby(newest.url);
+      lastError = `${newest.url} is intussen primair geworden. Deze laptop volgt die nu als standby.`;
+      return;
+    }
+    competingPrimaryUrl = primaries.find((entry) => entry.status.epoch === epoch)?.url ?? null;
+    return;
   }
-  return peer;
+  if (newest && newest.status.epoch >= epoch && newest.url !== primaryUrl()) becomeStandby(newest.url);
 }
 
-function rekeyPeer(peer: PeerState, nextUrl: string): void {
-  const url = normalizeUrl(nextUrl);
-  if (!url || url === currentSelfUrl() || url === peer.url) return;
-  peer.probeController?.abort();
-  for (const [registeredUrl, registeredPeer] of peers) {
-    if (registeredPeer === peer && registeredUrl !== url) peers.delete(registeredUrl);
-  }
-  peer.url = url;
-  peer.reachable = false;
-  peer.consecutiveFailures = 0;
-  peer.nextProbeAt = 0;
-  peers.set(url, peer);
-}
-
-function rememberPeerUrl(peer: PeerState, url: string): boolean {
-  const now = Date.now();
-  for (const [candidateUrl, seenAt] of peer.candidateUrls) {
-    if (now - seenAt >= candidateUrlLifetimeMs) peer.candidateUrls.delete(candidateUrl);
-  }
-  const isNewAddress = !peer.candidateUrls.has(url);
-  peer.candidateUrls.delete(url);
-  peer.candidateUrls.set(url, now);
-  // Bound interface history when DHCP assigns many addresses over a long event.
-  if (peer.candidateUrls.size > MAX_CANDIDATE_URLS) {
-    peer.candidateUrls.delete(peer.candidateUrls.keys().next().value!);
-  }
-  return isNewAddress;
-}
-
-function incomingPeerUrl(advertisedUrl: string, remoteAddress?: string): string {
-  const url = new URL(advertisedUrl);
-  const sourceAddress = remoteAddress?.replace(/^::ffff:/, '');
-  // On the physical LAN, the source address identifies the interface that
-  // reached us. Keep configured hostnames/proxies and the advertised port.
-  if (isIP(url.hostname) === 4 && sourceAddress && isIP(sourceAddress) === 4) {
-    url.hostname = sourceAddress;
-  }
-  return normalizeUrl(url.toString());
-}
-
-function toClusterPeer(peer: PeerState, localVector: OperationVector): ClusterPeer {
-  return {
-    id: peer.id,
-    url: peer.url,
-    reachable: peer.reachable,
-    lastSeenAt: peer.lastSeenAt,
-    lastSeq: peer.id ? peer.vector[peer.id] ?? null : null,
-    synchronized: peer.compatibilityError === null && vectorCovers(peer.vector, localVector),
-    operationVector: peer.vector,
-    compatibility: peer.compatibility,
-    compatibilityError: peer.compatibilityError,
-  };
-}
-
-function vectorCovers(candidate: OperationVector, required: OperationVector): boolean {
-  return Object.entries(required).every(([hostId, sequence]) => (candidate[hostId] || 0) >= sequence);
-}
-
-function currentIdentity(): ReplicationIdentity {
-  identityCache ??= ensureReplicationIdentity();
-  return identityCache;
-}
-
-function currentCompatibility(): ClusterCompatibility {
-  return localClusterCompatibility(databaseReadiness().schemaVersion);
-}
-
-function compatibilityFromQuery(req: Request): ClusterCompatibility | null {
-  const encoded = req.query.compatibility;
-  if (typeof encoded !== 'string' || encoded.length > 2_048) return null;
+/** Makes this laptop a standby of the primary at `rawUrl`, replacing its data. */
+export async function joinPrimary(rawUrl: string): Promise<{ backupFile: string }> {
+  if (!enabled) throw new Error('Laptops koppelen staat uit op deze installatie.');
+  const url = normalizeUrl(rawUrl);
+  if (!url || url === selfUrl()) throw new Error('Vul het adres van de primaire laptop in.');
+  if (busy) throw new Error('Er loopt al een koppeling of synchronisatie.');
+  busy = 'joining';
   try {
-    return parseClusterCompatibility(JSON.parse(encoded));
-  } catch {
-    return null;
+    const status = await fetchStatus(url).catch(() => {
+      throw new Error(`${url} is niet bereikbaar. Controleer het adres en de kabel.`);
+    });
+    if (!status.enabled) throw new Error('Op die laptop staat laptops koppelen uit.');
+    if (status.hostId === hostIdentity().hostId) throw new Error('Dat adres is deze laptop zelf.');
+    if (status.appVersion !== APP_VERSION || status.schemaVersion !== DATABASE_SCHEMA_VERSION) {
+      throw new Error(versionMismatchMessage(status.appVersion));
+    }
+    if (status.role !== 'primary') {
+      throw new Error(
+        `Die laptop is standby. Koppel met de primaire laptop${status.primary?.url ? `: ${status.primary.url}` : ''}.`
+      );
+    }
+    const backupFile = await bootstrapFrom(url, 'pre-join');
+    becomeStandby(url);
+    setLocalSetting('cluster_members_json', '{}');
+    rememberMembers({ [status.hostId]: url });
+    lastError = null;
+    return { backupFile };
+  } finally {
+    busy = null;
   }
 }
 
-function responseErrorMessage(body: string): string {
+/**
+ * Promotes this standby. With a reachable primary this is a planned handover
+ * without data loss; otherwise only `emergency` promotes, accepting that the
+ * primary's last unsynchronized writes may be missing.
+ */
+export async function promoteToPrimary(
+  emergency: boolean
+): Promise<{ result: 'planned' | 'emergency' | 'primary-unreachable' }> {
+  if (!enabled || role() !== 'standby') throw new Error('Deze laptop is al primair.');
+  if (busy) throw new Error('Er loopt al een koppeling of synchronisatie.');
+  busy = 'promoting';
   try {
-    const parsed = JSON.parse(body) as { error?: unknown };
-    return typeof parsed.error === 'string' ? parsed.error.slice(0, 500) : '';
-  } catch {
-    return body.trim().slice(0, 500);
+    // A pull that already started would otherwise apply entries under the handover.
+    await pullInFlight?.catch(() => undefined);
+    const url = primaryUrl();
+    const identity = hostIdentity();
+    const head = getLogHead();
+    const response = url
+      ? await peerFetch(`${url}/api/cluster/handover`, {
+          method: 'POST',
+          body: {
+            clusterId: identity.clusterId,
+            hostId: identity.hostId,
+            url: selfUrl(),
+            after: head.seq,
+            afterId: head.id,
+          },
+        }).catch(() => null)
+      : null;
+    if (response?.ok) {
+      const handover = handoverResponseSchema.parse(await response.json());
+      applyLogEntries(handover.entries.filter((entry) => entry.seq > getLogHead().seq));
+      becomePrimary(Math.max(getClusterEpoch(), handover.epoch) + 1);
+      return { result: 'planned' };
+    }
+    if (response) {
+      const problem = await readPeerError(response);
+      // Anything but "not primary any more" means the primary is alive and said no.
+      if (problem.code !== 'not_primary')
+        throw new Error(problem.error || `Overdracht mislukt (HTTP ${response.status}).`);
+    }
+    if (!emergency) return { result: 'primary-unreachable' };
+    becomePrimary(getClusterEpoch() + 1);
+    return { result: 'emergency' };
+  } finally {
+    busy = null;
   }
 }
 
-function pairingCode(clusterSecret: string): string {
-  return crypto.createHash('sha256').update(`apolloon-pairing:${clusterSecret}`).digest('hex').slice(0, 8).toUpperCase();
+async function fetchStatus(url: string): Promise<ClusterStatus> {
+  const response = await peerFetch(`${url}/api/cluster/status`);
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return (await response.json()) as ClusterStatus;
 }
 
-function validPairingCode(value: unknown, clusterSecret: string): boolean {
-  return secureEqual(String(value || '').trim().toUpperCase(), pairingCode(clusterSecret));
+function peerFetch(
+  url: string,
+  init: { method?: 'GET' | 'POST'; body?: unknown; timeoutMs?: number } = {}
+): Promise<globalThis.Response> {
+  return fetch(url, {
+    method: init.method ?? 'GET',
+    headers: {
+      'content-type': 'application/json',
+      'x-apolloon-app-version': APP_VERSION,
+      'x-apolloon-schema-version': String(DATABASE_SCHEMA_VERSION),
+    },
+    body: init.body === undefined ? undefined : JSON.stringify(init.body),
+    signal: AbortSignal.timeout(init.timeoutMs ?? requestTimeoutMs),
+  });
+}
+
+async function readPeerError(response: globalThis.Response): Promise<z.infer<typeof peerErrorSchema>> {
+  const text = await response.text().catch(() => '');
+  try {
+    const parsed = peerErrorSchema.safeParse(JSON.parse(text));
+    if (parsed.success) return parsed.data;
+  } catch {
+    // Not JSON; fall through to the raw text.
+  }
+  return { error: text.trim().slice(0, 300) };
+}
+
+function selfUrl(): string {
+  return configuredSelfUrl || normalizeUrl(hostInfo().url);
 }
 
 function normalizeUrl(value: unknown): string {
@@ -870,35 +620,13 @@ function normalizeUrl(value: unknown): string {
   if (!raw) return '';
   try {
     const url = new URL(raw.includes('://') ? raw : `http://${raw}`);
-    if ((url.protocol !== 'http:' && url.protocol !== 'https:') || url.username || url.password) {
-      return '';
-    }
-    url.pathname = '';
-    url.search = '';
-    url.hash = '';
-    return url.toString().replace(/\/$/, '');
+    if ((url.protocol !== 'http:' && url.protocol !== 'https:') || url.username || url.password) return '';
+    return url.origin;
   } catch {
     return '';
   }
 }
 
-function currentSelfUrl(): string {
-  return configuredSelfUrl || normalizeUrl(hostInfo().url);
-}
-
-function asyncJson(
-  handler: (req: Request, res: Response) => Promise<void>
-): (req: Request, res: Response, next: NextFunction) => void {
-  return (req, res, next) => {
-    handler(req, res).catch((error) => {
-      if (res.headersSent) {
-        next(error);
-        return;
-      }
-      res.status(500).json({
-        ok: false,
-        error: error instanceof Error ? error.message : 'onbekende clusterfout',
-      });
-    });
-  };
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

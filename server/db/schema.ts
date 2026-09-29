@@ -1,16 +1,10 @@
 import { type LabelInput } from '../../shared/schemas.js';
-import {
-  LEGACY_REPLICATION_CHECKPOINT_KEY,
-  REPLICATION_CHECKPOINT_KEY,
-  compactStoredLapLabels,
-  decodeReplicationCheckpoint,
-  storeReplicationCheckpoint,
-} from './checkpoint.js';
-import { all, getDb, one, run } from './connection.js';
-import { createLabelRecord, findLabelByName, getRunnerLabelsMap } from './labels.js';
-import { deleteLocalSetting, getSetting, setLocalSetting } from './settings.js';
+import { all, getDb, one, run, transaction } from './connection.js';
+import { TEMPORARY_TEAM_KIND, createLabelRecord, findLabelByName } from './labels.js';
+import { getSetting, setLocalSetting } from './settings.js';
+import { parseLabelsJson, parseStringArray, serializeHistoricalLabels } from './values.js';
 
-export const DATABASE_SCHEMA_VERSION = 12;
+export const DATABASE_SCHEMA_VERSION = 13;
 
 type DefaultLabel = Required<LabelInput> & { id: string };
 
@@ -116,6 +110,10 @@ export function createSchema(): void {
       registration_source TEXT NOT NULL DEFAULT 'manual' CHECK(registration_source IN ('import','manual')),
       notes TEXT DEFAULT '',
       registration_json TEXT,
+      status TEXT NOT NULL DEFAULT 'registered' CHECK(status IN ('registered','warming_up','waiting','running','ran')),
+      queue_index INTEGER,
+      status_since INTEGER,
+      hidden_at INTEGER,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
@@ -139,15 +137,6 @@ export function createSchema(): void {
       PRIMARY KEY (runner_id, label_id),
       FOREIGN KEY (runner_id) REFERENCES runners(id) ON DELETE CASCADE,
       FOREIGN KEY (label_id) REFERENCES labels(id) ON DELETE CASCADE
-    );
-
-    CREATE TABLE IF NOT EXISTS queue_entries (
-      runner_id TEXT PRIMARY KEY,
-      status TEXT NOT NULL CHECK(status IN ('registered','warming_up','waiting','running','ran')),
-      queue_index INTEGER,
-      status_since INTEGER,
-      hidden_at INTEGER,
-      FOREIGN KEY (runner_id) REFERENCES runners(id) ON DELETE CASCADE
     );
 
     CREATE TABLE IF NOT EXISTS race_state (
@@ -198,71 +187,31 @@ export function createSchema(): void {
       activated_at INTEGER,
       starts_at INTEGER,
       ends_at INTEGER,
-      schedule_owner_host_id TEXT,
       FOREIGN KEY (label_id) REFERENCES labels(id) ON DELETE CASCADE
     );
 
     CREATE TABLE IF NOT EXISTS temporary_team_members (
       team_label_id TEXT NOT NULL,
       runner_id TEXT NOT NULL UNIQUE,
-      restore_label_ids_json TEXT,
       PRIMARY KEY (team_label_id, runner_id),
       FOREIGN KEY (team_label_id) REFERENCES temporary_teams(label_id) ON DELETE CASCADE,
       FOREIGN KEY (runner_id) REFERENCES runners(id) ON DELETE CASCADE
     );
 
-    CREATE TABLE IF NOT EXISTS replication_operations (
-      id TEXT PRIMARY KEY,
-      cluster_id TEXT NOT NULL,
-      origin_host_id TEXT NOT NULL,
-      origin_seq INTEGER NOT NULL,
-      hlc_wall_ms INTEGER NOT NULL,
-      hlc_counter INTEGER NOT NULL,
+    CREATE TABLE IF NOT EXISTS replication_log (
+      seq INTEGER PRIMARY KEY,
+      id TEXT NOT NULL UNIQUE,
+      epoch INTEGER NOT NULL,
       type TEXT NOT NULL,
-      payload_json TEXT NOT NULL,
       statements_json TEXT NOT NULL,
-      result_json TEXT NOT NULL,
-      race_base_key TEXT,
-      status TEXT NOT NULL CHECK(status IN ('accepted','conflict','rejected')),
-      checksum TEXT NOT NULL,
-      created_at INTEGER NOT NULL,
-      applied_at INTEGER NOT NULL,
-      UNIQUE(origin_host_id, origin_seq)
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_replication_operations_order
-      ON replication_operations(hlc_wall_ms, hlc_counter, origin_host_id, origin_seq);
-
-    CREATE INDEX IF NOT EXISTS idx_replication_operations_race_base
-      ON replication_operations(race_base_key)
-      WHERE race_base_key IS NOT NULL;
-
-    CREATE TABLE IF NOT EXISTS replication_peer_progress (
-      peer_host_id TEXT NOT NULL,
-      origin_host_id TEXT NOT NULL,
-      acknowledged_seq INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL,
-      PRIMARY KEY(peer_host_id, origin_host_id)
-    );
-
-    CREATE TABLE IF NOT EXISTS replication_conflicts (
-      id TEXT PRIMARY KEY,
-      kind TEXT NOT NULL,
-      operation_ids_json TEXT NOT NULL,
-      status TEXT NOT NULL CHECK(status IN ('open','resolved')),
-      resolution_operation_id TEXT,
-      created_at INTEGER NOT NULL,
-      resolved_at INTEGER
+      created_at INTEGER NOT NULL
     );
 
     CREATE INDEX IF NOT EXISTS idx_laps_runner_finished
-      ON laps(runner_id, finished_at DESC);
+      ON laps(runner_id, finished_at DESC, duration_ms);
 
     CREATE INDEX IF NOT EXISTS idx_laps_finished
       ON laps(finished_at DESC);
-
-    CREATE INDEX IF NOT EXISTS idx_queue_status_order
-      ON queue_entries(status, queue_index, status_since);
 
     CREATE INDEX IF NOT EXISTS idx_race_events_occurred
       ON race_events(occurred_at DESC, created_at DESC);
@@ -286,68 +235,141 @@ function tableHasColumn(table: string, column: string): boolean {
   return all<{ name: string }>(`PRAGMA table_info(${table})`).some((row) => row.name === column);
 }
 
+/** Host-local keys of the retired multi-master replication (schema 7 to 12). */
+const RETIRED_SETTING_KEYS = [
+  'replication_cluster_secret',
+  'replication_hlc_wall_ms',
+  'replication_hlc_counter',
+  'replication_checkpoint_gzip_v1',
+  'replication_checkpoint_json',
+  'replication_dead_letters_json',
+  'timing_controller_host_id',
+  'timing_controller_generation',
+  'last_database_compaction_at',
+];
+
 export function migrateSchema(): void {
   const previousVersion = Number(getSetting('schema_version') || 0);
-  if (!tableHasColumn('runners', 'registration_json')) {
-    run('ALTER TABLE runners ADD COLUMN registration_json TEXT');
-  }
-  if (!tableHasColumn('race_state', 'active_labels_json')) {
-    run('ALTER TABLE race_state ADD COLUMN active_labels_json TEXT');
-  }
-  if (!tableHasColumn('laps', 'labels_json')) {
-    run("ALTER TABLE laps ADD COLUMN labels_json TEXT NOT NULL DEFAULT '[]'");
-  }
-  if (!tableHasColumn('temporary_teams', 'starts_at')) {
-    run('ALTER TABLE temporary_teams ADD COLUMN starts_at INTEGER');
-  }
-  if (!tableHasColumn('temporary_teams', 'ends_at')) {
-    run('ALTER TABLE temporary_teams ADD COLUMN ends_at INTEGER');
-  }
-  if (!tableHasColumn('temporary_teams', 'schedule_owner_host_id')) {
-    run('ALTER TABLE temporary_teams ADD COLUMN schedule_owner_host_id TEXT');
-  }
+  transaction(() => {
+    if (!tableHasColumn('runners', 'registration_json')) {
+      run('ALTER TABLE runners ADD COLUMN registration_json TEXT');
+    }
+    if (!tableHasColumn('race_state', 'active_labels_json')) {
+      run('ALTER TABLE race_state ADD COLUMN active_labels_json TEXT');
+    }
+    if (!tableHasColumn('laps', 'labels_json')) {
+      run("ALTER TABLE laps ADD COLUMN labels_json TEXT NOT NULL DEFAULT '[]'");
+    }
+    if (!tableHasColumn('temporary_teams', 'starts_at')) {
+      run('ALTER TABLE temporary_teams ADD COLUMN starts_at INTEGER');
+    }
+    if (!tableHasColumn('temporary_teams', 'ends_at')) {
+      run('ALTER TABLE temporary_teams ADD COLUMN ends_at INTEGER');
+    }
+    if (!tableHasColumn('runners', 'status')) moveQueueOntoRunners();
+    run('CREATE INDEX IF NOT EXISTS idx_runners_queue_order ON runners(status, queue_index, status_since)');
 
-  if (previousVersion < 5) {
-    const labelsByRunner = getRunnerLabelsMap();
-    for (const lap of all<{ id: string; runnerId: string }>('SELECT id, runner_id AS runnerId FROM laps')) {
-      run('UPDATE laps SET labels_json = ? WHERE id = ?', [
-        JSON.stringify(labelsByRunner.get(lap.runnerId) ?? []),
-        lap.id,
-      ]);
+    if (previousVersion > 0 && previousVersion < 5) snapshotLapLabels();
+    if (previousVersion > 0 && previousVersion < 6) {
+      run('DROP INDEX IF EXISTS idx_laps_runner_finished');
+      run('CREATE INDEX idx_laps_runner_finished ON laps(runner_id, finished_at DESC, duration_ms)');
     }
-    const active = one<{ runnerId: string | null }>(
-      'SELECT active_runner_id AS runnerId FROM race_state WHERE id = 1'
-    );
-    if (active?.runnerId) {
-      run('UPDATE race_state SET active_labels_json = ? WHERE id = 1', [
-        JSON.stringify(labelsByRunner.get(active.runnerId) ?? []),
-      ]);
+    if (previousVersion > 0 && previousVersion < 9) compactLapLabels();
+    if (previousVersion > 0 && previousVersion < 13) {
+      retireMultiMasterReplication();
+      deriveTemporaryTeamLabels();
     }
-  }
-  if (previousVersion < 6) {
-    run('DROP INDEX IF EXISTS idx_laps_runner_finished');
-    run(
-      `CREATE INDEX idx_laps_runner_finished
-       ON laps(runner_id, finished_at DESC, duration_ms)`
-    );
-  }
-  if (previousVersion < 8) {
-    // `cluster_operations` belonged to the retired leader/log replication design.
-    // Local-first replication has used `replication_operations` since schema 7.
-    run('DROP TABLE IF EXISTS cluster_operations');
-  }
-  if (previousVersion < 9) {
-    compactStoredLapLabels();
-
-    const storedCheckpoint =
-      getSetting(REPLICATION_CHECKPOINT_KEY) || getSetting(LEGACY_REPLICATION_CHECKPOINT_KEY);
-    if (storedCheckpoint) {
-      storeReplicationCheckpoint(decodeReplicationCheckpoint(storedCheckpoint));
-    }
-    deleteLocalSetting(LEGACY_REPLICATION_CHECKPOINT_KEY);
-  }
-  setLocalSetting('schema_version', String(DATABASE_SCHEMA_VERSION));
+    setLocalSetting('schema_version', String(DATABASE_SCHEMA_VERSION));
+  });
   getDb().pragma(`user_version = ${DATABASE_SCHEMA_VERSION}`);
+}
+
+/** Schema 5 started storing each lap's labels; older laps get the runner's labels at migration time. */
+function snapshotLapLabels(): void {
+  const labelsByRunner = new Map<string, unknown[]>();
+  for (const row of all<Record<string, string | number | null> & { runnerId: string }>(
+    `SELECT rl.runner_id AS runnerId, l.id, l.name, l.color, l.icon, l.kind, l.image_url AS imageUrl
+     FROM runner_labels rl JOIN labels l ON l.id = rl.label_id`
+  )) {
+    const { runnerId, ...label } = row;
+    labelsByRunner.set(runnerId, [...(labelsByRunner.get(runnerId) ?? []), label]);
+  }
+  for (const lap of all<{ id: string; runnerId: string }>('SELECT id, runner_id AS runnerId FROM laps')) {
+    run('UPDATE laps SET labels_json = ? WHERE id = ?', [
+      JSON.stringify(labelsByRunner.get(lap.runnerId) ?? []),
+      lap.id,
+    ]);
+  }
+  const active = one<{ runnerId: string | null }>('SELECT active_runner_id AS runnerId FROM race_state WHERE id = 1');
+  if (active?.runnerId) {
+    run('UPDATE race_state SET active_labels_json = ? WHERE id = 1', [
+      JSON.stringify(labelsByRunner.get(active.runnerId) ?? []),
+    ]);
+  }
+}
+
+/** Schema 9 dropped live-only label fields from the per-lap label snapshots. */
+function compactLapLabels(): void {
+  for (const lap of all<{ id: string; labelsJson: string }>('SELECT id, labels_json AS labelsJson FROM laps')) {
+    const compact = serializeHistoricalLabels(parseLabelsJson(lap.labelsJson));
+    if (compact !== lap.labelsJson) run('UPDATE laps SET labels_json = ? WHERE id = ?', [compact, lap.id]);
+  }
+}
+
+/** Schema 13 keeps each runner's queue state on the runner itself instead of a 1:1 `queue_entries` row. */
+function moveQueueOntoRunners(): void {
+  run(`ALTER TABLE runners ADD COLUMN status TEXT NOT NULL DEFAULT 'registered'
+       CHECK(status IN ('registered','warming_up','waiting','running','ran'))`);
+  run('ALTER TABLE runners ADD COLUMN queue_index INTEGER');
+  run('ALTER TABLE runners ADD COLUMN status_since INTEGER');
+  run('ALTER TABLE runners ADD COLUMN hidden_at INTEGER');
+  if (all('SELECT name FROM sqlite_master WHERE type = ? AND name = ?', ['table', 'queue_entries']).length) {
+    run(`UPDATE runners
+         SET status = q.status, queue_index = q.queue_index, status_since = q.status_since, hidden_at = q.hidden_at
+         FROM queue_entries q
+         WHERE q.runner_id = runners.id`);
+    run('DROP TABLE queue_entries');
+  }
+}
+
+/** Schema 13 replaced multi-master replication with a single primary and log-shipping standbys. */
+function retireMultiMasterReplication(): void {
+  run('DROP TABLE IF EXISTS cluster_operations');
+  run('DROP TABLE IF EXISTS replication_operations');
+  run('DROP TABLE IF EXISTS replication_peer_progress');
+  run('DROP TABLE IF EXISTS replication_conflicts');
+  run(`DELETE FROM settings WHERE key IN (${RETIRED_SETTING_KEYS.map(() => '?').join(', ')})`, RETIRED_SETTING_KEYS);
+}
+
+/**
+ * Before schema 13 an active night team rewrote its members' labels and kept
+ * the originals aside. Labels are now derived from the schedule, so restore
+ * the originals and drop the bookkeeping columns.
+ */
+function deriveTemporaryTeamLabels(): void {
+  if (tableHasColumn('temporary_team_members', 'restore_label_ids_json')) {
+    for (const member of all<{
+      teamId: string;
+      runnerId: string;
+      restoreJson: string | null;
+    }>(
+      `SELECT team_label_id AS teamId, runner_id AS runnerId, restore_label_ids_json AS restoreJson
+       FROM temporary_team_members WHERE restore_label_ids_json IS NOT NULL`
+    )) {
+      for (const labelId of parseStringArray(member.restoreJson)) {
+        run('INSERT OR IGNORE INTO runner_labels (runner_id, label_id) SELECT ?, id FROM labels WHERE id = ?', [
+          member.runnerId,
+          labelId,
+        ]);
+      }
+    }
+    run('ALTER TABLE temporary_team_members DROP COLUMN restore_label_ids_json');
+  }
+  if (tableHasColumn('temporary_teams', 'schedule_owner_host_id')) {
+    run('ALTER TABLE temporary_teams DROP COLUMN schedule_owner_host_id');
+  }
+  run('DELETE FROM runner_labels WHERE label_id IN (SELECT id FROM labels WHERE kind = ?)', [TEMPORARY_TEAM_KIND]);
+  run('UPDATE temporary_teams SET active = 0, activated_at = NULL WHERE starts_at IS NOT NULL AND ends_at IS NOT NULL');
 }
 
 export function seedDefaultLabels(): void {

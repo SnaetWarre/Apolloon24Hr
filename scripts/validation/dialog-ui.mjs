@@ -23,7 +23,9 @@ try {
   await page.keyboard.press('Escape');
   await searchDialog.waitFor({ state: 'detached' });
   assert.equal(await openSearch.evaluate((button) => button === document.activeElement), true);
-  console.log('PASS search dialog accepts typing immediately, contains keyboard focus, Escape works on buttons, and opener regains focus');
+  console.log(
+    'PASS search dialog accepts typing immediately, contains keyboard focus, Escape works on buttons, and opener regains focus'
+  );
 
   const openNewRunner = page.getByRole('button', { name: 'Nieuwe loper', exact: true });
   await openNewRunner.click();
@@ -44,7 +46,9 @@ try {
   await discardPrompt.getByRole('button', { name: 'Sluiten zonder opslaan', exact: true }).click();
   await nameInput.waitFor({ state: 'detached' });
   assert.equal(await openNewRunner.evaluate((button) => button === document.activeElement), true);
-  console.log('PASS new-runner dialog accepts a runner number immediately, protects drafts, and returns focus to its opener');
+  console.log(
+    'PASS new-runner dialog accepts a runner number immediately, protects drafts, and returns focus to its opener'
+  );
 
   await openSearch.click();
   const openProfile = searchDialog.getByRole('button', { name: 'Profiel', exact: true }).first();
@@ -85,7 +89,9 @@ try {
   await savePrompt.getByRole('button', { name: 'Opslaan', exact: true }).click();
   await savePrompt.getByRole('alert').waitFor();
   assert.equal(await savePrompt.getByRole('alert').isVisible(), true);
-  console.log('PASS nested prompt stays on-screen, Escape closes only top dialog, validation is readable, and failed saves remain visible');
+  console.log(
+    'PASS nested prompt stays on-screen, Escape closes only top dialog, validation is readable, and failed saves remain visible'
+  );
 } finally {
   await browser.close();
 }

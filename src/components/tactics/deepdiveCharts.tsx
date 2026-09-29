@@ -54,46 +54,57 @@ export function TeamLapTimelineChart({ team }: { team: HistoricalTeam }) {
     y: medianValue(rawPoints.slice(Math.max(0, pointIndex - 19), pointIndex + 1).map((candidate) => candidate.y)),
   }));
   return (
-    <ChartPanel configuration={{
-      type: 'scatter',
-      data: {
-        datasets: [
-          {
-            label: `Rondes team ${team.teamId}`,
-            data: rawPoints,
-            backgroundColor: withOpacity(teamColor(team.teamId), 0.35),
-            borderColor: 'transparent',
-            pointRadius: 2,
-          },
-          xySeries('Lopende mediaan (20)', rollingMedianPoints, workspaceChartPalette.strong, 2),
-        ],
-      },
-      options: xyChartOptions('Rondetijd', formatSeconds),
-    }} />
+    <ChartPanel
+      configuration={{
+        type: 'scatter',
+        data: {
+          datasets: [
+            {
+              label: `Rondes team ${team.teamId}`,
+              data: rawPoints,
+              backgroundColor: withOpacity(teamColor(team.teamId), 0.35),
+              borderColor: 'transparent',
+              pointRadius: 2,
+            },
+            xySeries('Lopende mediaan (20)', rollingMedianPoints, workspaceChartPalette.strong, 2),
+          ],
+        },
+        options: xyChartOptions('Rondetijd', formatSeconds),
+      }}
+    />
   );
 }
 
-export function DurationDistributionChart({ firstTeam, secondTeam }: { firstTeam: HistoricalTeam; secondTeam: HistoricalTeam }) {
+export function DurationDistributionChart({
+  firstTeam,
+  secondTeam,
+}: {
+  firstTeam: HistoricalTeam;
+  secondTeam: HistoricalTeam;
+}) {
   const firstSeconds = firstTeam.lapDurationsMs.map((durationMs) => durationMs / 1_000);
   const secondSeconds = secondTeam.lapDurationsMs.map((durationMs) => durationMs / 1_000);
   const minimum = Math.floor(Math.min(...firstSeconds, ...secondSeconds) / 2) * 2;
   const maximum = Math.ceil(Math.min(180, Math.max(...firstSeconds, ...secondSeconds)) / 2) * 2;
   const labels = Array.from({ length: Math.max(1, (maximum - minimum) / 2 + 1) }, (_, index) => minimum + index * 2);
-  const frequency = (durations: number[]) => labels.map((lowerBound) =>
-    durations.filter((duration) => duration >= lowerBound && duration < lowerBound + 2).length
-  );
+  const frequency = (durations: number[]) =>
+    labels.map(
+      (lowerBound) => durations.filter((duration) => duration >= lowerBound && duration < lowerBound + 2).length
+    );
   return (
-    <ChartPanel configuration={{
-      type: 'line',
-      data: {
-        labels,
-        datasets: [
-          lineSeries(`Team ${firstTeam.teamId}`, frequency(firstSeconds), teamColor(firstTeam.teamId)),
-          lineSeries(`Team ${secondTeam.teamId}`, frequency(secondSeconds), teamColor(secondTeam.teamId)),
-        ],
-      },
-      options: categoryChartOptions('Rondetijd (s)', 'Aantal rondes'),
-    }} />
+    <ChartPanel
+      configuration={{
+        type: 'line',
+        data: {
+          labels,
+          datasets: [
+            lineSeries(`Team ${firstTeam.teamId}`, frequency(firstSeconds), teamColor(firstTeam.teamId)),
+            lineSeries(`Team ${secondTeam.teamId}`, frequency(secondSeconds), teamColor(secondTeam.teamId)),
+          ],
+        },
+        options: categoryChartOptions('Rondetijd (s)', 'Aantal rondes'),
+      }}
+    />
   );
 }
 
@@ -106,7 +117,12 @@ export function DistributionRow({
 }) {
   return (
     <tr>
-      <td><span className="tactics-team-key"><i style={{ background: teamColor(team.teamId) }} />Team {team.teamId}</span></td>
+      <td>
+        <span className="tactics-team-key">
+          <i style={{ background: teamColor(team.teamId) }} />
+          Team {team.teamId}
+        </span>
+      </td>
       <td>{summary.laps}</td>
       <td>{formatNullableSeconds(summary.medianSeconds)}</td>
       <td>{summary.interquartileRangeSeconds == null ? '—' : `${summary.interquartileRangeSeconds.toFixed(1)}s`}</td>
@@ -126,39 +142,55 @@ export function WindowFrequencyChart({
   startHour: number;
   endHour: number;
 }) {
-  const durations = (team: HistoricalTeam) => team.lapDurationsMs
-    .map((durationMs, lapIndex) => ({
-      durationSeconds: durationMs / 1_000,
-      raceHour: team.cumulativeLapTimesMs[lapIndex] / 3_600_000,
-    }))
-    .filter((lap) => lap.raceHour >= startHour && lap.raceHour < endHour)
-    .map((lap) => lap.durationSeconds);
+  const durations = (team: HistoricalTeam) =>
+    team.lapDurationsMs
+      .map((durationMs, lapIndex) => ({
+        durationSeconds: durationMs / 1_000,
+        raceHour: team.cumulativeLapTimesMs[lapIndex] / 3_600_000,
+      }))
+      .filter((lap) => lap.raceHour >= startHour && lap.raceHour < endHour)
+      .map((lap) => lap.durationSeconds);
   const firstDurations = durations(firstTeam);
   const secondDurations = durations(secondTeam);
   const combinedDurations = [...firstDurations, ...secondDurations];
   const minimum = Math.floor(Math.max(0, percentileValue(combinedDurations, 0.02) - 4) / 2) * 2;
   const maximum = Math.ceil((percentileValue(combinedDurations, 0.98) + 4) / 2) * 2;
   const labels = Array.from({ length: Math.max(1, (maximum - minimum) / 2 + 1) }, (_, index) => minimum + index * 2);
-  const frequency = (lapDurations: number[]) => labels.map((lowerBound) =>
-    lapDurations.filter((duration) => duration >= lowerBound && duration < lowerBound + 2).length
-  );
+  const frequency = (lapDurations: number[]) =>
+    labels.map(
+      (lowerBound) => lapDurations.filter((duration) => duration >= lowerBound && duration < lowerBound + 2).length
+    );
   return (
-    <ChartPanel configuration={{
-      type: 'line',
-      data: {
-        labels,
-        datasets: [
-          lineSeries(`Team ${firstTeam.teamId}`, frequency(firstDurations), teamColor(firstTeam.teamId)),
-          lineSeries(`Team ${secondTeam.teamId}`, frequency(secondDurations), teamColor(secondTeam.teamId)),
-        ],
-      },
-      options: categoryChartOptions('Rondetijd (s)', 'Aantal rondes'),
-    }} />
+    <ChartPanel
+      configuration={{
+        type: 'line',
+        data: {
+          labels,
+          datasets: [
+            lineSeries(`Team ${firstTeam.teamId}`, frequency(firstDurations), teamColor(firstTeam.teamId)),
+            lineSeries(`Team ${secondTeam.teamId}`, frequency(secondDurations), teamColor(secondTeam.teamId)),
+          ],
+        },
+        options: categoryChartOptions('Rondetijd (s)', 'Aantal rondes'),
+      }}
+    />
   );
 }
 
-export function PaceComparisonChart({ points, firstTeam, secondTeam }: { points: PacePoint[]; firstTeam: HistoricalTeam; secondTeam: HistoricalTeam }) {
-  return <ChartPanel configuration={xyLineConfiguration(points, firstTeam, secondTeam, 'Mediaan rondetijd', formatSeconds)} />;
+export function PaceComparisonChart({
+  points,
+  firstTeam,
+  secondTeam,
+}: {
+  points: PacePoint[];
+  firstTeam: HistoricalTeam;
+  secondTeam: HistoricalTeam;
+}) {
+  return (
+    <ChartPanel
+      configuration={xyLineConfiguration(points, firstTeam, secondTeam, 'Mediaan rondetijd', formatSeconds)}
+    />
+  );
 }
 
 export function HalfHourDifferenceChart({
@@ -171,21 +203,29 @@ export function HalfHourDifferenceChart({
   secondTeam: HistoricalTeam;
 }) {
   return (
-    <ChartPanel configuration={{
-      type: 'bar',
-      data: {
-        labels: points.map((point) => `${point.raceHour.toFixed(2)}u`),
-        datasets: [{
-          label: `Team ${firstTeam.teamId} min team ${secondTeam.teamId}`,
-          data: points.map((point) => point.differenceSeconds),
-          backgroundColor: points.map((point) => point.differenceSeconds == null
-            ? workspaceChartPalette.neutral
-            : point.differenceSeconds > 0 ? teamColor(secondTeam.teamId) : teamColor(firstTeam.teamId)),
-          borderRadius: 3,
-        }],
-      },
-      options: categoryChartOptions('Halve race-uren', 'Verschil rondetijd', (value) => `${signedNumber(value, 0)}s`),
-    }} />
+    <ChartPanel
+      configuration={{
+        type: 'bar',
+        data: {
+          labels: points.map((point) => `${point.raceHour.toFixed(2)}u`),
+          datasets: [
+            {
+              label: `Team ${firstTeam.teamId} min team ${secondTeam.teamId}`,
+              data: points.map((point) => point.differenceSeconds),
+              backgroundColor: points.map((point) =>
+                point.differenceSeconds == null
+                  ? workspaceChartPalette.neutral
+                  : point.differenceSeconds > 0
+                    ? teamColor(secondTeam.teamId)
+                    : teamColor(firstTeam.teamId)
+              ),
+              borderRadius: 3,
+            },
+          ],
+        },
+        options: categoryChartOptions('Halve race-uren', 'Verschil rondetijd', (value) => `${signedNumber(value, 0)}s`),
+      }}
+    />
   );
 }
 
@@ -199,20 +239,56 @@ export function ConsistencyChart({
   secondTeam: HistoricalTeam;
 }) {
   return (
-    <ChartPanel configuration={{
-      type: 'line',
-      data: {
-        datasets: [
-          xySeries(`Mediaan team ${firstTeam.teamId}`, points.map((point) => ({ x: point.raceHour, y: point.firstSeconds })), teamColor(firstTeam.teamId), 3),
-          xySeries(`P10 team ${firstTeam.teamId}`, points.map((point) => ({ x: point.raceHour, y: point.firstP10Seconds })), teamColor(firstTeam.teamId), 1, [6, 5]),
-          xySeries(`P90 team ${firstTeam.teamId}`, points.map((point) => ({ x: point.raceHour, y: point.firstP90Seconds })), teamColor(firstTeam.teamId), 1, [6, 5]),
-          xySeries(`Mediaan team ${secondTeam.teamId}`, points.map((point) => ({ x: point.raceHour, y: point.secondSeconds })), teamColor(secondTeam.teamId), 3),
-          xySeries(`P10 team ${secondTeam.teamId}`, points.map((point) => ({ x: point.raceHour, y: point.secondP10Seconds })), teamColor(secondTeam.teamId), 1, [6, 5]),
-          xySeries(`P90 team ${secondTeam.teamId}`, points.map((point) => ({ x: point.raceHour, y: point.secondP90Seconds })), teamColor(secondTeam.teamId), 1, [6, 5]),
-        ],
-      },
-      options: xyChartOptions('Seconden', formatSeconds),
-    }} />
+    <ChartPanel
+      configuration={{
+        type: 'line',
+        data: {
+          datasets: [
+            xySeries(
+              `Mediaan team ${firstTeam.teamId}`,
+              points.map((point) => ({ x: point.raceHour, y: point.firstSeconds })),
+              teamColor(firstTeam.teamId),
+              3
+            ),
+            xySeries(
+              `P10 team ${firstTeam.teamId}`,
+              points.map((point) => ({ x: point.raceHour, y: point.firstP10Seconds })),
+              teamColor(firstTeam.teamId),
+              1,
+              [6, 5]
+            ),
+            xySeries(
+              `P90 team ${firstTeam.teamId}`,
+              points.map((point) => ({ x: point.raceHour, y: point.firstP90Seconds })),
+              teamColor(firstTeam.teamId),
+              1,
+              [6, 5]
+            ),
+            xySeries(
+              `Mediaan team ${secondTeam.teamId}`,
+              points.map((point) => ({ x: point.raceHour, y: point.secondSeconds })),
+              teamColor(secondTeam.teamId),
+              3
+            ),
+            xySeries(
+              `P10 team ${secondTeam.teamId}`,
+              points.map((point) => ({ x: point.raceHour, y: point.secondP10Seconds })),
+              teamColor(secondTeam.teamId),
+              1,
+              [6, 5]
+            ),
+            xySeries(
+              `P90 team ${secondTeam.teamId}`,
+              points.map((point) => ({ x: point.raceHour, y: point.secondP90Seconds })),
+              teamColor(secondTeam.teamId),
+              1,
+              [6, 5]
+            ),
+          ],
+        },
+        options: xyChartOptions('Seconden', formatSeconds),
+      }}
+    />
   );
 }
 
@@ -226,31 +302,67 @@ export function StandardDeviationChart({
   secondTeam: HistoricalTeam;
 }) {
   return (
-    <ChartPanel configuration={{
-      type: 'line',
-      data: {
-        datasets: [
-          xySeries(`Spreiding team ${firstTeam.teamId}`, points.map((point) => ({ x: point.raceHour, y: point.firstStandardDeviationSeconds })), teamColor(firstTeam.teamId), 2),
-          xySeries(`Spreiding team ${secondTeam.teamId}`, points.map((point) => ({ x: point.raceHour, y: point.secondStandardDeviationSeconds })), teamColor(secondTeam.teamId), 2),
-        ],
-      },
-      options: xyChartOptions('Standaardafwijking (s)', (value) => `${Number(value).toFixed(1)}s`),
-    }} />
+    <ChartPanel
+      configuration={{
+        type: 'line',
+        data: {
+          datasets: [
+            xySeries(
+              `Spreiding team ${firstTeam.teamId}`,
+              points.map((point) => ({ x: point.raceHour, y: point.firstStandardDeviationSeconds })),
+              teamColor(firstTeam.teamId),
+              2
+            ),
+            xySeries(
+              `Spreiding team ${secondTeam.teamId}`,
+              points.map((point) => ({ x: point.raceHour, y: point.secondStandardDeviationSeconds })),
+              teamColor(secondTeam.teamId),
+              2
+            ),
+          ],
+        },
+        options: xyChartOptions('Standaardafwijking (s)', (value) => `${Number(value).toFixed(1)}s`),
+      }}
+    />
   );
 }
 
-export function TimeGapChart({ points, firstTeam, secondTeam }: { points: ReturnType<typeof buildTimeGapCurve>; firstTeam: HistoricalTeam; secondTeam: HistoricalTeam }) {
+export function TimeGapChart({
+  points,
+  firstTeam,
+  secondTeam,
+}: {
+  points: ReturnType<typeof buildTimeGapCurve>;
+  firstTeam: HistoricalTeam;
+  secondTeam: HistoricalTeam;
+}) {
   return (
-    <ChartPanel configuration={{
-      type: 'line',
-      data: {
-        datasets: [
-          xySeries(`Tijdskloof team ${firstTeam.teamId} op team ${secondTeam.teamId}`, points.map((point) => ({ x: point.raceHour, y: point.gapSeconds })), workspaceChartPalette.accent, 3),
-          xySeries('Gelijke stand', [{ x: 0, y: 0 }, { x: 24, y: 0 }], workspaceChartPalette.neutral, 1, [6, 5]),
-        ],
-      },
-      options: xyChartOptions('Tijdsverschil', formatSignedSeconds),
-    }} />
+    <ChartPanel
+      configuration={{
+        type: 'line',
+        data: {
+          datasets: [
+            xySeries(
+              `Tijdskloof team ${firstTeam.teamId} op team ${secondTeam.teamId}`,
+              points.map((point) => ({ x: point.raceHour, y: point.gapSeconds })),
+              workspaceChartPalette.accent,
+              3
+            ),
+            xySeries(
+              'Gelijke stand',
+              [
+                { x: 0, y: 0 },
+                { x: 24, y: 0 },
+              ],
+              workspaceChartPalette.neutral,
+              1,
+              [6, 5]
+            ),
+          ],
+        },
+        options: xyChartOptions('Tijdsverschil', formatSignedSeconds),
+      }}
+    />
   );
 }
 
@@ -264,55 +376,95 @@ export function SameLapGapChart({
   secondTeam: HistoricalTeam;
 }) {
   return (
-    <ChartPanel configuration={{
-      type: 'line',
-      data: {
-        datasets: [
-          xySeries(`Team ${firstTeam.teamId} tegenover team ${secondTeam.teamId}`, points.map((point) => ({ x: point.raceHour, y: point.gapSeconds })), workspaceChartPalette.accent, 3),
-          xySeries('Gelijke ronde-index', [{ x: 0, y: 0 }, { x: 24, y: 0 }], workspaceChartPalette.neutral, 1, [6, 5]),
-        ],
-      },
-      options: xyChartOptions('Tijdsverschil', formatSignedSeconds),
-    }} />
+    <ChartPanel
+      configuration={{
+        type: 'line',
+        data: {
+          datasets: [
+            xySeries(
+              `Team ${firstTeam.teamId} tegenover team ${secondTeam.teamId}`,
+              points.map((point) => ({ x: point.raceHour, y: point.gapSeconds })),
+              workspaceChartPalette.accent,
+              3
+            ),
+            xySeries(
+              'Gelijke ronde-index',
+              [
+                { x: 0, y: 0 },
+                { x: 24, y: 0 },
+              ],
+              workspaceChartPalette.neutral,
+              1,
+              [6, 5]
+            ),
+          ],
+        },
+        options: xyChartOptions('Tijdsverschil', formatSignedSeconds),
+      }}
+    />
   );
 }
 
-export function HourlyGainChart({ points, firstTeam, secondTeam }: { points: ReturnType<typeof buildHourlyLapGains>; firstTeam: HistoricalTeam; secondTeam: HistoricalTeam }) {
+export function HourlyGainChart({
+  points,
+  firstTeam,
+  secondTeam,
+}: {
+  points: ReturnType<typeof buildHourlyLapGains>;
+  firstTeam: HistoricalTeam;
+  secondTeam: HistoricalTeam;
+}) {
   return (
-    <ChartPanel configuration={{
-      type: 'bar',
-      data: {
-        labels: points.map((point) => `${point.raceHour}u`),
-        datasets: [{
-          label: `Team ${secondTeam.teamId} min team ${firstTeam.teamId}`,
-          data: points.map((point) => point.lapDifference),
-          backgroundColor: points.map((point) => point.lapDifference > 0
-            ? teamColor(secondTeam.teamId)
-            : point.lapDifference < 0 ? teamColor(firstTeam.teamId) : workspaceChartPalette.neutral),
-          borderRadius: 4,
-        }],
-      },
-      options: categoryChartOptions('Race-uur', 'Verschil in rondes'),
-    }} />
+    <ChartPanel
+      configuration={{
+        type: 'bar',
+        data: {
+          labels: points.map((point) => `${point.raceHour}u`),
+          datasets: [
+            {
+              label: `Team ${secondTeam.teamId} min team ${firstTeam.teamId}`,
+              data: points.map((point) => point.lapDifference),
+              backgroundColor: points.map((point) =>
+                point.lapDifference > 0
+                  ? teamColor(secondTeam.teamId)
+                  : point.lapDifference < 0
+                    ? teamColor(firstTeam.teamId)
+                    : workspaceChartPalette.neutral
+              ),
+              borderRadius: 4,
+            },
+          ],
+        },
+        options: categoryChartOptions('Race-uur', 'Verschil in rondes'),
+      }}
+    />
   );
 }
 
-export function CumulativeRaceChart({ firstTeam, secondTeam }: { firstTeam: HistoricalTeam; secondTeam: HistoricalTeam }) {
+export function CumulativeRaceChart({
+  firstTeam,
+  secondTeam,
+}: {
+  firstTeam: HistoricalTeam;
+  secondTeam: HistoricalTeam;
+}) {
   const teamPoints = (team: HistoricalTeam) => [
     { x: 0, y: 0 },
     ...team.cumulativeLapTimesMs.map((timestampMs, lapIndex) => ({ x: timestampMs / 3_600_000, y: lapIndex + 1 })),
   ];
   return (
-    <ChartPanel configuration={{
-      type: 'line',
-      data: {
-        datasets: [
-          xySeries(`Team ${firstTeam.teamId}`, teamPoints(firstTeam), teamColor(firstTeam.teamId), 3),
-          xySeries(`Team ${secondTeam.teamId}`, teamPoints(secondTeam), teamColor(secondTeam.teamId), 3),
-        ],
-      },
-      options: xyChartOptions('Cumulatieve rondes', (value) => String(Math.round(Number(value))), true),
-    }} />
+    <ChartPanel
+      configuration={{
+        type: 'line',
+        data: {
+          datasets: [
+            xySeries(`Team ${firstTeam.teamId}`, teamPoints(firstTeam), teamColor(firstTeam.teamId), 3),
+            xySeries(`Team ${secondTeam.teamId}`, teamPoints(secondTeam), teamColor(secondTeam.teamId), 3),
+          ],
+        },
+        options: xyChartOptions('Cumulatieve rondes', (value) => String(Math.round(Number(value))), true),
+      }}
+    />
   );
 }
 
@@ -326,24 +478,35 @@ export function RaceLeadChart({
   lapLengthMeters: number;
 }) {
   return (
-    <ChartPanel configuration={{
-      type: 'line',
-      data: {
-        datasets: [
-          xySeries(
-            `Voorsprong team ${firstTeam.teamId} in rondes`,
-            points.map((point) => ({ x: point.raceHour, y: point.lapDifference })),
-            workspaceChartPalette.accent,
-            3
-          ),
-          xySeries('Gelijke stand', [{ x: 0, y: 0 }, { x: 24, y: 0 }], workspaceChartPalette.neutral, 1, [6, 5]),
-        ],
-      },
-      options: xyChartOptions(
-        `Rondeverschil · ${lapLengthMeters} m per ronde`,
-        (value) => `${signedNumber(Number(value), 0)} (${signedNumber(Number(value) * lapLengthMeters, 0)} m)`
-      ),
-    }} />
+    <ChartPanel
+      configuration={{
+        type: 'line',
+        data: {
+          datasets: [
+            xySeries(
+              `Voorsprong team ${firstTeam.teamId} in rondes`,
+              points.map((point) => ({ x: point.raceHour, y: point.lapDifference })),
+              workspaceChartPalette.accent,
+              3
+            ),
+            xySeries(
+              'Gelijke stand',
+              [
+                { x: 0, y: 0 },
+                { x: 24, y: 0 },
+              ],
+              workspaceChartPalette.neutral,
+              1,
+              [6, 5]
+            ),
+          ],
+        },
+        options: xyChartOptions(
+          `Rondeverschil · ${lapLengthMeters} m per ronde`,
+          (value) => `${signedNumber(Number(value), 0)} (${signedNumber(Number(value) * lapLengthMeters, 0)} m)`
+        ),
+      }}
+    />
   );
 }
 
@@ -377,56 +540,132 @@ export function DiagnosticTimelineChart({
     pointStyle: markerStyle,
   });
   return (
-    <ChartPanel configuration={{
-      type: 'scatter',
-      data: {
-        datasets: [
-          diagnosticSeries(`Trage rondes team ${firstTeam.teamId}`, firstSlowLaps, teamColor(firstTeam.teamId), 'circle'),
-          diagnosticSeries(`Temposprongen team ${firstTeam.teamId}`, firstChanges, teamColor(firstTeam.teamId), 'triangle'),
-          diagnosticSeries(`Trage rondes team ${secondTeam.teamId}`, secondSlowLaps, teamColor(secondTeam.teamId), 'circle'),
-          diagnosticSeries(`Temposprongen team ${secondTeam.teamId}`, secondChanges, teamColor(secondTeam.teamId), 'triangle'),
-        ],
-      },
-      options: xyChartOptions('Rondetijd', formatSeconds),
-    }} />
+    <ChartPanel
+      configuration={{
+        type: 'scatter',
+        data: {
+          datasets: [
+            diagnosticSeries(
+              `Trage rondes team ${firstTeam.teamId}`,
+              firstSlowLaps,
+              teamColor(firstTeam.teamId),
+              'circle'
+            ),
+            diagnosticSeries(
+              `Temposprongen team ${firstTeam.teamId}`,
+              firstChanges,
+              teamColor(firstTeam.teamId),
+              'triangle'
+            ),
+            diagnosticSeries(
+              `Trage rondes team ${secondTeam.teamId}`,
+              secondSlowLaps,
+              teamColor(secondTeam.teamId),
+              'circle'
+            ),
+            diagnosticSeries(
+              `Temposprongen team ${secondTeam.teamId}`,
+              secondChanges,
+              teamColor(secondTeam.teamId),
+              'triangle'
+            ),
+          ],
+        },
+        options: xyChartOptions('Rondetijd', formatSeconds),
+      }}
+    />
   );
 }
 
-export function BreakEvenChart({ points, targetLaps, teamId }: { points: ReturnType<typeof buildBreakEvenSensitivity>; targetLaps: number; teamId: number }) {
+export function BreakEvenChart({
+  points,
+  targetLaps,
+  teamId,
+}: {
+  points: ReturnType<typeof buildBreakEvenSensitivity>;
+  targetLaps: number;
+  teamId: number;
+}) {
   return (
-    <ChartPanel configuration={{
-      type: 'line',
-      data: {
-        datasets: [
-          xySeries(`Projectie team ${teamId}`, points.map((point) => ({ x: point.improvementSeconds, y: point.projectedLaps })), teamColor(teamId), 3),
-          xySeries('Te kloppen resultaat', [{ x: 0, y: targetLaps }, { x: points[points.length - 1]?.improvementSeconds ?? 15, y: targetLaps }], workspaceChartPalette.target, 2, [6, 5]),
-        ],
-      },
-      options: xyChartOptions('Totaal rondes', (value) => String(Math.round(Number(value))), false, 'Verbetering per ronde (s)'),
-    }} />
+    <ChartPanel
+      configuration={{
+        type: 'line',
+        data: {
+          datasets: [
+            xySeries(
+              `Projectie team ${teamId}`,
+              points.map((point) => ({ x: point.improvementSeconds, y: point.projectedLaps })),
+              teamColor(teamId),
+              3
+            ),
+            xySeries(
+              'Te kloppen resultaat',
+              [
+                { x: 0, y: targetLaps },
+                { x: points[points.length - 1]?.improvementSeconds ?? 15, y: targetLaps },
+              ],
+              workspaceChartPalette.target,
+              2,
+              [6, 5]
+            ),
+          ],
+        },
+        options: xyChartOptions(
+          'Totaal rondes',
+          (value) => String(Math.round(Number(value))),
+          false,
+          'Verbetering per ronde (s)'
+        ),
+      }}
+    />
   );
 }
 
-export function DraftingProximityChart({ firstAnalysis, secondAnalysis }: { firstAnalysis: DraftingTeamAnalysis; secondAnalysis: DraftingTeamAnalysis }) {
+export function DraftingProximityChart({
+  firstAnalysis,
+  secondAnalysis,
+}: {
+  firstAnalysis: DraftingTeamAnalysis;
+  secondAnalysis: DraftingTeamAnalysis;
+}) {
   return (
-    <ChartPanel configuration={{
-      type: 'line',
-      data: {
-        labels: firstAnalysis.proximityBins.map((bin) => bin.label),
-        datasets: [
-          lineSeries(`Team ${firstAnalysis.teamId}`, firstAnalysis.proximityBins.map((bin) => bin.medianSeconds), teamColor(firstAnalysis.teamId)),
-          lineSeries(`Team ${secondAnalysis.teamId}`, secondAnalysis.proximityBins.map((bin) => bin.medianSeconds), teamColor(secondAnalysis.teamId)),
-        ],
-      },
-      options: categoryChartOptions('Afstand tot dichtstbijzijnde passage', 'Mediaan rondetijd', formatSeconds),
-    }} />
+    <ChartPanel
+      configuration={{
+        type: 'line',
+        data: {
+          labels: firstAnalysis.proximityBins.map((bin) => bin.label),
+          datasets: [
+            lineSeries(
+              `Team ${firstAnalysis.teamId}`,
+              firstAnalysis.proximityBins.map((bin) => bin.medianSeconds),
+              teamColor(firstAnalysis.teamId)
+            ),
+            lineSeries(
+              `Team ${secondAnalysis.teamId}`,
+              secondAnalysis.proximityBins.map((bin) => bin.medianSeconds),
+              teamColor(secondAnalysis.teamId)
+            ),
+          ],
+        },
+        options: categoryChartOptions('Afstand tot dichtstbijzijnde passage', 'Mediaan rondetijd', formatSeconds),
+      }}
+    />
   );
 }
 
-export function DraftingScatterChart({ firstAnalysis, secondAnalysis }: { firstAnalysis: DraftingTeamAnalysis; secondAnalysis: DraftingTeamAnalysis }) {
+export function DraftingScatterChart({
+  firstAnalysis,
+  secondAnalysis,
+}: {
+  firstAnalysis: DraftingTeamAnalysis;
+  secondAnalysis: DraftingTeamAnalysis;
+}) {
   const scatterSeries = (analysis: DraftingTeamAnalysis) => ({
     label: `Team ${analysis.teamId}`,
-    data: analysis.signedGapSeconds.map((signedGap, lapIndex) => ({ x: signedGap, y: analysis.lapDurationsSeconds[lapIndex] })),
+    data: analysis.signedGapSeconds.map((signedGap, lapIndex) => ({
+      x: signedGap,
+      y: analysis.lapDurationsSeconds[lapIndex],
+    })),
     borderColor: teamColor(analysis.teamId),
     backgroundColor: `${teamColor(analysis.teamId)}55`,
     pointRadius: 2,
@@ -444,29 +683,42 @@ export function DraftingScatterChart({ firstAnalysis, secondAnalysis }: { firstA
     );
   };
   return (
-    <ChartPanel configuration={{
-      type: 'scatter',
-      data: {
-        datasets: [
-          scatterSeries(firstAnalysis),
-          scatterSeries(secondAnalysis),
-          trendSeries(firstAnalysis),
-          trendSeries(secondAnalysis),
-        ],
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        animation: false,
-        parsing: false,
-        interaction: { mode: 'nearest', intersect: false },
-        plugins: chartPlugins(formatSeconds),
-        scales: {
-          x: { type: 'linear', min: -35, max: 35, title: axisTitle('Positie: voor (-) of achter (+), seconden'), ticks: { color: workspaceChartPalette.muted }, grid: { color: workspaceChartPalette.grid } },
-          y: { title: axisTitle('Rondetijd'), ticks: { color: workspaceChartPalette.muted, callback: (value) => formatSeconds(Number(value)) }, grid: { color: workspaceChartPalette.grid } },
+    <ChartPanel
+      configuration={{
+        type: 'scatter',
+        data: {
+          datasets: [
+            scatterSeries(firstAnalysis),
+            scatterSeries(secondAnalysis),
+            trendSeries(firstAnalysis),
+            trendSeries(secondAnalysis),
+          ],
         },
-      },
-    }} />
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: false,
+          parsing: false,
+          interaction: { mode: 'nearest', intersect: false },
+          plugins: chartPlugins(formatSeconds),
+          scales: {
+            x: {
+              type: 'linear',
+              min: -35,
+              max: 35,
+              title: axisTitle('Positie: voor (-) of achter (+), seconden'),
+              ticks: { color: workspaceChartPalette.muted },
+              grid: { color: workspaceChartPalette.grid },
+            },
+            y: {
+              title: axisTitle('Rondetijd'),
+              ticks: { color: workspaceChartPalette.muted, callback: (value) => formatSeconds(Number(value)) },
+              grid: { color: workspaceChartPalette.grid },
+            },
+          },
+        },
+      }}
+    />
   );
 }
 
@@ -475,22 +727,44 @@ export function DraftingResultsTable({ analyses }: { analyses: DraftingTeamAnaly
     <div className="table-wrap">
       <table className="analysis-table">
         <thead>
-          <tr><th>Team</th><th>Vergelijking</th><th>n eerste</th><th>Mediaan eerste</th><th>n tweede</th><th>Mediaan tweede</th><th>Effect</th><th>p</th><th>Sign.</th></tr>
+          <tr>
+            <th>Team</th>
+            <th>Vergelijking</th>
+            <th>n eerste</th>
+            <th>Mediaan eerste</th>
+            <th>n tweede</th>
+            <th>Mediaan tweede</th>
+            <th>Effect</th>
+            <th>p</th>
+            <th>Sign.</th>
+          </tr>
         </thead>
         <tbody>
-          {analyses.flatMap((analysis) => analysis.comparisons.map((comparison) => (
-            <tr key={`${analysis.teamId}-${comparison.label}`}>
-              <td><strong>Team {analysis.teamId}</strong></td>
-              <td>{comparison.label}</td>
-              <td>{comparison.firstCount}</td>
-              <td>{formatNullableSeconds(comparison.firstMedianSeconds)}</td>
-              <td>{comparison.secondCount}</td>
-              <td>{formatNullableSeconds(comparison.secondMedianSeconds)}</td>
-              <td>{comparison.effectSeconds == null ? 'Geen data' : `${signedNumber(comparison.effectSeconds, 2)}s`}</td>
-              <td>{comparison.pValue == null ? 'Geen data' : comparison.pValue.toFixed(4)}</td>
-              <td><span className={`tactics-significance ${comparison.pValue != null && comparison.pValue < 0.05 ? 'is-significant' : ''}`}>{significanceLabel(comparison.pValue)}</span></td>
-            </tr>
-          )))}
+          {analyses.flatMap((analysis) =>
+            analysis.comparisons.map((comparison) => (
+              <tr key={`${analysis.teamId}-${comparison.label}`}>
+                <td>
+                  <strong>Team {analysis.teamId}</strong>
+                </td>
+                <td>{comparison.label}</td>
+                <td>{comparison.firstCount}</td>
+                <td>{formatNullableSeconds(comparison.firstMedianSeconds)}</td>
+                <td>{comparison.secondCount}</td>
+                <td>{formatNullableSeconds(comparison.secondMedianSeconds)}</td>
+                <td>
+                  {comparison.effectSeconds == null ? 'Geen data' : `${signedNumber(comparison.effectSeconds, 2)}s`}
+                </td>
+                <td>{comparison.pValue == null ? 'Geen data' : comparison.pValue.toFixed(4)}</td>
+                <td>
+                  <span
+                    className={`tactics-significance ${comparison.pValue != null && comparison.pValue < 0.05 ? 'is-significant' : ''}`}
+                  >
+                    {significanceLabel(comparison.pValue)}
+                  </span>
+                </td>
+              </tr>
+            ))
+          )}
         </tbody>
       </table>
     </div>
@@ -503,8 +777,22 @@ export function DiagnosticTable({ title, laps }: { title: string; laps: ReturnTy
       <h3>{title}</h3>
       <div className="table-wrap">
         <table className="analysis-table">
-          <thead><tr><th>Ronde</th><th>Race-uur</th><th>Tijd</th></tr></thead>
-          <tbody>{laps.map((lap) => <tr key={lap.lapNumber}><td>{lap.lapNumber}</td><td>{lap.raceHour.toFixed(2)}u</td><td>{formatSeconds(lap.durationSeconds)}</td></tr>)}</tbody>
+          <thead>
+            <tr>
+              <th>Ronde</th>
+              <th>Race-uur</th>
+              <th>Tijd</th>
+            </tr>
+          </thead>
+          <tbody>
+            {laps.map((lap) => (
+              <tr key={lap.lapNumber}>
+                <td>{lap.lapNumber}</td>
+                <td>{lap.raceHour.toFixed(2)}u</td>
+                <td>{formatSeconds(lap.durationSeconds)}</td>
+              </tr>
+            ))}
+          </tbody>
         </table>
       </div>
     </div>
@@ -517,8 +805,22 @@ export function PaceChangeTable({ title, changes }: { title: string; changes: Re
       <h3>{title}</h3>
       <div className="table-wrap">
         <table className="analysis-table">
-          <thead><tr><th>Ronde</th><th>Race-uur</th><th>Verschil</th></tr></thead>
-          <tbody>{changes.map((change) => <tr key={change.lapNumber}><td>{change.lapNumber}</td><td>{change.raceHour.toFixed(2)}u</td><td>{signedNumber(change.differenceSeconds, 1)}s</td></tr>)}</tbody>
+          <thead>
+            <tr>
+              <th>Ronde</th>
+              <th>Race-uur</th>
+              <th>Verschil</th>
+            </tr>
+          </thead>
+          <tbody>
+            {changes.map((change) => (
+              <tr key={change.lapNumber}>
+                <td>{change.lapNumber}</td>
+                <td>{change.raceHour.toFixed(2)}u</td>
+                <td>{signedNumber(change.differenceSeconds, 1)}s</td>
+              </tr>
+            ))}
+          </tbody>
         </table>
       </div>
     </div>
@@ -562,7 +864,15 @@ export function NumberControl({
     <label>
       <span>{label}</span>
       <div className="tactics-number-control">
-        <input className="input" type="number" value={value} min={min} max={max} step={step} onChange={(event) => onChange(clamp(Number(event.target.value) || min, min, max))} />
+        <input
+          className="input"
+          type="number"
+          value={value}
+          min={min}
+          max={max}
+          step={step}
+          onChange={(event) => onChange(clamp(Number(event.target.value) || min, min, max))}
+        />
         {suffix && <em>{suffix}</em>}
       </div>
     </label>
@@ -570,11 +880,23 @@ export function NumberControl({
 }
 
 export function DeepStat({ label, value, detail }: { label: string; value: string; detail: string }) {
-  return <div className="stat-panel tactics-stat"><span className="muted-label">{label}</span><strong>{value}</strong><small>{detail}</small></div>;
+  return (
+    <div className="stat-panel tactics-stat">
+      <span className="muted-label">{label}</span>
+      <strong>{value}</strong>
+      <small>{detail}</small>
+    </div>
+  );
 }
 
 export function SectionHeader({ kicker, title, text }: { kicker: string; title: string; text: string }) {
-  return <div className="analysis-section-header"><span className="page-kicker">{kicker}</span><h2>{title}</h2><p>{text}</p></div>;
+  return (
+    <div className="analysis-section-header">
+      <span className="page-kicker">{kicker}</span>
+      <h2>{title}</h2>
+      <p>{text}</p>
+    </div>
+  );
 }
 
 function ChartPanel({ configuration }: { configuration: ChartConfiguration }) {
@@ -585,7 +907,11 @@ function ChartPanel({ configuration }: { configuration: ChartConfiguration }) {
     const chart = new Chart(canvasRef.current, configuration);
     return () => chart.destroy();
   }, [chartTheme, configuration]);
-  return <div className="analysis-chart-card tactics-chart-card"><canvas ref={canvasRef} /></div>;
+  return (
+    <div className="analysis-chart-card tactics-chart-card">
+      <canvas ref={canvasRef} />
+    </div>
+  );
 }
 
 function xyLineConfiguration(
@@ -599,20 +925,57 @@ function xyLineConfiguration(
     type: 'line',
     data: {
       datasets: [
-        xySeries(`Team ${firstTeam.teamId}`, points.map((point) => ({ x: point.raceHour, y: point.firstSeconds })), teamColor(firstTeam.teamId), 3),
-        xySeries(`Team ${secondTeam.teamId}`, points.map((point) => ({ x: point.raceHour, y: point.secondSeconds })), teamColor(secondTeam.teamId), 3),
+        xySeries(
+          `Team ${firstTeam.teamId}`,
+          points.map((point) => ({ x: point.raceHour, y: point.firstSeconds })),
+          teamColor(firstTeam.teamId),
+          3
+        ),
+        xySeries(
+          `Team ${secondTeam.teamId}`,
+          points.map((point) => ({ x: point.raceHour, y: point.secondSeconds })),
+          teamColor(secondTeam.teamId),
+          3
+        ),
       ],
     },
     options: xyChartOptions(yAxisTitle, formatter),
   };
 }
 
-function xySeries(label: string, data: Array<{ x: number; y: number | null }>, color: string, borderWidth = 2, borderDash?: number[]) {
-  return { label, data, borderColor: color, backgroundColor: color, borderWidth, borderDash, pointRadius: 0, pointHoverRadius: 5, tension: 0.2, spanGaps: false };
+function xySeries(
+  label: string,
+  data: Array<{ x: number; y: number | null }>,
+  color: string,
+  borderWidth = 2,
+  borderDash?: number[]
+) {
+  return {
+    label,
+    data,
+    borderColor: color,
+    backgroundColor: color,
+    borderWidth,
+    borderDash,
+    pointRadius: 0,
+    pointHoverRadius: 5,
+    tension: 0.2,
+    spanGaps: false,
+  };
 }
 
 function lineSeries(label: string, data: Array<number | null>, color: string) {
-  return { label, data, borderColor: color, backgroundColor: color, borderWidth: 3, pointRadius: 2, pointHoverRadius: 5, tension: 0.25, spanGaps: false };
+  return {
+    label,
+    data,
+    borderColor: color,
+    backgroundColor: color,
+    borderWidth: 3,
+    pointRadius: 2,
+    pointHoverRadius: 5,
+    tension: 0.25,
+    spanGaps: false,
+  };
 }
 
 function xyChartOptions(
@@ -629,8 +992,19 @@ function xyChartOptions(
     interaction: { mode: 'nearest', intersect: false },
     plugins: chartPlugins(formatter),
     scales: {
-      x: { type: 'linear', min: 0, title: axisTitle(xAxisTitle), ticks: { color: workspaceChartPalette.muted }, grid: { color: workspaceChartPalette.grid } },
-      y: { beginAtZero, title: axisTitle(yAxisTitle), ticks: { color: workspaceChartPalette.muted, callback: (value) => formatter(Number(value)) }, grid: { color: workspaceChartPalette.grid } },
+      x: {
+        type: 'linear',
+        min: 0,
+        title: axisTitle(xAxisTitle),
+        ticks: { color: workspaceChartPalette.muted },
+        grid: { color: workspaceChartPalette.grid },
+      },
+      y: {
+        beginAtZero,
+        title: axisTitle(yAxisTitle),
+        ticks: { color: workspaceChartPalette.muted, callback: (value) => formatter(Number(value)) },
+        grid: { color: workspaceChartPalette.grid },
+      },
     },
   };
 }
@@ -647,16 +1021,34 @@ function categoryChartOptions(
     interaction: { mode: 'nearest', intersect: false },
     plugins: chartPlugins(formatter),
     scales: {
-      x: { title: axisTitle(xAxisTitle), ticks: { color: workspaceChartPalette.muted, maxTicksLimit: 18 }, grid: { color: workspaceChartPalette.grid } },
-      y: { beginAtZero: true, title: axisTitle(yAxisTitle), ticks: { color: workspaceChartPalette.muted, callback: (value) => formatter(Number(value)) }, grid: { color: workspaceChartPalette.grid } },
+      x: {
+        title: axisTitle(xAxisTitle),
+        ticks: { color: workspaceChartPalette.muted, maxTicksLimit: 18 },
+        grid: { color: workspaceChartPalette.grid },
+      },
+      y: {
+        beginAtZero: true,
+        title: axisTitle(yAxisTitle),
+        ticks: { color: workspaceChartPalette.muted, callback: (value) => formatter(Number(value)) },
+        grid: { color: workspaceChartPalette.grid },
+      },
     },
   };
 }
 
 function chartPlugins(formatter: (value: number) => string) {
   return {
-    legend: { position: 'top' as const, labels: { boxWidth: 14, color: workspaceChartPalette.text, font: { weight: 500 as const } } },
-    tooltip: { ...chartTooltipColors(), callbacks: { label: (context: { dataset: { label?: string }; parsed: { y: number | null } }) => `${context.dataset.label}: ${context.parsed.y == null ? 'geen data' : formatter(context.parsed.y)}` } },
+    legend: {
+      position: 'top' as const,
+      labels: { boxWidth: 14, color: workspaceChartPalette.text, font: { weight: 500 as const } },
+    },
+    tooltip: {
+      ...chartTooltipColors(),
+      callbacks: {
+        label: (context: { dataset: { label?: string }; parsed: { y: number | null } }) =>
+          `${context.dataset.label}: ${context.parsed.y == null ? 'geen data' : formatter(context.parsed.y)}`,
+      },
+    },
   };
 }
 
@@ -697,7 +1089,7 @@ function significanceLabel(pValue: number | null): string {
 }
 
 export function percentage(part: number, total: number): string {
-  return total ? `${(part / total * 100).toFixed(1)}%` : '0%';
+  return total ? `${((part / total) * 100).toFixed(1)}%` : '0%';
 }
 
 function medianValue(values: number[]): number | null {
@@ -715,7 +1107,10 @@ function percentileValue(values: number[], probability: number): number {
   const position = (sortedValues.length - 1) * probability;
   const lowerIndex = Math.floor(position);
   const fraction = position - lowerIndex;
-  return sortedValues[lowerIndex] + (sortedValues[Math.min(lowerIndex + 1, sortedValues.length - 1)] - sortedValues[lowerIndex]) * fraction;
+  return (
+    sortedValues[lowerIndex] +
+    (sortedValues[Math.min(lowerIndex + 1, sortedValues.length - 1)] - sortedValues[lowerIndex]) * fraction
+  );
 }
 
 function linearTrend(
@@ -727,9 +1122,8 @@ function linearTrend(
   const meanX = points.reduce((sum, point) => sum + point.x, 0) / points.length;
   const meanY = points.reduce((sum, point) => sum + point.y, 0) / points.length;
   const denominator = points.reduce((sum, point) => sum + (point.x - meanX) ** 2, 0);
-  const slope = denominator === 0
-    ? 0
-    : points.reduce((sum, point) => sum + (point.x - meanX) * (point.y - meanY), 0) / denominator;
+  const slope =
+    denominator === 0 ? 0 : points.reduce((sum, point) => sum + (point.x - meanX) * (point.y - meanY), 0) / denominator;
   const intercept = meanY - slope * meanX;
   return [
     { x: minimumX, y: intercept + slope * minimumX },
@@ -738,7 +1132,9 @@ function linearTrend(
 }
 
 function withOpacity(hexColor: string, opacity: number): string {
-  const alpha = Math.round(clamp(opacity, 0, 1) * 255).toString(16).padStart(2, '0');
+  const alpha = Math.round(clamp(opacity, 0, 1) * 255)
+    .toString(16)
+    .padStart(2, '0');
   return `${hexColor}${alpha}`;
 }
 

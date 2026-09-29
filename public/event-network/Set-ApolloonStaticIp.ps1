@@ -6,8 +6,8 @@
   plugged into the event switch via Ethernet.
 
   Recommended plan for 3 Windows laptops, isolated switch, no router:
-    Laptop 1 (timing controller): 192.168.10.11
-    Laptop 2 (replica / telsysteem 1): 192.168.10.12
+    Laptop 1 (primary): 192.168.10.11
+    Laptop 2 (standby): 192.168.10.12
     Laptop 3 (spare / display): 192.168.10.13
     Subnet mask: 255.255.255.0 (PrefixLength 24), no gateway, no DNS.
 
@@ -20,7 +20,7 @@
     2. Auto-detects the wired Ethernet adapter (override with -InterfaceAlias).
     3. Refuses to pin APIPA 169.254.x.x addresses.
     4. Warns if the requested IP is inside a detected DHCP range.
-    5. Sets the static IP, resets DNS, opens TCP 5173 + UDP 45737 firewall rules.
+    5. Sets the static IP, resets DNS, opens the TCP 5173 firewall rule.
     6. Prints the new Event URL to open on other devices.
 .EXAMPLE
   # Right-click PowerShell -> Run as Administrator, then:
@@ -122,10 +122,9 @@ if ($PSCmdlet.ShouldProcess("$($adapter.Name) -> $IPAddress/$PrefixLength", 'Set
     Set-DnsClientServerAddress -InterfaceIndex $adapter.ifIndex -ResetServerAddresses | Out-Null
   }
 
-  # 4. Firewall: TCP 5173 (app) + UDP 45737 (cluster discovery), idempotent.
+  # 4. Firewall: TCP 5173 (app and standby sync), idempotent.
   foreach ($rule in @(
-    @{ Name = 'Apolloon TCP 5173'; Proto = 'TCP'; Port = 5173 },
-    @{ Name = 'Apolloon UDP 45737'; Proto = 'UDP'; Port = 45737 }
+    @{ Name = 'Apolloon TCP 5173'; Proto = 'TCP'; Port = 5173 }
   )) {
     if (-not (Get-NetFirewallRule -DisplayName $rule.Name -ErrorAction SilentlyContinue)) {
       New-NetFirewallRule -DisplayName $rule.Name -Direction Inbound -Protocol $rule.Proto -LocalPort $rule.Port -Action Allow -Profile Any | Out-Null

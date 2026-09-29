@@ -39,10 +39,7 @@ await Promise.all(
       compressGzip(source, { level: 9 }),
     ]);
 
-    await Promise.all([
-      fs.writeFile(`${filePath}.br`, brotli),
-      fs.writeFile(`${filePath}.gz`, gzipped),
-    ]);
+    await Promise.all([fs.writeFile(`${filePath}.br`, brotli), fs.writeFile(`${filePath}.gz`, gzipped)]);
     compressedCount += 1;
     sourceBytes += source.byteLength;
     brotliBytes += brotli.byteLength;

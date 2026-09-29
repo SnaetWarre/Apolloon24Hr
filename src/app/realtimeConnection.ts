@@ -7,17 +7,13 @@ const listeners = new Set<() => void>();
 
 function publish(): void {
   snapshot = { connected: connectedSocketCount > 0, everConnected };
-  for (const listener of [...listeners]) {
+  for (const listener of listeners) {
     try {
       listener();
     } catch {
-      // Een kapotte luisteraar mag de rest nooit blokkeren.
+      // A broken listener must never block the others.
     }
   }
-}
-
-export function hasRealtimeConnection(): boolean {
-  return connectedSocketCount > 0;
 }
 
 export function markRealtimeConnected(): void {

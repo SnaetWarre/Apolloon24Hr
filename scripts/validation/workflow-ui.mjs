@@ -5,7 +5,10 @@ import assert from 'node:assert/strict';
 import { createTRPCClient, httpBatchLink } from '@trpc/client';
 
 const baseUrl = process.env.APOLLOON_TEST_URL;
-assert.ok(baseUrl && ['127.0.0.1', 'localhost'].includes(new URL(baseUrl).hostname), 'Use an explicitly configured disposable localhost server');
+assert.ok(
+  baseUrl && ['127.0.0.1', 'localhost'].includes(new URL(baseUrl).hostname),
+  'Use an explicitly configured disposable localhost server'
+);
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const browser = await chromium.launch({ headless: true, executablePath: process.env.CHROMIUM_EXECUTABLE });
 const page = await browser.newPage({ viewport: { width: 1366, height: 768 } });
@@ -114,12 +117,16 @@ try {
   assert.equal(await nameInput.inputValue(), 'Unsaved local draft');
   assert.equal(await page.getByRole('button', { name: 'Opslaan', exact: true }).isDisabled(), true);
   await page.getByRole('button', { name: 'Nieuwste profiel laden' }).click();
-  await page.getByRole('dialog', { name: 'Nieuwste profiel laden?', exact: true })
-    .getByRole('button', { name: 'Nieuwste laden', exact: true }).click();
+  await page
+    .getByRole('dialog', { name: 'Nieuwste profiel laden?', exact: true })
+    .getByRole('button', { name: 'Nieuwste laden', exact: true })
+    .click();
   assert.equal(await nameInput.inputValue(), firstRunner.name);
   assert.equal(await page.getByRole('textbox', { name: 'Notities' }).inputValue(), 'Remote operator edit');
   await rpc.runners.update.mutate({ id: firstRunner.id, fields: { notes: 'Clean draft auto refresh' } });
-  await waitUntil(async () => await page.getByRole('textbox', { name: 'Notities' }).inputValue() === 'Clean draft auto refresh');
+  await waitUntil(
+    async () => (await page.getByRole('textbox', { name: 'Notities' }).inputValue()) === 'Clean draft auto refresh'
+  );
   assert.equal(await page.getByRole('button', { name: 'Opslaan', exact: true }).isDisabled(), false);
   console.log('PASS remote profile edits preserve dirty drafts and refresh clean drafts');
 
@@ -136,7 +143,10 @@ try {
   const previousLapPanel = page.locator('.stat-panel').filter({ hasText: 'Vorige ronde' });
   await waitUntil(async () => /[0-9]/.test(await previousLapPanel.locator('strong').innerText()));
   const recentHistory = await (await fetch(`${baseUrl}/api/history?scope=recent&limit=250`)).json();
-  assert.equal(recentHistory.laps.some((lap) => lap.runnerId === firstRunner.id), false);
+  assert.equal(
+    recentHistory.laps.some((lap) => lap.runnerId === firstRunner.id),
+    false
+  );
   console.log('PASS returning runner previous lap remains visible beyond 250 intervening laps');
 
   await page.route('**/api/history?scope=recent*', (route) => route.fulfill({ status: 503, body: 'Unavailable' }));

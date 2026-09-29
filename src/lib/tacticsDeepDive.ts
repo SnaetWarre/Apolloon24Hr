@@ -142,10 +142,7 @@ export function buildQuarterHourPaces(
   return points;
 }
 
-export function buildHourlyConsistency(
-  firstTeam: HistoricalTeam,
-  secondTeam: HistoricalTeam
-): ConsistencyPoint[] {
+export function buildHourlyConsistency(firstTeam: HistoricalTeam, secondTeam: HistoricalTeam): ConsistencyPoint[] {
   return Array.from({ length: 24 }, (_, raceHour) => {
     const firstDurations = durationsInWindow(firstTeam, raceHour, raceHour + 1);
     const secondDurations = durationsInWindow(secondTeam, raceHour, raceHour + 1);
@@ -163,16 +160,17 @@ export function buildHourlyConsistency(
   });
 }
 
-export function summarizeHistoricalWindow(
-  team: HistoricalTeam,
-  startHour = 0,
-  endHour = 24
-): DistributionSummary {
+export function summarizeHistoricalWindow(team: HistoricalTeam, startHour = 0, endHour = 24): DistributionSummary {
   const durations = durationsInWindow(team, startHour, endHour);
   const firstQuartile = quantile(durations, 0.25);
   const thirdQuartile = quantile(durations, 0.75);
   if (firstQuartile == null || thirdQuartile == null) {
-    return { laps: durations.length, medianSeconds: median(durations), interquartileRangeSeconds: null, outlierCount: 0 };
+    return {
+      laps: durations.length,
+      medianSeconds: median(durations),
+      interquartileRangeSeconds: null,
+      outlierCount: 0,
+    };
   }
   const interquartileRangeSeconds = thirdQuartile - firstQuartile;
   const lowerFence = firstQuartile - 1.5 * interquartileRangeSeconds;
@@ -189,12 +187,18 @@ export function smoothPacePoints(points: PacePoint[], windowSize = 12): PacePoin
   const radius = Math.max(1, Math.floor(windowSize / 2));
   return points.map((point, pointIndex) => ({
     raceHour: point.raceHour,
-    firstSeconds: mean(points.slice(Math.max(0, pointIndex - radius), pointIndex + radius + 1)
-      .map((candidate) => candidate.firstSeconds)
-      .filter((pace): pace is number => pace != null)),
-    secondSeconds: mean(points.slice(Math.max(0, pointIndex - radius), pointIndex + radius + 1)
-      .map((candidate) => candidate.secondSeconds)
-      .filter((pace): pace is number => pace != null)),
+    firstSeconds: mean(
+      points
+        .slice(Math.max(0, pointIndex - radius), pointIndex + radius + 1)
+        .map((candidate) => candidate.firstSeconds)
+        .filter((pace): pace is number => pace != null)
+    ),
+    secondSeconds: mean(
+      points
+        .slice(Math.max(0, pointIndex - radius), pointIndex + radius + 1)
+        .map((candidate) => candidate.secondSeconds)
+        .filter((pace): pace is number => pace != null)
+    ),
   }));
 }
 
@@ -234,9 +238,8 @@ export function calculateNightPenalty(
   return {
     dayMedianSeconds,
     nightMedianSeconds,
-    penaltySeconds: dayMedianSeconds == null || nightMedianSeconds == null
-      ? null
-      : nightMedianSeconds - dayMedianSeconds,
+    penaltySeconds:
+      dayMedianSeconds == null || nightMedianSeconds == null ? null : nightMedianSeconds - dayMedianSeconds,
   };
 }
 
@@ -259,10 +262,7 @@ export function buildTimeGapCurve(
   return points;
 }
 
-export function buildHourlyLapGains(
-  firstTeam: HistoricalTeam,
-  secondTeam: HistoricalTeam
-): HourlyGainPoint[] {
+export function buildHourlyLapGains(firstTeam: HistoricalTeam, secondTeam: HistoricalTeam): HourlyGainPoint[] {
   let cumulativeLapDifference = 0;
   return Array.from({ length: 24 }, (_, raceHour) => {
     const firstLaps = lapCountInWindow(firstTeam, raceHour, raceHour + 1);
@@ -283,17 +283,15 @@ export function buildRaceLeadCurve(
   for (let timestampMs = 0; timestampMs <= RACE_SECONDS * 1_000; timestampMs += intervalMs) {
     points.push({
       raceHour: timestampMs / 3_600_000,
-      lapDifference: upperBound(firstTeam.cumulativeLapTimesMs, timestampMs)
-        - upperBound(secondTeam.cumulativeLapTimesMs, timestampMs),
+      lapDifference:
+        upperBound(firstTeam.cumulativeLapTimesMs, timestampMs) -
+        upperBound(secondTeam.cumulativeLapTimesMs, timestampMs),
     });
   }
   return points;
 }
 
-export function buildSameLapIndexGap(
-  firstTeam: HistoricalTeam,
-  secondTeam: HistoricalTeam
-): SameLapGapPoint[] {
+export function buildSameLapIndexGap(firstTeam: HistoricalTeam, secondTeam: HistoricalTeam): SameLapGapPoint[] {
   const sharedLapCount = Math.min(firstTeam.cumulativeLapTimesMs.length, secondTeam.cumulativeLapTimesMs.length);
   return Array.from({ length: sharedLapCount }, (_, lapIndex) => {
     const firstTimestampMs = firstTeam.cumulativeLapTimesMs[lapIndex];
@@ -325,7 +323,9 @@ export function buildLiveQuarterHourTrend(
       raceHour: raceHour + 0.125,
       liveSeconds: raceHour <= elapsedHours ? median(liveDurations) : null,
       ownHistoricalSeconds: ownHistoricalTeam ? paceMedianInWindow(ownHistoricalTeam, raceHour, raceHour + 0.25) : null,
-      rivalHistoricalSeconds: rivalHistoricalTeam ? paceMedianInWindow(rivalHistoricalTeam, raceHour, raceHour + 0.25) : null,
+      rivalHistoricalSeconds: rivalHistoricalTeam
+        ? paceMedianInWindow(rivalHistoricalTeam, raceHour, raceHour + 0.25)
+        : null,
     });
   }
   return points;
@@ -382,11 +382,9 @@ export function projectScenarioRange(
   const remainingLaps = (paceOffsetSeconds: number) => {
     let projectedLaps = completedLaps;
     for (let raceHour = Math.floor(boundedElapsedHours); raceHour < 24; raceHour += 1) {
-      const coveredFraction = raceHour === Math.floor(boundedElapsedHours)
-        ? 1 - (boundedElapsedHours - raceHour)
-        : 1;
+      const coveredFraction = raceHour === Math.floor(boundedElapsedHours) ? 1 - (boundedElapsedHours - raceHour) : 1;
       const paceSeconds = Math.max(1, (targetPacesSeconds[raceHour] ?? 1) + paceOffsetSeconds);
-      projectedLaps += coveredFraction * 3_600 / paceSeconds;
+      projectedLaps += (coveredFraction * 3_600) / paceSeconds;
     }
     return projectedLaps;
   };
@@ -409,11 +407,7 @@ export function findSlowLaps(team: HistoricalTeam, thresholdSeconds: number): Sl
     .sort((firstLap, secondLap) => secondLap.durationSeconds - firstLap.durationSeconds);
 }
 
-export function findPaceChanges(
-  team: HistoricalTeam,
-  thresholdSeconds = 8,
-  movingWindow = 5
-): PaceChange[] {
+export function findPaceChanges(team: HistoricalTeam, thresholdSeconds = 8, movingWindow = 5): PaceChange[] {
   const durationsSeconds = team.lapDurationsMs.map((durationMs) => durationMs / 1_000);
   return durationsSeconds
     .map((durationSeconds, lapIndex) => {
@@ -431,10 +425,7 @@ export function findPaceChanges(
     .sort((firstLap, secondLap) => Math.abs(secondLap.differenceSeconds) - Math.abs(firstLap.differenceSeconds));
 }
 
-export function calculateBreakEven(
-  improvingTeam: HistoricalTeam,
-  targetTeam: HistoricalTeam
-): BreakEvenResult | null {
+export function calculateBreakEven(improvingTeam: HistoricalTeam, targetTeam: HistoricalTeam): BreakEvenResult | null {
   const currentAverageSeconds = mean(improvingTeam.lapDurationsMs.map((durationMs) => durationMs / 1_000));
   if (currentAverageSeconds == null || targetTeam.cumulativeLapTimesMs.length === 0) return null;
   const requiredAverageSeconds = RACE_SECONDS / targetTeam.cumulativeLapTimesMs.length;
@@ -524,8 +515,9 @@ export function analyzeDrafting(
 }
 
 export function defaultSlowLapThreshold(firstTeam: HistoricalTeam, secondTeam: HistoricalTeam): number {
-  const durationsSeconds = [...firstTeam.lapDurationsMs, ...secondTeam.lapDurationsMs]
-    .map((durationMs) => durationMs / 1_000);
+  const durationsSeconds = [...firstTeam.lapDurationsMs, ...secondTeam.lapDurationsMs].map(
+    (durationMs) => durationMs / 1_000
+  );
   return Math.round((quantile(durationsSeconds, 0.9) ?? 90) / 5) * 5;
 }
 
@@ -553,7 +545,8 @@ function lapCountInWindow(team: HistoricalTeam, startHour: number, endHour: numb
 function trimmedCumulativeSeconds(team: HistoricalTeam): number[] {
   const cumulativeSeconds = team.cumulativeLapTimesMs.map((timestampMs) => timestampMs / 1_000);
   if (cumulativeSeconds.length < 6) return cumulativeSeconds;
-  const lastLapSeconds = cumulativeSeconds[cumulativeSeconds.length - 1] - cumulativeSeconds[cumulativeSeconds.length - 2];
+  const lastLapSeconds =
+    cumulativeSeconds[cumulativeSeconds.length - 1] - cumulativeSeconds[cumulativeSeconds.length - 2];
   const medianEarlierSeconds = median(team.lapDurationsMs.slice(0, -1).map((durationMs) => durationMs / 1_000));
   return medianEarlierSeconds != null && lastLapSeconds > medianEarlierSeconds * 2.5
     ? cumulativeSeconds.slice(0, -1)
@@ -595,20 +588,20 @@ function interpolateCurveTimestamp(
   if (nextIndex < 0) {
     const lastPoint = curve[curve.length - 1];
     const previousPoint = curve[Math.max(0, curve.length - 2)];
-    const paceSeconds = (lastPoint.timestampSeconds - previousPoint.timestampSeconds)
-      / Math.max(0.001, lastPoint.progress - previousPoint.progress);
+    const paceSeconds =
+      (lastPoint.timestampSeconds - previousPoint.timestampSeconds) /
+      Math.max(0.001, lastPoint.progress - previousPoint.progress);
     return lastPoint.timestampSeconds + (progress - lastPoint.progress) * paceSeconds;
   }
   const previousPoint = curve[nextIndex - 1];
   const nextPoint = curve[nextIndex];
-  const fraction = (progress - previousPoint.progress)
-    / Math.max(0.001, nextPoint.progress - previousPoint.progress);
+  const fraction = (progress - previousPoint.progress) / Math.max(0.001, nextPoint.progress - previousPoint.progress);
   return previousPoint.timestampSeconds + fraction * (nextPoint.timestampSeconds - previousPoint.timestampSeconds);
 }
 
 function recentDurations(cumulativeSeconds: number[], count: number): number[] {
   return cumulativeSeconds
-    .map((timestamp, index) => index === 0 ? timestamp : timestamp - cumulativeSeconds[index - 1])
+    .map((timestamp, index) => (index === 0 ? timestamp : timestamp - cumulativeSeconds[index - 1]))
     .slice(-count);
 }
 
@@ -629,12 +622,10 @@ function cleanDraftingLaps(
   const q3 = quantile(durations, 0.75) ?? center;
   const interquartileRange = q3 - q1;
   const medianAbsoluteDeviation = 1.4826 * (median(durations.map((duration) => Math.abs(duration - center))) ?? 0);
-  const deviationLowerBound = medianAbsoluteDeviation > 0
-    ? center - 4 * medianAbsoluteDeviation
-    : Number.NEGATIVE_INFINITY;
-  const deviationUpperBound = medianAbsoluteDeviation > 0
-    ? center + 4 * medianAbsoluteDeviation
-    : Number.POSITIVE_INFINITY;
+  const deviationLowerBound =
+    medianAbsoluteDeviation > 0 ? center - 4 * medianAbsoluteDeviation : Number.NEGATIVE_INFINITY;
+  const deviationUpperBound =
+    medianAbsoluteDeviation > 0 ? center + 4 * medianAbsoluteDeviation : Number.POSITIVE_INFINITY;
   const lowerBound = Math.max(q1 - 3 * interquartileRange, deviationLowerBound, options.minimumLapSeconds);
   const upperBound = Math.min(q3 + 3 * interquartileRange, deviationUpperBound, options.maximumLapSeconds);
   const cleanLaps = candidates.filter((lap) => lap.durationSeconds >= lowerBound && lap.durationSeconds <= upperBound);
@@ -647,8 +638,12 @@ function cleanDraftingLaps(
 function nearestSignedGap(focusTimestamp: number, otherTimestamps: number[]): number {
   if (!otherTimestamps.length) return Number.NaN;
   const insertionIndex = upperBound(otherTimestamps, focusTimestamp);
-  const previousGap = insertionIndex > 0 ? focusTimestamp - otherTimestamps[insertionIndex - 1] : Number.POSITIVE_INFINITY;
-  const nextGap = insertionIndex < otherTimestamps.length ? focusTimestamp - otherTimestamps[insertionIndex] : Number.POSITIVE_INFINITY;
+  const previousGap =
+    insertionIndex > 0 ? focusTimestamp - otherTimestamps[insertionIndex - 1] : Number.POSITIVE_INFINITY;
+  const nextGap =
+    insertionIndex < otherTimestamps.length
+      ? focusTimestamp - otherTimestamps[insertionIndex]
+      : Number.POSITIVE_INFINITY;
   return Math.abs(previousGap) <= Math.abs(nextGap) ? previousGap : nextGap;
 }
 
@@ -661,9 +656,8 @@ function compareGroups(label: string, firstValues: number[], secondValues: numbe
     secondCount: secondValues.length,
     firstMedianSeconds,
     secondMedianSeconds,
-    effectSeconds: firstMedianSeconds == null || secondMedianSeconds == null
-      ? null
-      : secondMedianSeconds - firstMedianSeconds,
+    effectSeconds:
+      firstMedianSeconds == null || secondMedianSeconds == null ? null : secondMedianSeconds - firstMedianSeconds,
     pValue: mannWhitneyPValue(firstValues, secondValues),
   };
 }
@@ -674,7 +668,7 @@ function mannWhitneyPValue(firstValues: number[], secondValues: number[]): numbe
     ...firstValues.map((value) => ({ value, group: 0 })),
     ...secondValues.map((value) => ({ value, group: 1 })),
   ].sort((firstValue, secondValue) => firstValue.value - secondValue.value);
-  const ranks = new Array<number>(combined.length);
+  const ranks: number[] = Array.from({ length: combined.length }, () => 0);
   let tieCorrection = 0;
   for (let startIndex = 0; startIndex < combined.length;) {
     let endIndex = startIndex + 1;
@@ -688,12 +682,13 @@ function mannWhitneyPValue(firstValues: number[], secondValues: number[]): numbe
   const firstCount = firstValues.length;
   const secondCount = secondValues.length;
   const rankSum = combined.reduce((sum, entry, index) => sum + (entry.group === 0 ? ranks[index] : 0), 0);
-  const uStatistic = rankSum - firstCount * (firstCount + 1) / 2;
+  const uStatistic = rankSum - (firstCount * (firstCount + 1)) / 2;
   const totalCount = firstCount + secondCount;
-  const variance = firstCount * secondCount / (totalCount * (totalCount - 1))
-    * ((totalCount ** 3 - totalCount - tieCorrection) / 12);
+  const variance =
+    ((firstCount * secondCount) / (totalCount * (totalCount - 1))) *
+    ((totalCount ** 3 - totalCount - tieCorrection) / 12);
   if (variance <= 0) return 1;
-  const zScore = (uStatistic - firstCount * secondCount / 2) / Math.sqrt(variance);
+  const zScore = (uStatistic - (firstCount * secondCount) / 2) / Math.sqrt(variance);
   return clamp(2 * (1 - normalCdf(Math.abs(zScore))), 0, 1);
 }
 
@@ -706,8 +701,10 @@ function erf(value: number): number {
   const absoluteValue = Math.abs(value);
   const coefficient = 0.3275911;
   const transform = 1 / (1 + coefficient * absoluteValue);
-  const polynomial = (((((1.061405429 * transform - 1.453152027) * transform) + 1.421413741)
-    * transform - 0.284496736) * transform + 0.254829592) * transform;
+  const polynomial =
+    ((((1.061405429 * transform - 1.453152027) * transform + 1.421413741) * transform - 0.284496736) * transform +
+      0.254829592) *
+    transform;
   return sign * (1 - polynomial * Math.exp(-absoluteValue * absoluteValue));
 }
 
@@ -727,9 +724,7 @@ function median(values: number[]): number | null {
 
 function mean(values: number[]): number | null {
   const finiteValues = values.filter(Number.isFinite);
-  return finiteValues.length
-    ? finiteValues.reduce((sum, value) => sum + value, 0) / finiteValues.length
-    : null;
+  return finiteValues.length ? finiteValues.reduce((sum, value) => sum + value, 0) / finiteValues.length : null;
 }
 
 function standardDeviation(values: number[]): number {

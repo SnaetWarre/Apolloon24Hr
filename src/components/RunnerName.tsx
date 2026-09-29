@@ -1,13 +1,7 @@
 import type { Runner } from '../types';
 
 /** Runner number as a bib (borstnummer) followed by the name. */
-export function RunnerName({
-  runner,
-  size,
-}: {
-  runner: Pick<Runner, 'runnerNumber' | 'name'>;
-  size?: 'lg';
-}) {
+export function RunnerName({ runner, size }: { runner: Pick<Runner, 'runnerNumber' | 'name'>; size?: 'lg' }) {
   return (
     <span className={`runner-name${size ? ` runner-name--${size}` : ''}`}>
       {runner.runnerNumber && <Bib number={runner.runnerNumber} size={size} />}

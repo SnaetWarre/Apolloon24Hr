@@ -7,12 +7,12 @@ import test from 'node:test';
 import { createTRPCClient, httpBatchLink } from '@trpc/client';
 import { io, type Socket } from 'socket.io-client';
 import type { AppRouter } from '../server/router.ts';
-import type { AppSnapshot, LiveAppSnapshot, RaceHistory, TemporaryTeam } from '../shared/schemas.ts';
+import type { AppSnapshot, LiveAppSnapshot, RaceHistory } from '../shared/schemas.ts';
 import { buildLabelComparisons, filterLaps } from '../src/lib/analysis.ts';
 
 const dataPath = path.resolve(`.tmp-test-temporary-teams-e2e-${process.pid}`);
 
-test('temporary night teams work through HTTP, realtime, analysis, exports, and restart', { timeout: 45_000 }, async () => {
+test('night teams work through HTTP, realtime, analysis, exports, and a restart', { timeout: 45_000 }, async () => {
   fs.rmSync(dataPath, { recursive: true, force: true });
   const port = await freePort();
   const baseUrl = `http://127.0.0.1:${port}`;
@@ -26,25 +26,16 @@ test('temporary night teams work through HTTP, realtime, analysis, exports, and 
       links: [httpBatchLink({ url: `${baseUrl}/trpc` })],
     });
 
-    let connectedRevision: number | null = null;
-    let initialBootstrapCount = 0;
+    const revisions: number[] = [];
     socket = io(baseUrl, { transports: ['websocket'], reconnection: false, autoConnect: false });
-    socket.on('state:revision', (revision: number) => {
-      connectedRevision = revision;
-    });
-    socket.on('bootstrap', () => {
-      initialBootstrapCount += 1;
-    });
+    socket.on('state:revision', (revision: number) => revisions.push(revision));
     socket.connect();
     await waitForSocket(socket);
-    await waitFor(() => connectedRevision !== null);
+    await waitFor(() => revisions.length > 0);
     const initialState = await fetchState(baseUrl);
-    assert.equal(connectedRevision, initialState.revision);
-    assert.equal(initialBootstrapCount, 0);
-    const realtimeTeams: TemporaryTeam[][] = [];
-    socket.on('temporary-teams:patched', (teams: TemporaryTeam[]) => realtimeTeams.push(teams));
+    assert.equal(revisions.at(-1), initialState.revision);
 
-    const labels = await client.labels.list.query();
+    const labels = initialState.labels;
     const blue = labels.find((label) => label.name === 'Speedteam Blue');
     const white = labels.find((label) => label.name === 'Speedteam White');
     assert.ok(blue);
@@ -78,11 +69,13 @@ test('temporary night teams work through HTTP, realtime, analysis, exports, and 
       /maar in een tijdelijke nachtploeg/
     );
 
+    const revisionBeforeActivation = revisions.at(-1) ?? 0;
     await client.temporaryTeams.setActive.mutate({ labelId: trojan.id, active: true });
     await client.temporaryTeams.setActive.mutate({ labelId: trojanV2.id, active: true });
-    await waitFor(() => realtimeTeams.some((teams) => teams.filter((team) => team.active).length === 2));
+    await waitFor(() => (revisions.at(-1) ?? 0) > revisionBeforeActivation);
 
     let state = await fetchState(baseUrl);
+    assert.equal(state.temporaryTeams.filter((team) => team.active).length, 2);
     assert.deepEqual(currentTeamIds(state, alice.id), [trojan.id]);
     assert.deepEqual(currentTeamIds(state, bob.id), [trojanV2.id]);
 
@@ -123,33 +116,25 @@ test('temporary night teams work through HTTP, realtime, analysis, exports, and 
     const compressedHistory = (await historyResponse.json()) as RaceHistory;
     assert.equal(historyResponse.headers.get('content-encoding'), 'gzip');
     assert.equal(compressedHistory.laps.length, 3);
-    assert.ok(
-      Number(historyResponse.headers.get('content-length')) <
-        Number(historyResponse.headers.get('x-apolloon-uncompressed-bytes'))
-    );
+    const unchanged = await fetch(`${baseUrl}/api/history`, {
+      headers: { 'if-none-match': historyResponse.headers.get('etag') ?? '' },
+    });
+    assert.equal(unchanged.status, 304);
 
-    const runnerHistory = (await fetch(
-      `${baseUrl}/api/history?runnerId=${encodeURIComponent(alice.id)}`
-    ).then((response) => response.json())) as RaceHistory;
+    const runnerHistory = (await fetch(`${baseUrl}/api/history?runnerId=${encodeURIComponent(alice.id)}`).then(
+      (response) => response.json()
+    )) as RaceHistory;
     assert.equal(runnerHistory.scope, 'runner');
     assert.ok(runnerHistory.laps.every((lap) => lap.runnerId === alice.id));
 
-    const unsafeCompaction = await fetch(`${baseUrl}/api/database/compact`, {
-      method: 'POST',
+    const comparisons = buildLabelComparisons([trojan, trojanV2, blue], state.laps);
+    assert.deepEqual(Object.fromEntries(comparisons.map((comparison) => [comparison.label.name, comparison.count])), {
+      'Speedteam Blue': 1,
+      'E2E Trojan': 1,
+      'E2E Trojan V2': 1,
     });
-    assert.equal(unsafeCompaction.status, 409);
-    assert.match(await unsafeCompaction.text(), /race actief/i);
 
-    const comparisons = buildLabelComparisons(
-      [trojan, trojanV2, blue],
-      state.laps
-    );
-    assert.deepEqual(
-      Object.fromEntries(comparisons.map((comparison) => [comparison.label.name, comparison.count])),
-      { 'Speedteam Blue': 1, 'E2E Trojan': 1, 'E2E Trojan V2': 1 }
-    );
-
-    const exportedJson = await fetch(`${baseUrl}/api/export/laps.json`).then((response) => response.json()) as {
+    const exportedJson = (await fetch(`${baseUrl}/api/export/laps.json`).then((response) => response.json())) as {
       laps: AppSnapshot['laps'];
     };
     assert.equal(exportedJson.laps.filter((lap) => lap.labels.some((label) => label.id === trojan.id)).length, 1);
@@ -174,13 +159,20 @@ test('temporary night teams work through HTTP, realtime, analysis, exports, and 
     assert.match(compressedAsset.headers.get('content-type') || '', /^text\/javascript/);
     assert.match(compressedAsset.headers.get('cache-control') || '', /immutable/);
 
-    const charlie = await client.runners.create.mutate({ name: 'E2E Charlie', runnerNumber: 'E2E-3', labels: [blue.id] });
+    const charlie = await client.runners.create.mutate({
+      name: 'E2E Charlie',
+      runnerNumber: 'E2E-3',
+      labels: [blue.id],
+    });
     const dana = await client.runners.create.mutate({ name: 'E2E Dana', runnerNumber: 'E2E-4', labels: [white.id] });
     const scheduledStart = Date.now() + 4_500;
     const scheduledEnd = scheduledStart + 2_000;
     const scheduled = await client.temporaryTeams.create.mutate({
-      name: 'E2E Gepland', color: '#7c3aed', runnerIds: [charlie.id],
-      startsAt: scheduledStart, endsAt: scheduledEnd,
+      name: 'E2E Gepland',
+      color: '#7c3aed',
+      runnerIds: [charlie.id],
+      startsAt: scheduledStart,
+      endsAt: scheduledEnd,
     });
     assert.equal(scheduled.active, false);
     await assert.rejects(
@@ -199,20 +191,40 @@ test('temporary night teams work through HTTP, realtime, analysis, exports, and 
     assert.equal(restartedState.temporaryTeams.filter((team) => team.active).length, 0);
     assert.equal(filterLaps(restartedState.laps, { enabledLabelIds: [trojan.id] }).length, 1);
     assert.deepEqual(currentTeamIds(restartedState, alice.id), [blue.id]);
-    assert.equal(restartedState.temporaryTeams.find((team) => team.labelId === scheduled.labelId)?.startsAt, scheduledStart);
+    assert.equal(
+      restartedState.temporaryTeams.find((team) => team.labelId === scheduled.labelId)?.startsAt,
+      scheduledStart
+    );
+    // The team starts on the clock, without any write; clients hear about it through a revision.
+    socket = io(baseUrl, { transports: ['websocket'], reconnection: false });
+    const revisionsAfterRestart: number[] = [];
+    socket.on('state:revision', (revision: number) => revisionsAfterRestart.push(revision));
+    await waitForSocket(socket);
     await waitFor(async () => currentTeamIds(await fetchState(baseUrl), charlie.id).includes(scheduled.labelId), 8_000);
+    assert.ok(revisionsAfterRestart.length > 1);
     await waitFor(async () => currentTeamIds(await fetchState(baseUrl), charlie.id).includes(blue.id), 8_000);
-    assert.equal((await fetchState(baseUrl)).temporaryTeams.find((team) => team.labelId === scheduled.labelId)?.active, false);
+    assert.equal(
+      (await fetchState(baseUrl)).temporaryTeams.find((team) => team.labelId === scheduled.labelId)?.active,
+      false
+    );
 
     const immediate = await client.temporaryTeams.create.mutate({
-      name: 'E2E Meteen', color: '#db2777', runnerIds: [dana.id],
-      startsAt: Date.now() - 10 * 60_000, endsAt: Date.now() + 2_000,
+      name: 'E2E Meteen',
+      color: '#db2777',
+      runnerIds: [dana.id],
+      startsAt: Date.now() - 10 * 60_000,
+      endsAt: Date.now() + 2_000,
     });
     assert.equal(immediate.active, true);
     assert.deepEqual(currentTeamIds(await fetchState(baseUrl), dana.id), [immediate.labelId]);
     await waitFor(async () => currentTeamIds(await fetchState(baseUrl), dana.id).includes(white.id), 8_000);
   } catch (error) {
-    throw new Error(`${error instanceof Error ? error.stack || error.message : String(error)}\nServer output:\n${serverOutput}`);
+    throw new Error(
+      `${error instanceof Error ? error.stack || error.message : String(error)}\nServer output:\n${serverOutput}`,
+      {
+        cause: error,
+      }
+    );
   } finally {
     socket?.close();
     await stopServer(server);
@@ -229,14 +241,17 @@ test('temporary night teams work through HTTP, realtime, analysis, exports, and 
         PUBLIC_APP_PORT: String(serverPort),
         PUBLIC_HOST: '127.0.0.1',
         CLUSTER_ENABLED: 'false',
-        APOLLOON_CLUSTER: 'false',
         NODE_ENV: 'test',
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let output = '';
-    child.stdout?.on('data', (chunk) => { output += chunk.toString(); });
-    child.stderr?.on('data', (chunk) => { output += chunk.toString(); });
+    child.stdout?.on('data', (chunk) => {
+      output += chunk.toString();
+    });
+    child.stderr?.on('data', (chunk) => {
+      output += chunk.toString();
+    });
     await waitFor(async () => {
       if (child.exitCode != null) throw new Error(`Server stopped with exit code ${child.exitCode}: ${output}`);
       try {
@@ -251,10 +266,12 @@ test('temporary night teams work through HTTP, realtime, analysis, exports, and 
 });
 
 function currentTeamIds(state: AppSnapshot, runnerId: string): string[] {
-  return state.runners
-    .find((runner) => runner.id === runnerId)?.labels
-    .filter((label) => label.kind === 'speedteam' || label.kind === 'temporary_team')
-    .map((label) => label.id) ?? [];
+  return (
+    state.runners
+      .find((runner) => runner.id === runnerId)
+      ?.labels.filter((label) => label.kind === 'speedteam' || label.kind === 'temporary_team')
+      .map((label) => label.id) ?? []
+  );
 }
 
 function raceExpectation(state: AppSnapshot) {
@@ -309,7 +326,7 @@ async function freePort(): Promise<number> {
     server.listen(0, '127.0.0.1', () => {
       const address = server.address();
       const port = typeof address === 'object' && address ? address.port : 0;
-      server.close((error) => error ? reject(error) : resolve(port));
+      server.close((error) => (error ? reject(error) : resolve(port)));
     });
   });
 }
