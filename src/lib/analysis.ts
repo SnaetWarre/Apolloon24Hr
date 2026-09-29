@@ -1,4 +1,5 @@
 import type { Label, LapRecord, PublicRecordMode, RaceState, Runner } from '../types';
+import { compareLabels } from '../../shared/labelOrder';
 
 export type AnalysisFilters = {
   enabledLabelIds: string[] | null;
@@ -18,6 +19,7 @@ export type AnalysisKpis = DurationStats & {
   lapsPerHour: number | null;
   projected24hLaps: number | null;
   outlierUnderMinuteCount: number;
+  outlierOverLimitCount: number;
 };
 
 export type TimeBucket = {
@@ -58,6 +60,16 @@ export type FastestLapWindow = {
   windowIndex: number;
 };
 
+/**
+ * A lap this long means nobody handed off (the race sat idle or someone forgot
+ * the button). It still counts as a lap, but its time would wreck every average.
+ */
+export const MAX_PLAUSIBLE_LAP_MS = 10 * 60_000;
+
+function hasPlausibleDuration(lap: Pick<LapRecord, 'durationMs'>): boolean {
+  return Number.isFinite(lap.durationMs) && lap.durationMs >= 0 && lap.durationMs <= MAX_PLAUSIBLE_LAP_MS;
+}
+
 const BRUSSELS_HOUR_FORMATTER = new Intl.DateTimeFormat('nl-BE', {
   hour: '2-digit',
   hourCycle: 'h23',
@@ -77,8 +89,8 @@ export function filterLaps(laps: LapRecord[], filters: AnalysisFilters): LapReco
 
 function calculateDurationStats(laps: Pick<LapRecord, 'durationMs'>[]): DurationStats {
   const durations = laps
+    .filter(hasPlausibleDuration)
     .map((lap) => lap.durationMs)
-    .filter((duration) => Number.isFinite(duration) && duration >= 0)
     .sort((a, b) => a - b);
   const count = durations.length;
   const totalMs = durations.reduce((sum, duration) => sum + duration, 0);
@@ -108,13 +120,15 @@ export function buildKpis(laps: LapRecord[], race: RaceState): AnalysisKpis {
   const endedAt = race.raceFinishedAt ?? newestLapTimestamp(laps);
   const elapsedMs = startedAt != null && endedAt != null ? Math.max(0, endedAt - startedAt) : 0;
   const elapsedHours = elapsedMs > 0 ? elapsedMs / 3_600_000 : null;
-  const lapsPerHour = elapsedHours ? stats.count / elapsedHours : null;
+  const lapsPerHour = elapsedHours ? laps.length / elapsedHours : null;
 
   return {
     ...stats,
+    count: laps.length,
     lapsPerHour,
     projected24hLaps: lapsPerHour != null ? Math.round(lapsPerHour * 24) : null,
     outlierUnderMinuteCount: laps.filter((lap) => lap.durationMs < 60_000).length,
+    outlierOverLimitCount: laps.filter((lap) => lap.durationMs > MAX_PLAUSIBLE_LAP_MS).length,
   };
 }
 
@@ -122,16 +136,16 @@ export function buildTimeBuckets(laps: LapRecord[], race: RaceState): TimeBucket
   const startedAt = race.raceStartedAt ?? oldestLapTimestamp(laps);
   if (startedAt == null) return [];
 
-  const buckets = new Map<number, { count: number; totalMs: number }>();
+  const buckets = new Map<number, { count: number; timedCount: number; totalMs: number }>();
   for (const lap of laps) {
     const hour = Math.max(0, Math.floor((lap.finishedAt - startedAt) / 3_600_000));
-    const bucket = buckets.get(hour);
-    if (bucket) {
-      bucket.count += 1;
+    const bucket = buckets.get(hour) ?? { count: 0, timedCount: 0, totalMs: 0 };
+    bucket.count += 1;
+    if (hasPlausibleDuration(lap)) {
+      bucket.timedCount += 1;
       bucket.totalMs += lap.durationMs;
-    } else {
-      buckets.set(hour, { count: 1, totalMs: lap.durationMs });
     }
+    buckets.set(hour, bucket);
   }
 
   return [...buckets.entries()]
@@ -140,7 +154,7 @@ export function buildTimeBuckets(laps: LapRecord[], race: RaceState): TimeBucket
       hour,
       label: formatClockHourWindow(startedAt, hour),
       count: bucket.count,
-      averageMs: Math.round(bucket.totalMs / bucket.count),
+      averageMs: bucket.timedCount > 0 ? Math.round(bucket.totalMs / bucket.timedCount) : null,
     }));
 }
 
@@ -154,7 +168,7 @@ export function buildRollingLapTrend(laps: LapRecord[], race: RaceState, windowM
   if (startedAt == null) return [];
 
   const windowMs = Math.max(1, windowMinutes) * 60_000;
-  const sortedLaps = [...laps].sort((a, b) => a.finishedAt - b.finishedAt);
+  const sortedLaps = laps.filter(hasPlausibleDuration).sort((a, b) => a.finishedAt - b.finishedAt);
   const points: RollingLapTrendPoint[] = [];
   let windowStartIndex = 0;
   let windowTotalMs = 0;
@@ -209,9 +223,7 @@ export function buildLabelComparisons(labels: Label[], laps: LapRecord[]): Label
       ...calculateDurationStats(lapsByLabel.get(label.id) ?? []),
     }))
     .filter((comparison) => comparison.count > 0)
-    .sort(
-      (a, b) => (a.label.sortOrder ?? 9999) - (b.label.sortOrder ?? 9999) || a.label.name.localeCompare(b.label.name)
-    );
+    .sort((a, b) => compareLabels(a.label, b.label));
 }
 
 export function buildDistribution(laps: LapRecord[]): DistributionBin[] {
@@ -228,7 +240,7 @@ export function buildDistribution(laps: LapRecord[]): DistributionBin[] {
   bins.push({ label: '1:30+', minMs: 90_000, maxMs: null, count: 0 });
 
   for (const lap of laps) {
-    if (lap.durationMs < 60_000) continue;
+    if (lap.durationMs < 60_000 || !hasPlausibleDuration(lap)) continue;
     const binIndex = Math.min(Math.floor((lap.durationMs - 60_000) / 5_000), bins.length - 1);
     bins[binIndex].count += 1;
   }

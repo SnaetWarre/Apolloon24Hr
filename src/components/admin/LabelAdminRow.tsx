@@ -13,14 +13,12 @@ export function LabelAdminRow({
   onDelete: () => Promise<void>;
 }) {
   const [target, setTarget] = React.useState(label.targetLaps?.toString() || '');
-  const [sortOrder, setSortOrder] = React.useState(label.sortOrder?.toString() || '');
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     setTarget(label.targetLaps?.toString() || '');
-    setSortOrder(label.sortOrder?.toString() || '');
-  }, [label.targetLaps, label.sortOrder]);
+  }, [label.targetLaps]);
 
   async function saveLabelSettings() {
     if (saving) return;
@@ -29,7 +27,6 @@ export function LabelAdminRow({
     try {
       await onSave({
         targetLaps: target ? Number(target) : null,
-        sortOrder: sortOrder ? Number(sortOrder) : null,
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Label opslaan mislukt');
@@ -53,17 +50,6 @@ export function LabelAdminRow({
           min="0"
           value={target}
           onChange={(event) => setTarget(event.target.value)}
-          placeholder="Auto"
-        />
-      </label>
-      <label className="label-target-editor">
-        <span className="label-target-editor__caption">Positie</span>
-        <input
-          className="input input--number"
-          type="number"
-          min="0"
-          value={sortOrder}
-          onChange={(event) => setSortOrder(event.target.value)}
           placeholder="Auto"
         />
       </label>

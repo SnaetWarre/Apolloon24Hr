@@ -8,7 +8,7 @@ import { observeDisplayHistory } from '../lib/displayHistory';
 import { useArrivals } from '../lib/motion';
 import { buildRecentLapSummaries, buildRunnerRanking, collectRankingLabels, type RankingMode } from '../lib/ranking';
 import type { Label, LapRecord, LiveAppSnapshot, PublicRecordMode, RaceEvent, Runner } from '../types';
-import { LabelBadge, labelKindOrder, labelKindTitle } from './LabelBadge';
+import { compareLabels, LabelBadge, labelKindOrder, labelKindTitle } from './LabelBadge';
 import { LiveDuration, LiveElapsed } from './LiveTime';
 
 const OUTSIDE_ALERT_VISIBLE_MS = 8_000;
@@ -598,9 +598,7 @@ function buildLabelStats(labels: Label[], runners: Runner[], laps: LapRecord[]) 
         percent: target > 0 ? (total.laps / target) * 100 : 0,
       };
     })
-    .sort(
-      (a, b) => (a.label.sortOrder ?? 9999) - (b.label.sortOrder ?? 9999) || a.label.name.localeCompare(b.label.name)
-    );
+    .sort((a, b) => compareLabels(a.label, b.label));
 }
 
 function groupCompetitions(stats: ReturnType<typeof buildLabelStats>) {

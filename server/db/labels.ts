@@ -3,6 +3,7 @@ import { type Label, type LabelImageUpload, type LabelInput, type LabelPatch } f
 import { all, one, run, transaction } from './connection.js';
 import { canonicalLabelName } from './values.js';
 import { clusterNow } from '../clock.js';
+import { compareLabels, LABEL_ORDER_SQL } from '../../shared/labelOrder.js';
 
 export const TEMPORARY_TEAM_KIND = 'temporary_team';
 
@@ -20,7 +21,7 @@ const LABEL_COLUMNS = `
   l.created_at AS createdAt,
   l.updated_at AS updatedAt`;
 
-const LABEL_ORDER = 'COALESCE(l.sort_order, 9999), l.name';
+const LABEL_ORDER = LABEL_ORDER_SQL;
 
 export function getLabels(): Label[] {
   return all<Label>(`SELECT ${LABEL_COLUMNS} FROM labels l ORDER BY ${LABEL_ORDER}`);
@@ -188,10 +189,6 @@ function activeTemporaryTeamLabels(nowMs: number, runnerId?: string): Array<Labe
 
 export function activeTemporaryTeamIdForRunner(runnerId: string, nowMs = clusterNow()): string | null {
   return activeTemporaryTeamLabels(nowMs, runnerId)[0]?.id ?? null;
-}
-
-function compareLabels(a: Label, b: Label): number {
-  return (a.sortOrder ?? 9999) - (b.sortOrder ?? 9999) || a.name.localeCompare(b.name);
 }
 
 /**

@@ -1,4 +1,5 @@
 import type { Label, LapRecord, Runner } from '../types';
+import { compareLabels } from '../../shared/labelOrder';
 
 export type RankingMode = 'laps' | 'coefficient';
 
@@ -125,9 +126,5 @@ export function collectRankingLabels(currentLabels: Label[], laps: LapRecord[]):
     for (const label of lap.labels) labelsById.set(label.id, label);
   }
   for (const label of currentLabels) labelsById.set(label.id, label);
-  return [...labelsById.values()].sort(
-    (firstLabel, secondLabel) =>
-      (firstLabel.sortOrder ?? 9_999) - (secondLabel.sortOrder ?? 9_999) ||
-      firstLabel.name.localeCompare(secondLabel.name, 'nl-BE')
-  );
+  return [...labelsById.values()].sort(compareLabels);
 }

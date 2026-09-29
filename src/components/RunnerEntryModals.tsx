@@ -4,7 +4,7 @@ import { useConfirm } from './ConfirmDialog';
 import { runnerFormError } from '../lib/runnerForm';
 import { useAppActions, useAppData } from '../app/index';
 import type { Label, LiveAppSnapshot, Runner } from '../types';
-import { LabelBadge, labelKindOrder, labelKindTitle } from './LabelBadge';
+import { compareLabels, LabelBadge, labelKindTitle } from './LabelBadge';
 
 const selectRunners = ({ runners }: LiveAppSnapshot) => ({ runners });
 const selectLabels = ({ labels }: LiveAppSnapshot) => ({ labels });
@@ -543,16 +543,9 @@ function exclusiveLabelGroup(kind: string | undefined) {
 
 function groupLabels(labels: Label[]) {
   const grouped = new Map<string, typeof labels>();
-  [...labels]
-    .sort(
-      (a, b) =>
-        labelKindOrder(a.kind) - labelKindOrder(b.kind) ||
-        (a.sortOrder ?? 9999) - (b.sortOrder ?? 9999) ||
-        a.name.localeCompare(b.name)
-    )
-    .forEach((label) => {
-      if (!grouped.has(label.kind)) grouped.set(label.kind, []);
-      grouped.get(label.kind)?.push(label);
-    });
+  [...labels].sort(compareLabels).forEach((label) => {
+    if (!grouped.has(label.kind)) grouped.set(label.kind, []);
+    grouped.get(label.kind)?.push(label);
+  });
   return [...grouped.entries()];
 }

@@ -42,7 +42,7 @@ const selectAnalysisData = ({ runners, labels, race }: LiveAppSnapshot) => ({
   labels,
   race,
 });
-import { LabelBadge, labelKindOrder, labelKindTitle } from './LabelBadge';
+import { compareLabels, LabelBadge, labelKindTitle } from './LabelBadge';
 
 type RunnerInsightSort = 'laps' | 'average' | 'best' | 'consistency';
 type AnalysisRecordWindowMode = Exclude<PublicRecordMode, 'off'>;
@@ -262,6 +262,12 @@ export function AnalysisView() {
                   verdeling.
                 </div>
               )}
+              {kpis.outlierOverLimitCount > 0 && (
+                <div className="warning-banner">
+                  {kpis.outlierOverLimitCount} ronde(s) langer dan 10 minuten gevonden. Waarschijnlijk werd er niet
+                  gewisseld; die tijden tellen niet mee in gemiddelden, traagste en grafieken.
+                </div>
+              )}
 
               <div className="analysis-main-grid">
                 <section className="panel">
@@ -344,12 +350,7 @@ function mergeAnalysisLabels(currentLabels: Label[], laps: LapRecord[]): Label[]
     for (const label of lap.labels) byId.set(label.id, label);
   }
   for (const label of currentLabels) byId.set(label.id, label);
-  return [...byId.values()].sort(
-    (a, b) =>
-      labelKindOrder(a.kind) - labelKindOrder(b.kind) ||
-      (a.sortOrder ?? 9999) - (b.sortOrder ?? 9999) ||
-      a.name.localeCompare(b.name)
-  );
+  return [...byId.values()].sort(compareLabels);
 }
 
 function StatPanel({ label, value, hero }: { label: string; value: string; hero?: boolean }) {
@@ -854,17 +855,10 @@ function DataTable<T>({ data, columns }: { data: T[]; columns: ColumnDef<T>[] })
 
 function groupLabels(labels: Label[]) {
   const grouped = new Map<string, Label[]>();
-  [...labels]
-    .sort(
-      (a, b) =>
-        labelKindOrder(a.kind) - labelKindOrder(b.kind) ||
-        (a.sortOrder ?? 9999) - (b.sortOrder ?? 9999) ||
-        a.name.localeCompare(b.name)
-    )
-    .forEach((label) => {
-      if (!grouped.has(label.kind)) grouped.set(label.kind, []);
-      grouped.get(label.kind)?.push(label);
-    });
+  [...labels].sort(compareLabels).forEach((label) => {
+    if (!grouped.has(label.kind)) grouped.set(label.kind, []);
+    grouped.get(label.kind)?.push(label);
+  });
   return [...grouped.entries()];
 }
 

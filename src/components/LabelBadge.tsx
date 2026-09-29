@@ -21,10 +21,4 @@ export function labelKindTitle(kind: string) {
   return 'Custom';
 }
 
-export function labelKindOrder(kind: string) {
-  if (kind === 'speedteam') return 0;
-  if (kind === 'temporary_team') return 1;
-  if (kind === 'zustervereniging' || kind === 'association') return 2;
-  if (kind === 'andere' || kind === 'group') return 3;
-  return 4;
-}
+export { compareLabels, labelKindOrder } from '../../shared/labelOrder';

@@ -1,4 +1,4 @@
-import { labelKindOrder } from '../LabelBadge';
+import { compareLabels } from '../LabelBadge';
 import type { Label, PublicRecordMode, Runner, RunnerStatus } from '../../types';
 
 export function formatFileSize(bytes: number): string {
@@ -79,16 +79,9 @@ export function currentTeamName(runner: Runner): string {
 
 export function groupLabels(labels: Label[]) {
   const grouped = new Map<string, typeof labels>();
-  [...labels]
-    .sort(
-      (a, b) =>
-        labelKindOrder(a.kind) - labelKindOrder(b.kind) ||
-        (a.sortOrder ?? 9999) - (b.sortOrder ?? 9999) ||
-        a.name.localeCompare(b.name)
-    )
-    .forEach((label) => {
-      if (!grouped.has(label.kind)) grouped.set(label.kind, []);
-      grouped.get(label.kind)?.push(label);
-    });
+  [...labels].sort(compareLabels).forEach((label) => {
+    if (!grouped.has(label.kind)) grouped.set(label.kind, []);
+    grouped.get(label.kind)?.push(label);
+  });
   return [...grouped.entries()];
 }

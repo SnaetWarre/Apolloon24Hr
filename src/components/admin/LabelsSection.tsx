@@ -66,7 +66,6 @@ function LabelsPanel({ labels }: { labels: Label[] }) {
   const [kind, setKind] = React.useState('andere');
   const [imageUrl, setImageUrl] = React.useState<string | null>(null);
   const [targetLaps, setTargetLaps] = React.useState('');
-  const [sortOrder, setSortOrder] = React.useState('');
 
   async function addLabel() {
     const labelName = name.trim();
@@ -80,7 +79,6 @@ function LabelsPanel({ labels }: { labels: Label[] }) {
           kind,
           imageUrl,
           targetLaps: targetLaps ? Number(targetLaps) : null,
-          sortOrder: sortOrder ? Number(sortOrder) : null,
         }),
       `${labelName} is toegevoegd.`,
       'Label toevoegen mislukt'
@@ -89,7 +87,6 @@ function LabelsPanel({ labels }: { labels: Label[] }) {
     setName('');
     setImageUrl(null);
     setTargetLaps('');
-    setSortOrder('');
   }
 
   async function removeLabel(label: Label) {
@@ -133,14 +130,6 @@ function LabelsPanel({ labels }: { labels: Label[] }) {
           value={targetLaps}
           onChange={(event) => setTargetLaps(event.target.value)}
           placeholder="Doel"
-        />
-        <input
-          className="input input--number"
-          type="number"
-          min="0"
-          value={sortOrder}
-          onChange={(event) => setSortOrder(event.target.value)}
-          placeholder="Positie"
         />
         <button className="btn btn--primary" onClick={() => void addLabel()} disabled={!name.trim() || pending}>
           {pending ? 'Toevoegen...' : 'Label toevoegen'}

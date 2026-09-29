@@ -4,7 +4,7 @@ import { useConfirm } from './ConfirmDialog';
 import { runnerFormError } from '../lib/runnerForm';
 import { useAppActions, useAppData, useRaceHistory, useRegistrations } from '../app/index';
 import { formatClockTimeMs, formatDurationMs } from '../lib/time';
-import { labelKindOrder, labelKindTitle } from './LabelBadge';
+import { compareLabels, labelKindTitle } from './LabelBadge';
 import type { Label, LiveAppSnapshot, Runner, RunnerStatus } from '../types';
 import { LiveElapsed } from './LiveTime';
 
@@ -519,16 +519,9 @@ function runnerStatusSummary(status: RunnerStatus) {
 
 function groupLabels(labels: Label[]) {
   const grouped = new Map<string, typeof labels>();
-  [...labels]
-    .sort(
-      (a, b) =>
-        labelKindOrder(a.kind) - labelKindOrder(b.kind) ||
-        (a.sortOrder ?? 9999) - (b.sortOrder ?? 9999) ||
-        a.name.localeCompare(b.name)
-    )
-    .forEach((label) => {
-      if (!grouped.has(label.kind)) grouped.set(label.kind, []);
-      grouped.get(label.kind)?.push(label);
-    });
+  [...labels].sort(compareLabels).forEach((label) => {
+    if (!grouped.has(label.kind)) grouped.set(label.kind, []);
+    grouped.get(label.kind)?.push(label);
+  });
   return [...grouped.entries()];
 }

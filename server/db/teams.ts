@@ -1,6 +1,7 @@
 import { type TemporaryTeam } from '../../shared/schemas.js';
 import { all, one, run, transaction } from './connection.js';
 import { TEMPORARY_TEAM_ACTIVE_SQL, TEMPORARY_TEAM_KIND, ensureTemporaryTeamRow } from './labels.js';
+import { LABEL_ORDER_SQL } from '../../shared/labelOrder.js';
 import { clusterNow } from '../clock.js';
 
 export function syncTemporaryTeamRows(): void {
@@ -31,7 +32,7 @@ export function getTemporaryTeams(nowMs = clusterNow()): TemporaryTeam[] {
      FROM temporary_teams t
      JOIN labels l ON l.id = t.label_id
      WHERE l.kind = ?
-     ORDER BY COALESCE(l.sort_order, 9999), l.name`,
+     ORDER BY ${LABEL_ORDER_SQL}`,
     [nowMs, TEMPORARY_TEAM_KIND]
   ).map((team) => {
     const memberRunnerIds = membersByTeam.get(team.labelId) ?? [];
