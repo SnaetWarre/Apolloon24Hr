@@ -11,6 +11,7 @@ import {
   type ChartConfiguration,
 } from 'chart.js';
 import { chartTooltipColors, useChartTheme, workspaceChartPalette } from '../../lib/chartPalette';
+import { useArrivals } from '../../lib/motion';
 import { RACE_DURATION_HOURS, type HourlyPacePoint, type RaceProgressPoint } from '../../lib/tactics';
 import type { LiveTrendPoint, TimeGapPoint } from '../../lib/tacticsDeepDive';
 import { formatPaceSeconds, formatRaceHour, formatSignedGap } from './tacticsFormat';
@@ -32,10 +33,12 @@ export function TacticsStat({
   tone?: 'positive' | 'negative';
   unit?: string;
 }) {
+  // A figure that changes while the page is open lifts briefly; the first figure is simply there.
+  const changed = useArrivals([value]).has(value);
   return (
     <div className={`stat-panel tactics-stat${tone ? ` tactics-stat--${tone}` : ''}`}>
       <span className="muted-label">{label}</span>
-      <strong>
+      <strong key={value} className={changed ? 'value-tick' : undefined}>
         {value}
         {unit && <small className="tactics-stat-unit">{unit}</small>}
       </strong>

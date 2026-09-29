@@ -1,5 +1,11 @@
 /* Kobe's tactiek: live target tracking and historical deep dive. */
 
+/* One section at a time; a section chosen later rises in (see KobeTacticsView). */
+.tactics-section {
+  display: grid;
+  min-width: 0;
+}
+
 .tactics-section-stack {
   display: grid;
   gap: var(--space-4);
@@ -33,6 +39,10 @@
   font-size: 12.5px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.tactics-stat strong {
+  transition: color var(--dur-2) var(--ease-out);
 }
 
 .tactics-stat--positive strong {
@@ -192,6 +202,12 @@
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   background: var(--surface);
+  transition: border-color var(--dur-1) var(--ease-out), background-color var(--dur-1) var(--ease-out);
+}
+
+/* The hour being edited shows its frame, not just the underline of the field. */
+.tactics-hourly-grid > label:focus-within {
+  border-color: var(--brand);
 }
 
 .tactics-hourly-grid > label.is-past {
@@ -220,6 +236,7 @@
   background: transparent;
   color: var(--ink);
   font: 600 17px var(--font-display);
+  transition: border-color var(--dur-1) var(--ease-out);
 }
 
 .tactics-hourly-grid input:focus {
@@ -312,7 +329,13 @@
   display: grid;
   min-height: 260px;
   place-content: center;
+  justify-items: center;
   text-align: center;
+}
+
+.tactics-empty-state > .icon {
+  margin-bottom: var(--space-3);
+  color: var(--ink-3);
 }
 
 .tactics-panel-heading .analysis-section-header {
@@ -365,6 +388,7 @@
   color: var(--ink);
   text-align: left;
   cursor: pointer;
+  transition: background-color var(--dur-1) var(--ease-out), box-shadow var(--dur-2) var(--ease-out);
 }
 
 .tactics-deep-nav button:last-child {
