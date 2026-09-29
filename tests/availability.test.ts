@@ -7,7 +7,6 @@ import {
   findAvailableUncalledRunners,
   formatMomentBlock,
   hasHourBlock,
-  hoursOutsideGrid,
   isAvailableAtMoment,
   parseHourBlock,
   setHourBlock,
@@ -146,11 +145,4 @@ test('ticking an hour writes it in the form format, in event order', () => {
   assert.deepEqual(toggleHourBlock(picked, 'dinsdag', 23), ['20-21u (dinsdag)', '01-02u (woensdag)']);
   assert.deepEqual(setHourBlock(picked, 'dinsdag', 20, true), picked);
   assert.deepEqual(setHourBlock(picked, 'dinsdag', 20, false), ['23-00u (dinsdag)', '01-02u (woensdag)']);
-
-  const grid = eventHourGrid();
-  assert.deepEqual(hoursOutsideGrid([...picked, '20-22u (dinsdag)', '17-18u (dinsdag)', 'avond'], grid), [
-    '20-22u (dinsdag)',
-    '17-18u (dinsdag)',
-    'avond',
-  ]);
 });

@@ -148,13 +148,6 @@ export function setHourBlock(hourTexts: string[], weekday: string, hour: number,
   return selected ? sortHourBlocks([...without, formatMomentBlock({ hour, weekday })]) : without;
 }
 
-/** Selected hours the grid cannot show, such as multi-hour blocks or text without a weekday. */
-export function hoursOutsideGrid(hourTexts: string[], grid: HourGridDay[]): string[] {
-  return hourTexts.filter(
-    (text) => !grid.some((day) => day.hours.some((hour) => isHourBlock(text, day.weekday, hour)))
-  );
-}
-
 export function sortHourBlocks(hourTexts: string[]): string[] {
   const position = (text: string) => {
     const block = parseHourBlock(text);

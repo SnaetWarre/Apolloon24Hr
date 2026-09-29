@@ -207,7 +207,8 @@ function seedRunners(count, nowMs) {
   return runners;
 }
 
-// `17-18u (dinsdag)` for the hour that is running now, in the form's own format.
+// `21-22u (dinsdag)` for the hour that is running now, in the form's own format,
+// or null when now is outside the event window (Tuesday 20:00 for 24 hours).
 function currentHourBlock(nowMs) {
   const parts = new Intl.DateTimeFormat('nl-BE', {
     hour: '2-digit',
@@ -217,8 +218,11 @@ function currentHourBlock(nowMs) {
   }).formatToParts(nowMs);
   const part = (type) => parts.find((entry) => entry.type === type)?.value ?? '';
   const hour = Number(part('hour'));
+  const weekday = part('weekday').toLowerCase();
+  const inWindow = (weekday === 'dinsdag' && hour >= 20) || (weekday === 'woensdag' && hour < 20);
+  if (!inWindow) return null;
   const pad = (value) => String(value).padStart(2, '0');
-  return `${pad(hour)}-${pad((hour + 1) % 24)}u (${part('weekday').toLowerCase()})`;
+  return `${pad(hour)}-${pad((hour + 1) % 24)}u (${weekday})`;
 }
 
 // Fictional form answers so profiles, filters and hours can be tested.
@@ -256,10 +260,13 @@ function fictionalRegistration(index, name, nowMs) {
     estimatedLaps: String(6 + (index % 10)),
     estimatedPace: `${Math.floor(pace / 60)}:${String(pace % 60).padStart(2, '0')}`,
     maxLapsPerBlock: String(3 + (index % 4)),
-    // Every third runner is also free right now, so the "Nu beschikbaar" panel on Wachtrij has people to call.
+    // During the event window every third runner is also free right now, so the
+    // "Nu beschikbaar" panel on Wachtrij has people to call.
     availableHours: [
-      ...[0, 1, 4].map((offset) => hourBlocks[(firstBlock + offset) % hourBlocks.length]),
-      ...(index % 3 === 0 ? [currentHourBlock(nowMs)] : []),
+      ...new Set([
+        ...[0, 1, 4].map((offset) => hourBlocks[(firstBlock + offset) % hourBlocks.length]),
+        ...(index % 3 === 0 && currentHourBlock(nowMs) ? [currentHourBlock(nowMs)] : []),
+      ]),
     ],
     reuseConsent: index % 5 === 0 ? 'Nee' : 'Ja',
     flexibility: index % 3 === 0 ? 'Ik kan inspringen als het moet' : 'Enkel op de opgegeven uren',
