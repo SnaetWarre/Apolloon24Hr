@@ -1,5 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import { type Runner, type RunnerInput, type RunnerPatch } from '../../shared/schemas.js';
+import {
+  runnerRegistrationSchema,
+  type Runner,
+  type RunnerInput,
+  type RunnerPatch,
+  type RunnerRegistration,
+  type RunnerRegistrationDetails,
+} from '../../shared/schemas.js';
 import { one, run, transaction } from './connection.js';
 import { TEMPORARY_TEAM_KIND, activeTemporaryTeamIdForRunner, ensureLabel } from './labels.js';
 import { getMaxQueueIndex } from './queue.js';
@@ -29,6 +36,41 @@ function findRunnerIdByEmail(email: string): string | null {
       [email]
     )?.id ?? null
   );
+}
+
+const EMPTY_REGISTRATION: RunnerRegistration = {
+  submittedAt: '',
+  email: '',
+  phone: '',
+  studyPhase: '',
+  estimatedLaps: '',
+  estimatedPace: '',
+  maxLapsPerBlock: '',
+  availableHours: [],
+  reuseConsent: '',
+  flexibility: '',
+  remarks: '',
+  categories: [],
+};
+
+/**
+ * Hand-entered contact details and hours on top of the stored registration.
+ * A registration left with no answers at all is dropped, so a manual runner
+ * reads as "no registration" again.
+ */
+function registrationJsonWithDetails(
+  registrationJson: string | null,
+  details: RunnerRegistrationDetails | undefined
+): string | null {
+  if (!details) return registrationJson;
+  const current = registrationJson ? runnerRegistrationSchema.parse(JSON.parse(registrationJson)) : EMPTY_REGISTRATION;
+  const next: RunnerRegistration = {
+    ...current,
+    ...details,
+    availableHours: details.availableHours ? [...new Set(details.availableHours)] : current.availableHours,
+  };
+  const hasAnswers = Object.values(next).some((value) => (Array.isArray(value) ? value.length : value.trim()));
+  return hasAnswers ? JSON.stringify(next) : null;
 }
 
 /**
@@ -89,7 +131,10 @@ export function insertRunner(input: RunnerInput): Runner {
         input.historicalBestMs ?? null,
         input.registrationSource ?? 'manual',
         input.notes ?? '',
-        input.registration ? JSON.stringify(input.registration) : null,
+        registrationJsonWithDetails(
+          input.registration ? JSON.stringify(input.registration) : null,
+          input.registrationDetails
+        ),
         initialStatus,
         initialQueueIndex,
         input.statusSince ?? now,
@@ -116,12 +161,14 @@ export function updateRunner(id: string, fields: RunnerPatch): Runner | null {
     historicalBestMs: fields.historicalBestMs !== undefined ? fields.historicalBestMs : current.historical_best_ms,
     registrationSource: fields.registrationSource ?? current.registration_source,
     notes: fields.notes ?? current.notes ?? '',
-    registrationJson:
+    registrationJson: registrationJsonWithDetails(
       fields.registration !== undefined
         ? fields.registration
           ? JSON.stringify(fields.registration)
           : null
         : current.registration_json,
+      fields.registrationDetails
+    ),
   };
 
   transaction(() => {

@@ -105,3 +105,82 @@ function compareRunnerNumbers(first: string | null, second: string | null): numb
   if (second === null) return -1;
   return first.localeCompare(second, 'nl-BE', { numeric: true });
 }
+
+const WEEKDAYS = ['maandag', 'dinsdag', 'woensdag', 'donderdag', 'vrijdag', 'zaterdag', 'zondag'];
+/** Without any registration to go by, offer every hour of the event days. */
+const DEFAULT_EVENT_WEEKDAYS = ['dinsdag', 'woensdag', 'donderdag'];
+
+export type HourGridDay = {
+  weekday: string;
+  hours: number[];
+};
+
+function blockHours(block: HourBlock): number[] {
+  const hours: number[] = [];
+  for (let hour = block.startHour; hours.length === 0 || hour !== block.endHour; hour = (hour + 1) % 24) {
+    hours.push(hour);
+  }
+  return hours;
+}
+
+/**
+ * The hours an operator can tick, per weekday: every hour between the first
+ * and last hour anyone registered for that day, so gaps in the form's
+ * answers can still be picked.
+ */
+export function buildHourGrid(hourTexts: string[]): HourGridDay[] {
+  const hoursByDay = new Map<string, number[]>();
+  for (const text of hourTexts) {
+    const block = parseHourBlock(text);
+    if (!block?.weekday) continue;
+    hoursByDay.set(block.weekday, [...(hoursByDay.get(block.weekday) ?? []), ...blockHours(block)]);
+  }
+  if (hoursByDay.size === 0) {
+    return DEFAULT_EVENT_WEEKDAYS.map((weekday) => ({ weekday, hours: Array.from({ length: 24 }, (_, hour) => hour) }));
+  }
+  return [...hoursByDay.entries()]
+    .sort(([first], [second]) => weekdayIndex(first) - weekdayIndex(second))
+    .map(([weekday, hours]) => {
+      const first = Math.min(...hours);
+      const last = Math.max(...hours);
+      return { weekday, hours: Array.from({ length: last - first + 1 }, (_, index) => first + index) };
+    });
+}
+
+/** Whether the list holds exactly the one-hour block starting at this hour. */
+export function hasHourBlock(hourTexts: string[], weekday: string, hour: number): boolean {
+  return hourTexts.some((text) => isHourBlock(text, weekday, hour));
+}
+
+/** Adds or removes the one-hour block, keeping the list in event order. */
+export function toggleHourBlock(hourTexts: string[], weekday: string, hour: number): string[] {
+  if (hasHourBlock(hourTexts, weekday, hour)) return hourTexts.filter((text) => !isHourBlock(text, weekday, hour));
+  return sortHourBlocks([...hourTexts, formatMomentBlock({ hour, weekday })]);
+}
+
+/** Selected hours the grid cannot show, such as multi-hour blocks or text without a weekday. */
+export function hoursOutsideGrid(hourTexts: string[], grid: HourGridDay[]): string[] {
+  return hourTexts.filter(
+    (text) => !grid.some((day) => day.hours.some((hour) => isHourBlock(text, day.weekday, hour)))
+  );
+}
+
+export function sortHourBlocks(hourTexts: string[]): string[] {
+  const position = (text: string) => {
+    const block = parseHourBlock(text);
+    return block?.weekday ? weekdayIndex(block.weekday) * 24 + block.startHour : Number.MAX_SAFE_INTEGER;
+  };
+  return [...hourTexts].sort(
+    (first, second) => position(first) - position(second) || first.localeCompare(second, 'nl-BE', { numeric: true })
+  );
+}
+
+function isHourBlock(text: string, weekday: string, hour: number): boolean {
+  const block = parseHourBlock(text);
+  return block?.weekday === weekday && block.startHour === hour && block.endHour === (hour + 1) % 24;
+}
+
+function weekdayIndex(weekday: string): number {
+  const index = WEEKDAYS.indexOf(weekday);
+  return index === -1 ? WEEKDAYS.length : index;
+}

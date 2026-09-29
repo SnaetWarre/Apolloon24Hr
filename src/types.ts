@@ -26,6 +26,7 @@ export type {
   RunnerInput,
   RunnerPatch,
   RunnerRegistration,
+  RunnerRegistrationDetails,
   RunnerStatus,
   TemporaryTeam,
 } from '../shared/schemas';

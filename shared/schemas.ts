@@ -74,6 +74,16 @@ export const runnerRegistrationSchema = z.object({
 });
 export type RunnerRegistration = z.infer<typeof runnerRegistrationSchema>;
 
+/** Registration answers an operator can fill in by hand; merged into the stored registration. */
+export const runnerRegistrationDetailsSchema = z
+  .object({
+    email: z.string().trim().max(320),
+    phone: z.string().trim().max(100),
+    availableHours: z.array(z.string().trim().min(1).max(100)).max(200),
+  })
+  .partial();
+export type RunnerRegistrationDetails = z.infer<typeof runnerRegistrationDetailsSchema>;
+
 export const runnerSchema = z.object({
   id: z.string(),
   runnerNumber: z.string().nullable(),
@@ -253,6 +263,7 @@ export const runnerInputSchema = z.object({
   registrationSource: registrationSourceSchema.optional(),
   notes: z.string().trim().optional(),
   registration: runnerRegistrationSchema.nullable().optional(),
+  registrationDetails: runnerRegistrationDetailsSchema.optional(),
   /** Label ids or names; unknown names become new labels. */
   labels: z.array(z.string().trim().min(1)).optional(),
   status: runnerStatusSchema.optional(),

@@ -1,11 +1,12 @@
 import React from 'react';
 import { ModalDialog } from './ModalDialog';
 import { useConfirm } from './ConfirmDialog';
+import { AvailableHoursPicker } from './AvailableHoursPicker';
 import { runnerFormError } from '../lib/runnerForm';
 import { useAppActions, useAppData, useRaceHistory, useRegistrations } from '../app/index';
 import { formatClockTimeMs, formatDurationMs } from '../lib/time';
 import { compareLabels, labelKindTitle } from './LabelBadge';
-import type { Label, LiveAppSnapshot, Runner, RunnerStatus } from '../types';
+import type { Label, LiveAppSnapshot, Runner, RunnerRegistration, RunnerStatus } from '../types';
 import { LiveElapsed } from './LiveTime';
 
 const selectRunnerProfileData = ({ runners, labels, temporaryTeams }: LiveAppSnapshot) => ({
@@ -25,6 +26,9 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
   const [name, setName] = React.useState('');
   const [targetLaps, setTargetLaps] = React.useState('');
   const [notes, setNotes] = React.useState('');
+  const [phone, setPhone] = React.useState('');
+  const [email, setEmail] = React.useState('');
+  const [availableHours, setAvailableHours] = React.useState<string[]>([]);
   const [selectedLabels, setSelectedLabels] = React.useState<string[]>([]);
   const [closePromptOpen, setClosePromptOpen] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
@@ -33,15 +37,27 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
   const [queueActionMessage, setQueueActionMessage] = React.useState<string | null>(null);
   const [queueActionError, setQueueActionError] = React.useState<string | null>(null);
   const [draftBaseline, setDraftBaseline] = React.useState(runner);
-  const editableRunnerKey = runner ? getEditableRunnerKey(runner) : '';
+  const [registrationBaseline, setRegistrationBaseline] = React.useState(registration);
+  const editableRunnerKey = runner ? getEditableRunnerKey(runner, registration) : '';
   const dirty = draftBaseline
-    ? isDirty({ runner: draftBaseline, runnerNumber, name, targetLaps, notes, selectedLabels })
+    ? isDirty({
+        runner: draftBaseline,
+        registration: registrationBaseline,
+        runnerNumber,
+        name,
+        targetLaps,
+        notes,
+        phone,
+        email,
+        availableHours,
+        selectedLabels,
+      })
     : false;
   const profileChangedElsewhere = Boolean(
     runner &&
     draftBaseline &&
     runner.id === draftBaseline.id &&
-    editableRunnerKey !== getEditableRunnerKey(draftBaseline)
+    editableRunnerKey !== getEditableRunnerKey(draftBaseline, registrationBaseline)
   );
   const initializedRunnerId = React.useRef<string | null>(null);
   const activeTemporaryTeam = temporaryTeams.find((team) => team.active && team.memberRunnerIds.includes(runnerId));
@@ -50,10 +66,14 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
     if (!runner) return;
     initializedRunnerId.current = runner.id;
     setDraftBaseline(runner);
+    setRegistrationBaseline(registration);
     setRunnerNumber(runner.runnerNumber || '');
     setName(runner.name);
     setTargetLaps(runner.targetLaps?.toString() || '');
     setNotes(runner.notes || '');
+    setPhone(registration?.phone || '');
+    setEmail(registration?.email || '');
+    setAvailableHours(registration?.availableHours ?? []);
     setSelectedLabels(runner.labels.map((label) => label.id));
   }
 
@@ -88,6 +108,7 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
         name,
         targetLaps: targetLaps ? Number(targetLaps) : null,
         notes,
+        registrationDetails: { phone, email, availableHours },
         labels: selectedLabels,
       });
       onClose();
@@ -230,7 +251,7 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
           </div>
         </div>
 
-        {registration && (
+        {registration && hasRegistrationAnswers(registration) && (
           <section className="profile-registration" aria-label="Inschrijvingsgegevens">
             <h3>Inschrijvingsgegevens</h3>
             <div className="profile-registration__grid">
@@ -286,6 +307,26 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
             <input className="input" value={name} onChange={(event) => setName(event.target.value)} />
           </label>
           <label>
+            Telefoon
+            <input
+              className="input"
+              type="tel"
+              autoComplete="off"
+              value={phone}
+              onChange={(event) => setPhone(event.target.value)}
+            />
+          </label>
+          <label>
+            E-mail
+            <input
+              className="input"
+              type="email"
+              autoComplete="off"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+            />
+          </label>
+          <label>
             Doel (rondes)
             <input
               className="input"
@@ -296,6 +337,8 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
             />
           </label>
         </div>
+
+        <AvailableHoursPicker value={availableHours} onChange={setAvailableHours} />
 
         <div className="label-picker-groups">
           {activeTemporaryTeam && (
@@ -431,6 +474,23 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
   );
 }
 
+/** The form's own answers; contact details and hours already show at the top. */
+function hasRegistrationAnswers(registration: RunnerRegistration) {
+  return (
+    registration.categories.length > 0 ||
+    [
+      registration.studyPhase,
+      registration.estimatedLaps,
+      registration.estimatedPace,
+      registration.maxLapsPerBlock,
+      registration.flexibility,
+      registration.reuseConsent,
+      registration.remarks,
+      registration.submittedAt,
+    ].some((value) => value.trim())
+  );
+}
+
 /** Empty answers are left out so the filled-in ones stand out. */
 function RegistrationField({ label, value }: { label: string; value: string }) {
   if (!value.trim()) return null;
@@ -458,17 +518,25 @@ function runnerTitle(runner: Pick<Runner, 'runnerNumber' | 'name'>) {
 
 function isDirty({
   runner,
+  registration,
   runnerNumber,
   name,
   targetLaps,
   notes,
+  phone,
+  email,
+  availableHours,
   selectedLabels,
 }: {
   runner: Runner;
+  registration: RunnerRegistration | null;
   runnerNumber: string;
   name: string;
   targetLaps: string;
   notes: string;
+  phone: string;
+  email: string;
+  availableHours: string[];
   selectedLabels: string[];
 }) {
   const currentLabels = runner.labels
@@ -481,11 +549,14 @@ function isDirty({
     name.trim() !== runner.name ||
     targetLaps.trim() !== (runner.targetLaps?.toString() || '') ||
     notes !== (runner.notes || '') ||
+    phone.trim() !== (registration?.phone || '') ||
+    email.trim() !== (registration?.email || '') ||
+    availableHours.join('|') !== (registration?.availableHours ?? []).join('|') ||
     currentLabels !== nextLabels
   );
 }
 
-function getEditableRunnerKey(runner: Runner) {
+function getEditableRunnerKey(runner: Runner, registration: RunnerRegistration | null) {
   return [
     runner.id,
     runner.runnerNumber || '',
@@ -496,6 +567,9 @@ function getEditableRunnerKey(runner: Runner) {
       .map((label) => label.id)
       .sort()
       .join('|'),
+    registration?.phone || '',
+    registration?.email || '',
+    (registration?.availableHours ?? []).join('|'),
   ].join('\u0001');
 }
 
