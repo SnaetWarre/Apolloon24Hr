@@ -10,7 +10,7 @@ import { LabelBadge } from './LabelBadge';
 import { RunnerName } from './RunnerName';
 import { PageHeader } from './PageHeader';
 import { useArrivals, usePulse } from '../lib/motion';
-import { forgetLapStart, rememberLapStart, timePress } from '../lib/pressTiming';
+import { forgetLapStart, rememberLapStart, timePress, type PressTime } from '../lib/pressTiming';
 import { LIVE_MILLISECOND_INTERVAL_MS, useClockTick } from '../lib/useClockTick';
 
 const selectTimingData = ({ runners, race }: LiveAppSnapshot) => ({ runners, race });
@@ -34,6 +34,8 @@ export function TimingView() {
   const [handoffBusy, setHandoffBusy] = React.useState(false);
   const [lastAction, setLastAction] = React.useState<string | null>(null);
   const [finishConfirmStep, setFinishConfirmStep] = React.useState<0 | 1 | 2>(0);
+  // The first "Race beëindigen" click stops the clock; the confirmations only decide whether it counts.
+  const [finishStop, setFinishStop] = React.useState<{ press: PressTime; activeStartedAt: number | null } | null>(null);
   const handoffBusyRef = React.useRef(false);
   const confirm = useConfirm();
   // A press flashes the key, also when it came from the keyboard.
@@ -166,15 +168,31 @@ export function TimingView() {
     await runExclusiveRaceAction(undoLastHandoff, null);
   }
 
-  async function finish(eventTime: number) {
-    const press = timePress(eventTime, race.activeStartedAt);
-    const succeeded = await runExclusiveRaceAction(() => finishRace(press), 'Race beëindigd.');
-    if (succeeded) forgetLapStart();
+  function startFinish(eventTime: number) {
+    setFinishStop({ press: timePress(eventTime, race.activeStartedAt), activeStartedAt: race.activeStartedAt });
+    setFinishConfirmStep(1);
+  }
+
+  function cancelFinish() {
+    setFinishStop(null);
+    setFinishConfirmStep(0);
+  }
+
+  async function finish() {
+    if (!finishPress) {
+      // Another laptop changed the runner while this dialog was open; the stopped time belongs to someone else.
+      cancelFinish();
+      setActionError('De loper is intussen gewisseld. Beëindig de race opnieuw.');
+      return;
+    }
+    const succeeded = await runExclusiveRaceAction(() => finishRace(finishPress), 'Race beëindigd.');
     if (succeeded) {
-      setFinishConfirmStep(0);
+      forgetLapStart();
+      cancelFinish();
     }
   }
 
+  const finishPress = finishStop?.activeStartedAt === race.activeStartedAt ? finishStop.press : null;
   const previousLapText = runnerHistoryError
     ? 'Niet beschikbaar'
     : activePreviousLap
@@ -248,7 +266,12 @@ export function TimingView() {
 
           <div className="timing-clock-row">
             {activeRunner && race.activeStartedAt ? (
-              <TimingClock key={startKey} startedAt={race.activeStartedAt} arrived={changed.has(`start:${startKey}`)} />
+              <TimingClock
+                key={startKey}
+                startedAt={race.activeStartedAt}
+                stoppedAt={finishPress?.pressedAt ?? null}
+                arrived={changed.has(`start:${startKey}`)}
+              />
             ) : (
               <span className="timing-clock timing-clock--idle" aria-hidden="true">
                 0:00<small>.0</small>
@@ -405,7 +428,7 @@ export function TimingView() {
             <h2>Race afsluiten</h2>
             <button
               className="btn btn--danger-outline btn--sm"
-              onClick={() => setFinishConfirmStep(1)}
+              onClick={(event) => startFinish(event.timeStamp)}
               disabled={handoffBusy || timingBlocked}
             >
               Race beëindigen
@@ -418,16 +441,22 @@ export function TimingView() {
         <ModalDialog
           label="Race afsluiten"
           onRequestClose={() => {
-            if (!handoffBusy) setFinishConfirmStep(0);
+            if (!handoffBusy) cancelFinish();
           }}
         >
           <div className="confirm-modal confirm-modal--danger">
             {finishConfirmStep === 1 ? (
               <>
                 <h3>Race beëindigen?</h3>
-                <p>De actieve loper stopt zonder extra ronde. Daarna vraagt de app nog één keer om bevestiging.</p>
+                <p>
+                  {activeRunner && race.activeStartedAt && finishPress
+                    ? `De klok van ${shortRunnerName(activeRunner)} staat stil op ${formatDurationMs(Math.max(0, finishPress.pressedAt - race.activeStartedAt))}. `
+                    : ''}
+                  De actieve loper stopt zonder extra ronde. Bij annuleren loopt de klok gewoon verder. Daarna vraagt de
+                  app nog één keer om bevestiging.
+                </p>
                 <div className="modal-actions">
-                  <button className="btn" onClick={() => setFinishConfirmStep(0)} disabled={handoffBusy}>
+                  <button className="btn" onClick={cancelFinish} disabled={handoffBusy}>
                     Annuleer
                   </button>
                   <button className="btn btn--primary" onClick={() => setFinishConfirmStep(2)}>
@@ -442,14 +471,10 @@ export function TimingView() {
                   Bevestig alleen als de race echt afgerond is. Spatie en Enter doen daarna niets meer op dit scherm.
                 </p>
                 <div className="modal-actions">
-                  <button className="btn" onClick={() => setFinishConfirmStep(0)} disabled={handoffBusy}>
+                  <button className="btn" onClick={cancelFinish} disabled={handoffBusy}>
                     Annuleer
                   </button>
-                  <button
-                    className="btn btn--danger"
-                    onClick={(event) => void finish(event.timeStamp)}
-                    disabled={handoffBusy}
-                  >
+                  <button className="btn btn--danger" onClick={() => void finish()} disabled={handoffBusy}>
                     Race definitief beeindigen
                   </button>
                 </div>
@@ -462,9 +487,17 @@ export function TimingView() {
   );
 }
 
-function TimingClock({ startedAt, arrived }: { startedAt: number; arrived: boolean }) {
-  useClockTick(LIVE_MILLISECOND_INTERVAL_MS);
-  const [main, fraction = '0'] = formatDurationMs(nowMs() - startedAt).split('.');
+function TimingClock({
+  startedAt,
+  stoppedAt,
+  arrived,
+}: {
+  startedAt: number;
+  stoppedAt: number | null;
+  arrived: boolean;
+}) {
+  useClockTick(LIVE_MILLISECOND_INTERVAL_MS, stoppedAt === null);
+  const [main, fraction = '0'] = formatDurationMs(Math.max(0, (stoppedAt ?? nowMs()) - startedAt)).split('.');
   return (
     <span
       className={`timing-clock live-time${arrived ? ' value-tick' : ''}`}

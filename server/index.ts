@@ -24,6 +24,7 @@ import { getNetProfile, isLoopbackAddress, requestMakeStatic, requestRevertDhcp 
 import { appRouter } from './router.js';
 import { registerStaticFrontend } from './static-files.js';
 import { clusterNow } from './clock.js';
+import { isDemoRaceEnabled, startDemoRace } from './demo-race.js';
 
 const app = express();
 app.disable('x-powered-by');
@@ -35,6 +36,7 @@ const io = new SocketIOServer(server, {
 const processStartedAt = Date.now();
 let shuttingDown = false;
 let temporaryTeamTimer: NodeJS.Timeout | null = null;
+let stopDemoRace: (() => void) | null = null;
 
 // Clients refetch when the revision moves; several changes in one tick send one event.
 let revisionEmitQueued = false;
@@ -197,6 +199,7 @@ function shutdown(reason: string): void {
   console.log(`Stopping server (${reason})`);
   stopClusterService();
   if (temporaryTeamTimer) clearInterval(temporaryTeamTimer);
+  stopDemoRace?.();
 
   const forceExit = setTimeout(() => {
     try {
@@ -233,6 +236,7 @@ await initDb();
 startBackupService();
 startClusterService();
 watchTemporaryTeams();
+if (isDemoRaceEnabled()) stopDemoRace = startDemoRace();
 
 server.listen(SERVER_PORT, () => {
   console.log(`Server listening on http://0.0.0.0:${SERVER_PORT}`);

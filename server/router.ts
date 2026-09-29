@@ -172,16 +172,18 @@ function assertExpectedRaceState(expected: RaceStateExpectation): void {
 
 /** A press may wait this long during a takeover (the write deadline) and still keep its own time. */
 const PRESS_MAX_AGE_MS = 20_000;
+/** Finishing stops the clock at the first click; the confirmations after it may take a while. */
+const FINISH_PRESS_MAX_AGE_MS = 10 * 60_000;
 
 /**
  * The moment of the key press as the timing screen recorded it. A press older
  * than any takeover wait, or in the future, means that screen's clock is off,
  * so the arrival time is used instead.
  */
-function pressMoment(press: TimingPress): number {
+function pressMoment(press: TimingPress, maxAgeMs = PRESS_MAX_AGE_MS): number {
   const now = clusterNow();
   const pressedAt = press.pressedAt;
-  const plausible = pressedAt !== undefined && pressedAt >= now - PRESS_MAX_AGE_MS && pressedAt <= now + 1_000;
+  const plausible = pressedAt !== undefined && pressedAt >= now - maxAgeMs && pressedAt <= now + 1_000;
   return Math.max(plausible ? pressedAt : now, press.activeStartedAt ?? 0);
 }
 
@@ -316,7 +318,7 @@ export const appRouter = t.router({
     finish: t.procedure.input(timingPressSchema).mutation(
       write((input) => {
         assertExpectedRaceState(input);
-        finishRace(pressMoment(input));
+        finishRace(pressMoment(input, FINISH_PRESS_MAX_AGE_MS));
         return { ok: true };
       })
     ),
