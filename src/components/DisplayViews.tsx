@@ -528,12 +528,16 @@ function DisplayLabels({ labels }: { labels: Label[] }) {
 }
 
 // The flash fades in, holds, and fades out just before it is removed.
-const flashStyle = { animationDuration: `${OUTSIDE_ALERT_VISIBLE_MS}ms` };
+const flashStyle = { '--flash-ms': `${OUTSIDE_ALERT_VISIBLE_MS}ms` } as React.CSSProperties;
+// Longer titles get a smaller size so they stay on two lines.
+const LONG_FLASH_TITLE = 18;
 
 function OutsideRecordFlash({ lap, mode }: { lap: LapRecord; mode: PublicRecordMode }) {
   return (
     <section className="outside-record-flash" style={flashStyle} aria-live="polite">
-      <div className="record-flash-content">
+      <div
+        className={`record-flash-content${publicRecordModeTitle(mode).length > LONG_FLASH_TITLE ? ' record-flash-content--long' : ''}`}
+      >
         <span>{publicRecordModeTitle(mode)}</span>
         <strong>{formatDurationMs(lap.durationMs)}</strong>
         <em>{lapRunnerLabel(lap)}</em>
@@ -544,7 +548,7 @@ function OutsideRecordFlash({ lap, mode }: { lap: LapRecord; mode: PublicRecordM
 
 function OutsideBurgieFlash({ event }: { event: RaceEvent }) {
   return (
-    <section className="outside-record-flash outside-record-flash--burgie" style={flashStyle} aria-live="polite">
+    <section className="outside-record-flash" style={flashStyle} aria-live="polite">
       <div className="record-flash-content">
         <span>Burgie gepakt</span>
         <strong>ZINGEN</strong>

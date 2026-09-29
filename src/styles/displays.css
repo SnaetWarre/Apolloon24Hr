@@ -247,49 +247,92 @@ html[data-display-tone="light"] body {
   font-size: clamp(44px, 5.4vw, 116px);
 }
 
+/*
+ * The flash is the loudest moment on the public screens, on purpose: a record or
+ * "Burgie gepakt" pulses between Apolloon blue and night blue inside a thick frame,
+ * with the figure on a yellow slab. It fades in, holds for --flash-ms (set inline to
+ * the time it stays) and fades out just before it is removed. The pulse is slow
+ * (one cycle every 2.4 s), far below any flicker threshold.
+ * Sizes follow the smaller of width and height so three lines always fit a tv.
+ */
 .outside-record-flash {
   position: fixed;
   inset: 0;
   z-index: 20;
   display: grid;
   place-items: center;
-  padding: 5vw;
+  overflow: hidden;
+  padding: clamp(26px, 5vw, 90px);
   background: var(--apolloon-blue);
   color: #FFFFFF;
   pointer-events: none;
-  /* The duration is set inline to the time the flash stays: it fades in, holds, and fades out. */
-  animation: display-flash 8s var(--ease-out) both;
+  animation:
+    display-flash var(--flash-ms, 8s) var(--ease-out) both,
+    record-flash-pulse 2.4s ease-in-out infinite;
 }
 
-.outside-record-flash--burgie {
-  background: #F2A516;
-  color: #111111;
+.outside-record-flash::before {
+  content: "";
+  position: absolute;
+  inset: clamp(16px, 2.4vw, 46px);
+  border: clamp(4px, 0.45vw, 9px) solid currentColor;
+  border-radius: 12px;
+  opacity: 0.72;
 }
 
 .record-flash-content {
+  position: relative;
+  z-index: 1;
   display: grid;
   justify-items: center;
-  gap: 2vh;
+  width: min(100%, 1640px);
   text-align: center;
 }
 
 .record-flash-content span {
-  font: 500 clamp(32px, 3.4vw, 72px)/1 var(--font-body);
-  opacity: 0.9;
+  font: 900 clamp(56px, min(12vw, 17vh), 238px)/0.84 var(--font-body);
+  letter-spacing: -0.01em;
+  text-transform: uppercase;
+  text-wrap: balance;
   animation: display-rise var(--dur-3) var(--ease-out) 120ms backwards;
 }
 
+/* "Snelste ronde van deze 2 uur" stays on two lines. */
+.record-flash-content--long span {
+  font-size: clamp(44px, min(7.5vw, 11vh), 150px);
+}
+
 .record-flash-content strong {
-  font: 700 clamp(120px, 16vw, 320px)/0.9 var(--font-body);
-  letter-spacing: -0.05em;
+  margin-top: clamp(16px, min(2.3vw, 3.4vh), 42px);
+  padding: clamp(8px, 1vw, 20px) clamp(22px, 2.2vw, 52px);
+  background: #FFCF24;
+  color: #162033;
+  font: 900 clamp(72px, min(14vw, 24vh), 282px)/0.92 var(--font-body);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.03em;
   animation: display-pop 600ms var(--ease-spring) backwards;
 }
 
 .record-flash-content em {
-  font: 600 clamp(36px, 3.8vw, 84px)/1 var(--font-body);
+  max-width: 100%;
+  margin-top: clamp(18px, min(2.6vw, 3.8vh), 48px);
+  overflow-wrap: anywhere;
+  font: 900 clamp(30px, min(5.8vw, 9vh), 112px)/1 var(--font-body);
   font-style: normal;
   letter-spacing: -0.02em;
   animation: display-rise var(--dur-3) var(--ease-out) 200ms backwards;
+}
+
+@keyframes record-flash-pulse {
+  0%,
+  100% {
+    background-color: var(--apolloon-blue);
+    color: #FFFFFF;
+  }
+  50% {
+    background-color: #0F2A5C;
+    color: #FFE58A;
+  }
 }
 
 @keyframes display-flash {
