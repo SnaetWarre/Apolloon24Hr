@@ -3,13 +3,14 @@ import test from 'node:test';
 import {
   blockCoversMoment,
   brusselsMoment,
-  buildHourGrid,
+  eventHourGrid,
   findAvailableUncalledRunners,
   formatMomentBlock,
   hasHourBlock,
   hoursOutsideGrid,
   isAvailableAtMoment,
   parseHourBlock,
+  setHourBlock,
   toggleHourBlock,
 } from '../src/lib/availability.ts';
 import type { Runner, RunnerRegistration } from '../src/types.ts';
@@ -131,17 +132,11 @@ test('only runners who are available now and not on the board are listed, unrun 
   );
 });
 
-test('the hour grid spans each registered day, filling hours nobody picked', () => {
-  assert.deepEqual(buildHourGrid(['22-23u (woensdag)', '20-21u (dinsdag)', '23-00u (dinsdag)', '18-19u (woensdag)']), [
+test('the event grid runs from Tuesday 20:00 for 24 hours', () => {
+  assert.deepEqual(eventHourGrid(), [
     { weekday: 'dinsdag', hours: [20, 21, 22, 23] },
-    { weekday: 'woensdag', hours: [18, 19, 20, 21, 22] },
+    { weekday: 'woensdag', hours: Array.from({ length: 20 }, (_, hour) => hour) },
   ]);
-  const fallback = buildHourGrid(['dinsdagavond']);
-  assert.deepEqual(
-    fallback.map(({ weekday }) => weekday),
-    ['dinsdag', 'woensdag', 'donderdag']
-  );
-  assert.equal(fallback[0].hours.length, 24);
 });
 
 test('ticking an hour writes it in the form format, in event order', () => {
@@ -149,7 +144,13 @@ test('ticking an hour writes it in the form format, in event order', () => {
   assert.deepEqual(picked, ['20-21u (dinsdag)', '23-00u (dinsdag)', '01-02u (woensdag)']);
   assert.equal(hasHourBlock(picked, 'dinsdag', 23), true);
   assert.deepEqual(toggleHourBlock(picked, 'dinsdag', 23), ['20-21u (dinsdag)', '01-02u (woensdag)']);
+  assert.deepEqual(setHourBlock(picked, 'dinsdag', 20, true), picked);
+  assert.deepEqual(setHourBlock(picked, 'dinsdag', 20, false), ['23-00u (dinsdag)', '01-02u (woensdag)']);
 
-  const grid = buildHourGrid(picked);
-  assert.deepEqual(hoursOutsideGrid([...picked, '20-22u (dinsdag)', 'avond'], grid), ['20-22u (dinsdag)', 'avond']);
+  const grid = eventHourGrid();
+  assert.deepEqual(hoursOutsideGrid([...picked, '20-22u (dinsdag)', '17-18u (dinsdag)', 'avond'], grid), [
+    '20-22u (dinsdag)',
+    '17-18u (dinsdag)',
+    'avond',
+  ]);
 });

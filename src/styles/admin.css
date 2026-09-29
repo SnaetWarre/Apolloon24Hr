@@ -734,12 +734,44 @@
   gap: 4px;
 }
 
-.hours-picker__hour span {
-  justify-content: center;
-  min-width: 44px;
+.hours-picker__slot {
+  min-width: 58px;
   min-height: 28px;
   padding: 0 6px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 500;
   font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+  transition:
+    background-color var(--dur-1) var(--ease-out),
+    border-color var(--dur-1) var(--ease-out),
+    color var(--dur-1) var(--ease-out);
+}
+
+.hours-picker__slot:hover {
+  background: var(--surface-2);
+}
+
+.hours-picker__slot[aria-pressed='true'] {
+  border-color: var(--brand);
+  background: var(--brand-wash);
+  color: var(--brand-ink);
+  box-shadow: inset 0 0 0 1px var(--brand);
+}
+
+.hours-picker__slot:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.hours-picker .label-picker-help {
+  margin: var(--space-1) 0 0;
 }
 
 @media (max-width: 900px) {
