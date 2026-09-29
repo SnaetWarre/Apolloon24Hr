@@ -1,5 +1,5 @@
 import React from 'react';
-import { eventHourGrid, formatMomentBlock, hasHourBlock, hoursOutsideGrid, setHourBlock } from '../lib/availability';
+import { eventHourGrid, formatMomentBlock, hasHourBlock, setHourBlock } from '../lib/availability';
 
 const GRID = eventHourGrid();
 
@@ -9,7 +9,6 @@ const GRID = eventHourGrid();
  * or press and drag across a stretch to set it in one go.
  */
 export function AvailableHoursPicker({ value, onChange }: { value: string[]; onChange: (hours: string[]) => void }) {
-  const otherHours = hoursOutsideGrid(value, GRID);
   // What a drag paints: the opposite of the slot it started on.
   const paint = React.useRef<boolean | null>(null);
 
@@ -70,19 +69,6 @@ export function AvailableHoursPicker({ value, onChange }: { value: string[]; onC
           </div>
         </div>
       ))}
-      {otherHours.length > 0 && (
-        <div className="hours-picker__day">
-          <span className="hours-picker__weekday">Andere</span>
-          <div className="hours-picker__hours">
-            {otherHours.map((text) => (
-              <label key={text} className="check-pill">
-                <input type="checkbox" checked onChange={() => onChange(value.filter((hour) => hour !== text))} />
-                <span>{text}</span>
-              </label>
-            ))}
-          </div>
-        </div>
-      )}
       <p className="label-picker-help">Sleep over meerdere uren om ze in één keer aan of uit te zetten.</p>
     </fieldset>
   );
