@@ -19,7 +19,7 @@ env:
 
 jobs:
   prepare-release:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v6
         with:
@@ -54,7 +54,7 @@ jobs:
             script: electron:build:win
             assets: release/*.exe
           - name: Linux x64
-            os: ubuntu-latest
+            os: ubuntu-26.04
             script: electron:build:linux
             assets: release/*.AppImage
           - name: macOS Apple Silicon
