@@ -17,6 +17,8 @@ type RunningServer = {
   baseUrl: string;
   dataPath: string;
   output: () => string;
+  /** Set when the test stops it; any other exit is reported with the server's output. */
+  stopping: boolean;
 };
 
 test('standalone mode stays writable and does not expose replication', { timeout: 15_000 }, async () => {
@@ -437,31 +439,54 @@ async function startServer(options: {
     baseUrl: `http://127.0.0.1:${options.port}`,
     dataPath: options.dataPath,
     output: () => chunks.join(''),
+    stopping: false,
   };
+  child.once('exit', (code, signal) => {
+    chunks.push(`\n[exited: ${code ?? signal}]\n`);
+    if (!server.stopping) {
+      process.stderr.write(`Server ${server.baseUrl} stopped unexpectedly (${code ?? signal}):\n${server.output()}\n`);
+    }
+  });
   await waitFor(async () => {
-    if (child.exitCode !== null) throw new Error(`server exited ${child.exitCode}\n${server.output()}`);
+    if (hasExited(server)) throw new Error(`server exited\n${server.output()}`);
     return (await fetch(`${server.baseUrl}/api/host-info`).catch(() => null))?.ok === true;
   });
   return server;
 }
 
 async function stopServer(server: RunningServer | null): Promise<void> {
-  if (!server || server.process.exitCode !== null) return;
-  const exited = new Promise<void>((resolve) => server.process.once('exit', () => resolve()));
+  if (!server || hasExited(server)) return;
+  server.stopping = true;
+  const exited = waitForExit(server);
   server.process.kill('SIGTERM');
   await Promise.race([exited, new Promise<void>((resolve) => setTimeout(resolve, 2_000))]);
-  if (server.process.exitCode === null) {
-    server.process.kill('SIGKILL');
-    await exited;
-  }
+  if (!hasExited(server)) server.process.kill('SIGKILL');
+  await exited;
 }
 
 /** A laptop that suddenly loses power. */
 async function killServer(server: RunningServer): Promise<void> {
-  if (server.process.exitCode !== null) return;
-  const exited = new Promise<void>((resolve) => server.process.once('exit', () => resolve()));
+  if (hasExited(server)) return;
+  server.stopping = true;
+  const exited = waitForExit(server);
   server.process.kill('SIGKILL');
   await exited;
+}
+
+/** A process killed by a signal keeps `exitCode` null, so both are checked. */
+function hasExited(server: RunningServer): boolean {
+  return server.process.exitCode !== null || server.process.signalCode !== null;
+}
+
+function waitForExit(server: RunningServer): Promise<void> {
+  if (hasExited(server)) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${server.baseUrl} did not stop\n${server.output()}`)), 10_000);
+    server.process.once('exit', () => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
 }
 
 async function fetchState(server: RunningServer): Promise<AppSnapshot> {
