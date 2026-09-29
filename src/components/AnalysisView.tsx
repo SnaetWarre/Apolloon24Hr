@@ -33,6 +33,7 @@ import {
   type LabelComparison,
   type RunnerInsight,
 } from '../lib/analysis';
+import { useArrivals } from '../lib/motion';
 import { formatClockTimeMs, formatDurationMs } from '../lib/time';
 import type { Label, LapRecord, LiveAppSnapshot, PublicRecordMode } from '../types';
 
@@ -78,6 +79,27 @@ export function AnalysisView() {
   const [runnerSearch, setRunnerSearch] = React.useState('');
   const [runnerSort, setRunnerSort] = React.useState<RunnerInsightSort>('laps');
   const [fastestWindowMode, setFastestWindowMode] = React.useState<AnalysisRecordWindowMode>('day');
+  const exportRef = React.useRef<HTMLDetailsElement>(null);
+  // A section chosen after the page opened fades in; the first one is simply there.
+  const sectionChanged = useArrivals([`section:${activeSection}`]).has(`section:${activeSection}`);
+
+  // The export menu closes like any menu: a click elsewhere or Escape.
+  React.useEffect(() => {
+    const details = exportRef.current;
+    if (!details) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (details.open && !details.contains(event.target as Node)) details.open = false;
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (details.open && event.key === 'Escape') details.open = false;
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, []);
 
   const analysisLabels = React.useMemo(() => mergeAnalysisLabels(labels, laps), [labels, laps]);
   const enabledLabelIds = React.useMemo(
@@ -146,7 +168,7 @@ export function AnalysisView() {
           </span>
         }
         actions={
-          <details className="analysis-export">
+          <details ref={exportRef} className="analysis-export">
             <summary className="btn btn--sm">
               <Icon name="download" size={14} />
               Exporteren
@@ -220,7 +242,7 @@ export function AnalysisView() {
             onSectionChange={setActiveSection}
           />
           {activeSection === 'race' && (
-            <>
+            <div key="race" className={`analysis-section${sectionChanged ? ' rise-in' : ''}`}>
               <div className="analysis-charts">
                 <section className="panel analysis-pace-panel">
                   <SectionHeader
@@ -257,10 +279,10 @@ export function AnalysisView() {
                   />
                 </section>
               </div>
-            </>
+            </div>
           )}
           {activeSection === 'runners' && (
-            <>
+            <div key="runners" className={`analysis-section${sectionChanged ? ' rise-in' : ''}`}>
               <section className="panel">
                 <div className="panel-heading-row">
                   <SectionHeader
@@ -298,10 +320,10 @@ export function AnalysisView() {
                   <RunnerInsightsTable insights={visibleRunnerInsights} />
                 </div>
               </section>
-            </>
+            </div>
           )}
           {activeSection === 'teams' && (
-            <>
+            <div key="teams" className={`analysis-section${sectionChanged ? ' rise-in' : ''}`}>
               <section className="panel">
                 <SectionHeader
                   title="Gemiddelde per label"
@@ -309,7 +331,7 @@ export function AnalysisView() {
                 />
                 <LabelComparisonList comparisons={labelComparisons} />
               </section>
-            </>
+            </div>
           )}
         </div>
       </div>
@@ -333,10 +355,14 @@ function mergeAnalysisLabels(currentLabels: Label[], laps: LapRecord[]): Label[]
 
 function StatPanel({ label, value, hero }: { label: string; value: string; hero?: boolean }) {
   const hasLongValue = value.length >= 10;
+  // A figure that changes with the filter lifts briefly; the first figure is simply there.
+  const changed = useArrivals([value]).has(value);
   return (
     <div className={`stat-panel${hasLongValue ? ' stat-panel--long-value' : ''}${hero ? ' stat-panel--hero' : ''}`}>
       <span className="muted-label">{label}</span>
-      <strong title={value}>{value}</strong>
+      <strong key={value} className={changed ? 'value-tick' : undefined} title={value}>
+        {value}
+      </strong>
     </div>
   );
 }
