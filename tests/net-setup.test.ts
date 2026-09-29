@@ -157,6 +157,7 @@ test('Linux and macOS command builders quote names and carry validated values', 
   assert.ok(setScript.includes(`nmcli con mod 'Wired connection 1' ipv4.addresses 192.168.1.211/24`));
   assert.ok(setScript.includes('ipv4.method manual'));
   assert.ok(setScript.includes('ufw allow 5173/tcp'));
+  assert.ok(setScript.includes('ufw allow 45737/udp'), 'laptops announce themselves on UDP');
   const setGw = buildLinuxSetStaticScript('Eth', '192.168.1.211', 24, '192.168.1.1');
   assert.ok(setGw.includes('ipv4.gateway 192.168.1.1'));
   const revert = buildLinuxRevertDhcpScript('Eth');

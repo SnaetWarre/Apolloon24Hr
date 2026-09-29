@@ -14,7 +14,7 @@ Shared contracts live in `shared/`. Anything imported by both client and server 
 - `src/router.tsx`: route table. Wedstrijd routes load eagerly; Analyse, Kobe's
   tactiek, Beheer, and the displays are lazy routes preloaded on hover.
 - `src/App.tsx`: app shell, loading/error states, and the connection and
-  standby banners. `components/Sidebar.tsx` holds the navigation.
+  "too few laptops" banners. `components/Sidebar.tsx` holds the navigation.
 - `src/app/`: app-wide data layer.
   - `queryClient.ts`: TanStack Query configuration.
   - `snapshot.ts`: query keys; everything server-derived lives under `['app']`.
@@ -44,7 +44,7 @@ Shared contracts live in `shared/`. Anything imported by both client and server 
   - `pressTiming.ts`: dates timing presses from their key events and measures
     laps on the monotonic clock.
   - `readiness.ts` and `systemStatus.ts`: the event readiness checklist and the
-    one-line health status, from backup, standby, and clock state.
+    one-line health status, from backup and linked-laptop state.
 - `src/types.ts`: client-facing re-export of shared schema types.
 - `src/styles/`: the design system, imported once via `index.css` (Geist, neutral light and charcoal dark).
   - `tokens.css`: semantic colour, type, spacing and radius tokens for the light
@@ -70,12 +70,15 @@ Shared contracts live in `shared/`. Anything imported by both client and server 
 - `server/exports.ts`: lap and event CSV/JSON exports.
 - `server/static-files.ts`: packaged frontend serving.
 - `server/db.ts`: facade over `server/db/` (SQLite schema, reads, writes, race-state transitions, replication log).
-- `server/cluster.ts`: primary/standby roles, log pulling, joining, and promotion.
+- `server/consensus.ts`: leader election by majority (Raft), log replication, and majority commit.
+- `server/cluster.ts`: endpoints between laptops, joining, passing writes to the leader, and the group status.
+- `server/peers.ts`: requests between laptops and their addresses.
+- `server/discovery.ts`: UDP announcements so laptops find each other on the LAN.
 - `server/backups.ts` and `backup-verify-worker.ts`: scheduled, verified backups and retention.
 - `server/app-state.ts`: live snapshot and lap history scopes.
 - `server/http-json.ts`: gzip, ETags, and one serialization per data revision.
 - `server/host.ts`: event LAN URL selection.
-- `server/clock.ts`: the cluster clock shared by all laptops.
+- `server/clock.ts`: the group clock shared by all laptops.
 - `server/net-setup.ts`: pins the laptop's wired adapter to a static address (and back to DHCP) through the OS permission prompt; only callable from the laptop itself.
 
 See `docs/backend-architecture.md` for the complete process, write,
@@ -119,4 +122,4 @@ server, and drives headless Chromium through Playwright. Run
 
 The design rationale lives in `docs/apolloon-redesign-brief.html`.
 
-`npm run test:e2e` performs a production build and exercises the HTTP/runtime paths, including joining a standby, catch-up after a restart, planned and emergency promotion, a returning old primary, and version mismatches.
+`npm run test:e2e` performs a production build and exercises the HTTP/runtime paths, including three laptops forming a group, the leader dying during a timed lap, catch-up after a restart, a laptop cut off from the others, continuing alone, finding each other after every address changed, exactly-once repeats, and version mismatches.

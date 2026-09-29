@@ -1,6 +1,6 @@
 # Leuven 24h Runner Tracker
 
-Telsysteem for the Apolloon 24 Urenloop. One Electron laptop is the **primary**: it orders every change in its SQLite database. The other Electron laptops (for example the queue desk and the warm-up post) run as **standbys**: each keeps a live copy and can take over, and their own screens work normally because they pass every change on to the primary. TVs and borrowed laptops open any laptop's address in a browser.
+Telsysteem for the Apolloon 24 Urenloop. Three Electron laptops (timing, the queue desk, and the warm-up post) are linked into one group: each holds the full SQLite database, every laptop's screen can make changes, and when a laptop fails the other two carry on by themselves without losing anything that was confirmed. TVs and borrowed laptops open any laptop's address in a browser.
 
 ## Event Network
 
@@ -8,48 +8,49 @@ Recommended defaults:
 
 ```text
 Server port: 5173
-Event URL:   shown by the app, for example http://<primary-lan-ip>:5173
+Event URL:   shown by the app, for example http://<laptop-lan-ip>:5173
 ```
 
-Browser and TV clients use automatic DHCP. Give the primary and standby laptops a fixed address so every screen keeps working after a cable or router restart. With access to the event router, a DHCP reservation does this. Without it, open Beheer › Systeem & herstel on the laptop itself and use **Vast netwerkadres**: it pins the wired adapter to its current address through the operating system's permission prompt (Windows, Linux with NetworkManager, macOS) and switches it back to DHCP after the event. The same panel offers the scripts in `public/event-network/` for manual use.
+Browser and TV clients use automatic DHCP. The Electron laptops find each other on the network by themselves (UDP broadcast on port 45737), also after their addresses change. Give them a fixed address anyway, so TVs and browser screens keep working after a cable or router restart. With access to the event router, a DHCP reservation does this. Without it, open Beheer › Systeem & herstel on the laptop itself and use **Vast netwerkadres**: it pins the wired adapter to its current address through the operating system's permission prompt (Windows, Linux with NetworkManager, macOS) and switches it back to DHCP after the event. The same panel offers the scripts in `public/event-network/` for manual use.
 
-### Primary and standby
+### Linked laptops
 
-Laptop coupling is enabled in the packaged app. The primary accepts every change and records it in a replication log in the same SQLite transaction. Each standby pulls that log a few times per second and replays it, so it holds a byte-for-byte copy that is at most a fraction of a second behind.
+Linking laptops is enabled in the packaged app. The laptops choose one of them by majority vote to put every change in order; it records each change in a replication log in the same SQLite transaction and sends it to the others at once. A change counts as saved once two laptops hold it, so any one laptop can fail without losing a confirmed change. Changes made on another laptop's screen are passed to that laptop automatically, and the screen shows the result a few milliseconds later.
 
 Normal event setup:
 
 ```text
-1. Plug the Electron laptops into the same wired switch.
-2. Start Apolloon on the laptop that should be primary and import the registrations there.
-3. Start Apolloon on the second laptop, open Beheer › Systeem & herstel,
-   enter the primary's Event URL, and choose "Standby worden".
-4. Check Beheer › Voorbereiding: the standby must be reachable and caught up.
-5. Open the primary's Event URL on every operator laptop and TV.
+1. Plug the three Electron laptops into the same wired switch.
+2. Start Apolloon on the first laptop and import the registrations there.
+3. On the second and third laptop, open Beheer › Systeem & herstel.
+   The first laptop is listed by itself; click "Koppelen" next to it.
+4. Check Beheer › Voorbereiding: all three laptops must be reachable.
+5. Open any laptop's Event URL on the TVs and other screens.
 ```
 
-Becoming a standby replaces that laptop's database with the primary's; a backup of the old database is kept first. A change made on a standby's screen goes to the primary, and the screen shows it as soon as the standby's own copy has it, a few milliseconds later. When the primary cannot be reached, a banner says so and changes wait until it is back or a standby takes over. Browsers remember the other laptops and reopen the same page on another one when theirs disappears; the Electron app always stays on its own laptop.
+Linking replaces that laptop's database with the group's; a backup of the old database is kept first.
 
-**Planned switch** (for example to move the primary): on the standby, choose "Deze laptop primair maken". The primary hands over its last changes, becomes a standby of the new primary, and no data is lost.
+When a laptop dies or loses its cable, the other two notice within a second or two, choose a new leader if needed, and carry on. A timing key press during those seconds waits and then counts with the time of the press. The laptop catches up by itself when it returns. Browsers remember the laptops and reopen the same page on another one when theirs disappears; the Electron app always stays on its own laptop.
 
-**Failure of the primary**: on the standby, choose "Deze laptop primair maken" and confirm the emergency takeover once the old primary is really stopped or unplugged. Changes from the last fraction of a second that had not been copied may be missing; check the last laps. Open the new primary's address on the browser laptops; the red connection banner links to it. If the old primary comes back, it notices the newer primary, follows it as a standby, and keeps anything it wrote in the meantime in a backup.
+With only one laptop left, nothing is saved until a second one is back, because one laptop cannot know whether the others are gone or still working behind a broken cable. If the others are truly gone, Beheer › Systeem offers **Alleen verder werken**. See `docs/reliability-model.md` for the details and a rehearsal checklist.
 
-Laptops only couple with the same Apolloon version and database schema; otherwise Admin shows an "Upgrade vereist" error.
+Laptops only link with the same Apolloon version and database schema; otherwise Admin shows an "Upgrade vereist" error.
 
 Developer overrides:
 
 ```text
-CLUSTER_ENABLED=true             # enable laptop coupling in development
+CLUSTER_ENABLED=true             # enable linking laptops in development
+CLUSTER_DISCOVERY=false          # do not announce or listen on UDP 45737
 CLUSTER_SELF_URL=http://host:port  # address announced to other laptops (tests)
 ```
 
-Admin includes a wedstrijdgereedheid checklist for backup freshness, free disk space, and the standby.
+Admin includes a wedstrijdgereedheid checklist for backup freshness, free disk space, and the linked laptops.
 
-Laptops at the event have no internet time, so their clocks can differ by seconds. Every laptop therefore keeps an offset to the primary's clock (the cluster clock), measured on each sync, and a laptop that takes over keeps using it, so times stay continuous across a switch.
+Laptops at the event have no internet time, so their clocks can differ by seconds. Every laptop therefore keeps an offset to the leading laptop's clock (the group clock), measured every two seconds, and a laptop that takes over keeps using it, so times stay continuous across a takeover.
 
 ### Recovery backups
 
-Every host creates a verified SQLite backup every five minutes and keeps the latest 48 scheduled backups plus the latest 20 manual and safety backups under `<DATA_PATH>/backups`. Each backup is checked with `quick_check` and `foreign_key_check` off the main thread before it is kept, so checks never delay timing. Admin can create and download a backup immediately. Download one to another laptop or USB storage before the event: the standby protects against a broken laptop, a backup also protects against a wrong action that was copied to the standby.
+Every host creates a verified SQLite backup every five minutes and keeps the latest 48 scheduled backups plus the latest 20 manual and safety backups under `<DATA_PATH>/backups`. Each backup is checked with `quick_check` and `foreign_key_check` off the main thread before it is kept, so checks never delay timing. Admin can create and download a backup immediately. Download one to USB storage before the event: the linked laptops protect against a broken laptop, a backup also protects against a wrong action that was copied to every laptop.
 
 Screens receive only live state; lap history is loaded separately as full, recent, or per-runner data. Registration answers with contact details are loaded only where an operator needs them (profiles and Beheer).
 
@@ -69,10 +70,10 @@ For hosting the app directly on the VPS without a laptop tunnel, see `docs/vps-d
 
 ## Running The Event
 
-1. Connect the primary and standby laptops to the local router/switch by Ethernet.
-2. Start the Electron app on both and couple the standby (see [Primary and standby](#primary-and-standby)).
+1. Connect the three Electron laptops to the local router/switch by Ethernet.
+2. Start the Electron app on all three and link them (see [Linked laptops](#linked-laptops)).
 3. Allow the firewall prompt for port `5173` if Windows asks.
-4. Copy the Event URL shown on the primary laptop.
+4. Copy the Event URL shown on one of the laptops.
 5. On every other laptop, open that Event URL. Do not use `localhost` on client laptops.
 6. Choose the role from the start page:
    - Telsysteem 1 - Wachtrij
@@ -150,7 +151,7 @@ npm run format          Format with oxfmt (format:check only reports)
 npm run check           Type-check, lint, format check, and build the Vite client
 npm run build           Type-check the client, build Vite, and compile the server
 npm test                Unit tests
-npm run test:e2e        Build, then run real servers (standby, failover, night teams)
+npm run test:e2e        Build, then run real servers (three laptops, failover, night teams)
 npm run test:ui         Browser checks against the build (npx playwright install chromium once)
 ```
 

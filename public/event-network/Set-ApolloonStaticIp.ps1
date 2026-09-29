@@ -20,7 +20,7 @@
     2. Auto-detects the wired Ethernet adapter (override with -InterfaceAlias).
     3. Refuses to pin APIPA 169.254.x.x addresses.
     4. Warns if the requested IP is inside a detected DHCP range.
-    5. Sets the static IP, resets DNS, opens the TCP 5173 firewall rule.
+    5. Sets the static IP, resets DNS, opens the TCP 5173 and UDP 45737 firewall rules.
     6. Prints the new Event URL to open on other devices.
 .EXAMPLE
   # Right-click PowerShell -> Run as Administrator, then:
@@ -122,9 +122,10 @@ if ($PSCmdlet.ShouldProcess("$($adapter.Name) -> $IPAddress/$PrefixLength", 'Set
     Set-DnsClientServerAddress -InterfaceIndex $adapter.ifIndex -ResetServerAddresses | Out-Null
   }
 
-  # 4. Firewall: TCP 5173 (app and standby sync), idempotent.
+  # 4. Firewall: TCP 5173 (app and laptops) and UDP 45737 (laptops finding each other), idempotent.
   foreach ($rule in @(
-    @{ Name = 'Apolloon TCP 5173'; Proto = 'TCP'; Port = 5173 }
+    @{ Name = 'Apolloon TCP 5173'; Proto = 'TCP'; Port = 5173 },
+    @{ Name = 'Apolloon UDP 45737'; Proto = 'UDP'; Port = 45737 }
   )) {
     if (-not (Get-NetFirewallRule -DisplayName $rule.Name -ErrorAction SilentlyContinue)) {
       New-NetFirewallRule -DisplayName $rule.Name -Direction Inbound -Protocol $rule.Proto -LocalPort $rule.Port -Action Allow -Profile Any | Out-Null

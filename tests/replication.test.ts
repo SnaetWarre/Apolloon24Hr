@@ -44,7 +44,7 @@ test('each committed write is logged once; reads and rolled-back writes are not'
   }
 });
 
-test('replaying the log on another database reproduces the primary exactly', async () => {
+test('replaying the log on another database reproduces the leader exactly', async () => {
   const db = await freshDatabase();
   const { appSnapshot } = await import('../server/app-state.ts');
   const write = <T>(action: () => T) => db.recordWrite('test.write', action);
@@ -84,7 +84,7 @@ test('replaying the log on another database reproduces the primary exactly', asy
   db.closeDb();
 });
 
-test('a standby can only continue from a retained prefix of the primary log', async () => {
+test('a follower can only continue from a retained prefix of the leader log', async () => {
   const db = await freshDatabase();
   const noop = { sql: 'UPDATE race_state SET race_finished_at = race_finished_at WHERE id = 1', params: [] };
   const entries = Array.from({ length: 5_500 }, (_, index) => ({
@@ -99,8 +99,8 @@ test('a standby can only continue from a retained prefix of the primary log', as
   db.applyLogEntries(entries.slice(0, 10));
   assert.equal(db.canContinueFrom(0, null), true);
   assert.equal(db.canContinueFrom(10, 'entry-10'), true);
-  assert.equal(db.canContinueFrom(10, 'another-history'), false, 'a diverged standby must re-sync');
-  assert.equal(db.canContinueFrom(11, 'entry-11'), false, 'a standby ahead of the primary must re-sync');
+  assert.equal(db.canContinueFrom(10, 'another-history'), false, 'a diverged follower must re-sync');
+  assert.equal(db.canContinueFrom(11, 'entry-11'), false, 'a follower ahead of the leader must re-sync');
 
   db.applyLogEntries(entries.slice(10));
   assert.equal(db.canContinueFrom(5_500, 'entry-5500'), true);
@@ -110,24 +110,54 @@ test('a standby can only continue from a retained prefix of the primary log', as
   db.closeDb();
 });
 
-test('installing a primary image replaces the event data but keeps this laptop identity', async () => {
+test('a follower stores what continues its log and reports a gap or a different history', async () => {
   const db = await freshDatabase();
-  const primary = db.hostIdentity();
-  db.recordWrite('test.create', () => db.insertRunner({ name: 'From primary', runnerNumber: '1' }));
+  const noop = { sql: 'UPDATE race_state SET race_finished_at = race_finished_at WHERE id = 1', params: [] };
+  const entry = (seq: number, id = `entry-${seq}`) => ({
+    seq,
+    id,
+    epoch: 1,
+    type: 'test.noop',
+    statements: [noop],
+    createdAt: seq,
+  });
+
+  assert.deepEqual(db.appendFromLeader(0, null, [entry(1), entry(2)]), { ok: true });
+  assert.deepEqual(db.appendFromLeader(3, 'entry-3', [entry(4)]), { ok: false, reason: 'behind' });
+  // A repeat of entries it already has is harmless, so a lost answer can simply be sent again.
+  assert.deepEqual(db.appendFromLeader(0, null, [entry(1), entry(2), entry(3)]), { ok: true });
+  assert.equal(db.getLogHead().seq, 3);
+  assert.deepEqual(db.appendFromLeader(3, 'entry-3', []), { ok: true }, 'a heartbeat');
+
+  assert.deepEqual(db.appendFromLeader(2, 'other-2', [entry(3)]), { ok: false, reason: 'diverged' });
+  assert.deepEqual(db.appendFromLeader(2, 'entry-2', [entry(3, 'other-3')]), { ok: false, reason: 'diverged' });
+  assert.deepEqual(
+    db.appendFromLeader(2, 'entry-2', []),
+    { ok: false, reason: 'diverged' },
+    'entries the leader does not have came from an earlier leader'
+  );
+  assert.equal(db.getLogHead().seq, 3, 'nothing is applied from a different history');
+  db.closeDb();
+});
+
+test('installing a leader image replaces the event data but keeps this laptop identity', async () => {
+  const db = await freshDatabase();
+  const leader = db.hostIdentity();
+  db.recordWrite('test.create', () => db.insertRunner({ name: 'From leader', runnerNumber: '1' }));
   const image = db.serializeDatabase();
   const imageHead = db.getLogHead();
 
   db.setLocalSetting('replication_cluster_id', 'another-cluster');
-  db.setLocalSetting('host_id', 'standby-host');
+  db.setLocalSetting('host_id', 'follower-host');
   db.recordWrite('test.create', () => db.insertRunner({ name: 'Local only', runnerNumber: '2' }));
   db.recordWrite('test.create', () => db.insertRunner({ name: 'Local only too', runnerNumber: '3' }));
 
   const installed = db.installDatabaseImage(image, db.DATABASE_SCHEMA_VERSION);
-  assert.equal(installed.clusterId, primary.clusterId);
-  assert.deepEqual(db.hostIdentity(), { hostId: 'standby-host', clusterId: primary.clusterId });
+  assert.equal(installed.clusterId, leader.clusterId);
+  assert.deepEqual(db.hostIdentity(), { hostId: 'follower-host', clusterId: leader.clusterId });
   assert.deepEqual(
     db.getAllRunners().map((runner) => runner.name),
-    ['From primary']
+    ['From leader']
   );
   assert.deepEqual(db.getLogHead(), imageHead);
   assert.throws(() => db.installDatabaseImage(image, db.DATABASE_SCHEMA_VERSION + 1), /schema/);

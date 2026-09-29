@@ -1,4 +1,4 @@
-// Runs every browser check against its own freshly seeded, built server (or pair of laptops).
+// Runs every browser check against its own freshly seeded, built server (or group of laptops).
 // Usage: npm run test:ui (after npm run build). Needs `npx playwright install chromium` once.
 import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -9,7 +9,7 @@ const CHECKS = [
   { name: 'workflow-ui', laptops: 1 },
   { name: 'dialog-ui', laptops: 1 },
   { name: 'theme-ui', laptops: 1 },
-  { name: 'failover-ui', laptops: 2 },
+  { name: 'failover-ui', laptops: 3 },
 ];
 
 // `node scripts/validation/run.mjs failover-ui` runs only the named checks.
@@ -25,7 +25,10 @@ for (const check of CHECKS.filter((candidate) => !selected.length || selected.in
       env: {
         ...process.env,
         APOLLOON_TEST_URL: laptops[0].url,
-        APOLLOON_OTHER_URL: laptops[1]?.url ?? '',
+        APOLLOON_OTHER_URLS: laptops
+          .slice(1)
+          .map((laptop) => laptop.url)
+          .join(','),
         APOLLOON_TEST_PID: String(laptops[0].process.pid),
       },
       stdio: 'inherit',
@@ -58,6 +61,9 @@ async function startLaptop(name, { seed, cluster }) {
       PORT: String(port),
       CLUSTER_ENABLED: cluster ? 'true' : 'false',
       CLUSTER_SELF_URL: url,
+      // Laptops on one machine announce themselves on loopback.
+      CLUSTER_DISCOVERY_ADDRESS: '127.255.255.255',
+      CLUSTER_DISCOVERY_PORT: String(20_000 + (process.pid % 20_000)),
       BACKUP_ENABLED: 'false',
     },
     stdio: ['ignore', 'ignore', 'inherit'],

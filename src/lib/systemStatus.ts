@@ -1,6 +1,6 @@
 import type { ClusterStatus } from '../types';
 
-export type SystemStatusTone = 'healthy' | 'standby' | 'error';
+export type SystemStatusTone = 'healthy' | 'warning' | 'error';
 export type SystemStatus = { tone: SystemStatusTone; title: string; detail: string };
 
 /** The one-line laptop health summary shown in the sidebar and on the overview. */
@@ -18,32 +18,14 @@ export function deriveSystemStatus(
   }
   if (!cluster) return null;
 
-  if (cluster.competingPrimaryUrl) {
-    return {
-      tone: 'error',
-      title: 'Twee primaire laptops',
-      detail: `Ook ${cluster.competingPrimaryUrl} is primair`,
-    };
-  }
-  if (cluster.role === 'standby') {
-    const primary = cluster.primary;
-    if (!primary?.reachable) {
-      return {
-        tone: 'error',
-        title: 'Primaire laptop onbereikbaar',
-        detail: 'Wijzigingen lukken niet; neem over in Beheer',
-      };
-    }
-    return {
-      tone: 'standby',
-      title: 'Gekoppeld als standby',
-      detail: primary.lagEntries > 0 ? `Haalt ${primary.lagEntries} wijzigingen op` : `Volgt ${primary.url}`,
-    };
+  if (cluster.enabled) {
+    const group = describeGroup(cluster);
+    if (group.tone !== 'healthy') return group;
   }
   if (cluster.lastError)
     return {
       tone: 'error',
-      title: 'Synchronisatie controleren',
+      title: 'Laptops controleren',
       detail: cluster.lastError,
     };
 
@@ -51,7 +33,7 @@ export function deriveSystemStatus(
   const backupOverdue = backup.enabled && (!backup.latest || now - backup.latest.createdAt > backup.intervalMs * 3);
   if (!backup.enabled || backup.lastError || backup.diskLow || backupOverdue) {
     return {
-      tone: backup.diskLow || backup.lastError ? 'error' : 'standby',
+      tone: backup.diskLow || backup.lastError ? 'error' : 'warning',
       title: 'Backup controleren',
       detail: backup.lastError
         ? 'Laatste backup is mislukt'
@@ -69,25 +51,37 @@ export function deriveSystemStatus(
       detail: backup.latest ? `Backup ${formatAge(backup.latest.createdAt, now)}` : 'Backupservice is actief',
     };
   }
-  const followers = cluster.standbys.filter((standby) => standby.reachable);
-  if (!followers.length)
-    return {
-      tone: 'standby',
-      title: 'Geen standby',
-      detail: 'Alleen deze laptop heeft de data',
-    };
-  if (!followers.some((standby) => standby.caughtUp)) {
-    return {
-      tone: 'standby',
-      title: 'Standby werkt bij',
-      detail: 'De laatste wijzigingen worden gekopieerd',
-    };
+  return describeGroup(cluster);
+}
+
+/** How the linked laptops are doing, in words for the people at the tables. */
+export function describeGroup(cluster: ClusterStatus): SystemStatus {
+  const total = cluster.members.length;
+  const unreachable = cluster.members.filter((member) => !member.reachable).length;
+  switch (cluster.state) {
+    case 'solo':
+      return { tone: 'warning', title: 'Alleen deze laptop', detail: 'Koppel de andere laptops in Beheer' };
+    case 'electing':
+      return { tone: 'warning', title: 'Laptops nemen over', detail: 'Even geduld, dit duurt enkele seconden' };
+    case 'no-majority':
+      return {
+        tone: 'error',
+        title: 'Te weinig laptops bereikbaar',
+        detail: 'Niets wordt bewaard; zet de andere laptops aan',
+      };
+    case 'degraded':
+      return unreachable
+        ? {
+            tone: 'warning',
+            title: unreachable === 1 ? 'Eén laptop onbereikbaar' : `${unreachable} laptops onbereikbaar`,
+            detail: `Alles werkt nog; bewaard op ${total - unreachable} laptops`,
+          }
+        : { tone: 'warning', title: 'Laptop werkt bij', detail: 'De laatste wijzigingen worden gekopieerd' };
+    case 'healthy':
+      return total === 2
+        ? { tone: 'warning', title: 'Twee laptops', detail: 'Koppel een derde, zodat er één mag uitvallen' }
+        : { tone: 'healthy', title: 'Alles veilig', detail: `Gegevens op ${total} laptops` };
   }
-  return {
-    tone: 'healthy',
-    title: `Primair · ${followers.length} standby`,
-    detail: 'Gekopieerd en geback-upt',
-  };
 }
 
 function formatAge(createdAt: number, now: number): string {

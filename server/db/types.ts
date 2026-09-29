@@ -5,7 +5,7 @@ export type ReplicatedStatement = {
   params: SqlValue[];
 };
 
-/** One committed write on the primary, replayed in `seq` order by standbys. */
+/** One write on the leader, replayed in `seq` order by the other laptops. */
 export type ReplicationLogEntry = {
   seq: number;
   id: string;

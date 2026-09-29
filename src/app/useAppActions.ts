@@ -97,11 +97,8 @@ export function useAppActions() {
         trpc.settings.updatePublicRecordMode.mutate({ publicRecordMode })
       ),
       createBackup: action(() => trpc.backups.create.mutate(), [clusterStatusKey]),
-      joinPrimary: action((primaryUrl: string) => trpc.cluster.join.mutate({ primaryUrl }), [appKey, clusterStatusKey]),
-      promoteToPrimary: action(
-        (emergency: boolean) => trpc.cluster.promote.mutate({ emergency }),
-        [appKey, clusterStatusKey]
-      ),
+      joinGroup: action((url: string) => trpc.cluster.join.mutate({ url }), [appKey, clusterStatusKey]),
+      continueAlone: action(() => trpc.cluster.continueAlone.mutate(), [appKey, clusterStatusKey]),
     };
   }, [queryClient]);
 }

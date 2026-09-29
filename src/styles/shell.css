@@ -254,17 +254,17 @@
   display: none;
 }
 
-.system-status--standby,
+.system-status--warning,
 .system-status--error {
   margin-bottom: 4px;
 }
 
-.system-status--standby {
+.system-status--warning {
   border-color: var(--warn-line);
   background: var(--warn-wash);
 }
 
-.system-status--standby .system-status__dot {
+.system-status--warning .system-status__dot {
   background: var(--warn);
 }
 
@@ -277,7 +277,7 @@
   background: var(--stop);
 }
 
-.system-status--standby:hover,
+.system-status--warning:hover,
 .system-status--error:hover {
   filter: brightness(0.98);
 }
@@ -569,12 +569,12 @@
   color: var(--ink-2);
 }
 
-.overview-status--standby {
+.overview-status--warning {
   border-color: var(--warn-line);
   background: var(--warn-wash);
 }
 
-.overview-status--standby .system-status__dot {
+.overview-status--warning .system-status__dot {
   background: var(--warn);
 }
 

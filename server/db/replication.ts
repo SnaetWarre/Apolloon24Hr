@@ -17,12 +17,12 @@ import { REPLICATED_SETTING_KEYS, getSetting } from './settings.js';
 import { type ReplicatedStatement, type ReplicationLogEntry } from './types.js';
 
 /**
- * Entries kept for standbys that fall briefly behind. A standby that needs an
- * older entry re-bootstraps from a full database image instead.
+ * Entries kept for laptops that fall briefly behind. A laptop that needs an
+ * older entry re-syncs from a full database image instead.
  */
 const LOG_RETENTION = 5_000;
 
-const MAX_ENTRIES_PER_PULL = 500;
+const MAX_ENTRIES_PER_BATCH = 500;
 
 /** Event tables in foreign-key insert order, plus the log itself. */
 const REPLICATED_TABLES = [
@@ -35,6 +35,8 @@ const REPLICATED_TABLES = [
   'race_events',
   'temporary_teams',
   'temporary_team_members',
+  'cluster_members',
+  'forwarded_writes',
   'replication_log',
 ] as const;
 
@@ -77,23 +79,31 @@ export function getClusterEpoch(): number {
   return Number.isSafeInteger(epoch) && epoch > 0 ? epoch : 0;
 }
 
-export function getLogHead(): { seq: number; id: string | null } {
+export type LogHead = { seq: number; id: string | null; epoch: number };
+
+/** The last entry: its position, identity, and the term it was written in. */
+export function getLogHead(): LogHead {
   return (
-    one<{ seq: number; id: string }>('SELECT seq, id FROM replication_log ORDER BY seq DESC LIMIT 1') ?? {
+    one<LogHead>('SELECT seq, id, epoch FROM replication_log ORDER BY seq DESC LIMIT 1') ?? {
       seq: 0,
       id: null,
+      epoch: 0,
     }
   );
 }
 
-export function getLogEntriesAfter(seq: number, limit = MAX_ENTRIES_PER_PULL): ReplicationLogEntry[] {
+export function getLogEntryId(seq: number): string | null {
+  return one<{ id: string }>('SELECT id FROM replication_log WHERE seq = ?', [seq])?.id ?? null;
+}
+
+export function getLogEntriesAfter(seq: number, limit = MAX_ENTRIES_PER_BATCH): ReplicationLogEntry[] {
   return all<LogRow>(`${LOG_SELECT} WHERE seq > ? ORDER BY seq LIMIT ?`, [
     seq,
-    Math.min(Math.max(1, limit), MAX_ENTRIES_PER_PULL),
+    Math.min(Math.max(1, limit), MAX_ENTRIES_PER_BATCH),
   ]).map(entryFromRow);
 }
 
-/** True when a standby at (`after`, `afterId`) holds a prefix of this log that is still retained. */
+/** True when a follower at (`after`, `afterId`) holds a prefix of this log that is still retained. */
 export function canContinueFrom(after: number, afterId: string | null): boolean {
   const head = getLogHead();
   if (after > head.seq) return false;
@@ -117,7 +127,7 @@ function insertLogEntry(entry: ReplicationLogEntry): void {
 
 /**
  * Runs a write and appends the SQL it executed to the replication log in the
- * same transaction, so a standby replaying the log ends up byte-for-byte equal.
+ * same transaction, so a laptop replaying the log ends up byte-for-byte equal.
  */
 export function recordWrite<T>(type: string, action: () => T): T {
   const { result, changed } = transaction(() => {
@@ -138,7 +148,7 @@ export function recordWrite<T>(type: string, action: () => T): T {
   return result;
 }
 
-/** Replays a primary's entries, which must continue this log without gaps. */
+/** Replays the leader's entries, which must continue this log without gaps. */
 export function applyLogEntries(entries: ReplicationLogEntry[]): void {
   if (!entries.length) return;
   transaction(() => {
@@ -153,13 +163,38 @@ export function applyLogEntries(entries: ReplicationLogEntry[]): void {
   markAppDataChanged();
 }
 
-/** A consistent copy of the whole database, used to bootstrap a standby. */
+export type AppendOutcome = { ok: true } | { ok: false; reason: 'behind' | 'diverged' };
+
+/**
+ * Stores a leader's entries that follow (`prevSeq`, `prevId`). Entries this
+ * log already holds with the same id are skipped. A different id at the same
+ * position, or entries here the leader did not send, mean the histories
+ * diverged, and this laptop must re-sync from a full copy.
+ */
+export function appendFromLeader(
+  prevSeq: number,
+  prevId: string | null,
+  entries: ReplicationLogEntry[]
+): AppendOutcome {
+  const head = getLogHead();
+  if (prevSeq > head.seq) return { ok: false, reason: 'behind' };
+  if (prevSeq > 0 && getLogEntryId(prevSeq) !== prevId) return { ok: false, reason: 'diverged' };
+  const coveredSeq = entries.length ? entries[entries.length - 1].seq : prevSeq;
+  if (head.seq > coveredSeq) return { ok: false, reason: 'diverged' };
+  for (const entry of entries) {
+    if (entry.seq <= head.seq && getLogEntryId(entry.seq) !== entry.id) return { ok: false, reason: 'diverged' };
+  }
+  applyLogEntries(entries.filter((entry) => entry.seq > head.seq));
+  return { ok: true };
+}
+
+/** A consistent copy of the whole database, for a laptop that joins or re-syncs. */
 export function serializeDatabase(): Buffer {
   return getDb().serialize();
 }
 
 /**
- * Replaces this host's event data and log with a primary's database image.
+ * Replaces this host's event data and log with the leader's database image.
  * Host-local settings (identity, role) stay; the cluster id is adopted.
  */
 export function installDatabaseImage(image: Buffer, expectedSchemaVersion: number): { clusterId: string } {

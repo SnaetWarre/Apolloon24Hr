@@ -8,7 +8,7 @@ export const RELEASE_ID = process.env.APOLLOON_RELEASE_ID?.trim() || null;
 export const APP_VERSION =
   process.env.APOLLOON_APP_VERSION?.trim() || process.env.npm_package_version?.trim() || '0.0.0-dev';
 
-/** Primary/standby replication; on in the packaged app, opt-in elsewhere. */
+/** Linking laptops into one group; on in the packaged app, opt-in elsewhere. */
 export function isClusterEnabled(environment: NodeJS.ProcessEnv = process.env): boolean {
   return environment.CLUSTER_ENABLED === 'true';
 }

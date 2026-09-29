@@ -152,45 +152,57 @@ export type BackupStatus = {
   databaseBytes: number;
 };
 
-export type ClusterRole = 'primary' | 'standby';
+export type ClusterRole = 'leader' | 'follower' | 'candidate';
 
-export type ClusterStandby = {
+/**
+ * How the laptops are doing, for the screens: `solo` is a laptop on its own,
+ * `healthy` has every laptop in the group up to date, `degraded` still has a
+ * majority but misses a laptop, `electing` is choosing a new main laptop, and
+ * `no-majority` cannot save changes until more laptops are back.
+ */
+export type GroupState = 'solo' | 'healthy' | 'degraded' | 'electing' | 'no-majority';
+
+export type ClusterMemberStatus = {
   hostId: string;
   url: string;
+  self: boolean;
+  leader: boolean;
   reachable: boolean;
-  lastSeenAt: number;
-  appliedSeq: number;
+  /** Holds every change the main laptop has. */
   caughtUp: boolean;
 };
 
-/** What a standby knows about the primary it follows. */
-export type ClusterPrimary = {
-  url: string | null;
-  hostId: string | null;
-  reachable: boolean;
-  lastContactAt: number | null;
-  head: number;
-  lagEntries: number;
+/** Laptops heard on the network that belong to another group, so a laptop on its own can join them in one click. */
+export type NearbyGroup = {
+  /** A laptop of that group to join through. */
+  url: string;
+  laptops: number;
+  runners: number;
+  appVersion: string;
+  compatible: boolean;
 };
 
 export type ClusterStatus = {
   enabled: boolean;
   hostId: string;
   clusterId: string;
-  role: ClusterRole;
-  /** Raised on every promotion; the highest epoch is the current primary. */
-  epoch: number;
   appVersion: string;
   schemaVersion: number;
+  role: ClusterRole;
+  /** Raised on every election; the main laptop of the highest term wins. */
+  term: number;
+  state: GroupState;
+  leader: { hostId: string; url: string } | null;
+  members: ClusterMemberStatus[];
+  /** Laptops that must hold a change before it counts as saved. */
+  majority: number;
   writable: boolean;
-  busy: 'joining' | 'bootstrapping' | 'promoting' | null;
+  busy: 'joining' | 'resyncing' | null;
   selfUrl: string;
   logHead: number;
-  primary: ClusterPrimary | null;
-  standbys: ClusterStandby[];
-  /** Other laptops in this cluster, so browsers can switch when this one goes away. */
+  /** Other laptops in the group, so browsers can switch when this one goes away. */
   memberUrls: string[];
-  competingPrimaryUrl: string | null;
+  nearby: NearbyGroup[];
   lastError: string | null;
   backup: BackupStatus;
 };

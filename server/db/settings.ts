@@ -4,7 +4,7 @@ import { one, run, runUncaptured } from './connection.js';
 
 const DEFAULT_PUBLIC_RECORD_MODE: PublicRecordMode = 'day';
 
-/** Settings that are part of the event data and travel to standbys. Everything else is host-local. */
+/** Settings that are part of the event data and travel to the other laptops. Everything else is host-local. */
 export const REPLICATED_SETTING_KEYS: readonly string[] = ['public_record_mode'];
 
 export function getSetting(key: string): string | null {
@@ -19,10 +19,6 @@ function setSetting(key: string, value: string): void {
 /** Host-local setting (identity, cluster role, schema version): never replicated. */
 export function setLocalSetting(key: string, value: string): void {
   runUncaptured('INSERT OR REPLACE INTO settings(key, value) VALUES(?, ?)', [key, value]);
-}
-
-export function deleteLocalSetting(key: string): void {
-  runUncaptured('DELETE FROM settings WHERE key = ?', [key]);
 }
 
 export function getAppSettings(): AppSettings {
@@ -46,7 +42,7 @@ function ensureLocalSetting(key: string, create: () => string): string {
 
 export type HostIdentity = { hostId: string; clusterId: string };
 
-/** This laptop's id, and the id of the primary lineage it belongs to (adopted when joining). */
+/** This laptop's id, and the id of the group it belongs to (adopted when joining). */
 export function hostIdentity(): HostIdentity {
   return {
     hostId: ensureLocalSetting('host_id', randomUUID),

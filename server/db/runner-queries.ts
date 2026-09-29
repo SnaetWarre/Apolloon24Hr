@@ -68,6 +68,10 @@ export function getAllRunners(): Runner[] {
   ).map((row) => runnerFromRow(row, labelsByRunner.get(row.id) ?? []));
 }
 
+export function countRunners(): number {
+  return one<{ count: number }>('SELECT COUNT(*) AS count FROM runners')?.count ?? 0;
+}
+
 export function getRunnerById(id: string): Runner | null {
   const row = one<RunnerRow>(`${RUNNER_SELECT_SQL} WHERE r.id = ? GROUP BY r.id`, [id]);
   return row ? runnerFromRow(row, getRunnerLabels(id)) : null;
