@@ -1,47 +1,69 @@
-// Runs every browser check against its own freshly seeded, built server.
-// Usage: npm run test:ui (builds first). Needs `npx playwright install chromium` once.
+// Runs every browser check against its own freshly seeded, built server (or pair of laptops).
+// Usage: npm run test:ui (after npm run build). Needs `npx playwright install chromium` once.
 import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 
-const CHECKS = ['workflow-ui', 'dialog-ui', 'theme-ui'];
+const CHECKS = [
+  { name: 'workflow-ui', laptops: 1 },
+  { name: 'dialog-ui', laptops: 1 },
+  { name: 'theme-ui', laptops: 1 },
+  { name: 'failover-ui', laptops: 2 },
+];
 
-for (const check of CHECKS) {
-  const dataPath = path.resolve('.test-data', `ui-${check}`);
-  fs.rmSync(dataPath, { recursive: true, force: true });
-  execFileSync(
-    process.execPath,
-    ['--import', 'tsx', 'scripts/seed-test-db.mjs', '--scenario=ready', `--data-path=${dataPath}`],
-    {
-      stdio: 'ignore',
+// `node scripts/validation/run.mjs failover-ui` runs only the named checks.
+const selected = process.argv.slice(2);
+for (const check of CHECKS.filter((candidate) => !selected.length || selected.includes(candidate.name))) {
+  const laptops = [];
+  try {
+    for (let index = 0; index < check.laptops; index += 1) {
+      laptops.push(await startLaptop(`${check.name}-${index}`, { seed: index === 0, cluster: check.laptops > 1 }));
     }
-  );
+    console.log(`\n${check.name}`);
+    execFileSync(process.execPath, [path.join('scripts', 'validation', `${check.name}.mjs`)], {
+      env: {
+        ...process.env,
+        APOLLOON_TEST_URL: laptops[0].url,
+        APOLLOON_OTHER_URL: laptops[1]?.url ?? '',
+        APOLLOON_TEST_PID: String(laptops[0].process.pid),
+      },
+      stdio: 'inherit',
+    });
+  } finally {
+    for (const laptop of laptops) {
+      laptop.process.kill('SIGTERM');
+      fs.rmSync(laptop.dataPath, { recursive: true, force: true });
+    }
+  }
+}
 
+async function startLaptop(name, { seed, cluster }) {
+  const dataPath = path.resolve('.test-data', `ui-${name}`);
+  fs.rmSync(dataPath, { recursive: true, force: true });
+  if (seed) {
+    execFileSync(
+      process.execPath,
+      ['--import', 'tsx', 'scripts/seed-test-db.mjs', '--scenario=ready', `--data-path=${dataPath}`],
+      { stdio: 'ignore' }
+    );
+  }
   const port = await freePort();
-  const baseUrl = `http://127.0.0.1:${port}`;
-  const server = spawn(process.execPath, ['dist-server/server/index.js'], {
+  const url = `http://127.0.0.1:${port}`;
+  const child = spawn(process.execPath, ['dist-server/server/index.js'], {
     env: {
       ...process.env,
       NODE_ENV: 'production',
       DATA_PATH: dataPath,
       PORT: String(port),
-      CLUSTER_ENABLED: 'false',
+      CLUSTER_ENABLED: cluster ? 'true' : 'false',
+      CLUSTER_SELF_URL: url,
       BACKUP_ENABLED: 'false',
     },
     stdio: ['ignore', 'ignore', 'inherit'],
   });
-  try {
-    await waitForServer(baseUrl, server);
-    console.log(`\n${check}`);
-    execFileSync(process.execPath, [path.join('scripts', 'validation', `${check}.mjs`)], {
-      env: { ...process.env, APOLLOON_TEST_URL: baseUrl },
-      stdio: 'inherit',
-    });
-  } finally {
-    server.kill('SIGTERM');
-    fs.rmSync(dataPath, { recursive: true, force: true });
-  }
+  await waitForServer(url, child);
+  return { url, dataPath, process: child };
 }
 
 async function waitForServer(baseUrl, child) {

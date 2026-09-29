@@ -25,6 +25,8 @@ Shared contracts live in `shared/`. Anything imported by both client and server 
   - `useRealtimeBridge.ts`: loads the realtime transport after the first state render.
   - `realtimeClient.ts`: refetches when the server announces a new revision,
     and keeps the server clock offset in sync.
+  - `useFailover.ts`: browsers remember the other laptops and reopen the page
+    on one of them when theirs disappears.
 - `src/components/`: route-level screens and reusable UI pieces.
   - `AdminView.tsx`: Beheer tabs; each tab is a section component in
     `components/admin/` (`PreparationSection`, `RunnersSection`,
@@ -39,6 +41,8 @@ Shared contracts live in `shared/`. Anything imported by both client and server 
 - `src/lib/`: browser-side helpers and app-specific utility functions.
   - `tactics.ts`: historical race validation, live comparison, and target-scenario calculations for Kobe's tactiek.
   - `tacticsDeepDive.ts`: detailed historical statistics, race-gap models, live uncertainty, and drafting tests.
+  - `pressTiming.ts`: dates timing presses from their key events and measures
+    laps on the monotonic clock.
   - `readiness.ts` and `systemStatus.ts`: the event readiness checklist and the
     one-line health status, from backup, standby, and clock state.
 - `src/types.ts`: client-facing re-export of shared schema types.
@@ -71,6 +75,7 @@ Shared contracts live in `shared/`. Anything imported by both client and server 
 - `server/app-state.ts`: live snapshot and lap history scopes.
 - `server/http-json.ts`: gzip, ETags, and one serialization per data revision.
 - `server/host.ts`: event LAN URL selection.
+- `server/clock.ts`: the cluster clock shared by all laptops.
 - `server/net-setup.ts`: pins the laptop's wired adapter to a static address (and back to DHCP) through the OS permission prompt; only callable from the laptop itself.
 
 See `docs/backend-architecture.md` for the complete process, write,

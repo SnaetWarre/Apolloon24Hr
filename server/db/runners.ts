@@ -5,6 +5,7 @@ import { TEMPORARY_TEAM_KIND, activeTemporaryTeamIdForRunner, ensureLabel } from
 import { getMaxQueueIndex } from './queue.js';
 import { clearActiveRunner } from './race-state.js';
 import { getRunnerById } from './runner-queries.js';
+import { clusterNow } from '../clock.js';
 
 type StoredRunner = {
   runner_number: string | null;
@@ -58,7 +59,7 @@ export function insertRunner(input: RunnerInput): Runner {
   if (initialStatus === 'running') {
     throw new Error('Start een nieuwe loper via het timingscherm');
   }
-  const now = Date.now();
+  const now = clusterNow();
   const id = input.id || randomUUID();
   const initialQueueIndex = initialStatus === 'waiting' ? getMaxQueueIndex() + 1 : null;
   transaction(() => {
@@ -145,7 +146,7 @@ export function updateRunner(id: string, fields: RunnerPatch): Runner | null {
         next.registrationSource,
         next.notes,
         next.registrationJson,
-        Date.now(),
+        clusterNow(),
         id,
       ]
     );

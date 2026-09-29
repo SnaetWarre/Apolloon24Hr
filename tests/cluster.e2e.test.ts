@@ -66,7 +66,7 @@ test('a manual backup can be downloaded as a SQLite file', { timeout: 15_000 }, 
 });
 
 test(
-  'a standby joins, follows every write read-only, and catches up after a restart',
+  'a standby joins, passes its writes to the primary, and catches up after a restart',
   { timeout: 40_000 },
   async () => {
     const root = testRoot('standby');
@@ -89,10 +89,11 @@ test(
 
       await client(primary).runners.create.mutate({ name: 'After join', runnerNumber: 'A-2' });
       await waitForSameState(primary, standby);
-      await assert.rejects(
-        client(standby).runners.create.mutate({ name: 'Written on a standby', runnerNumber: 'B-2' }),
-        /standby en alleen-lezen/
-      );
+      // A write on the standby's own screen goes through the primary and is on both once it returns.
+      await client(standby).runners.create.mutate({ name: 'Written on the standby', runnerNumber: 'B-2' });
+      for (const server of [standby, primary]) {
+        assert.ok((await fetchState(server)).runners.some((runner) => runner.name === 'Written on the standby'));
+      }
       await waitFor(async () =>
         (await fetchStatus(primary)).standbys.some((entry) => entry.reachable && entry.caughtUp)
       );
@@ -146,10 +147,8 @@ test(
 
       await client(second).runners.create.mutate({ name: 'After handover', runnerNumber: 'H-2' });
       await waitForSameState(second, first);
-      await assert.rejects(
-        client(first).runners.create.mutate({ name: 'Old primary', runnerNumber: 'H-3' }),
-        /standby/
-      );
+      await client(first).runners.create.mutate({ name: 'Via the old primary', runnerNumber: 'H-3' });
+      assert.ok((await fetchState(second)).runners.some((runner) => runner.name === 'Via the old primary'));
     } catch (error) {
       throw withServerOutput(error, ...servers);
     } finally {
@@ -204,6 +203,48 @@ test(
     }
   }
 );
+
+test('a standby times laps through the primary and says when the primary is gone', { timeout: 30_000 }, async () => {
+  const root = testRoot('forwarded-timing');
+  const servers: RunningServer[] = [];
+  try {
+    const primary = await startServer({ port: await freePort(), dataPath: path.join(root, 'primary') });
+    const standby = await startServer({ port: await freePort(), dataPath: path.join(root, 'standby') });
+    servers.push(primary, standby);
+    await client(standby).cluster.join.mutate({ primaryUrl: primary.baseUrl });
+
+    const first = await client(standby).runners.create.mutate({
+      name: 'First',
+      runnerNumber: 'T-1',
+      status: 'waiting',
+    });
+    await client(standby).runners.create.mutate({ name: 'Second', runnerNumber: 'T-2', status: 'waiting' });
+    const startedAt = Date.now() - 3_000;
+    await client(standby).race.startNext.mutate({ activeRunnerId: null, activeStartedAt: null, pressedAt: startedAt });
+    await client(standby).race.handoff.mutate({
+      activeRunnerId: first.id,
+      activeStartedAt: startedAt,
+      pressedAt: startedAt + 2_500,
+      measuredDurationMs: 2_498,
+    });
+    const [lap] = (await fetchState(primary)).laps;
+    assert.equal(lap?.startedAt, startedAt);
+    assert.equal(lap?.durationMs, 2_498, 'the lap is what the timing screen measured');
+    await waitForSameState(primary, standby);
+
+    await stopServer(primary);
+    await assert.rejects(
+      client(standby).runners.create.mutate({ name: 'Nobody to take it', runnerNumber: 'T-3' }),
+      /niet bereikbaar/
+    );
+    assert.equal((await fetchState(standby)).laps.length, 1, 'the standby still shows everything it had');
+  } catch (error) {
+    throw withServerOutput(error, ...servers);
+  } finally {
+    await Promise.all(servers.map(stopServer));
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test('laptops with different app versions refuse to couple', { timeout: 20_000 }, async () => {
   const root = testRoot('versions');

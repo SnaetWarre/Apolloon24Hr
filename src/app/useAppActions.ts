@@ -11,6 +11,7 @@ import type {
   RunnerPatch,
   RunnerStatus,
 } from '../types';
+import type { PressTime } from '../lib/pressTiming';
 import { appKey, clusterStatusKey, snapshotKey } from './snapshot';
 
 export function useAppActions() {
@@ -85,10 +86,12 @@ export function useAppActions() {
       setTemporaryTeamActive: action((labelId: string, active: boolean) =>
         trpc.temporaryTeams.setActive.mutate({ labelId, active })
       ),
-      handoff: action(() => trpc.race.handoff.mutate(raceExpectation())),
-      startNext: action(() => trpc.race.startNext.mutate(raceExpectation())),
+      handoff: action((press: PressTime) => trpc.race.handoff.mutate({ ...raceExpectation(), ...press })),
+      startNext: action((press: PressTime) => trpc.race.startNext.mutate({ ...raceExpectation(), ...press })),
       undoLastHandoff: action(() => trpc.race.undoLastHandoff.mutate(raceExpectation())),
-      finishRace: action(() => trpc.race.finish.mutate(raceExpectation())),
+      finishRace: action((press: PressTime) =>
+        trpc.race.finish.mutate({ ...raceExpectation(), pressedAt: press.pressedAt })
+      ),
       burgieGepakt: action(() => trpc.events.burgieGepakt.mutate()),
       updatePublicRecordMode: action((publicRecordMode: PublicRecordMode) =>
         trpc.settings.updatePublicRecordMode.mutate({ publicRecordMode })

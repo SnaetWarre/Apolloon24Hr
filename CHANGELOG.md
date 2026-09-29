@@ -8,10 +8,21 @@ Vereist een nieuwe major versie: laptops met deze versie koppelen niet met 3.x.
 De database migreert automatisch naar schema 13 en bewaart eerst een kopie
 (`app.pre-schema-13.sqlite`).
 
+### Added
+
+- Rondetijden komen uit het moment van de toetsdruk zelf en worden tussen twee
+  drukken op dezelfde klok gemeten: netwerk, een drukke server of
+  klokcorrecties veranderen een ronde niet meer
+- Elke laptop werkt in haar eigen venster: een standby geeft wijzigingen door
+  aan de primaire laptop
+- Alle laptops delen één klok (die van de primaire laptop), ook na een overname
+- Browsers en tv's schakelen vanzelf naar een andere laptop als de hunne
+  wegvalt
+
 ### Changed
 
-- Eén primaire laptop doet alle wijzigingen; een standby-laptop volgt live en
-  alleen-lezen. Dit vervangt de synchronisatie waarbij elke laptop schreef:
+- Eén primaire laptop legt alle wijzigingen vast; een standby-laptop houdt een
+  live kopie bij. Dit vervangt de synchronisatie waarbij elke laptop schreef:
   geen syncconflicten, quarantaine, timingcontroller of koppelcode meer.
   Overnemen kan gepland (zonder verlies) of als noodovername
 - Tijdelijke nachtploegen volgen hun planning zonder labels te herschrijven:

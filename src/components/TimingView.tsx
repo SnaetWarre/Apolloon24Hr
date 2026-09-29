@@ -9,6 +9,7 @@ import type { LiveAppSnapshot, Runner } from '../types';
 import { LabelBadge } from './LabelBadge';
 import { RunnerName } from './RunnerName';
 import { PageHeader } from './PageHeader';
+import { forgetLapStart, rememberLapStart, timePress } from '../lib/pressTiming';
 import { LIVE_MILLISECOND_INTERVAL_MS, useClockTick } from '../lib/useClockTick';
 
 const selectTimingData = ({ runners, race }: LiveAppSnapshot) => ({ runners, race });
@@ -34,8 +35,8 @@ export function TimingView() {
   const [finishConfirmStep, setFinishConfirmStep] = React.useState<0 | 1 | 2>(0);
   const handoffBusyRef = React.useRef(false);
   const confirm = useConfirm();
-  // Only the primary laptop records laps; a standby shows the race read-only.
-  const timingBlocked = cluster?.role === 'standby';
+  // Laps are recorded on the primary; another laptop can time while it reaches the primary.
+  const timingBlocked = cluster?.role === 'standby' && !cluster.primary?.reachable;
 
   const activeRunner = runners.find((runner) => runner.id === race.activeRunnerId) || null;
   const nextRunner = getNextWaitingRunner(runners);
@@ -70,39 +71,47 @@ export function TimingView() {
     []
   );
 
-  const runHandoff = React.useCallback(async () => {
-    if (timingBlocked || finishConfirmStep > 0 || (!activeRunner && !nextRunner)) return;
-    if (
-      race.raceFinishedAt &&
-      !(await confirm({
-        title: 'Race hervatten?',
-        message: 'De race is afgesloten. Hervatten start de volgende loper.',
-        confirmLabel: 'Race hervatten',
-        tone: 'danger',
-      }))
-    )
-      return;
-    await runExclusiveRaceAction(async () => {
-      const handoffResult = await (activeRunner ? handoff() : startNext());
-      setLastAction(
-        handoffResult.lapId
-          ? handoffResult.startedRunnerId
-            ? 'Ronde opgeslagen. Volgende loper gestart.'
-            : 'Ronde opgeslagen. Niemand actief; de wachtrij is leeg.'
-          : 'Loper gestart.'
-      );
-    }, null);
-  }, [
-    activeRunner,
-    nextRunner,
-    finishConfirmStep,
-    race.raceFinishedAt,
-    confirm,
-    handoff,
-    runExclusiveRaceAction,
-    startNext,
-    timingBlocked,
-  ]);
+  const runHandoff = React.useCallback(
+    async (eventTime: number) => {
+      if (timingBlocked || finishConfirmStep > 0 || (!activeRunner && !nextRunner)) return;
+      if (race.raceFinishedAt) {
+        const resume = await confirm({
+          title: 'Race hervatten?',
+          message: 'De race is afgesloten. Hervatten start de volgende loper.',
+          confirmLabel: 'Race hervatten',
+          tone: 'danger',
+        });
+        if (!resume) return;
+        // The lap starts at the confirmation, not at the press that opened it.
+        eventTime = performance.now();
+      }
+      const press = timePress(eventTime, race.activeStartedAt);
+      await runExclusiveRaceAction(async () => {
+        const handoffResult = await (activeRunner ? handoff(press) : startNext(press));
+        if (handoffResult.startedRunnerId) rememberLapStart(press, eventTime);
+        else forgetLapStart();
+        setLastAction(
+          handoffResult.lapId
+            ? handoffResult.startedRunnerId
+              ? 'Ronde opgeslagen. Volgende loper gestart.'
+              : 'Ronde opgeslagen. Niemand actief; de wachtrij is leeg.'
+            : 'Loper gestart.'
+        );
+      }, null);
+    },
+    [
+      activeRunner,
+      nextRunner,
+      finishConfirmStep,
+      race.raceFinishedAt,
+      race.activeStartedAt,
+      confirm,
+      handoff,
+      runExclusiveRaceAction,
+      startNext,
+      timingBlocked,
+    ]
+  );
 
   React.useEffect(() => {
     // Navigation buttons can stay focused when this route opens. In that case,
@@ -133,7 +142,7 @@ export function TimingView() {
       if (event.key === 'Enter' && isInteractiveTarget(target)) return;
       event.preventDefault();
       if (event.repeat || handoffBusy) return;
-      void runHandoff();
+      void runHandoff(event.timeStamp);
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
@@ -153,8 +162,10 @@ export function TimingView() {
     await runExclusiveRaceAction(undoLastHandoff, null);
   }
 
-  async function finish() {
-    const succeeded = await runExclusiveRaceAction(finishRace, 'Race beëindigd.');
+  async function finish(eventTime: number) {
+    const press = timePress(eventTime, race.activeStartedAt);
+    const succeeded = await runExclusiveRaceAction(() => finishRace(press), 'Race beëindigd.');
+    if (succeeded) forgetLapStart();
     if (succeeded) {
       setFinishConfirmStep(0);
     }
@@ -237,7 +248,11 @@ export function TimingView() {
           </div>
 
           <div className="timing-actions">
-            <button className="btn btn--primary btn--xl" onClick={runHandoff} disabled={handoffDisabled}>
+            <button
+              className="btn btn--primary btn--xl"
+              onClick={(event) => void runHandoff(event.timeStamp)}
+              disabled={handoffDisabled}
+            >
               <span>{handoffLabel}</span>
               {!race.raceFinishedAt && !handoffDisabled && <kbd>Spatie / Enter</kbd>}
             </button>
@@ -247,14 +262,8 @@ export function TimingView() {
             {timingBlocked && (
               <div className="warning-banner warning-banner--blocking">
                 <span>
-                  <strong>Deze laptop is standby.</strong> Klok op de primaire laptop
-                  {cluster?.primary?.url ? (
-                    <>
-                      {' '}
-                      (<strong>{cluster.primary.url}</strong>)
-                    </>
-                  ) : null}
-                  . Is die uitgevallen, neem dan over in <Link to="/admin">Beheer</Link>.
+                  <strong>De primaire laptop is niet bereikbaar.</strong> Klokken lukt weer zodra die terug is. Is die
+                  uitgevallen, neem dan over in <Link to="/admin">Beheer</Link>.
                 </span>
               </div>
             )}
@@ -407,7 +416,11 @@ export function TimingView() {
                   <button className="btn" onClick={() => setFinishConfirmStep(0)} disabled={handoffBusy}>
                     Annuleer
                   </button>
-                  <button className="btn btn--danger" onClick={finish} disabled={handoffBusy}>
+                  <button
+                    className="btn btn--danger"
+                    onClick={(event) => void finish(event.timeStamp)}
+                    disabled={handoffBusy}
+                  >
                     Race definitief beeindigen
                   </button>
                 </div>

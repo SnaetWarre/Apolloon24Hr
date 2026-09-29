@@ -15,11 +15,14 @@ import {
   temporaryTeamCreateSchema,
   temporaryTeamMembersSchema,
   temporaryTeamScheduleSchema,
+  timingPressSchema,
   type RaceStateExpectation,
   type TemporaryTeam,
+  type TimingPress,
 } from '../shared/schemas.js';
 import { createVerifiedBackup } from './backups.js';
-import { assertWritable, joinPrimary, promoteToPrimary } from './cluster.js';
+import { clusterNow } from './clock.js';
+import { assertWritable, forwardWrite, isFollowing, joinPrimary, promoteToPrimary } from './cluster.js';
 import {
   createBurgieGepaktEvent,
   createLabel,
@@ -47,24 +50,48 @@ import {
 } from './db.js';
 import { CsvImportError, importRunnersFromCsv } from './runner-import.js';
 
-const t = initTRPC.create();
+/** `forwarded` marks a write another laptop passed on to this one. */
+export type RequestContext = { forwarded?: boolean };
+
+const t = initTRPC.context<RequestContext>().create();
+
+type ErrorCode = ConstructorParameters<typeof TRPCError>[0]['code'];
+
+/** Error codes a primary can answer a forwarded write with; anything else is reported as a server error. */
+const FORWARDED_ERROR_CODES = new Set<string>(['BAD_REQUEST', 'NOT_FOUND', 'CONFLICT', 'SERVICE_UNAVAILABLE']);
 
 function fail(code: 'NOT_FOUND' | 'BAD_REQUEST' | 'CONFLICT', message: string): never {
   throw new TRPCError({ code, message });
 }
 
 /**
- * Runs a mutation as one replicated write on the primary. A domain error
- * thrown by the database layer becomes a CONFLICT with its (Dutch) message.
+ * A mutation that changes event data. The main laptop commits it as one
+ * replicated write; any other laptop passes the call on to the main laptop
+ * and answers once its own copy has the change.
  */
+function write<I, T>(action: (input: I) => T) {
+  return async ({ input, path, ctx }: { input: I; path: string; ctx: RequestContext }): Promise<T> => {
+    if (isFollowing()) {
+      if (ctx.forwarded) {
+        throw new TRPCError({
+          code: 'SERVICE_UNAVAILABLE',
+          message: 'De laptops wisselen net van rol. Probeer opnieuw.',
+        });
+      }
+      const outcome = await forwardWrite<T>(path, input);
+      if (outcome.ok) return outcome.data;
+      const code = (FORWARDED_ERROR_CODES.has(outcome.code) ? outcome.code : 'INTERNAL_SERVER_ERROR') as ErrorCode;
+      throw new TRPCError({ code, message: outcome.message });
+    }
+    return commitWrite(path, () => action(input));
+  };
+}
+
 function commitWrite<T>(type: string, action: () => T): T {
   try {
     assertWritable();
   } catch (error) {
-    throw new TRPCError({
-      code: 'FORBIDDEN',
-      message: (error as Error).message,
-    });
+    throw new TRPCError({ code: 'SERVICE_UNAVAILABLE', message: (error as Error).message });
   }
   try {
     return recordWrite(type, action);
@@ -89,6 +116,18 @@ function assertExpectedRaceState(expected: RaceStateExpectation): void {
   }
 }
 
+/**
+ * The moment of the key press as the timing screen recorded it. A press more
+ * than a few seconds from this laptop's clock means that screen's clock is
+ * off, so the arrival time is used instead.
+ */
+function pressMoment(press: TimingPress): number {
+  const now = clusterNow();
+  const pressedAt = press.pressedAt;
+  const plausible = pressedAt !== undefined && pressedAt >= now - 10_000 && pressedAt <= now + 1_000;
+  return Math.max(plausible ? pressedAt : now, press.activeStartedAt ?? 0);
+}
+
 function requireTemporaryTeam(labelId: string): TemporaryTeam {
   return getTemporaryTeam(labelId) ?? fail('NOT_FOUND', 'Tijdelijke nachtploeg niet gevonden');
 }
@@ -109,19 +148,12 @@ export const appRouter = t.router({
 
   runners: t.router({
     registrations: t.procedure.query(() => getRunnerRegistrations()),
-    create: t.procedure
-      .input(runnerInputSchema)
-      .mutation(({ input }) => commitWrite('runners.create', () => insertRunner(input))),
+    create: t.procedure.input(runnerInputSchema).mutation(write((input) => insertRunner(input))),
     update: t.procedure
       .input(runnerIdSchema.extend({ fields: runnerPatchSchema }))
-      .mutation(({ input }) =>
-        commitWrite(
-          'runners.update',
-          () => updateRunner(input.id, input.fields) ?? fail('NOT_FOUND', 'Loper niet gevonden')
-        )
-      ),
-    delete: t.procedure.input(runnerIdSchema).mutation(({ input }) =>
-      commitWrite('runners.delete', () => {
+      .mutation(write((input) => updateRunner(input.id, input.fields) ?? fail('NOT_FOUND', 'Loper niet gevonden'))),
+    delete: t.procedure.input(runnerIdSchema).mutation(
+      write((input) => {
         const runner = getRunnerById(input.id) ?? fail('NOT_FOUND', 'Loper niet gevonden');
         if (runner.status === 'running') fail('CONFLICT', 'Actieve loper kan niet verwijderd worden');
         if (runner.lapCount > 0) fail('CONFLICT', 'Lopers met rondes blijven bewaard voor analyse');
@@ -129,37 +161,34 @@ export const appRouter = t.router({
         return { ok: true };
       })
     ),
-    setStatus: t.procedure.input(runnerStatusUpdateSchema).mutation(({ input }) =>
-      commitWrite(
-        'runners.setStatus',
-        () =>
+    setStatus: t.procedure.input(runnerStatusUpdateSchema).mutation(
+      write(
+        (input) =>
           updateRunnerStatus({
             id: input.id,
             status: input.status,
-            statusSince: input.statusSince ?? Date.now(),
+            statusSince: input.statusSince ?? clusterNow(),
           }) ?? fail('NOT_FOUND', 'Loper niet gevonden')
       )
     ),
-    reorder: t.procedure.input(queueReorderSchema).mutation(({ input }) =>
-      commitWrite('runners.reorder', () => {
+    reorder: t.procedure.input(queueReorderSchema).mutation(
+      write((input) => {
         updateWaitingOrder(input.ids);
         return { ok: true };
       })
     ),
-    hide: t.procedure.input(runnerIdSchema).mutation(({ input }) =>
-      commitWrite('runners.hide', () => {
+    hide: t.procedure.input(runnerIdSchema).mutation(
+      write((input) => {
         const current = getRunnerById(input.id) ?? fail('NOT_FOUND', 'Loper niet gevonden');
         if (current.status !== 'ran') fail('CONFLICT', 'Alleen gelopen lopers kunnen verborgen worden');
-        return hideRunnerInQueue(input.id, Date.now()) ?? fail('NOT_FOUND', 'Loper niet gevonden');
+        return hideRunnerInQueue(input.id, clusterNow()) ?? fail('NOT_FOUND', 'Loper niet gevonden');
       })
     ),
     unhide: t.procedure
       .input(runnerIdSchema)
-      .mutation(({ input }) =>
-        commitWrite('runners.unhide', () => unhideRunnerInQueue(input.id) ?? fail('NOT_FOUND', 'Loper niet gevonden'))
-      ),
-    importCsv: t.procedure.input(importCsvSchema).mutation(({ input }) =>
-      commitWrite('runners.importCsv', () => {
+      .mutation(write((input) => unhideRunnerInQueue(input.id) ?? fail('NOT_FOUND', 'Loper niet gevonden'))),
+    importCsv: t.procedure.input(importCsvSchema).mutation(
+      write((input) => {
         try {
           return importRunnersFromCsv(input.csvText);
         } catch (error) {
@@ -171,19 +200,12 @@ export const appRouter = t.router({
   }),
 
   labels: t.router({
-    create: t.procedure
-      .input(labelInputSchema)
-      .mutation(({ input }) => commitWrite('labels.create', () => createLabel(input))),
+    create: t.procedure.input(labelInputSchema).mutation(write((input) => createLabel(input))),
     update: t.procedure
       .input(runnerIdSchema.extend({ fields: labelPatchSchema }))
-      .mutation(({ input }) =>
-        commitWrite(
-          'labels.update',
-          () => updateLabel(input.id, input.fields) ?? fail('NOT_FOUND', 'Label niet gevonden')
-        )
-      ),
-    delete: t.procedure.input(runnerIdSchema).mutation(({ input }) =>
-      commitWrite('labels.delete', () => {
+      .mutation(write((input) => updateLabel(input.id, input.fields) ?? fail('NOT_FOUND', 'Label niet gevonden'))),
+    delete: t.procedure.input(runnerIdSchema).mutation(
+      write((input) => {
         if (!deleteLabel(input.id)) fail('NOT_FOUND', 'Label niet gevonden');
         return { ok: true };
       })
@@ -191,13 +213,9 @@ export const appRouter = t.router({
   }),
 
   temporaryTeams: t.router({
-    create: t.procedure.input(temporaryTeamCreateSchema).mutation(({ input }) =>
-      commitWrite('temporaryTeams.create', () => {
-        const label = createLabel({
-          name: input.name,
-          color: input.color,
-          kind: 'temporary_team',
-        });
+    create: t.procedure.input(temporaryTeamCreateSchema).mutation(
+      write((input) => {
+        const label = createLabel({ name: input.name, color: input.color, kind: 'temporary_team' });
         setTemporaryTeamMembers(label.id, input.runnerIds);
         setTemporaryTeamSchedule(label.id, input.startsAt, input.endsAt);
         return requireTemporaryTeam(label.id);
@@ -205,67 +223,55 @@ export const appRouter = t.router({
     ),
     setSchedule: t.procedure
       .input(temporaryTeamScheduleSchema.safeExtend({ labelId: z.string().min(1) }))
-      .mutation(({ input }) =>
-        commitWrite('temporaryTeams.setSchedule', () =>
-          setTemporaryTeamSchedule(input.labelId, input.startsAt, input.endsAt)
-        )
-      ),
+      .mutation(write((input) => setTemporaryTeamSchedule(input.labelId, input.startsAt, input.endsAt))),
     setMembers: t.procedure
       .input(temporaryTeamMembersSchema)
-      .mutation(({ input }) =>
-        commitWrite('temporaryTeams.setMembers', () => setTemporaryTeamMembers(input.labelId, input.runnerIds))
-      ),
+      .mutation(write((input) => setTemporaryTeamMembers(input.labelId, input.runnerIds))),
     setActive: t.procedure
       .input(temporaryTeamActiveSchema)
-      .mutation(({ input }) =>
-        commitWrite('temporaryTeams.setActive', () => setTemporaryTeamActive(input.labelId, input.active, Date.now()))
-      ),
+      .mutation(write((input) => setTemporaryTeamActive(input.labelId, input.active, clusterNow()))),
   }),
 
   race: t.router({
-    startNext: t.procedure.input(raceStateExpectationSchema).mutation(({ input }) =>
-      commitWrite('race.startNext', () => {
+    startNext: t.procedure.input(timingPressSchema).mutation(
+      write((input) => {
         assertExpectedRaceState(input);
         if (input.activeRunnerId) fail('CONFLICT', 'Er loopt al een loper');
-        const result = performHandoff(Date.now());
+        const result = performHandoff(pressMoment(input));
         return result.ok ? result : fail('CONFLICT', 'Niemand staat klaar in de wachtrij');
       })
     ),
-    handoff: t.procedure.input(raceStateExpectationSchema).mutation(({ input }) =>
-      commitWrite('race.handoff', () => {
+    handoff: t.procedure.input(timingPressSchema).mutation(
+      write((input) => {
         assertExpectedRaceState(input);
-        const result = performHandoff(Date.now());
+        const result = performHandoff(pressMoment(input), input.measuredDurationMs);
         return result.ok ? result : fail('CONFLICT', 'Niemand staat klaar in de wachtrij');
       })
     ),
-    undoLastHandoff: t.procedure.input(raceStateExpectationSchema).mutation(({ input }) =>
-      commitWrite('race.undoLastHandoff', () => {
+    undoLastHandoff: t.procedure.input(raceStateExpectationSchema).mutation(
+      write((input) => {
         assertExpectedRaceState(input);
         const result = undoLastHandoff();
         return result.ok ? result : fail('CONFLICT', 'Er is geen wissel om ongedaan te maken');
       })
     ),
-    finish: t.procedure.input(raceStateExpectationSchema).mutation(({ input }) =>
-      commitWrite('race.finish', () => {
+    finish: t.procedure.input(timingPressSchema).mutation(
+      write((input) => {
         assertExpectedRaceState(input);
-        finishRace(Date.now());
+        finishRace(pressMoment(input));
         return { ok: true };
       })
     ),
   }),
 
   events: t.router({
-    burgieGepakt: t.procedure.mutation(() =>
-      commitWrite('events.burgieGepakt', () => createBurgieGepaktEvent(Date.now()))
-    ),
+    burgieGepakt: t.procedure.mutation(write(() => createBurgieGepaktEvent(clusterNow()))),
   }),
 
   settings: t.router({
     updatePublicRecordMode: t.procedure
       .input(publicRecordModeUpdateSchema)
-      .mutation(({ input }) =>
-        commitWrite('settings.updatePublicRecordMode', () => setPublicRecordMode(input.publicRecordMode))
-      ),
+      .mutation(write((input) => setPublicRecordMode(input.publicRecordMode))),
   }),
 });
 

@@ -2,6 +2,7 @@ import { type Runner, type RunnerStatus } from '../../shared/schemas.js';
 import { all, one, run, transaction } from './connection.js';
 import { clearActiveRunner, getRaceState, startActiveRunner } from './race-state.js';
 import { getRunnerById } from './runner-queries.js';
+import { clusterNow } from '../clock.js';
 
 /** A runner's place in the flow, as stored with a handoff so it can be undone. */
 export type QueueState = {
@@ -12,7 +13,7 @@ export type QueueState = {
   hiddenAt: number | null;
 };
 
-export function hideRunnerInQueue(id: string, now = Date.now()): Runner | null {
+export function hideRunnerInQueue(id: string, now = clusterNow()): Runner | null {
   run('UPDATE runners SET hidden_at = ? WHERE id = ?', [now, id]);
   return getRunnerById(id);
 }
@@ -40,7 +41,7 @@ export function updateRunnerStatus({
       throw new Error('Er loopt al een loper');
     }
   }
-  const now = statusSince ?? Date.now();
+  const now = statusSince ?? clusterNow();
   const nextQueueIndex = status !== 'waiting' ? null : (queueIndex ?? getMaxQueueIndex() + 1);
 
   transaction(() => {

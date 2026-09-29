@@ -1,6 +1,7 @@
 import { type TemporaryTeam } from '../../shared/schemas.js';
 import { all, one, run, transaction } from './connection.js';
 import { TEMPORARY_TEAM_ACTIVE_SQL, TEMPORARY_TEAM_KIND, ensureTemporaryTeamRow } from './labels.js';
+import { clusterNow } from '../clock.js';
 
 export function syncTemporaryTeamRows(): void {
   run(
@@ -11,7 +12,7 @@ export function syncTemporaryTeamRows(): void {
 }
 
 /** Night teams with `active` evaluated at `nowMs`; a team without members is never active. */
-export function getTemporaryTeams(nowMs = Date.now()): TemporaryTeam[] {
+export function getTemporaryTeams(nowMs = clusterNow()): TemporaryTeam[] {
   const membersByTeam = new Map<string, string[]>();
   for (const member of all<{ labelId: string; runnerId: string }>(
     `SELECT team_label_id AS labelId, runner_id AS runnerId FROM temporary_team_members ORDER BY runner_id`
@@ -47,7 +48,7 @@ export function getTemporaryTeams(nowMs = Date.now()): TemporaryTeam[] {
   });
 }
 
-export function getTemporaryTeam(labelId: string, nowMs = Date.now()): TemporaryTeam | null {
+export function getTemporaryTeam(labelId: string, nowMs = clusterNow()): TemporaryTeam | null {
   return getTemporaryTeams(nowMs).find((team) => team.labelId === labelId) ?? null;
 }
 
@@ -84,7 +85,7 @@ export function setTemporaryTeamMembers(labelId: string, runnerIds: string[]): T
 }
 
 /** Switches an unscheduled team by hand; scheduled teams follow their window. */
-export function setTemporaryTeamActive(labelId: string, active: boolean, nowMs = Date.now()): TemporaryTeam {
+export function setTemporaryTeamActive(labelId: string, active: boolean, nowMs = clusterNow()): TemporaryTeam {
   const team = requireTemporaryTeam(labelId);
   if (team.startsAt !== null) throw new Error('Deze ploeg volgt haar planning. Pas het begin- of einduur aan.');
   if (active && team.memberRunnerIds.length === 0) throw new Error('Voeg eerst minstens een loper toe');
@@ -108,7 +109,7 @@ export function setTemporaryTeamSchedule(labelId: string, startsAt: number, ends
 }
 
 /** Changes whenever a night team starts or stops, so clients can refresh derived labels. */
-export function activeTemporaryTeamsKey(nowMs = Date.now()): string {
+export function activeTemporaryTeamsKey(nowMs = clusterNow()): string {
   return getTemporaryTeams(nowMs)
     .filter((team) => team.active)
     .map((team) => team.labelId)

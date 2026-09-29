@@ -7,6 +7,7 @@ import { type QueueState, getNextWaitingRunner, getQueueStates, restoreQueueStat
 import { clearActiveRunner, getRaceState, startActiveRunner } from './race-state.js';
 import { getRunnerById } from './runner-queries.js';
 import { serializeHistoricalLabels } from './values.js';
+import { clusterNow } from '../clock.js';
 
 type HandoffSnapshot = {
   raceState: RaceState;
@@ -15,7 +16,7 @@ type HandoffSnapshot = {
   lapIds: string[];
 };
 
-export function createBurgieGepaktEvent(nowMs = Date.now()): RaceEvent {
+export function createBurgieGepaktEvent(nowMs = clusterNow()): RaceEvent {
   const activeRunnerId = getRaceState().activeRunnerId;
   const activeRunner = activeRunnerId ? getRunnerById(activeRunnerId) : null;
   const id = randomUUID();
@@ -45,12 +46,20 @@ export function createBurgieGepaktEvent(nowMs = Date.now()): RaceEvent {
   return event;
 }
 
+/** How far a duration measured by the timing screen may differ from the clock difference before it is distrusted. */
+const MAX_MEASUREMENT_DIFFERENCE_MS = 250;
+
 /**
  * The spacebar action: records the active runner's lap and starts the next
  * waiting runner. Stores what it replaced so the handoff can be undone.
+ *
+ * `nowMs` is the moment of the press. `measuredDurationMs`, when the timing
+ * screen measured the lap between its own two presses, is used as the lap
+ * time: it comes from one monotonic clock and ignores clock corrections.
  */
 export function performHandoff(
-  nowMs = Date.now()
+  nowMs = clusterNow(),
+  measuredDurationMs?: number
 ): { ok: true; lapId: string | null; startedRunnerId: string | null } | { ok: false; error: 'empty_queue' } {
   const raceState = getRaceState();
   const activeRunnerId = raceState.activeRunnerId;
@@ -77,6 +86,12 @@ export function performHandoff(
 
     if (activeRunnerId) {
       const startedAt = raceState.activeStartedAt ?? nowMs;
+      const clockDurationMs = Math.max(0, nowMs - startedAt);
+      const durationMs =
+        measuredDurationMs !== undefined &&
+        Math.abs(measuredDurationMs - clockDurationMs) <= MAX_MEASUREMENT_DIFFERENCE_MS
+          ? measuredDurationMs
+          : clockDurationMs;
       run(
         `INSERT INTO laps (
           id,
@@ -95,7 +110,7 @@ export function performHandoff(
           getLapCount(activeRunnerId) + 1,
           startedAt,
           nowMs,
-          Math.max(0, nowMs - startedAt),
+          durationMs,
           nowMs,
           serializeHistoricalLabels(
             raceState.activeLabels.length ? raceState.activeLabels : getRunnerLabels(activeRunnerId, startedAt)
@@ -160,7 +175,7 @@ export function undoLastHandoff(): { ok: true; deletedLapIds: string[] } | { ok:
   return { ok: true, deletedLapIds };
 }
 
-export function finishRace(nowMs = Date.now()): void {
+export function finishRace(nowMs = clusterNow()): void {
   const activeRunnerId = getRaceState().activeRunnerId;
   transaction(() => {
     if (activeRunnerId) setRaceStatus(activeRunnerId, 'ran', nowMs);
