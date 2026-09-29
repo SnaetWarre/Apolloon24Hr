@@ -207,6 +207,20 @@ function seedRunners(count, nowMs) {
   return runners;
 }
 
+// `17-18u (dinsdag)` for the hour that is running now, in the form's own format.
+function currentHourBlock(nowMs) {
+  const parts = new Intl.DateTimeFormat('nl-BE', {
+    hour: '2-digit',
+    hourCycle: 'h23',
+    weekday: 'long',
+    timeZone: 'Europe/Brussels',
+  }).formatToParts(nowMs);
+  const part = (type) => parts.find((entry) => entry.type === type)?.value ?? '';
+  const hour = Number(part('hour'));
+  const pad = (value) => String(value).padStart(2, '0');
+  return `${pad(hour)}-${pad((hour + 1) % 24)}u (${part('weekday').toLowerCase()})`;
+}
+
 // Fictional form answers so profiles, filters and hours can be tested.
 // Uses example.be addresses and 0470 00 xx xx numbers; never real people.
 function fictionalRegistration(index, name, nowMs) {
@@ -242,7 +256,11 @@ function fictionalRegistration(index, name, nowMs) {
     estimatedLaps: String(6 + (index % 10)),
     estimatedPace: `${Math.floor(pace / 60)}:${String(pace % 60).padStart(2, '0')}`,
     maxLapsPerBlock: String(3 + (index % 4)),
-    availableHours: [0, 1, 4].map((offset) => hourBlocks[(firstBlock + offset) % hourBlocks.length]),
+    // Every third runner is also free right now, so the "Nu beschikbaar" panel on Wachtrij has people to call.
+    availableHours: [
+      ...[0, 1, 4].map((offset) => hourBlocks[(firstBlock + offset) % hourBlocks.length]),
+      ...(index % 3 === 0 ? [currentHourBlock(nowMs)] : []),
+    ],
     reuseConsent: index % 5 === 0 ? 'Nee' : 'Ja',
     flexibility: index % 3 === 0 ? 'Ik kan inspringen als het moet' : 'Enkel op de opgegeven uren',
     remarks: index % 7 === 0 ? 'Liefst niet twee blokken na elkaar.' : '',

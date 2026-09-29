@@ -64,6 +64,7 @@ const PATHS = {
       <path d="m20 20-3.5-3.5" />
     </>
   ),
+  phone: <path d="M5 3h3l2 5-2.5 1.5a11 11 0 0 0 6 6L15 13l5 2v3a2 2 0 0 1-2 2A16 16 0 0 1 3 5a2 2 0 0 1 2-2Z" />,
   plus: <path d="M12 5v14M5 12h14" />,
   close: <path d="M18 6 6 18M6 6l12 12" />,
   download: <path d="M12 3v12m0 0-4-4m4 4 4-4M4 21h16" />,

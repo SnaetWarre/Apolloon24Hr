@@ -3,6 +3,7 @@ import { useAppData } from '../app/index';
 import { useArrivals } from '../lib/motion';
 import { getNextWaitingRunner } from '../lib/runners';
 import type { LiveAppSnapshot } from '../types';
+import { AvailableNowPanel } from './AvailableNowPanel';
 import { KanbanBoard } from './KanbanBoard';
 import { LiveDuration } from './LiveTime';
 import { PageHeader } from './PageHeader';
@@ -60,6 +61,7 @@ export function QueuePage() {
         </div>
       </section>
       <KanbanBoard onOpenProfile={setProfileRunnerId} />
+      <AvailableNowPanel runners={runners} onOpenProfile={setProfileRunnerId} />
       {profileRunnerId && <RunnerProfileModal runnerId={profileRunnerId} onClose={() => setProfileRunnerId(null)} />}
     </>
   );

@@ -20,7 +20,8 @@ Shared contracts live in `shared/`. Anything imported by both client and server 
   - `snapshot.ts`: query keys; everything server-derived lives under `['app']`.
   - `useAppData.ts`: live-state query with selectors.
   - `useRaceHistory.ts`: full, recent, and per-runner race history.
-  - `useRegistrations.ts`: registration answers, only for profile and Beheer.
+  - `useRegistrations.ts`: registration answers, for the profile, Beheer, and the
+    "Nu beschikbaar" panel on Wachtrij.
   - `useAppActions.ts`: tRPC mutations that refresh this screen when they return.
   - `useRealtimeBridge.ts`: loads the realtime transport after the first state render.
   - `realtimeClient.ts`: refetches when the server announces a new revision,
@@ -41,6 +42,9 @@ Shared contracts live in `shared/`. Anything imported by both client and server 
 - `src/lib/`: browser-side helpers and app-specific utility functions.
   - `tactics.ts`: historical race validation, live comparison, and target-scenario calculations for Kobe's tactiek.
   - `tacticsDeepDive.ts`: detailed historical statistics, race-gap models, live uncertainty, and drafting tests.
+  - `availability.ts`: matches the form's hour blocks (`20-21u (dinsdag)`) to the
+    Brussels clock, for `AvailableNowPanel.tsx` on Wachtrij: who can run this
+    hour but is not warming up or waiting, with their phone number.
   - `pressTiming.ts`: dates timing presses from their key events and measures
     laps on the monotonic clock.
   - `readiness.ts` and `systemStatus.ts`: the event readiness checklist and the
