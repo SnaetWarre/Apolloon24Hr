@@ -1,6 +1,7 @@
 import React from 'react';
 import { ModalDialog } from './ModalDialog';
 import { useConfirm } from './ConfirmDialog';
+import { AvailableHoursPicker } from './AvailableHoursPicker';
 import { runnerFormError } from '../lib/runnerForm';
 import { useAppActions, useAppData } from '../app/index';
 import type { Label, LiveAppSnapshot, Runner } from '../types';
@@ -198,7 +199,16 @@ export function RunnerActivationModal({
   );
 }
 
-export function RunnerAddModal({ onClose, onAdded }: { onClose: () => void; onAdded?: () => void }) {
+/** Queue screens add a runner straight to warming up; management only registers them. */
+export function RunnerAddModal({
+  onClose,
+  onAdded,
+  destination = 'warming_up',
+}: {
+  onClose: () => void;
+  onAdded?: () => void;
+  destination?: 'warming_up' | 'registered';
+}) {
   const { labels } = useAppData(selectLabels);
   const { addRunner } = useAppActions();
   const [runnerNumber, setRunnerNumber] = React.useState('');
@@ -209,6 +219,9 @@ export function RunnerAddModal({ onClose, onAdded }: { onClose: () => void; onAd
   const [historicalBestMinutes, setHistoricalBestMinutes] = React.useState('');
   const [historicalBestSeconds, setHistoricalBestSeconds] = React.useState('');
   const [notes, setNotes] = React.useState('');
+  const [phone, setPhone] = React.useState('');
+  const [email, setEmail] = React.useState('');
+  const [availableHours, setAvailableHours] = React.useState<string[]>([]);
   const [selectedLabels, setSelectedLabels] = React.useState<string[]>([]);
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -220,11 +233,14 @@ export function RunnerAddModal({ onClose, onAdded }: { onClose: () => void; onAd
     if (saveBusyRef.current) return;
     const hasDraft =
       selectedLabels.length > 0 ||
+      availableHours.length > 0 ||
       [
         runnerNumber,
         name,
         targetLaps,
         notes,
+        phone,
+        email,
         historicalAvgMinutes,
         historicalAvgSeconds,
         historicalBestMinutes,
@@ -266,8 +282,9 @@ export function RunnerAddModal({ onClose, onAdded }: { onClose: () => void; onAd
         historicalBestMs: minuteSecondInputToMs(historicalBestMinutes, historicalBestSeconds),
         registrationSource: 'manual',
         notes,
+        registrationDetails: { phone, email, availableHours },
         labels: selectedLabels,
-        status: 'warming_up',
+        status: destination,
       });
       onAdded?.();
       onClose();
@@ -351,6 +368,35 @@ export function RunnerAddModal({ onClose, onAdded }: { onClose: () => void; onAd
 
         <details className="runner-extra-details">
           <summary className="disclosure">
+            Contact en beschikbaarheid <span>Telefoon, e-mail en beschikbare uren</span>
+          </summary>
+          <div className="form-grid">
+            <label>
+              Telefoon
+              <input
+                className="input"
+                type="tel"
+                autoComplete="off"
+                value={phone}
+                onChange={(event) => setPhone(event.target.value)}
+              />
+            </label>
+            <label>
+              E-mail
+              <input
+                className="input"
+                type="email"
+                autoComplete="off"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+              />
+            </label>
+          </div>
+          <AvailableHoursPicker value={availableHours} onChange={setAvailableHours} />
+        </details>
+
+        <details className="runner-extra-details">
+          <summary className="disclosure">
             Extra gegevens <span>Doel, historische tijden en notities</span>
           </summary>
           <div className="form-grid">
@@ -428,7 +474,7 @@ export function RunnerAddModal({ onClose, onAdded }: { onClose: () => void; onAd
             Annuleer
           </button>
           <button className="btn btn--primary" onClick={save} disabled={saving}>
-            {saving ? 'Opslaan...' : 'Toevoegen aan opwarmen'}
+            {saving ? 'Opslaan...' : destination === 'warming_up' ? 'Toevoegen aan opwarmen' : 'Loper toevoegen'}
           </button>
         </div>
       </div>

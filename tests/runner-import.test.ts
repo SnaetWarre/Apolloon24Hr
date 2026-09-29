@@ -65,3 +65,41 @@ test('Google Form import keeps every answer and preserves an existing runner on 
     fs.rmSync(dataPath, { recursive: true, force: true });
   }
 });
+
+test('hand-entered contact details and hours merge into the registration', async () => {
+  fs.rmSync(dataPath, { recursive: true, force: true });
+  const db = await import('../server/db.ts');
+  const { appRouter } = await import('../server/router.ts');
+  try {
+    await db.initDb();
+    const caller = appRouter.createCaller({});
+    const manual = await caller.runners.create({
+      name: 'Manuele Loper',
+      registrationSource: 'manual',
+      registrationDetails: { phone: ' 0470 11 22 33 ', email: '', availableHours: ['20-21u (dinsdag)'] },
+    });
+    const registration = (await caller.runners.registrations())[manual.id];
+    assert.equal(registration?.phone, '0470 11 22 33');
+    assert.deepEqual(registration?.availableHours, ['20-21u (dinsdag)']);
+    assert.equal(registration?.studyPhase, '');
+
+    const withoutDetails = await caller.runners.create({ name: 'Zonder Gegevens', registrationDetails: {} });
+    assert.equal((await caller.runners.registrations())[withoutDetails.id], undefined);
+
+    await caller.runners.update({
+      id: manual.id,
+      fields: { registrationDetails: { availableHours: ['21-22u (dinsdag)', '21-22u (dinsdag)'] } },
+    });
+    const updated = (await caller.runners.registrations())[manual.id];
+    assert.equal(updated?.phone, '0470 11 22 33');
+    assert.deepEqual(updated?.availableHours, ['21-22u (dinsdag)']);
+
+    await caller.runners.update({
+      id: manual.id,
+      fields: { registrationDetails: { phone: '', email: '', availableHours: [] } },
+    });
+    assert.equal((await caller.runners.registrations())[manual.id], undefined);
+  } finally {
+    fs.rmSync(dataPath, { recursive: true, force: true });
+  }
+});

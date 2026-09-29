@@ -2,6 +2,7 @@ import React from 'react';
 import { useAppActions, useRegistrations } from '../../app/index';
 import { useConfirm } from '../ConfirmDialog';
 import { RunnerProfileModal } from '../RunnerProfileModal';
+import { RunnerAddModal } from '../RunnerEntryModals';
 import type { Runner } from '../../types';
 import { AdminNoticeBanner, useAdminAction } from './AdminNotice';
 import { AdminRunnerTable } from './AdminRunnerTable';
@@ -13,10 +14,11 @@ export function RunnersSection({ runners }: { runners: Runner[] }) {
   const confirm = useConfirm();
   const registrations = useRegistrations();
   const { deleteRunner, unhideRunner } = useAppActions();
-  const { notice, run } = useAdminAction();
+  const { notice, setNotice, run } = useAdminAction();
   const [query, setQuery] = React.useState('');
   const [hour, setHour] = React.useState('');
   const [profileRunnerId, setProfileRunnerId] = React.useState<string | null>(null);
+  const [addOpen, setAddOpen] = React.useState(false);
 
   const availableHours = React.useMemo(
     () =>
@@ -88,10 +90,17 @@ export function RunnersSection({ runners }: { runners: Runner[] }) {
 
   return (
     <section className="panel">
-      <h2>Lopers beheren</h2>
-      <p className="panel-copy">
-        Definitief verwijderen kan alleen voor lopers zonder rondes. Gelopen data blijft bewaard voor analyse.
-      </p>
+      <div className="panel-heading-row">
+        <div>
+          <h2>Lopers beheren</h2>
+          <p className="panel-copy">
+            Definitief verwijderen kan alleen voor lopers zonder rondes. Gelopen data blijft bewaard voor analyse.
+          </p>
+        </div>
+        <button className="btn btn--primary" onClick={() => setAddOpen(true)}>
+          Nieuwe loper
+        </button>
+      </div>
       <div className="form-row form-row--plain">
         <input
           className="input input--stretch"
@@ -136,6 +145,13 @@ export function RunnersSection({ runners }: { runners: Runner[] }) {
         />
       </div>
       {profileRunnerId && <RunnerProfileModal runnerId={profileRunnerId} onClose={() => setProfileRunnerId(null)} />}
+      {addOpen && (
+        <RunnerAddModal
+          destination="registered"
+          onClose={() => setAddOpen(false)}
+          onAdded={() => setNotice({ tone: 'success', text: 'Loper toegevoegd.' })}
+        />
+      )}
     </section>
   );
 }

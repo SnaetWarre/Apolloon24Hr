@@ -740,6 +740,51 @@
   font-weight: 400;
 }
 
+.hours-picker {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+  margin: var(--space-4) 0 0;
+  padding: 0;
+  border: 0;
+}
+
+.hours-picker legend {
+  margin-bottom: var(--space-2);
+  padding: 0;
+  color: var(--ink-2);
+  font-size: 13.5px;
+  font-weight: 500;
+}
+
+.hours-picker__day {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  align-items: start;
+  gap: var(--space-3);
+}
+
+.hours-picker__weekday {
+  padding-top: 5px;
+  color: var(--ink-2);
+  font-size: 13px;
+  text-transform: capitalize;
+}
+
+.hours-picker__hours {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.hours-picker__hour span {
+  justify-content: center;
+  min-width: 44px;
+  min-height: 28px;
+  padding: 0 6px;
+  font-variant-numeric: tabular-nums;
+}
+
 @media (max-width: 900px) {
   .label-create-row {
     grid-template-columns: repeat(2, minmax(0, 1fr));

@@ -3,10 +3,14 @@ import test from 'node:test';
 import {
   blockCoversMoment,
   brusselsMoment,
+  buildHourGrid,
   findAvailableUncalledRunners,
   formatMomentBlock,
+  hasHourBlock,
+  hoursOutsideGrid,
   isAvailableAtMoment,
   parseHourBlock,
+  toggleHourBlock,
 } from '../src/lib/availability.ts';
 import type { Runner, RunnerRegistration } from '../src/types.ts';
 
@@ -125,4 +129,27 @@ test('only runners who are available now and not on the board are listed, unrun 
     ),
     ['later']
   );
+});
+
+test('the hour grid spans each registered day, filling hours nobody picked', () => {
+  assert.deepEqual(buildHourGrid(['22-23u (woensdag)', '20-21u (dinsdag)', '23-00u (dinsdag)', '18-19u (woensdag)']), [
+    { weekday: 'dinsdag', hours: [20, 21, 22, 23] },
+    { weekday: 'woensdag', hours: [18, 19, 20, 21, 22] },
+  ]);
+  const fallback = buildHourGrid(['dinsdagavond']);
+  assert.deepEqual(
+    fallback.map(({ weekday }) => weekday),
+    ['dinsdag', 'woensdag', 'donderdag']
+  );
+  assert.equal(fallback[0].hours.length, 24);
+});
+
+test('ticking an hour writes it in the form format, in event order', () => {
+  const picked = toggleHourBlock(toggleHourBlock(['23-00u (dinsdag)'], 'woensdag', 1), 'dinsdag', 20);
+  assert.deepEqual(picked, ['20-21u (dinsdag)', '23-00u (dinsdag)', '01-02u (woensdag)']);
+  assert.equal(hasHourBlock(picked, 'dinsdag', 23), true);
+  assert.deepEqual(toggleHourBlock(picked, 'dinsdag', 23), ['20-21u (dinsdag)', '01-02u (woensdag)']);
+
+  const grid = buildHourGrid(picked);
+  assert.deepEqual(hoursOutsideGrid([...picked, '20-22u (dinsdag)', 'avond'], grid), ['20-22u (dinsdag)', 'avond']);
 });
