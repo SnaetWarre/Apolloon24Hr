@@ -20,10 +20,10 @@ const RUNNER_SELECT_SQL = `
     json_extract(r.registration_json, '$.estimatedPace') AS estimatedPace,
     r.created_at AS createdAt,
     r.updated_at AS updatedAt,
-    COALESCE(q.status, 'registered') AS status,
-    q.status_since AS statusSince,
-    q.queue_index AS queueIndex,
-    q.hidden_at AS queueHiddenAt,
+    r.status,
+    r.status_since AS statusSince,
+    r.queue_index AS queueIndex,
+    r.hidden_at AS queueHiddenAt,
     COUNT(l.id) AS lapCount,
     MAX(l.duration_ms) AS slowestLapMs,
     MIN(l.duration_ms) AS bestLapMs,
@@ -37,7 +37,6 @@ const RUNNER_SELECT_SQL = `
       LIMIT 1
     ) AS lastLapMs
   FROM runners r
-  LEFT JOIN queue_entries q ON q.runner_id = r.id
   LEFT JOIN laps l ON l.runner_id = r.id
 `;
 
@@ -57,14 +56,14 @@ export function getAllRunners(): Runner[] {
     `${RUNNER_SELECT_SQL}
      GROUP BY r.id
      ORDER BY
-       CASE COALESCE(q.status, 'registered')
+       CASE r.status
          WHEN 'running' THEN 0
          WHEN 'waiting' THEN 1
          WHEN 'warming_up' THEN 2
          WHEN 'ran' THEN 3
          ELSE 4
        END,
-       q.queue_index,
+       r.queue_index,
        r.name`
   ).map((row) => runnerFromRow(row, labelsByRunner.get(row.id) ?? []));
 }

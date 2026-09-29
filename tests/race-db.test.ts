@@ -181,13 +181,13 @@ test('operational SQLite access paths stay indexed and runner lookups agree', as
       const indexNames = new Set(
         [
           ...inspectionDb.prepare("PRAGMA index_list('laps')").all(),
-          ...inspectionDb.prepare("PRAGMA index_list('queue_entries')").all(),
+          ...inspectionDb.prepare("PRAGMA index_list('runners')").all(),
           ...inspectionDb.prepare("PRAGMA index_list('race_events')").all(),
         ].map((row) => String((row as { name: unknown }).name))
       );
       assert.ok(indexNames.has('idx_laps_runner_finished'));
       assert.ok(indexNames.has('idx_laps_finished'));
-      assert.ok(indexNames.has('idx_queue_status_order'));
+      assert.ok(indexNames.has('idx_runners_queue_order'));
       assert.ok(indexNames.has('idx_race_events_occurred'));
     } finally {
       inspectionDb.close();

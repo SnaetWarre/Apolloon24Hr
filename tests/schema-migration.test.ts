@@ -23,6 +23,9 @@ const LEGACY_SCHEMA = `
     image_url TEXT, target_laps INTEGER, sort_order INTEGER, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
   );
   CREATE TABLE runner_labels (runner_id TEXT NOT NULL, label_id TEXT NOT NULL, PRIMARY KEY (runner_id, label_id));
+  CREATE TABLE queue_entries (
+    runner_id TEXT PRIMARY KEY, status TEXT NOT NULL, queue_index INTEGER, status_since INTEGER, hidden_at INTEGER
+  );
   CREATE TABLE temporary_teams (
     label_id TEXT PRIMARY KEY, active INTEGER NOT NULL DEFAULT 0, activated_at INTEGER,
     starts_at INTEGER, ends_at INTEGER, schedule_owner_host_id TEXT
@@ -43,7 +46,9 @@ const LEGACY_SCHEMA = `
   INSERT INTO labels VALUES
     ('blue', 'Speedteam Blue', '#1d4ed8', 'SB', 'speedteam', NULL, NULL, 20, 1, 1),
     ('night', 'Nachtploeg', '#7c3aed', 'NP', 'temporary_team', NULL, NULL, 25, 1, 1);
-  INSERT INTO runners (id, runner_number, name, created_at, updated_at) VALUES ('alice', '1', 'Alice', 1, 1);
+  INSERT INTO runners (id, runner_number, name, created_at, updated_at) VALUES
+    ('alice', '1', 'Alice', 1, 1), ('bob', '2', 'Bob', 1, 1), ('cleo', '3', 'Cleo', 1, 1);
+  INSERT INTO queue_entries VALUES ('alice', 'waiting', 0, 700, NULL), ('bob', 'ran', NULL, 800, 900);
   -- An active night team had swapped Alice's speedteam for its own label.
   INSERT INTO runner_labels VALUES ('alice', 'night');
   INSERT INTO temporary_teams VALUES ('night', 1, 500, 0, 4102444800000, 'legacy-host');
@@ -51,7 +56,7 @@ const LEGACY_SCHEMA = `
   INSERT INTO replication_operations VALUES ('op-1', '[]');
 `;
 
-test('schema 13 retires multi-master replication and derives night-team labels', async () => {
+test('schema 13 retires multi-master replication, moves the queue onto runners, and derives night-team labels', async () => {
   fs.rmSync(dataPath, { recursive: true, force: true });
   fs.mkdirSync(path.dirname(databasePath), { recursive: true });
   const legacy = new Database(databasePath);
@@ -74,13 +79,28 @@ test('schema 13 retires multi-master replication and derives night-team labels',
       db.getTemporaryTeams().map((team) => [team.labelId, team.active]),
       [['night', true]]
     );
+    const queue = Object.fromEntries(
+      db
+        .getAllRunners()
+        .map((runner) => [runner.id, [runner.status, runner.queueIndex, runner.statusSince, runner.hiddenFromQueue]])
+    );
+    assert.deepEqual(queue, {
+      alice: ['waiting', 0, 700, false],
+      bob: ['ran', null, 800, true],
+      cleo: ['registered', null, null, false],
+    });
 
     db.closeDb();
     const migrated = new Database(databasePath, { readonly: true });
     try {
       const tables = migrated.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").pluck().all();
       assert.ok(tables.includes('replication_log'));
-      for (const retired of ['replication_operations', 'replication_peer_progress', 'replication_conflicts']) {
+      for (const retired of [
+        'replication_operations',
+        'replication_peer_progress',
+        'replication_conflicts',
+        'queue_entries',
+      ]) {
         assert.equal(tables.includes(retired), false, `${retired} is dropped`);
       }
       const settings = Object.fromEntries(
@@ -100,7 +120,9 @@ test('schema 13 retires multi-master replication and derives night-team labels',
       ]) {
         assert.equal(settings[retired], undefined, `${retired} is removed`);
       }
-      assert.deepEqual(migrated.prepare('SELECT label_id FROM runner_labels').pluck().all(), ['blue']);
+      assert.deepEqual(migrated.prepare("SELECT label_id FROM runner_labels WHERE runner_id = 'alice'").pluck().all(), [
+        'blue',
+      ]);
       const memberColumns = migrated.prepare('PRAGMA table_info(temporary_team_members)').all() as Array<{
         name: string;
       }>;

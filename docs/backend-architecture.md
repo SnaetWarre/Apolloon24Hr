@@ -67,7 +67,8 @@ server/index.ts
 - `connection.ts`: the single `better-sqlite3` connection, statement cache,
   write capture, and the data revision.
 - `schema.ts`: tables and migrations. Schema 13 dropped the multi-master
-  replication tables and derives night-team labels.
+  replication tables, moved the queue state onto `runners`, and derives
+  night-team labels.
 - `replication.ts`: the replication log. `recordWrite` captures the SQL a
   command executes and appends it as one log entry in the same transaction.
   `applyLogEntries` replays entries on a standby; `serializeDatabase` and
@@ -80,12 +81,12 @@ server/index.ts
 Application tables:
 
 ```text
-runners                 labels
-queue_entries           runner_labels
-race_state              laps
-handoff_history         race_events
-temporary_teams         temporary_team_members
-settings                replication_log
+runners (incl. queue)   labels
+runner_labels           race_state
+laps                    handoff_history
+race_events             temporary_teams
+temporary_team_members  settings
+replication_log
 ```
 
 ### `server/cluster.ts`

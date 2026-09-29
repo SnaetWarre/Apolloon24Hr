@@ -28,7 +28,6 @@ const MAX_ENTRIES_PER_PULL = 500;
 const REPLICATED_TABLES = [
   'labels',
   'runners',
-  'queue_entries',
   'runner_labels',
   'race_state',
   'laps',

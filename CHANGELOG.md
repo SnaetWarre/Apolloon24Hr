@@ -25,6 +25,7 @@ De database migreert automatisch naar schema 13 en bewaart eerst een kopie
   geplande en 20 overige); database verkleinen, controlebestanden en de
   dagelijkse/uurlijkse bewaring zijn weg
 - Beheer is opgesplitst per onderdeel
+- De wachtrijstatus staat op de loper zelf in plaats van in een aparte tabel
 - Vast netwerkadres en de scripts openen alleen nog TCP 5173: UDP 45737 was
   voor de automatische laptopdetectie, die niet meer bestaat
 - Code wordt gecontroleerd met oxlint en opgemaakt met oxfmt; de

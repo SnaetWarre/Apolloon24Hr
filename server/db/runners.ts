@@ -73,9 +73,12 @@ export function insertRunner(input: RunnerInput): Runner {
         registration_source,
         notes,
         registration_json,
+        status,
+        queue_index,
+        status_since,
         created_at,
         updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
         input.runnerNumber ?? null,
@@ -86,14 +89,12 @@ export function insertRunner(input: RunnerInput): Runner {
         input.registrationSource ?? 'manual',
         input.notes ?? '',
         input.registration ? JSON.stringify(input.registration) : null,
+        initialStatus,
+        initialQueueIndex,
+        input.statusSince ?? now,
         now,
         now,
       ]
-    );
-    run(
-      `INSERT INTO queue_entries (runner_id, status, queue_index, status_since, hidden_at)
-       VALUES (?, ?, ?, ?, NULL)`,
-      [id, initialStatus, initialQueueIndex, input.statusSince ?? now]
     );
     setRunnerLabels(id, input.labels ?? []);
   });
@@ -189,7 +190,6 @@ export function deleteRunner(id: string): void {
   transaction(() => {
     run('DELETE FROM runner_labels WHERE runner_id = ?', [id]);
     run('DELETE FROM laps WHERE runner_id = ?', [id]);
-    run('DELETE FROM queue_entries WHERE runner_id = ?', [id]);
     clearActiveRunner(id);
     run('DELETE FROM runners WHERE id = ?', [id]);
   });

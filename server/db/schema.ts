@@ -110,6 +110,10 @@ export function createSchema(): void {
       registration_source TEXT NOT NULL DEFAULT 'manual' CHECK(registration_source IN ('import','manual')),
       notes TEXT DEFAULT '',
       registration_json TEXT,
+      status TEXT NOT NULL DEFAULT 'registered' CHECK(status IN ('registered','warming_up','waiting','running','ran')),
+      queue_index INTEGER,
+      status_since INTEGER,
+      hidden_at INTEGER,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
@@ -133,15 +137,6 @@ export function createSchema(): void {
       PRIMARY KEY (runner_id, label_id),
       FOREIGN KEY (runner_id) REFERENCES runners(id) ON DELETE CASCADE,
       FOREIGN KEY (label_id) REFERENCES labels(id) ON DELETE CASCADE
-    );
-
-    CREATE TABLE IF NOT EXISTS queue_entries (
-      runner_id TEXT PRIMARY KEY,
-      status TEXT NOT NULL CHECK(status IN ('registered','warming_up','waiting','running','ran')),
-      queue_index INTEGER,
-      status_since INTEGER,
-      hidden_at INTEGER,
-      FOREIGN KEY (runner_id) REFERENCES runners(id) ON DELETE CASCADE
     );
 
     CREATE TABLE IF NOT EXISTS race_state (
@@ -218,9 +213,6 @@ export function createSchema(): void {
     CREATE INDEX IF NOT EXISTS idx_laps_finished
       ON laps(finished_at DESC);
 
-    CREATE INDEX IF NOT EXISTS idx_queue_status_order
-      ON queue_entries(status, queue_index, status_since);
-
     CREATE INDEX IF NOT EXISTS idx_race_events_occurred
       ON race_events(occurred_at DESC, created_at DESC);
 
@@ -274,6 +266,8 @@ export function migrateSchema(): void {
     if (!tableHasColumn('temporary_teams', 'ends_at')) {
       run('ALTER TABLE temporary_teams ADD COLUMN ends_at INTEGER');
     }
+    if (!tableHasColumn('runners', 'status')) moveQueueOntoRunners();
+    run('CREATE INDEX IF NOT EXISTS idx_runners_queue_order ON runners(status, queue_index, status_since)');
 
     if (previousVersion > 0 && previousVersion < 5) snapshotLapLabels();
     if (previousVersion > 0 && previousVersion < 6) {
@@ -319,6 +313,22 @@ function compactLapLabels(): void {
   for (const lap of all<{ id: string; labelsJson: string }>('SELECT id, labels_json AS labelsJson FROM laps')) {
     const compact = serializeHistoricalLabels(parseLabelsJson(lap.labelsJson));
     if (compact !== lap.labelsJson) run('UPDATE laps SET labels_json = ? WHERE id = ?', [compact, lap.id]);
+  }
+}
+
+/** Schema 13 keeps each runner's queue state on the runner itself instead of a 1:1 `queue_entries` row. */
+function moveQueueOntoRunners(): void {
+  run(`ALTER TABLE runners ADD COLUMN status TEXT NOT NULL DEFAULT 'registered'
+       CHECK(status IN ('registered','warming_up','waiting','running','ran'))`);
+  run('ALTER TABLE runners ADD COLUMN queue_index INTEGER');
+  run('ALTER TABLE runners ADD COLUMN status_since INTEGER');
+  run('ALTER TABLE runners ADD COLUMN hidden_at INTEGER');
+  if (all('SELECT name FROM sqlite_master WHERE type = ? AND name = ?', ['table', 'queue_entries']).length) {
+    run(`UPDATE runners
+         SET status = q.status, queue_index = q.queue_index, status_since = q.status_since, hidden_at = q.hidden_at
+         FROM queue_entries q
+         WHERE q.runner_id = runners.id`);
+    run('DROP TABLE queue_entries');
   }
 }
 
