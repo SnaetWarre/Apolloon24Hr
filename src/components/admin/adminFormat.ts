@@ -1,15 +1,6 @@
 import { labelKindOrder } from '../LabelBadge';
 import type { Label, PublicRecordMode, Runner, RunnerStatus } from '../../types';
 
-export function formatConflictTime(timestamp: number): string {
-  const date = new Date(timestamp);
-  return `${date.toLocaleTimeString('nl-BE', {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  })}.${String(date.getMilliseconds()).padStart(3, '0')}`;
-}
-
 export function formatFileSize(bytes: number): string {
   if (bytes < 1_024) return `${bytes} B`;
   if (bytes < 1_024 ** 2) return `${(bytes / 1_024).toFixed(1)} KiB`;
@@ -72,8 +63,17 @@ export function publicRecordModeLabel(mode: PublicRecordMode) {
 
 export function compareRunnerIdentity(a: Runner, b: Runner) {
   return (
-    (a.runnerNumber || '').localeCompare(b.runnerNumber || '', undefined, { numeric: true }) ||
-    a.name.localeCompare(b.name)
+    (a.runnerNumber || '').localeCompare(b.runnerNumber || '', undefined, {
+      numeric: true,
+    }) || a.name.localeCompare(b.name)
+  );
+}
+
+/** The speedteam a runner runs for now, which may be a night team. */
+export function currentTeamName(runner: Runner): string {
+  return (
+    runner.labels.find((label) => label.kind === 'speedteam' || label.kind === 'temporary_team')?.name ??
+    'Geen speedteam'
   );
 }
 

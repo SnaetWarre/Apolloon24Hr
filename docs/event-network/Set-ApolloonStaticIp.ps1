@@ -6,8 +6,8 @@
   plugged into the event switch via Ethernet.
 
   Recommended plan for 3 Windows laptops, isolated switch, no router:
-    Laptop 1 (timing controller): 192.168.10.11
-    Laptop 2 (replica / telsysteem 1): 192.168.10.12
+    Laptop 1 (primary): 192.168.10.11
+    Laptop 2 (standby): 192.168.10.12
     Laptop 3 (spare / display): 192.168.10.13
     Subnet mask: 255.255.255.0 (PrefixLength 24), no gateway, no DNS.
 

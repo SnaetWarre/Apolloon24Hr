@@ -1,7 +1,6 @@
 import Papa from 'papaparse';
 import { type ImportSummary, type RunnerInput, type RunnerRegistration } from '../shared/schemas.js';
 import { upsertRunnerFromImport } from './db.js';
-import { cleanText } from './db/values.js';
 
 /** Thrown for a CSV that cannot be read at all, as opposed to individual bad rows. */
 export class CsvImportError extends Error {}
@@ -18,7 +17,7 @@ const FORM_CATEGORY_LABELS = new Map([
 ]);
 
 function text(value: unknown): string {
-  return cleanText(value) ?? '';
+  return value === undefined || value === null ? '' : String(value).trim();
 }
 
 function parseDecimal(value: string): number {
@@ -127,14 +126,23 @@ function runnerInputFromRow(
  * column). Rows are upserted one by one; bad rows are reported, not fatal.
  */
 export function importRunnersFromCsv(csvText: string): ImportSummary {
-  if (!text(csvText)) throw new CsvImportError('csvText required');
-  const parsed = Papa.parse(text(csvText), { header: true, skipEmptyLines: true }) as {
+  if (!text(csvText)) throw new CsvImportError('Het CSV-bestand is leeg.');
+  const parsed = Papa.parse(text(csvText), {
+    header: true,
+    skipEmptyLines: true,
+  }) as {
     data: Array<Record<string, unknown>>;
     errors: Array<{ message: string }>;
   };
-  if (parsed.errors.length) throw new CsvImportError(parsed.errors[0].message);
+  if (parsed.errors.length)
+    throw new CsvImportError(`Het CSV-bestand kon niet gelezen worden: ${parsed.errors[0].message}`);
 
-  const summary: ImportSummary = { created: 0, updated: 0, skipped: 0, errors: [] };
+  const summary: ImportSummary = {
+    created: 0,
+    updated: 0,
+    skipped: 0,
+    errors: [],
+  };
   const formExport = parsed.data.some((row) =>
     Object.keys(row).some((key) => key.trim().toLowerCase().startsWith('e-mailadres'))
   );

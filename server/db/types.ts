@@ -1,52 +1,16 @@
 export type SqlValue = string | number | null;
 
-export type ReplicatedSqlStatement = {
+export type ReplicatedStatement = {
   sql: string;
   params: SqlValue[];
 };
 
-export type ReplicationOperation = {
+/** One committed write on the primary, replayed in `seq` order by standbys. */
+export type ReplicationLogEntry = {
+  seq: number;
   id: string;
-  clusterId: string;
-  originHostId: string;
-  originSeq: number;
-  hlcWallMs: number;
-  hlcCounter: number;
+  epoch: number;
   type: string;
-  payload: unknown;
-  statements: ReplicatedSqlStatement[];
-  result: unknown;
-  raceBaseKey: string | null;
-  status: 'accepted' | 'conflict' | 'rejected';
-  checksum: string;
+  statements: ReplicatedStatement[];
   createdAt: number;
-  appliedAt: number;
-};
-
-export type ReplicationIdentity = {
-  clusterId: string;
-  clusterSecret: string;
-  hostId: string;
-};
-
-export type ReplicationConflict = {
-  id: string;
-  kind: 'timing' | 'data';
-  operationIds: string[];
-  status: 'open' | 'resolved';
-  resolutionOperationId: string | null;
-  createdAt: number;
-  resolvedAt: number | null;
-  operations: Array<{
-    id: string;
-    originHostId: string;
-    type: string;
-    createdAt: number;
-  }>;
-};
-
-export type ReplicationCheckpoint = {
-  vector: Record<string, number>;
-  tables: Record<string, Array<Record<string, SqlValue>>>;
-  settings: Record<string, string>;
 };

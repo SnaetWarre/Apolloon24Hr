@@ -10,12 +10,6 @@ const HOST_CACHE_MS = 1_000;
 let cachedLanHost: string | null = null;
 let cachedLanHostAt = 0;
 
-type LanNetworkEndpoint = {
-  address: string;
-  broadcastAddress: string;
-  score: number;
-};
-
 export function hostInfo(): HostInfo {
   const publicHost = resolvePublicHost();
   return {
@@ -29,41 +23,27 @@ function resolvePublicHost(): string {
   if (EXPLICIT_PUBLIC_HOST) return EXPLICIT_PUBLIC_HOST;
   const now = Date.now();
   if (now - cachedLanHostAt >= HOST_CACHE_MS) {
-    cachedLanHost = currentLanNetworkEndpoints()[0]?.address ?? null;
+    try {
+      cachedLanHost = selectLanIp(os.networkInterfaces());
+    } catch {
+      cachedLanHost = null;
+    }
     cachedLanHostAt = now;
   }
   return cachedLanHost || 'localhost';
 }
 
+/** The physical IPv4 address other laptops most likely reach: wired private ranges win. */
 export function selectLanIp(interfaces: NodeJS.Dict<os.NetworkInterfaceInfo[]>): string | null {
-  return lanNetworkEndpoints(interfaces)[0]?.address ?? null;
-}
-
-export function currentLanNetworkEndpoints(): LanNetworkEndpoint[] {
-  try {
-    return lanNetworkEndpoints(os.networkInterfaces());
-  } catch {
-    return [];
-  }
-}
-
-/** Physical IPv4 interfaces, best event-LAN candidate first (wired private ranges win). */
-export function lanNetworkEndpoints(interfaces: NodeJS.Dict<os.NetworkInterfaceInfo[]>): LanNetworkEndpoint[] {
-  const candidates: LanNetworkEndpoint[] = [];
+  let best: { address: string; score: number } | null = null;
   for (const [name, addresses] of Object.entries(interfaces)) {
     for (const addressInfo of addresses ?? []) {
       if (addressInfo.family !== 'IPv4' || addressInfo.internal || !addressInfo.address) continue;
       const score = scoreInterfaceAddress(name, addressInfo.address);
-      if (score > 0) {
-        candidates.push({
-          address: addressInfo.address,
-          broadcastAddress: ipv4BroadcastAddress(addressInfo.address, addressInfo.netmask),
-          score,
-        });
-      }
+      if (score > 0 && (!best || score > best.score)) best = { address: addressInfo.address, score };
     }
   }
-  return candidates.sort((a, b) => b.score - a.score);
+  return best?.address ?? null;
 }
 
 function scoreInterfaceAddress(name: string, address: string): number {
@@ -82,17 +62,4 @@ function scoreInterfaceAddress(name: string, address: string): number {
   if (/^(en|eth|eno|ens|enp|ethernet)/i.test(name)) score += 200;
   else if (/^(wl|wlan|wifi|wi-fi)/i.test(name)) score += 20;
   return score;
-}
-
-function ipv4BroadcastAddress(address: string, netmask: string): string {
-  const addressParts = address.split('.').map(Number);
-  const netmaskParts = netmask.split('.').map(Number);
-  if (
-    addressParts.length !== 4 ||
-    netmaskParts.length !== 4 ||
-    [...addressParts, ...netmaskParts].some((part) => !Number.isInteger(part) || part < 0 || part > 255)
-  ) {
-    return '255.255.255.255';
-  }
-  return addressParts.map((part, index) => (part & netmaskParts[index]) | (~netmaskParts[index] & 255)).join('.');
 }

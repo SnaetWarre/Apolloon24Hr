@@ -11,7 +11,7 @@ import {
 } from './queue.js';
 import { clearActiveRunner, getRaceState, startActiveRunner } from './race-state.js';
 import { getRunnerById } from './runner-queries.js';
-import { cleanStatus, serializeHistoricalLabels } from './values.js';
+import { serializeHistoricalLabels } from './values.js';
 
 type HandoffSnapshot = {
   raceState: RaceState;
@@ -102,7 +102,7 @@ export function performHandoff(
           Math.max(0, nowMs - startedAt),
           nowMs,
           serializeHistoricalLabels(
-            raceState.activeLabels.length ? raceState.activeLabels : getRunnerLabels(activeRunnerId)
+            raceState.activeLabels.length ? raceState.activeLabels : getRunnerLabels(activeRunnerId, startedAt)
           ),
         ]
       );
@@ -149,13 +149,7 @@ export function undoLastHandoff(): { ok: true; deletedLapIds: string[] } | { ok:
            queue_index = excluded.queue_index,
            status_since = excluded.status_since,
            hidden_at = excluded.hidden_at`,
-        [
-          entry.runnerId,
-          cleanStatus(entry.status),
-          entry.queueIndex ?? null,
-          entry.statusSince ?? null,
-          entry.hiddenAt ?? null,
-        ]
+        [entry.runnerId, entry.status, entry.queueIndex ?? null, entry.statusSince ?? null, entry.hiddenAt ?? null]
       );
     }
 

@@ -13,7 +13,7 @@ import {
 import { useAppActions, useAppData } from '../app/index';
 import { useBoardSearch } from '../app/boardSearch';
 import { formatDurationMs, formatElapsedSeconds, nowMs } from '../lib/time';
-import { useSecondTick } from '../lib/useAnimationFrameTick';
+import { useSecondTick } from '../lib/useClockTick';
 import { kanbanCollisionDetection, resolveKanbanDrop } from '../lib/kanban';
 import type { LiveAppSnapshot, Runner, RunnerStatus } from '../types';
 import { LabelBadge } from './LabelBadge';
@@ -398,9 +398,7 @@ function QueueRunnerRow({
                 {runner.lapCount} {runner.lapCount === 1 ? 'ronde' : 'rondes'}
               </span>
             )}
-            {runner.registration?.estimatedPace && (
-              <span title="Geschat tempo uit de inschrijving">~{runner.registration.estimatedPace}</span>
-            )}
+            {runner.estimatedPace && <span title="Geschat tempo uit de inschrijving">~{runner.estimatedPace}</span>}
           </span>
         </button>
         <TimerBadge runner={runner} />

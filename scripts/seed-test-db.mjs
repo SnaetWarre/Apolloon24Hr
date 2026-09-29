@@ -264,7 +264,7 @@ function seedLiveRace(runners, nowMs) {
     runners,
     lapCount: 35,
     nowMs,
-    startOffsetMs: minutes(48),
+    activeElapsedMs: minutes(1),
     recycleDelayMs: 30_000,
     retireEvery: 9,
     hiddenRanCount: 0,
@@ -281,7 +281,7 @@ function seedLargeRace(runners, nowMs) {
 }
 
 function seedTemporaryTeams(runners) {
-  const eligible = runners.filter((runner) => runner.labels.filter((label) => label.kind === 'speedteam').length === 1);
+  const eligible = runners.filter((runner) => runner.labels.some((label) => label.kind === 'speedteam'));
   const definitions = [
     { name: 'Trojan', color: '#7c3aed', icon: 'TR', members: eligible.slice(0, 6) },
     { name: 'Trojan V2', color: '#db2777', icon: 'T2', members: eligible.slice(6, 12) },
@@ -314,6 +314,17 @@ function seedRandomLapHistory({ runners, nowMs, nightTeams = [] }) {
   const startedAt = nowMs - totalDurationMs - activeElapsedMs - randomInt(101, 999);
   let currentStartedAt = startedAt;
 
+  // Night teams cover the middle third of the history.
+  const lapStart = (lapIndex) =>
+    startedAt + lapDurations.slice(0, lapIndex).reduce((sum, duration) => sum + duration, 0);
+  for (const labelId of nightTeams) {
+    db.setTemporaryTeamSchedule(
+      labelId,
+      lapStart(Math.floor(lapSchedule.length / 3)),
+      lapStart(Math.floor((lapSchedule.length * 2) / 3))
+    );
+  }
+
   db.updateRunnerStatus({
     id: lapSchedule[0].id,
     status: 'waiting',
@@ -333,13 +344,6 @@ function seedRandomLapHistory({ runners, nowMs, nightTeams = [] }) {
     const finishedAt = currentStartedAt + duration;
     const nextRunner = lapSchedule[lapIndex + 1] || activeAfterHistory;
 
-    if (lapIndex === Math.floor(lapSchedule.length / 3)) {
-      for (const labelId of nightTeams) db.setTemporaryTeamActive(labelId, true, currentStartedAt);
-    }
-    if (lapIndex === Math.floor((lapSchedule.length * 2) / 3)) {
-      for (const labelId of nightTeams) db.setTemporaryTeamActive(labelId, false, currentStartedAt);
-    }
-
     if (nextRunner) {
       db.updateRunnerStatus({
         id: nextRunner.id,
@@ -353,16 +357,16 @@ function seedRandomLapHistory({ runners, nowMs, nightTeams = [] }) {
     currentStartedAt = finishedAt;
   }
 
-  for (const labelId of nightTeams) {
-    const team = db.getTemporaryTeams().find((item) => item.labelId === labelId);
-    if (team?.active) db.setTemporaryTeamActive(labelId, false, nowMs);
-  }
-
   seedLargeFinalStatuses(runners, nowMs, lapTargets);
 }
 
-function seedLapHistory({ runners, lapCount, nowMs, startOffsetMs, recycleDelayMs, retireEvery, hiddenRanCount }) {
-  const startedAt = nowMs - startOffsetMs;
+function seedLapHistory({ runners, lapCount, nowMs, activeElapsedMs, recycleDelayMs, retireEvery, hiddenRanCount }) {
+  // The last recorded lap ends `activeElapsedMs` ago, so the active lap started in the past.
+  const historyMs = Array.from({ length: lapCount }, (_, index) => lapDurationMs(index)).reduce(
+    (sum, ms) => sum + ms,
+    0
+  );
+  const startedAt = nowMs - historyMs - activeElapsedMs;
   db.performHandoff(startedAt);
   const ranRunnerIds = new Set();
 

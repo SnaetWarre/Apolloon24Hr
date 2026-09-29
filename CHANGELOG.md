@@ -4,16 +4,46 @@ All notable changes to the Leuven 24h Runner Tracker will be documented in this 
 
 ## [Unreleased]
 
+Vereist een nieuwe major versie: laptops met deze versie koppelen niet met 3.x.
+De database migreert automatisch naar schema 13 en bewaart eerst een kopie
+(`app.pre-schema-13.sqlite`).
+
 ### Changed
+
+- Eén primaire laptop doet alle wijzigingen; een standby-laptop volgt live en
+  alleen-lezen. Dit vervangt de synchronisatie waarbij elke laptop schreef:
+  geen syncconflicten, quarantaine, timingcontroller of koppelcode meer.
+  Overnemen kan gepland (zonder verlies) of als noodovername
+- Tijdelijke nachtploegen volgen hun planning zonder labels te herschrijven:
+  leden kunnen altijd aangepast worden en zitten na afloop meteen terug in hun
+  eigen speedteam
+- Contactgegevens uit de inschrijving zitten niet meer in de live data die elk
+  scherm (ook de tv's) laadt; alleen profielen en Beheer halen ze op
+- Schermen halen na elke wijziging de actuele staat op in plaats van losse
+  updates samen te voegen, zodat een scherm nooit op een oude staat blijft staan
+- Backups worden in een aparte thread gecontroleerd en eenvoudiger bewaard (48
+  geplande en 20 overige); database verkleinen, controlebestanden en de
+  dagelijkse/uurlijkse bewaring zijn weg
+- Beheer is opgesplitst per onderdeel
+- Code wordt gecontroleerd met oxlint en opgemaakt met oxfmt; de
+  browsercontroles draaien in CI
 
 - Bevestigingen zijn in-app dialogen i.p.v. browserpop-ups: de live klokken en
   realtime updates lopen door terwijl een vraag openstaat, en de knoppen zeggen
   wat ze doen ("Timing overnemen", "Definitief verwijderen", ...)
 
+### Removed
+
+- Het paneel "Vast netwerkadres" in Beheer: gebruik een DHCP-reservatie op de
+  router, of de scripts in `docs/event-network/`
+
 ### Fixed
 
 - Spatie of Enter in een open dialoog op het timingscherm registreert geen
   wissel meer
+- De Electron-app herstart de server automatisch als die onverwacht stopt
+- De klok op het timingscherm verspringt niet meer na het herladen van de
+  live data
 
 ## [3.1.0] - 2026-09-22
 

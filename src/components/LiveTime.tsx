@@ -1,5 +1,5 @@
 import { formatDurationMs, formatElapsedSeconds, nowMs } from '../lib/time';
-import { LIVE_MILLISECOND_INTERVAL_MS, useClockTick, useSecondTick } from '../lib/useAnimationFrameTick';
+import { LIVE_MILLISECOND_INTERVAL_MS, useClockTick, useSecondTick } from '../lib/useClockTick';
 
 export function LiveDuration({
   startedAt,

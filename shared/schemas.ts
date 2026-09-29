@@ -83,7 +83,8 @@ export const runnerSchema = z.object({
   historicalBestMs: z.number().int().nonnegative().nullable(),
   registrationSource: registrationSourceSchema,
   notes: z.string(),
-  registration: runnerRegistrationSchema.nullable(),
+  /** From the registration form; the rest of the form (contact details) is served separately. */
+  estimatedPace: z.string().nullable(),
   createdAt: z.number(),
   updatedAt: z.number(),
   status: runnerStatusSchema,
@@ -113,13 +114,12 @@ export type RaceState = z.infer<typeof raceStateSchema>;
 
 export const temporaryTeamSchema = z.object({
   labelId: z.string(),
+  /** Evaluated on the server: inside the schedule, or switched on by hand when unscheduled. */
   active: z.boolean(),
   activatedAt: z.number().nullable(),
   startsAt: z.number().nullable(),
   endsAt: z.number().nullable(),
-  scheduleOwnerHostId: z.string().nullable(),
   memberRunnerIds: z.array(z.string()),
-  restoreLabelIdsByRunner: z.record(z.string(), z.array(z.string())),
 });
 export type TemporaryTeam = z.infer<typeof temporaryTeamSchema>;
 
@@ -130,134 +130,88 @@ export const hostInfoSchema = z.object({
 });
 export type HostInfo = z.infer<typeof hostInfoSchema>;
 
-const clusterRoleSchema = z.enum(['standalone', 'local-first']);
-export type ClusterRole = z.infer<typeof clusterRoleSchema>;
+export type BackupRecord = {
+  fileName: string;
+  createdAt: number;
+  sizeBytes: number;
+  scheduled: boolean;
+};
 
-export const clusterCompatibilitySchema = z.object({
-  protocolVersion: z.number().int().positive(),
-  schemaVersion: z.number().int().positive(),
-  minimumSchemaVersion: z.number().int().positive(),
-  replicationFormatVersion: z.number().int().positive(),
-  minimumReplicationFormatVersion: z.number().int().positive(),
-  appVersion: z.string().min(1),
-  minimumAppVersion: z.string().min(1),
-  releaseId: z.string().nullable(),
-});
-export type ClusterCompatibility = z.infer<typeof clusterCompatibilitySchema>;
+export type BackupStatus = {
+  enabled: boolean;
+  inProgress: boolean;
+  intervalMs: number;
+  nextScheduledAt: number | null;
+  retainedCount: number;
+  latest: BackupRecord | null;
+  lastError: string | null;
+  lastFailureAt: number | null;
+  diskFreeBytes: number | null;
+  minimumFreeBytes: number;
+  diskLow: boolean;
+  databaseBytes: number;
+};
 
-export const clusterPeerSchema = z.object({
-  id: z.string().nullable(),
-  url: z.string(),
-  reachable: z.boolean(),
-  lastSeenAt: z.number().nullable(),
-  lastSeq: z.number().int().nonnegative().nullable(),
-  synchronized: z.boolean(),
-  operationVector: z.record(z.string(), z.number().int().nonnegative()).optional(),
-  compatibility: clusterCompatibilitySchema.nullable(),
-  compatibilityError: z.string().nullable(),
-});
-export type ClusterPeer = z.infer<typeof clusterPeerSchema>;
+export type ClusterRole = 'primary' | 'standby';
 
-export const backupRecordSchema = z.object({
-  fileName: z.string(),
-  createdAt: z.number().int().nonnegative(),
-  reason: z.string(),
-  sizeBytes: z.number().int().nonnegative(),
-  sha256: z.string().regex(/^[0-9a-f]{64}$/),
-  verified: z.literal(true),
-});
-export type BackupRecord = z.infer<typeof backupRecordSchema>;
+export type ClusterStandby = {
+  hostId: string;
+  url: string;
+  reachable: boolean;
+  lastSeenAt: number;
+  appliedSeq: number;
+  caughtUp: boolean;
+  clockSkewMs: number | null;
+};
 
-export const databaseStorageStatusSchema = z.object({
-  fileBytes: z.number().int().nonnegative(),
-  usedBytes: z.number().int().nonnegative(),
-  reclaimableBytes: z.number().int().nonnegative(),
-  reclaimablePercent: z.number().nonnegative(),
-  compactionRecommended: z.boolean(),
-  raceActive: z.boolean(),
-  lastCompactedAt: z.number().int().nonnegative().nullable(),
-});
-export type DatabaseStorageStatus = z.infer<typeof databaseStorageStatusSchema>;
+/** What a standby knows about the primary it follows. */
+export type ClusterPrimary = {
+  url: string | null;
+  hostId: string | null;
+  reachable: boolean;
+  lastContactAt: number | null;
+  head: number;
+  lagEntries: number;
+};
 
-export const backupStatusSchema = z.object({
-  enabled: z.boolean(),
-  inProgress: z.boolean(),
-  queued: z.boolean(),
-  maintenanceInProgress: z.boolean(),
-  intervalMs: z.number().int().positive(),
-  nextScheduledAt: z.number().int().nonnegative().nullable(),
-  retainedCount: z.number().int().nonnegative(),
-  retainedBytes: z.number().int().nonnegative(),
-  maximumRetainedBytes: z.number().int().positive(),
-  latest: backupRecordSchema.nullable(),
-  lastFailureAt: z.number().int().nonnegative().nullable(),
-  lastError: z.string().nullable(),
-  diskFreeBytes: z.number().int().nonnegative().nullable(),
-  diskTotalBytes: z.number().int().nonnegative().nullable(),
-  minimumFreeBytes: z.number().int().positive(),
-  diskLow: z.boolean(),
-  database: databaseStorageStatusSchema,
-});
-export type BackupStatus = z.infer<typeof backupStatusSchema>;
+export type ClusterStatus = {
+  enabled: boolean;
+  hostId: string;
+  clusterId: string;
+  role: ClusterRole;
+  /** Raised on every promotion; the highest epoch is the current primary. */
+  epoch: number;
+  appVersion: string;
+  schemaVersion: number;
+  writable: boolean;
+  busy: 'joining' | 'bootstrapping' | 'promoting' | null;
+  selfUrl: string;
+  logHead: number;
+  primary: ClusterPrimary | null;
+  standbys: ClusterStandby[];
+  /** Other laptops in this cluster, so browsers can switch when this one goes away. */
+  memberUrls: string[];
+  competingPrimaryUrl: string | null;
+  lastError: string | null;
+  /** Largest measured clock difference between this laptop and its primary or standbys. */
+  clockSkewMs: number | null;
+  backup: BackupStatus;
+};
 
-const timingControlStateSchema = z.enum(['unassigned', 'local', 'remote-reachable', 'remote-unreachable']);
-export type TimingControlState = z.infer<typeof timingControlStateSchema>;
+export type LiveAppSnapshot = {
+  runners: Runner[];
+  labels: Label[];
+  race: RaceState;
+  temporaryTeams: TemporaryTeam[];
+  settings: AppSettings;
+  revision: number;
+  host: HostInfo;
+};
 
-export const timingControlStatusSchema = z.object({
-  state: timingControlStateSchema,
-  controllerHostId: z.string().nullable(),
-  generation: z.number().int().nonnegative(),
-  controllerUrl: z.string().nullable(),
-  controllerLastSeenAt: z.number().int().nonnegative().nullable(),
-  localReplicaCaughtUp: z.boolean(),
-  takeoverAllowed: z.boolean(),
-  takeoverAvailableAt: z.number().int().nonnegative().nullable(),
-  forcedTakeoverAllowed: z.boolean(),
-  forcedTakeoverAvailableAt: z.number().int().nonnegative().nullable(),
-});
-export type TimingControlStatus = z.infer<typeof timingControlStatusSchema>;
-
-export const clusterStatusSchema = z.object({
-  enabled: z.boolean(),
-  hostId: z.string(),
-  clusterId: z.string(),
-  pairingCode: z.string(),
-  role: clusterRoleSchema,
-  compatibility: clusterCompatibilitySchema,
-  incompatiblePeerCount: z.number().int().nonnegative(),
-  writable: z.boolean(),
-  connectedHosts: z.number().int().positive(),
-  knownHosts: z.number().int().positive(),
-  pendingOperations: z.number().int().nonnegative(),
-  conflictCount: z.number().int().nonnegative(),
-  deadLetterCount: z.number().int().nonnegative().default(0),
-  timingControllerHostId: z.string().nullable(),
-  timingControl: timingControlStatusSchema,
-  clockSkewMs: z.number().nullable(),
-  lastAppliedSeq: z.number().int().nonnegative(),
-  peers: z.array(clusterPeerSchema),
-  backup: backupStatusSchema,
-});
-export type ClusterStatus = z.infer<typeof clusterStatusSchema>;
-
-export const liveAppSnapshotSchema = z.object({
-  runners: z.array(runnerSchema),
-  labels: z.array(labelSchema),
-  race: raceStateSchema,
-  temporaryTeams: z.array(temporaryTeamSchema),
-  settings: appSettingsSchema,
-  revision: z.number().int().nonnegative().optional(),
-  serverNowMs: z.number(),
-  host: hostInfoSchema,
-  cluster: clusterStatusSchema.optional(),
-});
-export type LiveAppSnapshot = z.infer<typeof liveAppSnapshotSchema>;
-
-export const appSnapshotSchema = liveAppSnapshotSchema.extend({
-  laps: z.array(lapRecordSchema),
-  events: z.array(raceEventSchema),
-});
-export type AppSnapshot = z.infer<typeof appSnapshotSchema>;
+export type AppSnapshot = LiveAppSnapshot & {
+  laps: LapRecord[];
+  events: RaceEvent[];
+};
 
 export const raceHistorySchema = z.object({
   scope: z.enum(['full', 'recent', 'runner']),
@@ -269,6 +223,13 @@ export const raceHistorySchema = z.object({
 });
 export type RaceHistory = z.infer<typeof raceHistorySchema>;
 
+/** Trimmed text where an empty answer means "not set". */
+const optionalText = z
+  .string()
+  .trim()
+  .max(1_000)
+  .transform((value) => value || null);
+
 export const publicRecordModeUpdateSchema = z.object({
   publicRecordMode: publicRecordModeSchema,
 });
@@ -276,17 +237,19 @@ export const publicRecordModeUpdateSchema = z.object({
 export const runnerInputSchema = z.object({
   id: z.string().optional(),
   name: z.string().trim().min(1),
-  runnerNumber: z.string().nullable().optional(),
+  runnerNumber: optionalText.nullable().optional(),
   targetLaps: z.number().int().nonnegative().nullable().optional(),
   historicalAvgMs: z.number().int().nonnegative().nullable().optional(),
   historicalBestMs: z.number().int().nonnegative().nullable().optional(),
   registrationSource: registrationSourceSchema.optional(),
-  notes: z.string().optional(),
+  notes: z.string().trim().optional(),
   registration: runnerRegistrationSchema.nullable().optional(),
-  labels: z.array(z.string()).optional(),
+  /** Label ids or names; unknown names become new labels. */
+  labels: z.array(z.string().trim().min(1)).optional(),
   status: runnerStatusSchema.optional(),
   statusSince: z.number().int().nonnegative().optional(),
 });
+/** What the server works with after validation; clients send `z.input` of the schema. */
 export type RunnerInput = z.infer<typeof runnerInputSchema>;
 
 export const runnerPatchSchema = runnerInputSchema
@@ -299,10 +262,10 @@ export type RunnerPatch = z.infer<typeof runnerPatchSchema>;
 
 export const labelInputSchema = z.object({
   name: z.string().trim().min(1),
-  color: z.string().optional(),
-  icon: z.string().optional(),
-  kind: z.string().optional(),
-  imageUrl: z.string().nullable().optional(),
+  color: z.string().trim().optional(),
+  icon: z.string().trim().optional(),
+  kind: z.string().trim().optional(),
+  imageUrl: optionalText.nullable().optional(),
   targetLaps: z.number().int().nonnegative().nullable().optional(),
   sortOrder: z.number().int().nonnegative().nullable().optional(),
 });

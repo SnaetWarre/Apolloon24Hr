@@ -23,7 +23,7 @@ import {
 } from '../lib/tactics';
 import { buildLiveQuarterHourTrend, buildLiveRivalTimeGap, projectScenarioRange } from '../lib/tacticsDeepDive';
 import { nowMs } from '../lib/time';
-import { useClockTick } from '../lib/useAnimationFrameTick';
+import { useClockTick } from '../lib/useClockTick';
 import type { LapRecord, LiveAppSnapshot } from '../types';
 import { HistoricalAnalysisSection, HistoricalDataNotice, HistoricalDatasetManager } from './tactics/HistoricalPanels';
 import {

@@ -1,6 +1,6 @@
 import { type LapRecord, type RaceEvent } from '../../shared/schemas.js';
 import { all, one } from './connection.js';
-import { boundedHistoryLimit, cleanRaceEventType, parseLabelsJson } from './values.js';
+import { boundedHistoryLimit, parseLabelsJson } from './values.js';
 
 type LapRow = Omit<LapRecord, 'labels'> & { labelsJson: string };
 
@@ -40,10 +40,6 @@ function lapFromRow({ labelsJson, ...lap }: LapRow): LapRecord {
   return { ...lap, labels: parseLabelsJson(labelsJson) };
 }
 
-function raceEventFromRow(event: RaceEvent): RaceEvent {
-  return { ...event, type: cleanRaceEventType(event.type) };
-}
-
 export function getLapCount(runnerId: string): number {
   return one<{ count: number }>('SELECT COUNT(*) AS count FROM laps WHERE runner_id = ?', [runnerId])?.count ?? 0;
 }
@@ -62,22 +58,14 @@ export function getLapsForRunner(runnerId: string): LapRecord[] {
   return all<LapRow>(`${LAP_SELECT_SQL} WHERE l.runner_id = ? ORDER BY l.finished_at DESC`, [runnerId]).map(lapFromRow);
 }
 
-export function getLapById(id: string): LapRecord | null {
-  const row = one<LapRow>(`${LAP_SELECT_SQL} WHERE l.id = ?`, [id]);
-  return row ? lapFromRow(row) : null;
-}
-
 export function getAllRaceEvents(): RaceEvent[] {
-  return all<RaceEvent>(`${RACE_EVENT_SELECT_SQL} ${RACE_EVENT_ORDER}`).map(raceEventFromRow);
+  return all<RaceEvent>(`${RACE_EVENT_SELECT_SQL} ${RACE_EVENT_ORDER}`);
 }
 
 export function getRecentRaceEvents(limit = 100): RaceEvent[] {
-  return all<RaceEvent>(`${RACE_EVENT_SELECT_SQL} ${RACE_EVENT_ORDER} LIMIT ?`, [boundedHistoryLimit(limit)]).map(
-    raceEventFromRow
-  );
+  return all<RaceEvent>(`${RACE_EVENT_SELECT_SQL} ${RACE_EVENT_ORDER} LIMIT ?`, [boundedHistoryLimit(limit)]);
 }
 
 export function getRaceEventById(id: string): RaceEvent | null {
-  const event = one<RaceEvent>(`${RACE_EVENT_SELECT_SQL} WHERE id = ?`, [id]);
-  return event ? raceEventFromRow(event) : null;
+  return one<RaceEvent>(`${RACE_EVENT_SELECT_SQL} WHERE id = ?`, [id]);
 }

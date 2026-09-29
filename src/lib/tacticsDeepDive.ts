@@ -668,7 +668,7 @@ function mannWhitneyPValue(firstValues: number[], secondValues: number[]): numbe
     ...firstValues.map((value) => ({ value, group: 0 })),
     ...secondValues.map((value) => ({ value, group: 1 })),
   ].sort((firstValue, secondValue) => firstValue.value - secondValue.value);
-  const ranks = new Array<number>(combined.length);
+  const ranks: number[] = Array.from({ length: combined.length }, () => 0);
   let tieCorrection = 0;
   for (let startIndex = 0; startIndex < combined.length;) {
     let endIndex = startIndex + 1;

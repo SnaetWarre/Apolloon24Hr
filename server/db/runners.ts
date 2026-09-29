@@ -1,11 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { type Runner, type RunnerInput, type RunnerPatch } from '../../shared/schemas.js';
 import { one, run, transaction } from './connection.js';
-import { TEMPORARY_TEAM_KIND, ensureLabel, getLabels } from './labels.js';
+import { TEMPORARY_TEAM_KIND, activeTemporaryTeamIdForRunner, ensureLabel } from './labels.js';
 import { getMaxQueueIndex } from './queue.js';
 import { clearActiveRunner } from './race-state.js';
 import { getRunnerById } from './runner-queries.js';
-import { cleanInt, cleanRegistrationSource, cleanStatus, cleanText } from './values.js';
 
 type StoredRunner = {
   runner_number: string | null;
@@ -17,18 +16,6 @@ type StoredRunner = {
   notes: string | null;
   registration_json: string | null;
 };
-
-function getActiveTemporaryTeamLabelIdForRunner(runnerId: string): string | null {
-  return (
-    one<{ labelId: string }>(
-      `SELECT ttm.team_label_id AS labelId
-       FROM temporary_team_members ttm
-       JOIN temporary_teams tt ON tt.label_id = ttm.team_label_id
-       WHERE ttm.runner_id = ? AND tt.active = 1`,
-      [runnerId]
-    )?.labelId ?? null
-  );
-}
 
 function findRunnerIdByNumber(runnerNumber: string): string | null {
   return one<{ id: string }>('SELECT id FROM runners WHERE runner_number = ?', [runnerNumber])?.id ?? null;
@@ -44,29 +31,30 @@ function findRunnerIdByEmail(email: string): string | null {
 }
 
 /**
- * Replaces the runner's labels. Values may be label ids or names; unknown names
- * create a label. A temporary team label is only kept while that team is active.
+ * Replaces the runner's stored labels. Values may be label ids or names;
+ * unknown names create a label. Night team labels are derived, never stored,
+ * and while a night team is active the runner keeps their speedteam.
  */
 function setRunnerLabels(runnerId: string, labelNamesOrIds: string[]): void {
-  run('DELETE FROM runner_labels WHERE runner_id = ?', [runnerId]);
-  const activeTemporaryLabelId = getActiveTemporaryTeamLabelIdForRunner(runnerId);
+  const keepSpeedteam = Boolean(activeTemporaryTeamIdForRunner(runnerId));
+  run(
+    `DELETE FROM runner_labels WHERE runner_id = ?
+     ${keepSpeedteam ? "AND label_id NOT IN (SELECT id FROM labels WHERE kind = 'speedteam')" : ''}`,
+    [runnerId]
+  );
   for (const value of labelNamesOrIds) {
-    const labelText = cleanText(value);
-    if (!labelText) continue;
     const label =
-      one<{ id: string; kind: string }>('SELECT id, kind FROM labels WHERE id = ?', [labelText]) ??
-      ensureLabel(labelText);
-    if (!label) continue;
-    if (label.kind === TEMPORARY_TEAM_KIND && label.id !== activeTemporaryLabelId) continue;
+      one<{ id: string; kind: string }>('SELECT id, kind FROM labels WHERE id = ?', [value]) ?? ensureLabel(value);
+    if (!label || label.kind === TEMPORARY_TEAM_KIND || (keepSpeedteam && label.kind === 'speedteam')) continue;
     run('INSERT OR IGNORE INTO runner_labels (runner_id, label_id) VALUES (?, ?)', [runnerId, label.id]);
   }
 }
 
 export function insertRunner(input: RunnerInput): Runner {
-  const name = cleanText(input.name);
-  if (!name) throw new Error('runner name required');
+  const name = input.name.trim();
+  if (!name) throw new Error('Een loper heeft een naam nodig');
 
-  const initialStatus = cleanStatus(input.status);
+  const initialStatus = input.status ?? 'registered';
   if (initialStatus === 'running') {
     throw new Error('Start een nieuwe loper via het timingscherm');
   }
@@ -90,13 +78,13 @@ export function insertRunner(input: RunnerInput): Runner {
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
-        cleanText(input.runnerNumber),
+        input.runnerNumber ?? null,
         name,
-        cleanInt(input.targetLaps),
-        cleanInt(input.historicalAvgMs),
-        cleanInt(input.historicalBestMs),
-        cleanRegistrationSource(input.registrationSource),
-        cleanText(input.notes) || '',
+        input.targetLaps ?? null,
+        input.historicalAvgMs ?? null,
+        input.historicalBestMs ?? null,
+        input.registrationSource ?? 'manual',
+        input.notes ?? '',
         input.registration ? JSON.stringify(input.registration) : null,
         now,
         now,
@@ -105,7 +93,7 @@ export function insertRunner(input: RunnerInput): Runner {
     run(
       `INSERT INTO queue_entries (runner_id, status, queue_index, status_since, hidden_at)
        VALUES (?, ?, ?, ?, NULL)`,
-      [id, initialStatus, initialQueueIndex, cleanInt(input.statusSince) ?? now]
+      [id, initialStatus, initialQueueIndex, input.statusSince ?? now]
     );
     setRunnerLabels(id, input.labels ?? []);
   });
@@ -118,27 +106,14 @@ export function updateRunner(id: string, fields: RunnerPatch): Runner | null {
   const current = one<StoredRunner>('SELECT * FROM runners WHERE id = ?', [id]);
   if (!current) return null;
 
-  if (fields.labels !== undefined) {
-    const activeTemporaryLabelId = getActiveTemporaryTeamLabelIdForRunner(id);
-    if (activeTemporaryLabelId) {
-      const requested = new Set(fields.labels);
-      const hasOrdinarySpeedteam = getLabels().some((label) => label.kind === 'speedteam' && requested.has(label.id));
-      if (!requested.has(activeTemporaryLabelId) || hasOrdinarySpeedteam) {
-        throw new Error('De speedteamploeg ligt vast zolang de tijdelijke nachtploeg actief is');
-      }
-    }
-  }
-
   const next = {
-    runnerNumber: fields.runnerNumber !== undefined ? cleanText(fields.runnerNumber) : current.runner_number,
-    name: fields.name !== undefined ? cleanText(fields.name) || current.name : current.name,
-    targetLaps: fields.targetLaps !== undefined ? cleanInt(fields.targetLaps) : current.target_laps,
-    historicalAvgMs:
-      fields.historicalAvgMs !== undefined ? cleanInt(fields.historicalAvgMs) : current.historical_avg_ms,
-    historicalBestMs:
-      fields.historicalBestMs !== undefined ? cleanInt(fields.historicalBestMs) : current.historical_best_ms,
-    registrationSource: cleanRegistrationSource(fields.registrationSource ?? current.registration_source),
-    notes: fields.notes !== undefined ? cleanText(fields.notes) || '' : current.notes || '',
+    runnerNumber: fields.runnerNumber !== undefined ? fields.runnerNumber : current.runner_number,
+    name: fields.name || current.name,
+    targetLaps: fields.targetLaps !== undefined ? fields.targetLaps : current.target_laps,
+    historicalAvgMs: fields.historicalAvgMs !== undefined ? fields.historicalAvgMs : current.historical_avg_ms,
+    historicalBestMs: fields.historicalBestMs !== undefined ? fields.historicalBestMs : current.historical_best_ms,
+    registrationSource: fields.registrationSource ?? current.registration_source,
+    notes: fields.notes ?? current.notes ?? '',
     registrationJson:
       fields.registration !== undefined
         ? fields.registration
@@ -186,9 +161,12 @@ export function updateRunner(id: string, fields: RunnerPatch): Runner | null {
  * number. A form re-import keeps the operator's number, notes, and labels,
  * because the row's position in the sheet can change between exports.
  */
-export function upsertRunnerFromImport(input: RunnerInput): { action: 'created' | 'updated'; runner: Runner } {
-  const runnerNumber = cleanText(input.runnerNumber);
-  const email = cleanText(input.registration?.email);
+export function upsertRunnerFromImport(input: RunnerInput): {
+  action: 'created' | 'updated';
+  runner: Runner;
+} {
+  const runnerNumber = input.runnerNumber?.trim();
+  const email = input.registration?.email.trim();
   const existingId = email ? findRunnerIdByEmail(email) : runnerNumber ? findRunnerIdByNumber(runnerNumber) : null;
   if (existingId) {
     const { status: _status, statusSince: _statusSince, ...profileFields } = input;

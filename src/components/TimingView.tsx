@@ -1,4 +1,5 @@
 import React from 'react';
+import { Link } from '@tanstack/react-router';
 import { isModalDialogOpen, ModalDialog } from './ModalDialog';
 import { useConfirm } from './ConfirmDialog';
 import { useAppActions, useAppData, useClusterStatus, useRaceHistory } from '../app/index';
@@ -8,7 +9,7 @@ import type { LiveAppSnapshot, Runner } from '../types';
 import { LabelBadge } from './LabelBadge';
 import { RunnerName } from './RunnerName';
 import { PageHeader } from './PageHeader';
-import { LIVE_MILLISECOND_INTERVAL_MS, useClockTick } from '../lib/useAnimationFrameTick';
+import { LIVE_MILLISECOND_INTERVAL_MS, useClockTick } from '../lib/useClockTick';
 
 const selectTimingData = ({ runners, race }: LiveAppSnapshot) => ({ runners, race });
 
@@ -26,19 +27,15 @@ export function TimingView() {
     error: runnerHistoryError,
   } = useRaceHistory({ scope: 'runner', runnerId: race.activeRunnerId || '' });
   const { cluster } = useClusterStatus();
-  const { handoff, startNext, undoLastHandoff, finishRace, claimTimingControl } = useAppActions();
+  const { handoff, startNext, undoLastHandoff, finishRace } = useAppActions();
   const [actionError, setActionError] = React.useState<string | null>(null);
   const [handoffBusy, setHandoffBusy] = React.useState(false);
   const [lastAction, setLastAction] = React.useState<string | null>(null);
   const [finishConfirmStep, setFinishConfirmStep] = React.useState<0 | 1 | 2>(0);
   const handoffBusyRef = React.useRef(false);
   const confirm = useConfirm();
-  const controlledElsewhere = Boolean(
-    cluster?.timingControllerHostId && cluster.timingControllerHostId !== cluster.hostId
-  );
-  const timingControl = cluster?.timingControl ?? null;
-  const hasSyncConflict = Boolean(cluster?.conflictCount);
-  const timingBlocked = controlledElsewhere || hasSyncConflict;
+  // Only the primary laptop records laps; a standby shows the race read-only.
+  const timingBlocked = cluster?.role === 'standby';
 
   const activeRunner = runners.find((runner) => runner.id === race.activeRunnerId) || null;
   const nextRunner = getNextWaitingRunner(runners);
@@ -163,34 +160,6 @@ export function TimingView() {
     }
   }
 
-  async function emergencyTakeover() {
-    if (
-      !timingControl ||
-      !controlledElsewhere ||
-      (!timingControl.takeoverAllowed && !timingControl.forcedTakeoverAllowed)
-    )
-      return;
-    const force = !timingControl.localReplicaCaughtUp;
-    if (
-      !(await confirm({
-        title: force ? 'Geforceerde noodovername' : 'Noodovername timing',
-        message: force
-          ? 'Deze laptop is mogelijk niet volledig gesynchroniseerd. Bevestig dat de vorige timinglaptop gestopt is en aanvaard dat de laatste timingacties kunnen ontbreken.'
-          : 'Bevestig dat de vorige timinglaptop gestopt of definitief losgekoppeld is. Als die laptop verder klokt, ontstaan twee timinggeschiedenissen.',
-        confirmLabel: force ? 'Geforceerd overnemen' : 'Timing overnemen',
-        tone: 'danger',
-      }))
-    ) {
-      return;
-    }
-    await runExclusiveRaceAction(
-      () => claimTimingControl(timingControl.controllerHostId, force),
-      force
-        ? 'Deze laptop heeft de timing geforceerd overgenomen; controleer de laatste timingacties.'
-        : 'Deze laptop heeft de timing overgenomen.'
-    );
-  }
-
   const waitingCount = runners.filter((runner) => runner.status === 'waiting').length;
   const handoffDisabled = handoffBusy || timingBlocked || (!activeRunner && !nextRunner);
   const handoffLabel = handoffBusy
@@ -275,49 +244,17 @@ export function TimingView() {
           </div>
 
           <div className="timing-feedback">
-            {controlledElsewhere && (
-              <div className="warning-banner warning-banner--blocking">
-                {timingControl?.state === 'remote-reachable' ? (
-                  <span>
-                    <strong>Timing wordt elders bediend.</strong> De timing loopt op{' '}
-                    <strong>{timingControl.controllerUrl || 'een andere bereikbare laptop'}</strong>. Gebruik die laptop
-                    of draag de timing daar gecontroleerd over.
-                  </span>
-                ) : (
-                  <>
-                    <span>
-                      <strong>Timinglaptop niet bereikbaar.</strong> Controleer eerst fysiek dat die app gestopt is.
-                      {timingControl?.takeoverAllowed
-                        ? ' De lokale replica bevat alles tot de laatste geslaagde synchronisatie; een noodovername is nu mogelijk.'
-                        : timingControl?.forcedTakeoverAllowed
-                          ? ' De lokale replica is mogelijk onvolledig. Alleen een geforceerde noodovername is beschikbaar.'
-                          : timingControl?.localReplicaCaughtUp
-                            ? ` Noodovername wordt beschikbaar om ${formatClockTimeMs(
-                                timingControl.takeoverAvailableAt || Date.now()
-                              )}.`
-                            : ` De lokale replica is mogelijk onvolledig. Herstel bij voorkeur de verbinding; geforceerde noodovername wordt beschikbaar om ${formatClockTimeMs(
-                                timingControl?.forcedTakeoverAvailableAt || Date.now()
-                              )}.`}
-                    </span>
-                    <button
-                      className="btn"
-                      onClick={() => void emergencyTakeover()}
-                      disabled={
-                        handoffBusy || (!timingControl?.takeoverAllowed && !timingControl?.forcedTakeoverAllowed)
-                      }
-                    >
-                      {timingControl?.forcedTakeoverAllowed ? 'Geforceerde noodovername' : 'Noodovername starten'}
-                    </button>
-                  </>
-                )}
-              </div>
-            )}
-
-            {hasSyncConflict && (
+            {timingBlocked && (
               <div className="warning-banner warning-banner--blocking">
                 <span>
-                  <strong>Synchronisatieconflict.</strong> Er zijn twee verschillende timinggeschiedenissen gevonden.
-                  Timing is veilig gepauzeerd. Kies in Beheer welke laptop de correcte geschiedenis bevat.
+                  <strong>Deze laptop is standby.</strong> Klok op de primaire laptop
+                  {cluster?.primary?.url ? (
+                    <>
+                      {' '}
+                      (<strong>{cluster.primary.url}</strong>)
+                    </>
+                  ) : null}
+                  . Is die uitgevallen, neem dan over in <Link to="/admin">Beheer</Link>.
                 </span>
               </div>
             )}

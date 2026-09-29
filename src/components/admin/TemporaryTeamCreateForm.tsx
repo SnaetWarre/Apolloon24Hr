@@ -1,6 +1,6 @@
 import React from 'react';
 import type { Runner, TemporaryTeam } from '../../types';
-import { compareRunnerIdentity } from './adminFormat';
+import { compareRunnerIdentity, currentTeamName } from './adminFormat';
 import { formatTeamWindow, parseTeamWindow, toLocalDateTime } from './temporaryTeamTime';
 
 export function TemporaryTeamCreateForm({
@@ -142,14 +142,12 @@ export function TemporaryTeamCreateForm({
       <div className="temporary-team-create__runners" aria-label="Lopers kiezen">
         {visibleRunners.map((runner) => {
           const assigned = assignedIds.has(runner.id);
-          const baseTeams = runner.labels.filter((label) => label.kind === 'speedteam');
-          const available = !assigned && baseTeams.length === 1;
           return (
-            <label key={runner.id} className={`temporary-team-create__runner${available ? '' : ' is-disabled'}`}>
+            <label key={runner.id} className={`temporary-team-create__runner${assigned ? ' is-disabled' : ''}`}>
               <input
                 type="checkbox"
                 checked={selectedIds.includes(runner.id)}
-                disabled={!available || busy}
+                disabled={assigned || busy}
                 onChange={(event) =>
                   setSelectedIds((current) =>
                     event.target.checked ? [...current, runner.id] : current.filter((id) => id !== runner.id)
@@ -161,13 +159,7 @@ export function TemporaryTeamCreateForm({
                   {runner.runnerNumber ? `${runner.runnerNumber} · ` : ''}
                   {runner.name}
                 </strong>
-                <small>
-                  {assigned
-                    ? 'Zit al in een nachtploeg'
-                    : baseTeams.length !== 1
-                      ? 'Heeft niet exact één speedteam'
-                      : baseTeams[0].name}
-                </small>
+                <small>{assigned ? 'Zit al in een nachtploeg' : currentTeamName(runner)}</small>
               </span>
             </label>
           );

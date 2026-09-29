@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import type { RaceHistory } from '../types';
-import { historyKey } from './history';
+import { historyKey } from './snapshot';
 
 export type RaceHistoryRequest =
   | { scope: 'full' }

@@ -4,3 +4,4 @@ export { useAppData } from './useAppData';
 export { useClusterStatus } from './useClusterStatus';
 export { useRealtimeBridge, useConnectionLost } from './useRealtimeBridge';
 export { useRaceHistory } from './useRaceHistory';
+export { useRegistrations } from './useRegistrations';

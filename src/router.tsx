@@ -1,82 +1,74 @@
-import { createRootRoute, createRoute, createRouter } from '@tanstack/react-router';
-import {
-  AdminPage,
-  AnalysisPage,
-  AppRoot,
-  HomePage,
-  InsideDisplayPage,
-  KobeTacticsPage,
-  NotFoundPage,
-  OutsideDisplayPage,
-  QueuePage,
-  TimingPage,
-} from './App';
+import { createRootRoute, createRoute, createRouter, lazyRouteComponent } from '@tanstack/react-router';
+import { AppRoot, NotFoundPage } from './App';
+import { QueuePage } from './components/QueuePage';
+import { RolePicker } from './components/RolePicker';
+import { TimingView } from './components/TimingView';
+
+function pending(message: string, display = false) {
+  return function PendingRoute() {
+    return (
+      <div className={display ? 'display-loading' : 'app-state app-state--inline'} role="status">
+        <p>{message}</p>
+      </div>
+    );
+  };
+}
 
 const rootRoute = createRootRoute({
   component: AppRoot,
   notFoundComponent: NotFoundPage,
 });
 
-const indexRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/',
-  component: HomePage,
-});
-
-const queueRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/queue',
-  component: QueuePage,
-});
-
-const timingRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/timing',
-  component: TimingPage,
-});
-
-const analysisRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/analysis',
-  component: AnalysisPage,
-});
-
-const tacticsRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/tactics',
-  component: KobeTacticsPage,
-});
-
-const adminRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/admin',
-  component: AdminPage,
-});
-
-const outsideDisplayRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/display/outside',
-  component: OutsideDisplayPage,
-});
-
-const insideDisplayRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/display/inside',
-  component: InsideDisplayPage,
-});
-
+// Wedstrijd screens load eagerly so operators never wait on a chunk; the rest splits.
 const routeTree = rootRoute.addChildren([
-  indexRoute,
-  queueRoute,
-  timingRoute,
-  analysisRoute,
-  tacticsRoute,
-  adminRoute,
-  outsideDisplayRoute,
-  insideDisplayRoute,
+  createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/',
+    component: RolePicker,
+  }),
+  createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/queue',
+    component: QueuePage,
+  }),
+  createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/timing',
+    component: TimingView,
+  }),
+  createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/analysis',
+    component: lazyRouteComponent(() => import('./components/AnalysisView'), 'AnalysisView'),
+    pendingComponent: pending('Analyse wordt geladen...'),
+  }),
+  createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/tactics',
+    component: lazyRouteComponent(() => import('./components/KobeTacticsView'), 'KobeTacticsView'),
+    pendingComponent: pending("Kobe's tactiek wordt geladen..."),
+  }),
+  createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/admin',
+    component: lazyRouteComponent(() => import('./components/AdminView'), 'AdminView'),
+    pendingComponent: pending('Beheer wordt geladen...'),
+  }),
+  createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/display/outside',
+    component: lazyRouteComponent(() => import('./components/DisplayViews'), 'OutsideDisplay'),
+    pendingComponent: pending('Buitenscherm wordt geladen...', true),
+  }),
+  createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/display/inside',
+    component: lazyRouteComponent(() => import('./components/DisplayViews'), 'InsideDisplay'),
+    pendingComponent: pending('Binnenscherm wordt geladen...', true),
+  }),
 ]);
 
-export const router = createRouter({ routeTree });
+export const router = createRouter({ routeTree, defaultPreload: 'intent' });
 
 declare module '@tanstack/react-router' {
   interface Register {

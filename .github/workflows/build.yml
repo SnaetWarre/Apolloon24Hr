@@ -13,7 +13,7 @@ env:
 
 jobs:
   tests:
-    name: Typecheck, unit and integration tests
+    name: Typecheck, lint, unit, integration and browser tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -23,8 +23,12 @@ jobs:
           cache: npm
       - run: npm ci --include=optional
       - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run format:check
       - run: npm test
       - run: npm run test:e2e
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:ui
 
   build-windows:
     runs-on: windows-2022

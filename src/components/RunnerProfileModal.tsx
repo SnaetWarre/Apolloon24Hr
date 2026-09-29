@@ -2,7 +2,7 @@ import React from 'react';
 import { ModalDialog } from './ModalDialog';
 import { useConfirm } from './ConfirmDialog';
 import { runnerFormError } from '../lib/runnerForm';
-import { useAppActions, useAppData, useRaceHistory } from '../app/index';
+import { useAppActions, useAppData, useRaceHistory, useRegistrations } from '../app/index';
 import { formatClockTimeMs, formatDurationMs } from '../lib/time';
 import { labelKindOrder, labelKindTitle } from './LabelBadge';
 import type { Label, LiveAppSnapshot, Runner, RunnerStatus } from '../types';
@@ -20,6 +20,7 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
   const { laps: allLaps } = useRaceHistory({ scope: 'runner', runnerId });
   const { setStatus, updateRunner } = useAppActions();
   const runner = runners.find((item) => item.id === runnerId);
+  const registration = useRegistrations()[runnerId] ?? null;
   const [runnerNumber, setRunnerNumber] = React.useState('');
   const [name, setName] = React.useState('');
   const [targetLaps, setTargetLaps] = React.useState('');
@@ -59,6 +60,8 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
   React.useEffect(() => {
     // Refresh untouched profiles, but never replace an operator's unsaved draft.
     if (initializedRunnerId.current !== runnerId || !dirty) loadLatestProfile();
+    // Only a change to the stored profile should reload the form, not every keystroke.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editableRunnerKey]);
 
   React.useEffect(() => {
@@ -166,25 +169,25 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
           <div className="profile-essentials__grid">
             <div className="profile-essential-field">
               <span className="muted-label">Telefoon</span>
-              {runner.registration?.phone ? (
-                <a href={`tel:${runner.registration.phone.replace(/\s+/g, '')}`}>{runner.registration.phone}</a>
+              {registration?.phone ? (
+                <a href={`tel:${registration.phone.replace(/\s+/g, '')}`}>{registration.phone}</a>
               ) : (
                 <span className="profile-essential-field__empty">Niet opgegeven</span>
               )}
             </div>
             <div className="profile-essential-field">
               <span className="muted-label">E-mail</span>
-              {runner.registration?.email ? (
-                <a href={`mailto:${runner.registration.email}`}>{runner.registration.email}</a>
+              {registration?.email ? (
+                <a href={`mailto:${registration.email}`}>{registration.email}</a>
               ) : (
                 <span className="profile-essential-field__empty">Niet opgegeven</span>
               )}
             </div>
             <div className="profile-essential-field profile-essential-field--hours">
               <span className="muted-label">Beschikbare uren</span>
-              {runner.registration?.availableHours.length ? (
+              {registration?.availableHours.length ? (
                 <div className="profile-hours">
-                  {runner.registration.availableHours.map((hour) => (
+                  {registration.availableHours.map((hour) => (
                     <span key={hour}>{hour}</span>
                   ))}
                 </div>
@@ -193,7 +196,7 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
               )}
             </div>
           </div>
-          {!runner.registration && (
+          {!registration && (
             <p className="profile-essentials__note">
               {runner.registrationSource === 'manual'
                 ? 'Manueel toegevoegd, geen inschrijving.'
@@ -227,22 +230,19 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
           </div>
         </div>
 
-        {runner.registration && (
+        {registration && (
           <section className="profile-registration" aria-label="Inschrijvingsgegevens">
             <h3>Inschrijvingsgegevens</h3>
             <div className="profile-registration__grid">
-              <RegistrationField label="Studiefase" value={runner.registration.studyPhase} />
-              <RegistrationField label="Geschat totaal rondjes" value={runner.registration.estimatedLaps} />
-              <RegistrationField label="Geschat gemiddeld tempo op 515 m" value={runner.registration.estimatedPace} />
-              <RegistrationField
-                label="Maximum rondjes per blok van 2 uur"
-                value={runner.registration.maxLapsPerBlock}
-              />
-              <RegistrationField label="Flexibiliteit" value={runner.registration.flexibility} />
-              <RegistrationField label="Categorieën" value={runner.registration.categories.join(', ')} />
-              <RegistrationField label="Toestemming voor hergebruik" value={runner.registration.reuseConsent} />
-              <RegistrationField label="Opmerking bij inschrijving" value={runner.registration.remarks} />
-              <RegistrationField label="Ingeschreven op" value={runner.registration.submittedAt} />
+              <RegistrationField label="Studiefase" value={registration.studyPhase} />
+              <RegistrationField label="Geschat totaal rondjes" value={registration.estimatedLaps} />
+              <RegistrationField label="Geschat gemiddeld tempo op 515 m" value={registration.estimatedPace} />
+              <RegistrationField label="Maximum rondjes per blok van 2 uur" value={registration.maxLapsPerBlock} />
+              <RegistrationField label="Flexibiliteit" value={registration.flexibility} />
+              <RegistrationField label="Categorieën" value={registration.categories.join(', ')} />
+              <RegistrationField label="Toestemming voor hergebruik" value={registration.reuseConsent} />
+              <RegistrationField label="Opmerking bij inschrijving" value={registration.remarks} />
+              <RegistrationField label="Ingeschreven op" value={registration.submittedAt} />
             </div>
           </section>
         )}
@@ -492,7 +492,6 @@ function getEditableRunnerKey(runner: Runner) {
     runner.name,
     runner.targetLaps ?? '',
     runner.notes || '',
-    JSON.stringify(runner.registration),
     runner.labels
       .map((label) => label.id)
       .sort()

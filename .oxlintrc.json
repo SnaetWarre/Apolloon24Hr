@@ -1,0 +1,30 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "react", "unicorn", "oxc", "import"],
+  "categories": {
+    "correctness": "error"
+  },
+  "env": {
+    "builtin": true,
+    "browser": true,
+    "node": true
+  },
+  "ignorePatterns": ["dist", "dist-server", "release", "public", ".vite-cache"],
+  "rules": {
+    "react/react-in-jsx-scope": "off",
+    "react-hooks/rules-of-hooks": "error",
+    "react-hooks/exhaustive-deps": "warn",
+    "typescript/no-unused-vars": [
+      "error",
+      {
+        "argsIgnorePattern": "^_",
+        "varsIgnorePattern": "^_",
+        "destructuredArrayIgnorePattern": "^_"
+      }
+    ],
+    "react/set-state-in-effect": "off",
+    "react/use-memo": "off",
+    "react/incompatible-library": "off",
+    "react/purity": "off"
+  }
+}

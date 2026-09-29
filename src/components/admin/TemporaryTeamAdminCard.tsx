@@ -1,9 +1,9 @@
 import React from 'react';
 import { LabelBadge } from '../LabelBadge';
 import { useConfirm } from '../ConfirmDialog';
-import { isModalDialogOpen } from '../ModalDialog';
+import { ModalDialog } from '../ModalDialog';
 import { formatClockTimeMs } from '../../lib/time';
-import { compareRunnerIdentity } from './adminFormat';
+import { compareRunnerIdentity, currentTeamName } from './adminFormat';
 import { RunnerIdentity } from './RunnerIdentity';
 import { formatTeamWindow, parseTeamWindow, toLocalDateTime } from './temporaryTeamTime';
 import type { Label, Runner, TemporaryTeam } from '../../types';
@@ -41,9 +41,10 @@ export function TemporaryTeamAdminCard({
     setEnd(team.endsAt === null ? '' : toLocalDateTime(team.endsAt));
   }, [team.startsAt, team.endsAt, editingSchedule]);
 
+  const memberKey = team.memberRunnerIds.join('|');
   React.useEffect(() => {
-    setSelectedIds(team.memberRunnerIds);
-  }, [team.memberRunnerIds.join('|')]);
+    setSelectedIds(memberKey ? memberKey.split('|') : []);
+  }, [memberKey]);
 
   const otherMemberIds = new Set(
     allTeams.filter((item) => item.labelId !== team.labelId).flatMap((item) => item.memberRunnerIds)
@@ -102,17 +103,6 @@ export function TemporaryTeamAdminCard({
       setBusy(false);
     }
   }
-
-  React.useEffect(() => {
-    if (!membersOpen) return undefined;
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key !== 'Escape' || isModalDialogOpen()) return;
-      event.preventDefault();
-      void closeMembers();
-    }
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [membersOpen, dirty]);
 
   async function changeActive() {
     if (busy) return;
@@ -238,7 +228,7 @@ export function TemporaryTeamAdminCard({
         )}
         <div className="form-row form-row--plain">
           <button className="btn btn--ghost" onClick={openMembers} disabled={busy}>
-            {team.active ? 'Ledenlijst bekijken' : 'Ledenlijst beheren'}
+            Ledenlijst beheren
           </button>
           <button
             className="btn btn--ghost"
@@ -261,7 +251,7 @@ export function TemporaryTeamAdminCard({
       </article>
 
       {membersOpen && (
-        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={`Ledenlijst ${label.name}`}>
+        <ModalDialog label={`Ledenlijst ${label.name}`} onRequestClose={() => void closeMembers()}>
           <div className="modal temporary-team-modal">
             <div className="modal-header">
               <div>
@@ -271,16 +261,10 @@ export function TemporaryTeamAdminCard({
                   <LabelBadge label={label} /> · {selectedIds.length} geselecteerd
                 </p>
               </div>
-              <button className="icon-btn" onClick={closeMembers} aria-label="Sluiten">
+              <button className="icon-btn" onClick={() => void closeMembers()} aria-label="Sluiten">
                 x
               </button>
             </div>
-
-            {team.active && (
-              <div className="warning-banner">
-                De ploeg is actief. Deactiveer ze eerst om de ledenlijst te wijzigen.
-              </div>
-            )}
 
             <div className="temporary-team-member-manager">
               <section className="temporary-team-member-column temporary-team-member-column--selected">
@@ -296,14 +280,12 @@ export function TemporaryTeamAdminCard({
                     selectedRunners.map((runner) => (
                       <div key={runner.id} className="temporary-team-member-row">
                         <RunnerIdentity runner={runner} />
-                        {!team.active && (
-                          <button
-                            className="btn btn--danger btn--sm"
-                            onClick={() => setSelectedIds((current) => current.filter((id) => id !== runner.id))}
-                          >
-                            Verwijder
-                          </button>
-                        )}
+                        <button
+                          className="btn btn--danger btn--sm"
+                          onClick={() => setSelectedIds((current) => current.filter((id) => id !== runner.id))}
+                        >
+                          Verwijder
+                        </button>
                       </div>
                     ))
                   ) : (
@@ -331,26 +313,18 @@ export function TemporaryTeamAdminCard({
                   {availableRunners.length ? (
                     availableRunners.map((runner) => {
                       const assignedElsewhere = otherMemberIds.has(runner.id);
-                      const baseTeams = runner.labels.filter((item) => item.kind === 'speedteam');
-                      const invalidBaseTeam = baseTeams.length !== 1;
                       return (
                         <div
                           key={runner.id}
-                          className={`temporary-team-member-row${assignedElsewhere || invalidBaseTeam ? ' is-disabled' : ''}`}
+                          className={`temporary-team-member-row${assignedElsewhere ? ' is-disabled' : ''}`}
                         >
                           <RunnerIdentity
                             runner={runner}
-                            detail={
-                              assignedElsewhere
-                                ? 'Zit al in een andere nachtploeg'
-                                : invalidBaseTeam
-                                  ? 'Heeft niet exact één speedteam'
-                                  : baseTeams[0].name
-                            }
+                            detail={assignedElsewhere ? 'Zit al in een andere nachtploeg' : currentTeamName(runner)}
                           />
                           <button
                             className="btn btn--primary btn--sm"
-                            disabled={team.active || assignedElsewhere || invalidBaseTeam}
+                            disabled={assignedElsewhere}
                             onClick={() =>
                               setSelectedIds((current) =>
                                 current.includes(runner.id) ? current : [...current, runner.id]
@@ -370,17 +344,15 @@ export function TemporaryTeamAdminCard({
             </div>
 
             <div className="temporary-team-modal-actions">
-              <button className="btn btn--ghost" onClick={closeMembers}>
+              <button className="btn btn--ghost" onClick={() => void closeMembers()}>
                 Annuleren
               </button>
-              {!team.active && (
-                <button className="btn btn--primary" onClick={saveMembers} disabled={busy || !dirty}>
-                  {busy ? 'Opslaan...' : `Ledenlijst opslaan (${selectedIds.length})`}
-                </button>
-              )}
+              <button className="btn btn--primary" onClick={saveMembers} disabled={busy || !dirty}>
+                {busy ? 'Opslaan...' : `Ledenlijst opslaan (${selectedIds.length})`}
+              </button>
             </div>
           </div>
-        </div>
+        </ModalDialog>
       )}
     </>
   );

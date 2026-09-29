@@ -1,27 +1,24 @@
 import { useQuery } from '@tanstack/react-query';
 import type { ClusterStatus } from '../types';
+import { clusterStatusKey } from './snapshot';
 
 export function useClusterStatus(): {
   cluster: ClusterStatus | null;
-  loading: boolean;
   error: Error | null;
-  lastUpdatedAt: number | null;
 } {
   const query = useQuery({
-    queryKey: ['cluster', 'status'],
+    queryKey: clusterStatusKey,
     queryFn: async () => {
       const response = await fetch('/api/cluster/status');
-      if (!response.ok) throw new Error(`Cluster status failed: ${response.status}`);
+      if (!response.ok) throw new Error(`Systeemstatus laden mislukt (${response.status})`);
       return response.json() as Promise<ClusterStatus>;
     },
-    refetchInterval: (query) => (query.state.data?.enabled ? 5_000 : 10_000),
+    refetchInterval: 5_000,
     refetchOnWindowFocus: true,
   });
 
   return {
     cluster: query.data ?? null,
-    loading: query.isPending,
     error: query.error instanceof Error ? query.error : null,
-    lastUpdatedAt: query.dataUpdatedAt || null,
   };
 }

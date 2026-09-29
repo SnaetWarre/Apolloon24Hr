@@ -4,14 +4,18 @@ export const DATA_ROOT = path.resolve(process.env.DATA_PATH || process.cwd());
 
 export const RELEASE_ID = process.env.APOLLOON_RELEASE_ID?.trim() || null;
 
+/** Set by Electron from package.json, and by npm scripts during development. */
+export const APP_VERSION =
+  process.env.APOLLOON_APP_VERSION?.trim() || process.env.npm_package_version?.trim() || '0.0.0-dev';
+
+/** Primary/standby replication; on in the packaged app, opt-in elsewhere. */
+export function isClusterEnabled(environment: NodeJS.ProcessEnv = process.env): boolean {
+  return environment.CLUSTER_ENABLED === 'true';
+}
+
 export function readPositiveInt(value: unknown, fallback: number): number {
   const parsed = Math.floor(Number(value));
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
-}
-
-export function readPositiveNumber(value: unknown, fallback: number): number {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 export function readPort(value: unknown, fallback: number): number {

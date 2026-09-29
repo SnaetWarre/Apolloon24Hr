@@ -622,6 +622,20 @@ input[type="radio"] {
   text-align: center;
 }
 
+.connection-banner a {
+  color: inherit;
+  font-weight: 600;
+}
+
+.standby-banner {
+  padding: 8px var(--space-4);
+  border-bottom: 1px solid var(--warn-line);
+  background: var(--warn-wash);
+  color: var(--ink);
+  font-size: 13.5px;
+  text-align: center;
+}
+
 .warning-inline {
   grid-column: 1 / -1;
   color: var(--warn-ink);

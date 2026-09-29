@@ -2,7 +2,6 @@ import { type Runner, type RunnerStatus } from '../../shared/schemas.js';
 import { all, one, run, transaction } from './connection.js';
 import { clearActiveRunner, getRaceState, startActiveRunner } from './race-state.js';
 import { getRunnerById } from './runner-queries.js';
-import { cleanInt, cleanStatus } from './values.js';
 
 export type QueueEntrySnapshot = {
   runnerId: string;
@@ -12,8 +11,7 @@ export type QueueEntrySnapshot = {
   hiddenAt: number | null;
 };
 
-export function hideRunnerInQueue(id: string, hiddenAt = Date.now()): Runner | null {
-  const now = cleanInt(hiddenAt) ?? Date.now();
+export function hideRunnerInQueue(id: string, now = Date.now()): Runner | null {
   run(
     `INSERT INTO queue_entries (runner_id, status, queue_index, status_since, hidden_at)
      VALUES (?, 'registered', NULL, ?, ?)
@@ -35,36 +33,6 @@ export function unhideRunnerInQueue(id: string): Runner | null {
   return getRunnerById(id);
 }
 
-/**
- * Guards status changes that touch the live race. The queue desk works on a
- * different laptop than timing all day; without this, one click there could
- * wipe the live lap or silently reopen a finished race.
- *
- * Pure so the rules are unit-testable. Returns null when the change is
- * allowed, otherwise the (Dutch) message shown to the operator.
- */
-export function runnerStatusChangeError(input: {
-  runnerId: string;
-  status: RunnerStatus;
-  activeRunnerId: string | null;
-  raceFinishedAt: number | null;
-  controllerHostId: string | null;
-  localHostId: string;
-}): string | null {
-  const controlledElsewhere = Boolean(input.controllerHostId) && input.controllerHostId !== input.localHostId;
-  if (!controlledElsewhere) return null;
-  const touchesLiveLap =
-    input.activeRunnerId !== null && input.runnerId === input.activeRunnerId && input.status !== 'running';
-  if (touchesLiveLap) {
-    return 'Deze loper loopt nu live. Alleen de timinglaptop kan dit aanpassen.';
-  }
-  const manualStart = input.status === 'running' && input.activeRunnerId !== input.runnerId;
-  if (!manualStart) return null;
-  return input.raceFinishedAt !== null
-    ? 'De race is gefinisht. Hervatten kan alleen op de timinglaptop.'
-    : 'Alleen de timinglaptop kan een loper handmatig laten starten.';
-}
-
 export function updateRunnerStatus({
   id,
   status,
@@ -77,16 +45,14 @@ export function updateRunnerStatus({
   queueIndex?: number | null;
 }): Runner | null {
   if (!one<{ id: string }>('SELECT id FROM runners WHERE id = ?', [id])) return null;
-  const nextStatus = cleanStatus(status);
-  if (nextStatus === 'running') {
+  if (status === 'running') {
     const activeRunnerId = getRaceState().activeRunnerId;
     if (activeRunnerId && activeRunnerId !== id) {
       throw new Error('Er loopt al een loper');
     }
   }
-  const now = cleanInt(statusSince) ?? Date.now();
-  const nextQueueIndex =
-    nextStatus !== 'waiting' ? null : queueIndex != null ? cleanInt(queueIndex) : getMaxQueueIndex() + 1;
+  const now = statusSince ?? Date.now();
+  const nextQueueIndex = status !== 'waiting' ? null : (queueIndex ?? getMaxQueueIndex() + 1);
 
   transaction(() => {
     run(
@@ -97,9 +63,9 @@ export function updateRunnerStatus({
          queue_index = excluded.queue_index,
          status_since = excluded.status_since,
          hidden_at = NULL`,
-      [id, nextStatus, nextQueueIndex, now]
+      [id, status, nextQueueIndex, now]
     );
-    if (nextStatus === 'running') startActiveRunner(id, now);
+    if (status === 'running') startActiveRunner(id, now);
     else clearActiveRunner(id);
   });
 

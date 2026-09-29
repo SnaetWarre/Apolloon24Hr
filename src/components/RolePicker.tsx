@@ -1,6 +1,5 @@
 import { Link } from '@tanstack/react-router';
 import { useAppData, useClusterStatus, useRaceHistory } from '../app/index';
-import { preloadAdminView, preloadAnalysisView } from '../lazyViews';
 import { getNextWaitingRunner } from '../lib/runners';
 import { deriveSystemStatus } from '../lib/systemStatus';
 import { useCopyText } from '../lib/clipboard';
@@ -170,7 +169,7 @@ export function RolePicker() {
           <section className="panel overview-laps">
             <header className="panel-header">
               <h2>Laatste rondes</h2>
-              <Link className="btn btn--sm btn--quiet" to="/analysis" onPointerEnter={preloadAnalysisView}>
+              <Link className="btn btn--sm btn--quiet" to="/analysis">
                 Naar Analyse
                 <Icon name="arrowRight" size={14} />
               </Link>
@@ -201,7 +200,7 @@ export function RolePicker() {
           <section className="panel overview-system">
             <header className="panel-header">
               <h2>Systeem</h2>
-              <Link className="btn btn--sm btn--quiet" to="/admin" onPointerEnter={preloadAdminView}>
+              <Link className="btn btn--sm btn--quiet" to="/admin">
                 Naar Beheer
                 <Icon name="arrowRight" size={14} />
               </Link>

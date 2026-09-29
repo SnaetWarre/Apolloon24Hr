@@ -10,6 +10,7 @@ const __dirname = path.dirname(__filename);
 
 let mainWindow;
 let serverProcess;
+let quitting = false;
 let appUrl = 'http://127.0.0.1:5173';
 const smokeTest = process.env.APOLLOON_PACKAGE_SMOKE === '1';
 if (smokeTest) {
@@ -90,16 +91,14 @@ async function startServer() {
     return;
   }
 
-  const serverPath = path.join(process.resourcesPath, 'app.asar.unpacked', 'dist-server', 'server', 'index.js');
-
-  const envPath = path.join(app.getPath('userData'), '.env');
   const env = {
     ...process.env,
     NODE_ENV: 'production',
     CLUSTER_ENABLED: process.env.CLUSTER_ENABLED || 'true',
     DATA_PATH: app.getPath('userData'),
+    APOLLOON_APP_VERSION: app.getVersion(),
   };
-
+  const envPath = path.join(app.getPath('userData'), '.env');
   if (fs.existsSync(envPath)) {
     Object.assign(env, parseEnvText(fs.readFileSync(envPath, 'utf8')));
   }
@@ -108,26 +107,35 @@ async function startServer() {
   env.PUBLIC_APP_PORT = String(serverAddress.publicPort);
   appUrl = serverAddress.url;
 
+  await waitForServer(appUrl, launchServer(env));
+}
+
+/**
+ * Starts the backend and restarts it when it stops unexpectedly, so a crash
+ * during the event costs seconds instead of a manual restart. Open screens
+ * reconnect on their own.
+ */
+function launchServer(env, restartDelayMs = 1_000) {
   const cwd = path.join(process.resourcesPath, 'app.asar.unpacked');
+  const serverPath = path.join(cwd, 'dist-server', 'server', 'index.js');
+  const child = fork(serverPath, [], { stdio: ['ignore', 'inherit', 'inherit', 'ipc'], env, cwd, execArgv: [] });
+  const startedAt = Date.now();
+  serverProcess = child;
 
-  console.log('Starting server:', { serverPath, cwd });
-
-  serverProcess = fork(serverPath, [], {
-    stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
-    env,
-    cwd,
-    execArgv: [],
-  });
-
-  serverProcess.on('error', (err) => {
+  child.on('error', (err) => {
     console.error('Failed to start server:', err);
   });
-
-  serverProcess.on('exit', (code, signal) => {
+  child.on('exit', (code, signal) => {
     console.log('Server exited with code:', code, 'signal:', signal);
+    if (quitting || serverProcess !== child) return;
+    // Back off when it keeps crashing right after starting.
+    const nextDelayMs = Date.now() - startedAt < 30_000 ? Math.min(restartDelayMs * 2, 30_000) : 1_000;
+    console.warn(`Restarting server in ${restartDelayMs} ms`);
+    setTimeout(() => {
+      if (!quitting) launchServer(env, nextDelayMs);
+    }, restartDelayMs);
   });
-
-  await waitForServer(appUrl, serverProcess);
+  return child;
 }
 
 async function waitForServer(url, child, timeoutMs = 20_000) {
@@ -190,15 +198,14 @@ if (!gotTheLock) {
   });
 }
 
+function stopServer() {
+  quitting = true;
+  serverProcess?.kill();
+}
+
 app.on('window-all-closed', () => {
-  if (serverProcess) {
-    serverProcess.kill();
-  }
+  stopServer();
   app.quit();
 });
 
-app.on('before-quit', () => {
-  if (serverProcess) {
-    serverProcess.kill();
-  }
-});
+app.on('before-quit', stopServer);

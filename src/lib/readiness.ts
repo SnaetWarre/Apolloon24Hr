@@ -1,4 +1,4 @@
-import type { ClusterStatus, RaceState } from '../types';
+import type { ClusterStatus } from '../types';
 
 export type ReadinessLevel = 'ready' | 'warning' | 'blocked';
 
@@ -9,11 +9,9 @@ export type ReadinessCheck = {
   detail: string;
 };
 
-export function buildEventReadiness(
-  cluster: ClusterStatus | null,
-  race: RaceState,
-  now = Date.now()
-): ReadinessCheck[] {
+const MAX_CLOCK_SKEW_MS = 2_000;
+
+export function buildEventReadiness(cluster: ClusterStatus | null, now = Date.now()): ReadinessCheck[] {
   if (!cluster) {
     return [
       {
@@ -28,20 +26,20 @@ export function buildEventReadiness(
   const checks: ReadinessCheck[] = [];
   const backup = cluster.backup;
   const backupAge = backup.latest ? Math.max(0, now - backup.latest.createdAt) : null;
-  const backupMaxAge = backup.intervalMs * 3;
+  const backupStale = backupAge === null || backupAge > backup.intervalMs * 3;
   checks.push({
     id: 'backup',
     label: 'Herstelbackup',
-    level: !backup.enabled || backup.lastError || backupAge === null || backupAge > backupMaxAge ? 'blocked' : 'ready',
+    level: !backup.enabled || backup.lastError || backupStale ? 'blocked' : 'ready',
     detail: !backup.enabled
       ? 'Automatische backups zijn uitgeschakeld.'
       : backup.lastError
         ? `Laatste fout: ${backup.lastError}`
         : backupAge === null
-          ? 'Er is nog geen geverifieerde backup.'
-          : backupAge > backupMaxAge
+          ? 'Er is nog geen gecontroleerde backup.'
+          : backupStale
             ? 'De laatste backup is ouder dan drie backupintervallen.'
-            : 'Er is een recente geverifieerde backup.',
+            : 'Er is een recente gecontroleerde backup.',
   });
 
   checks.push({
@@ -49,106 +47,83 @@ export function buildEventReadiness(
     label: 'Opslagruimte',
     level: backup.diskLow ? 'blocked' : backup.diskFreeBytes === null ? 'warning' : 'ready',
     detail: backup.diskLow
-      ? 'De vrije ruimte zit onder de ingestelde veiligheidsgrens.'
+      ? 'De vrije ruimte zit onder de veiligheidsgrens.'
       : backup.diskFreeBytes === null
         ? 'Vrije opslagruimte kon niet worden gemeten.'
         : 'Er is voldoende vrije ruimte voor nieuwe backups.',
   });
 
-  checks.push({
-    id: 'database-size',
-    label: 'Databaseopslag',
-    level: 'ready',
-    detail: backup.database.compactionRecommended
-      ? 'De database bevat herbruikbare lege ruimte. Dit is geen dataprobleem; verklein het bestand na de race via Beheer › Systeem en herstel.'
-      : 'Het databasebestand bevat geen overmatige vrije ruimte.',
-  });
-
-  if (cluster.enabled) {
-    checks.push({
-      id: 'compatibility',
-      label: 'Laptopversies',
-      level: cluster.incompatiblePeerCount > 0 ? 'blocked' : 'ready',
-      detail:
-        cluster.incompatiblePeerCount > 0
-          ? `${cluster.incompatiblePeerCount} laptop${cluster.incompatiblePeerCount === 1 ? '' : 's'} moet eerst worden bijgewerkt; synchronisatie is veilig geblokkeerd.`
-          : `Schema ${cluster.compatibility.schemaVersion}, replicatieformaat ${cluster.compatibility.replicationFormatVersion} en app ${cluster.compatibility.appVersion} zijn compatibel.`,
-    });
-    const synchronizedPeer = cluster.peers.some((peer) => peer.reachable && peer.synchronized);
+  if (!cluster.enabled) {
     checks.push({
       id: 'replica',
-      label: 'Live replica',
-      level: synchronizedPeer && cluster.pendingOperations === 0 ? 'ready' : 'blocked',
-      detail: !synchronizedPeer
-        ? 'Geen bereikbare, volledig gesynchroniseerde tweede laptop.'
-        : cluster.pendingOperations > 0
-          ? `${cluster.pendingOperations} wijziging${cluster.pendingOperations === 1 ? '' : 'en'} wacht op synchronisatie.`
-          : 'Minstens één tweede laptop is volledig gesynchroniseerd.',
-    });
-    checks.push({
-      id: 'clock',
-      label: 'Systeemklokken',
-      level: (cluster.clockSkewMs ?? 0) > 2_000 ? 'blocked' : 'ready',
-      detail:
-        (cluster.clockSkewMs ?? 0) > 2_000
-          ? `Het gemeten verschil is ${Math.round((cluster.clockSkewMs ?? 0) / 1_000)} seconden.`
-          : 'De bereikbare laptops liggen binnen twee seconden.',
-    });
-  } else {
-    checks.push({
-      id: 'replica',
-      label: 'Live replica',
+      label: 'Tweede laptop',
       level: 'warning',
       detail: 'Deze installatie draait bewust zelfstandig; er is geen live tweede kopie.',
     });
+    return checks;
   }
 
-  checks.push({
-    id: 'conflicts',
-    label: 'Synchronisatieconflicten',
-    level: cluster.conflictCount > 0 ? 'blocked' : 'ready',
-    detail:
-      cluster.conflictCount > 0
-        ? `${cluster.conflictCount} conflict${cluster.conflictCount === 1 ? '' : 'en'} moet nog worden opgelost.`
-        : 'Er zijn geen open conflicten.',
-  });
+  checks.push(cluster.role === 'primary' ? standbyCheck(cluster) : primaryCheck(cluster));
 
-  const deadLetters = cluster.deadLetterCount ?? 0;
-  checks.push({
-    id: 'quarantine',
-    label: 'Quarantaine',
-    level: deadLetters > 0 ? 'warning' : 'ready',
-    detail:
-      deadLetters > 0
-        ? `${deadLetters} synchronisatie-actie${deadLetters === 1 ? ' is' : 's zijn'} in quarantaine gezet (foute data overgeslagen zodat de sync doorloopt). Controleer in Beheer wat er mist.`
-        : 'Er staan geen acties in quarantaine.',
-  });
+  if (cluster.competingPrimaryUrl) {
+    checks.push({
+      id: 'competing-primary',
+      label: 'Eén primaire laptop',
+      level: 'blocked',
+      detail: `${cluster.competingPrimaryUrl} is ook primair. Koppel één van beide opnieuw als standby.`,
+    });
+  }
+  if (cluster.lastError) {
+    checks.push({
+      id: 'cluster-error',
+      label: 'Synchronisatie',
+      level: 'blocked',
+      detail: cluster.lastError,
+    });
+  }
 
-  const timing = cluster.timingControl;
+  const skew = cluster.clockSkewMs === null ? null : Math.abs(cluster.clockSkewMs);
   checks.push({
-    id: 'timing-controller',
-    label: 'Timingcontroller',
-    level:
-      timing.state === 'remote-unreachable'
-        ? 'blocked'
-        : timing.state === 'unassigned'
-          ? race.raceStartedAt
-            ? 'blocked'
-            : 'warning'
-          : 'ready',
+    id: 'clock',
+    label: 'Systeemklokken',
+    level: skew !== null && skew > MAX_CLOCK_SKEW_MS ? 'blocked' : 'ready',
     detail:
-      timing.state === 'local'
-        ? 'Deze laptop bedient de timing.'
-        : timing.state === 'remote-reachable'
-          ? 'De toegewezen timinglaptop is bereikbaar.'
-          : timing.state === 'remote-unreachable'
-            ? 'De toegewezen timinglaptop is niet bereikbaar.'
-            : race.raceStartedAt
-              ? 'De race is gestart maar timing is niet toegewezen.'
-              : 'Timing wordt bij de eerste timingactie toegewezen.',
+      skew === null
+        ? 'Nog geen tweede laptop om mee te vergelijken.'
+        : skew > MAX_CLOCK_SKEW_MS
+          ? `De laptops verschillen ${Math.round(skew / 1_000)} seconden; na een overname kloppen rondetijden dan niet.`
+          : 'De laptops liggen binnen twee seconden.',
   });
-
   return checks;
+}
+
+function standbyCheck(cluster: ClusterStatus): ReadinessCheck {
+  const reachable = cluster.standbys.filter((standby) => standby.reachable);
+  const caughtUp = reachable.some((standby) => standby.caughtUp);
+  return {
+    id: 'replica',
+    label: 'Standby-laptop',
+    level: caughtUp ? 'ready' : reachable.length ? 'warning' : 'blocked',
+    detail: caughtUp
+      ? `${reachable.length === 1 ? 'Een standby volgt' : `${reachable.length} standby's volgen`} deze laptop en ${reachable.length === 1 ? 'is' : 'zijn'} bij.`
+      : reachable.length
+        ? 'De standby werkt de laatste wijzigingen bij.'
+        : 'Geen bereikbare standby-laptop. Koppel een tweede laptop in Beheer › Systeem.',
+  };
+}
+
+function primaryCheck(cluster: ClusterStatus): ReadinessCheck {
+  const primary = cluster.primary;
+  return {
+    id: 'replica',
+    label: 'Primaire laptop',
+    level: !primary?.reachable ? 'blocked' : primary.lagEntries > 0 ? 'warning' : 'ready',
+    detail: !primary?.reachable
+      ? `De primaire laptop${primary?.url ? ` (${primary.url})` : ''} is niet bereikbaar. Neem over in Beheer als die gestopt is.`
+      : primary.lagEntries > 0
+        ? `Deze standby haalt nog ${primary.lagEntries} wijziging${primary.lagEntries === 1 ? '' : 'en'} op.`
+        : `Deze laptop is standby van ${primary.url} en is volledig bij.`,
+  };
 }
 
 export function readinessSummary(checks: ReadinessCheck[]): ReadinessLevel {

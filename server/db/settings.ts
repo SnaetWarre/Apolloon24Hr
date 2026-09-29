@@ -1,19 +1,22 @@
 import { randomUUID } from 'node:crypto';
-import { publicRecordModeSchema, type PublicRecordMode, type AppSettings } from '../../shared/schemas.js';
-import { one, run, runUncaptured, markAppDataChanged } from './connection.js';
+import { publicRecordModeSchema, type AppSettings, type PublicRecordMode } from '../../shared/schemas.js';
+import { one, run, runUncaptured } from './connection.js';
 
 const DEFAULT_PUBLIC_RECORD_MODE: PublicRecordMode = 'day';
+
+/** Settings that are part of the event data and travel to standbys. Everything else is host-local. */
+export const REPLICATED_SETTING_KEYS: readonly string[] = ['public_record_mode'];
 
 export function getSetting(key: string): string | null {
   return one<{ value: string }>('SELECT value FROM settings WHERE key = ?', [key])?.value ?? null;
 }
 
-/** Replicated setting: captured into the active command like any application write. */
-export function setSetting(key: string, value: string): void {
+/** Replicated setting: captured into the active write like any application change. */
+function setSetting(key: string, value: string): void {
   run('INSERT OR REPLACE INTO settings(key, value) VALUES(?, ?)', [key, value]);
 }
 
-/** Host-local setting (identity, clocks, checkpoints): never replicated. */
+/** Host-local setting (identity, cluster role, schema version): never replicated. */
 export function setLocalSetting(key: string, value: string): void {
   runUncaptured('INSERT OR REPLACE INTO settings(key, value) VALUES(?, ?)', [key, value]);
 }
@@ -28,14 +31,12 @@ export function getAppSettings(): AppSettings {
 }
 
 export function setPublicRecordMode(mode: PublicRecordMode): AppSettings {
-  const parsed = publicRecordModeSchema.safeParse(mode);
-  setSetting('public_record_mode', parsed.success ? parsed.data : DEFAULT_PUBLIC_RECORD_MODE);
-  markAppDataChanged();
+  setSetting('public_record_mode', mode);
   return getAppSettings();
 }
 
 /** Returns the host-local setting, creating and storing it on first use. */
-export function ensureLocalSetting(key: string, create: () => string): string {
+function ensureLocalSetting(key: string, create: () => string): string {
   const existing = getSetting(key);
   if (existing) return existing;
   const value = create();
@@ -43,6 +44,12 @@ export function ensureLocalSetting(key: string, create: () => string): string {
   return value;
 }
 
-export function ensureHostId(): string {
-  return ensureLocalSetting('host_id', randomUUID);
+export type HostIdentity = { hostId: string; clusterId: string };
+
+/** This laptop's id, and the id of the primary lineage it belongs to (adopted when joining). */
+export function hostIdentity(): HostIdentity {
+  return {
+    hostId: ensureLocalSetting('host_id', randomUUID),
+    clusterId: ensureLocalSetting('replication_cluster_id', () => process.env.CLUSTER_ID?.trim() || randomUUID()),
+  };
 }
