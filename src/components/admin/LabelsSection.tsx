@@ -6,6 +6,7 @@ import type { Label, Runner, TemporaryTeam } from '../../types';
 import { AdminNoticeBanner, useAdminAction } from './AdminNotice';
 import { groupLabels } from './adminFormat';
 import { LabelAdminRow } from './LabelAdminRow';
+import { LabelImagePicker } from './LabelImagePicker';
 import { TemporaryTeamAdminCard } from './TemporaryTeamAdminCard';
 import { TemporaryTeamCreateForm } from './TemporaryTeamCreateForm';
 
@@ -63,7 +64,7 @@ function LabelsPanel({ labels }: { labels: Label[] }) {
   const [name, setName] = React.useState('');
   const [color, setColor] = React.useState('#3b82f6');
   const [kind, setKind] = React.useState('andere');
-  const [imageUrl, setImageUrl] = React.useState('');
+  const [imageUrl, setImageUrl] = React.useState<string | null>(null);
   const [targetLaps, setTargetLaps] = React.useState('');
   const [sortOrder, setSortOrder] = React.useState('');
 
@@ -77,7 +78,7 @@ function LabelsPanel({ labels }: { labels: Label[] }) {
           color,
           icon: labelName.slice(0, 2).toUpperCase(),
           kind,
-          imageUrl: imageUrl.trim() || null,
+          imageUrl,
           targetLaps: targetLaps ? Number(targetLaps) : null,
           sortOrder: sortOrder ? Number(sortOrder) : null,
         }),
@@ -86,7 +87,7 @@ function LabelsPanel({ labels }: { labels: Label[] }) {
     );
     if (!created) return;
     setName('');
-    setImageUrl('');
+    setImageUrl(null);
     setTargetLaps('');
     setSortOrder('');
   }
@@ -124,12 +125,7 @@ function LabelsPanel({ labels }: { labels: Label[] }) {
           <option value="andere">Andere</option>
           <option value="custom">Custom</option>
         </select>
-        <input
-          className="input"
-          value={imageUrl}
-          onChange={(event) => setImageUrl(event.target.value)}
-          placeholder="/labels/logo.png optioneel"
-        />
+        <LabelImagePicker imageUrl={imageUrl} onChange={setImageUrl} />
         <input
           className="input input--number"
           type="number"

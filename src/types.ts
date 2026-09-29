@@ -9,6 +9,7 @@ export type {
   GroupState,
   HostInfo,
   Label,
+  LabelImageUpload,
   LabelInput,
   LabelPatch,
   LapRecord,

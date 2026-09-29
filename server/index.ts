@@ -11,6 +11,7 @@ import {
   closeDb,
   databaseReadiness,
   getAppDataRevision,
+  getLabelImage,
   initDb,
   markAppDataChanged,
   onAppDataChanged,
@@ -97,6 +98,18 @@ app.get('/api/history', (req, res, next) => {
 app.get('/api/time', (_req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   res.json({ serverNowMs: clusterNow() });
+});
+
+// Content-addressed, so a stored logo never changes under its URL.
+app.get('/api/label-images/:id', (req, res) => {
+  const image = getLabelImage(req.params.id);
+  if (!image) {
+    res.status(404).end();
+    return;
+  }
+  res.setHeader('Content-Type', image.mime);
+  res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+  res.send(image.bytes);
 });
 
 app.get('/api/host-info', (_req, res) => {

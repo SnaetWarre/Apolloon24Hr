@@ -184,7 +184,7 @@
 
 .label-admin-row {
   display: grid;
-  grid-template-columns: minmax(160px, 1fr) 96px 96px auto auto;
+  grid-template-columns: minmax(160px, 1fr) 200px 96px 96px auto auto;
   gap: var(--space-2);
   align-items: end;
   padding: 8px 0;
@@ -226,6 +226,25 @@
 
 .label-create-row > .input {
   width: 100%;
+}
+
+.label-image-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+  min-width: 0;
+}
+
+.label-image-picker__preview {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+}
+
+.label-image-picker .warning-inline {
+  flex-basis: 100%;
 }
 
 .label-create-row > .input--color {

@@ -26,6 +26,7 @@ const MAX_ENTRIES_PER_BATCH = 500;
 
 /** Event tables in foreign-key insert order, plus the log itself. */
 const REPLICATED_TABLES = [
+  'label_images',
   'labels',
   'runners',
   'runner_labels',

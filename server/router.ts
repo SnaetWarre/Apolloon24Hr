@@ -2,6 +2,7 @@ import { TRPCError, initTRPC } from '@trpc/server';
 import { z } from 'zod';
 import {
   importCsvSchema,
+  labelImageUploadSchema,
   labelInputSchema,
   labelPatchSchema,
   publicRecordModeUpdateSchema,
@@ -51,6 +52,7 @@ import {
   performHandoff,
   recordWrite,
   saveForwardedWrite,
+  saveLabelImage,
   setPublicRecordMode,
   setTemporaryTeamActive,
   setTemporaryTeamMembers,
@@ -263,6 +265,9 @@ export const appRouter = t.router({
         return { ok: true };
       })
     ),
+    uploadImage: t.procedure
+      .input(labelImageUploadSchema)
+      .mutation(write((input) => ({ imageUrl: saveLabelImage(input) }))),
   }),
 
   temporaryTeams: t.router({

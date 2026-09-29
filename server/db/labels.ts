@@ -1,5 +1,5 @@
-import { randomUUID } from 'node:crypto';
-import { type Label, type LabelInput, type LabelPatch } from '../../shared/schemas.js';
+import { createHash, randomUUID } from 'node:crypto';
+import { type Label, type LabelImageUpload, type LabelInput, type LabelPatch } from '../../shared/schemas.js';
 import { all, one, run, transaction } from './connection.js';
 import { canonicalLabelName } from './values.js';
 import { clusterNow } from '../clock.js';
@@ -135,6 +135,29 @@ export function updateLabel(id: string, fields: LabelPatch): Label | null {
   }
 
   return getLabel(id);
+}
+
+export const LABEL_IMAGE_PATH = '/api/label-images/';
+
+/** Stores a logo under a hash of its bytes, so the same file uploaded twice is kept once. */
+export function saveLabelImage({ mime, dataBase64 }: LabelImageUpload): string {
+  const bytes = Buffer.from(dataBase64, 'base64');
+  const id = createHash('sha256').update(mime).update(bytes).digest('hex').slice(0, 32);
+  run('INSERT OR IGNORE INTO label_images (id, mime, data_base64, created_at) VALUES (?, ?, ?, ?)', [
+    id,
+    mime,
+    bytes.toString('base64'),
+    clusterNow(),
+  ]);
+  return `${LABEL_IMAGE_PATH}${id}`;
+}
+
+export function getLabelImage(id: string): { mime: string; bytes: Buffer } | null {
+  const row = one<{ mime: string; dataBase64: string }>(
+    'SELECT mime, data_base64 AS dataBase64 FROM label_images WHERE id = ?',
+    [id]
+  );
+  return row ? { mime: row.mime, bytes: Buffer.from(row.dataBase64, 'base64') } : null;
 }
 
 export function deleteLabel(id: string): boolean {

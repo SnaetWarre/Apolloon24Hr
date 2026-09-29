@@ -4,7 +4,7 @@ import { TEMPORARY_TEAM_KIND, createLabelRecord, findLabelByName } from './label
 import { getSetting, setLocalSetting } from './settings.js';
 import { parseLabelsJson, parseStringArray, serializeHistoricalLabels } from './values.js';
 
-export const DATABASE_SCHEMA_VERSION = 13;
+export const DATABASE_SCHEMA_VERSION = 14;
 
 type DefaultLabel = Required<LabelInput> & { id: string };
 
@@ -129,6 +129,13 @@ export function createSchema(): void {
       sort_order INTEGER,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS label_images (
+      id TEXT PRIMARY KEY,
+      mime TEXT NOT NULL,
+      data_base64 TEXT NOT NULL,
+      created_at INTEGER NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS runner_labels (

@@ -283,6 +283,17 @@ export type LabelInput = z.infer<typeof labelInputSchema>;
 export const labelPatchSchema = labelInputSchema.partial();
 export type LabelPatch = z.infer<typeof labelPatchSchema>;
 
+/** A label logo the browser already scaled down; stored in the database so every laptop has it. */
+export const labelImageUploadSchema = z.object({
+  mime: z.enum(['image/webp', 'image/png']),
+  dataBase64: z
+    .string()
+    .min(1)
+    .max(1_000_000)
+    .regex(/^[A-Za-z0-9+/]+={0,2}$/),
+});
+export type LabelImageUpload = z.infer<typeof labelImageUploadSchema>;
+
 export const queueReorderSchema = z.object({
   ids: z.array(z.string()).min(1),
 });

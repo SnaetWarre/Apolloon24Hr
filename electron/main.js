@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
@@ -13,6 +13,7 @@ let serverProcess;
 let quitting = false;
 let appUrl = 'http://127.0.0.1:5173';
 const smokeTest = process.env.APOLLOON_PACKAGE_SMOKE === '1';
+const IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'jfif', 'gif', 'webp', 'avif', 'bmp', 'ico', 'svg', 'apng'];
 if (smokeTest) {
   if (!process.env.APOLLOON_SMOKE_DATA) throw new Error('Missing smoke test data directory');
   app.setPath('userData', process.env.APOLLOON_SMOKE_DATA);
@@ -30,6 +31,7 @@ async function createWindow() {
       nodeIntegration: false,
       contextIsolation: true,
       spellcheck: false,
+      preload: path.join(__dirname, 'preload.cjs'),
     },
   });
   mainWindow = window;
@@ -74,6 +76,23 @@ async function rendererHasContent(window) {
   if (window.isDestroyed()) return false;
   return window.webContents.executeJavaScript("Boolean(document.getElementById('root')?.childElementCount)");
 }
+
+ipcMain.handle('apolloon:pick-image', async (event) => {
+  const owner = BrowserWindow.fromWebContents(event.sender);
+  const options = {
+    title: 'Kies een logo',
+    defaultPath: app.getPath('downloads'),
+    properties: ['openFile'],
+    filters: [
+      { name: 'Afbeeldingen', extensions: IMAGE_EXTENSIONS },
+      { name: 'Alle bestanden', extensions: ['*'] },
+    ],
+  };
+  const result = owner ? await dialog.showOpenDialog(owner, options) : await dialog.showOpenDialog(options);
+  const filePath = result.canceled ? null : result.filePaths[0];
+  if (!filePath) return null;
+  return { name: path.basename(filePath), bytes: await fs.promises.readFile(filePath) };
+});
 
 function ensureEnvFile() {
   const envPath = path.join(app.getPath('userData'), '.env');

@@ -112,7 +112,7 @@ test('schema 13 retires multi-master replication, moves the queue onto runners, 
             return [key, value];
           })
       );
-      assert.equal(settings.schema_version, '13');
+      assert.equal(settings.schema_version, '14');
       for (const retired of [
         'replication_cluster_secret',
         'replication_checkpoint_gzip_v1',

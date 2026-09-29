@@ -1,6 +1,7 @@
 import React from 'react';
 import { LabelBadge } from '../LabelBadge';
-import type { Label } from '../../types';
+import type { Label, LabelPatch } from '../../types';
+import { LabelImagePicker } from './LabelImagePicker';
 
 export function LabelAdminRow({
   label,
@@ -8,7 +9,7 @@ export function LabelAdminRow({
   onDelete,
 }: {
   label: Label;
-  onSave: (fields: { targetLaps: number | null; sortOrder: number | null }) => Promise<void>;
+  onSave: (fields: LabelPatch) => Promise<void>;
   onDelete: () => Promise<void>;
 }) {
   const [target, setTarget] = React.useState(label.targetLaps?.toString() || '');
@@ -40,6 +41,10 @@ export function LabelAdminRow({
   return (
     <div className="label-admin-row">
       <LabelBadge label={label} />
+      <div className="label-target-editor">
+        <span className="label-target-editor__caption">Logo</span>
+        <LabelImagePicker imageUrl={label.imageUrl} onChange={(imageUrl) => onSave({ imageUrl })} compact />
+      </div>
       <label className="label-target-editor">
         <span className="label-target-editor__caption">Doel (rondes)</span>
         <input

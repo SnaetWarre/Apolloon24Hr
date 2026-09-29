@@ -2,6 +2,7 @@ import React from 'react';
 import { useQueryClient, type QueryKey } from '@tanstack/react-query';
 import { trpc } from '../api';
 import type {
+  LabelImageUpload,
   LabelInput,
   LabelPatch,
   LiveAppSnapshot,
@@ -73,6 +74,7 @@ export function useAppActions() {
       createLabel: action((input: LabelInput) => trpc.labels.create.mutate(input)),
       updateLabel: action((id: string, fields: LabelPatch) => trpc.labels.update.mutate({ id, fields })),
       deleteLabel: action((id: string) => trpc.labels.delete.mutate({ id })),
+      uploadLabelImage: action((input: LabelImageUpload) => trpc.labels.uploadImage.mutate(input), []),
       createTemporaryTeam: action(
         (input: { name: string; color: string; startsAt: number; endsAt: number; runnerIds: string[] }) =>
           trpc.temporaryTeams.create.mutate(input)
