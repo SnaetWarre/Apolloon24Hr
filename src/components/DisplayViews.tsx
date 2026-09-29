@@ -146,7 +146,7 @@ export function InsideDisplay() {
   const [presentation, setPresentation] = useDisplayPresentation('inside', 'dark');
   const activeRunner = runners.find((runner) => runner.id === race.activeRunnerId) || null;
   const nextRunner = getNextWaitingRunner(runners);
-  const { laps } = useRaceHistory({ scope: 'full' });
+  const { laps, initialized: historyIsInitialized } = useRaceHistory({ scope: 'full' });
   const [rankingMode, setRankingMode] = React.useState<RankingMode>('laps');
   const [rankingLabelId, setRankingLabelId] = React.useState<string | null>(null);
   const [rotationPaused, setRotationPaused] = React.useState(false);
@@ -182,6 +182,20 @@ export function InsideDisplay() {
   const competitionRowCount = competitions.reduce((total, competition) => total + competition.stats.length, 0);
   // Same definition as Analyse, so the public and operator screens agree.
   const lapsPerHour = React.useMemo(() => buildKpis(laps, race).lapsPerHour, [laps, race]);
+  const activeKey = activeRunner?.id ?? 'none';
+  const nextKey = nextRunner?.id ?? 'none';
+  // What changes after the screen opened moves: a handover, a lap that lands, a ranking that switches.
+  const changed = useArrivals([
+    `active:${activeKey}`,
+    `next:${nextKey}`,
+    `laps:${laps.length}`,
+    `ranking:${rankingMode}:${rankingLabelId ?? ''}`,
+  ]);
+  const newLapIds = useArrivals(
+    recentLapSummaries.map(({ lap }) => lap.id),
+    historyIsInitialized
+  );
+  const rankingKey = `ranking:${rankingMode}:${rankingLabelId ?? ''}`;
 
   return (
     <main className={`display-root display-root--inside display-root--${presentation}`}>
@@ -205,7 +219,9 @@ export function InsideDisplay() {
           </div>
           <div>
             <dt>Rondes</dt>
-            <dd>{laps.length.toLocaleString('nl-BE')}</dd>
+            <dd key={laps.length} className={changed.has(`laps:${laps.length}`) ? 'value-tick' : undefined}>
+              {laps.length.toLocaleString('nl-BE')}
+            </dd>
           </div>
           <div>
             <dt>Per uur</dt>
@@ -221,7 +237,10 @@ export function InsideDisplay() {
       <div className="inside-live">
         <section className="inside-now" aria-label="Nu op de piste">
           <span className="inside-now__label">Nu op de piste</span>
-          <strong className="inside-now__runner">
+          <strong
+            key={activeKey}
+            className={`inside-now__runner${changed.has(`active:${activeKey}`) ? ' display-rise' : ''}`}
+          >
             {activeRunner ? runnerLabelWithoutDash(activeRunner) : 'Nog niemand gestart'}
           </strong>
           {activeRunner && race.activeStartedAt && (
@@ -233,14 +252,20 @@ export function InsideDisplay() {
             />
           )}
           <span className="inside-now__next">
-            Volgende: <strong>{nextRunner ? runnerLabelWithoutDash(nextRunner) : 'niemand klaar'}</strong>
+            Volgende:{' '}
+            <strong key={nextKey} className={changed.has(`next:${nextKey}`) ? 'display-rise' : undefined}>
+              {nextRunner ? runnerLabelWithoutDash(nextRunner) : 'niemand klaar'}
+            </strong>
           </span>
         </section>
         <section className="inside-recent-laps" aria-label="Laatste 3 lopers">
           <h2 className="visually-hidden">Laatste 3 lopers</h2>
           {recentLapSummaries.length ? (
             recentLapSummaries.map(({ lap, bestLapMs, averageLapMs }, index) => (
-              <article key={lap.id} className={`recent-lap-row${index === 0 ? ' is-latest' : ''}`}>
+              <article
+                key={lap.id}
+                className={`recent-lap-row${index === 0 ? ' is-latest' : ''}${newLapIds.has(lap.id) ? ' is-new' : ''}`}
+              >
                 <span className="recent-lap-card-header">
                   {index === 0 ? 'Net binnen' : `Binnen om ${formatDisplayClockTime(lap.finishedAt)}`}, ronde{' '}
                   {lap.lapNumber}
@@ -300,7 +325,7 @@ export function InsideDisplay() {
               : 'Meeste rondes; bij gelijke stand telt het snelste gemiddelde.'}
             {rankingLabelId ? ` Label: ${rankingLabels.find((label) => label.id === rankingLabelId)?.name ?? ''}.` : ''}
           </p>
-          <ol className="ranking-list">
+          <ol key={rankingKey} className={`ranking-list${changed.has(rankingKey) ? ' display-rise' : ''}`}>
             {ranking.map((runner, index) => (
               <li key={runner.runnerId} className="ranking-row">
                 <span>{index + 1}</span>
