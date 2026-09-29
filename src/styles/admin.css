@@ -10,6 +10,11 @@
   margin-bottom: var(--space-4);
 }
 
+/* The attention dot draws the eye a few times, then stays put. */
+.management-navigation .section-nav-dot {
+  animation: attention 1.2s var(--ease-in-out) 3;
+}
+
 .management-content {
   display: grid;
   gap: var(--space-4);
@@ -40,6 +45,7 @@
   background: var(--warn-wash);
   color: var(--warn-ink);
   font-size: 14px;
+  transition: background-color var(--dur-2) var(--ease-out), color var(--dur-2) var(--ease-out);
 }
 
 .readiness-summary--ready {
@@ -81,6 +87,7 @@
   color: #1D1100;
   font-size: 13px;
   font-weight: 700;
+  transition: background-color var(--dur-2) var(--ease-out);
 }
 
 .readiness-check--ready .readiness-check__marker {
@@ -237,6 +244,7 @@
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
   background: var(--surface);
+  transition: border-color var(--dur-2) var(--ease-out);
 }
 
 .temporary-team-card.is-active {
@@ -787,6 +795,7 @@
   padding: var(--space-2) var(--space-3);
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
+  transition: background-color var(--dur-2) var(--ease-out), border-color var(--dur-2) var(--ease-out);
 }
 
 .cluster-state--warning {
@@ -805,6 +814,11 @@
 
 .cluster-manual-join > summary {
   cursor: pointer;
+}
+
+.cluster-manual-join > summary,
+details.host-hint > summary {
+  flex: 1 1 100%;
 }
 
 .cluster-manual-join .form-row {
