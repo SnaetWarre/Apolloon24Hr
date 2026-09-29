@@ -42,7 +42,6 @@ const selectAnalysisData = ({ runners, labels, race }: LiveAppSnapshot) => ({
   labels,
   race,
 });
-const MAX_CHART_PIXEL_RATIO = 1.5;
 import { LabelBadge, labelKindOrder, labelKindTitle } from './LabelBadge';
 
 type RunnerInsightSort = 'laps' | 'average' | 'best' | 'consistency';
@@ -510,7 +509,6 @@ function RollingLapTrendChart({ points }: { points: ReturnType<typeof buildRolli
         responsive: true,
         maintainAspectRatio: false,
         animation: false,
-        devicePixelRatio: Math.min(window.devicePixelRatio || 1, MAX_CHART_PIXEL_RATIO),
         interaction: {
           mode: 'nearest',
           intersect: false,
@@ -643,7 +641,6 @@ function RacePaceChart({ buckets }: { buckets: ReturnType<typeof buildTimeBucket
         responsive: true,
         maintainAspectRatio: false,
         animation: false,
-        devicePixelRatio: Math.min(window.devicePixelRatio || 1, MAX_CHART_PIXEL_RATIO),
         interaction: {
           mode: 'index',
           intersect: false,

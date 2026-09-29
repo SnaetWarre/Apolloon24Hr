@@ -21,6 +21,10 @@ export const workspaceChartPalette = {
   get grid() {
     return token('--chart-grid', '#E1E7EF');
   },
+  /** Quiet background band, e.g. the night hours. */
+  get band() {
+    return token('--surface-2', '#F4F4F5');
+  },
   get surface() {
     return token('--surface', '#FFFFFF');
   },

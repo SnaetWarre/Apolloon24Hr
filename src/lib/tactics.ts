@@ -14,10 +14,19 @@ export type HistoricalRace = {
   teams: HistoricalTeam[];
 };
 
-export type RaceProgressPoint = {
+/** Laps completed at a moment in the race, fractional between two lap finishes. */
+export type LapTimelinePoint = {
   raceHour: number;
   liveLaps: number | null;
-  targetLaps: number | null;
+  targetLaps: number;
+  ownHistoricalLaps: number | null;
+  rivalHistoricalLaps: number | null;
+};
+
+export type HourlyLapCountPoint = {
+  raceHour: number;
+  liveLaps: number | null;
+  targetLaps: number;
   ownHistoricalLaps: number | null;
   rivalHistoricalLaps: number | null;
 };
@@ -154,32 +163,69 @@ function buildLiveHourlyPaces(laps: LapRecord[], raceStartedAt: number): Array<n
   return durationsByHour.map((durations) => median(durations));
 }
 
-export function buildRaceProgress(input: {
+/**
+ * Lap counts on a fixed minute grid. Between two lap finishes the count rises linearly, so
+ * differences of a lap or less read as a smooth curve instead of a sawtooth. The live series
+ * stops at the last finished lap: the lap in progress has no known end yet.
+ */
+export function buildLapTimeline(input: {
+  liveLaps: LapRecord[];
+  raceStartedAt: number;
+  targetPacesSeconds: number[];
+  ownHistoricalTeam: HistoricalTeam | null;
+  rivalHistoricalTeam: HistoricalTeam | null;
+  stepMinutes?: number;
+}): LapTimelinePoint[] {
+  const stepMinutes = Math.max(1, input.stepMinutes ?? 1);
+  const liveOffsetsMs = input.liveLaps
+    .map((lap) => lap.finishedAt - input.raceStartedAt)
+    .filter((offsetMs) => offsetMs >= 0)
+    .sort((firstOffset, secondOffset) => firstOffset - secondOffset);
+  const lastLiveOffsetMs = liveOffsetsMs.at(-1) ?? -1;
+  const points: LapTimelinePoint[] = [];
+  for (let minute = 0; minute <= RACE_DURATION_HOURS * 60; minute += stepMinutes) {
+    const elapsedMs = minute * 60_000;
+    points.push({
+      raceHour: minute / 60,
+      liveLaps: elapsedMs <= lastLiveOffsetMs ? interpolatedLapCount(liveOffsetsMs, elapsedMs) : null,
+      targetLaps: targetLapCountAt(input.targetPacesSeconds, minute / 60),
+      ownHistoricalLaps: input.ownHistoricalTeam
+        ? interpolatedLapCount(input.ownHistoricalTeam.cumulativeLapTimesMs, elapsedMs)
+        : null,
+      rivalHistoricalLaps: input.rivalHistoricalTeam
+        ? interpolatedLapCount(input.rivalHistoricalTeam.cumulativeLapTimesMs, elapsedMs)
+        : null,
+    });
+  }
+  return points;
+}
+
+/** Laps finished within each race hour. The live hour in progress stays empty until it is complete. */
+export function buildHourlyLapCounts(input: {
   liveLaps: LapRecord[];
   raceStartedAt: number;
   elapsedHours: number;
   targetPacesSeconds: number[];
   ownHistoricalTeam: HistoricalTeam | null;
   rivalHistoricalTeam: HistoricalTeam | null;
-  intervalMinutes?: number;
-}): RaceProgressPoint[] {
-  const intervalHours = Math.max(5, input.intervalMinutes ?? 15) / 60;
-  const points: RaceProgressPoint[] = [];
-  const liveFinishTimes = input.liveLaps.map((lap) => lap.finishedAt);
-  const maximumHour = Math.max(RACE_DURATION_HOURS, input.elapsedHours);
-
-  for (let raceHour = 0; raceHour <= maximumHour + 0.0001; raceHour += intervalHours) {
-    const pointHour = Math.min(maximumHour, Math.round(raceHour * 100) / 100);
-    const timestamp = input.raceStartedAt + pointHour * 3_600_000;
-    points.push({
-      raceHour: pointHour,
-      liveLaps: pointHour <= input.elapsedHours ? upperBound(liveFinishTimes, timestamp) : null,
-      targetLaps: pointHour <= RACE_DURATION_HOURS ? targetLapCountAt(input.targetPacesSeconds, pointHour) : null,
-      ownHistoricalLaps: historicalLapCountAt(input.ownHistoricalTeam, pointHour),
-      rivalHistoricalLaps: historicalLapCountAt(input.rivalHistoricalTeam, pointHour),
-    });
+}): HourlyLapCountPoint[] {
+  const liveCounts = Array<number>(RACE_DURATION_HOURS).fill(0);
+  for (const lap of input.liveLaps) {
+    const raceHour = Math.floor((lap.finishedAt - input.raceStartedAt) / 3_600_000);
+    if (raceHour >= 0 && raceHour < RACE_DURATION_HOURS) liveCounts[raceHour] += 1;
   }
-  return points;
+  const historicalCount = (team: HistoricalTeam | null, raceHour: number) =>
+    team
+      ? upperBound(team.cumulativeLapTimesMs, (raceHour + 1) * 3_600_000) -
+        upperBound(team.cumulativeLapTimesMs, raceHour * 3_600_000)
+      : null;
+  return Array.from({ length: RACE_DURATION_HOURS }, (_, raceHour) => ({
+    raceHour,
+    liveLaps: raceHour + 1 <= input.elapsedHours ? liveCounts[raceHour] : null,
+    targetLaps: 3_600 / validPace(input.targetPacesSeconds[raceHour]),
+    ownHistoricalLaps: historicalCount(input.ownHistoricalTeam, raceHour),
+    rivalHistoricalLaps: historicalCount(input.rivalHistoricalTeam, raceHour),
+  }));
 }
 
 export function buildHourlyPaceComparison(input: {
@@ -245,6 +291,14 @@ function fillMissingPaces(paces: Array<number | null>, fallbackPace: number): nu
   const validPaces = paces.filter((pace): pace is number => pace != null && pace > 0);
   const centralPace = median(validPaces) ?? fallbackPace;
   return paces.map((pace) => pace ?? centralPace);
+}
+
+function interpolatedLapCount(sortedOffsetsMs: number[], elapsedMs: number): number {
+  const completedLaps = upperBound(sortedOffsetsMs, elapsedMs);
+  if (completedLaps >= sortedOffsetsMs.length) return completedLaps;
+  const previousFinishMs = completedLaps > 0 ? sortedOffsetsMs[completedLaps - 1] : 0;
+  const nextFinishMs = sortedOffsetsMs[completedLaps];
+  return completedLaps + (elapsedMs - previousFinishMs) / (nextFinishMs - previousFinishMs);
 }
 
 function upperBound(sortedValues: number[], maximumValue: number): number {

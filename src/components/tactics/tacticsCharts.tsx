@@ -12,13 +12,11 @@ import {
 } from 'chart.js';
 import { chartTooltipColors, useChartTheme, workspaceChartPalette } from '../../lib/chartPalette';
 import { useArrivals } from '../../lib/motion';
-import { RACE_DURATION_HOURS, type HourlyPacePoint, type RaceProgressPoint } from '../../lib/tactics';
+import { RACE_DURATION_HOURS, type HourlyPacePoint } from '../../lib/tactics';
 import type { LiveTrendPoint, TimeGapPoint } from '../../lib/tacticsDeepDive';
 import { formatPaceSeconds, formatRaceHour, formatSignedGap } from './tacticsFormat';
 
 Chart.register(CategoryScale, Legend, LinearScale, LineController, LineElement, PointElement, Tooltip);
-
-const MAX_CHART_PIXEL_RATIO = 1.5;
 
 export function TacticsStat({
   label,
@@ -55,43 +53,6 @@ export function TacticsSectionHeader({ kicker, title, text }: { kicker: string; 
       <p>{text}</p>
     </div>
   );
-}
-
-export function RaceProgressChart({
-  points,
-  showLive = false,
-  showTarget = false,
-  ownLabel = 'Apolloon vorig jaar',
-  rivalLabel = 'VTK vorig jaar',
-}: {
-  points: RaceProgressPoint[];
-  showLive?: boolean;
-  showTarget?: boolean;
-  ownLabel?: string;
-  rivalLabel?: string;
-}) {
-  const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
-  const chartTheme = useChartTheme();
-
-  React.useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas || !points.length) return undefined;
-    const datasets: ChartConfiguration<'line'>['data']['datasets'] = [];
-    if (showLive) datasets.push(lineDataset('Apolloon live', points, 'liveLaps', workspaceChartPalette.live, 4));
-    if (showTarget)
-      datasets.push(lineDataset('Doelverloop', points, 'targetLaps', workspaceChartPalette.target, 2, [8, 6]));
-    datasets.push(lineDataset(ownLabel, points, 'ownHistoricalLaps', workspaceChartPalette.own, 2, [7, 5], true));
-    datasets.push(lineDataset(rivalLabel, points, 'rivalHistoricalLaps', workspaceChartPalette.rival, 2, [7, 5], true));
-
-    const chart = new Chart(canvas, {
-      type: 'line',
-      data: { datasets },
-      options: sharedLineChartOptions('Cumulatieve rondes', (value) => `${Math.round(Number(value))}`),
-    });
-    return () => chart.destroy();
-  }, [chartTheme, ownLabel, points, rivalLabel, showLive, showTarget]);
-
-  return <ChartCanvas canvasRef={canvasRef} />;
 }
 
 export function HourlyPaceChart({
@@ -240,30 +201,6 @@ function ChartCanvas({ canvasRef }: { canvasRef: React.RefObject<HTMLCanvasEleme
   );
 }
 
-function lineDataset(
-  label: string,
-  points: RaceProgressPoint[],
-  valueKey: keyof Pick<RaceProgressPoint, 'liveLaps' | 'targetLaps' | 'ownHistoricalLaps' | 'rivalHistoricalLaps'>,
-  color: string,
-  borderWidth: number,
-  borderDash?: number[],
-  hiddenByDefault?: boolean
-) {
-  return {
-    label,
-    data: points.map((point) => ({ x: point.raceHour, y: point[valueKey] })),
-    borderColor: color,
-    backgroundColor: color,
-    borderWidth,
-    borderDash,
-    hidden: hiddenByDefault,
-    pointRadius: 0,
-    pointHoverRadius: 5,
-    tension: 0.18,
-    spanGaps: false,
-  };
-}
-
 function paceDataset(
   label: string,
   points: HourlyPacePoint[],
@@ -297,7 +234,6 @@ function sharedLineChartOptions(
     responsive: true,
     maintainAspectRatio: false,
     animation: false,
-    devicePixelRatio: Math.min(window.devicePixelRatio || 1, MAX_CHART_PIXEL_RATIO),
     interaction: { mode: 'nearest', intersect: false },
     parsing: false,
     plugins: {
@@ -331,7 +267,6 @@ function sharedLineChartOptions(
         grid: { color: workspaceChartPalette.grid },
       },
       y: {
-        beginAtZero: yAxisTitle === 'Cumulatieve rondes',
         title: { display: true, text: yAxisTitle, color: workspaceChartPalette.muted, font: { weight: 500 } },
         ticks: { color: workspaceChartPalette.muted, callback: (value) => yTickFormatter(value) },
         grid: { color: workspaceChartPalette.grid },

@@ -258,6 +258,240 @@
   height: 420px !important;
 }
 
+/* ---------- Race timeline: voor of achter, per uur, totaal ---------- */
+.race-timeline {
+  --plot-left: 48px;
+  --plot-right: 8px;
+  --plot-top: 8px;
+  --plot-height: 360px;
+  display: grid;
+  gap: var(--space-3);
+}
+
+.race-timeline-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+}
+
+.race-timeline-toolbar .segmented-control {
+  margin: 0;
+}
+
+.race-timeline-presets {
+  margin-left: auto !important;
+}
+
+.race-timeline-baseline {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.race-timeline-baseline span {
+  color: var(--ink-3);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.race-timeline-baseline .input {
+  width: auto;
+  min-height: var(--control-h-sm);
+  padding-block: 0;
+  font-size: 13px;
+}
+
+.race-timeline-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px var(--space-1);
+}
+
+.race-timeline-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 26px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ink-2);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-1) var(--ease-out),
+    color var(--dur-1) var(--ease-out),
+    opacity var(--dur-1) var(--ease-out);
+}
+
+.race-timeline-legend-item:hover {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+
+.race-timeline-legend-item[aria-pressed="false"] {
+  opacity: 0.45;
+}
+
+.race-timeline-legend-item[aria-pressed="false"] .race-timeline-swatch {
+  background: var(--line-2);
+}
+
+.race-timeline-legend-item em {
+  color: var(--ink-3);
+  font-size: 12px;
+  font-style: normal;
+}
+
+.race-timeline-swatch {
+  width: 16px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--swatch);
+}
+
+.race-timeline-swatch--dashed {
+  background: repeating-linear-gradient(90deg, var(--swatch) 0 5px, transparent 5px 8px);
+}
+
+.race-timeline-plot {
+  cursor: crosshair;
+  touch-action: pan-y;
+  user-select: none;
+}
+
+.race-timeline-selection {
+  position: absolute;
+  top: var(--plot-top);
+  height: var(--plot-height);
+  border-inline: 1px solid var(--brand);
+  background: var(--brand-wash);
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+.race-timeline-brush {
+  display: grid;
+  gap: 6px;
+  padding-left: var(--plot-left);
+  padding-right: var(--plot-right);
+}
+
+.race-timeline-brush-track {
+  position: relative;
+  height: 44px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  cursor: pointer;
+  touch-action: pan-y;
+  user-select: none;
+}
+
+.race-timeline-brush-track svg {
+  position: absolute;
+  inset: 3px 0;
+  width: 100%;
+  height: calc(100% - 6px);
+  pointer-events: none;
+}
+
+.race-timeline-brush-track polyline {
+  fill: none;
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.race-timeline-brush-night {
+  position: absolute;
+  inset-block: 0;
+  background: var(--surface-2);
+  pointer-events: none;
+}
+
+.race-timeline-brush-now {
+  position: absolute;
+  inset-block: 0;
+  border-left: 1px dashed var(--ink-3);
+  pointer-events: none;
+}
+
+.race-timeline-brush-window {
+  position: absolute;
+  inset-block: 0;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  cursor: grab;
+  transition: background-color var(--dur-1) var(--ease-out);
+}
+
+.race-timeline-brush-window.is-zoomed {
+  border-color: var(--brand);
+  background: color-mix(in srgb, var(--brand) 10%, transparent);
+  box-shadow: 0 0 0 9999px color-mix(in srgb, var(--surface) 55%, transparent);
+}
+
+.race-timeline-brush-window:active {
+  cursor: grabbing;
+}
+
+.race-timeline-brush-window:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+.race-timeline-brush-handle {
+  position: absolute;
+  inset-block: 0;
+  width: 12px;
+  cursor: ew-resize;
+}
+
+.race-timeline-brush-handle[data-brush="start"] {
+  left: -6px;
+}
+
+.race-timeline-brush-handle[data-brush="end"] {
+  right: -6px;
+}
+
+.race-timeline-brush-window.is-zoomed .race-timeline-brush-handle::after {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 4px;
+  height: 16px;
+  border-radius: 2px;
+  background: var(--brand);
+  content: "";
+  transform: translate(-50%, -50%);
+}
+
+.race-timeline-brush-caption {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--space-1) var(--space-4);
+  color: var(--ink-2);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.race-timeline-brush-caption small {
+  margin-left: 6px;
+  color: var(--ink-3);
+  font-size: 12px;
+}
+
+.race-timeline-brush-hint {
+  color: var(--ink-3);
+}
+
 .tactics-reference-notice {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

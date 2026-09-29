@@ -4,7 +4,8 @@ import path from 'node:path';
 import test from 'node:test';
 import {
   buildHourlyHistoricalPaces,
-  buildRaceProgress,
+  buildHourlyLapCounts,
+  buildLapTimeline,
   buildTargetPaces,
   paceUncertaintySeconds,
   historicalLapCountAt,
@@ -75,16 +76,48 @@ test('live filtering and projection use Apolloon lap records without file conver
   assert.equal(targetLapCountAt(flatPaces, 12), 360);
   assert.equal(Math.round(projectedLapCount(360, 12, flatPaces)), 720);
 
-  const progress = buildRaceProgress({
+  const timeline = buildLapTimeline({
     liveLaps: filteredLaps,
     raceStartedAt,
-    elapsedHours: 1,
     targetPacesSeconds: flatPaces,
     ownHistoricalTeam: null,
     rivalHistoricalTeam: null,
   });
-  assert.equal(progress.find((point) => point.raceHour === 1)?.liveLaps, 2);
-  assert.equal(progress.at(-1)?.liveLaps, null);
+  // Laps finish at 80 s and 200 s: one minute in is 60/80 of the first lap, two minutes in is
+  // the first lap plus 40/120 of the second. After the last finish the live line stops.
+  assert.equal(timeline[1]?.liveLaps, 0.75);
+  assert.equal(timeline[2]?.liveLaps?.toFixed(4), (1 + 40 / 120).toFixed(4));
+  assert.equal(timeline[4]?.liveLaps, null);
+  assert.equal(timeline[60]?.targetLaps, 30);
+  assert.equal(timeline.at(-1)?.raceHour, 24);
+
+  const hourly = buildHourlyLapCounts({
+    liveLaps: filteredLaps,
+    raceStartedAt,
+    elapsedHours: 1.5,
+    targetPacesSeconds: flatPaces,
+    ownHistoricalTeam: null,
+    rivalHistoricalTeam: null,
+  });
+  assert.equal(hourly[0]?.liveLaps, 2);
+  assert.equal(hourly[0]?.targetLaps, 30);
+  // The hour in progress is not complete yet, so it would read as a false drop.
+  assert.equal(hourly[1]?.liveLaps, null);
+});
+
+test('lap timeline shows the Quivr 2025 lead between VTK and Apolloon without rounding to whole laps', () => {
+  const reference = parseHistoricalRace(fs.readFileSync('public/reference/quivr-2025-lap-times.json', 'utf8'));
+  const timeline = buildLapTimeline({
+    liveLaps: [],
+    raceStartedAt: 0,
+    targetPacesSeconds: buildTargetPaces(1_095, null),
+    ownHistoricalTeam: reference.teams.find((team) => team.teamId === 1) ?? null,
+    rivalHistoricalTeam: reference.teams.find((team) => team.teamId === 4) ?? null,
+  });
+  const finish = timeline.at(-1)!;
+  assert.equal(finish.ownHistoricalLaps, 1_095);
+  assert.equal(finish.rivalHistoricalLaps, 1_102);
+  assert.ok(timeline.some((point) => !Number.isInteger(point.ownHistoricalLaps)));
 });
 
 test('bundled Quivr 2025 data is valid and contains the Apolloon and VTK reference teams', () => {

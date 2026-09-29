@@ -76,15 +76,30 @@ export function formatRaceHour(hours: number): string {
   return minutes ? `${wholeHours}u${String(minutes).padStart(2, '0')}` : `${wholeHours}u`;
 }
 
+const raceClockFormatter = new Intl.DateTimeFormat('nl-BE', {
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+  timeZone: 'Europe/Brussels',
+});
+
 export function formatRaceHourWindow(raceStartedAt: number, raceHour: number): string {
-  const formatter = new Intl.DateTimeFormat('nl-BE', {
-    hour: '2-digit',
-    minute: '2-digit',
-    hourCycle: 'h23',
-    timeZone: 'Europe/Brussels',
-  });
   const startedAt = raceStartedAt + raceHour * 3_600_000;
-  return `${formatter.format(startedAt)}-${formatter.format(startedAt + 3_600_000)}`;
+  return `${raceClockFormatter.format(startedAt)}-${raceClockFormatter.format(startedAt + 3_600_000)}`;
+}
+
+/** Brussels clock time at a moment in the race, e.g. "02:10". */
+export function formatRaceClock(raceStartedAt: number, raceHour: number): string {
+  return raceClockFormatter.format(raceStartedAt + raceHour * 3_600_000);
+}
+
+/** Race-hour ranges between midnight and 06:00 Brussels time, where the pace usually drops. */
+export function nightRaceHourRanges(raceStartedAt: number): Array<[number, number]> {
+  const [startHour, startMinute] = raceClockFormatter.format(raceStartedAt).split(':').map(Number);
+  const firstMidnight = (24 - startHour - startMinute / 60) % 24;
+  return [firstMidnight - 24, firstMidnight]
+    .map((midnight): [number, number] => [Math.max(0, midnight), Math.min(RACE_DURATION_HOURS, midnight + 6)])
+    .filter(([start, end]) => end > start);
 }
 
 export function clamp(value: number, minimum: number, maximum: number): number {

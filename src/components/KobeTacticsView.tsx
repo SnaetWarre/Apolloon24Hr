@@ -9,8 +9,9 @@ import {
   DEFAULT_MAXIMUM_LAP_SECONDS,
   DEFAULT_MINIMUM_LAP_SECONDS,
   RACE_DURATION_HOURS,
+  buildHourlyLapCounts,
   buildHourlyPaceComparison,
-  buildRaceProgress,
+  buildLapTimeline,
   buildTargetPaces,
   formatSignedLapDifference,
   historicalLapCountAt,
@@ -50,10 +51,10 @@ import {
   HourlyPaceChart,
   LiveTimeGapChart,
   LiveTrendChart,
-  RaceProgressChart,
   TacticsSectionHeader,
   TacticsStat,
 } from './tactics/tacticsCharts';
+import { RaceTimelineChart } from './tactics/RaceTimelineChart';
 import { RecentLapsTable } from './tactics/tacticsTables';
 
 type TacticsSection = 'live' | 'historical';
@@ -267,7 +268,14 @@ function LiveTacticsSection({
       : projectedLapCount(cleanLaps.length, elapsedHours, Array(RACE_DURATION_HOURS).fill(currentPaceSeconds));
   const ownHistoricalLapsNow = historicalLapCountAt(ownHistoricalTeam, elapsedHours);
   const rivalHistoricalLapsNow = historicalLapCountAt(rivalHistoricalTeam, elapsedHours);
-  const progressPoints = buildRaceProgress({
+  const timelinePoints = buildLapTimeline({
+    liveLaps: cleanLaps,
+    raceStartedAt,
+    targetPacesSeconds: targetPaces,
+    ownHistoricalTeam,
+    rivalHistoricalTeam,
+  });
+  const hourlyLapCounts = buildHourlyLapCounts({
     liveLaps: cleanLaps,
     raceStartedAt,
     elapsedHours,
@@ -351,9 +359,14 @@ function LiveTacticsSection({
           <TacticsSectionHeader
             kicker="Voortgang"
             title="Live tegenover doel en vorig jaar"
-            text="Stippellijn: het doelverloop. Klik in de legenda om vorig jaar te tonen."
+            text="Hoeveel rondes je voor of achter staat, en per uur waar het verschil ontstaat."
           />
-          <RaceProgressChart points={progressPoints} showLive showTarget />
+          <RaceTimelineChart
+            timeline={timelinePoints}
+            hourly={hourlyLapCounts}
+            elapsedHours={elapsedHours}
+            raceStartedAt={raceStartedAt}
+          />
         </section>
 
         <section className="panel tactics-scenario-panel">
