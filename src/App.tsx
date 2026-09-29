@@ -1,8 +1,9 @@
 import React from 'react';
 import { Outlet, useNavigate, useRouterState } from '@tanstack/react-router';
 import { useQueryClient } from '@tanstack/react-query';
-import { useAppData, useClusterStatus, useConnectionLost, useRealtimeBridge } from './app/index';
+import { useAppData, useClusterStatus, useConnectionLost, useDisconnected, useRealtimeBridge } from './app/index';
 import { clusterStatusKey } from './app/snapshot';
+import { useFailover } from './app/useFailover';
 import { setDocumentSurface } from './app/theme';
 import { AppShellFrame } from './components/Sidebar';
 import type { ClusterStatus } from './types';
@@ -12,6 +13,10 @@ const selectNothing = () => ({});
 export function AppRoot() {
   const { initialized, error, refresh } = useAppData(selectNothing);
   useRealtimeBridge(initialized);
+  const connectionLost = useConnectionLost();
+  const disconnected = useDisconnected();
+  // useFailover waits a few seconds, so the first connection being made never counts as a failure.
+  const switching = useFailover((initialized && disconnected) || Boolean(error));
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const displayRoute = pathname.startsWith('/display/');
 
@@ -21,7 +26,7 @@ export function AppRoot() {
 
   if (error) {
     return (
-      <Shell>
+      <Shell switching={switching}>
         <div className="app-state" role="alert">
           <span className="brand-mark brand-mark--lg" role="img" aria-label="Apolloon" />
           <h1>Geen verbinding met de lokale server</h1>
@@ -42,7 +47,7 @@ export function AppRoot() {
         </div>
       );
     return (
-      <Shell>
+      <Shell switching={switching}>
         <div className="app-state" role="status">
           <span className="brand-mark brand-mark--lg" role="img" aria-label="Apolloon" />
           <p>Wedstrijddata laden…</p>
@@ -54,15 +59,15 @@ export function AppRoot() {
   if (displayRoute) {
     return (
       <>
-        <ConnectionBanner />
+        <ConnectionBanner connectionLost={connectionLost} switching={switching} />
         <Outlet />
       </>
     );
   }
 
   return (
-    <Shell>
-      <StandbyBanner />
+    <Shell switching={switching}>
+      <PrimaryUnreachableBanner />
       <a className="skip-link" href="#workspace">
         Naar inhoud
       </a>
@@ -88,20 +93,27 @@ export function NotFoundPage() {
   );
 }
 
-function Shell({ children }: { children: React.ReactNode }) {
+function Shell({ children, switching }: { children: React.ReactNode; switching: boolean }) {
+  const connectionLost = useConnectionLost();
   return (
     <div className="app-root">
-      <ConnectionBanner />
+      <ConnectionBanner connectionLost={connectionLost} switching={switching} />
       {children}
     </div>
   );
 }
 
-/** Offers the other laptops this browser last heard about, so operators can switch after a failure. */
-function ConnectionBanner() {
-  const connectionLost = useConnectionLost();
+/** Offers the other laptops this browser last heard about, and says when it is switching to one. */
+function ConnectionBanner({ connectionLost, switching }: { connectionLost: boolean; switching: boolean }) {
   const cluster = useQueryClient().getQueryData<ClusterStatus>(clusterStatusKey);
-  if (!connectionLost) return null;
+  if (!connectionLost && !switching) return null;
+  if (switching) {
+    return (
+      <div className="connection-banner" role="alert">
+        <strong>Verbinding met deze laptop verbroken.</strong> Overschakelen naar een andere laptop…
+      </div>
+    );
+  }
   const alternatives = (cluster?.memberUrls ?? []).filter((url) => url !== window.location.origin);
   return (
     <div className="connection-banner" role="alert">
@@ -123,19 +135,14 @@ function ConnectionBanner() {
   );
 }
 
-function StandbyBanner() {
+/** Changes on this laptop go through the primary; say so when it cannot be reached. */
+function PrimaryUnreachableBanner() {
   const { cluster } = useClusterStatus();
-  if (cluster?.role !== 'standby') return null;
-  const primaryUrl = cluster.primary?.url;
+  if (cluster?.role !== 'standby' || cluster.primary?.reachable) return null;
   return (
-    <div className="standby-banner" role="status">
-      <strong>Standby, alleen-lezen.</strong> Wijzigingen gebeuren op de primaire laptop
-      {primaryUrl ? (
-        <>
-          : <a href={`${primaryUrl}${window.location.pathname}`}>{primaryUrl.replace(/^https?:\/\//, '')}</a>
-        </>
-      ) : null}
-      . Valt die uit, neem dan over in Beheer › Systeem.
+    <div className="standby-banner" role="alert">
+      <strong>De primaire laptop is niet bereikbaar.</strong> Je ziet de laatste gegevens, maar wijzigingen lukken pas
+      weer als die terug is. Is die uitgevallen, neem dan over in Beheer › Systeem.
     </div>
   );
 }

@@ -58,7 +58,7 @@ function ClusterPanel({ cluster, hostUrl }: { cluster: ClusterStatus; hostUrl: s
     const confirmed = await confirm({
       title: 'Standby worden van deze laptop?',
       message:
-        'Deze laptop neemt de volledige database van de primaire laptop over en wordt alleen-lezen. De huidige database wordt eerst als backup bewaard.',
+        'Deze laptop neemt de volledige database van de primaire laptop over en geeft voortaan elke wijziging aan die laptop door. De huidige database wordt eerst als backup bewaard.',
       confirmLabel: 'Koppelen en overnemen',
       tone: 'danger',
     });
@@ -138,7 +138,7 @@ function ClusterPanel({ cluster, hostUrl }: { cluster: ClusterStatus; hostUrl: s
       ) : (
         <>
           <p className="panel-copy">
-            Deze laptop is <strong>standby</strong> en alleen-lezen. Ze volgt{' '}
+            Deze laptop is <strong>standby</strong>: ze houdt een volledige kopie bij en geeft wijzigingen door aan{' '}
             <strong>{primary?.url ?? 'onbekend'}</strong>
             {primary?.reachable
               ? primary.lagEntries

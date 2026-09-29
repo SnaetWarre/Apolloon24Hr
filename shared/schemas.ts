@@ -161,7 +161,6 @@ export type ClusterStandby = {
   lastSeenAt: number;
   appliedSeq: number;
   caughtUp: boolean;
-  clockSkewMs: number | null;
 };
 
 /** What a standby knows about the primary it follows. */
@@ -193,8 +192,6 @@ export type ClusterStatus = {
   memberUrls: string[];
   competingPrimaryUrl: string | null;
   lastError: string | null;
-  /** Largest measured clock difference between this laptop and its primary or standbys. */
-  clockSkewMs: number | null;
   backup: BackupStatus;
 };
 
@@ -317,6 +314,15 @@ export const raceStateExpectationSchema = z.object({
   activeStartedAt: z.number().int().nonnegative().nullable(),
 });
 export type RaceStateExpectation = z.infer<typeof raceStateExpectationSchema>;
+
+/** A timing action with the moment of the key press, and the lap as the timing screen measured it. */
+export const timingPressSchema = raceStateExpectationSchema.extend({
+  /** Cluster time of the press, from the key event rather than from when the request arrived. */
+  pressedAt: z.number().int().nonnegative().optional(),
+  /** Time since this screen's previous press, on one monotonic clock. */
+  measuredDurationMs: z.number().int().nonnegative().optional(),
+});
+export type TimingPress = z.infer<typeof timingPressSchema>;
 
 export const importCsvSchema = z.object({
   csvText: z.string().min(1),

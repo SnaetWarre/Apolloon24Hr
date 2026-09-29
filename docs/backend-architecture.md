@@ -57,7 +57,9 @@ server/index.ts
 ### `server/router.ts`
 
 - Defines every mutation exposed to the UI, validated with Zod.
-- Refuses writes on a standby with a message that names the primary.
+- On a standby, passes every write to the primary (`forwardWrite`) and waits
+  until its own copy has it; the primary refuses writes forwarded to it while
+  it is not primary itself, so calls never loop.
 - Runs each write through `recordWrite`, so data and log entry commit together.
 - Timing commands carry the race state the operator saw; a stale second press
   is refused instead of recording an extra lap.
@@ -116,15 +118,18 @@ replication_log
   to DHCP through the OS permission prompt. Its `/api/net/*` writes only
   accept requests from the laptop itself.
 - `server/env.ts`: data root, app version, release id, and number parsing.
+- `server/clock.ts`: the cluster clock, the primary's time as every laptop
+  estimates it; data timestamps and timing use it.
 - `server/static-files.ts`: packaged frontend, never outside the build root.
 - `shared/schemas.ts`: client/server contracts.
 
 ## Write Path
 
 ```text
-UI mutation
+UI mutation on any laptop
   -> Zod validation
-  -> primary check and race preconditions
+  -> on a standby: passed on to the primary, answered after this copy has it
+  -> race preconditions
   -> SQLite transaction
        -> application table changes
        -> captured SQL appended to replication_log

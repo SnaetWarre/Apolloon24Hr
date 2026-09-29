@@ -28,13 +28,11 @@ function primaryWithStandby(overrides: Partial<ClusterStatus> = {}): ClusterStat
         lastSeenAt: now,
         appliedSeq: 12,
         caughtUp: true,
-        clockSkewMs: 40,
       },
     ],
     memberUrls: ['http://host-b:5173'],
     competingPrimaryUrl: null,
     lastError: null,
-    clockSkewMs: 40,
     backup: {
       enabled: true,
       inProgress: false,
@@ -65,7 +63,6 @@ test('real safety failures block the event and a standalone laptop only warns', 
     'blocked'
   );
   assert.equal(readinessSummary(buildEventReadiness({ ...cluster, standbys: [] }, now)), 'blocked');
-  assert.equal(readinessSummary(buildEventReadiness({ ...cluster, clockSkewMs: 5_000 }, now)), 'blocked');
   assert.equal(
     readinessSummary(buildEventReadiness({ ...cluster, competingPrimaryUrl: 'http://host-c:5173' }, now)),
     'blocked'
@@ -88,7 +85,7 @@ test('a standby reports whether its primary is reachable', () => {
     },
   });
   assert.equal(readinessSummary(buildEventReadiness(standby, now)), 'ready');
-  assert.equal(deriveSystemStatus(standby, null, now)?.title, 'Standby (alleen-lezen)');
+  assert.equal(deriveSystemStatus(standby, null, now)?.title, 'Gekoppeld als standby');
 
   const orphaned = { ...standby, primary: { ...standby.primary!, reachable: false } };
   assert.equal(readinessSummary(buildEventReadiness(orphaned, now)), 'blocked');

@@ -3,6 +3,13 @@ import { z } from 'zod';
 import type { ClusterStatus } from '../shared/schemas.js';
 import { backupStatus, createVerifiedBackup } from './backups.js';
 import {
+  clusterClockOffset,
+  clusterNow,
+  observeReferenceClock,
+  resetClockSamples,
+  setClusterClockOffset,
+} from './clock.js';
+import {
   DATABASE_SCHEMA_VERSION,
   applyLogEntries,
   canContinueFrom,
@@ -22,13 +29,14 @@ import { hostInfo } from './host.js';
 import { sendJson } from './http-json.js';
 
 /*
- * One primary laptop accepts every write and appends it to its replication
- * log. Standbys pull that log and replay it, so each holds a full, read-only
- * copy. Promoting a standby is always an operator decision: planned (the
- * primary hands over and stops writing) or, when the primary is gone, an
- * emergency takeover. A primary that learns of a newer primary becomes its
- * standby; if it wrote anything in the meantime it re-syncs, and those writes
- * survive only in the backup taken just before.
+ * One primary laptop commits every write and appends it to its replication
+ * log. Standbys pull that log and replay it, so each holds a full copy, and
+ * pass the writes made on their own screens on to the primary. Promoting a
+ * standby is an operator decision: planned (the primary hands over and stops
+ * writing) or, when the primary is gone, an emergency takeover. A primary that
+ * learns of a newer primary becomes its standby; if it wrote anything in the
+ * meantime it re-syncs, and those writes survive only in the backup taken
+ * just before.
  */
 
 const enabled = isClusterEnabled();
@@ -39,6 +47,7 @@ const requestTimeoutMs = readPositiveInt(process.env.CLUSTER_REQUEST_TIMEOUT_MS,
 const reachableWindowMs = Math.max(3_000, pullIntervalMs * 8);
 const HANDOVER_MAX_LAG = 500;
 const MAX_MEMBERS = 16;
+const FORWARD_TIMEOUT_MS = 5_000;
 
 type Busy = ClusterStatus['busy'];
 
@@ -47,7 +56,6 @@ type StandbyRecord = {
   url: string;
   appliedSeq: number;
   lastSeenAt: number;
-  clockSkewMs: number | null;
 };
 
 const standbys = new Map<string, StandbyRecord>();
@@ -58,10 +66,10 @@ let primaryContact = {
 };
 let busy: Busy = null;
 let lastError: string | null = null;
-let clockSkewMs: number | null = null;
 let competingPrimaryUrl: string | null = null;
 let pullTimer: NodeJS.Timeout | null = null;
-let pullInFlight: Promise<boolean> | null = null;
+/** Pulls run one at a time, whether from the timer or after forwarding a write. */
+let pullQueue: Promise<unknown> = Promise.resolve();
 let probeTimer: NodeJS.Timeout | null = null;
 let stopping = false;
 
@@ -71,7 +79,6 @@ const peerRequestSchema = z.object({
   url: z.string().min(1).max(2_048),
   after: z.number().int().nonnegative(),
   afterId: z.string().max(128).nullable(),
-  clockSkewMs: z.number().nullable().optional(),
 });
 
 const pullResponseSchema = z.object({
@@ -107,10 +114,16 @@ function primaryUrl(): string | null {
   return role() === 'standby' ? getSetting('cluster_primary_url') : null;
 }
 
+/** True when writes made here are passed on to another laptop. */
+export function isFollowing(): boolean {
+  return role() === 'standby';
+}
+
 function becomeStandby(url: string): void {
   setLocalSetting('cluster_role', 'standby');
   setLocalSetting('cluster_primary_url', url);
   standbys.clear();
+  resetClockSamples();
   primaryContact = { hostId: null, head: 0, lastContactAt: null };
   competingPrimaryUrl = null;
 }
@@ -157,10 +170,8 @@ export function clusterStatus(): ClusterStatus {
   const now = Date.now();
   const head = getLogHead().seq;
   const members = knownMembers();
-  const reachableStandbys = [...standbys.values()].filter((standby) => now - standby.lastSeenAt < reachableWindowMs);
-  const standbySkews = reachableStandbys.flatMap((standby) =>
-    standby.clockSkewMs === null ? [] : [Math.abs(standby.clockSkewMs)]
-  );
+  const primaryReachable =
+    primaryContact.lastContactAt !== null && now - primaryContact.lastContactAt < reachableWindowMs;
   return {
     enabled,
     hostId: identity.hostId,
@@ -169,7 +180,7 @@ export function clusterStatus(): ClusterStatus {
     epoch: getClusterEpoch(),
     appVersion: APP_VERSION,
     schemaVersion: DATABASE_SCHEMA_VERSION,
-    writable: currentRole === 'primary' && !busy,
+    writable: !busy && (currentRole === 'primary' || primaryReachable),
     busy,
     selfUrl: selfUrl(),
     logHead: head,
@@ -178,7 +189,7 @@ export function clusterStatus(): ClusterStatus {
         ? {
             url: primaryUrl(),
             hostId: primaryContact.hostId,
-            reachable: primaryContact.lastContactAt !== null && now - primaryContact.lastContactAt < reachableWindowMs,
+            reachable: primaryReachable,
             lastContactAt: primaryContact.lastContactAt,
             head: primaryContact.head,
             lagEntries: Math.max(0, primaryContact.head - head),
@@ -195,18 +206,72 @@ export function clusterStatus(): ClusterStatus {
     memberUrls: [...new Set(Object.values(members))],
     competingPrimaryUrl,
     lastError,
-    clockSkewMs: currentRole === 'standby' ? clockSkewMs : standbySkews.length ? Math.max(...standbySkews) : null,
     backup: backupStatus(),
   };
 }
 
-/** Throws the message operators see when they try to change data on a standby. */
+/** Throws when this laptop cannot commit a write itself right now. */
 export function assertWritable(): void {
-  if (role() === 'standby') {
-    const url = primaryUrl();
-    throw new Error(`Deze laptop is standby en alleen-lezen. Werk op de primaire laptop${url ? `: ${url}` : ''}.`);
-  }
+  if (role() === 'standby') throw new Error('Deze laptop geeft wijzigingen door aan de primaire laptop.');
   if (busy) throw new Error('Deze laptop wordt gekoppeld of gesynchroniseerd. Probeer zo opnieuw.');
+}
+
+type ForwardOutcome<T> = { ok: true; data: T } | { ok: false; code: string; message: string };
+
+/**
+ * Passes a write made on this laptop's screen to the primary, then waits
+ * until this laptop's copy has it, so the screen shows the result at once.
+ */
+export async function forwardWrite<T>(path: string, input: unknown): Promise<ForwardOutcome<T>> {
+  const url = primaryUrl();
+  const unreachable: ForwardOutcome<T> = {
+    ok: false,
+    code: 'SERVICE_UNAVAILABLE',
+    message: 'De primaire laptop is niet bereikbaar. Probeer zo opnieuw, of neem over in Beheer › Systeem.',
+  };
+  if (!url) return unreachable;
+  let response: globalThis.Response;
+  try {
+    response = await fetch(`${url}/trpc/${path}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-apolloon-forwarded': '1' },
+      body: input === undefined ? undefined : JSON.stringify(input),
+      signal: AbortSignal.timeout(FORWARD_TIMEOUT_MS),
+    });
+  } catch {
+    return unreachable;
+  }
+  const payload = (await response.json().catch(() => null)) as {
+    result?: { data?: T };
+    error?: { message?: string; data?: { code?: string } };
+  } | null;
+  if (payload?.error) {
+    return {
+      ok: false,
+      code: payload.error.data?.code ?? 'INTERNAL_SERVER_ERROR',
+      message: payload.error.message ?? 'Opslaan mislukt',
+    };
+  }
+  if (!response.ok || !payload?.result) {
+    return {
+      ok: false,
+      code: 'SERVICE_UNAVAILABLE',
+      message: `De primaire laptop antwoordde met HTTP ${response.status}.`,
+    };
+  }
+  await catchUp().catch(() => undefined);
+  return { ok: true, data: payload.result.data as T };
+}
+
+/** Pulls until this laptop has everything the primary had when it answered. */
+async function catchUp(): Promise<void> {
+  for (let batch = 0; batch < 20 && (await pullExclusive()); batch += 1);
+}
+
+function pullExclusive(): Promise<boolean> {
+  const pull = pullQueue.then(() => (role() === 'standby' && !busy ? pullOnce() : false));
+  pullQueue = pull.catch(() => undefined);
+  return pull;
 }
 
 export function registerClusterRoutes(app: Express): void {
@@ -228,7 +293,6 @@ export function registerClusterRoutes(app: Express): void {
       url,
       appliedSeq: request.after,
       lastSeenAt: Date.now(),
-      clockSkewMs: request.clockSkewMs ?? null,
     });
     rememberMembers({ [request.hostId]: url });
     sendJson(req, res, null, () => ({
@@ -238,7 +302,7 @@ export function registerClusterRoutes(app: Express): void {
       head: getLogHead().seq,
       entries: getLogEntriesAfter(request.after),
       members: { ...knownMembers(), [identity.hostId]: selfUrl() },
-      serverNowMs: Date.now(),
+      serverNowMs: clusterNow(),
     })).catch(next);
   });
 
@@ -338,6 +402,8 @@ function sendPeerError(
 }
 
 export function startClusterService(): void {
+  const storedOffset = Number(getSetting('cluster_clock_offset_ms') || 0);
+  setClusterClockOffset(Number.isFinite(storedOffset) ? storedOffset : 0);
   if (!enabled) return;
   stopping = false;
   schedulePull(0);
@@ -358,14 +424,10 @@ function schedulePull(delayMs: number): void {
   pullTimer = setTimeout(async () => {
     let more = false;
     try {
-      if (role() === 'standby' && !busy) {
-        pullInFlight = pullOnce();
-        more = await pullInFlight;
-      }
+      more = await pullExclusive();
     } catch (error) {
       lastError = errorMessage(error);
     } finally {
-      pullInFlight = null;
       schedulePull(more ? 0 : pullIntervalMs);
     }
   }, delayMs);
@@ -390,7 +452,6 @@ async function pullOnce(): Promise<boolean> {
       url: selfUrl(),
       after: head.seq,
       afterId: head.id,
-      clockSkewMs,
     },
   }).catch(() => null);
   if (!response) return false;
@@ -412,7 +473,7 @@ async function pullOnce(): Promise<boolean> {
   const payload = pullResponseSchema.parse(await response.json());
   const receivedAt = Date.now();
   try {
-    applyLogEntries(payload.entries);
+    applyLogEntries(payload.entries.filter((entry) => entry.seq > getLogHead().seq));
   } catch (error) {
     // A standby's copy is disposable: rather than stall, fetch a fresh one.
     console.warn('Standby could not replay the primary log; resynchronizing:', errorMessage(error));
@@ -426,7 +487,9 @@ async function pullOnce(): Promise<boolean> {
     head: payload.head,
     lastContactAt: receivedAt,
   };
-  clockSkewMs = payload.serverNowMs - (startedAt + (receivedAt - startedAt) / 2);
+  if (observeReferenceClock(payload.serverNowMs, startedAt, receivedAt)) {
+    setLocalSetting('cluster_clock_offset_ms', String(clusterClockOffset()));
+  }
   lastError = null;
   return getLogHead().seq < payload.head;
 }
@@ -542,7 +605,7 @@ export async function promoteToPrimary(
   busy = 'promoting';
   try {
     // A pull that already started would otherwise apply entries under the handover.
-    await pullInFlight?.catch(() => undefined);
+    await pullQueue;
     const url = primaryUrl();
     const identity = hostIdentity();
     const head = getLogHead();

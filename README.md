@@ -1,6 +1,6 @@
 # Leuven 24h Runner Tracker
 
-Telsysteem for the Apolloon 24 Urenloop. One Electron laptop is the **primary**: it holds the SQLite database and every operator screen and TV connects to it with a browser over the wired event network. A second Electron laptop runs as a **standby** that keeps a live, read-only copy and can take over.
+Telsysteem for the Apolloon 24 Urenloop. One Electron laptop is the **primary**: it orders every change in its SQLite database. The other Electron laptops (for example the queue desk and the warm-up post) run as **standbys**: each keeps a live copy and can take over, and their own screens work normally because they pass every change on to the primary. TVs and borrowed laptops open any laptop's address in a browser.
 
 ## Event Network
 
@@ -28,7 +28,7 @@ Normal event setup:
 5. Open the primary's Event URL on every operator laptop and TV.
 ```
 
-Becoming a standby replaces that laptop's database with the primary's; a backup of the old database is kept first. A standby is read-only and says so in a banner; its screens still show live data.
+Becoming a standby replaces that laptop's database with the primary's; a backup of the old database is kept first. A change made on a standby's screen goes to the primary, and the screen shows it as soon as the standby's own copy has it, a few milliseconds later. When the primary cannot be reached, a banner says so and changes wait until it is back or a standby takes over. Browsers remember the other laptops and reopen the same page on another one when theirs disappears; the Electron app always stays on its own laptop.
 
 **Planned switch** (for example to move the primary): on the standby, choose "Deze laptop primair maken". The primary hands over its last changes, becomes a standby of the new primary, and no data is lost.
 
@@ -43,7 +43,9 @@ CLUSTER_ENABLED=true             # enable laptop coupling in development
 CLUSTER_SELF_URL=http://host:port  # address announced to other laptops (tests)
 ```
 
-Admin includes a wedstrijdgereedheid checklist for backup freshness, free disk space, the standby, and clock differences between the laptops.
+Admin includes a wedstrijdgereedheid checklist for backup freshness, free disk space, and the standby.
+
+Laptops at the event have no internet time, so their clocks can differ by seconds. Every laptop therefore keeps an offset to the primary's clock (the cluster clock), measured on each sync, and a laptop that takes over keeps using it, so times stay continuous across a switch.
 
 ### Recovery backups
 
@@ -130,6 +132,7 @@ Telsysteem 1 controls the waiting queue. Telsysteem 2 uses the spacebar:
 - The first spacebar press starts the race clock and starts the first runner in the waiting queue.
 - If no runner is active, spacebar starts the first runner in the waiting queue.
 - If a runner is active, spacebar saves that runner's lap and immediately starts the next queued runner.
+- A lap runs from one press to the next as the timing screen recorded them from the key events, not from when the request reached the server. The lap time is measured on the browser's monotonic clock between the two presses, so network delay, a busy server, and clock corrections never change it.
 - Undo Last Handoff restores the previous active/next state and removes the last recorded lap.
 
 There is no automatic 24-hour cutoff in the software.

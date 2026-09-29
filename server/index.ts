@@ -22,6 +22,7 @@ import { sendJson } from './http-json.js';
 import { getNetProfile, isLoopbackAddress, requestMakeStatic, requestRevertDhcp } from './net-setup.js';
 import { appRouter } from './router.js';
 import { registerStaticFrontend } from './static-files.js';
+import { clusterNow } from './clock.js';
 
 const app = express();
 app.disable('x-powered-by');
@@ -67,7 +68,13 @@ function requireLoopback(req: Request, res: Response, next: NextFunction): void 
 
 app.use(express.json({ limit: '20mb' }));
 registerClusterRoutes(app);
-app.use('/trpc', createExpressMiddleware({ router: appRouter }));
+app.use(
+  '/trpc',
+  createExpressMiddleware({
+    router: appRouter,
+    createContext: ({ req }) => ({ forwarded: req.header('x-apolloon-forwarded') === '1' }),
+  })
+);
 
 app.get('/api/state', (req, res, next) => {
   sendJson(req, res, `live:${getAppDataRevision()}:${hostInfo().url}`, liveAppSnapshot).catch(next);
@@ -85,7 +92,7 @@ app.get('/api/history', (req, res, next) => {
 
 app.get('/api/time', (_req, res) => {
   res.setHeader('Cache-Control', 'no-store');
-  res.json({ serverNowMs: Date.now() });
+  res.json({ serverNowMs: clusterNow() });
 });
 
 app.get('/api/host-info', (_req, res) => {

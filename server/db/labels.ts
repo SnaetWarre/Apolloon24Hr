@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { type Label, type LabelInput, type LabelPatch } from '../../shared/schemas.js';
 import { all, one, run, transaction } from './connection.js';
 import { canonicalLabelName } from './values.js';
+import { clusterNow } from '../clock.js';
 
 export const TEMPORARY_TEAM_KIND = 'temporary_team';
 
@@ -92,7 +93,7 @@ export function createLabelRecord(input: LabelInput, id: string, now: number): L
 }
 
 export function createLabel(input: LabelInput): Label {
-  return createLabelRecord(input, randomUUID(), Date.now());
+  return createLabelRecord(input, randomUUID(), clusterNow());
 }
 
 export function updateLabel(id: string, fields: LabelPatch): Label | null {
@@ -124,7 +125,7 @@ export function updateLabel(id: string, fields: LabelPatch): Label | null {
          sort_order = ?,
          updated_at = ?
      WHERE id = ?`,
-    [next.name, next.color, next.icon, next.kind, next.imageUrl, next.targetLaps, next.sortOrder, Date.now(), id]
+    [next.name, next.color, next.icon, next.kind, next.imageUrl, next.targetLaps, next.sortOrder, clusterNow(), id]
   );
 
   if (next.kind === TEMPORARY_TEAM_KIND) {
@@ -162,7 +163,7 @@ function activeTemporaryTeamLabels(nowMs: number, runnerId?: string): Array<Labe
   );
 }
 
-export function activeTemporaryTeamIdForRunner(runnerId: string, nowMs = Date.now()): string | null {
+export function activeTemporaryTeamIdForRunner(runnerId: string, nowMs = clusterNow()): string | null {
   return activeTemporaryTeamLabels(nowMs, runnerId)[0]?.id ?? null;
 }
 
@@ -174,7 +175,7 @@ function compareLabels(a: Label, b: Label): number {
  * Each runner's labels at `nowMs`: the stored labels, with the speedteam
  * swapped for the night team while that team is active.
  */
-export function getRunnerLabelsMap(runnerId?: string, nowMs = Date.now()): Map<string, Label[]> {
+export function getRunnerLabelsMap(runnerId?: string, nowMs = clusterNow()): Map<string, Label[]> {
   const rows = all<Label & { runnerId: string }>(
     `SELECT rl.runner_id AS runnerId, ${LABEL_COLUMNS}
      FROM runner_labels rl
@@ -196,6 +197,6 @@ export function getRunnerLabelsMap(runnerId?: string, nowMs = Date.now()): Map<s
   return map;
 }
 
-export function getRunnerLabels(runnerId: string, nowMs = Date.now()): Label[] {
+export function getRunnerLabels(runnerId: string, nowMs = clusterNow()): Label[] {
   return getRunnerLabelsMap(runnerId, nowMs).get(runnerId) ?? [];
 }

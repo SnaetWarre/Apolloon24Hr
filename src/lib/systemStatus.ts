@@ -31,12 +31,12 @@ export function deriveSystemStatus(
       return {
         tone: 'error',
         title: 'Primaire laptop onbereikbaar',
-        detail: 'Deze standby is alleen-lezen; neem over in Beheer',
+        detail: 'Wijzigingen lukken niet; neem over in Beheer',
       };
     }
     return {
       tone: 'standby',
-      title: 'Standby (alleen-lezen)',
+      title: 'Gekoppeld als standby',
       detail: primary.lagEntries > 0 ? `Haalt ${primary.lagEntries} wijzigingen op` : `Volgt ${primary.url}`,
     };
   }
@@ -46,13 +46,6 @@ export function deriveSystemStatus(
       title: 'Synchronisatie controleren',
       detail: cluster.lastError,
     };
-  if ((cluster.clockSkewMs ?? 0) > 2_000) {
-    return {
-      tone: 'standby',
-      title: 'Klokken verschillen',
-      detail: `Controleer de systeemtijd (${Math.round((cluster.clockSkewMs ?? 0) / 1_000)} s verschil)`,
-    };
-  }
 
   const backup = cluster.backup;
   const backupOverdue = backup.enabled && (!backup.latest || now - backup.latest.createdAt > backup.intervalMs * 3);

@@ -2,14 +2,23 @@ import React from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { getRealtimeConnectionSnapshot, subscribeRealtimeConnection } from './realtimeConnection';
 
-/** True als de verbinding er was en nu weg is (verberg vóór de eerste connectie). */
-export function useConnectionLost(): boolean {
-  const snapshot = React.useSyncExternalStore(
+function useConnectionSnapshot() {
+  return React.useSyncExternalStore(
     subscribeRealtimeConnection,
     getRealtimeConnectionSnapshot,
     getRealtimeConnectionSnapshot
   );
+}
+
+/** True when the live connection existed and is gone; quiet while the first connection is still being made. */
+export function useConnectionLost(): boolean {
+  const snapshot = useConnectionSnapshot();
   return snapshot.everConnected && !snapshot.connected;
+}
+
+/** True whenever there is no live connection, including when it never came up. */
+export function useDisconnected(): boolean {
+  return !useConnectionSnapshot().connected;
 }
 
 export function useRealtimeBridge(enabled = true): void {

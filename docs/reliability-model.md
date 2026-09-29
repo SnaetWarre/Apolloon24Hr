@@ -28,12 +28,27 @@ broken cable and a dead laptop look the same, so an operator decides.
   SQLite transaction.
 - Each standby pulls new entries about four times per second and replays them.
   A standby's data is at most a fraction of a second behind.
-- A standby is read-only. Its screens show live data with a banner that
-  names the primary.
+- A standby passes every change made on its own screen to the primary and
+  answers once its own copy has it. When the primary is unreachable, changes
+  wait and a banner says so; the screens keep showing the latest data.
+- Browsers remember the laptops and reopen the same page on another laptop
+  when theirs stays unreachable for about eight seconds.
 - A standby whose log no longer matches the primary (after a failover), or
   that is further behind than the retained 5,000 entries, backs up its
   database and installs a full copy from the primary.
 - Laptops only couple when app version and database schema are identical.
+
+## Timing Precision
+
+- A press is dated from its key event, converted to the cluster clock, so
+  the time the request needs does not count.
+- A lap is the time between the timing screen's own two presses on the
+  browser's monotonic clock. The server uses it when it is within 250 ms of
+  the clock difference, and falls back to the clock difference otherwise
+  (after a page reload or a switch to another laptop).
+- The cluster clock is the primary's clock. Every laptop measures its
+  offset on each sync, keeping the fastest recent round trip, and a laptop
+  that takes over keeps its offset.
 
 ## Promotion
 

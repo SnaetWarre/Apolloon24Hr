@@ -9,8 +9,6 @@ export type ReadinessCheck = {
   detail: string;
 };
 
-const MAX_CLOCK_SKEW_MS = 2_000;
-
 export function buildEventReadiness(cluster: ClusterStatus | null, now = Date.now()): ReadinessCheck[] {
   if (!cluster) {
     return [
@@ -82,18 +80,6 @@ export function buildEventReadiness(cluster: ClusterStatus | null, now = Date.no
     });
   }
 
-  const skew = cluster.clockSkewMs === null ? null : Math.abs(cluster.clockSkewMs);
-  checks.push({
-    id: 'clock',
-    label: 'Systeemklokken',
-    level: skew !== null && skew > MAX_CLOCK_SKEW_MS ? 'blocked' : 'ready',
-    detail:
-      skew === null
-        ? 'Nog geen tweede laptop om mee te vergelijken.'
-        : skew > MAX_CLOCK_SKEW_MS
-          ? `De laptops verschillen ${Math.round(skew / 1_000)} seconden; na een overname kloppen rondetijden dan niet.`
-          : 'De laptops liggen binnen twee seconden.',
-  });
   return checks;
 }
 

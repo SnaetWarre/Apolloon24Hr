@@ -8,7 +8,7 @@ Owns every validated write, plus queries that need input validation or should st
 
 - Runner, label, queue, timing, night-team, settings, backup, and laptop-coupling commands.
 - `runners.registrations`: registration answers with contact details, loaded only by profile and Beheer views.
-- Payloads are validated with Zod. Writes run on the primary only; a standby refuses them.
+- Payloads are validated with Zod. Writes run on the primary; a standby passes them on to it.
 - Timing commands carry the race state the operator saw.
 - Client entrypoint: `src/api.ts` (`trpc`), actions composed in `src/app/useAppActions.ts`.
 
