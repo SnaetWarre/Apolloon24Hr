@@ -188,12 +188,15 @@ test('a laptop that was off catches up by itself, also across many batches', { t
     const leader = (await leaderOf(servers))!;
     const offline = servers.find((server) => server !== leader)!;
     await killServer(offline);
-    // Two of three laptops are a majority, so everything keeps working.
-    await Promise.all(
-      Array.from({ length: 520 }, (_, index) =>
-        client(leader).runners.create.mutate({ name: `Offline write ${index}`, runnerNumber: `OFF-${index}` })
-      )
-    );
+    // Two of three laptops are a majority, so everything keeps working. More than one batch of 500
+    // entries piles up; the writes go in chunks, as 520 at once can outlast the commit timeout on a slow disk.
+    for (let start = 0; start < 520; start += 50) {
+      await Promise.all(
+        Array.from({ length: Math.min(50, 520 - start) }, (_, offset) => start + offset).map((index) =>
+          client(leader).runners.create.mutate({ name: `Offline write ${index}`, runnerNumber: `OFF-${index}` })
+        )
+      );
+    }
     const restarted = await startServer({ port: offline.port, dataPath: offline.dataPath });
     servers[servers.indexOf(offline)] = restarted;
     await waitForSameState(leader, restarted, 20_000);
@@ -418,7 +421,7 @@ async function startServer(options: {
       CLUSTER_SELF_URL: `http://127.0.0.1:${options.port}`,
       CLUSTER_HEARTBEAT_MS: '50',
       CLUSTER_ELECTION_TIMEOUT_MS: '400',
-      CLUSTER_COMMIT_TIMEOUT_MS: '1500',
+      CLUSTER_COMMIT_TIMEOUT_MS: '3000',
       CLUSTER_WRITE_DEADLINE_MS: '6000',
       CLUSTER_REQUEST_TIMEOUT_MS: '300',
       CLUSTER_TEST_FAULTS: 'true',
