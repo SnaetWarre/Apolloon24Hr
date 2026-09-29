@@ -185,46 +185,26 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
           </button>
         </div>
 
-        <section className="profile-essentials" aria-label="Contact en beschikbaarheid">
-          <h3>Contact en beschikbaarheid</h3>
-          <div className="profile-essentials__grid">
-            <div className="profile-essential-field">
-              <span className="muted-label">Telefoon</span>
-              {registration?.phone ? (
-                <a href={`tel:${registration.phone.replace(/\s+/g, '')}`}>{registration.phone}</a>
-              ) : (
-                <span className="profile-essential-field__empty">Niet opgegeven</span>
-              )}
-            </div>
-            <div className="profile-essential-field">
-              <span className="muted-label">E-mail</span>
-              {registration?.email ? (
-                <a href={`mailto:${registration.email}`}>{registration.email}</a>
-              ) : (
-                <span className="profile-essential-field__empty">Niet opgegeven</span>
-              )}
-            </div>
-            <div className="profile-essential-field profile-essential-field--hours">
-              <span className="muted-label">Beschikbare uren</span>
-              {registration?.availableHours.length ? (
-                <div className="profile-hours">
-                  {registration.availableHours.map((hour) => (
-                    <span key={hour}>{hour}</span>
-                  ))}
-                </div>
-              ) : (
-                <span className="profile-essential-field__empty">Niet opgegeven</span>
-              )}
-            </div>
-          </div>
-          {!registration && (
-            <p className="profile-essentials__note">
-              {runner.registrationSource === 'manual'
-                ? 'Manueel toegevoegd, geen inschrijving.'
-                : 'Geen inschrijvingsgegevens.'}
-            </p>
-          )}
-        </section>
+        <div className="form-grid">
+          <label>
+            Lopersnummer
+            <input className="input" value={runnerNumber} onChange={(event) => setRunnerNumber(event.target.value)} />
+          </label>
+          <label>
+            Naam
+            <input className="input" value={name} onChange={(event) => setName(event.target.value)} />
+          </label>
+          <label>
+            Doel (rondes)
+            <input
+              className="input"
+              type="number"
+              min="0"
+              value={targetLaps}
+              onChange={(event) => setTargetLaps(event.target.value)}
+            />
+          </label>
+        </div>
 
         <div className="profile-stats">
           <div className="profile-stat">
@@ -250,6 +230,94 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
             <strong>{runner.bestLapMs ? formatDurationMs(runner.bestLapMs) : '—'}</strong>
           </div>
         </div>
+
+        <section className="profile-essentials" aria-label="Contact en beschikbaarheid">
+          <h3>Contact en beschikbaarheid</h3>
+          <div className="form-grid">
+            <label>
+              Telefoon
+              <div className="input-with-action">
+                <input
+                  className="input"
+                  type="tel"
+                  autoComplete="off"
+                  value={phone}
+                  onChange={(event) => setPhone(event.target.value)}
+                />
+                {phone.trim() && (
+                  <a className="btn btn--ghost" href={`tel:${phone.replace(/\s+/g, '')}`}>
+                    Bellen
+                  </a>
+                )}
+              </div>
+            </label>
+            <label>
+              E-mail
+              <div className="input-with-action">
+                <input
+                  className="input"
+                  type="email"
+                  autoComplete="off"
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                />
+                {email.trim() && (
+                  <a className="btn btn--ghost" href={`mailto:${email.trim()}`}>
+                    Mailen
+                  </a>
+                )}
+              </div>
+            </label>
+          </div>
+          <AvailableHoursPicker value={availableHours} onChange={setAvailableHours} />
+          {!registration && (
+            <p className="profile-essentials__note">
+              {runner.registrationSource === 'manual'
+                ? 'Manueel toegevoegd, geen inschrijving.'
+                : 'Geen inschrijvingsgegevens.'}
+            </p>
+          )}
+        </section>
+
+        <div className="label-picker-groups">
+          {activeTemporaryTeam && (
+            <div className="host-hint">
+              De speedteamploeg wordt beheerd door de actieve tijdelijke nachtploeg en kan hier niet gewijzigd worden.
+            </div>
+          )}
+          {groupLabels(labels).map(([kind, groupedLabels]) => (
+            <section key={kind} className="label-picker-group">
+              <h3>{labelKindTitle(kind)}</h3>
+              <div className="label-picker">
+                {groupedLabels.map((label) => (
+                  <label key={label.id} className="check-pill">
+                    <input
+                      type="checkbox"
+                      checked={selectedLabels.includes(label.id)}
+                      disabled={
+                        label.kind === 'temporary_team' || (Boolean(activeTemporaryTeam) && label.kind === 'speedteam')
+                      }
+                      onChange={() => toggleLabel(label.id)}
+                    />
+                    <span style={{ borderColor: label.color }}>
+                      {label.imageUrl ? (
+                        <img src={label.imageUrl} alt="" className="label-image" />
+                      ) : (
+                        <i className="label-dot" style={{ background: label.color }} />
+                      )}
+                      {label.name}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </section>
+          ))}
+        </div>
+
+        <label className="stacked-label">
+          Notities
+          <textarea className="input textarea" value={notes} onChange={(event) => setNotes(event.target.value)} />
+        </label>
 
         {registration && hasRegistrationAnswers(registration) && (
           <section className="profile-registration" aria-label="Inschrijvingsgegevens">
@@ -295,90 +363,6 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
             <div className="empty-inline">Nog geen rondes geregistreerd.</div>
           )}
         </section>
-
-        <h3 className="profile-edit-title">Profiel aanpassen</h3>
-        <div className="form-grid">
-          <label>
-            Lopersnummer
-            <input className="input" value={runnerNumber} onChange={(event) => setRunnerNumber(event.target.value)} />
-          </label>
-          <label>
-            Naam
-            <input className="input" value={name} onChange={(event) => setName(event.target.value)} />
-          </label>
-          <label>
-            Telefoon
-            <input
-              className="input"
-              type="tel"
-              autoComplete="off"
-              value={phone}
-              onChange={(event) => setPhone(event.target.value)}
-            />
-          </label>
-          <label>
-            E-mail
-            <input
-              className="input"
-              type="email"
-              autoComplete="off"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-            />
-          </label>
-          <label>
-            Doel (rondes)
-            <input
-              className="input"
-              type="number"
-              min="0"
-              value={targetLaps}
-              onChange={(event) => setTargetLaps(event.target.value)}
-            />
-          </label>
-        </div>
-
-        <AvailableHoursPicker value={availableHours} onChange={setAvailableHours} />
-
-        <div className="label-picker-groups">
-          {activeTemporaryTeam && (
-            <div className="host-hint">
-              De speedteamploeg wordt beheerd door de actieve tijdelijke nachtploeg en kan hier niet gewijzigd worden.
-            </div>
-          )}
-          {groupLabels(labels).map(([kind, groupedLabels]) => (
-            <section key={kind} className="label-picker-group">
-              <h3>{labelKindTitle(kind)}</h3>
-              <div className="label-picker">
-                {groupedLabels.map((label) => (
-                  <label key={label.id} className="check-pill">
-                    <input
-                      type="checkbox"
-                      checked={selectedLabels.includes(label.id)}
-                      disabled={
-                        label.kind === 'temporary_team' || (Boolean(activeTemporaryTeam) && label.kind === 'speedteam')
-                      }
-                      onChange={() => toggleLabel(label.id)}
-                    />
-                    <span style={{ borderColor: label.color }}>
-                      {label.imageUrl ? (
-                        <img src={label.imageUrl} alt="" className="label-image" />
-                      ) : (
-                        <i className="label-dot" style={{ background: label.color }} />
-                      )}
-                      {label.name}
-                    </span>
-                  </label>
-                ))}
-              </div>
-            </section>
-          ))}
-        </div>
-
-        <label className="stacked-label">
-          Notities
-          <textarea className="input textarea" value={notes} onChange={(event) => setNotes(event.target.value)} />
-        </label>
 
         {queueRemovalLabel && (
           <section className="profile-queue-action">

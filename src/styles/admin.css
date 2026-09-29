@@ -506,53 +506,9 @@
   font-size: 14px;
 }
 
-.profile-essentials__grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr);
-  gap: var(--space-4) var(--space-5);
-}
-
-.profile-essential-field {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
-}
-
-.profile-essential-field a {
-  color: var(--brand-ink);
-  font-size: 16px;
-  font-weight: 600;
-  overflow-wrap: anywhere;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-
-.profile-essential-field__empty,
 .profile-essentials__note {
   color: var(--ink-2);
   font-size: 13.5px;
-}
-
-.profile-essential-field--hours {
-  grid-column: 1 / -1;
-  padding-top: var(--space-3);
-  border-top: 1px solid var(--line);
-}
-
-.profile-hours {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.profile-hours span {
-  padding: 3px 8px;
-  border: 1px solid var(--line-2);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  font-size: 13px;
 }
 
 .profile-essentials__note {
@@ -627,11 +583,18 @@
   white-space: pre-wrap;
 }
 
-.profile-edit-title {
-  margin: var(--space-5) 0 var(--space-3);
-  padding-top: var(--space-4);
-  border-top: 1px solid var(--line);
-  font-size: 14px;
+.profile-essentials .hours-picker {
+  margin-top: var(--space-3);
+}
+
+.input-with-action {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.input-with-action .input {
+  flex: 1;
+  min-width: 0;
 }
 
 @media (max-width: 720px) {
@@ -645,12 +608,6 @@
 
   .profile-stat:nth-child(-n + 2) {
     border-bottom: 1px solid var(--line);
-  }
-}
-
-@media (max-width: 520px) {
-  .profile-essentials__grid {
-    grid-template-columns: minmax(0, 1fr);
   }
 }
 
