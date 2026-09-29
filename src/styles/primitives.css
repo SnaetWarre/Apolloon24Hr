@@ -19,11 +19,20 @@
   text-decoration: none;
   white-space: nowrap;
   cursor: pointer;
-  transition: background-color 100ms ease, border-color 100ms ease, color 100ms ease;
+  transition:
+    background-color var(--dur-1) var(--ease-out),
+    border-color var(--dur-1) var(--ease-out),
+    color var(--dur-1) var(--ease-out),
+    box-shadow var(--dur-1) var(--ease-out),
+    transform var(--dur-1) var(--ease-out);
 }
 
 .btn:hover:not(:disabled) {
   background: var(--surface-2);
+}
+
+.btn:active:not(:disabled) {
+  transform: translateY(1px);
 }
 
 .btn:disabled {
@@ -128,6 +137,7 @@
   color: var(--ink-3);
   font-size: 14px;
   cursor: pointer;
+  transition: background-color var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out);
 }
 
 .icon-btn:hover {
@@ -156,6 +166,7 @@ kbd {
   background: var(--surface);
   color: var(--ink);
   font-size: 13.5px;
+  transition: border-color var(--dur-1) var(--ease-out), box-shadow var(--dur-1) var(--ease-out);
 }
 
 .input::placeholder,
@@ -339,6 +350,10 @@ input[type="radio"] {
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
+  transition:
+    background-color var(--dur-1) var(--ease-out),
+    color var(--dur-1) var(--ease-out),
+    box-shadow var(--dur-1) var(--ease-out);
 }
 
 .segmented-control button:hover {
@@ -369,6 +384,21 @@ input[type="radio"] {
   font-size: 13.5px;
   font-weight: 500;
   cursor: pointer;
+  transition: color var(--dur-1) var(--ease-out);
+}
+
+/* The active rail grows out from the middle of the tab and sits on the divider. */
+.section-navigation button::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: -1px;
+  left: 0;
+  height: 2px;
+  background: var(--ink);
+  opacity: 0;
+  transform: scaleX(0.4);
+  transition: transform var(--dur-2) var(--ease-out), opacity var(--dur-2) var(--ease-out);
 }
 
 .section-navigation button:hover {
@@ -377,7 +407,11 @@ input[type="radio"] {
 
 .section-navigation button[aria-pressed="true"] {
   color: var(--ink);
-  box-shadow: inset 0 -2px 0 var(--ink);
+}
+
+.section-navigation button[aria-pressed="true"]::after {
+  opacity: 1;
+  transform: none;
 }
 
 .section-nav-dot {
@@ -390,6 +424,40 @@ input[type="radio"] {
   color: transparent;
   font-size: 0;
   vertical-align: 2px;
+}
+
+/* ---------- Disclosures ---------- */
+/* A summary with a chevron that turns; what it reveals rises into place. */
+.disclosure {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  cursor: pointer;
+  list-style: none;
+}
+
+.disclosure::-webkit-details-marker {
+  display: none;
+}
+
+.disclosure::before {
+  content: "";
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin: 0 4px 0 2px;
+  border-right: 1.5px solid var(--ink-3);
+  border-bottom: 1.5px solid var(--ink-3);
+  transform: rotate(-45deg);
+  transition: transform var(--dur-1) var(--ease-out);
+}
+
+details[open] > .disclosure::before {
+  transform: rotate(45deg);
+}
+
+details[open] > .disclosure ~ * {
+  animation: rise-in var(--dur-2) var(--ease-out) backwards;
 }
 
 /* ---------- Runner identity ---------- */
@@ -498,6 +566,11 @@ input[type="radio"] {
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
+  transition:
+    background-color var(--dur-1) var(--ease-out),
+    border-color var(--dur-1) var(--ease-out),
+    color var(--dur-1) var(--ease-out),
+    box-shadow var(--dur-1) var(--ease-out);
 }
 
 .check-pill span:hover {
@@ -587,6 +660,12 @@ input[type="radio"] {
   flex: 1 1 280px;
 }
 
+/* Feedback drops into place; it never just appears. */
+.warning-banner,
+.success-banner {
+  animation: notice-in var(--dur-2) var(--ease-out) backwards;
+}
+
 .warning-banner {
   border-color: var(--warn-line);
   background: var(--warn-wash);
@@ -620,6 +699,7 @@ input[type="radio"] {
   color: #FFFFFF;
   font-size: 13.5px;
   text-align: center;
+  animation: notice-in var(--dur-3) var(--ease-out) backwards;
 }
 
 .connection-banner a {
@@ -634,6 +714,7 @@ input[type="radio"] {
   color: var(--ink);
   font-size: 13.5px;
   text-align: center;
+  animation: notice-in var(--dur-3) var(--ease-out) backwards;
 }
 
 .warning-inline {
@@ -658,10 +739,18 @@ input[type="radio"] {
   padding: var(--space-6);
   color: var(--ink-2);
   text-align: center;
+  animation: fade-in var(--dur-3) var(--ease-out) backwards;
 }
 
+/* Waiting: the wordmark breathes until the data is there. */
+.app-state[role="status"] .brand-mark {
+  animation: breathe 1.8s var(--ease-in-out) infinite;
+}
+
+/* Route chunks usually load within a frame; only show the message when they do not. */
 .app-state--inline {
   margin: var(--space-8) auto;
+  animation-delay: 160ms;
 }
 
 .app-state h1 {
@@ -774,6 +863,7 @@ td {
   padding: 7px 10px;
   border-bottom: 1px solid var(--line);
   vertical-align: middle;
+  transition: background-color var(--dur-1) var(--ease-out);
 }
 
 tbody tr:hover td {
@@ -811,20 +901,16 @@ dialog.modal-backdrop {
 dialog.modal-backdrop[open] {
   display: grid;
   place-items: center;
+  animation: fade-in var(--dur-2) var(--ease-out) backwards;
+}
+
+dialog.modal-backdrop[open] > .modal,
+dialog.modal-backdrop[open] > .confirm-modal {
+  animation: dialog-in var(--dur-2) var(--ease-out) backwards;
 }
 
 dialog.modal-backdrop::backdrop {
   background: transparent;
-}
-
-div.modal-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 30;
-  display: grid;
-  place-items: center;
-  padding: var(--space-4);
-  background: var(--overlay);
 }
 
 .modal {
@@ -913,6 +999,7 @@ div.modal-backdrop {
   font-size: 13.5px;
   font-weight: 500;
   white-space: nowrap;
+  transition: background-color var(--dur-1) var(--ease-out);
 }
 
 .file-picker:hover {

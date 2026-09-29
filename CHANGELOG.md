@@ -53,6 +53,10 @@ De database migreert automatisch naar schema 13 en bewaart eerst een kopie
   vinden elkaar terug als hun adressen veranderen (bv. een andere router)
 - Code wordt gecontroleerd met oxlint en opgemaakt met oxfmt; de
   browsercontroles draaien in CI
+- De schermen bewegen kort mee met wat je doet: knoppen, dialogen, meldingen
+  en tabbladen hebben overgangen, en een nieuwe ronde of loper schuift
+  zichtbaar op zijn plaats. Wie in het besturingssysteem "minder beweging"
+  kiest, ziet geen animaties
 
 - Bevestigingen zijn in-app dialogen i.p.v. browserpop-ups: de live klokken en
   realtime updates lopen door terwijl een vraag openstaat, en de knoppen zeggen

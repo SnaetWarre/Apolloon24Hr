@@ -8,6 +8,7 @@
   display: grid;
   grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
   min-height: 100vh;
+  transition: grid-template-columns var(--dur-2) var(--ease-out);
 }
 
 .workspace {
@@ -30,6 +31,7 @@
   color: var(--bg);
   font-weight: 500;
   transform: translateY(-200%);
+  transition: transform var(--dur-1) var(--ease-out);
 }
 
 .skip-link:focus {
@@ -97,6 +99,7 @@
   background: transparent;
   color: var(--ink-3);
   cursor: pointer;
+  transition: background-color var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out);
 }
 
 .sidebar__toggle:hover {
@@ -133,10 +136,15 @@
   font-weight: 500;
   text-decoration: none;
   white-space: nowrap;
+  transition:
+    background-color var(--dur-1) var(--ease-out),
+    color var(--dur-1) var(--ease-out),
+    box-shadow var(--dur-1) var(--ease-out);
 }
 
 .nav-link .icon {
   color: var(--ink-3);
+  transition: color var(--dur-1) var(--ease-out);
 }
 
 .nav-link:hover {
@@ -181,6 +189,7 @@
   color: var(--ink-3);
   font-size: 12.5px;
   text-align: left;
+  transition: background-color var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out);
 }
 
 .sidebar-row__value {
@@ -224,6 +233,7 @@
   color: var(--ink-2);
   font-size: 12.5px;
   text-decoration: none;
+  transition: background-color var(--dur-1) var(--ease-out);
 }
 
 .system-status:hover {
@@ -302,6 +312,10 @@
   background: transparent;
   color: var(--ink-3);
   cursor: pointer;
+  transition:
+    background-color var(--dur-1) var(--ease-out),
+    color var(--dur-1) var(--ease-out),
+    box-shadow var(--dur-1) var(--ease-out);
 }
 
 .theme-switch button:hover {
@@ -341,6 +355,18 @@
   padding: 8px var(--space-6);
   border-bottom: 1px solid var(--line);
   background: var(--bg);
+  transition: box-shadow var(--dur-2) var(--ease-out);
+}
+
+/* Content has scrolled underneath: the bar casts a light shadow. */
+.page-header.is-stuck {
+  box-shadow: var(--shadow-header);
+}
+
+.page-header__sentinel {
+  height: 1px;
+  margin-bottom: -1px;
+  pointer-events: none;
 }
 
 .page-header h1 {
@@ -378,6 +404,10 @@
   font-size: 12px;
   font-weight: 500;
   white-space: nowrap;
+  transition:
+    background-color var(--dur-2) var(--ease-out),
+    border-color var(--dur-2) var(--ease-out),
+    color var(--dur-2) var(--ease-out);
 }
 
 .header-tag--live::before {
@@ -386,6 +416,8 @@
   height: 6px;
   border-radius: 50%;
   background: var(--go);
+  --live-ring: var(--go);
+  animation: live-ring 2.4s var(--ease-out) infinite;
 }
 
 .header-tag--partial {

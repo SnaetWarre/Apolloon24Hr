@@ -1,0 +1,143 @@
+/*
+ * Motion. Movement answers an action (a press, an opening, a runner arriving)
+ * or marks something live; nothing moves on its own to decorate.
+ * Durations and easings live in tokens.css. base.css shortens every duration
+ * to nothing under prefers-reduced-motion, so every keyframe here must end in
+ * the element's normal state.
+ */
+
+/* Something new takes its place: a lap in a list, a runner in a lane. */
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* A value changed (a count, a time): a small lift, never a distraction. */
+@keyframes value-tick {
+  from {
+    opacity: 0.35;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Feedback and notices drop in from just above their place. */
+@keyframes notice-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* A dialog settles in while its backdrop fades separately. */
+@keyframes dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* A menu opens from its anchor. Set transform-origin where it hangs from. */
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* A confirmation (a check mark) appears with a small overshoot. */
+@keyframes pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  60% {
+    opacity: 1;
+    transform: scale(1.12);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* A press was registered, also when it came from the keyboard. */
+@keyframes press {
+  0% {
+    transform: none;
+  }
+  40% {
+    transform: scale(0.985);
+  }
+  100% {
+    transform: none;
+  }
+}
+
+/* A live dot breathes a soft ring: this screen receives data right now.
+   Set --live-ring on the dot to the dot's own colour. */
+@keyframes live-ring {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--live-ring, currentColor) 45%, transparent);
+  }
+  70%,
+  100% {
+    box-shadow: 0 0 0 5px transparent;
+  }
+}
+
+/* Waiting for data: the wordmark breathes. */
+@keyframes breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+/* Draws the eye a few times, then stays put. */
+@keyframes attention {
+  0%,
+  100% {
+    transform: none;
+  }
+  50% {
+    transform: scale(1.5);
+  }
+}
+
+.icon--pop {
+  animation: pop var(--dur-3) var(--ease-spring) backwards;
+}
