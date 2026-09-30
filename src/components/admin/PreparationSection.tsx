@@ -40,7 +40,7 @@ function ReadinessPanel({
       <div className="readiness-heading">
         <div>
           <h2>Wedstrijdgereedheid</h2>
-          <p className="panel-copy">Eén overzicht van backups, de tweede laptop en de klokken.</p>
+          <p className="panel-copy">Eén overzicht van backups, opslagruimte en de gekoppelde laptops.</p>
         </div>
         <strong className={`readiness-summary readiness-summary--${readiness}`}>
           {readiness === 'ready'

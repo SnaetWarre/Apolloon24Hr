@@ -1,11 +1,11 @@
 {
-  "name": "leuven-24h-runner-tracker",
+  "name": "apolloon-telsysteem",
   "private": true,
   "version": "4.0.2",
-  "description": "24h runner tracker for Leuven event",
+  "description": "Telsysteem voor de Apolloon 24 Urenloop",
   "author": "Apolloon",
   "homepage": "https://github.com/SnaetWarre/Apolloon24Hr",
-  "desktopName": "Leuven 24h Tracker",
+  "desktopName": "Apolloon Telsysteem",
   "type": "module",
   "packageManager": "npm@11.16.0",
   "engines": {
@@ -66,6 +66,7 @@
     "react-dom": "^19.3.0",
     "socket.io": "^4.8.4",
     "socket.io-client": "^4.8.4",
+    "write-excel-file": "^4.1.1",
     "zod": "^4.6.5"
   },
   "devDependencies": {
@@ -92,8 +93,8 @@
     "wait-on": "^9.5.1"
   },
   "build": {
-    "appId": "com.leuven24h.tracker",
-    "productName": "Leuven 24h Tracker",
+    "appId": "be.apolloon.telsysteem",
+    "productName": "Apolloon Telsysteem",
     "npmRebuild": false,
     "directories": {
       "output": "release"

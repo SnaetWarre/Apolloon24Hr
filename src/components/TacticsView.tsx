@@ -61,7 +61,7 @@ type TacticsSection = 'live' | 'historical';
 
 const selectTacticsData = ({ race }: LiveAppSnapshot) => ({ race });
 
-export function KobeTacticsView() {
+export function TacticsView() {
   // Chart configurations are built during render; re-render them with the new theme colours.
   useChartTheme();
   const { race } = useAppData(selectTacticsData);
@@ -125,7 +125,7 @@ export function KobeTacticsView() {
   return (
     <>
       <PageHeader
-        title="Kobe's tactiek"
+        title="Tactiek"
         meta={
           <span className="header-tag header-tag--live" role="status">
             {historyLoading ? 'Live data laden' : `${laps.length} rondes live gekoppeld`}
@@ -325,7 +325,7 @@ function LiveTacticsSection({
         <TacticsStat
           label="Eindstand op doelschema"
           value={Math.round(scenarioRange.expectedLaps).toLocaleString('nl-BE')}
-          detail={`${Math.round(scenarioRange.pessimisticLaps)}–${Math.round(scenarioRange.optimisticLaps)} bij ±${recentPaceUncertaintySeconds.toFixed(1)} s op het tempo`}
+          detail={`${Math.round(scenarioRange.pessimisticLaps)}–${Math.round(scenarioRange.optimisticLaps)} bij ±${recentPaceUncertaintySeconds.toLocaleString('nl-BE', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} s op het tempo`}
         />
         <TacticsStat
           label={`Tempo laatste ${recentLapCount}`}
@@ -337,20 +337,20 @@ function LiveTacticsSection({
           }
         />
         <TacticsStat
-          label="Tegenover Apolloon vorig jaar"
+          label="Apolloon vorig jaar"
           value={formatSignedLapDifference(
             ownHistoricalLapsNow == null ? null : cleanLaps.length - ownHistoricalLapsNow
           )}
           unit="rondes"
-          detail={`Op hetzelfde moment, ${historicalSourceName}`}
+          detail={`Verschil op hetzelfde moment in ${historicalSourceName}`}
         />
         <TacticsStat
-          label="Tegenover VTK vorig jaar"
+          label="VTK vorig jaar"
           value={formatSignedLapDifference(
             rivalHistoricalLapsNow == null ? null : cleanLaps.length - rivalHistoricalLapsNow
           )}
           unit="rondes"
-          detail={`Op hetzelfde moment, ${historicalSourceName}`}
+          detail={`Verschil op hetzelfde moment in ${historicalSourceName}`}
         />
       </section>
 

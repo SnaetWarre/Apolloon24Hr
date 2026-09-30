@@ -1,17 +1,30 @@
 # Changelog
 
-All notable changes to the Leuven 24h Runner Tracker will be documented in this file.
+All notable changes to Apolloon Telsysteem will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Analyse › Exporteren heeft een Excel-bestand met de rondes en de
+  gebeurtenissen: Nederlandse kolommen, tijden in Belgische tijd en rondetijden
+  waarmee Excel kan rekenen. De CSV- en JSON-exports blijven voor MATLAB en R
+
 ### Changed
 
+- De app heet Apolloon Telsysteem in plaats van Leuven 24h Tracker. Met de
+  nieuwe naam en `appId` installeert ze als een nieuwe app met een eigen, lege
+  datamap
+- "Kobe's tactiek" heet nu Tactiek
 - Een database van vóór 4.0 wordt niet meer omgezet. De app zet ze ongewijzigd
   opzij als `app.retired-<tijd>.sqlite` en begint met een lege database en een
   nieuwe laptop-identiteit. Databases van 4.0 en later blijven gewoon behouden
 
 ### Fixed
 
+- De kerncijfers op Tactiek worden niet meer afgekapt
+- De wedstrijdgereedheid spreekt van gekoppelde laptops in plaats van een
+  tweede laptop, en belooft geen klokcontrole meer
 - Bij het opstarten vergelijkt de app elke tabel met de huidige structuur, in
   plaats van te vertrouwen op het schemanummer. Wijkt een tabel af, dan wordt
   ze herbouwd met behoud van alle gegevens, na een kopie

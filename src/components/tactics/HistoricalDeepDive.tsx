@@ -199,7 +199,7 @@ function OverviewSection({
           <SectionHeader
             kicker="Rondeduur over 24 uur"
             title={`Alle passages van ${detailTeam.teamName}`}
-            text="Elke stip is een geregistreerde ronde. De donkere lijn is de lopende mediaan over twintig rondes, zoals in Kobe zijn oorspronkelijke analyse."
+            text="Elke stip is een geregistreerde ronde. De donkere lijn is de lopende mediaan over twintig rondes, zoals in de oorspronkelijke tactische analyse."
           />
           <label className="tactics-compact-select">
             <span>Team in detail</span>

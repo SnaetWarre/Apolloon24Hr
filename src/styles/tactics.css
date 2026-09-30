@@ -1,6 +1,6 @@
-/* Kobe's tactiek: live target tracking and historical deep dive. */
+/* Tactiek: live target tracking and historical deep dive. */
 
-/* One section at a time; a section chosen later rises in (see KobeTacticsView). */
+/* One section at a time; a section chosen later rises in (see TacticsView). */
 .tactics-section {
   display: grid;
   min-width: 0;
@@ -34,11 +34,10 @@
 }
 
 .tactics-stat small {
-  overflow: hidden;
   color: var(--ink-3);
   font-size: 12.5px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
 }
 
 .tactics-stat strong {

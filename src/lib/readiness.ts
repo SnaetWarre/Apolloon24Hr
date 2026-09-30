@@ -54,9 +54,9 @@ export function buildEventReadiness(cluster: ClusterStatus | null, now = Date.no
   if (!cluster.enabled) {
     checks.push({
       id: 'replica',
-      label: 'Tweede laptop',
+      label: 'Gekoppelde laptops',
       level: 'warning',
-      detail: 'Deze installatie draait bewust zelfstandig; er is geen live tweede kopie.',
+      detail: 'Koppelen staat uit op deze installatie; de gegevens staan alleen op deze laptop.',
     });
     return checks;
   }
