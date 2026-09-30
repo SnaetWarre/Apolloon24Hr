@@ -76,7 +76,7 @@ test('only items that arrive after the first render with data count as new', () 
 });
 
 test('packaged static files stay relative to the AppImage mount root', () => {
-  const hiddenMountRoot = path.join('/tmp', '.mount_LeuvenExample', 'resources', 'app.asar.unpacked');
+  const hiddenMountRoot = path.join('/tmp', '.mount_LeuvenExample', 'resources', 'app.asar');
   const distRoot = path.join(hiddenMountRoot, 'dist');
 
   assert.equal(

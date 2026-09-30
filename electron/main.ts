@@ -135,9 +135,14 @@ async function startServer() {
  * reconnect on their own.
  */
 function launchServer(env: NodeJS.ProcessEnv, restartDelayMs = 1_000): ChildProcess {
-  const cwd = path.join(process.resourcesPath, 'app.asar.unpacked');
-  const serverPath = path.join(cwd, 'dist-server', 'server', 'index.js');
-  const child = fork(serverPath, [], { stdio: ['ignore', 'inherit', 'inherit', 'ipc'], env, cwd, execArgv: [] });
+  // The server runs from inside app.asar; Electron's Node mode reads the archive.
+  const serverPath = path.join(app.getAppPath(), 'dist-server', 'server', 'index.js');
+  const child = fork(serverPath, [], {
+    stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
+    env,
+    cwd: app.getPath('userData'),
+    execArgv: [],
+  });
   const startedAt = Date.now();
   serverProcess = child;
 
@@ -196,9 +201,7 @@ if (!gotTheLock) {
       await startServer();
       await createWindow();
       if (smokeTest) {
-        const response = await fetch(`${appUrl}/api/health`);
-        const health = (await response.json()) as { database?: { ready?: boolean } };
-        if (!response.ok || !health.database?.ready) throw new Error('SQLite is not ready');
+        await runPackagedSmokeChecks();
         fs.writeFileSync(
           path.join(app.getPath('userData'), 'smoke-result.json'),
           JSON.stringify({ version: app.getVersion(), renderer: true, database: true })
@@ -215,6 +218,27 @@ if (!gotTheLock) {
       }
     }
   });
+}
+
+/** Checks that the server works from inside app.asar: database, backup worker, and precompressed assets. */
+async function runPackagedSmokeChecks() {
+  const response = await fetch(`${appUrl}/api/health`);
+  const health = (await response.json()) as { database?: { ready?: boolean } };
+  if (!response.ok || !health.database?.ready) throw new Error('SQLite is not ready');
+
+  const backup = await fetch(`${appUrl}/trpc/backups.create`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!backup.ok) throw new Error(`Verified backup failed: ${await backup.text()}`);
+
+  const html = await (await fetch(appUrl)).text();
+  const script = /<script[^>]+src="(\/assets\/[^"]+\.js)"/.exec(html)?.[1];
+  if (!script) throw new Error('index.html has no bundled script');
+  const asset = await fetch(`${appUrl}${script}`, { headers: { 'Accept-Encoding': 'br' } });
+  if (!asset.ok || asset.headers.get('content-encoding') !== 'br') {
+    throw new Error(`Precompressed asset not served (${asset.status}, ${asset.headers.get('content-encoding')})`);
+  }
 }
 
 function stopServer() {
