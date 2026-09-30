@@ -12,6 +12,7 @@ Laptops koppelen alleen met dezelfde versie: zet 4.0.1 op alle laptops.
 
 - De app heeft nu hetzelfde Apolloon-icoon als de site, in plaats van het paarse
   "24h"-icoon
+- Er is geen macOS-build voor Intel meer; macOS Apple Silicon blijft
 
 ## [4.0.0] - 2026-09-30
 

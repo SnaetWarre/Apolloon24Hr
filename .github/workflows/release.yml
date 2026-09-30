@@ -59,10 +59,6 @@ jobs:
             os: macos-latest
             script: electron:build:mac
             assets: release/*.dmg release/*.zip
-          - name: macOS Intel
-            os: macos-15-intel
-            script: electron:build:mac
-            assets: release/*.dmg release/*.zip
 
     steps:
       - uses: actions/checkout@v6
