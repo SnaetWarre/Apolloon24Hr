@@ -40,13 +40,13 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
     []
   );
 
-  const settle = React.useCallback((confirmed: boolean) => {
+  const settle = (confirmed: boolean) => {
     const current = pendingRef.current;
     if (!current) return;
     pendingRef.current = null;
     setPending(null);
     current.resolve(confirmed);
-  }, []);
+  };
 
   return (
     <ConfirmContext.Provider value={confirm}>

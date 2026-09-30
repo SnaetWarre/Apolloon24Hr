@@ -20,14 +20,8 @@ export function normalizeClockInterval(intervalMs: number): number {
 
 export function useClockTick(intervalMs = 100, enabled = true): void {
   const cadenceMs = normalizeClockInterval(intervalMs);
-  const subscribe = React.useCallback(
-    (listener: () => void) => (enabled ? subscribeToClock(cadenceMs, listener) : () => undefined),
-    [cadenceMs, enabled]
-  );
-  const getSnapshot = React.useCallback(
-    () => (enabled ? (clocks.get(cadenceMs)?.version ?? 0) : 0),
-    [cadenceMs, enabled]
-  );
+  const subscribe = (listener: () => void) => (enabled ? subscribeToClock(cadenceMs, listener) : () => undefined);
+  const getSnapshot = () => (enabled ? (clocks.get(cadenceMs)?.version ?? 0) : 0);
   React.useSyncExternalStore(subscribe, getSnapshot, () => 0);
 }
 

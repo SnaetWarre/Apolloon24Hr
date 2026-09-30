@@ -1,15 +1,15 @@
-import { app, BrowserWindow, dialog, ipcMain } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, type OpenDialogOptions } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
-import { fork } from 'child_process';
+import { fork, type ChildProcess } from 'child_process';
 import { parseEnvText, resolveServerAddress } from './server-config.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-let mainWindow;
-let serverProcess;
+let mainWindow: BrowserWindow | null = null;
+let serverProcess: ChildProcess | undefined;
 let quitting = false;
 let appUrl = 'http://127.0.0.1:5173';
 const smokeTest = process.env.APOLLOON_PACKAGE_SMOKE === '1';
@@ -49,7 +49,7 @@ async function createWindow() {
   });
 }
 
-async function loadPackagedRenderer(window) {
+async function loadPackagedRenderer(window: BrowserWindow) {
   // A failed/older AppImage can leave cached 404 responses for the same hashed
   // assets. Clear that persistent HTTP cache before loading the local UI.
   await window.webContents.session.clearCache();
@@ -72,14 +72,14 @@ async function loadPackagedRenderer(window) {
   }
 }
 
-async function rendererHasContent(window) {
+async function rendererHasContent(window: BrowserWindow): Promise<boolean> {
   if (window.isDestroyed()) return false;
   return window.webContents.executeJavaScript("Boolean(document.getElementById('root')?.childElementCount)");
 }
 
 ipcMain.handle('apolloon:pick-image', async (event) => {
   const owner = BrowserWindow.fromWebContents(event.sender);
-  const options = {
+  const options: OpenDialogOptions = {
     title: 'Kies een logo',
     defaultPath: app.getPath('downloads'),
     properties: ['openFile'],
@@ -110,7 +110,7 @@ async function startServer() {
     return;
   }
 
-  const env = {
+  const env: NodeJS.ProcessEnv = {
     ...process.env,
     NODE_ENV: 'production',
     CLUSTER_ENABLED: process.env.CLUSTER_ENABLED || 'true',
@@ -134,7 +134,7 @@ async function startServer() {
  * during the event costs seconds instead of a manual restart. Open screens
  * reconnect on their own.
  */
-function launchServer(env, restartDelayMs = 1_000) {
+function launchServer(env: NodeJS.ProcessEnv, restartDelayMs = 1_000): ChildProcess {
   const cwd = path.join(process.resourcesPath, 'app.asar.unpacked');
   const serverPath = path.join(cwd, 'dist-server', 'server', 'index.js');
   const child = fork(serverPath, [], { stdio: ['ignore', 'inherit', 'inherit', 'ipc'], env, cwd, execArgv: [] });
@@ -157,7 +157,7 @@ function launchServer(env, restartDelayMs = 1_000) {
   return child;
 }
 
-async function waitForServer(url, child, timeoutMs = 20_000) {
+async function waitForServer(url: string, child: ChildProcess, timeoutMs = 20_000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (child.exitCode !== null) {
@@ -197,7 +197,7 @@ if (!gotTheLock) {
       await createWindow();
       if (smokeTest) {
         const response = await fetch(`${appUrl}/api/health`);
-        const health = await response.json();
+        const health = (await response.json()) as { database?: { ready?: boolean } };
         if (!response.ok || !health.database?.ready) throw new Error('SQLite is not ready');
         fs.writeFileSync(
           path.join(app.getPath('userData'), 'smoke-result.json'),

@@ -20,73 +20,55 @@ export function RunnersSection({ runners }: { runners: Runner[] }) {
   const [profileRunnerId, setProfileRunnerId] = React.useState<string | null>(null);
   const [addOpen, setAddOpen] = React.useState(false);
 
-  const availableHours = React.useMemo(
-    () =>
-      [...new Set(Object.values(registrations).flatMap((registration) => registration.availableHours))].sort(
-        (a, b) => weekdayOrder(a) - weekdayOrder(b) || a.localeCompare(b, 'nl-BE', { numeric: true })
-      ),
-    [registrations]
-  );
+  const availableHours = [
+    ...new Set(Object.values(registrations).flatMap((registration) => registration.availableHours)),
+  ].sort((a, b) => weekdayOrder(a) - weekdayOrder(b) || a.localeCompare(b, 'nl-BE', { numeric: true }));
 
-  const matchingRunners = React.useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return runners
-      .filter((runner) => !hour || registrations[runner.id]?.availableHours.includes(hour))
-      .filter((runner) => {
-        if (!q) return true;
-        const searchable = [
-          runner.name,
-          runner.runnerNumber || '',
-          runner.status,
-          runner.registrationSource,
-          ...runner.labels.map((label) => label.name),
-          ...(registrations[runner.id]?.availableHours ?? []),
-        ];
-        return searchable.some((text) => text.toLowerCase().includes(q));
-      })
-      .sort(
-        (a, b) =>
-          statusOrder(a.status) - statusOrder(b.status) ||
-          (a.runnerNumber || '').localeCompare(b.runnerNumber || '', undefined, { numeric: true }) ||
-          a.name.localeCompare(b.name)
-      );
-  }, [hour, query, registrations, runners]);
+  const q = query.trim().toLowerCase();
+  const matchingRunners = runners
+    .filter((runner) => !hour || registrations[runner.id]?.availableHours.includes(hour))
+    .filter((runner) => {
+      if (!q) return true;
+      const searchable = [
+        runner.name,
+        runner.runnerNumber || '',
+        runner.status,
+        runner.registrationSource,
+        ...runner.labels.map((label) => label.name),
+        ...(registrations[runner.id]?.availableHours ?? []),
+      ];
+      return searchable.some((text) => text.toLowerCase().includes(q));
+    })
+    .sort(
+      (a, b) =>
+        statusOrder(a.status) - statusOrder(b.status) ||
+        (a.runnerNumber || '').localeCompare(b.runnerNumber || '', undefined, { numeric: true }) ||
+        a.name.localeCompare(b.name)
+    );
 
-  const statusCounts = React.useMemo(() => {
-    const counts = new Map<Runner['status'], number>();
-    for (const runner of matchingRunners) counts.set(runner.status, (counts.get(runner.status) ?? 0) + 1);
-    return [...counts.entries()]
-      .sort(([a], [b]) => statusOrder(a) - statusOrder(b))
-      .map(([status, count]) => `${statusLabel(status)}: ${count}`)
-      .join(' · ');
-  }, [matchingRunners]);
+  const counts = new Map<Runner['status'], number>();
+  for (const runner of matchingRunners) counts.set(runner.status, (counts.get(runner.status) ?? 0) + 1);
+  const statusCounts = [...counts.entries()]
+    .sort(([a], [b]) => statusOrder(a) - statusOrder(b))
+    .map(([status, count]) => `${statusLabel(status)}: ${count}`)
+    .join(' · ');
 
-  const restoreRunner = React.useCallback(
-    (runner: Runner) =>
-      run(() => unhideRunner(runner.id), `${runner.name} is terug zichtbaar.`, 'Loper terug tonen mislukt').then(
-        () => undefined
-      ),
-    [run, unhideRunner]
-  );
+  const restoreRunner = (runner: Runner) =>
+    run(() => unhideRunner(runner.id), `${runner.name} is terug zichtbaar.`, 'Loper terug tonen mislukt').then(
+      () => undefined
+    );
 
-  const removeRunner = React.useCallback(
-    async (runner: Runner) => {
-      if (runner.lapCount > 0 || runner.status === 'running') return;
-      const confirmed = await confirm({
-        title: `${runner.name} definitief verwijderen?`,
-        message: 'Dit kan niet ongedaan gemaakt worden.',
-        confirmLabel: 'Definitief verwijderen',
-        tone: 'danger',
-      });
-      if (confirmed)
-        await run(
-          () => deleteRunner(runner.id),
-          `${runner.name} is definitief verwijderd.`,
-          'Loper verwijderen mislukt'
-        );
-    },
-    [confirm, deleteRunner, run]
-  );
+  const removeRunner = async (runner: Runner) => {
+    if (runner.lapCount > 0 || runner.status === 'running') return;
+    const confirmed = await confirm({
+      title: `${runner.name} definitief verwijderen?`,
+      message: 'Dit kan niet ongedaan gemaakt worden.',
+      confirmLabel: 'Definitief verwijderen',
+      tone: 'danger',
+    });
+    if (confirmed)
+      await run(() => deleteRunner(runner.id), `${runner.name} is definitief verwijderd.`, 'Loper verwijderen mislukt');
+  };
 
   return (
     <section className="panel">

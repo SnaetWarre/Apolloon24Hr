@@ -35,8 +35,10 @@ server/index.ts
 
 ## Process Boundaries
 
-### `electron/main.js`
+### `electron/main.ts`
 
+- Compiled to `dist-electron/` by `npm run electron:compile`; the Electron
+  build scripts run that step first.
 - Starts the compiled backend as a child process and passes the app version.
 - Restarts the backend with backoff when it stops unexpectedly; open screens
   reconnect on their own.

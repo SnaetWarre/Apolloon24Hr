@@ -26,11 +26,8 @@ export function AvailableNowPanel({
   // Ticks exactly on the hour boundary; Brussels hours line up with UTC hours.
   useClockTick(HOUR_MS);
   const { hour, weekday } = brusselsMoment(Date.now());
-  const moment = React.useMemo(() => ({ hour, weekday }), [hour, weekday]);
-  const available = React.useMemo(
-    () => findAvailableUncalledRunners(runners, registrations, moment),
-    [moment, registrations, runners]
-  );
+  const moment = { hour, weekday };
+  const available = findAvailableUncalledRunners(runners, registrations, moment);
   const query = search.trim().toLowerCase();
   const shown = query
     ? available.filter(

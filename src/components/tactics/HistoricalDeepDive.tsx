@@ -111,7 +111,7 @@ function OverviewSection({
   firstTeam: HistoricalTeam;
   secondTeam: HistoricalTeam;
 }) {
-  const summaries = React.useMemo(() => summarizeHistoricalTeams(historicalRace), [historicalRace]);
+  const summaries = summarizeHistoricalTeams(historicalRace);
   const [detailTeamId, setDetailTeamId] = React.useState(firstTeam.teamId);
   const firstSummary = summaries.find((summary) => summary.teamId === firstTeam.teamId)!;
   const secondSummary = summaries.find((summary) => summary.teamId === secondTeam.teamId)!;
@@ -236,16 +236,10 @@ function TempoSection({ firstTeam, secondTeam }: { firstTeam: HistoricalTeam; se
   const [endHour, setEndHour] = React.useState(24);
   const [nightStartHour, setNightStartHour] = React.useState(3);
   const [nightEndHour, setNightEndHour] = React.useState(9);
-  const quarterPaces = React.useMemo(
-    () => buildQuarterHourPaces(firstTeam, secondTeam, startHour, endHour),
-    [endHour, firstTeam, secondTeam, startHour]
-  );
-  const smoothedPaces = React.useMemo(() => smoothPacePoints(quarterPaces), [quarterPaces]);
-  const consistency = React.useMemo(() => buildHourlyConsistency(firstTeam, secondTeam), [firstTeam, secondTeam]);
-  const halfHourDifferences = React.useMemo(
-    () => buildHalfHourPaceDifferences(firstTeam, secondTeam, startHour, endHour),
-    [endHour, firstTeam, secondTeam, startHour]
-  );
+  const quarterPaces = buildQuarterHourPaces(firstTeam, secondTeam, startHour, endHour);
+  const smoothedPaces = smoothPacePoints(quarterPaces);
+  const consistency = buildHourlyConsistency(firstTeam, secondTeam);
+  const halfHourDifferences = buildHalfHourPaceDifferences(firstTeam, secondTeam, startHour, endHour);
   const firstPenalty = calculateNightPenalty(firstTeam, nightStartHour, nightEndHour);
   const secondPenalty = calculateNightPenalty(secondTeam, nightStartHour, nightEndHour);
   const firstDistribution = summarizeHistoricalWindow(firstTeam, startHour, endHour);
@@ -352,10 +346,10 @@ function TempoSection({ firstTeam, secondTeam }: { firstTeam: HistoricalTeam; se
 
 function RaceSection({ firstTeam, secondTeam }: { firstTeam: HistoricalTeam; secondTeam: HistoricalTeam }) {
   const [lapLengthMeters, setLapLengthMeters] = React.useState(530);
-  const timeGap = React.useMemo(() => buildTimeGapCurve(firstTeam, secondTeam), [firstTeam, secondTeam]);
-  const hourlyGains = React.useMemo(() => buildHourlyLapGains(firstTeam, secondTeam), [firstTeam, secondTeam]);
-  const raceLead = React.useMemo(() => buildRaceLeadCurve(firstTeam, secondTeam), [firstTeam, secondTeam]);
-  const sameLapGap = React.useMemo(() => buildSameLapIndexGap(firstTeam, secondTeam), [firstTeam, secondTeam]);
+  const timeGap = buildTimeGapCurve(firstTeam, secondTeam);
+  const hourlyGains = buildHourlyLapGains(firstTeam, secondTeam);
+  const raceLead = buildRaceLeadCurve(firstTeam, secondTeam);
+  const sameLapGap = buildSameLapIndexGap(firstTeam, secondTeam);
   const finalLapGap = secondTeam.cumulativeLapTimesMs.length - firstTeam.cumulativeLapTimesMs.length;
   const finalTimeGap = timeGap[timeGap.length - 1]?.gapSeconds ?? 0;
 
@@ -439,10 +433,7 @@ function RaceSection({ firstTeam, secondTeam }: { firstTeam: HistoricalTeam; sec
 }
 
 function DiagnosticsSection({ firstTeam, secondTeam }: { firstTeam: HistoricalTeam; secondTeam: HistoricalTeam }) {
-  const suggestedThreshold = React.useMemo(
-    () => defaultSlowLapThreshold(firstTeam, secondTeam),
-    [firstTeam, secondTeam]
-  );
+  const suggestedThreshold = defaultSlowLapThreshold(firstTeam, secondTeam);
   const [slowThresholdSeconds, setSlowThresholdSeconds] = React.useState(suggestedThreshold);
   const [paceChangeThresholdSeconds, setPaceChangeThresholdSeconds] = React.useState(8);
   const [improvingTeamId, setImprovingTeamId] = React.useState(firstTeam.teamId);
@@ -586,25 +577,16 @@ function DraftingSection({ firstTeam, secondTeam }: { firstTeam: HistoricalTeam;
   const [farSeconds, setFarSeconds] = React.useState(15);
   const [minimumLapSeconds, setMinimumLapSeconds] = React.useState(55);
   const [maximumLapSeconds, setMaximumLapSeconds] = React.useState(140);
-  const options = React.useMemo(
-    () => ({
-      startHour,
-      endHour,
-      closeSeconds,
-      farSeconds,
-      minimumLapSeconds,
-      maximumLapSeconds,
-    }),
-    [closeSeconds, endHour, farSeconds, maximumLapSeconds, minimumLapSeconds, startHour]
-  );
-  const firstAnalysis = React.useMemo(
-    () => analyzeDrafting(firstTeam, secondTeam, options),
-    [firstTeam, options, secondTeam]
-  );
-  const secondAnalysis = React.useMemo(
-    () => analyzeDrafting(secondTeam, firstTeam, options),
-    [firstTeam, options, secondTeam]
-  );
+  const options = {
+    startHour,
+    endHour,
+    closeSeconds,
+    farSeconds,
+    minimumLapSeconds,
+    maximumLapSeconds,
+  };
+  const firstAnalysis = analyzeDrafting(firstTeam, secondTeam, options);
+  const secondAnalysis = analyzeDrafting(secondTeam, firstTeam, options);
 
   return (
     <div className="tactics-section-stack">

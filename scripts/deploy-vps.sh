@@ -9,7 +9,7 @@ VPS_SERVICE_NAME="${VPS_SERVICE_NAME:-apolloon}"
 VPS_APP_PORT="${VPS_APP_PORT:-3000}"
 VPS_PUBLIC_HOST="${VPS_PUBLIC_HOST:-${VPS_HOST}}"
 VPS_PUBLIC_APP_PORT="${VPS_PUBLIC_APP_PORT:-${VPS_APP_PORT}}"
-VPS_NODE_VERSION="${VPS_NODE_VERSION:-22.12.0}"
+VPS_NODE_VERSION="${VPS_NODE_VERSION:-24.21.0}"
 DEPLOY_SKIP_BUILD="${DEPLOY_SKIP_BUILD:-0}"
 DEPLOY_ARTIFACT="${DEPLOY_ARTIFACT:-}"
 DEPLOY_FORCE="${DEPLOY_FORCE:-0}"
@@ -207,15 +207,15 @@ install_node() {
   "${sudo_cmd[@]}" ln -sfn "${install_dir}/bin/npx" /usr/local/bin/npx
 }
 
-if [[ "$(node_major)" -lt 22 || ! -x "$(command -v npm || true)" ]]; then
+if [[ "$(node_major)" -lt 24 || ! -x "$(command -v npm || true)" ]]; then
   echo "Installing Node.js ${node_version} on the VPS..."
   install_node
 fi
 
 node_bin="$(command -v node || true)"
 npm_bin="$(command -v npm || true)"
-if [[ -z "${node_bin}" || -z "${npm_bin}" || "$(node_major)" -lt 22 ]]; then
-  echo "Node.js >= 22 and npm are required on the VPS." >&2
+if [[ -z "${node_bin}" || -z "${npm_bin}" || "$(node_major)" -lt 24 ]]; then
+  echo "Node.js >= 24 and npm are required on the VPS." >&2
   exit 1
 fi
 
