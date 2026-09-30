@@ -25,12 +25,12 @@ Deploying new code does not overwrite the live database or its versioned backups
 ## VPS Prerequisites
 
 The deploy script can install Node.js automatically when deploying as `root` or as a user with passwordless `sudo`.
-By default it installs Node `22.12.0` under `/opt/node-v22.12.0-linux-x64` and links `node`, `npm`, and `npx` into `/usr/local/bin`.
+By default it installs Node `24.21.0` under `/opt/node-v24.21.0-linux-x64` and links `node`, `npm`, and `npx` into `/usr/local/bin`.
 
 Override the bootstrap version if needed:
 
 ```bash
-VPS_NODE_VERSION=22.12.0 npm run deploy:vps
+VPS_NODE_VERSION=24.21.0 npm run deploy:vps
 ```
 
 The deploy script also expects:
@@ -152,7 +152,7 @@ VPS_SERVICE_NAME=apolloon
 VPS_APP_PORT=3000
 VPS_PUBLIC_HOST=$VPS_HOST
 VPS_PUBLIC_APP_PORT=$VPS_APP_PORT
-VPS_NODE_VERSION=22.12.0
+VPS_NODE_VERSION=24.21.0
 ```
 
 ## VPS Operations

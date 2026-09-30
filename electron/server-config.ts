@@ -1,7 +1,11 @@
-/** @returns {Record<string, string>} */
-export function parseEnvText(content) {
-  /** @type {Record<string, string>} */
-  const values = {};
+export type ServerAddress = {
+  port: number;
+  publicPort: number;
+  url: string;
+};
+
+export function parseEnvText(content: string): Record<string, string> {
+  const values: Record<string, string> = {};
   for (const rawLine of String(content || '').split(/\r?\n/)) {
     const line = rawLine.trim();
     if (!line || line.startsWith('#')) continue;
@@ -20,7 +24,7 @@ export function parseEnvText(content) {
   return values;
 }
 
-export function resolveServerAddress(environment) {
+export function resolveServerAddress(environment: Record<string, string | undefined>): ServerAddress {
   const port = readPort(environment.PORT, 5173);
   const publicPort = readPort(environment.PUBLIC_APP_PORT, port);
   return {
@@ -30,7 +34,7 @@ export function resolveServerAddress(environment) {
   };
 }
 
-function readPort(value, fallback) {
+function readPort(value: string | undefined, fallback: number): number {
   const port = Number(value);
   return Number.isInteger(port) && port > 0 && port < 65536 ? port : fallback;
 }

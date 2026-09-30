@@ -151,16 +151,10 @@ export function InsideDisplay() {
   const [rankingLabelId, setRankingLabelId] = React.useState<string | null>(null);
   const [rotationPaused, setRotationPaused] = React.useState(false);
   const [prefersReducedMotion, setPrefersReducedMotion] = React.useState(false);
-  const recentLapSummaries = React.useMemo(() => buildRecentLapSummaries(laps), [laps]);
-  const rankingLabels = React.useMemo(() => collectRankingLabels(labels, laps), [labels, laps]);
-  const ranking = React.useMemo(
-    () => buildRunnerRanking(runners, laps, rankingMode, rankingLabelId).slice(0, 10),
-    [laps, rankingLabelId, rankingMode, runners]
-  );
-  const competitions = React.useMemo(
-    () => groupCompetitions(buildLabelStats(labels, runners, laps)),
-    [labels, laps, runners]
-  );
+  const recentLapSummaries = buildRecentLapSummaries(laps);
+  const rankingLabels = collectRankingLabels(labels, laps);
+  const ranking = buildRunnerRanking(runners, laps, rankingMode, rankingLabelId).slice(0, 10);
+  const competitions = groupCompetitions(buildLabelStats(labels, runners, laps));
 
   React.useEffect(() => {
     const reducedMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -181,7 +175,7 @@ export function InsideDisplay() {
   const rotationActive = !prefersReducedMotion && !rotationPaused;
   const competitionRowCount = competitions.reduce((total, competition) => total + competition.stats.length, 0);
   // Same definition as Analyse, so the public and operator screens agree.
-  const lapsPerHour = React.useMemo(() => buildKpis(laps, race).lapsPerHour, [laps, race]);
+  const lapsPerHour = buildKpis(laps, race).lapsPerHour;
   const activeKey = activeRunner?.id ?? 'none';
   const nextKey = nextRunner?.id ?? 'none';
   // What changes after the screen opened moves: a handover, a lap that lands, a ranking that switches.

@@ -124,10 +124,7 @@ export function RaceTimelineChart({
   const hasRivalHistory = timeline[0]?.rivalHistoricalLaps != null;
   const activeBaseline =
     (baseline === 'own' && !hasOwnHistory) || (baseline === 'rival' && !hasRivalHistory) ? 'target' : baseline;
-  const seriesData = React.useMemo(
-    () => buildSeriesData(view, activeBaseline, timeline, hourly, hasOwnHistory, hasRivalHistory),
-    [activeBaseline, hasOwnHistory, hasRivalHistory, hourly, timeline, view]
-  );
+  const seriesData = buildSeriesData(view, activeBaseline, timeline, hourly, hasOwnHistory, hasRivalHistory);
   const [windowMin, windowMax] = resolveTimeWindow(timeWindow, elapsedHours);
 
   React.useEffect(() => {

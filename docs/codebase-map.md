@@ -4,7 +4,7 @@ This app has three runtime surfaces:
 
 - `src/`: React/Vite client for event operators, displays, and exports.
 - `server/`: local Express, tRPC, Socket.IO, and SQLite runtime.
-- `electron/`: desktop wrapper that starts the compiled server and opens the app.
+- `electron/`: desktop wrapper that starts the compiled server and opens the app; compiled to `dist-electron/`.
 
 Shared contracts live in `shared/`. Anything imported by both client and server should go there instead of being duplicated in `src/` and `server/`.
 

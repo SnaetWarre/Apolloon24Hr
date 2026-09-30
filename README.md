@@ -58,7 +58,7 @@ See `docs/reliability-model.md` for the failover policy, retention rules, recove
 
 ## Tech Stack
 
-- Frontend: React 19, Vite 8, TanStack Router, TanStack Query, TanStack Table, and small Zustand UI state.
+- Frontend: React 19, Vite 8, TanStack Router, TanStack Query, and TanStack Table.
 - Backend: Express 5 with tRPC on `/trpc`, Socket.IO realtime events, and native SQLite via `better-sqlite3`.
 - Packaging: Electron + electron-builder. Production builds compile the backend to `dist-server/` and serve the Vite build from the local server.
 - Exports: plain HTTP endpoints under `/api/export/*` for browser downloads and external tools.

@@ -100,40 +100,21 @@ export function AnalysisView() {
     };
   }, []);
 
-  const analysisLabels = React.useMemo(() => mergeAnalysisLabels(labels, laps), [labels, laps]);
-  const enabledLabelIds = React.useMemo(
-    () => filters.enabledLabelIds ?? analysisLabels.map((label) => label.id),
-    [analysisLabels, filters.enabledLabelIds]
-  );
-  const enabledLabels = React.useMemo(
-    () => analysisLabels.filter((label) => enabledLabelIds.includes(label.id)),
-    [analysisLabels, enabledLabelIds]
-  );
-  const filteredLaps = React.useMemo(() => filterLaps(laps, filters), [laps, filters]);
-  const kpis = React.useMemo(() => buildKpis(filteredLaps, race), [filteredLaps, race]);
-  const timeBuckets = React.useMemo(() => buildTimeBuckets(filteredLaps, race), [filteredLaps, race]);
-  const rollingLapTrend = React.useMemo(() => buildRollingLapTrend(filteredLaps, race), [filteredLaps, race]);
-  const distribution = React.useMemo(() => buildDistribution(filteredLaps), [filteredLaps]);
-  const fastestLapWindows = React.useMemo(
-    () => buildFastestLapWindows(filteredLaps, race, fastestWindowMode),
-    [fastestWindowMode, filteredLaps, race]
-  );
-  const labelComparisons = React.useMemo(
-    () => buildLabelComparisons(enabledLabels, filteredLaps),
-    [enabledLabels, filteredLaps]
-  );
-  const runnerInsights = React.useMemo(() => buildRunnerInsights(runners, filteredLaps), [runners, filteredLaps]);
-  const visibleRunnerInsights = React.useMemo(
-    () =>
-      runnerInsights
-        .filter((insight) => runnerInsightMatches(insight, runnerSearch))
-        .sort(sortRunnerInsight(runnerSort)),
-    [runnerInsights, runnerSearch, runnerSort]
-  );
-  const burgieEventCount = React.useMemo(
-    () => events.reduce((count, event) => count + (event.type === 'burgie_gepakt' ? 1 : 0), 0),
-    [events]
-  );
+  const analysisLabels = mergeAnalysisLabels(labels, laps);
+  const enabledLabelIds = filters.enabledLabelIds ?? analysisLabels.map((label) => label.id);
+  const enabledLabels = analysisLabels.filter((label) => enabledLabelIds.includes(label.id));
+  const filteredLaps = filterLaps(laps, filters);
+  const kpis = buildKpis(filteredLaps, race);
+  const timeBuckets = buildTimeBuckets(filteredLaps, race);
+  const rollingLapTrend = buildRollingLapTrend(filteredLaps, race);
+  const distribution = buildDistribution(filteredLaps);
+  const fastestLapWindows = buildFastestLapWindows(filteredLaps, race, fastestWindowMode);
+  const labelComparisons = buildLabelComparisons(enabledLabels, filteredLaps);
+  const runnerInsights = buildRunnerInsights(runners, filteredLaps);
+  const visibleRunnerInsights = runnerInsights
+    .filter((insight) => runnerInsightMatches(insight, runnerSearch))
+    .sort(sortRunnerInsight(runnerSort));
+  const burgieEventCount = events.reduce((count, event) => count + (event.type === 'burgie_gepakt' ? 1 : 0), 0);
 
   function enableAllLabels() {
     setFilters(allLabelsEnabled);

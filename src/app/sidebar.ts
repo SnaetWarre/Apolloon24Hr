@@ -28,7 +28,7 @@ export function useSidebarCollapsed(): [boolean, () => void] {
   }, []);
 
   const collapsed = choice ? choice === 'collapsed' : narrow;
-  const toggle = React.useCallback(() => {
+  const toggle = () => {
     const next = collapsed ? 'expanded' : 'collapsed';
     try {
       window.localStorage.setItem(STORAGE_KEY, next);
@@ -36,20 +36,21 @@ export function useSidebarCollapsed(): [boolean, () => void] {
       // Keep the choice for this session only.
     }
     setChoice(next);
-  }, [collapsed]);
+  };
 
+  const onShortcut = React.useEffectEvent((event: KeyboardEvent) => {
+    if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return;
+    if (event.key.toLowerCase() !== 'b' || event.repeat) return;
+    const target = event.target as HTMLElement | null;
+    if (target?.closest('textarea, [contenteditable="true"]')) return;
+    event.preventDefault();
+    toggle();
+  });
   React.useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return;
-      if (event.key.toLowerCase() !== 'b' || event.repeat) return;
-      const target = event.target as HTMLElement | null;
-      if (target?.closest('textarea, [contenteditable="true"]')) return;
-      event.preventDefault();
-      toggle();
-    };
+    const onKeyDown = (event: KeyboardEvent) => onShortcut(event);
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [toggle]);
+  }, []);
 
   return [collapsed, toggle];
 }

@@ -40,14 +40,14 @@ export function useArrivals(ids: readonly string[], ready = true): ReadonlySet<s
 export function usePulse(durationMs: number): [boolean, () => void] {
   const [active, setActive] = React.useState(false);
   const timeoutRef = React.useRef<number | null>(null);
-  const trigger = React.useCallback(() => {
+  const trigger = () => {
     if (timeoutRef.current !== null) window.clearTimeout(timeoutRef.current);
     setActive(true);
     timeoutRef.current = window.setTimeout(() => {
       timeoutRef.current = null;
       setActive(false);
     }, durationMs);
-  }, [durationMs]);
+  };
   React.useEffect(
     () => () => {
       if (timeoutRef.current !== null) window.clearTimeout(timeoutRef.current);

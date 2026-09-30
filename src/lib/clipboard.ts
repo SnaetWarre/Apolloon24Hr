@@ -38,13 +38,13 @@ async function copyText(text: string): Promise<CopyResult> {
 /** Copy action plus a short "Gekopieerd" confirmation. */
 export function useCopyText(text: string | null): [boolean, () => void] {
   const [copied, setCopied] = React.useState(false);
-  const copy = React.useCallback(() => {
+  const copy = () => {
     if (!text) return;
     void copyText(text).then((result) => {
       if (result !== 'copied') return;
       setCopied(true);
       window.setTimeout(() => setCopied(false), 2000);
     });
-  }, [text]);
+  };
   return [copied, copy];
 }
