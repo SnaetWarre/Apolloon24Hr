@@ -87,6 +87,19 @@ export function latestBackupPath(): { record: BackupRecord; path: string } | nul
   return fs.existsSync(filePath) ? { record, path: filePath } : null;
 }
 
+/** Every kept backup, newest first. */
+export function listBackups(): BackupRecord[] {
+  return records.slice();
+}
+
+/** The file of a kept backup; only names from the list are accepted, so no path leaves the folder. */
+export function backupFile(fileName: string): { record: BackupRecord; path: string } | null {
+  const record = records.find((item) => item.fileName === fileName);
+  if (!record) return null;
+  const filePath = path.join(backupDirectory, record.fileName);
+  return fs.existsSync(filePath) ? { record, path: filePath } : null;
+}
+
 /** Keeps the newest scheduled and the newest other backups; returns the file names to keep. */
 export function backupsToRetain(candidates: BackupRecord[]): Set<string> {
   const newestFirst = candidates.slice().sort((a, b) => b.createdAt - a.createdAt);

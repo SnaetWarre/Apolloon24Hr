@@ -21,7 +21,9 @@ import {
   type TemporaryTeam,
   type TimingPress,
 } from '../shared/schemas.js';
-import { createVerifiedBackup } from './backups.js';
+import { activityPageSchema, backupFileSchema } from '../shared/schemas.js';
+import { describeWrite } from './activity.js';
+import { backupFile, createVerifiedBackup, listBackups } from './backups.js';
 import { clusterNow } from './clock.js';
 import {
   NOT_CONFIRMED_MESSAGE,
@@ -42,6 +44,7 @@ import {
   deleteRunner,
   finishRace,
   findForwardedWrite,
+  getActivity,
   getLogHead,
   getRaceState,
   getRunnerById,
@@ -49,7 +52,12 @@ import {
   getTemporaryTeam,
   hideRunnerInQueue,
   insertRunner,
+  logActivity,
   performHandoff,
+  previewBackup,
+  readRestoreData,
+  replaceEventData,
+  restoreDataSchema,
   recordWrite,
   saveForwardedWrite,
   saveLabelImage,
@@ -75,6 +83,8 @@ export type RequestContext = {
   forwarded?: boolean;
   requestId?: string;
   reportLogSeq?: (seq: number) => void;
+  /** The screen and address the operator made the change on, for the activity log. */
+  origin?: string;
 };
 
 const t = initTRPC.context<RequestContext>().create();
@@ -101,15 +111,17 @@ function unavailable(message: string): never {
  */
 function write<I, T>(action: (input: I) => T) {
   return async ({ input, path, ctx }: { input: I; path: string; ctx: RequestContext }): Promise<T> => {
-    if (ctx.forwarded) return commitHere(path, () => action(input), ctx.requestId, ctx.reportLogSeq);
+    const origin = ctx.origin || 'onbekend';
+    const change = { type: path, input, origin, action: () => action(input) };
+    if (ctx.forwarded) return commitHere(change, ctx.requestId, ctx.reportLogSeq);
     const deadline = writeDeadline();
     let requestId: string | undefined;
     for (;;) {
       const target = await writeTarget(deadline);
       if (target === null) unavailable(NO_LEADER_MESSAGE);
-      if (target === 'self') return commitHere(path, () => action(input), requestId);
+      if (target === 'self') return commitHere(change, requestId);
       requestId ??= newRequestId();
-      const outcome = await forwardWrite<T>(target, path, input, requestId);
+      const outcome = await forwardWrite<T>(target, path, input, requestId, origin);
       if (outcome.ok) return outcome.data;
       if (outcome.retry && performance.now() < deadline) {
         await new Promise((resolve) => setTimeout(resolve, 100));
@@ -121,10 +133,14 @@ function write<I, T>(action: (input: I) => T) {
   };
 }
 
-/** Commits on this laptop, the leader, and waits until a majority holds the change. */
+type Change<T> = { type: string; input: unknown; origin: string; action: () => T };
+
+/**
+ * Commits on this laptop, the leader, and waits until a majority holds the change.
+ * The activity log entry is part of the same write.
+ */
 async function commitHere<T>(
-  type: string,
-  action: () => T,
+  { type, input, origin, action }: Change<T>,
   requestId?: string,
   reportLogSeq?: (seq: number) => void
 ): Promise<T> {
@@ -141,7 +157,9 @@ async function commitHere<T>(
         touchForwardedWrite(requestId, clusterNow());
         return earlier.result as T;
       }
+      const describe = safeDescribe(type, input);
       const outcome = action();
+      if (describe) logActivity({ occurredAt: clusterNow(), action: type, summary: describe(outcome), origin });
       if (requestId) saveForwardedWrite(requestId, outcome, clusterNow());
       return outcome;
     });
@@ -153,6 +171,23 @@ async function commitHere<T>(
   reportLogSeq?.(seq);
   if (!(await waitForCommit(seq))) unavailable(NOT_CONFIRMED_MESSAGE);
   return result;
+}
+
+/** A description that cannot be made never stops the change itself. */
+function safeDescribe(type: string, input: unknown): ((result: unknown) => string) | null {
+  try {
+    const describe = describeWrite(type, input);
+    if (!describe) return null;
+    return (result) => {
+      try {
+        return describe(result);
+      } catch {
+        return type;
+      }
+    };
+  } catch {
+    return () => type;
+  }
 }
 
 function domainErrorMessage(error: unknown): string {
@@ -191,6 +226,8 @@ function requireTemporaryTeam(labelId: string): TemporaryTeam {
   return getTemporaryTeam(labelId) ?? fail('NOT_FOUND', 'Tijdelijke nachtploeg niet gevonden');
 }
 
+const applyRestore = write(replaceEventData);
+
 export const appRouter = t.router({
   cluster: t.router({
     join: t.procedure
@@ -201,6 +238,36 @@ export const appRouter = t.router({
 
   backups: t.router({
     create: t.procedure.mutation(() => createVerifiedBackup('manual')),
+    list: t.procedure.query(() => listBackups()),
+    preview: t.procedure.input(backupFileSchema).query(({ input }) => {
+      const found = backupFile(input.fileName) ?? fail('NOT_FOUND', 'Deze backup bestaat niet meer.');
+      return previewBackup(found.path, found.record.fileName, found.record.createdAt);
+    }),
+    /**
+     * Puts every laptop back to a backup of this laptop. The current data is kept in a
+     * backup first. The rows travel to the leader as one ordinary replicated write, so the
+     * whole group changes together and nobody has to stop or relink a laptop.
+     */
+    restore: t.procedure.input(backupFileSchema).mutation(async ({ input, ctx }) => {
+      const found = backupFile(input.fileName) ?? fail('NOT_FOUND', 'Deze backup bestaat niet meer.');
+      let data;
+      try {
+        data = readRestoreData(found.path, found.record.fileName, found.record.createdAt);
+      } catch (error) {
+        fail('BAD_REQUEST', error instanceof Error ? error.message : String(error));
+      }
+      const safety = await createVerifiedBackup('pre-restore');
+      const restored = await applyRestore({ input: data, path: 'backups.applyRestore', ctx });
+      return { ...restored, safetyBackup: safety.fileName };
+    }),
+    /** The replicated half of `restore`; also what a laptop forwards to the leader. */
+    applyRestore: t.procedure
+      .input(restoreDataSchema)
+      .mutation(({ input, path, ctx }) => applyRestore({ input, path, ctx })),
+  }),
+
+  activity: t.router({
+    list: t.procedure.input(activityPageSchema).query(({ input }) => getActivity(input.limit, input.before)),
   }),
 
   runners: t.router({

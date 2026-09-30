@@ -4,8 +4,9 @@ import path from 'node:path';
 import test from 'node:test';
 import { DatabaseSync } from 'node:sqlite';
 import type { BackupRecord } from '../shared/schemas.ts';
+import { temporaryDataPath } from './temporary-data.ts';
 
-const dataPath = path.resolve(`.tmp-test-backups-${process.pid}`);
+const dataPath = temporaryDataPath('backups');
 process.env.DATA_PATH = dataPath;
 process.env.NODE_ENV = 'test';
 process.env.BACKUP_ENABLED = 'false';

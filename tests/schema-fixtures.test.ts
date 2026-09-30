@@ -4,8 +4,9 @@ import path from 'node:path';
 import test from 'node:test';
 import { DatabaseSync } from 'node:sqlite';
 import { schemaProblems } from '../server/db/schema-check.ts';
+import { temporaryDataPath } from './temporary-data.ts';
 
-const dataPath = path.resolve(`.tmp-test-schema-fixtures-${process.pid}`);
+const dataPath = temporaryDataPath('schema-fixtures');
 const dataDir = path.join(dataPath, 'data');
 const databasePath = path.join(dataDir, 'app.db');
 process.env.DATA_PATH = dataPath;
@@ -18,8 +19,11 @@ const fixtures = fs
   .filter((file) => file.endsWith('.sqlite'))
   .sort();
 
-/** The last release: its database must already match, so it is not rebuilt. */
-const LATEST_RELEASE_FIXTURE = 'v4.0.2.sqlite';
+/**
+ * The last release: its tables must already match, so none is rebuilt. Tables added
+ * since are only missing, and are created without a rebuild or a repair copy.
+ */
+const LATEST_RELEASE_FIXTURE = 'v4.1.0.sqlite';
 
 type StoredRunner = { name: string; status: string; laps: number };
 
@@ -77,7 +81,12 @@ for (const fixture of fixtures) {
     fs.mkdirSync(dataDir, { recursive: true });
     fs.copyFileSync(path.join(fixtureDir, fixture), databasePath);
     const before = storedRunners(databasePath);
-    if (fixture === LATEST_RELEASE_FIXTURE) assert.deepEqual(openedProblems(databasePath), []);
+    if (fixture === LATEST_RELEASE_FIXTURE) {
+      assert.deepEqual(
+        openedProblems(databasePath).filter((problem) => !problem.detail.endsWith('table is missing')),
+        []
+      );
+    }
 
     const db = await import('../server/db.ts');
     const { liveAppSnapshot } = await import('../server/app-state.ts');

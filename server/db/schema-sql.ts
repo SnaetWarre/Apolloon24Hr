@@ -112,6 +112,14 @@ export const SCHEMA_SQL = `
       FOREIGN KEY (runner_id) REFERENCES runners(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS activity_log (
+      id TEXT PRIMARY KEY,
+      occurred_at INTEGER NOT NULL,
+      action TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      origin TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS cluster_members (
       host_id TEXT PRIMARY KEY,
       url TEXT NOT NULL,
@@ -141,6 +149,9 @@ export const SCHEMA_SQL = `
 
     CREATE INDEX IF NOT EXISTS idx_race_events_occurred
       ON race_events(occurred_at DESC, created_at DESC);
+
+    CREATE INDEX IF NOT EXISTS idx_activity_log_occurred
+      ON activity_log(occurred_at DESC);
 
     CREATE INDEX IF NOT EXISTS idx_runner_labels_label
       ON runner_labels(label_id, runner_id);

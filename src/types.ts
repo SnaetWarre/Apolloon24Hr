@@ -1,6 +1,8 @@
 export type {
+  ActivityEntry,
   AppSettings,
   AppSnapshot,
+  BackupPreview,
   BackupRecord,
   BackupStatus,
   ClusterMemberStatus,

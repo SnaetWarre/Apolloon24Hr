@@ -13,7 +13,7 @@ import type {
   RunnerStatus,
 } from '../types';
 import type { PressTime } from '../lib/pressTiming';
-import { appKey, clusterStatusKey, snapshotKey } from './snapshot';
+import { appKey, backupsKey, clusterStatusKey, snapshotKey } from './snapshot';
 
 export function useAppActions() {
   const queryClient = useQueryClient();
@@ -98,7 +98,11 @@ export function useAppActions() {
       updatePublicRecordMode: action((publicRecordMode: PublicRecordMode) =>
         trpc.settings.updatePublicRecordMode.mutate({ publicRecordMode })
       ),
-      createBackup: action(() => trpc.backups.create.mutate(), [clusterStatusKey]),
+      createBackup: action(() => trpc.backups.create.mutate(), [clusterStatusKey, backupsKey]),
+      restoreBackup: action(
+        (fileName: string) => trpc.backups.restore.mutate({ fileName }),
+        [appKey, clusterStatusKey, backupsKey]
+      ),
       joinGroup: action((url: string) => trpc.cluster.join.mutate({ url }), [appKey, clusterStatusKey]),
       continueAlone: action(() => trpc.cluster.continueAlone.mutate(), [appKey, clusterStatusKey]),
     };

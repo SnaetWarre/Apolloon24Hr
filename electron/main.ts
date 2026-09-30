@@ -1,9 +1,17 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, type OpenDialogOptions } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, screen, shell, type OpenDialogOptions } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
 import { fork, type ChildProcess } from 'child_process';
+import { isRaceActive, stopWatchingRace, watchRace } from './race-guard.js';
 import { parseEnvText, resolveServerAddress } from './server-config.js';
+import {
+  DEFAULT_WINDOW_SIZE,
+  MIN_WINDOW_SIZE,
+  parseWindowState,
+  restorableBounds,
+  type SavedWindowState,
+} from './window-state.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -11,6 +19,8 @@ const __dirname = path.dirname(__filename);
 let mainWindow: BrowserWindow | null = null;
 let serverProcess: ChildProcess | undefined;
 let quitting = false;
+/** Set once the operator confirmed closing the app while the race runs. */
+let quitConfirmed = false;
 let appUrl = 'http://127.0.0.1:5173';
 const smokeTest = process.env.APOLLOON_PACKAGE_SMOKE === '1';
 const IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'jfif', 'gif', 'webp', 'avif', 'bmp', 'ico', 'svg', 'apng'];
@@ -23,13 +33,17 @@ if (smokeTest) {
 async function createWindow() {
   if (mainWindow) return; // Prevent multiple windows
 
+  const saved = smokeTest ? null : readWindowState();
+  const bounds = restorableBounds(
+    saved,
+    screen.getAllDisplays().map((display) => display.workArea)
+  );
   // The renderer draws its own title bar (src/components/DesktopTitleBar.tsx), so the
   // window opens without the operating system's frame. macOS keeps its traffic lights.
   const window = new BrowserWindow({
-    width: 1400,
-    height: 900,
-    minWidth: 720,
-    minHeight: 480,
+    ...(bounds ?? DEFAULT_WINDOW_SIZE),
+    minWidth: MIN_WINDOW_SIZE.width,
+    minHeight: MIN_WINDOW_SIZE.height,
     show: false,
     frame: isMac,
     titleBarStyle: isMac ? 'hidden' : 'default',
@@ -38,12 +52,17 @@ async function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      sandbox: true,
       spellcheck: false,
       preload: path.join(__dirname, 'preload.cjs'),
     },
   });
   mainWindow = window;
+  if (bounds && saved?.maximized) window.maximize();
   wireWindowState(window);
+  guardNavigation(window);
+  recoverRenderer(window);
+  guardClose(window);
 
   if (!app.isPackaged) {
     await window.loadURL(appUrl);
@@ -56,6 +75,135 @@ async function createWindow() {
   window.on('closed', () => {
     if (mainWindow === window) mainWindow = null;
   });
+}
+
+const windowStatePath = () => path.join(app.getPath('userData'), 'window-state.json');
+
+function readWindowState(): SavedWindowState | null {
+  try {
+    return parseWindowState(fs.readFileSync(windowStatePath(), 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function saveWindowState(window: BrowserWindow): void {
+  if (smokeTest || window.isDestroyed()) return;
+  const state: SavedWindowState = { bounds: window.getNormalBounds(), maximized: window.isMaximized() };
+  try {
+    fs.writeFileSync(windowStatePath(), JSON.stringify(state));
+  } catch (error) {
+    desktopLog(`Window position not saved: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+/**
+ * The window only ever shows this laptop's own app. A link elsewhere opens in the
+ * browser instead of replacing the timing screen, and no page can open new windows.
+ */
+function guardNavigation(window: BrowserWindow) {
+  const openOutside = (url: string) => {
+    if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
+  };
+  window.webContents.setWindowOpenHandler(({ url }) => {
+    openOutside(url);
+    return { action: 'deny' };
+  });
+  window.webContents.on('will-navigate', (event, url) => {
+    if (sameOrigin(url, appUrl)) return;
+    event.preventDefault();
+    openOutside(url);
+  });
+}
+
+function sameOrigin(url: string, base: string): boolean {
+  try {
+    return new URL(url).origin === new URL(base).origin;
+  } catch {
+    return false;
+  }
+}
+
+/** How long a hung page may stay frozen before it is restarted. */
+const UNRESPONSIVE_RESTART_MS = 10_000;
+
+/**
+ * A crashed or frozen page is loaded again on the same screen, so the operator gets the
+ * timing screen back within seconds instead of a blank window. The race data lives in
+ * the server, which a renderer crash does not touch.
+ */
+function recoverRenderer(window: BrowserWindow) {
+  const recentCrashes: number[] = [];
+  let unresponsiveTimer: NodeJS.Timeout | null = null;
+
+  window.webContents.on('render-process-gone', (_event, details) => {
+    if (details.reason === 'clean-exit' || quitting || window.isDestroyed()) return;
+    const now = Date.now();
+    recentCrashes.push(now);
+    while (recentCrashes.length && recentCrashes[0] < now - 60_000) recentCrashes.shift();
+    // Keeps crashing: wait longer, so the laptop stays usable enough to close the app.
+    const delayMs = recentCrashes.length > 3 ? 10_000 : 500;
+    desktopLog(`Page stopped (${details.reason}, exit code ${details.exitCode}); reloading in ${delayMs} ms`);
+    setTimeout(() => {
+      if (!window.isDestroyed()) window.webContents.reload();
+    }, delayMs);
+  });
+  window.on('unresponsive', () => {
+    if (unresponsiveTimer) return;
+    desktopLog('Page not responding');
+    unresponsiveTimer = setTimeout(() => {
+      unresponsiveTimer = null;
+      if (!window.isDestroyed()) window.webContents.forcefullyCrashRenderer();
+    }, UNRESPONSIVE_RESTART_MS);
+  });
+  window.on('responsive', () => {
+    if (unresponsiveTimer) clearTimeout(unresponsiveTimer);
+    unresponsiveTimer = null;
+  });
+}
+
+/** Closing the app while the race runs takes this laptop out of the group, so it asks first. */
+function guardClose(window: BrowserWindow) {
+  window.on('close', (event) => {
+    if (quitConfirmed || smokeTest || !isRaceActive()) {
+      saveWindowState(window);
+      return;
+    }
+    event.preventDefault();
+    void confirmQuitDuringRace().then((confirmed) => {
+      if (!confirmed || window.isDestroyed()) return;
+      // Destroyed rather than closed: a crashed or frozen page cannot hold the window open.
+      saveWindowState(window);
+      window.destroy();
+    });
+  });
+}
+
+let quitQuestion: Promise<boolean> | null = null;
+
+function confirmQuitDuringRace(): Promise<boolean> {
+  quitQuestion ??= (async () => {
+    const options = {
+      type: 'warning' as const,
+      title: 'Apolloon afsluiten?',
+      message: 'De wedstrijd loopt nog. Toch afsluiten?',
+      detail:
+        'Deze laptop valt dan weg uit de groep. De andere laptops werken verder, maar dan mag er geen enkele ' +
+        'meer uitvallen. Start Apolloon daarna meteen opnieuw.',
+      buttons: ['Blijven', 'Toch afsluiten'],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+    };
+    const owner = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+    const { response } = owner ? await dialog.showMessageBox(owner, options) : await dialog.showMessageBox(options);
+    quitConfirmed = response === 1;
+    if (quitConfirmed) desktopLog('Closed during the race after confirmation');
+    return quitConfirmed;
+  })().finally(() => {
+    quitQuestion = null;
+  });
+  return quitQuestion;
 }
 
 async function loadPackagedRenderer(window: BrowserWindow) {
@@ -240,6 +388,12 @@ const SERVER_LOG_MAX_BYTES = 5 * 1024 * 1024;
 let serverErrorTail = '';
 let serverLogStream: fs.WriteStream | null = null;
 
+/** Lines from the desktop app itself, among the server's in `server.log`. */
+function desktopLog(message: string) {
+  console.log(message);
+  if (app.isReady()) serverLog().write(`[desktop ${new Date().toISOString()}] ${message}\n`);
+}
+
 /** `server.log` in the app data folder, started over once it grows past a few MB. */
 function serverLog(): fs.WriteStream {
   if (serverLogStream) return serverLogStream;
@@ -295,6 +449,10 @@ if (!gotTheLock) {
     ensureEnvFile();
     try {
       await startServer();
+      watchRace(
+        () => appUrl,
+        (active) => desktopLog(active ? 'Race running: keeping the screen awake' : 'Race stopped')
+      );
       await createWindow();
       if (smokeTest) {
         const runners = await runPackagedSmokeChecks();
@@ -350,6 +508,7 @@ async function runPackagedSmokeChecks(): Promise<number> {
 
 function stopServer() {
   quitting = true;
+  stopWatchingRace();
   serverProcess?.kill();
 }
 
@@ -358,4 +517,14 @@ app.on('window-all-closed', () => {
   app.quit();
 });
 
-app.on('before-quit', stopServer);
+app.on('before-quit', (event) => {
+  // Cmd+Q on macOS, or quitting from the dock, skips the window's close button.
+  if (!quitConfirmed && !smokeTest && isRaceActive()) {
+    event.preventDefault();
+    void confirmQuitDuringRace().then((confirmed) => {
+      if (confirmed) app.quit();
+    });
+    return;
+  }
+  stopServer();
+});

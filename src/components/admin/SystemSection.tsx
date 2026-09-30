@@ -6,6 +6,7 @@ import { useConfirm } from '../ConfirmDialog';
 import { NetworkSetupPanel } from '../NetworkSetupPanel';
 import type { BackupStatus, ClusterStatus, NearbyGroup, Runner } from '../../types';
 import { AdminNoticeBanner, useAdminAction } from './AdminNotice';
+import { RestorePanel } from './RestorePanel';
 import { formatFileSize, formatRelativeAge } from './adminFormat';
 
 export function SystemSection({
@@ -26,6 +27,7 @@ export function SystemSection({
         <NetworkSetupPanel />
       </section>
       {cluster && <BackupPanel backup={cluster.backup} />}
+      <RestorePanel runnerCount={runners.length} />
       <section className="panel">
         <h2>Database status</h2>
         <div className="stats-grid">

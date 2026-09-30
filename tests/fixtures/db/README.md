@@ -15,7 +15,9 @@ Only 4.0 and later: the app puts an older database aside
   node scripts/make-db-fixture.mjs v4.0.3
   ```
 
-  and point `LATEST_RELEASE_FIXTURE` in the test at it.
+  and point `LATEST_RELEASE_FIXTURE` in the test at it. Its tables must match
+  the current schema, except tables added since, which the app creates
+  without a rebuild.
 - `v4.0.1-early-runners.sqlite`: a laptop's real database after going from the
   first version straight to 4.0.1. It says schema 14 but has the first
   `runners` table. Its admin password hash was removed.

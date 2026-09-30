@@ -52,6 +52,12 @@ Laptops at the event have no internet time, so their clocks can differ by second
 
 Every host creates a verified SQLite backup every five minutes and keeps the latest 48 scheduled backups plus the latest 20 manual and safety backups under `<DATA_PATH>/backups`. Each backup is checked with `quick_check` and `foreign_key_check` off the main thread before it is kept, so checks never delay timing. Beheer › Systeem & herstel can create and download a backup immediately. Download one to USB storage before the event: the linked laptops protect against a broken laptop, a backup also protects against a wrong action that was copied to every laptop.
 
+**Backup terugzetten** in the same section puts every linked laptop back to one of this laptop's backups at once, after keeping the current state as a `pre-restore` backup. Beheer › Activiteit lists every change with the screen and address it came from, on every laptop, so the moment before a mistake is easy to find.
+
+### Desktop app on race day
+
+While the race runs, the desktop app keeps the screen on and the laptop awake, and asks before it closes: a closed or sleeping laptop drops out of the group. A page that crashes or freezes for ten seconds is reloaded by itself, and every screen shows a recovery screen instead of going blank; the error goes to `server.log` in the app data folder. The window reopens where it was.
+
 Screens receive only live state; lap history is loaded separately as full, recent, or per-runner data. Registration answers with contact details are loaded only where an operator needs them (profiles and Beheer).
 
 See `docs/reliability-model.md` for the failover policy, retention rules, recovery procedure, and event-day checklist.

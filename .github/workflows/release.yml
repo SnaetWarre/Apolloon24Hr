@@ -1,5 +1,8 @@
 name: Release
 
+# A version tag builds, tests and smoke-tests the installers, attaches them to a draft
+# release with that version's changelog, and adds SHA256SUMS.txt once every build is in.
+
 on:
   push:
     tags:
@@ -7,12 +10,15 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing version tag to build
+        description: Existing version tag to build, such as v4.1.0
         required: true
-        default: v4.0.2
 
 permissions:
   contents: write
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
 
 env:
   RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
@@ -28,16 +34,20 @@ jobs:
       - name: Verify tag matches package version
         run: node scripts/verify-release-tag.mjs
 
-      - name: Create draft release
+      - name: Create draft release with the changelog
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release view "${RELEASE_TAG}" >/dev/null 2>&1 || \
+          node scripts/release-notes.mjs > "${RUNNER_TEMP}/notes.md"
+          if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
+            gh release edit "${RELEASE_TAG}" --notes-file "${RUNNER_TEMP}/notes.md"
+          else
             gh release create "${RELEASE_TAG}" \
               --draft \
               --verify-tag \
-              --title "Apolloon ${RELEASE_TAG#v}" \
-              --notes "Unsigned Windows, Linux, and macOS desktop builds. Verify the checksums before distribution."
+              --title "Apolloon Telsysteem ${RELEASE_TAG#v}" \
+              --notes-file "${RUNNER_TEMP}/notes.md"
+          fi
 
   build:
     needs: prepare-release
@@ -51,14 +61,17 @@ jobs:
             os: windows-latest
             script: electron:build:win
             assets: release/*.exe
+            smoke: node scripts/package-smoke.mjs
           - name: Linux x64
             os: ubuntu-26.04
             script: electron:build:linux
             assets: release/*.AppImage
+            smoke: xvfb-run -a node scripts/package-smoke.mjs
           - name: macOS Apple Silicon
             os: macos-latest
             script: electron:build:mac
             assets: release/*.dmg release/*.zip
+            smoke: ''
 
     steps:
       - uses: actions/checkout@v6
@@ -88,12 +101,7 @@ jobs:
           ELECTRON_BUILDER_CACHE: ${{ runner.temp }}/electron-builder
 
       - name: Run regression tests
-        if: runner.os != 'Windows'
         run: npm test
-
-      - name: Run Windows packaging regressions
-        if: runner.os == 'Windows'
-        run: node --import tsx --test tests/electron-config.test.ts tests/sqlite-connection.test.ts
 
       - name: Build desktop package
         run: npm run ${{ matrix.script }}
@@ -101,6 +109,11 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
           ELECTRON_CACHE: ${{ runner.temp }}/electron
           ELECTRON_BUILDER_CACHE: ${{ runner.temp }}/electron-builder
+
+      # The same checks as on pull requests: the packaged app starts, opens old databases and backs up.
+      - name: Smoke test the package
+        if: matrix.smoke != ''
+        run: ${{ matrix.smoke }}
 
       - name: Upload installers to draft release
         shell: bash
@@ -114,3 +127,18 @@ jobs:
             exit 1
           fi
           gh release upload "${RELEASE_TAG}" "${files[@]}" --clobber
+
+  checksums:
+    needs: build
+    runs-on: ubuntu-26.04
+    steps:
+      - name: Add SHA256SUMS.txt for every installer
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          mkdir assets && cd assets
+          gh release download "${RELEASE_TAG}" --pattern '*.exe' --pattern '*.AppImage' --pattern '*.dmg' --pattern '*.zip'
+          sha256sum -- * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          gh release upload "${RELEASE_TAG}" SHA256SUMS.txt --clobber

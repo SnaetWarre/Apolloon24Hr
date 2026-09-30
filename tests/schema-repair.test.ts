@@ -3,8 +3,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { DatabaseSync } from 'node:sqlite';
+import { temporaryDataPath } from './temporary-data.ts';
 
-const dataPath = path.resolve(`.tmp-test-schema-repair-${process.pid}`);
+const dataPath = temporaryDataPath('schema-repair');
 const dataDir = path.join(dataPath, 'data');
 const databasePath = path.join(dataDir, 'app.db');
 process.env.DATA_PATH = dataPath;

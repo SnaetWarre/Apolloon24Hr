@@ -202,7 +202,8 @@ export async function forwardWrite<T>(
   leader: ClusterMember,
   path: string,
   input: unknown,
-  requestId: string
+  requestId: string,
+  origin: string
 ): Promise<ForwardOutcome<T>> {
   const retry = (message: string): ForwardOutcome<T> => ({
     ok: false,
@@ -220,7 +221,11 @@ export async function forwardWrite<T>(
     response = await peerFetch(`${leader.url}/trpc/${path}`, {
       method: 'POST',
       body: input,
-      headers: { 'x-apolloon-forwarded': '1', 'x-apolloon-request-id': requestId },
+      headers: {
+        'x-apolloon-forwarded': '1',
+        'x-apolloon-request-id': requestId,
+        'x-apolloon-origin': encodeURIComponent(origin),
+      },
       timeoutMs: commitTimeoutMs + 1_000,
       signal: abort.signal,
     });

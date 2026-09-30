@@ -3,6 +3,7 @@ import { useAppData, useClusterStatus } from '../app/index';
 import { useArrivals } from '../lib/motion';
 import { buildEventReadiness, readinessSummary } from '../lib/readiness';
 import type { LiveAppSnapshot } from '../types';
+import { ActivitySection } from './admin/ActivitySection';
 import { LabelsSection } from './admin/LabelsSection';
 import { PreparationSection } from './admin/PreparationSection';
 import { PublicSection } from './admin/PublicSection';
@@ -19,13 +20,14 @@ const selectAdminData = ({ labels, runners, settings, temporaryTeams, host }: Li
   host,
 });
 
-type AdminSection = 'preparation' | 'runners' | 'labels' | 'public' | 'system';
+type AdminSection = 'preparation' | 'runners' | 'labels' | 'public' | 'activity' | 'system';
 
 const ADMIN_SECTIONS: ReadonlyArray<{ id: AdminSection; label: string }> = [
   { id: 'preparation', label: 'Voorbereiding' },
   { id: 'runners', label: 'Lopers' },
   { id: 'labels', label: 'Ploegen & labels' },
   { id: 'public', label: 'Publiek' },
+  { id: 'activity', label: 'Activiteit' },
   { id: 'system', label: 'Systeem & herstel' },
 ];
 
@@ -69,6 +71,9 @@ export function AdminView() {
         </div>
         <div className={contentClass('public')} hidden={activeSection !== 'public'}>
           <PublicSection publicRecordMode={settings.publicRecordMode} />
+        </div>
+        <div className={contentClass('activity')} hidden={activeSection !== 'activity'}>
+          <ActivitySection active={activeSection === 'activity'} />
         </div>
         <div className={contentClass('system')} hidden={activeSection !== 'system'}>
           <SystemSection cluster={cluster} hostUrl={host?.url ?? ''} runners={runners} labelCount={labels.length} />

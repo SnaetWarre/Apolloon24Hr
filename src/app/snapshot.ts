@@ -9,7 +9,12 @@ export const historyKey = [...appKey, 'history'] as const;
 
 export const registrationsKey = [...appKey, 'registrations'] as const;
 
+export const activityKey = [...appKey, 'activity'] as const;
+
 export const clusterStatusKey = ['cluster', 'status'] as const;
+
+/** This laptop's own backups; not event data, so not refreshed with it. */
+export const backupsKey = ['cluster', 'backups'] as const;
 
 export const emptyRace: RaceState = {
   id: 1,

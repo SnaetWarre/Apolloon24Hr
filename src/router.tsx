@@ -1,5 +1,6 @@
 import { createRootRoute, createRoute, createRouter, lazyRouteComponent } from '@tanstack/react-router';
 import { AppRoot, NotFoundPage } from './App';
+import { RouteErrorPage } from './components/ErrorScreens';
 import { QueuePage } from './components/QueuePage';
 import { RolePicker } from './components/RolePicker';
 import { TimingView } from './components/TimingView';
@@ -68,7 +69,7 @@ const routeTree = rootRoute.addChildren([
   }),
 ]);
 
-export const router = createRouter({ routeTree, defaultPreload: 'intent' });
+export const router = createRouter({ routeTree, defaultPreload: 'intent', defaultErrorComponent: RouteErrorPage });
 
 declare module '@tanstack/react-router' {
   interface Register {

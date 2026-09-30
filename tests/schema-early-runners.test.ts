@@ -3,8 +3,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { DatabaseSync } from 'node:sqlite';
+import { temporaryDataPath } from './temporary-data.ts';
 
-const dataPath = path.resolve(`.tmp-test-schema-early-runners-${process.pid}`);
+const dataPath = temporaryDataPath('schema-early-runners');
 const databasePath = path.join(dataPath, 'data', 'app.db');
 process.env.DATA_PATH = dataPath;
 process.env.NODE_ENV = 'test';

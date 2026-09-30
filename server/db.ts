@@ -94,3 +94,5 @@ export { hideRunnerInQueue, unhideRunnerInQueue, updateRunnerStatus, updateWaiti
 export { getRaceState } from './db/race-state.js';
 export { getAllLaps, getRecentLaps, getLapsForRunner, getAllRaceEvents, getRecentRaceEvents } from './db/history.js';
 export { createBurgieGepaktEvent, performHandoff, undoLastHandoff, finishRace } from './db/timing.js';
+export { getActivity, logActivity } from './db/activity.js';
+export { previewBackup, readRestoreData, replaceEventData, restoreDataSchema } from './db/restore.js';
