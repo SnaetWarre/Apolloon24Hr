@@ -9,7 +9,7 @@ on:
       tag:
         description: Existing version tag to build
         required: true
-        default: v4.0.0
+        default: v4.0.1
 
 permissions:
   contents: write
@@ -57,10 +57,6 @@ jobs:
             assets: release/*.AppImage
           - name: macOS Apple Silicon
             os: macos-latest
-            script: electron:build:mac
-            assets: release/*.dmg release/*.zip
-          - name: macOS Intel
-            os: macos-15-intel
             script: electron:build:mac
             assets: release/*.dmg release/*.zip
 
