@@ -109,7 +109,7 @@ after the event; its scripts are also downloadable for manual use.
 Every laptop runs its own backup scheduler, every five minutes by default. A
 backup is kept only after all of these steps succeed:
 
-1. `better-sqlite3` creates an online backup into a temporary file.
+1. `node:sqlite` creates an online backup into a temporary file.
 2. A worker thread converts it to a single rollback-journal file and runs
    `PRAGMA quick_check` and `PRAGMA foreign_key_check`, so the checks never
    delay a timing request.

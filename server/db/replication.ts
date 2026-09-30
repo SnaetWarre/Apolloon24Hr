@@ -1,7 +1,6 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import Database from 'better-sqlite3';
 import { z } from 'zod';
 import {
   DATA_DIR,
@@ -14,6 +13,7 @@ import {
   transaction,
 } from './connection.js';
 import { REPLICATED_SETTING_KEYS, getSetting } from './settings.js';
+import { openExistingDatabase, quickCheck } from './sqlite-file.js';
 import { type ReplicatedStatement, type ReplicationLogEntry } from './types.js';
 
 /**
@@ -191,7 +191,8 @@ export function appendFromLeader(
 
 /** A consistent copy of the whole database, for a laptop that joins or re-syncs. */
 export function serializeDatabase(): Buffer {
-  return getDb().serialize();
+  const image = getDb().serialize();
+  return Buffer.from(image.buffer, image.byteOffset, image.byteLength);
 }
 
 /**
@@ -208,7 +209,7 @@ export function installDatabaseImage(image: Buffer, expectedSchemaVersion: numbe
     db.prepare('ATTACH DATABASE ? AS incoming').run(imagePath);
     try {
       transaction(() => {
-        db.pragma('defer_foreign_keys = ON');
+        db.exec('PRAGMA defer_foreign_keys = ON');
         for (const table of [...REPLICATED_TABLES].reverse()) runUncaptured(`DELETE FROM main."${table}"`);
         for (const table of REPLICATED_TABLES) {
           const columns = (
@@ -238,11 +239,11 @@ export function installDatabaseImage(image: Buffer, expectedSchemaVersion: numbe
 }
 
 function inspectImage(imagePath: string, expectedSchemaVersion: number): string {
-  const image = new Database(imagePath, { fileMustExist: true });
+  const image = openExistingDatabase(imagePath);
   try {
-    image.pragma('journal_mode = DELETE');
-    const check = image.pragma('quick_check', { simple: true });
-    if (check !== 'ok') throw new Error(`De ontvangen database is beschadigd (${String(check)}).`);
+    image.exec('PRAGMA journal_mode = DELETE');
+    const check = quickCheck(image);
+    if (check !== 'ok') throw new Error(`De ontvangen database is beschadigd (${check}).`);
     const setting = (key: string) =>
       (image.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined)?.value;
     const schemaVersion = Number(setting('schema_version') || 0);

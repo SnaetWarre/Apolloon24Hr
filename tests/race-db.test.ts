@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
-import Database from 'better-sqlite3';
+import { DatabaseSync } from 'node:sqlite';
 
 const dataPath = path.resolve(`.tmp-test-race-db-${process.pid}`);
 process.env.DATA_PATH = dataPath;
@@ -176,7 +176,7 @@ test('operational SQLite access paths stay indexed and runner lookups agree', as
     );
     assert.ok(db.getRunnerById(second.id));
 
-    const inspectionDb = new Database(path.join(dataPath, 'data', 'app.db'), { readonly: true });
+    const inspectionDb = new DatabaseSync(path.join(dataPath, 'data', 'app.db'), { readOnly: true });
     try {
       const indexNames = new Set(
         [

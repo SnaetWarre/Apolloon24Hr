@@ -76,8 +76,11 @@ server/index.ts
 
 ### `server/db.ts` (facade over `server/db/`)
 
-- `connection.ts`: the single `better-sqlite3` connection, statement cache,
-  write capture, and the data revision.
+- `connection.ts`: the single `node:sqlite` connection, statement cache,
+  transactions (a nested call becomes a savepoint), write capture, and the
+  data revision.
+- `sqlite-file.ts`: opens a standalone database file (a backup or a received
+  image) and runs `PRAGMA quick_check`; also used by the backup worker.
 - `schema.ts`: tables and migrations. Schema 13 dropped the multi-master
   replication tables, moved the queue state onto `runners`, and derives
   night-team labels.

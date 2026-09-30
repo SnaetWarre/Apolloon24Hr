@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { DATA_DIR, getDb, openDatabase } from './db/connection.js';
+import { DATA_DIR, backupDatabase, getDb, openDatabase } from './db/connection.js';
 import { DATABASE_SCHEMA_VERSION, createSchema, migrateSchema, seedDefaultLabels } from './db/schema.js';
 import { getSetting, hostIdentity } from './db/settings.js';
 import { syncTemporaryTeamRows } from './db/teams.js';
@@ -20,7 +20,7 @@ export async function initDb(): Promise<void> {
   const upgradesReplication = storedSchemaVersion > 0 && storedSchemaVersion < 13;
   if (upgradesReplication) {
     const backupPath = path.join(DATA_DIR, `app.pre-schema-13.sqlite`);
-    if (!fs.existsSync(backupPath)) await database.backup(backupPath);
+    if (!fs.existsSync(backupPath)) await backupDatabase(backupPath);
   }
   createSchema();
   migrateSchema();

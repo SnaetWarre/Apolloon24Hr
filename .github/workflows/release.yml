@@ -48,9 +48,7 @@ jobs:
       matrix:
         include:
           - name: Windows x64
-            # Node-gyp cannot currently discover a supported Visual Studio
-            # installation on windows-latest (Windows Server 2025).
-            os: windows-2022
+            os: windows-latest
             script: electron:build:win
             assets: release/*.exe
           - name: Linux x64
@@ -99,7 +97,7 @@ jobs:
 
       - name: Run Windows packaging regressions
         if: runner.os == 'Windows'
-        run: node --import tsx --test tests/cluster-policy.test.ts tests/electron-config.test.ts
+        run: node --import tsx --test tests/electron-config.test.ts tests/sqlite-connection.test.ts
 
       - name: Build desktop package
         run: npm run ${{ matrix.script }}

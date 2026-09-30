@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
-import Database from 'better-sqlite3';
+import { DatabaseSync } from 'node:sqlite';
 import type { BackupRecord } from '../shared/schemas.ts';
 
 const dataPath = path.resolve(`.tmp-test-backups-${process.pid}`);
@@ -26,11 +26,11 @@ test('online backups are verified off the main thread and restorable as single S
     assert.deepEqual(fs.readdirSync(path.dirname(backupPath)), [record.fileName], 'no partial or sidecar files');
     assert.equal(record.scheduled, false);
 
-    const restored = new Database(backupPath, { readonly: true, fileMustExist: true });
+    const restored = new DatabaseSync(backupPath, { readOnly: true });
     try {
-      assert.equal(restored.pragma('journal_mode', { simple: true }), 'delete');
+      assert.deepEqual({ ...restored.prepare('PRAGMA journal_mode').get() }, { journal_mode: 'delete' });
       assert.deepEqual(
-        restored.prepare('SELECT name, runner_number AS runnerNumber FROM runners WHERE id = ?').get(runner.id),
+        { ...restored.prepare('SELECT name, runner_number AS runnerNumber FROM runners WHERE id = ?').get(runner.id) },
         {
           name: 'Backup runner',
           runnerNumber: 'BACKUP-1',

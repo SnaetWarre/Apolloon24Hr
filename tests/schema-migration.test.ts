@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
-import Database from 'better-sqlite3';
+import { DatabaseSync } from 'node:sqlite';
 
 const dataPath = path.resolve(`.tmp-test-schema-migration-${process.pid}`);
 const databasePath = path.join(dataPath, 'data', 'app.db');
@@ -59,7 +59,7 @@ const LEGACY_SCHEMA = `
 test('schema 13 retires multi-master replication, moves the queue onto runners, and derives night-team labels', async () => {
   fs.rmSync(dataPath, { recursive: true, force: true });
   fs.mkdirSync(path.dirname(databasePath), { recursive: true });
-  const legacy = new Database(databasePath);
+  const legacy = new DatabaseSync(databasePath);
   legacy.exec(LEGACY_SCHEMA);
   legacy.close();
 
@@ -91,9 +91,12 @@ test('schema 13 retires multi-master replication, moves the queue onto runners, 
     });
 
     db.closeDb();
-    const migrated = new Database(databasePath, { readonly: true });
+    const migrated = new DatabaseSync(databasePath, { readOnly: true });
     try {
-      const tables = migrated.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").pluck().all();
+      const tables = migrated
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
+        .all()
+        .map((row) => row.name);
       assert.ok(tables.includes('replication_log'));
       for (const retired of [
         'replication_operations',
@@ -120,9 +123,13 @@ test('schema 13 retires multi-master replication, moves the queue onto runners, 
       ]) {
         assert.equal(settings[retired], undefined, `${retired} is removed`);
       }
-      assert.deepEqual(migrated.prepare("SELECT label_id FROM runner_labels WHERE runner_id = 'alice'").pluck().all(), [
-        'blue',
-      ]);
+      assert.deepEqual(
+        migrated
+          .prepare("SELECT label_id FROM runner_labels WHERE runner_id = 'alice'")
+          .all()
+          .map((row) => row.label_id),
+        ['blue']
+      );
       const memberColumns = migrated.prepare('PRAGMA table_info(temporary_team_members)').all() as Array<{
         name: string;
       }>;
@@ -135,7 +142,7 @@ test('schema 13 retires multi-master replication, moves the queue onto runners, 
         teamColumns.some((column) => column.name === 'schedule_owner_host_id'),
         false
       );
-      assert.equal(migrated.pragma('quick_check', { simple: true }), 'ok');
+      assert.equal(migrated.prepare('PRAGMA quick_check').get()?.quick_check, 'ok');
     } finally {
       migrated.close();
     }

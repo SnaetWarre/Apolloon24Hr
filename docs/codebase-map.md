@@ -93,7 +93,6 @@ backup retention, and the event-day recovery runbook.
 ## Scripts And Data
 
 - `scripts/seed-test-db.mjs`: deterministic and stress-test development data.
-- `scripts/electron-build.mjs`: packaged Electron build wrapper.
 - `scripts/ensure-lan-dev-firewall.mjs`: development firewall helper.
 - `scripts/validation/`: Playwright browser checks; `run.mjs` runs each against its own seeded server.
 - `public/event-network/`: static-address scripts, downloadable from Beheer for manual use.
