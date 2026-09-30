@@ -9,7 +9,7 @@ on:
       tag:
         description: Existing version tag to build
         required: true
-        default: v4.0.1
+        default: v4.0.2
 
 permissions:
   contents: write

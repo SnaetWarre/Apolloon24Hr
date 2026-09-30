@@ -138,13 +138,24 @@ function launchServer(env: NodeJS.ProcessEnv, restartDelayMs = 1_000): ChildProc
   // The server runs from inside app.asar; Electron's Node mode reads the archive.
   const serverPath = path.join(app.getAppPath(), 'dist-server', 'server', 'index.js');
   const child = fork(serverPath, [], {
-    stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
+    stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
     env,
     cwd: app.getPath('userData'),
     execArgv: [],
   });
   const startedAt = Date.now();
   serverProcess = child;
+  // Windows has no console for a desktop app, so the server output also goes to a file.
+  const log = serverLog();
+  log.write(`\n--- server start ${new Date().toISOString()} (${app.getVersion()}) ---\n`);
+  child.stdout?.on('data', (chunk: Buffer) => {
+    process.stdout.write(chunk);
+    log.write(chunk);
+  });
+  child.stderr?.on('data', (chunk: Buffer) => {
+    process.stderr.write(chunk);
+    log.write(chunk);
+  });
 
   child.on('error', (err) => {
     console.error('Failed to start server:', err);
@@ -160,6 +171,19 @@ function launchServer(env: NodeJS.ProcessEnv, restartDelayMs = 1_000): ChildProc
     }, restartDelayMs);
   });
   return child;
+}
+
+const SERVER_LOG_MAX_BYTES = 5 * 1024 * 1024;
+let serverLogStream: fs.WriteStream | null = null;
+
+/** `server.log` in the app data folder, started over once it grows past a few MB. */
+function serverLog(): fs.WriteStream {
+  if (serverLogStream) return serverLogStream;
+  const logPath = path.join(app.getPath('userData'), 'server.log');
+  const tooLarge = fs.existsSync(logPath) && fs.statSync(logPath).size > SERVER_LOG_MAX_BYTES;
+  serverLogStream = fs.createWriteStream(logPath, { flags: tooLarge ? 'w' : 'a' });
+  serverLogStream.on('error', (error) => console.error('Server log unavailable:', error));
+  return serverLogStream;
 }
 
 async function waitForServer(url: string, child: ChildProcess, timeoutMs = 20_000) {
