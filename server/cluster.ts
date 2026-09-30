@@ -72,7 +72,8 @@ const ELECTING_GRACE_MS = electionTimeoutMs * 5;
 
 let joining = false;
 let lastError: string | null = null;
-let startedAt = Date.now();
+/** Durations here run on the monotonic clock, like consensus, so a clock correction cannot stretch or skip them. */
+let startedAt = performance.now();
 let maintenanceTimer: NodeJS.Timeout | null = null;
 
 function selfMember(): ClusterMember {
@@ -151,7 +152,7 @@ function groupState(writable: boolean, statuses: ClusterMemberStatus[]): GroupSt
   if (!enabled || statuses.length === 1) return writable ? 'solo' : 'electing';
   if (!writable) {
     const since = Math.max(lastLeaderContact() ?? 0, startedAt);
-    return Date.now() - since < ELECTING_GRACE_MS ? 'electing' : 'no-majority';
+    return performance.now() - since < ELECTING_GRACE_MS ? 'electing' : 'no-majority';
   }
   return statuses.every((member) => member.reachable && member.caughtUp) ? 'healthy' : 'degraded';
 }
@@ -169,7 +170,7 @@ export const NOT_CONFIRMED_MESSAGE =
   'Niet bevestigd: deze wijziging staat nog niet op een tweede laptop. Controleer of de andere laptops aan staan en probeer opnieuw.';
 
 export function writeDeadline(): number {
-  return Date.now() + WRITE_DEADLINE_MS;
+  return performance.now() + WRITE_DEADLINE_MS;
 }
 
 /**
@@ -180,7 +181,7 @@ export function writeDeadline(): number {
 export async function writeTarget(deadline: number): Promise<'self' | ClusterMember | null> {
   for (;;) {
     if (!busy() && leaderAlive()) return isLeader() ? 'self' : (currentLeader() ?? 'self');
-    if (Date.now() >= deadline) return null;
+    if (performance.now() >= deadline) return null;
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
 }
@@ -228,12 +229,13 @@ export async function forwardWrite<T>(
   } finally {
     clearInterval(watch);
   }
+  // A tRPC error is the leader's answer to the write; a laptop that no longer leads answers
+  // with a plain `{ code, error }` instead, and the write goes to the next leader.
   const payload = (await response.json().catch(() => null)) as {
     result?: { data?: T };
-    error?: { message?: string; data?: { code?: string } };
-    code?: string;
+    error?: { message?: string; data?: { code?: string } } | string;
   } | null;
-  if (payload?.error) {
+  if (payload?.error && typeof payload.error === 'object') {
     const code = payload.error.data?.code ?? 'INTERNAL_SERVER_ERROR';
     const message = payload.error.message ?? 'Opslaan mislukt';
     return { ok: false, code, message, retry: code === 'SERVICE_UNAVAILABLE' };
@@ -244,8 +246,8 @@ export async function forwardWrite<T>(
 }
 
 async function waitForLocalSeq(seq: number): Promise<void> {
-  const deadline = Date.now() + 2_000;
-  while (getLogHead().seq < seq && Date.now() < deadline) {
+  const deadline = performance.now() + 2_000;
+  while (getLogHead().seq < seq && performance.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
 }
@@ -493,7 +495,7 @@ export function startClusterService(): void {
   const storedOffset = Number(getSetting('cluster_clock_offset_ms') || 0);
   setClusterClockOffset(Number.isFinite(storedOffset) ? storedOffset : 0);
   if (!enabled) return;
-  startedAt = Date.now();
+  startedAt = performance.now();
   startConsensus();
   startDiscovery(() => {
     const identity = hostIdentity();

@@ -41,6 +41,8 @@
     "test": "node --import tsx --test \"tests/!(*.e2e).test.{ts,mjs}\"",
     "test:e2e": "npm run build && node --import tsx --test \"tests/*.e2e.test.ts\"",
     "test:ui": "node scripts/validation/run.mjs",
+    "test:sim": "node --import tsx --test tests/raft-sim.test.ts",
+    "rehearse": "node scripts/rehearse.mjs",
     "check": "npm run typecheck && npm run lint && npm run format:check && npm run client:build",
     "build": "npm run typecheck:client && npm run client:build && npm run server:build",
     "electron:dev": "npm run electron:compile && node scripts/ensure-lan-dev-firewall.mjs && concurrently -k \"npm run dev:seeded\" \"wait-on http://localhost:5173 && electron .\"",

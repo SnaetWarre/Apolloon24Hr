@@ -18,7 +18,8 @@ server/index.ts
   |     v
   |   server/db.ts ----------- SQLite + replication log
   |
-  |-- server/consensus.ts ----- leader election, log replication, majority commit
+  |-- server/raft.ts ---------- leader election, log replication, majority commit
+  |-- server/consensus.ts ----- runs raft.ts on SQLite, HTTP, and real timers
   |-- server/cluster.ts ------- peer endpoints, joining, forwarding writes, status
   |-- server/discovery.ts ----- UDP announcements: finding laptops on the LAN
   |     |
@@ -114,9 +115,12 @@ cluster_members         forwarded_writes
 replication_log
 ```
 
-### `server/consensus.ts`
+### `server/raft.ts` and `server/consensus.ts`
 
-Raft among the laptops in `cluster_members`:
+Raft among the laptops in `cluster_members`. `raft.ts` holds the algorithm
+and receives its storage, network, clock, timers, and randomness;
+`consensus.ts` passes the SQLite log, HTTP, and real timers, and the
+simulation tests pass fakes.
 
 - Terms and this laptop's vote are host-local settings, so a laptop never
   votes twice in a term, also across restarts. Log entries carry the term
@@ -133,6 +137,12 @@ Raft among the laptops in `cluster_members`:
 - A follower whose log diverged (it holds entries the leader does not), or
   that needs entries the leader no longer keeps (5,000 retained), takes a
   backup and installs a full image from the leader.
+- A re-sync is abandoned when the leader it copies from goes quiet or
+  another laptop leads, and waits at most 10 s for the copy to start, so a
+  laptop never sits out an election waiting for a laptop that lost power.
+- Timeouts run on the monotonic clock (`performance.now()`). The wall clock
+  may jump when the system corrects it; a laptop whose clock jumped back
+  would otherwise refuse to vote for as long as the jump.
 - Followers keep their clock offset to the leader (`server/clock.ts`).
 
 ### `server/cluster.ts`
@@ -221,3 +231,7 @@ a timed lap, a follower catching up after being off, a laptop cut off from
 the others, continuing alone after two laptops fail, finding each other
 again after every address changed, exactly-once repeats,
 version mismatches, backups, and night teams across a restart.
+
+`npm test` also runs the consensus simulation (`tests/raft-sim.test.ts`), and
+`npm run rehearse` puts three real servers through random failures; see
+`docs/codebase-map.md`.

@@ -27,6 +27,10 @@ De database migreert automatisch naar schema 13 en bewaart eerst een kopie
 - Alle laptops delen één klok, ook na een overname
 - Browsers en tv's schakelen vanzelf naar een andere laptop als de hunne
   wegvalt
+- De overname wordt getest met duizenden gesimuleerde runs vol uitvallende
+  laptops, losse kabels, dichtgeklapte schermen en verspringende klokken, en
+  met `npm run rehearse`: drie echte servers onder willekeurige storingen
+  terwijl een bot rondes klokt
 
 ### Changed
 
