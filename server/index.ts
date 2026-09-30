@@ -182,6 +182,16 @@ app.get('/api/backups/latest', (_req, res) => {
 registerExportRoutes(app);
 registerStaticFrontend(app);
 
+// Operators see the reason on screen; the default handler only says "Internal Server Error".
+app.use((error: unknown, req: Request, res: Response, next: NextFunction) => {
+  console.error(`${req.method} ${req.path} failed:`, error);
+  if (res.headersSent) {
+    next(error);
+    return;
+  }
+  res.status(500).json({ ok: false, error: error instanceof Error ? error.message : String(error) });
+});
+
 /** Night-team labels are derived from the clock, so clients refresh when a team starts or stops. */
 function watchTemporaryTeams(): void {
   let activeKey = activeTemporaryTeamsKey();

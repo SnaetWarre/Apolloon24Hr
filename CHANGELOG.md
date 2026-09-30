@@ -4,6 +4,23 @@ All notable changes to the Leuven 24h Runner Tracker will be documented in this 
 
 ## [Unreleased]
 
+## [4.0.2] - 2026-09-30
+
+Laptops koppelen alleen met dezelfde versie: zet 4.0.2 op alle laptops.
+
+### Fixed
+
+- Een laptop met een database uit de allereerste versie toonde "Geen verbinding
+  met de lokale server" (500): de lopers-tabel miste kolommen. Die tabel wordt
+  nu bij het opstarten herbouwd, met behoud van lopers en rondes
+
+### Added
+
+- Kan de server iets niet laden, dan staat de reden nu op het scherm in plaats
+  van alleen een foutcode
+- De server schrijft zijn meldingen naar `server.log` in de app-map, ook op
+  Windows waar er geen console is
+
 ## [4.0.1] - 2026-09-30
 
 Laptops koppelen alleen met dezelfde versie: zet 4.0.1 op alle laptops.

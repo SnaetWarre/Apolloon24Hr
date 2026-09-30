@@ -42,7 +42,10 @@ async function fetchSnapshot(): Promise<LiveAppSnapshot> {
     return prefetched;
   }
   const response = await fetch('/api/state');
-  if (!response.ok) throw new Error(`Serverstatus laden mislukt (${response.status})`);
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(`Serverstatus laden mislukt (${response.status})${body?.error ? `: ${body.error}` : ''}`);
+  }
   return (await response.json()) as LiveAppSnapshot;
 }
 

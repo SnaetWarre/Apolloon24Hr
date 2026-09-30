@@ -93,14 +93,7 @@ const DEFAULT_LABELS: DefaultLabel[] = [
   },
 ];
 
-export function createSchema(): void {
-  getDb().exec(`
-    CREATE TABLE IF NOT EXISTS settings (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS runners (
+const RUNNERS_TABLE_SQL = `(
       id TEXT PRIMARY KEY,
       runner_number TEXT UNIQUE,
       name TEXT NOT NULL,
@@ -116,7 +109,43 @@ export function createSchema(): void {
       hidden_at INTEGER,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
+    )`;
+
+/** What a `runners` column gets when an older table lacks it; the other columns may stay NULL. */
+const RUNNER_COLUMN_FALLBACKS: Record<string, string> = {
+  registration_source: "'manual'",
+  notes: "''",
+  status: "'registered'",
+  created_at: "CAST(unixepoch('subsec') * 1000 AS INTEGER)",
+  updated_at: "CAST(unixepoch('subsec') * 1000 AS INTEGER)",
+};
+
+const RUNNER_COLUMNS = [
+  'id',
+  'runner_number',
+  'name',
+  'target_laps',
+  'historical_avg_ms',
+  'historical_best_ms',
+  'registration_source',
+  'notes',
+  'registration_json',
+  'status',
+  'queue_index',
+  'status_since',
+  'hidden_at',
+  'created_at',
+  'updated_at',
+];
+
+export function createSchema(): void {
+  getDb().exec(`
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS runners ${RUNNERS_TABLE_SQL};
 
     CREATE TABLE IF NOT EXISTS labels (
       id TEXT PRIMARY KEY,
@@ -300,7 +329,41 @@ export function migrateSchema(): void {
     }
     setLocalSetting('schema_version', String(DATABASE_SCHEMA_VERSION));
   });
+  rebuildOutdatedRunnersTable();
   getDb().exec(`PRAGMA user_version = ${DATABASE_SCHEMA_VERSION}`);
+}
+
+/**
+ * Databases from the earliest versions have a `runners` table without most
+ * columns and with a status check that rejects 'registered' and 'running'.
+ * SQLite cannot change a check in place, so such a table is copied into a
+ * fresh one with the same ids. Foreign keys are off meanwhile so dropping the
+ * old table does not cascade into laps and labels.
+ */
+function rebuildOutdatedRunnersTable(): void {
+  const existing = new Set(all<{ name: string }>('PRAGMA table_info(runners)').map((column) => column.name));
+  const tableSql = one<{ sql: string }>("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'runners'")?.sql;
+  const current =
+    RUNNER_COLUMNS.every((column) => existing.has(column)) &&
+    Boolean(tableSql?.includes("'registered'") && tableSql.includes("'running'"));
+  if (current) return;
+
+  const db = getDb();
+  db.exec('PRAGMA foreign_keys = OFF');
+  try {
+    transaction(() => {
+      run(`CREATE TABLE runners_rebuilt ${RUNNERS_TABLE_SQL}`);
+      const values = RUNNER_COLUMNS.map((column) =>
+        existing.has(column) ? column : (RUNNER_COLUMN_FALLBACKS[column] ?? 'NULL')
+      );
+      run(`INSERT INTO runners_rebuilt (${RUNNER_COLUMNS.join(', ')}) SELECT ${values.join(', ')} FROM runners`);
+      run('DROP TABLE runners');
+      run('ALTER TABLE runners_rebuilt RENAME TO runners');
+      run('CREATE INDEX IF NOT EXISTS idx_runners_queue_order ON runners(status, queue_index, status_since)');
+    });
+  } finally {
+    db.exec('PRAGMA foreign_keys = ON');
+  }
 }
 
 /** Schema 5 started storing each lap's labels; older laps get the runner's labels at migration time. */
