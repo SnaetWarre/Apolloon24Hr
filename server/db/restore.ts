@@ -112,6 +112,7 @@ export function replaceEventData(data: RestoreData): { runners: number; laps: nu
         columns.map((name) => row[name] ?? null)
       );
   }
+  for (const key of REPLICATED_SETTING_KEYS) run('DELETE FROM settings WHERE key = ?', [key]);
   for (const { key, value } of data.settings) {
     if (REPLICATED_SETTING_KEYS.includes(key))
       run('INSERT OR REPLACE INTO settings(key, value) VALUES(?, ?)', [key, value]);

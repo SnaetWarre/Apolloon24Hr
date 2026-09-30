@@ -36,7 +36,8 @@ import {
   writeDeadline,
   writeTarget,
 } from './cluster.js';
-import { waitForCommit } from './consensus.js';
+import { currentTerm, waitForCommit } from './consensus.js';
+import { selfUrl } from './peers.js';
 import {
   createBurgieGepaktEvent,
   createLabel,
@@ -102,6 +103,8 @@ function unavailable(message: string): never {
   throw new TRPCError({ code: 'SERVICE_UNAVAILABLE', message });
 }
 
+type Preparation<P> = { value: P; isCurrent: () => boolean };
+
 /**
  * A mutation that changes event data, callable on every laptop. The leader
  * commits it as one replicated write and answers once a majority of laptops
@@ -109,10 +112,10 @@ function unavailable(message: string): never {
  * at the next leader when the first one fails meanwhile, so a key press
  * during a takeover still counts, once, with its original time.
  */
-function write<I, T>(action: (input: I) => T) {
+function write<I, T, P = undefined>(action: (input: I, prepared: P) => T, prepare?: () => Promise<Preparation<P>>) {
   return async ({ input, path, ctx }: { input: I; path: string; ctx: RequestContext }): Promise<T> => {
     const origin = ctx.origin || 'onbekend';
-    const change = { type: path, input, origin, action: () => action(input) };
+    const change = { type: path, input, origin, action: (prepared: P) => action(input, prepared), prepare };
     if (ctx.forwarded) return commitHere(change, ctx.requestId, ctx.reportLogSeq);
     const deadline = writeDeadline();
     let requestId: string | undefined;
@@ -133,19 +136,41 @@ function write<I, T>(action: (input: I) => T) {
   };
 }
 
-type Change<T> = { type: string; input: unknown; origin: string; action: () => T };
+type Change<T, P> = {
+  type: string;
+  input: unknown;
+  origin: string;
+  action: (prepared: P) => T;
+  prepare?: () => Promise<Preparation<P>>;
+};
 
 /**
  * Commits on this laptop, the leader, and waits until a majority holds the change.
  * The activity log entry is part of the same write.
  */
-async function commitHere<T>(
-  { type, input, origin, action }: Change<T>,
+async function commitHere<T, P>(
+  { type, input, origin, action, prepare }: Change<T, P>,
   requestId?: string,
   reportLogSeq?: (seq: number) => void
 ): Promise<T> {
+  let prepared: P | undefined;
   try {
     assertWritable();
+    // A repeated forwarded restore returns its original result and safety backup.
+    if (prepare && !(requestId && findForwardedWrite(requestId))) {
+      const deadline = writeDeadline();
+      for (;;) {
+        const candidate = await prepare();
+        assertWritable();
+        if (candidate.isCurrent()) {
+          prepared = candidate.value;
+          break;
+        }
+        if (performance.now() >= deadline) {
+          unavailable('De gegevens veranderen nog. Probeer het terugzetten opnieuw.');
+        }
+      }
+    }
   } catch (error) {
     unavailable((error as Error).message);
   }
@@ -158,7 +183,8 @@ async function commitHere<T>(
         return earlier.result as T;
       }
       const describe = safeDescribe(type, input);
-      const outcome = action();
+      // No await between checking the backup's revision and replacing the data.
+      const outcome = action(prepared as P);
       if (describe) logActivity({ occurredAt: clusterNow(), action: type, summary: describe(outcome), origin });
       if (requestId) saveForwardedWrite(requestId, outcome, clusterNow());
       return outcome;
@@ -226,7 +252,18 @@ function requireTemporaryTeam(labelId: string): TemporaryTeam {
   return getTemporaryTeam(labelId) ?? fail('NOT_FOUND', 'Tijdelijke nachtploeg niet gevonden');
 }
 
-const applyRestore = write(replaceEventData);
+const applyRestore = write(
+  (input: z.infer<typeof restoreDataSchema>, safety) => ({ ...replaceEventData(input), ...safety }),
+  async () => {
+    const head = getLogHead();
+    const term = currentTerm();
+    const safety = await createVerifiedBackup('pre-restore');
+    return {
+      value: { safetyBackup: safety.fileName, safetyHostUrl: selfUrl() },
+      isCurrent: () => currentTerm() === term && getLogHead().id === head.id,
+    };
+  }
+);
 
 export const appRouter = t.router({
   cluster: t.router({
@@ -244,8 +281,8 @@ export const appRouter = t.router({
       return previewBackup(found.path, found.record.fileName, found.record.createdAt);
     }),
     /**
-     * Puts every laptop back to a backup of this laptop. The current data is kept in a
-     * backup first. The rows travel to the leader as one ordinary replicated write, so the
+     * Puts every laptop back to a backup of this laptop. The leader keeps a verified
+     * backup of its current data first. The rows travel as one ordinary replicated write, so the
      * whole group changes together and nobody has to stop or relink a laptop.
      */
     restore: t.procedure.input(backupFileSchema).mutation(async ({ input, ctx }) => {
@@ -256,9 +293,7 @@ export const appRouter = t.router({
       } catch (error) {
         fail('BAD_REQUEST', error instanceof Error ? error.message : String(error));
       }
-      const safety = await createVerifiedBackup('pre-restore');
-      const restored = await applyRestore({ input: data, path: 'backups.applyRestore', ctx });
-      return { ...restored, safetyBackup: safety.fileName };
+      return applyRestore({ input: data, path: 'backups.applyRestore', ctx });
     }),
     /** The replicated half of `restore`; also what a laptop forwards to the leader. */
     applyRestore: t.procedure

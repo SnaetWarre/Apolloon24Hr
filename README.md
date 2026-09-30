@@ -52,7 +52,7 @@ Laptops at the event have no internet time, so their clocks can differ by second
 
 Every host creates a verified SQLite backup every five minutes and keeps the latest 48 scheduled backups plus the latest 20 manual and safety backups under `<DATA_PATH>/backups`. Each backup is checked with `quick_check` and `foreign_key_check` off the main thread before it is kept, so checks never delay timing. Beheer › Systeem & herstel can create and download a backup immediately. Download one to USB storage before the event: the linked laptops protect against a broken laptop, a backup also protects against a wrong action that was copied to every laptop.
 
-**Backup terugzetten** in the same section puts every linked laptop back to one of this laptop's backups at once, after keeping the current state as a `pre-restore` backup. Beheer › Activiteit lists every change with the screen and address it came from, on every laptop, so the moment before a mistake is easy to find.
+**Backup terugzetten** in the same section puts every linked laptop back to one of this laptop's backups at once. The leader first keeps the current group state as a verified `pre-restore` backup; the result tells you which laptop holds it so you can undo the restore there. Beheer › Activiteit lists every change with the screen and address it came from, on every laptop, so the moment before a mistake is easy to find.
 
 ### Desktop app on race day
 

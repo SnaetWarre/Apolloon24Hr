@@ -2,7 +2,7 @@ import React from 'react';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { trpc } from '../../api';
 import { activityKey } from '../../app/snapshot';
-import type { ActivityEntry } from '../../types';
+import type { ActivityCursor, ActivityEntry } from '../../types';
 
 const PAGE_SIZE = 200;
 
@@ -19,9 +19,12 @@ export function ActivitySection({ active }: { active: boolean }) {
   const query = useInfiniteQuery({
     queryKey: activityKey,
     queryFn: ({ pageParam }) => trpc.activity.list.query({ limit: PAGE_SIZE, before: pageParam }),
-    initialPageParam: null as number | null,
-    getNextPageParam: (lastPage) =>
-      lastPage.length < PAGE_SIZE ? undefined : lastPage[lastPage.length - 1].occurredAt,
+    initialPageParam: null as ActivityCursor | null,
+    getNextPageParam: (lastPage) => {
+      if (lastPage.length < PAGE_SIZE) return undefined;
+      const last = lastPage[lastPage.length - 1];
+      return { occurredAt: last.occurredAt, id: last.id };
+    },
     // Only while the section is open: every change refreshes it.
     enabled: active,
   });

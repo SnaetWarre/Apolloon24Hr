@@ -108,8 +108,9 @@ test(
       const restored = await client(follower).backups.restore.mutate({ fileName: backup.fileName });
       assert.deepEqual([restored.runners, restored.laps], [2, 0]);
       assert.match(restored.safetyBackup, /pre-restore/);
+      assert.equal(restored.safetyHostUrl, leader.baseUrl);
       assert.ok(
-        (await client(follower).backups.list.query()).some((record) => record.fileName === restored.safetyBackup),
+        (await client(leader).backups.list.query()).some((record) => record.fileName === restored.safetyBackup),
         'the state before the restore is kept'
       );
       for (const server of servers) {
@@ -138,6 +139,89 @@ test(
     }
   }
 );
+
+test(
+  'a restore from a stale follower can be undone using the leader’s safety backup',
+  { timeout: 40_000 },
+  async () => {
+    const root = testRoot('restore-stale');
+    const servers: RunningServer[] = [];
+    try {
+      await startGroup(root, servers);
+      const leader = (await leaderOf(servers))!;
+      const follower = servers.find((server) => server !== leader)!;
+      const kept = await client(leader).runners.create.mutate({ name: 'Kept', runnerNumber: 'KEEP' });
+      await waitForSameState(leader, follower);
+      const backup = await client(follower).backups.create.mutate();
+      await isolate(follower, true);
+      const latest = await client(leader).runners.create.mutate({ name: 'Latest committed', runnerNumber: 'LATEST' });
+      await client(leader).settings.updatePublicRecordMode.mutate({ publicRecordMode: 'off' });
+      assert.deepEqual(
+        (await fetchState(follower)).runners.map((runner) => runner.id),
+        [kept.id]
+      );
+
+      // The restore waits for the cable to return. Its safety copy must not use this stale data.
+      const restoring = client(follower).backups.restore.mutate({ fileName: backup.fileName });
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      await isolate(follower, false);
+      const restored = await restoring;
+      const safetyHost = servers.find((server) => server.baseUrl === restored.safetyHostUrl)!;
+      assert.ok(safetyHost);
+      const preview = await client(safetyHost).backups.preview.query({ fileName: restored.safetyBackup });
+      assert.equal(preview.runners, 2, 'the safety copy includes the write the follower had not received');
+      for (const server of servers) {
+        await waitForSameState(leader, server);
+        assert.equal((await fetchState(server)).settings.publicRecordMode, 'day');
+      }
+
+      await client(safetyHost).backups.restore.mutate({ fileName: restored.safetyBackup });
+      for (const server of servers) {
+        await waitForSameState(safetyHost, server);
+        const state = await fetchState(server);
+        assert.deepEqual(state.runners.map((runner) => runner.id).sort(), [kept.id, latest.id].sort());
+        assert.equal(state.settings.publicRecordMode, 'off');
+      }
+    } catch (error) {
+      throw withServerOutput(error, ...servers);
+    } finally {
+      await Promise.all(servers.map(stopServer));
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
+);
+
+test('writes during safety-backup verification are preserved before restoring', { timeout: 20_000 }, async () => {
+  const root = testRoot('restore-concurrent');
+  const server = await startServer({ port: await freePort(), dataPath: root, clusterEnabled: false });
+  try {
+    await client(server).runners.create.mutate({ name: 'Original', runnerNumber: 'ORIGINAL' });
+    const backup = await client(server).backups.create.mutate();
+    const restoring = client(server).backups.restore.mutate({ fileName: backup.fileName });
+    // The online snapshot starts before its worker checks finish. Add a write in that gap.
+    await waitFor(
+      async () => {
+        return (await fetchStatus(server)).backup.inProgress;
+      },
+      8_000,
+      1
+    );
+    await client(server).runners.create.mutate({ name: 'During backup', runnerNumber: 'DURING' });
+    const restored = await restoring;
+    const preview = await client(server).backups.preview.query({ fileName: restored.safetyBackup });
+    assert.equal(preview.runners, 2, 'the final safety copy includes the concurrent write');
+    await client(server).backups.restore.mutate({ fileName: restored.safetyBackup });
+    assert.deepEqual((await fetchState(server)).runners.map((runner) => runner.name).sort(), [
+      'During backup',
+      'Original',
+    ]);
+  } catch (error) {
+    throw withServerOutput(error, server);
+  } finally {
+    await stopServer(server);
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test('three laptops form one group, every laptop writes, and each holds everything', { timeout: 40_000 }, async () => {
   const root = testRoot('group');

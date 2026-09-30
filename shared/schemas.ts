@@ -191,9 +191,16 @@ export type ActivityEntry = {
   origin: string;
 };
 
+export const activityCursorSchema = z.object({
+  occurredAt: z.number().int().nonnegative(),
+  id: z.string().min(1).max(128),
+});
+
+export type ActivityCursor = z.infer<typeof activityCursorSchema>;
+
 export const activityPageSchema = z.object({
   limit: z.number().int().positive().max(500).default(200),
-  before: z.number().int().nonnegative().nullable().default(null),
+  before: activityCursorSchema.nullable().default(null),
 });
 
 export type ClusterRole = 'leader' | 'follower' | 'candidate';

@@ -27,6 +27,12 @@ jobs:
   prepare-release:
     runs-on: ubuntu-26.04
     steps:
+      # Keep the generator from this workflow's revision: older tags do not contain it.
+      - uses: actions/checkout@v6
+
+      - name: Keep the release-note generator
+        run: cp scripts/release-notes.mjs "${RUNNER_TEMP}/release-notes.mjs"
+
       - uses: actions/checkout@v6
         with:
           ref: ${{ env.RELEASE_TAG }}
@@ -38,7 +44,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          node scripts/release-notes.mjs > "${RUNNER_TEMP}/notes.md"
+          node "${RUNNER_TEMP}/release-notes.mjs" > "${RUNNER_TEMP}/notes.md"
           if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
             gh release edit "${RELEASE_TAG}" --notes-file "${RUNNER_TEMP}/notes.md"
           else

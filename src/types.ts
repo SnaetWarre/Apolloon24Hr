@@ -1,4 +1,5 @@
 export type {
+  ActivityCursor,
   ActivityEntry,
   AppSettings,
   AppSnapshot,

@@ -37,9 +37,14 @@ export function RouteErrorPage({ error, info, reset }: ErrorComponentProps) {
   }, [error, info]);
 
   const retry = React.useCallback(() => {
+    // A rejected module import stays cached until the document is reloaded.
+    if (displayRoute) {
+      window.location.reload();
+      return;
+    }
     reset();
     void router.invalidate();
-  }, [reset, router]);
+  }, [displayRoute, reset, router]);
 
   React.useEffect(() => {
     if (!displayRoute) return;

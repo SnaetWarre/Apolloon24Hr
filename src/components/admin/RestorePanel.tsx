@@ -61,7 +61,7 @@ export function RestorePanel({ runnerCount }: { runnerCount: number }) {
     await run(
       () => restoreBackup(record.fileName),
       (result) =>
-        `Teruggezet naar ${formatMoment(record.createdAt)}: ${result.runners} lopers, ${result.laps} rondes. De toestand van daarvoor staat in ${result.safetyBackup}.`,
+        `Teruggezet naar ${formatMoment(record.createdAt)}: ${result.runners} lopers, ${result.laps} rondes. De toestand van daarvoor staat op laptop ${result.safetyHostUrl}, in ${result.safetyBackup}. Open daar Systeem & herstel om dit ongedaan te maken.`,
       'Terugzetten mislukt'
     );
   }

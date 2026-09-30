@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import type { ActivityEntry } from '../../shared/schemas.js';
+import type { ActivityCursor, ActivityEntry } from '../../shared/schemas.js';
 import { all, run } from './connection.js';
 
 const MAX_PAGE = 500;
@@ -19,14 +19,14 @@ export function logActivity(entry: Omit<ActivityEntry, 'id'>): void {
 }
 
 /** The newest entries first; `before` continues below the last entry of the previous page. */
-export function getActivity(limit: number, before: number | null = null): ActivityEntry[] {
+export function getActivity(limit: number, before: ActivityCursor | null = null): ActivityEntry[] {
   const size = Math.min(Math.max(1, Math.trunc(limit) || 1), MAX_PAGE);
   return all<ActivityEntry>(
     `SELECT id, occurred_at AS occurredAt, action, summary, origin
      FROM activity_log
-     WHERE occurred_at < ?
+     WHERE (occurred_at, id) < (?, ?)
      ORDER BY occurred_at DESC, id DESC
      LIMIT ?`,
-    [before ?? Number.MAX_SAFE_INTEGER, size]
+    [before?.occurredAt ?? Number.MAX_SAFE_INTEGER, before?.id ?? '', size]
   );
 }

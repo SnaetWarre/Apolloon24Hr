@@ -150,15 +150,17 @@ Restoring a backup, from any linked laptop:
    holds the backup; each laptop lists its own.
 2. Click Terugzetten next to the backup. The confirmation shows how many
    runners and laps it holds, and warns when the race was running then.
-3. The laptop first saves a verified `pre-restore` backup of the current
-   state, then sends the backup's event data to the leader as one ordinary
+3. The laptop sends the backup's event data to the leader. The leader saves a
+   verified `pre-restore` backup of the current group state, retrying if a write
+   arrives while the backup is being checked, then restores as one ordinary
    replicated write. Every linked laptop changes at once; nobody stops or
    relinks a laptop. The activity log and the group itself are not restored.
 4. If the race was running at the backup, the runner on the track then is on
    the track again with the start time of then. Check the timing screen.
 
-A restore can be undone by restoring its `pre-restore` backup. When no laptop
-survives, copy a backup from USB to `<DATA_PATH>/backups/` on a new laptop,
+A restore can be undone by restoring its `pre-restore` backup on the laptop
+named in the restore result. When no laptop survives, copy a backup from USB
+to `<DATA_PATH>/backups/` on a new laptop,
 start Apolloon, and restore it there.
 
 ## How The Failover Is Tested
