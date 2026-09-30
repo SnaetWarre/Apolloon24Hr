@@ -4,6 +4,12 @@ All notable changes to Apolloon Telsysteem will be documented in this file.
 
 ## [Unreleased]
 
+## [4.1.0] - 2026-09-30
+
+Laptops koppelen alleen met dezelfde versie: zet 4.1.0 op alle laptops. De app
+heet nu Apolloon Telsysteem en installeert naast de oude "Leuven 24h Tracker";
+verwijder die oude app.
+
 ### Added
 
 - Analyse › Exporteren heeft een Excel-bestand met de rondes en de
@@ -16,6 +22,8 @@ All notable changes to Apolloon Telsysteem will be documented in this file.
   nieuwe naam en `appId` installeert ze als een nieuwe app met een eigen, lege
   datamap
 - "Kobe's tactiek" heet nu Tactiek
+- De desktop-app tekent zijn eigen titelbalk in plaats van het venster van het
+  besturingssysteem
 - Een database van vóór 4.0 wordt niet meer omgezet. De app zet ze ongewijzigd
   opzij als `app.retired-<tijd>.sqlite` en begint met een lege database en een
   nieuwe laptop-identiteit. Databases van 4.0 en later blijven gewoon behouden
