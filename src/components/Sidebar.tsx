@@ -35,7 +35,7 @@ const NAVIGATION_GROUPS: ReadonlyArray<{
     title: 'Opvolgen',
     items: [
       { path: '/analysis', label: 'Analyse', icon: 'analysis' },
-      { path: '/tactics', label: "Kobe's tactiek", icon: 'tactics' },
+      { path: '/tactics', label: 'Tactiek', icon: 'tactics' },
     ],
   },
   {

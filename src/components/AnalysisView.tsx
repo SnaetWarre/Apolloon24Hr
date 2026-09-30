@@ -155,6 +155,10 @@ export function AnalysisView() {
             </summary>
             <div className="analysis-export__menu">
               <p>Exports bevatten altijd de volledige wedstrijd. De labelfilters op dit scherm tellen niet mee.</p>
+              <a className="btn btn--sm" href="/api/export/race.xlsx">
+                Excel: rondes en gebeurtenissen
+              </a>
+              <p className="analysis-export__group">Voor MATLAB, R of andere scripts</p>
               <a className="btn btn--quiet btn--sm" href="/api/export/laps.csv">
                 Rondes (CSV)
               </a>
@@ -473,7 +477,7 @@ function RollingLapTrendChart({ points }: { points: ReturnType<typeof buildRolli
       data: {
         datasets: [
           {
-            label: 'Apolloon rolling gemiddelde',
+            label: 'Lopend gemiddelde',
             data: points.map((point) => ({
               x: point.raceHour,
               y: point.averageMs / 1000,

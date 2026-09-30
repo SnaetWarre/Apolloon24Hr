@@ -45,8 +45,8 @@ const routeTree = rootRoute.addChildren([
   createRoute({
     getParentRoute: () => rootRoute,
     path: '/tactics',
-    component: lazyRouteComponent(() => import('./components/KobeTacticsView'), 'KobeTacticsView'),
-    pendingComponent: pending("Kobe's tactiek wordt geladen..."),
+    component: lazyRouteComponent(() => import('./components/TacticsView'), 'TacticsView'),
+    pendingComponent: pending('Tactiek wordt geladen...'),
   }),
   createRoute({
     getParentRoute: () => rootRoute,

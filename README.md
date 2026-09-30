@@ -1,6 +1,6 @@
-# Leuven 24h Runner Tracker
+# Apolloon Telsysteem
 
-Telsysteem for the Apolloon 24 Urenloop. Three Electron laptops (timing, the queue desk, and the warm-up post) are linked into one group: each holds the full SQLite database, every laptop's screen can make changes, and when a laptop fails the other two carry on by themselves without losing anything that was confirmed. TVs and borrowed laptops open any laptop's address in a browser.
+Lap counting for the Apolloon 24 Urenloop. Three Electron laptops (timing, the queue desk, and the warm-up post) are linked into one group: each holds the full SQLite database, every laptop's screen can make changes, and when a laptop fails the other two carry on by themselves without losing anything that was confirmed. TVs and borrowed laptops open any laptop's address in a browser.
 
 ## Event Network
 
@@ -34,7 +34,7 @@ When a laptop dies or loses its cable, the other two notice within a second or t
 
 With only one laptop left, nothing is saved until a second one is back, because one laptop cannot know whether the others are gone or still working behind a broken cable. If the others are truly gone, Beheer › Systeem offers **Alleen verder werken**. See `docs/reliability-model.md` for the details and a rehearsal checklist.
 
-Laptops only link with the same Apolloon version and database schema; otherwise Admin shows an "Upgrade vereist" error.
+Laptops only link with the same Apolloon version and database schema; otherwise Beheer shows an "Upgrade vereist" error.
 
 Developer overrides:
 
@@ -44,13 +44,13 @@ CLUSTER_DISCOVERY=false          # do not announce or listen on UDP 45737
 CLUSTER_SELF_URL=http://host:port  # address announced to other laptops (tests)
 ```
 
-Admin includes a wedstrijdgereedheid checklist for backup freshness, free disk space, and the linked laptops.
+Beheer › Voorbereiding has a wedstrijdgereedheid checklist for backup freshness, free disk space, and the linked laptops.
 
 Laptops at the event have no internet time, so their clocks can differ by seconds. Every laptop therefore keeps an offset to the leading laptop's clock (the group clock), measured every two seconds, and a laptop that takes over keeps using it, so times stay continuous across a takeover.
 
 ### Recovery backups
 
-Every host creates a verified SQLite backup every five minutes and keeps the latest 48 scheduled backups plus the latest 20 manual and safety backups under `<DATA_PATH>/backups`. Each backup is checked with `quick_check` and `foreign_key_check` off the main thread before it is kept, so checks never delay timing. Admin can create and download a backup immediately. Download one to USB storage before the event: the linked laptops protect against a broken laptop, a backup also protects against a wrong action that was copied to every laptop.
+Every host creates a verified SQLite backup every five minutes and keeps the latest 48 scheduled backups plus the latest 20 manual and safety backups under `<DATA_PATH>/backups`. Each backup is checked with `quick_check` and `foreign_key_check` off the main thread before it is kept, so checks never delay timing. Beheer › Systeem & herstel can create and download a backup immediately. Download one to USB storage before the event: the linked laptops protect against a broken laptop, a backup also protects against a wrong action that was copied to every laptop.
 
 Screens receive only live state; lap history is loaded separately as full, recent, or per-runner data. Registration answers with contact details are loaded only where an operator needs them (profiles and Beheer).
 
@@ -70,71 +70,64 @@ For hosting the app directly on the VPS without a laptop tunnel, see `docs/vps-d
 
 ## Running The Event
 
-1. Connect the three Electron laptops to the local router/switch by Ethernet.
-2. Start the Electron app on all three and link them (see [Linked laptops](#linked-laptops)).
+1. Connect the three Electron laptops to the event router by Ethernet.
+2. Start Apolloon Telsysteem on all three and link them (see [Linked laptops](#linked-laptops)).
 3. Allow the firewall prompt for port `5173` if Windows asks.
-4. Copy the Event URL shown on one of the laptops.
-5. On every other laptop, open that Event URL. Do not use `localhost` on client laptops.
-6. Choose the role from the start page:
-   - Telsysteem 1 - Wachtrij
-   - Telsysteem 2 - Timing
-   - Buitenscherm
-   - Binnenscherm
-   - Analyse & Export
-   - Admin / Import / Labels
+4. Copy the Event URL with **Adres voor andere laptop kopiëren** on Overzicht, or from the bottom of the sidebar.
+5. Open that Event URL on the TVs and any other screen. Do not use `localhost` on those.
+6. Pick a page from the sidebar:
+   - **Overzicht**: race time, the runner on the track, the latest laps, and system status.
+   - **Wachtrij** (Telsysteem 1): warm-up and the queue of runners who are ready.
+   - **Timing** (Telsysteem 2): the spacebar that records every handoff.
+   - **Analyse**: figures, charts, and the exports.
+   - **Tactiek**: the live race against the target and against last year.
+   - **Binnenscherm** and **Buitenscherm**: the public screens for the TVs.
+   - **Beheer**: preparation, runners, teams and labels, public screens, and system and recovery.
 
-There is no password login. The physical local network is the trust boundary.
+There is no password login. The event network is wired only, and that physical network is the trust boundary.
 
 ## Night Teams
 
-A tijdelijke nachtploeg moves its members from their speedteam to the night team during a planned window. Labels are derived from the schedule: nothing is rewritten, so members are back in their own speedteam as soon as the window ends or the team is removed. Each lap keeps the labels of the moment its runner started.
+A tijdelijke nachtploeg (Beheer › Ploegen & labels) moves its members from their speedteam to the night team during a planned window. Labels are derived from the schedule: nothing is rewritten, so members are back in their own speedteam as soon as the window ends or the team is removed. Each lap keeps the labels of the moment its runner started.
 
 ## Registration Import
 
-Export Google Forms/Sheets data to CSV before the event and import it through `Admin / Import / Labels`.
-The import creates the full registration database. Imported runners stay in the `Ingeschreven` state and do not appear on the queue board until Telsysteem 1 activates them for warm-up.
+Import the registrations in Beheer › Voorbereiding › Inschrijvingen importeren, from a CSV file. Imported runners stay in the `Ingeschreven` state and do not appear on the queue board until Wachtrij moves them to warm-up.
 
-Default label categories:
+Two kinds of CSV are accepted:
+
+- **The Google Form export.** It is recognised by its e-mail column. The row number becomes the runner number, the answers (availability, estimates, remarks, contact details) go into the runner's profile, and the "Behoor je tot" answers become labels.
+- **A plain runner list** with these columns:
+
+  ```text
+  runner_number,name,labels,target_laps,historical_avg,historical_best
+  ```
+
+  `runner_number` and `name` are required. `labels` can hold several labels separated by commas, semicolons, or pipes. Columns such as `zustervereniging`, `vereniging`, `club`, `team`, `speedteam`, `jaar`, and `groep` are read as labels too. Times accept `ss`, `mm:ss`, or `hh:mm:ss`.
+
+Existing runner numbers are updated instead of duplicated, missing labels are created automatically, and re-importing does not reset live statuses such as warm-up, waiting, running, or ran.
+
+## Labels
+
+Default labels:
 
 - Speedteams: `Speedteam White`, `Speedteam Blue`
-- Zusterverenigingen: `HILOK`, `Mesacosa`, `Kinesia`
+- Zusterverenigingen: `HILOK`, `Mesacosa`, `Kinesia`, with their logos from `public/labels/`
 - Andere: `1ste jaar`, `Anciens`, `Dames`
 
-The zustervereniging labels use the logo files in `public/labels/`.
-
-Label progress goals can be adjusted in `Admin / Import / Labels` through the `Doel toeren` field per label. If a label goal is empty, the app automatically uses the sum of the target laps of all runners with that label. The `Positie` field controls the order in which labels appear in progress lists.
-
-Expected CSV columns:
-
-```text
-runner_number,name,labels,target_laps,historical_avg,historical_best
-```
-
-The importer also reads common Google Forms columns such as `zustervereniging`, `vereniging`, `club`, `team`, `speedteam`, `jaar`, and `groep` as labels.
-
-Notes:
-
-- `runner_number` and `name` are required.
-- `labels` can contain comma, semicolon, or pipe separated labels.
-- Existing runner numbers are updated instead of duplicated.
-- Missing labels are created automatically.
-- Re-importing does not reset live statuses such as warm-up, waiting, running, or ran.
-
-Telsysteem 1 has two entry actions:
-
-- `Ingeschrevene zoeken`: find an imported runner and move them to warm-up.
-- `Nieuwe loper`: create an onsite runner manually and put them directly in warm-up.
+Labels are listed by kind, then by name. In Beheer › Ploegen & labels each label can get a logo and a **Doel (rondes)**. Without a goal, the app uses the sum of the target laps of all runners with that label.
 
 ## Timing Flow
 
-Telsysteem 1 controls the waiting queue. Telsysteem 2 uses the spacebar:
+Wachtrij (Telsysteem 1) controls the queue with two entry actions: **Loper zoeken** finds an imported runner and moves them to warm-up, and **Nieuwe loper** creates a runner on the spot and puts them straight into warm-up. Timing (Telsysteem 2) uses the spacebar or Enter:
 
 - Opening the app does not start the race.
-- The first spacebar press starts the race clock and starts the first runner in the waiting queue.
-- If no runner is active, spacebar starts the first runner in the waiting queue.
-- If a runner is active, spacebar saves that runner's lap and immediately starts the next queued runner.
+- The first press starts the race clock and the first runner in the queue.
+- If no runner is active, a press starts the first runner in the queue.
+- If a runner is active, a press saves that runner's lap and immediately starts the next runner in the queue.
 - A lap runs from one press to the next as the timing screen recorded them from the key events, not from when the request reached the server. The lap time is measured on the browser's monotonic clock between the two presses, so network delay, a busy server, and clock corrections never change it.
-- Undo Last Handoff restores the previous active/next state and removes the last recorded lap.
+- **Laatste wissel ongedaan maken** restores the previous runner on the track and the queue, and removes the lap that handoff recorded.
+- **Race beëindigen** stops the race after a second confirmation. A press after that asks whether to resume the race.
 
 There is no automatic 24-hour cutoff in the software.
 
@@ -178,7 +171,7 @@ The seeded scenarios are:
 
 ## Building Installers
 
-Installers are written to `release/`. Build each one on its own platform:
+Installers are written to `release/` as `Apolloon Telsysteem`. Build each one on its own platform:
 
 ```text
 npm run electron:build:win     Windows installer (on Windows)
@@ -186,14 +179,18 @@ npm run electron:build:linux   Linux AppImage
 npm run electron:build:mac     macOS dmg and zip (on macOS)
 ```
 
+
 ## Exports
 
-The analysis page links to:
+Analyse › Exporteren offers an Excel workbook for the teachers and plain files for scripts:
 
 ```text
+/api/export/race.xlsx           Excel: laps and events, Dutch headers, local time, lap times as time values
 /api/export/laps.csv
 /api/export/laps.json
+/api/export/events.csv
+/api/export/events.json
 /api/export/current-state.json
 ```
 
-These endpoints are local and can be opened from MATLAB, RStudio, or another laptop on the event LAN.
+The CSV files use commas and UTC timestamps, which suits MATLAB and R; open the Excel workbook in Excel. All endpoints are local and work from any laptop on the event network.

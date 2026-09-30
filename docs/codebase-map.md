@@ -11,8 +11,8 @@ Shared contracts live in `shared/`. Anything imported by both client and server 
 ## Client Shape
 
 - `src/main.tsx`: React entrypoint and providers.
-- `src/router.tsx`: route table. Wedstrijd routes load eagerly; Analyse, Kobe's
-  tactiek, Beheer, and the displays are lazy routes preloaded on hover.
+- `src/router.tsx`: route table. Wedstrijd routes load eagerly; Analyse,
+  Tactiek, Beheer, and the displays are lazy routes preloaded on hover.
 - `src/App.tsx`: app shell, loading/error states, and the connection and
   "too few laptops" banners. `components/Sidebar.tsx` holds the navigation.
 - `src/app/`: app-wide data layer.
@@ -33,14 +33,14 @@ Shared contracts live in `shared/`. Anything imported by both client and server 
     `components/admin/` (`PreparationSection`, `RunnersSection`,
     `LabelsSection`, `PublicSection`, `SystemSection`). `AdminNotice.tsx` holds
     the shared busy/message hook.
-  - `KobeTacticsView.tsx`: live API-backed tactics and the historical workspace shell.
+  - `TacticsView.tsx`: live API-backed tactics and the historical workspace shell.
   - `tactics/HistoricalDeepDive.tsx`: detailed historical charts, diagnostics, and drafting controls.
   - `ModalDialog.tsx`: native modal `<dialog>` wrapper; `isModalDialogOpen()`
     lets page-level shortcuts (timing Space/Enter) stay quiet under a dialog.
   - `ConfirmDialog.tsx`: `useConfirm()` returns an awaitable in-app confirmation.
     Use it instead of `window.confirm`, which freezes the live clocks.
 - `src/lib/`: browser-side helpers and app-specific utility functions.
-  - `tactics.ts`: historical race validation, live comparison, and target-scenario calculations for Kobe's tactiek.
+  - `tactics.ts`: historical race validation, live comparison, and target-scenario calculations for Tactiek.
   - `tacticsDeepDive.ts`: detailed historical statistics, race-gap models, live uncertainty, and drafting tests.
   - `availability.ts`: matches the form's hour blocks (`20-21u (dinsdag)`) to the
     Brussels clock, for `AvailableNowPanel.tsx` on Wachtrij: who can run this
@@ -71,7 +71,8 @@ Shared contracts live in `shared/`. Anything imported by both client and server 
 - `server/index.ts`: HTTP, tRPC, and Socket.IO wiring, `/api` routes, startup and shutdown.
 - `server/router.ts`: tRPC procedures and request validation.
 - `server/runner-import.ts`: runner CSV and Google Form import.
-- `server/exports.ts`: lap and event CSV/JSON exports.
+- `server/exports.ts`: lap and event CSV/JSON exports and the Excel download route.
+- `server/excel-export.ts`: the Excel workbook (laps and events, local time, lap times as time values).
 - `server/static-files.ts`: packaged frontend serving.
 - `server/db.ts`: facade over `server/db/` (SQLite schema, reads, writes, race-state transitions, replication log).
 - `server/raft.ts`: leader election by majority (Raft), log replication, and majority commit, with storage, network, clock, and timers passed in.

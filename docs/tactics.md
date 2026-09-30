@@ -1,4 +1,4 @@
-# Kobe's tactiek
+# Tactiek
 
 `/tactics` is the strategy workspace inspired by
 [`koberypens/TacticalAnalysis`](https://github.com/koberypens/TacticalAnalysis).
