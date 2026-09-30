@@ -4,6 +4,8 @@ All notable changes to the Leuven 24h Runner Tracker will be documented in this 
 
 ## [Unreleased]
 
+## [4.0.0] - 2026-09-30
+
 Vereist een nieuwe major versie: laptops met deze versie koppelen niet met 3.x.
 De database migreert automatisch naar schema 13 en bewaart eerst een kopie
 (`app.pre-schema-13.sqlite`).
