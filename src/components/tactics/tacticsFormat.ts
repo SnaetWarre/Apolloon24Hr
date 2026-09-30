@@ -4,7 +4,6 @@ import { RACE_DURATION_HOURS, parseHistoricalRace, type HistoricalRace } from '.
 export const HISTORICAL_RACE_STORAGE_KEY = 'apolloon.kobe-tactics.historical-race.v1';
 export const HISTORICAL_RACE_NAME_STORAGE_KEY = 'apolloon.kobe-tactics.historical-race-name.v1';
 export const TACTICS_SCENARIO_STORAGE_KEY = 'apolloon.kobe-tactics.scenario.v1';
-export const BUNDLED_REFERENCE_URL = '/reference/quivr-2025-lap-times.json';
 export const BUNDLED_REFERENCE_NAME = 'Quivr 2025';
 export const APOLLOON_TEAM_ID = 1;
 export const VTK_TEAM_ID = 4;

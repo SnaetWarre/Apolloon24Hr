@@ -85,7 +85,8 @@ export function useAppActions() {
       addRunner: action((input: RunnerInput) => trpc.runners.create.mutate(input)),
       updateRunner: action((id: string, fields: RunnerPatch) => trpc.runners.update.mutate({ id, fields })),
       setStatus: (id: string, status: RunnerStatus) => {
-        const statusSince = nowMs();
+        // The server only takes whole milliseconds; the clock offset can be fractional.
+        const statusSince = Math.round(nowMs());
         return optimistic(statusPatch(id, status, statusSince), () =>
           trpc.runners.setStatus.mutate({ id, status, statusSince })
         );

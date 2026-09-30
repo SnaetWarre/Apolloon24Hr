@@ -1,6 +1,7 @@
 import { createRootRoute, createRoute, createRouter, lazyRouteComponent } from '@tanstack/react-router';
 import { AppRoot, NotFoundPage } from './App';
 import { clusterStatusQuery, queryClient, raceHistoryQuery, registrationsQuery } from './app/index';
+import { bundledReferenceQuery } from './app/bundledReference';
 import { RouteErrorPage } from './components/ErrorScreens';
 import { QueuePage } from './components/QueuePage';
 import { RolePicker } from './components/RolePicker';
@@ -33,6 +34,7 @@ const recentLaps = (limit: number) => () => queryClient.prefetchQuery(raceHistor
 const allLaps = () => queryClient.prefetchQuery(raceHistoryQuery());
 const clusterStatus = () => queryClient.prefetchQuery(clusterStatusQuery);
 const registrations = () => queryClient.prefetchQuery(registrationsQuery);
+const bundledReference = () => queryClient.prefetchQuery(bundledReferenceQuery);
 
 const rootRoute = createRootRoute({
   component: AppRoot,
@@ -69,7 +71,7 @@ const routeTree = rootRoute.addChildren([
   createRoute({
     getParentRoute: () => rootRoute,
     path: '/tactics',
-    loader: prefetch(allLaps),
+    loader: prefetch(allLaps, bundledReference),
     component: lazyRouteComponent(() => import('./components/TacticsView'), 'TacticsView'),
     pendingComponent: pending('Tactiek wordt geladen...'),
   }),
