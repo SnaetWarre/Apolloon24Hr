@@ -53,7 +53,7 @@
 .analysis-scope {
   position: sticky;
   top: calc(var(--topbar-h) + var(--space-4));
-  max-height: calc(100dvh - var(--topbar-h) - var(--space-8));
+  max-height: calc(100dvh - var(--titlebar-h) - var(--topbar-h) - var(--space-8));
   overflow: auto;
   padding: var(--space-4);
   border: 1px solid var(--line);

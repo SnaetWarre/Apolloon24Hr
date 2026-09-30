@@ -889,9 +889,9 @@ td.num {
 dialog.modal-backdrop {
   width: 100%;
   max-width: none;
-  height: 100dvh;
+  height: calc(100dvh - var(--titlebar-h));
   max-height: none;
-  margin: 0;
+  margin: var(--titlebar-h) 0 0;
   padding: var(--space-4);
   border: 0;
   background: var(--overlay);

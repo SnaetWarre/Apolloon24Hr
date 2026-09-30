@@ -178,7 +178,7 @@
 }
 
 .queue-lane__rows {
-  height: max(280px, calc(100dvh - 250px));
+  height: max(280px, calc(100dvh - var(--titlebar-h) - 250px));
   overflow: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;

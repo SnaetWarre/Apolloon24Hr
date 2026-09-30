@@ -1,4 +1,5 @@
 import type { LabelImageUpload } from '../types';
+import { getDesktop } from './desktop';
 
 /** Longest side of a stored logo: sharp on the big screens, where a logo is about 1.1em of large text. */
 export const LABEL_IMAGE_SIZE = 256;
@@ -22,15 +23,6 @@ const MIME_BY_EXTENSION: Record<string, string> = {
   svg: 'image/svg+xml',
   webp: 'image/webp',
 };
-
-declare global {
-  interface Window {
-    /** Only set inside the desktop app. */
-    apolloonDesktop?: {
-      pickImage: () => Promise<{ name: string; bytes: Uint8Array } | null>;
-    };
-  }
-}
 
 export type Box = { x: number; y: number; width: number; height: number };
 
@@ -73,8 +65,9 @@ export function opaqueBounds(data: ArrayLike<number>, width: number, height: num
 
 /** Lets the user pick an image; the desktop app opens its dialog in Downloads. */
 export async function pickImageFile(): Promise<Blob | null> {
-  if (window.apolloonDesktop) {
-    const picked = await window.apolloonDesktop.pickImage();
+  const desktop = getDesktop();
+  if (desktop) {
+    const picked = await desktop.pickImage();
     if (!picked) return null;
     const extension = picked.name.split('.').pop()?.toLowerCase() ?? '';
     return new Blob([picked.bytes as Uint8Array<ArrayBuffer>], { type: MIME_BY_EXTENSION[extension] ?? '' });

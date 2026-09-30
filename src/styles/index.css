@@ -5,6 +5,7 @@
 @import './motion.css';
 @import './primitives.css';
 @import './shell.css';
+@import './titlebar.css';
 @import './queue.css';
 @import './timing.css';
 @import './analysis.css';

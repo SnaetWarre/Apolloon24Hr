@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, type OpenDialogOptions } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, type OpenDialogOptions } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
@@ -14,6 +14,7 @@ let quitting = false;
 let appUrl = 'http://127.0.0.1:5173';
 const smokeTest = process.env.APOLLOON_PACKAGE_SMOKE === '1';
 const IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'jfif', 'gif', 'webp', 'avif', 'bmp', 'ico', 'svg', 'apng'];
+const isMac = process.platform === 'darwin';
 if (smokeTest) {
   if (!process.env.APOLLOON_SMOKE_DATA) throw new Error('Missing smoke test data directory');
   app.setPath('userData', process.env.APOLLOON_SMOKE_DATA);
@@ -22,10 +23,17 @@ if (smokeTest) {
 async function createWindow() {
   if (mainWindow) return; // Prevent multiple windows
 
+  // The renderer draws its own title bar (src/components/DesktopTitleBar.tsx), so the
+  // window opens without the operating system's frame. macOS keeps its traffic lights.
   const window = new BrowserWindow({
     width: 1400,
     height: 900,
+    minWidth: 720,
+    minHeight: 480,
     show: false,
+    frame: isMac,
+    titleBarStyle: isMac ? 'hidden' : 'default',
+    trafficLightPosition: { x: 14, y: 11 },
     backgroundColor: '#f5f7fb',
     webPreferences: {
       nodeIntegration: false,
@@ -35,6 +43,7 @@ async function createWindow() {
     },
   });
   mainWindow = window;
+  wireWindowState(window);
 
   if (!app.isPackaged) {
     await window.loadURL(appUrl);
@@ -76,6 +85,58 @@ async function rendererHasContent(window: BrowserWindow): Promise<boolean> {
   if (window.isDestroyed()) return false;
   return window.webContents.executeJavaScript("Boolean(document.getElementById('root')?.childElementCount)");
 }
+
+type WindowState = { maximized: boolean; fullscreen: boolean; focused: boolean };
+
+function windowState(window: BrowserWindow): WindowState {
+  return { maximized: window.isMaximized(), fullscreen: window.isFullScreen(), focused: window.isFocused() };
+}
+
+/** Tells the renderer's title bar when the window is maximized, fullscreen or in the background. */
+function wireWindowState(window: BrowserWindow) {
+  const send = () => {
+    if (!window.isDestroyed()) window.webContents.send('apolloon:window-state', windowState(window));
+  };
+  window.on('maximize', send);
+  window.on('unmaximize', send);
+  window.on('enter-full-screen', send);
+  window.on('leave-full-screen', send);
+  window.on('focus', send);
+  window.on('blur', send);
+  // Without the native frame there is no menu, so the few shortcuts that matter live here.
+  window.webContents.on('before-input-event', (event, input) => {
+    if (input.type !== 'keyDown') return;
+    if (input.key === 'F11') {
+      event.preventDefault();
+      window.setFullScreen(!window.isFullScreen());
+    } else if (!app.isPackaged && (input.key === 'F12' || (input.control && input.shift && input.key === 'I'))) {
+      event.preventDefault();
+      window.webContents.toggleDevTools();
+    }
+  });
+}
+
+ipcMain.handle('apolloon:window-state', (event) => {
+  const window = BrowserWindow.fromWebContents(event.sender);
+  return window ? windowState(window) : null;
+});
+
+ipcMain.on('apolloon:window', (event, action: unknown) => {
+  const window = BrowserWindow.fromWebContents(event.sender);
+  if (!window) return;
+  switch (action) {
+    case 'minimize':
+      window.minimize();
+      break;
+    case 'toggle-maximize':
+      if (window.isMaximized()) window.unmaximize();
+      else window.maximize();
+      break;
+    case 'close':
+      window.close();
+      break;
+  }
+});
 
 ipcMain.handle('apolloon:pick-image', async (event) => {
   const owner = BrowserWindow.fromWebContents(event.sender);
@@ -228,6 +289,9 @@ if (!gotTheLock) {
 
   app.whenReady().then(async () => {
     console.log('App starting');
+    // Windows and Linux show no menu in a frameless window; dropping it also stops the
+    // default menu's F11 from toggling fullscreen a second time. macOS keeps its menu.
+    if (!isMac) Menu.setApplicationMenu(null);
     ensureEnvFile();
     try {
       await startServer();

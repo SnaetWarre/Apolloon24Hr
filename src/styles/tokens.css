@@ -27,6 +27,8 @@
   --control-h-sm: 28px;
   --topbar-h: 52px;
   --sidebar-w: 208px;
+  /* Height of the desktop app's own title bar; titlebar.css sets it, browsers keep 0. */
+  --titlebar-h: 0px;
 
   /* Motion. dur-1: a state changes under the pointer. dur-2: something opens or
      lands. dur-3: a move that must be readable from across a room (tv screens). */

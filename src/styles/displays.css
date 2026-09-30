@@ -42,7 +42,7 @@ html[data-display-tone="light"] body {
 }
 
 .display-root {
-  min-height: 100vh;
+  min-height: calc(100vh - var(--titlebar-h));
   background: var(--d-bg);
   color: var(--d-ink);
   font-family: var(--font-body);
@@ -78,7 +78,7 @@ html[data-display-tone="light"] body {
 
 .display-loading {
   display: grid;
-  min-height: 100vh;
+  min-height: calc(100vh - var(--titlebar-h));
   place-items: center;
   background: #111111;
   color: #B4B4B4;
@@ -139,7 +139,7 @@ html[data-display-tone="light"] body {
   position: relative;
   display: grid;
   grid-template-rows: minmax(0, 58fr) minmax(0, 42fr);
-  height: 100vh;
+  height: calc(100vh - var(--titlebar-h));
   min-height: 0;
   overflow: hidden;
   border-top: 0.6vh solid var(--apolloon-blue);
@@ -257,7 +257,7 @@ html[data-display-tone="light"] body {
  */
 .outside-record-flash {
   position: fixed;
-  inset: 0;
+  inset: var(--titlebar-h) 0 0;
   z-index: 20;
   display: grid;
   place-items: center;
@@ -367,7 +367,7 @@ html[data-display-tone="light"] body {
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
   gap: 2vh;
-  height: 100vh;
+  height: calc(100vh - var(--titlebar-h));
   padding: 2.6vh 2.4vw;
   overflow: hidden;
   border-top: 0.6vh solid var(--apolloon-blue);
@@ -886,7 +886,7 @@ html[data-display-tone="light"] body {
 
   .display-root--inside {
     height: auto;
-    min-height: 100vh;
+    min-height: calc(100vh - var(--titlebar-h));
     overflow: visible;
   }
 }
