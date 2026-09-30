@@ -186,7 +186,8 @@ function scheduleNext(delayMs: number): void {
 }
 
 async function syncFile(filePath: string): Promise<void> {
-  const handle = await fs.promises.open(filePath, 'r');
+  // Windows only flushes a handle opened for writing (read-only fails with EPERM).
+  const handle = await fs.promises.open(filePath, 'r+');
   try {
     await handle.sync();
   } finally {
