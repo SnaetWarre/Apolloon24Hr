@@ -1,6 +1,8 @@
 import { type LabelInput } from '../../shared/schemas.js';
 import { all, getDb, one, run, transaction } from './connection.js';
 import { TEMPORARY_TEAM_KIND, createLabelRecord, findLabelByName } from './labels.js';
+import { type SchemaProblem, type TableShape, referenceSchema, schemaProblems } from './schema-check.js';
+import { RUNNER_QUEUE_INDEX_SQL, SCHEMA_SQL } from './schema-sql.js';
 import { getSetting, setLocalSetting } from './settings.js';
 import { parseLabelsJson, parseStringArray, serializeHistoricalLabels } from './values.js';
 
@@ -93,190 +95,15 @@ const DEFAULT_LABELS: DefaultLabel[] = [
   },
 ];
 
-const RUNNERS_TABLE_SQL = `(
-      id TEXT PRIMARY KEY,
-      runner_number TEXT UNIQUE,
-      name TEXT NOT NULL,
-      target_laps INTEGER,
-      historical_avg_ms INTEGER,
-      historical_best_ms INTEGER,
-      registration_source TEXT NOT NULL DEFAULT 'manual' CHECK(registration_source IN ('import','manual')),
-      notes TEXT DEFAULT '',
-      registration_json TEXT,
-      status TEXT NOT NULL DEFAULT 'registered' CHECK(status IN ('registered','warming_up','waiting','running','ran')),
-      queue_index INTEGER,
-      status_since INTEGER,
-      hidden_at INTEGER,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
-    )`;
-
-/** What a `runners` column gets when an older table lacks it; the other columns may stay NULL. */
-const RUNNER_COLUMN_FALLBACKS: Record<string, string> = {
-  registration_source: "'manual'",
-  notes: "''",
-  status: "'registered'",
+/** What a new NOT NULL column without a default gets when a table is rebuilt. */
+const COLUMN_FALLBACKS: Record<string, string> = {
   created_at: "CAST(unixepoch('subsec') * 1000 AS INTEGER)",
   updated_at: "CAST(unixepoch('subsec') * 1000 AS INTEGER)",
 };
 
-const RUNNER_COLUMNS = [
-  'id',
-  'runner_number',
-  'name',
-  'target_laps',
-  'historical_avg_ms',
-  'historical_best_ms',
-  'registration_source',
-  'notes',
-  'registration_json',
-  'status',
-  'queue_index',
-  'status_since',
-  'hidden_at',
-  'created_at',
-  'updated_at',
-];
-
+/** Creates missing tables; existing ones are left for `migrateSchema`. */
 export function createSchema(): void {
-  getDb().exec(`
-    CREATE TABLE IF NOT EXISTS settings (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS runners ${RUNNERS_TABLE_SQL};
-
-    CREATE TABLE IF NOT EXISTS labels (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL UNIQUE,
-      color TEXT NOT NULL,
-      icon TEXT NOT NULL,
-      kind TEXT NOT NULL,
-      image_url TEXT,
-      target_laps INTEGER,
-      sort_order INTEGER,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS label_images (
-      id TEXT PRIMARY KEY,
-      mime TEXT NOT NULL,
-      data_base64 TEXT NOT NULL,
-      created_at INTEGER NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS runner_labels (
-      runner_id TEXT NOT NULL,
-      label_id TEXT NOT NULL,
-      PRIMARY KEY (runner_id, label_id),
-      FOREIGN KEY (runner_id) REFERENCES runners(id) ON DELETE CASCADE,
-      FOREIGN KEY (label_id) REFERENCES labels(id) ON DELETE CASCADE
-    );
-
-    CREATE TABLE IF NOT EXISTS race_state (
-      id INTEGER PRIMARY KEY CHECK(id = 1),
-      active_runner_id TEXT,
-      active_started_at INTEGER,
-      race_started_at INTEGER,
-      race_finished_at INTEGER,
-      active_labels_json TEXT,
-      FOREIGN KEY (active_runner_id) REFERENCES runners(id) ON DELETE SET NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS laps (
-      id TEXT PRIMARY KEY,
-      runner_id TEXT NOT NULL,
-      lap_number INTEGER NOT NULL,
-      started_at INTEGER NOT NULL,
-      finished_at INTEGER NOT NULL,
-      duration_ms INTEGER NOT NULL,
-      source TEXT NOT NULL,
-      created_at INTEGER NOT NULL,
-      labels_json TEXT NOT NULL DEFAULT '[]',
-      FOREIGN KEY (runner_id) REFERENCES runners(id) ON DELETE CASCADE
-    );
-
-    CREATE TABLE IF NOT EXISTS handoff_history (
-      id TEXT PRIMARY KEY,
-      created_at INTEGER NOT NULL,
-      payload_json TEXT NOT NULL,
-      undone INTEGER NOT NULL DEFAULT 0
-    );
-
-    CREATE TABLE IF NOT EXISTS race_events (
-      id TEXT PRIMARY KEY,
-      type TEXT NOT NULL CHECK(type IN ('burgie_gepakt')),
-      message TEXT NOT NULL,
-      occurred_at INTEGER NOT NULL,
-      runner_id TEXT,
-      runner_number TEXT,
-      runner_name TEXT,
-      created_at INTEGER NOT NULL,
-      FOREIGN KEY (runner_id) REFERENCES runners(id) ON DELETE SET NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS temporary_teams (
-      label_id TEXT PRIMARY KEY,
-      active INTEGER NOT NULL DEFAULT 0,
-      activated_at INTEGER,
-      starts_at INTEGER,
-      ends_at INTEGER,
-      FOREIGN KEY (label_id) REFERENCES labels(id) ON DELETE CASCADE
-    );
-
-    CREATE TABLE IF NOT EXISTS temporary_team_members (
-      team_label_id TEXT NOT NULL,
-      runner_id TEXT NOT NULL UNIQUE,
-      PRIMARY KEY (team_label_id, runner_id),
-      FOREIGN KEY (team_label_id) REFERENCES temporary_teams(label_id) ON DELETE CASCADE,
-      FOREIGN KEY (runner_id) REFERENCES runners(id) ON DELETE CASCADE
-    );
-
-    CREATE TABLE IF NOT EXISTS cluster_members (
-      host_id TEXT PRIMARY KEY,
-      url TEXT NOT NULL,
-      added_at INTEGER NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS forwarded_writes (
-      request_id TEXT PRIMARY KEY,
-      result_json TEXT NOT NULL,
-      created_at INTEGER NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS replication_log (
-      seq INTEGER PRIMARY KEY,
-      id TEXT NOT NULL UNIQUE,
-      epoch INTEGER NOT NULL,
-      type TEXT NOT NULL,
-      statements_json TEXT NOT NULL,
-      created_at INTEGER NOT NULL
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_laps_runner_finished
-      ON laps(runner_id, finished_at DESC, duration_ms);
-
-    CREATE INDEX IF NOT EXISTS idx_laps_finished
-      ON laps(finished_at DESC);
-
-    CREATE INDEX IF NOT EXISTS idx_race_events_occurred
-      ON race_events(occurred_at DESC, created_at DESC);
-
-    CREATE INDEX IF NOT EXISTS idx_runner_labels_label
-      ON runner_labels(label_id, runner_id);
-  `);
-
-  run(
-    `INSERT OR IGNORE INTO race_state (
-      id,
-      active_runner_id,
-      active_started_at,
-      race_started_at,
-      race_finished_at
-    ) VALUES (1, NULL, NULL, NULL, NULL)`
-  );
+  getDb().exec(SCHEMA_SQL);
 }
 
 function tableHasColumn(table: string, column: string): boolean {
@@ -296,73 +123,130 @@ const RETIRED_SETTING_KEYS = [
   'last_database_compaction_at',
 ];
 
+/**
+ * Runs the data migrations for the stored schema version, then brings every
+ * table to the current shape and checks it, all in one transaction. Throws
+ * when the database still differs, so the server does not start on a table it
+ * cannot read. Foreign keys are off meanwhile so rebuilding a table does not
+ * cascade into its laps and labels.
+ */
 export function migrateSchema(): void {
   const previousVersion = Number(getSetting('schema_version') || 0);
-  transaction(() => {
-    if (!tableHasColumn('runners', 'registration_json')) {
-      run('ALTER TABLE runners ADD COLUMN registration_json TEXT');
-    }
-    if (!tableHasColumn('race_state', 'active_labels_json')) {
-      run('ALTER TABLE race_state ADD COLUMN active_labels_json TEXT');
-    }
-    if (!tableHasColumn('laps', 'labels_json')) {
-      run("ALTER TABLE laps ADD COLUMN labels_json TEXT NOT NULL DEFAULT '[]'");
-    }
-    if (!tableHasColumn('temporary_teams', 'starts_at')) {
-      run('ALTER TABLE temporary_teams ADD COLUMN starts_at INTEGER');
-    }
-    if (!tableHasColumn('temporary_teams', 'ends_at')) {
-      run('ALTER TABLE temporary_teams ADD COLUMN ends_at INTEGER');
-    }
-    if (!tableHasColumn('runners', 'status')) moveQueueOntoRunners();
-    run('CREATE INDEX IF NOT EXISTS idx_runners_queue_order ON runners(status, queue_index, status_since)');
-
-    if (previousVersion > 0 && previousVersion < 5) snapshotLapLabels();
-    if (previousVersion > 0 && previousVersion < 6) {
-      run('DROP INDEX IF EXISTS idx_laps_runner_finished');
-      run('CREATE INDEX idx_laps_runner_finished ON laps(runner_id, finished_at DESC, duration_ms)');
-    }
-    if (previousVersion > 0 && previousVersion < 9) compactLapLabels();
-    if (previousVersion > 0 && previousVersion < 13) {
-      retireMultiMasterReplication();
-      deriveTemporaryTeamLabels();
-    }
-    setLocalSetting('schema_version', String(DATABASE_SCHEMA_VERSION));
-  });
-  rebuildOutdatedRunnersTable();
-  getDb().exec(`PRAGMA user_version = ${DATABASE_SCHEMA_VERSION}`);
-}
-
-/**
- * Databases from the earliest versions have a `runners` table without most
- * columns and with a status check that rejects 'registered' and 'running'.
- * SQLite cannot change a check in place, so such a table is copied into a
- * fresh one with the same ids. Foreign keys are off meanwhile so dropping the
- * old table does not cascade into laps and labels.
- */
-function rebuildOutdatedRunnersTable(): void {
-  const existing = new Set(all<{ name: string }>('PRAGMA table_info(runners)').map((column) => column.name));
-  const tableSql = one<{ sql: string }>("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'runners'")?.sql;
-  const current =
-    RUNNER_COLUMNS.every((column) => existing.has(column)) &&
-    Boolean(tableSql?.includes("'registered'") && tableSql.includes("'running'"));
-  if (current) return;
-
   const db = getDb();
   db.exec('PRAGMA foreign_keys = OFF');
   try {
     transaction(() => {
-      run(`CREATE TABLE runners_rebuilt ${RUNNERS_TABLE_SQL}`);
-      const values = RUNNER_COLUMNS.map((column) =>
-        existing.has(column) ? column : (RUNNER_COLUMN_FALLBACKS[column] ?? 'NULL')
+      if (!tableHasColumn('runners', 'registration_json')) {
+        run('ALTER TABLE runners ADD COLUMN registration_json TEXT');
+      }
+      if (!tableHasColumn('race_state', 'active_labels_json')) {
+        run('ALTER TABLE race_state ADD COLUMN active_labels_json TEXT');
+      }
+      if (!tableHasColumn('laps', 'labels_json')) {
+        run("ALTER TABLE laps ADD COLUMN labels_json TEXT NOT NULL DEFAULT '[]'");
+      }
+      if (!tableHasColumn('temporary_teams', 'starts_at')) {
+        run('ALTER TABLE temporary_teams ADD COLUMN starts_at INTEGER');
+      }
+      if (!tableHasColumn('temporary_teams', 'ends_at')) {
+        run('ALTER TABLE temporary_teams ADD COLUMN ends_at INTEGER');
+      }
+      if (!tableHasColumn('runners', 'status')) moveQueueOntoRunners();
+      run(RUNNER_QUEUE_INDEX_SQL);
+
+      if (previousVersion > 0 && previousVersion < 5) snapshotLapLabels();
+      if (previousVersion > 0 && previousVersion < 6) {
+        run('DROP INDEX IF EXISTS idx_laps_runner_finished');
+        run('CREATE INDEX idx_laps_runner_finished ON laps(runner_id, finished_at DESC, duration_ms)');
+      }
+      if (previousVersion > 0 && previousVersion < 9) compactLapLabels();
+      if (previousVersion > 0 && previousVersion < 13) {
+        retireMultiMasterReplication();
+        deriveTemporaryTeamLabels();
+      }
+
+      repairSchema(schemaProblems(db));
+      const remaining = schemaProblems(db);
+      if (remaining.length) {
+        throw new Error(
+          `database does not match schema ${DATABASE_SCHEMA_VERSION}: ${remaining.map((problem) => problem.detail).join('; ')}`
+        );
+      }
+      warnAboutForeignKeyViolations();
+      run(
+        `INSERT OR IGNORE INTO race_state (
+          id,
+          active_runner_id,
+          active_started_at,
+          race_started_at,
+          race_finished_at
+        ) VALUES (1, NULL, NULL, NULL, NULL)`
       );
-      run(`INSERT INTO runners_rebuilt (${RUNNER_COLUMNS.join(', ')}) SELECT ${values.join(', ')} FROM runners`);
-      run('DROP TABLE runners');
-      run('ALTER TABLE runners_rebuilt RENAME TO runners');
-      run('CREATE INDEX IF NOT EXISTS idx_runners_queue_order ON runners(status, queue_index, status_since)');
+      setLocalSetting('schema_version', String(DATABASE_SCHEMA_VERSION));
     });
   } finally {
     db.exec('PRAGMA foreign_keys = ON');
+  }
+  db.exec(`PRAGMA user_version = ${DATABASE_SCHEMA_VERSION}`);
+}
+
+/**
+ * Fixes what `schemaProblems` found. SQLite cannot change a column, check or
+ * key in place, so such a table is copied into a fresh one with the same rows
+ * and ids; a wrong or missing index is created again.
+ */
+function repairSchema(problems: SchemaProblem[]): void {
+  if (!problems.length) return;
+  console.warn(`Repairing database schema: ${problems.map((problem) => problem.detail).join('; ')}`);
+  const reference = referenceSchema();
+  const rebuilt = new Set<string>();
+  for (const problem of problems) {
+    if (problem.kind !== 'table' || rebuilt.has(problem.table)) continue;
+    rebuildTable(problem.table, reference.get(problem.table)!);
+    rebuilt.add(problem.table);
+  }
+  for (const problem of problems) {
+    if (problem.kind !== 'index' || rebuilt.has(problem.table)) continue;
+    getDb().exec(`DROP INDEX IF EXISTS "${problem.index}"`);
+    const sql = reference.get(problem.table)?.indexes.get(problem.index)?.sql;
+    if (sql) getDb().exec(sql);
+  }
+}
+
+function rebuildTable(table: string, shape: TableShape): void {
+  const db = getDb();
+  const existing = new Set(all<{ name: string }>(`PRAGMA table_info("${table}")`).map((column) => column.name));
+  if (existing.size) {
+    const temporary = `${table}__rebuilt`;
+    db.exec(`DROP TABLE IF EXISTS "${temporary}"`);
+    db.exec(`CREATE TABLE "${temporary}" ${shape.sql.slice(shape.sql.indexOf('('))}`);
+    const columns = [...shape.columns.keys()];
+    const values = [...shape.columns].map(([name, column]) => {
+      const fallback = column.defaultSql ?? COLUMN_FALLBACKS[name] ?? null;
+      if (!existing.has(name)) return fallback ?? 'NULL';
+      return column.notNull && fallback ? `COALESCE("${name}", ${fallback})` : `"${name}"`;
+    });
+    db.exec(
+      `INSERT INTO "${temporary}" (${columns.map((name) => `"${name}"`).join(', ')}) SELECT ${values.join(', ')} FROM "${table}"`
+    );
+    db.exec(`DROP TABLE "${table}"`);
+    db.exec(`ALTER TABLE "${temporary}" RENAME TO "${table}"`);
+  } else {
+    db.exec(shape.sql);
+  }
+  for (const index of shape.indexes.values()) db.exec(index.sql);
+}
+
+/** Rows that point at a missing parent predate the repair; they are reported, not removed. */
+function warnAboutForeignKeyViolations(): void {
+  const counts = new Map<string, number>();
+  for (const violation of all<{ table: string }>('PRAGMA foreign_key_check')) {
+    counts.set(violation.table, (counts.get(violation.table) ?? 0) + 1);
+  }
+  if (counts.size) {
+    console.warn(
+      `Database rows without their parent row: ${[...counts].map(([table, count]) => `${table} ${count}`).join(', ')}`
+    );
   }
 }
 

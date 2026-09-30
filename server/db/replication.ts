@@ -13,6 +13,7 @@ import {
   transaction,
 } from './connection.js';
 import { type AppendOutcome, type LogView, canContinueFrom as canContinueFromLog, planAppend } from './append-rules.js';
+import { schemaProblems } from './schema-check.js';
 import { REPLICATED_SETTING_KEYS, getSetting } from './settings.js';
 import { openExistingDatabase, quickCheck } from './sqlite-file.js';
 import { type ReplicatedStatement, type ReplicationLogEntry } from './types.js';
@@ -240,6 +241,13 @@ function inspectImage(imagePath: string, expectedSchemaVersion: number): string 
     const schemaVersion = Number(setting('schema_version') || 0);
     if (schemaVersion !== expectedSchemaVersion) {
       throw new Error(`De ontvangen database heeft schema ${schemaVersion}, deze laptop ${expectedSchemaVersion}.`);
+    }
+    // The version alone is not proof: an old table could once be stamped current.
+    const problems = schemaProblems(image).filter((problem) => problem.kind === 'table');
+    if (problems.length) {
+      throw new Error(
+        `De ontvangen database heeft niet de verwachte tabellen (${problems.map((problem) => problem.detail).join('; ')}).`
+      );
     }
     const clusterId = setting('replication_cluster_id');
     if (!clusterId) throw new Error('De ontvangen database heeft geen cluster-id.');
