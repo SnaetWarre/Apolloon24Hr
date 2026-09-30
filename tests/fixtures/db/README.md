@@ -3,7 +3,10 @@
 `tests/schema-fixtures.test.ts` starts the app on each of these and checks that
 it keeps the runners and laps, can record new laps, and ends with the same
 tables as a fresh database. The package smoke test also starts the packaged app
-on `v0.7.1.sqlite`.
+on `v4.0.0.sqlite` and `v4.0.1-early-runners.sqlite`.
+
+Only 4.0 and later: the app puts an older database aside
+(`app.retired-<time>.sqlite`) and starts empty.
 
 - `v<version>.sqlite`: made by that release's own database code, with three
   runners (Anna, Bert, Cas) and three laps. After a release, add one:

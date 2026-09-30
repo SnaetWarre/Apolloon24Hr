@@ -1,10 +1,9 @@
 import { type LabelInput } from '../../shared/schemas.js';
-import { all, getDb, one, run, transaction } from './connection.js';
-import { TEMPORARY_TEAM_KIND, createLabelRecord, findLabelByName } from './labels.js';
+import { all, getDb, run, transaction } from './connection.js';
+import { createLabelRecord, findLabelByName } from './labels.js';
 import { type SchemaProblem, type TableShape, referenceSchema, schemaProblems } from './schema-check.js';
 import { RUNNER_QUEUE_INDEX_SQL, SCHEMA_SQL } from './schema-sql.js';
-import { getSetting, setLocalSetting } from './settings.js';
-import { parseLabelsJson, parseStringArray, serializeHistoricalLabels } from './values.js';
+import { setLocalSetting } from './settings.js';
 
 export const DATABASE_SCHEMA_VERSION = 14;
 
@@ -106,65 +105,19 @@ export function createSchema(): void {
   getDb().exec(SCHEMA_SQL);
 }
 
-function tableHasColumn(table: string, column: string): boolean {
-  return all<{ name: string }>(`PRAGMA table_info(${table})`).some((row) => row.name === column);
-}
-
-/** Host-local keys of the retired multi-master replication (schema 7 to 12). */
-const RETIRED_SETTING_KEYS = [
-  'replication_cluster_secret',
-  'replication_hlc_wall_ms',
-  'replication_hlc_counter',
-  'replication_checkpoint_gzip_v1',
-  'replication_checkpoint_json',
-  'replication_dead_letters_json',
-  'timing_controller_host_id',
-  'timing_controller_generation',
-  'last_database_compaction_at',
-];
-
 /**
- * Runs the data migrations for the stored schema version, then brings every
- * table to the current shape and checks it, all in one transaction. Throws
- * when the database still differs, so the server does not start on a table it
- * cannot read. Foreign keys are off meanwhile so rebuilding a table does not
- * cascade into its laps and labels.
+ * Brings every table to the current shape and checks it, in one transaction.
+ * Throws when the database still differs, so the server does not start on a
+ * table it cannot read. Foreign keys are off meanwhile so rebuilding a table
+ * does not cascade into its laps and labels. Databases from before 4.0 never
+ * get here: `initDb` puts them aside.
  */
 export function migrateSchema(): void {
-  const previousVersion = Number(getSetting('schema_version') || 0);
   const db = getDb();
   db.exec('PRAGMA foreign_keys = OFF');
   try {
     transaction(() => {
-      if (!tableHasColumn('runners', 'registration_json')) {
-        run('ALTER TABLE runners ADD COLUMN registration_json TEXT');
-      }
-      if (!tableHasColumn('race_state', 'active_labels_json')) {
-        run('ALTER TABLE race_state ADD COLUMN active_labels_json TEXT');
-      }
-      if (!tableHasColumn('laps', 'labels_json')) {
-        run("ALTER TABLE laps ADD COLUMN labels_json TEXT NOT NULL DEFAULT '[]'");
-      }
-      if (!tableHasColumn('temporary_teams', 'starts_at')) {
-        run('ALTER TABLE temporary_teams ADD COLUMN starts_at INTEGER');
-      }
-      if (!tableHasColumn('temporary_teams', 'ends_at')) {
-        run('ALTER TABLE temporary_teams ADD COLUMN ends_at INTEGER');
-      }
-      if (!tableHasColumn('runners', 'status')) moveQueueOntoRunners();
       run(RUNNER_QUEUE_INDEX_SQL);
-
-      if (previousVersion > 0 && previousVersion < 5) snapshotLapLabels();
-      if (previousVersion > 0 && previousVersion < 6) {
-        run('DROP INDEX IF EXISTS idx_laps_runner_finished');
-        run('CREATE INDEX idx_laps_runner_finished ON laps(runner_id, finished_at DESC, duration_ms)');
-      }
-      if (previousVersion > 0 && previousVersion < 9) compactLapLabels();
-      if (previousVersion > 0 && previousVersion < 13) {
-        retireMultiMasterReplication();
-        deriveTemporaryTeamLabels();
-      }
-
       repairSchema(schemaProblems(db));
       const remaining = schemaProblems(db);
       if (remaining.length) {
@@ -248,94 +201,6 @@ function warnAboutForeignKeyViolations(): void {
       `Database rows without their parent row: ${[...counts].map(([table, count]) => `${table} ${count}`).join(', ')}`
     );
   }
-}
-
-/** Schema 5 started storing each lap's labels; older laps get the runner's labels at migration time. */
-function snapshotLapLabels(): void {
-  const labelsByRunner = new Map<string, unknown[]>();
-  for (const row of all<Record<string, string | number | null> & { runnerId: string }>(
-    `SELECT rl.runner_id AS runnerId, l.id, l.name, l.color, l.icon, l.kind, l.image_url AS imageUrl
-     FROM runner_labels rl JOIN labels l ON l.id = rl.label_id`
-  )) {
-    const { runnerId, ...label } = row;
-    labelsByRunner.set(runnerId, [...(labelsByRunner.get(runnerId) ?? []), label]);
-  }
-  for (const lap of all<{ id: string; runnerId: string }>('SELECT id, runner_id AS runnerId FROM laps')) {
-    run('UPDATE laps SET labels_json = ? WHERE id = ?', [
-      JSON.stringify(labelsByRunner.get(lap.runnerId) ?? []),
-      lap.id,
-    ]);
-  }
-  const active = one<{ runnerId: string | null }>('SELECT active_runner_id AS runnerId FROM race_state WHERE id = 1');
-  if (active?.runnerId) {
-    run('UPDATE race_state SET active_labels_json = ? WHERE id = 1', [
-      JSON.stringify(labelsByRunner.get(active.runnerId) ?? []),
-    ]);
-  }
-}
-
-/** Schema 9 dropped live-only label fields from the per-lap label snapshots. */
-function compactLapLabels(): void {
-  for (const lap of all<{ id: string; labelsJson: string }>('SELECT id, labels_json AS labelsJson FROM laps')) {
-    const compact = serializeHistoricalLabels(parseLabelsJson(lap.labelsJson));
-    if (compact !== lap.labelsJson) run('UPDATE laps SET labels_json = ? WHERE id = ?', [compact, lap.id]);
-  }
-}
-
-/** Schema 13 keeps each runner's queue state on the runner itself instead of a 1:1 `queue_entries` row. */
-function moveQueueOntoRunners(): void {
-  run(`ALTER TABLE runners ADD COLUMN status TEXT NOT NULL DEFAULT 'registered'
-       CHECK(status IN ('registered','warming_up','waiting','running','ran'))`);
-  run('ALTER TABLE runners ADD COLUMN queue_index INTEGER');
-  run('ALTER TABLE runners ADD COLUMN status_since INTEGER');
-  run('ALTER TABLE runners ADD COLUMN hidden_at INTEGER');
-  if (all('SELECT name FROM sqlite_master WHERE type = ? AND name = ?', ['table', 'queue_entries']).length) {
-    run(`UPDATE runners
-         SET status = q.status, queue_index = q.queue_index, status_since = q.status_since, hidden_at = q.hidden_at
-         FROM queue_entries q
-         WHERE q.runner_id = runners.id`);
-    run('DROP TABLE queue_entries');
-  }
-}
-
-/** Schema 13 replaced multi-master replication with a single primary and log-shipping standbys. */
-function retireMultiMasterReplication(): void {
-  run('DROP TABLE IF EXISTS cluster_operations');
-  run('DROP TABLE IF EXISTS replication_operations');
-  run('DROP TABLE IF EXISTS replication_peer_progress');
-  run('DROP TABLE IF EXISTS replication_conflicts');
-  run(`DELETE FROM settings WHERE key IN (${RETIRED_SETTING_KEYS.map(() => '?').join(', ')})`, RETIRED_SETTING_KEYS);
-}
-
-/**
- * Before schema 13 an active night team rewrote its members' labels and kept
- * the originals aside. Labels are now derived from the schedule, so restore
- * the originals and drop the bookkeeping columns.
- */
-function deriveTemporaryTeamLabels(): void {
-  if (tableHasColumn('temporary_team_members', 'restore_label_ids_json')) {
-    for (const member of all<{
-      teamId: string;
-      runnerId: string;
-      restoreJson: string | null;
-    }>(
-      `SELECT team_label_id AS teamId, runner_id AS runnerId, restore_label_ids_json AS restoreJson
-       FROM temporary_team_members WHERE restore_label_ids_json IS NOT NULL`
-    )) {
-      for (const labelId of parseStringArray(member.restoreJson)) {
-        run('INSERT OR IGNORE INTO runner_labels (runner_id, label_id) SELECT ?, id FROM labels WHERE id = ?', [
-          member.runnerId,
-          labelId,
-        ]);
-      }
-    }
-    run('ALTER TABLE temporary_team_members DROP COLUMN restore_label_ids_json');
-  }
-  if (tableHasColumn('temporary_teams', 'schedule_owner_host_id')) {
-    run('ALTER TABLE temporary_teams DROP COLUMN schedule_owner_host_id');
-  }
-  run('DELETE FROM runner_labels WHERE label_id IN (SELECT id FROM labels WHERE kind = ?)', [TEMPORARY_TEAM_KIND]);
-  run('UPDATE temporary_teams SET active = 0, activated_at = NULL WHERE starts_at IS NOT NULL AND ends_at IS NOT NULL');
 }
 
 export function seedDefaultLabels(): void {

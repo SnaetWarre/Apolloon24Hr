@@ -1,11 +1,10 @@
 // Builds tests/fixtures/db/<tag>.sqlite: the database a released version
 // creates, with a few runners and laps, for the upgrade tests.
 //
-//   node scripts/make-db-fixture.mjs v0.7.1 v1.0.0 ...
+//   node scripts/make-db-fixture.mjs v4.0.3
 //
-// Each tag is checked out in a temporary worktree and its own database code
-// creates the tables. Releases before 4.0 used better-sqlite3, which is
-// installed once into a temporary folder for them.
+// The tag is checked out in a temporary worktree and its own database code
+// creates the tables. Only 4.0 and later: the app puts older databases aside.
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -23,7 +22,6 @@ const repo = path.resolve(import.meta.dirname, '..');
 const fixtures = path.join(repo, 'tests', 'fixtures', 'db');
 const tsx = pathToFileURL(path.join(repo, 'node_modules', 'tsx', 'dist', 'loader.mjs')).href;
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'apolloon-db-fixture-'));
-const legacyModules = path.join(temporary, 'legacy', 'node_modules');
 
 const RUNNERS = [
   { id: 'fixture-anna', runner_number: '1', name: 'Anna', status: 'waiting', queue_index: 0, status_since: 1_000 },
@@ -41,31 +39,13 @@ function git(...args) {
   return execFileSync('git', args, { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] });
 }
 
-function installLegacyModules() {
-  if (fs.existsSync(legacyModules)) return;
-  const folder = path.dirname(legacyModules);
-  fs.mkdirSync(folder, { recursive: true });
-  fs.writeFileSync(path.join(folder, 'package.json'), '{ "private": true }\n');
-  execFileSync('npm', ['install', '--no-save', '--no-audit', '--no-fund', 'better-sqlite3@12', 'uuid@14', 'zod@4'], {
-    cwd: folder,
-    stdio: 'inherit',
-  });
-}
-
 /** Lets the tag's own code create its database in `dataPath`. */
 function createWithRelease(tag, worktree, dataPath) {
-  const entry = ['server/db.ts', 'server/db.mjs'].find((file) => fs.existsSync(path.join(worktree, file)));
-  if (!entry) throw new Error(`${tag} has no server/db module`);
-  const usesNodeSqlite = !JSON.parse(fs.readFileSync(path.join(worktree, 'package.json'), 'utf8')).dependencies?.[
-    'better-sqlite3'
-  ];
-  if (!usesNodeSqlite) installLegacyModules();
-  fs.symlinkSync(usesNodeSqlite ? path.join(repo, 'node_modules') : legacyModules, path.join(worktree, 'node_modules'));
+  fs.symlinkSync(path.join(repo, 'node_modules'), path.join(worktree, 'node_modules'));
   const script = `
-    const db = await import(${JSON.stringify(pathToFileURL(path.join(worktree, entry)).href)});
-    if (db.initDb) await db.initDb();
-    if (db.closeDb) db.closeDb();
-    else db.db?.close();
+    const db = await import(${JSON.stringify(pathToFileURL(path.join(worktree, 'server', 'db.ts')).href)});
+    await db.initDb();
+    db.closeDb();
     process.exit(0);
   `;
   execFileSync(process.execPath, ['--import', tsx, '--input-type=module', '-e', script], {
@@ -90,10 +70,6 @@ function insert(db, table, row) {
   ).run(...entries.map(([, value]) => value));
 }
 
-function hasTable(db, table) {
-  return Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table));
-}
-
 function addSampleData(file) {
   const db = new DatabaseSync(file);
   try {
@@ -106,30 +82,18 @@ function addSampleData(file) {
         created_at: 1_000,
         updated_at: 1_000,
       });
-      if (hasTable(db, 'queue_entries')) {
-        insert(db, 'queue_entries', {
-          runner_id: runner.id,
-          status: runner.status,
-          queue_index: runner.queue_index,
-          status_since: runner.status_since,
-          hidden_at: null,
-        });
-      }
     }
-    if (hasTable(db, 'laps')) {
-      for (const lap of LAPS) {
-        insert(db, 'laps', {
-          ...lap,
-          duration_ms: lap.finished_at - lap.started_at,
-          source: 'manual',
-          created_at: lap.finished_at,
-          labels_json: '[]',
-        });
-      }
+    for (const lap of LAPS) {
+      insert(db, 'laps', {
+        ...lap,
+        duration_ms: lap.finished_at - lap.started_at,
+        source: 'manual',
+        created_at: lap.finished_at,
+        labels_json: '[]',
+      });
     }
-    const label = hasTable(db, 'labels') ? db.prepare('SELECT id FROM labels ORDER BY name LIMIT 1').get() : null;
-    if (label && hasTable(db, 'runner_labels'))
-      insert(db, 'runner_labels', { runner_id: 'fixture-anna', label_id: label.id });
+    const label = db.prepare('SELECT id FROM labels ORDER BY name LIMIT 1').get();
+    insert(db, 'runner_labels', { runner_id: 'fixture-anna', label_id: label.id });
     db.exec('COMMIT');
     db.exec('PRAGMA wal_checkpoint(TRUNCATE); PRAGMA journal_mode = DELETE; VACUUM;');
   } finally {

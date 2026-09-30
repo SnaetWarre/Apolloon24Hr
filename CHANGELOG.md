@@ -4,6 +4,12 @@ All notable changes to the Leuven 24h Runner Tracker will be documented in this 
 
 ## [Unreleased]
 
+### Changed
+
+- Een database van vóór 4.0 wordt niet meer omgezet. De app zet ze ongewijzigd
+  opzij als `app.retired-<tijd>.sqlite` en begint met een lege database en een
+  nieuwe laptop-identiteit. Databases van 4.0 en later blijven gewoon behouden
+
 ### Fixed
 
 - Bij het opstarten vergelijkt de app elke tabel met de huidige structuur, in

@@ -4,11 +4,29 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import net from 'node:net';
+import { DatabaseSync } from 'node:sqlite';
 
-/** A new install, and one upgrading the oldest database a laptop can still have. */
+/** A 3.x database, which the app puts aside before starting empty. */
+const SCHEMA_12_SQL = `
+  CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+  CREATE TABLE runners (id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+  INSERT INTO settings VALUES ('schema_version', '12');
+  INSERT INTO runners VALUES ('alice', 'Alice', 1, 1);
+`;
+
+/**
+ * A new install, an upgrade from 4.0.0, the 4.0.1 laptop whose runners table
+ * needs a rebuild, and a 3.x database that is put aside.
+ */
 const SCENARIOS = [
   { name: 'fresh', database: null, runners: 0 },
-  { name: 'upgrade from v0.7.1', database: path.join('tests', 'fixtures', 'db', 'v0.7.1.sqlite'), runners: 3 },
+  { name: 'upgrade from v4.0.0', database: path.join('tests', 'fixtures', 'db', 'v4.0.0.sqlite'), runners: 3 },
+  {
+    name: 'repair of v4.0.1-early-runners',
+    database: path.join('tests', 'fixtures', 'db', 'v4.0.1-early-runners.sqlite'),
+    runners: 0,
+  },
+  { name: 'retire of a 3.x database', sql: SCHEMA_12_SQL, runners: 0, retired: true },
 ];
 
 const temporary = mkdtempSync(path.join(tmpdir(), 'apolloon-package-smoke-'));
@@ -28,11 +46,17 @@ try {
   for (const [index, scenario] of SCENARIOS.entries()) {
     const dataPath = path.join(temporary, `data-${index}`);
     mkdirSync(dataPath);
-    if (scenario.database) {
-      mkdirSync(path.join(dataPath, 'data'));
-      copyFileSync(scenario.database, path.join(dataPath, 'data', 'app.db'));
+    const databasePath = path.join(dataPath, 'data', 'app.db');
+    if (scenario.database || scenario.sql) mkdirSync(path.join(dataPath, 'data'));
+    if (scenario.database) copyFileSync(scenario.database, databasePath);
+    if (scenario.sql) {
+      const db = new DatabaseSync(databasePath);
+      db.exec(scenario.sql);
+      db.close();
     }
     await smoke(executable, dataPath, scenario);
+    const retired = readdirSync(path.join(dataPath, 'data')).filter((file) => file.startsWith('app.retired-'));
+    assert.equal(retired.length, scenario.retired ? 1 : 0, `Retired databases (${scenario.name})`);
   }
 } finally {
   rmSync(temporary, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });

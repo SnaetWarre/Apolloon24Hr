@@ -1,13 +1,18 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { DATA_DIR, backupDatabase, getDb, openDatabase } from './db/connection.js';
+import { type DatabaseSync } from 'node:sqlite';
+import { DATA_DIR, DB_FILE, backupDatabase, closeDb, openDatabase } from './db/connection.js';
 import { DATABASE_SCHEMA_VERSION, createSchema, migrateSchema, seedDefaultLabels } from './db/schema.js';
 import { schemaProblems } from './db/schema-check.js';
 import { getSetting, hostIdentity } from './db/settings.js';
 import { syncTemporaryTeamRows } from './db/teams.js';
 
+/** The first 4.0 schema. Older databases hold only earlier years' events and are put aside, not converted. */
+const FIRST_KEPT_SCHEMA_VERSION = 13;
+
 export async function initDb(): Promise<void> {
-  const database = openDatabase();
+  let database = openDatabase();
+  const hasTables = Boolean(database.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table'").get());
   const hasSettingsTable = Boolean(
     database.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'settings'").get()
   );
@@ -17,24 +22,32 @@ export async function initDb(): Promise<void> {
       `database schema ${storedSchemaVersion} is newer than this Apolloon release (${DATABASE_SCHEMA_VERSION})`
     );
   }
-  // Keep a copy from before the schema 13 replication rewrite; it also drops the old operation log.
-  const upgradesReplication = storedSchemaVersion > 0 && storedSchemaVersion < 13;
-  if (upgradesReplication) {
-    const backupPath = path.join(DATA_DIR, `app.pre-schema-13.sqlite`);
-    if (!fs.existsSync(backupPath)) await backupDatabase(backupPath);
-  }
+  if (hasTables && storedSchemaVersion < FIRST_KEPT_SCHEMA_VERSION) database = retireDatabase(storedSchemaVersion);
   createSchema();
   // Keep a copy before rebuilding tables of a database whose structure is out of date. A failed
   // repair changes nothing, so the restarts after it keep the first copy of the day.
-  if (!upgradesReplication && schemaProblems(database).some((problem) => problem.kind === 'table')) {
+  if (schemaProblems(database).some((problem) => problem.kind === 'table')) {
     const backupPath = path.join(DATA_DIR, `app.pre-repair-${new Date().toISOString().slice(0, 10)}.sqlite`);
     if (!fs.existsSync(backupPath)) await backupDatabase(backupPath);
   }
   migrateSchema();
-  if (upgradesReplication) getDb().exec('VACUUM');
   seedDefaultLabels();
   syncTemporaryTeamRows();
   hostIdentity();
+}
+
+/** Moves the database file aside, untouched, and opens an empty one in its place. */
+function retireDatabase(schemaVersion: number): DatabaseSync {
+  closeDb();
+  const retiredPath = path.join(DATA_DIR, `app.retired-${new Date().toISOString().replace(/[:.]/g, '-')}.sqlite`);
+  fs.renameSync(DB_FILE, retiredPath);
+  for (const suffix of ['-wal', '-shm']) {
+    if (fs.existsSync(`${DB_FILE}${suffix}`)) fs.renameSync(`${DB_FILE}${suffix}`, `${retiredPath}${suffix}`);
+  }
+  console.warn(
+    `Put aside a database from before 4.0 (schema ${schemaVersion}) as ${path.basename(retiredPath)}; starting empty.`
+  );
+  return openDatabase();
 }
 
 export { getAppDataRevision, markAppDataChanged, onAppDataChanged, closeDb, backupDatabase } from './db/connection.js';
