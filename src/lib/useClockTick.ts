@@ -1,13 +1,13 @@
 import React from 'react';
+import { nowMs } from './time';
 
 const MIN_CLOCK_INTERVAL_MS = 16;
 export const LIVE_MILLISECOND_INTERVAL_MS = 1_000 / 30;
 export const SECOND_DISPLAY_INTERVAL_MS = 500;
 type Clock = {
   cadenceMs: number;
-  listeners: Set<() => void>;
+  listeners: Set<(now: number) => void>;
   timeoutId: number | null;
-  version: number;
 };
 
 const clocks = new Map<number, Clock>();
@@ -18,23 +18,28 @@ export function normalizeClockInterval(intervalMs: number): number {
   return Math.max(MIN_CLOCK_INTERVAL_MS, Math.round(intervalMs));
 }
 
-export function useClockTick(intervalMs = 100, enabled = true): void {
+/**
+ * The server-clock time, refreshed every `intervalMs` while `enabled`.
+ * Render from this value, never from a bare nowMs() or Date.now(): the React
+ * Compiler caches a call with no inputs, and the clock on screen would stand still.
+ * Every component on the same cadence gets the same tick, so clocks never disagree.
+ */
+export function useClockTick(intervalMs = 100, enabled = true): number {
   const cadenceMs = normalizeClockInterval(intervalMs);
-  const subscribe = (listener: () => void) => (enabled ? subscribeToClock(cadenceMs, listener) : () => undefined);
-  const getSnapshot = () => (enabled ? (clocks.get(cadenceMs)?.version ?? 0) : 0);
-  React.useSyncExternalStore(subscribe, getSnapshot, () => 0);
+  const [now, setNow] = React.useState(nowMs);
+  React.useEffect(() => (enabled ? subscribeToClock(cadenceMs, setNow) : undefined), [cadenceMs, enabled]);
+  return now;
 }
 
-export function useSecondTick(enabled = true): void {
-  useClockTick(SECOND_DISPLAY_INTERVAL_MS, enabled);
+export function useSecondTick(enabled = true): number {
+  return useClockTick(SECOND_DISPLAY_INTERVAL_MS, enabled);
 }
 
-function subscribeToClock(cadenceMs: number, listener: () => void): () => void {
+function subscribeToClock(cadenceMs: number, listener: (now: number) => void): () => void {
   const clock = clocks.get(cadenceMs) ?? {
     cadenceMs,
     listeners: new Set(),
     timeoutId: null,
-    version: 0,
   };
   clock.listeners.add(listener);
   clocks.set(cadenceMs, clock);
@@ -50,13 +55,17 @@ function subscribeToClock(cadenceMs: number, listener: () => void): () => void {
   };
 }
 
+function notify(clock: Clock): void {
+  const now = nowMs();
+  for (const listener of clock.listeners) listener(now);
+}
+
 function scheduleClock(clock: Clock): void {
   if (clock.timeoutId !== null || document.hidden || clock.listeners.size === 0) return;
   const untilNextCadence = clock.cadenceMs - (Date.now() % clock.cadenceMs);
   clock.timeoutId = window.setTimeout(() => {
     clock.timeoutId = null;
-    clock.version = (clock.version + 1) % 1_000_000;
-    for (const listener of clock.listeners) listener();
+    notify(clock);
     scheduleClock(clock);
   }, untilNextCadence);
 }
@@ -73,8 +82,7 @@ function handleVisibilityChange(): void {
       clearClock(clock);
       continue;
     }
-    clock.version = (clock.version + 1) % 1_000_000;
-    for (const listener of clock.listeners) listener();
+    notify(clock);
     scheduleClock(clock);
   }
 }

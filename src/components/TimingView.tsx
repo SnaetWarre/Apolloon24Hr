@@ -3,8 +3,7 @@ import { Link } from '@tanstack/react-router';
 import { isModalDialogOpen, ModalDialog } from './ModalDialog';
 import { useConfirm } from './ConfirmDialog';
 import { useAppActions, useAppData, useClusterStatus, useRaceHistory } from '../app/index';
-import { formatClockTimeMs, formatDurationMs, nowMs } from '../lib/time';
-import { getNextWaitingRunner } from '../lib/runners';
+import { formatClockTimeMs, formatDurationMs } from '../lib/time';
 import type { LiveAppSnapshot, Runner } from '../types';
 import { LabelBadge } from './LabelBadge';
 import { RunnerName } from './RunnerName';
@@ -23,11 +22,6 @@ export function TimingView() {
     error: historyError,
     refresh: refreshHistory,
   } = useRaceHistory({ scope: 'recent', limit: 10 });
-  const {
-    laps: activeRunnerLaps,
-    loading: runnerHistoryLoading,
-    error: runnerHistoryError,
-  } = useRaceHistory({ scope: 'runner', runnerId: race.activeRunnerId || '' });
   const { cluster } = useClusterStatus();
   const { handoff, startNext, undoLastHandoff, finishRace } = useAppActions();
   const [actionError, setActionError] = React.useState<string | null>(null);
@@ -36,6 +30,12 @@ export function TimingView() {
   const [finishConfirmStep, setFinishConfirmStep] = React.useState<0 | 1 | 2>(0);
   // The first "Race beëindigen" click stops the clock; the confirmations only decide whether it counts.
   const [finishStop, setFinishStop] = React.useState<{ press: PressTime; activeStartedAt: number | null } | null>(null);
+  // The screen shows a handoff the moment it is pressed; the server's answer then confirms it.
+  const [pressedHandoff, setPressedHandoff] = React.useState<{
+    fromStartedAt: number | null;
+    runnerId: string | null;
+    startedAt: number;
+  } | null>(null);
   const handoffBusyRef = React.useRef(false);
   const confirm = useConfirm();
   // A press flashes the key, also when it came from the keyboard.
@@ -44,27 +44,24 @@ export function TimingView() {
   const timingBlocked = cluster?.state === 'no-majority';
 
   const activeRunner = runners.find((runner) => runner.id === race.activeRunnerId) || null;
-  const nextRunner = getNextWaitingRunner(runners);
-  const recentLaps = laps.slice(0, 10);
-  const upcomingRunners = runners
+  const waitingRunners = runners
     .filter((runner) => runner.status === 'waiting')
-    .sort((first, second) => (first.queueIndex ?? 0) - (second.queueIndex ?? 0))
-    .slice(0, 5);
-  const activePreviousLap = activeRunner
-    ? activeRunnerLaps.find((lap) => lap.runnerId === activeRunner.id) || null
-    : null;
+    .sort((first, second) => (first.queueIndex ?? 0) - (second.queueIndex ?? 0));
+  const nextRunner = waitingRunners[0] ?? null;
+  const recentLaps = laps.slice(0, 10);
   const runExclusiveRaceAction = React.useCallback(
     async (action: () => Promise<unknown>, successMessage: string | null): Promise<boolean> => {
       if (handoffBusyRef.current) return false;
       handoffBusyRef.current = true;
       setHandoffBusy(true);
       setActionError(null);
-      setLastAction(null);
+      // The previous confirmation stays until this one lands, so the line under the button never blinks.
       try {
         await action();
         if (successMessage) setLastAction(successMessage);
         return true;
       } catch (err) {
+        setLastAction(null);
         setActionError(err instanceof Error ? err.message : 'Timing actie mislukt');
         return false;
       } finally {
@@ -75,48 +72,42 @@ export function TimingView() {
     []
   );
 
-  const runHandoff = React.useCallback(
-    async (eventTime: number) => {
-      if (timingBlocked || finishConfirmStep > 0 || (!activeRunner && !nextRunner)) return;
-      if (race.raceFinishedAt) {
-        const resume = await confirm({
-          title: 'Race hervatten?',
-          message: 'De race is afgesloten. Hervatten start de volgende loper.',
-          confirmLabel: 'Race hervatten',
-          tone: 'danger',
-        });
-        if (!resume) return;
-        // The lap starts at the confirmation, not at the press that opened it.
-        eventTime = performance.now();
-      }
-      const press = timePress(eventTime, race.activeStartedAt);
-      await runExclusiveRaceAction(async () => {
-        const handoffResult = await (activeRunner ? handoff(press) : startNext(press));
-        if (handoffResult.startedRunnerId) rememberLapStart(press, eventTime);
-        else forgetLapStart();
-        setLastAction(
-          handoffResult.lapId
-            ? handoffResult.startedRunnerId
-              ? 'Ronde opgeslagen. Volgende loper gestart.'
-              : 'Ronde opgeslagen. Niemand actief; de wachtrij is leeg.'
-            : 'Loper gestart.'
-        );
-      }, null);
-    },
-    [
-      activeRunner,
-      nextRunner,
-      finishConfirmStep,
-      race.raceFinishedAt,
-      race.activeStartedAt,
-      confirm,
-      handoff,
-      runExclusiveRaceAction,
-      startNext,
-      timingBlocked,
-    ]
-  );
-  const handoffDisabled = handoffBusy || timingBlocked || (!activeRunner && !nextRunner);
+  async function runHandoff(eventTime: number) {
+    if (handoffBusyRef.current || timingBlocked || finishConfirmStep > 0 || (!activeRunner && !nextRunner)) return;
+    if (race.raceFinishedAt) {
+      const resume = await confirm({
+        title: 'Race hervatten?',
+        message: 'De race is afgesloten. Hervatten start de volgende loper.',
+        confirmLabel: 'Race hervatten',
+        tone: 'danger',
+      });
+      if (!resume) return;
+      // The lap starts at the confirmation, not at the press that opened it.
+      eventTime = performance.now();
+    }
+    const press = timePress(eventTime, race.activeStartedAt);
+    setPressedHandoff({
+      fromStartedAt: race.activeStartedAt,
+      runnerId: nextRunner?.id ?? null,
+      startedAt: press.pressedAt,
+    });
+    await runExclusiveRaceAction(async () => {
+      const handoffResult = await (activeRunner ? handoff(press) : startNext(press));
+      if (handoffResult.startedRunnerId) rememberLapStart(press, eventTime);
+      else forgetLapStart();
+      setLastAction(
+        handoffResult.lapId
+          ? handoffResult.startedRunnerId
+            ? 'Ronde opgeslagen. Volgende loper gestart.'
+            : 'Ronde opgeslagen. Niemand actief; de wachtrij is leeg.'
+          : 'Loper gestart.'
+      );
+    }, null);
+    setPressedHandoff(null);
+  }
+
+  // A press in flight never disables the button: it would fade on every handoff. Presses meanwhile are ignored.
+  const handoffDisabled = timingBlocked || (!activeRunner && !nextRunner);
 
   React.useEffect(() => {
     // Navigation buttons can stay focused when this route opens. In that case,
@@ -125,34 +116,36 @@ export function TimingView() {
     if (activeElement instanceof HTMLElement) activeElement.blur();
   }, []);
 
+  const onHandoffKey = React.useEffectEvent((event: KeyboardEvent) => {
+    const target = event.target as HTMLElement | null;
+    if (
+      event.defaultPrevented ||
+      event.ctrlKey ||
+      event.altKey ||
+      event.metaKey ||
+      event.isComposing ||
+      !isHandoffKey(event) ||
+      isTextEntryTarget(target) ||
+      finishConfirmStep > 0 ||
+      timingBlocked ||
+      race.raceFinishedAt ||
+      isModalDialogOpen()
+    )
+      return;
+    // Space is the dedicated timing control on this screen, even if a button
+    // still has focus. Keep Enter's normal button/link behaviour intact.
+    if (event.key === 'Enter' && isInteractiveTarget(target)) return;
+    event.preventDefault();
+    if (event.repeat || handoffBusyRef.current || handoffDisabled) return;
+    flashPress();
+    void runHandoff(event.timeStamp);
+  });
+
   React.useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      if (
-        event.defaultPrevented ||
-        event.ctrlKey ||
-        event.altKey ||
-        event.metaKey ||
-        event.isComposing ||
-        !isHandoffKey(event) ||
-        isTextEntryTarget(target) ||
-        finishConfirmStep > 0 ||
-        timingBlocked ||
-        race.raceFinishedAt ||
-        isModalDialogOpen()
-      )
-        return;
-      // Space is the dedicated timing control on this screen, even if a button
-      // still has focus. Keep Enter's normal button/link behaviour intact.
-      if (event.key === 'Enter' && isInteractiveTarget(target)) return;
-      event.preventDefault();
-      if (event.repeat || handoffBusy || handoffDisabled) return;
-      flashPress();
-      void runHandoff(event.timeStamp);
-    };
+    const onKeyDown = (event: KeyboardEvent) => onHandoffKey(event);
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [finishConfirmStep, flashPress, handoffBusy, handoffDisabled, runHandoff, timingBlocked, race.raceFinishedAt]);
+  }, []);
 
   async function undo() {
     if (handoffBusyRef.current) return;
@@ -165,10 +158,11 @@ export function TimingView() {
       }))
     )
       return;
-    await runExclusiveRaceAction(undoLastHandoff, null);
+    await runExclusiveRaceAction(undoLastHandoff, 'Laatste wissel ongedaan gemaakt.');
   }
 
   function startFinish(eventTime: number) {
+    if (handoffBusyRef.current) return;
     setFinishStop({ press: timePress(eventTime, race.activeStartedAt), activeStartedAt: race.activeStartedAt });
     setFinishConfirmStep(1);
   }
@@ -193,16 +187,17 @@ export function TimingView() {
   }
 
   const finishPress = finishStop?.activeStartedAt === race.activeStartedAt ? finishStop.press : null;
-  const previousLapText = runnerHistoryError
-    ? 'Niet beschikbaar'
-    : activePreviousLap
-      ? formatDurationMs(activePreviousLap.durationMs)
-      : activeRunner && runnerHistoryLoading
-        ? 'Laden...'
-        : '—';
-  const bestLapText = activeRunner?.bestLapMs ? formatDurationMs(activeRunner.bestLapMs) : '—';
-  const activeKey = activeRunner?.id ?? 'none';
-  const startKey = race.activeStartedAt ?? 0;
+  // Until the server answers a press, show the runner it started; its answer carries the same start time.
+  const pending = handoffBusy && pressedHandoff?.fromStartedAt === race.activeStartedAt ? pressedHandoff : null;
+  const shownRunner = pending ? (runners.find((runner) => runner.id === pending.runnerId) ?? null) : activeRunner;
+  const shownStartedAt = pending ? (pending.runnerId ? pending.startedAt : null) : race.activeStartedAt;
+  const shownQueue = pending ? waitingRunners.filter((runner) => runner.id !== pending.runnerId) : waitingRunners;
+  const shownNext = shownQueue[0] ?? null;
+  const upcomingRunners = shownQueue.slice(0, 5);
+  const previousLapText = shownRunner?.lastLapMs ? formatDurationMs(shownRunner.lastLapMs) : '—';
+  const bestLapText = shownRunner?.bestLapMs ? formatDurationMs(shownRunner.bestLapMs) : '—';
+  const activeKey = shownRunner?.id ?? 'none';
+  const startKey = shownStartedAt ?? 0;
 
   // What changed after this screen opened moves briefly.
   const changed = useArrivals([
@@ -217,37 +212,36 @@ export function TimingView() {
   );
   const newUpcomingIds = useArrivals(upcomingRunners.map((runner) => runner.id));
 
-  const waitingCount = runners.filter((runner) => runner.status === 'waiting').length;
-  const handoffLabel = handoffBusy
-    ? 'Bezig...'
-    : timingBlocked
-      ? 'Timing geblokkeerd'
-      : race.raceFinishedAt && nextRunner
-        ? `Race hervatten met ${shortRunnerName(nextRunner)}`
-        : activeRunner
-          ? nextRunner
-            ? `Klok ${shortRunnerName(activeRunner)} af, start ${shortRunnerName(nextRunner)}`
-            : `Klok ${shortRunnerName(activeRunner)} af`
-          : nextRunner
-            ? `Start ${shortRunnerName(nextRunner)}`
-            : 'Geen loper klaar';
+  const waitingCount = shownQueue.length;
+  const handoffLabel = timingBlocked
+    ? 'Timing geblokkeerd'
+    : race.raceFinishedAt && !pending && nextRunner
+      ? `Race hervatten met ${shortRunnerName(nextRunner)}`
+      : shownRunner
+        ? shownNext
+          ? `Klok ${shortRunnerName(shownRunner)} af, start ${shortRunnerName(shownNext)}`
+          : `Klok ${shortRunnerName(shownRunner)} af`
+        : shownNext
+          ? `Start ${shortRunnerName(shownNext)}`
+          : 'Geen loper klaar';
+  const finished = Boolean(race.raceFinishedAt) && !pending;
 
   return (
     <>
       <PageHeader title="Timing" meta={<span>Spatie of Enter klokt de huidige loper af en start de volgende.</span>} />
 
       <div className="timing-workspace">
-        <section className={`timing-station${activeRunner ? ' is-running' : ''}`} aria-label="Timing bedienen">
+        <section className={`timing-station${shownRunner ? ' is-running' : ''}`} aria-label="Timing bedienen">
           <span className="timing-station__label">
-            {race.raceFinishedAt ? 'Race afgesloten' : activeRunner ? 'Nu op de piste' : 'Nog niemand op de piste'}
+            {finished ? 'Race afgesloten' : shownRunner ? 'Nu op de piste' : 'Nog niemand op de piste'}
           </span>
           <div key={activeKey} className={`timing-now${changed.has(`active:${activeKey}`) ? ' rise-in' : ''}`}>
-            {activeRunner ? (
+            {shownRunner ? (
               <>
-                <RunnerName runner={activeRunner} size="lg" />
-                {activeRunner.labels.length > 0 && (
+                <RunnerName runner={shownRunner} size="lg" />
+                {shownRunner.labels.length > 0 && (
                   <div className="label-list">
-                    {activeRunner.labels.map((label) => (
+                    {shownRunner.labels.map((label) => (
                       <LabelBadge key={label.id} label={label} />
                     ))}
                   </div>
@@ -255,20 +249,16 @@ export function TimingView() {
               </>
             ) : (
               <span className="timing-now__empty">
-                {race.raceFinishedAt
-                  ? 'Niemand actief'
-                  : nextRunner
-                    ? 'Klaar om te starten'
-                    : 'Wacht op de eerste loper'}
+                {finished ? 'Niemand actief' : shownNext ? 'Klaar om te starten' : 'Wacht op de eerste loper'}
               </span>
             )}
           </div>
 
           <div className="timing-clock-row">
-            {activeRunner && race.activeStartedAt ? (
+            {shownRunner && shownStartedAt ? (
               <TimingClock
                 key={startKey}
-                startedAt={race.activeStartedAt}
+                startedAt={shownStartedAt}
                 stoppedAt={finishPress?.pressedAt ?? null}
                 arrived={changed.has(`start:${startKey}`)}
               />
@@ -300,13 +290,15 @@ export function TimingView() {
             <button
               className={`btn btn--primary btn--xl${pressed ? ' is-pressed' : ''}`}
               onClick={(event) => {
+                if (handoffBusyRef.current) return;
                 flashPress();
                 void runHandoff(event.timeStamp);
               }}
               disabled={handoffDisabled}
+              aria-busy={handoffBusy}
             >
               <span>{handoffLabel}</span>
-              {!race.raceFinishedAt && !handoffDisabled && <kbd>Spatie / Enter</kbd>}
+              {!finished && !handoffDisabled && <kbd>Spatie / Enter</kbd>}
             </button>
           </div>
 
@@ -325,20 +317,27 @@ export function TimingView() {
                 {actionError}
               </div>
             )}
-            {lastAction && (
-              <div key={startKey} className="success-banner" role="status">
-                {lastAction}
-              </div>
+            {pending ? (
+              // Only shows when the laptops take a moment to answer; a normal press is confirmed before it fades in.
+              <p className="timing-feedback__hint timing-feedback__saving" role="status">
+                Wissel wordt opgeslagen…
+              </p>
+            ) : (
+              lastAction && (
+                <div key={startKey} className="success-banner" role="status">
+                  {lastAction}
+                </div>
+              )
             )}
-            {!activeRunner && !nextRunner && !race.raceFinishedAt && !timingBlocked && (
+            {!shownRunner && !shownNext && !finished && !timingBlocked && (
               <p className="timing-feedback__hint">Zet in Wachtrij een opgewarmde loper klaar om te starten.</p>
             )}
-            {activeRunner && !nextRunner && !race.raceFinishedAt && !timingBlocked && (
+            {shownRunner && !shownNext && !finished && !timingBlocked && (
               <p className="timing-feedback__hint timing-feedback__hint--warn">
                 Niemand klaar in de wachtrij. Na afklokken loopt er niemand op de piste.
               </p>
             )}
-            {race.raceFinishedAt && (
+            {finished && (
               <p className="timing-feedback__hint">
                 Race afgesloten. Spatie en Enter doen niets meer; hervat alleen bewust met de knop.
               </p>
@@ -350,7 +349,7 @@ export function TimingView() {
               <span className="muted-label">Race gestart</span>
               <strong>{race.raceStartedAt ? formatClockTimeMs(race.raceStartedAt).split('.')[0] : 'Nog niet'}</strong>
             </div>
-            <button className="btn timing-undo" onClick={undo} disabled={handoffBusy || timingBlocked}>
+            <button className="btn timing-undo" onClick={undo} disabled={timingBlocked}>
               Laatste wissel ongedaan maken
             </button>
           </div>
@@ -429,7 +428,7 @@ export function TimingView() {
             <button
               className="btn btn--danger-outline btn--sm"
               onClick={(event) => startFinish(event.timeStamp)}
-              disabled={handoffBusy || timingBlocked}
+              disabled={timingBlocked}
             >
               Race beëindigen
             </button>
@@ -496,8 +495,8 @@ function TimingClock({
   stoppedAt: number | null;
   arrived: boolean;
 }) {
-  useClockTick(LIVE_MILLISECOND_INTERVAL_MS, stoppedAt === null);
-  const [main, fraction = '0'] = formatDurationMs(Math.max(0, (stoppedAt ?? nowMs()) - startedAt)).split('.');
+  const now = useClockTick(LIVE_MILLISECOND_INTERVAL_MS, stoppedAt === null);
+  const [main, fraction = '0'] = formatDurationMs(Math.max(0, (stoppedAt ?? now) - startedAt)).split('.');
   return (
     <span
       className={`timing-clock live-time${arrived ? ' value-tick' : ''}`}

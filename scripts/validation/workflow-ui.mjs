@@ -71,15 +71,19 @@ try {
   await page.keyboard.press('Space');
   await waitUntil(async () => (await snapshot()).race.activeRunnerId === firstRunner.id);
   await page.getByRole('button', { name: /^Klok / }).waitFor();
+  // The React Compiler once cached the clock's time read, and the lap clock stood still.
+  const lapClock = page.getByRole('timer', { name: 'Lopende rondetijd' });
+  const clockBefore = await lapClock.innerText();
+  await page.waitForTimeout(400);
+  assert.notEqual(await lapClock.innerText(), clockBefore, 'The lap clock keeps running');
   await page.keyboard.press('Space');
   await page.getByText('Ronde opgeslagen. Niemand actief; de wachtrij is leeg.').waitFor();
   assert.equal((await snapshot()).race.activeRunnerId, null);
-  console.log('PASS empty queue, modified shortcuts, final runner handoff feedback');
+  console.log('PASS empty queue, modified shortcuts, running lap clock, final runner handoff feedback');
 
   await rpc.runners.setStatus.mutate({ id: firstRunner.id, status: 'waiting' });
   await rpc.race.startNext.mutate(await expectation());
   await rpc.runners.setStatus.mutate({ id: secondRunner.id, status: 'waiting' });
-  const lapClock = page.getByRole('timer', { name: 'Lopende rondetijd' });
   const finishDialog = page.getByRole('dialog', { name: 'Race afsluiten', exact: true });
   await page.getByRole('button', { name: 'Race beëindigen', exact: true }).click();
   const stoppedClock = await lapClock.textContent();

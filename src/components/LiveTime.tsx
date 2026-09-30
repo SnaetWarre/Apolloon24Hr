@@ -1,4 +1,4 @@
-import { formatDurationMs, formatElapsedSeconds, nowMs } from '../lib/time';
+import { formatDurationMs, formatElapsedSeconds } from '../lib/time';
 import { LIVE_MILLISECOND_INTERVAL_MS, useClockTick, useSecondTick } from '../lib/useClockTick';
 
 export function LiveDuration({
@@ -12,8 +12,7 @@ export function LiveDuration({
   refreshMs?: number;
   format?: 'milliseconds' | 'seconds';
 }) {
-  useClockTick(refreshMs);
-  const elapsedMs = nowMs() - startedAt;
+  const elapsedMs = useClockTick(refreshMs) - startedAt;
   return (
     <span className={className}>
       {format === 'seconds' ? formatElapsedSeconds(elapsedMs) : formatDurationMs(elapsedMs)}
@@ -22,11 +21,11 @@ export function LiveDuration({
 }
 
 export function LiveElapsed({ startedAt, prefix = '' }: { startedAt: number; prefix?: string }) {
-  useSecondTick();
+  const now = useSecondTick();
   return (
     <>
       {prefix}
-      {formatElapsedSeconds(nowMs() - startedAt)}
+      {formatElapsedSeconds(now - startedAt)}
     </>
   );
 }

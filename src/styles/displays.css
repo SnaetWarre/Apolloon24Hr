@@ -85,6 +85,10 @@ html[data-display-tone="light"] body {
   font: 500 clamp(20px, 2vw, 36px) var(--font-body);
 }
 
+.display-loading > * {
+  animation: fade-in var(--dur-3) var(--ease-out) 300ms backwards;
+}
+
 .display-brand {
   display: flex;
   align-items: center;

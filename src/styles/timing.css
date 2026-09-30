@@ -150,6 +150,11 @@
   color: var(--warn-ink);
 }
 
+/* Invisible for a normal press; appears only when the laptops are slow to confirm. */
+.timing-feedback__saving {
+  animation: fade-in var(--dur-2) var(--ease-out) 400ms backwards;
+}
+
 .timing-footer {
   display: flex;
   flex-wrap: wrap;
@@ -219,7 +224,9 @@
   padding-bottom: var(--space-2);
 }
 
+/* Bleeds to the panel edges; max-width would keep it one padding short on the right. */
 .timing-log .table-wrap {
+  max-width: none;
   max-height: 400px;
   margin: 0 calc(var(--space-4) * -1);
 }

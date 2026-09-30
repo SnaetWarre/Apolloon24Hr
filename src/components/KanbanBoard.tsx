@@ -13,7 +13,7 @@ import {
 import { useAppActions, useAppData } from '../app/index';
 import { useBoardSearch } from '../app/boardSearch';
 import { useArrivals } from '../lib/motion';
-import { formatDurationMs, formatElapsedSeconds, nowMs } from '../lib/time';
+import { formatDurationMs, formatElapsedSeconds } from '../lib/time';
 import { useSecondTick } from '../lib/useClockTick';
 import { kanbanCollisionDetection, resolveKanbanDrop } from '../lib/kanban';
 import type { LiveAppSnapshot, Runner, RunnerStatus } from '../types';
@@ -33,9 +33,9 @@ const LONG_WARM_UP_MS = 10 * 60_000;
 
 function TimerBadge({ runner }: { runner: Runner }) {
   const running = Boolean(runner.statusSince && runner.status !== 'ran');
-  useSecondTick(running);
+  const now = useSecondTick(running);
   if (!runner.statusSince || runner.status === 'ran') return <span className="timer-badge" />;
-  const elapsedMs = nowMs() - runner.statusSince;
+  const elapsedMs = now - runner.statusSince;
   const long = runner.status === 'warming_up' && elapsedMs >= LONG_WARM_UP_MS;
   return (
     <span
@@ -69,8 +69,6 @@ export const KanbanBoard: React.FC<{ onOpenProfile: (runnerId: string) => void }
   const { setStatus, moveInQueue, hideRunner, unhideRunner } = useAppActions();
   const [showHiddenRan, setShowHiddenRan] = React.useState(false);
   const [actionError, setActionError] = React.useState<string | null>(null);
-  const [actionBusy, setActionBusy] = React.useState(false);
-  const actionBusyRef = React.useRef(false);
   const [draggedRunnerId, setDraggedRunnerId] = React.useState<string | null>(null);
   const [dropTargetId, setDropTargetId] = React.useState<string | null>(null);
   const sensors = useSensors(
@@ -78,18 +76,13 @@ export const KanbanBoard: React.FC<{ onOpenProfile: (runnerId: string) => void }
     useSensor(KeyboardSensor)
   );
 
+  // Changes show at once and reach the server in click order, so the board never locks between clicks.
   const runQueueAction = React.useCallback(async (action: () => Promise<unknown>) => {
-    if (actionBusyRef.current) return;
-    actionBusyRef.current = true;
-    setActionBusy(true);
     setActionError(null);
     try {
       await action();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Wachtrijactie mislukt');
-    } finally {
-      actionBusyRef.current = false;
-      setActionBusy(false);
     }
   }, []);
   const handleHide = React.useCallback(
@@ -195,7 +188,6 @@ export const KanbanBoard: React.FC<{ onOpenProfile: (runnerId: string) => void }
         key={runner.id}
         runner={runner}
         queuePosition={queuePosition}
-        actionBusy={actionBusy}
         arrived={arrivedIds.has(`${runner.status}:${runner.id}`)}
         insertionEdge={insertionEdge}
         onOpenProfile={onOpenProfile}
@@ -344,7 +336,6 @@ function QueueLane({
 function QueueRunnerRow({
   runner,
   queuePosition,
-  actionBusy,
   arrived,
   onOpenProfile,
   onAdvance,
@@ -353,19 +344,13 @@ function QueueRunnerRow({
 }: {
   runner: Runner;
   queuePosition: number;
-  actionBusy: boolean;
   arrived: boolean;
   onOpenProfile: (runnerId: string) => void;
   onAdvance: () => void;
   insertionEdge?: 'before' | 'after';
   onToggleHidden: () => void;
 }) {
-  const {
-    attributes,
-    listeners,
-    setNodeRef: setDragRef,
-    isDragging,
-  } = useDraggable({ id: runner.id, disabled: actionBusy });
+  const { attributes, listeners, setNodeRef: setDragRef, isDragging } = useDraggable({ id: runner.id });
   const { setNodeRef: setDropRef } = useDroppable({ id: runner.id, disabled: isDragging });
   const isCompleted = runner.status === 'ran';
   return (
@@ -415,15 +400,11 @@ function QueueRunnerRow({
         </button>
         <TimerBadge runner={runner} />
         <div className="queue-row-actions" onPointerDown={(event) => event.stopPropagation()}>
-          <button
-            className={`btn btn--sm${runner.status === 'warming_up' ? ' btn--advance' : ''}`}
-            disabled={actionBusy}
-            onClick={onAdvance}
-          >
+          <button className={`btn btn--sm${runner.status === 'warming_up' ? ' btn--advance' : ''}`} onClick={onAdvance}>
             {runner.status === 'warming_up' ? 'Naar wachtrij' : 'Opwarmen'}
           </button>
           {isCompleted && (
-            <button className="btn btn--quiet btn--sm" disabled={actionBusy} onClick={onToggleHidden}>
+            <button className="btn btn--quiet btn--sm" onClick={onToggleHidden}>
               {runner.hiddenFromQueue ? 'Terug tonen' : 'Verberg'}
             </button>
           )}

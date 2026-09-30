@@ -25,7 +25,6 @@ import {
   type HistoricalRace,
 } from '../lib/tactics';
 import { buildLiveQuarterHourTrend, buildLiveRivalTimeGap, projectScenarioRange } from '../lib/tacticsDeepDive';
-import { nowMs } from '../lib/time';
 import { useClockTick } from '../lib/useClockTick';
 import type { LapRecord, LiveAppSnapshot } from '../types';
 import { HistoricalAnalysisSection, HistoricalDataNotice, HistoricalDatasetManager } from './tactics/HistoricalPanels';
@@ -65,7 +64,7 @@ export function TacticsView() {
   // Chart configurations are built during render; re-render them with the new theme colours.
   useChartTheme();
   const { race } = useAppData(selectTacticsData);
-  useClockTick(30_000, race.raceStartedAt != null && race.raceFinishedAt == null);
+  const now = useClockTick(30_000, race.raceStartedAt != null && race.raceFinishedAt == null);
   const { laps, loading: historyLoading, error: historyError } = useRaceHistory({ scope: 'full' });
   const [section, setSection] = React.useState<TacticsSection>('live');
   const storedHistoricalRace = React.useMemo(loadStoredHistoricalRace, []);
@@ -156,7 +155,7 @@ export function TacticsView() {
           <LiveTacticsSection
             laps={laps}
             raceStartedAt={race.raceStartedAt}
-            currentTimestamp={race.raceFinishedAt ?? nowMs()}
+            currentTimestamp={race.raceFinishedAt ?? now}
             historicalRace={historicalRace}
             historicalSourceName={historicalSourceName}
             historicalError={historicalError}

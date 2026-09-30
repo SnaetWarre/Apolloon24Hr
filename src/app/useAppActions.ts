@@ -13,7 +13,18 @@ import type {
   RunnerStatus,
 } from '../types';
 import type { PressTime } from '../lib/pressTiming';
+import { nowMs } from '../lib/time';
+import { addPendingChange, confirmedSnapshot, orderPatch, statusPatch, waitingOrder } from './optimistic';
 import { appKey, backupsKey, clusterStatusKey, snapshotKey } from './snapshot';
+
+// Queue changes go to the server one at a time, in the order they were clicked, so quick clicks
+// are never lost and the back of the queue fills in the order people were sent there.
+let queueChanges: Promise<unknown> = Promise.resolve();
+function inClickOrder<Result>(call: () => Promise<Result>): Promise<Result> {
+  const result = queueChanges.then(call, call);
+  queueChanges = result.catch(() => undefined);
+  return result;
+}
 
 export function useAppActions() {
   const queryClient = useQueryClient();
@@ -33,6 +44,33 @@ export function useAppActions() {
 
     const snapshot = () => queryClient.getQueryData<LiveAppSnapshot>(snapshotKey);
 
+    /**
+     * Shows `patch` on this screen right away and keeps it on top of every refetch until the server
+     * has answered; then the server's snapshot takes over, also when the change was refused.
+     */
+    async function optimistic<Result>(
+      patch: (current: LiveAppSnapshot) => LiveAppSnapshot,
+      call: () => Promise<Result>
+    ): Promise<Result> {
+      const removePatch = addPendingChange(patch);
+      queryClient.setQueryData<LiveAppSnapshot>(snapshotKey, (current) => current && patch(current));
+      return inClickOrder(async () => {
+        try {
+          const result = await call();
+          // The patch stays until the refetch lands, so the screen never shows the old state in between.
+          await queryClient.invalidateQueries({ queryKey: appKey });
+          return result;
+        } catch (error) {
+          // Refused: drop the patch first, so the refetch shows what the server really has.
+          removePatch();
+          await queryClient.invalidateQueries({ queryKey: appKey });
+          throw error;
+        } finally {
+          removePatch();
+        }
+      });
+    }
+
     /** Timing actions send the race state this screen shows, so a stale press is refused. */
     const raceExpectation = (): RaceStateExpectation => {
       const race = snapshot()?.race;
@@ -46,24 +84,33 @@ export function useAppActions() {
     return {
       addRunner: action((input: RunnerInput) => trpc.runners.create.mutate(input)),
       updateRunner: action((id: string, fields: RunnerPatch) => trpc.runners.update.mutate({ id, fields })),
-      setStatus: action((id: string, status: RunnerStatus) => trpc.runners.setStatus.mutate({ id, status })),
-      moveInQueue: action(async (id: string, targetId: string) => {
-        const waiting = (snapshot()?.runners ?? [])
-          .filter((runner) => runner.status === 'waiting')
-          .sort(
-            (a, b) =>
-              (a.queueIndex ?? Number.MAX_SAFE_INTEGER) - (b.queueIndex ?? Number.MAX_SAFE_INTEGER) ||
-              (a.statusSince ?? Number.MAX_SAFE_INTEGER) - (b.statusSince ?? Number.MAX_SAFE_INTEGER)
-          );
-        const oldIndex = waiting.findIndex((runner) => runner.id === id);
-        const targetIndex = waiting.findIndex((runner) => runner.id === targetId);
+      setStatus: (id: string, status: RunnerStatus) => {
+        const statusSince = nowMs();
+        return optimistic(statusPatch(id, status, statusSince), () =>
+          trpc.runners.setStatus.mutate({ id, status, statusSince })
+        );
+      },
+      moveInQueue: async (id: string, targetId: string) => {
+        const current = snapshot();
+        if (!current) return;
+        const order = waitingOrder(current);
+        const oldIndex = order.indexOf(id);
+        const targetIndex = order.indexOf(targetId);
         if (oldIndex === -1 || targetIndex === -1 || oldIndex === targetIndex) return;
-        const [moved] = waiting.splice(oldIndex, 1);
-        waiting.splice(targetIndex, 0, moved);
-        await trpc.runners.reorder.mutate({
-          ids: waiting.map((runner) => runner.id),
+        order.splice(oldIndex, 1);
+        order.splice(targetIndex, 0, id);
+        await optimistic(orderPatch(order), () => {
+          // The server wants exactly its own waiting runners. Runners still on their way to the
+          // queue from an earlier click are left out; anyone missing keeps their turn at the back.
+          const serverWaiting = waitingOrder(confirmedSnapshot() ?? current);
+          const known = new Set(serverWaiting);
+          const ids = order.filter((runnerId) => known.has(runnerId));
+          const listed = new Set(ids);
+          return trpc.runners.reorder.mutate({
+            ids: [...ids, ...serverWaiting.filter((runnerId) => !listed.has(runnerId))],
+          });
         });
-      }),
+      },
       deleteRunner: action((id: string) => trpc.runners.delete.mutate({ id })),
       hideRunner: action((id: string) => trpc.runners.hide.mutate({ id })),
       unhideRunner: action((id: string) => trpc.runners.unhide.mutate({ id })),
