@@ -21,29 +21,17 @@ const fixtures = fs
 /** The last release: its database must already match, so it is not rebuilt. */
 const LATEST_RELEASE_FIXTURE = 'v4.0.2.sqlite';
 
-type StoredRunner = { name: string; status: string | null; laps: number };
+type StoredRunner = { name: string; status: string; laps: number };
 
 /** Runners with their queue status and lap count, read straight from the file as that version stored them. */
 function storedRunners(file: string): Map<string, StoredRunner> {
   const db = new DatabaseSync(file, { readOnly: true });
   try {
-    const tables = new Set(
-      (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{ name: string }>).map(
-        (row) => row.name
+    const rows = db
+      .prepare(
+        `SELECT r.id, r.name, r.status, (SELECT count(*) FROM laps l WHERE l.runner_id = r.id) AS laps FROM runners r`
       )
-    );
-    const runnerColumns = new Set(
-      (db.prepare('PRAGMA table_info(runners)').all() as Array<{ name: string }>).map((column) => column.name)
-    );
-    const status = tables.has('queue_entries')
-      ? '(SELECT q.status FROM queue_entries q WHERE q.runner_id = r.id)'
-      : runnerColumns.has('status')
-        ? 'r.status'
-        : 'NULL';
-    const laps = tables.has('laps') ? '(SELECT count(*) FROM laps l WHERE l.runner_id = r.id)' : '0';
-    const rows = db.prepare(`SELECT r.id, r.name, ${status} AS status, ${laps} AS laps FROM runners r`).all() as Array<
-      StoredRunner & { id: string }
-    >;
+      .all() as Array<StoredRunner & { id: string }>;
     return new Map(rows.map(({ id, ...runner }) => [id, runner]));
   } finally {
     db.close();
@@ -59,8 +47,8 @@ function openedProblems(file: string) {
   }
 }
 
-test('there is a database from each schema this app has shipped', () => {
-  for (const release of ['v0.7.1', 'v1.0.0', 'v1.2.0', 'v3.1.0', 'v4.0.0', 'v4.0.1-early-runners']) {
+test('there is a database from each 4.x schema this app has shipped', () => {
+  for (const release of ['v4.0.0', 'v4.0.1-early-runners']) {
     assert.ok(fixtures.includes(`${release}.sqlite`), `${release}.sqlite is missing`);
   }
   assert.ok(fixtures.includes(LATEST_RELEASE_FIXTURE));
@@ -106,10 +94,7 @@ for (const fixture of fixtures) {
           ])
         ),
         Object.fromEntries(
-          [...before].map(([id, runner]) => [
-            id,
-            { name: runner.name, status: runner.status ?? 'registered', laps: runner.laps },
-          ])
+          [...before].map(([id, runner]) => [id, { name: runner.name, status: runner.status, laps: runner.laps }])
         )
       );
       assert.equal(snapshot.labels.length > 0, true, 'default labels are there');

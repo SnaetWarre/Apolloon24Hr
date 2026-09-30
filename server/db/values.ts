@@ -62,16 +62,6 @@ export function canonicalLabelName(name: string): string | null {
   return FIRST_YEAR_ALIASES.has(text.toLowerCase()) ? '1ste jaar' : text;
 }
 
-export function parseStringArray(value: string | null): string[] {
-  if (!value) return [];
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : [];
-  } catch {
-    return [];
-  }
-}
-
 export function boundedHistoryLimit(value: number): number {
   return Math.max(1, Math.min(1_000, Math.floor(value) || 100));
 }
