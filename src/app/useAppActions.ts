@@ -52,7 +52,16 @@ export function useAppActions() {
       patch: (current: LiveAppSnapshot) => LiveAppSnapshot,
       call: () => Promise<Result>
     ): Promise<Result> {
-      const removePatch = addPendingChange(patch);
+      const removePending = addPendingChange(patch);
+      const removePatch = () => {
+        // A later server change can differ from this patch (for example, Timing started the runner).
+        // Rebuild the cache so the removed patch cannot leave that newer state overwritten.
+        const reconciled = removePending();
+        // A failed snapshot read must keep showing the existing connection error.
+        if (reconciled && queryClient.getQueryState(snapshotKey)?.status === 'success') {
+          queryClient.setQueryData(snapshotKey, reconciled);
+        }
+      };
       queryClient.setQueryData<LiveAppSnapshot>(snapshotKey, (current) => current && patch(current));
       return inClickOrder(async () => {
         try {

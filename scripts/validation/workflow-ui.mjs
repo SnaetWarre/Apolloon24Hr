@@ -172,6 +172,57 @@ try {
   await page.getByText('Rondes konden niet worden bijgewerkt.', { exact: false }).waitFor();
   assert.equal(await page.getByText('Nog geen rondes geregistreerd', { exact: true }).count(), 0);
   console.log('PASS history failure is distinct from an empty race');
+
+  // Another timing station can start a runner before the queue desk receives confirmation of their move.
+  const queueRunner = await rpc.runners.create.mutate({ name: 'Concurrent queue runner', runnerNumber: '9073' });
+  for (const runner of (await snapshot()).runners.filter((runner) => runner.status === 'waiting')) {
+    await rpc.runners.setStatus.mutate({ id: runner.id, status: 'warming_up' });
+  }
+  await rpc.runners.setStatus.mutate({ id: queueRunner.id, status: 'warming_up' });
+  await page.goto(`${baseUrl}/queue`);
+  const queueRow = page.locator('.queue-runner').filter({
+    has: page.locator('button.queue-identity').filter({ hasText: queueRunner.name }),
+  });
+  await queueRow.getByRole('button', { name: 'Naar wachtrij', exact: true }).waitFor();
+  const moveRoute = '**/trpc/runners.setStatus*';
+  await page.route(moveRoute, async (route) => {
+    const response = await route.fetch();
+    await rpc.race.handoff.mutate(await expectation());
+    assert.equal((await snapshot()).race.activeRunnerId, queueRunner.id);
+    await route.fulfill({ response });
+  });
+  try {
+    const moved = page.waitForResponse(moveRoute);
+    await queueRow.getByRole('button', { name: 'Naar wachtrij', exact: true }).click();
+    await moved;
+    await queueRow.waitFor({ state: 'detached' });
+    assert.equal((await snapshot()).runners.find((runner) => runner.id === queueRunner.id).status, 'running');
+  } finally {
+    await page.unroute(moveRoute);
+  }
+  console.log('PASS a runner started elsewhere leaves the queue when their pending move is confirmed');
+
+  // Settling an optimistic change must not hide a failed refresh of the server snapshot.
+  const failedRefreshRunner = await rpc.runners.create.mutate({ name: 'Queue refresh runner', runnerNumber: '9074' });
+  await rpc.runners.setStatus.mutate({ id: failedRefreshRunner.id, status: 'warming_up' });
+  await page.goto(`${baseUrl}/queue`);
+  const refreshRow = page.locator('.queue-runner').filter({
+    has: page.locator('button.queue-identity').filter({ hasText: failedRefreshRunner.name }),
+  });
+  await refreshRow.getByRole('button', { name: 'Naar wachtrij', exact: true }).waitFor();
+  await page.route('**/api/state', (route) => route.fulfill({ status: 503, body: 'Unavailable' }));
+  try {
+    await refreshRow.getByRole('button', { name: 'Naar wachtrij', exact: true }).click();
+    const connectionError = page.getByRole('heading', { name: 'Geen verbinding met de lokale server', exact: true });
+    await connectionError.waitFor();
+    await page.waitForTimeout(300);
+    assert.equal(await connectionError.isVisible(), true);
+  } finally {
+    await page.unroute('**/api/state');
+  }
+  await page.getByRole('button', { name: 'Opnieuw proberen', exact: true }).click();
+  await refreshRow.getByRole('button', { name: 'Opwarmen', exact: true }).waitFor();
+  console.log('PASS a failed queue refresh keeps the connection error visible and recovers on retry');
 } finally {
   await browser.close();
 }

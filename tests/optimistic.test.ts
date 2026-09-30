@@ -97,3 +97,38 @@ test('changes still in flight stay on top of every refetch until they are remove
   remove();
   assert.deepEqual(waitingOrder(withPendingChanges(server)), ['a']);
 });
+
+test('settling a queue move restores a runner started elsewhere and preserves other pending moves', () => {
+  withPendingChanges(snapshot([runner('a', 'warming_up'), runner('b', 'warming_up')]));
+  const removeA = addPendingChange(statusPatch('a', 'waiting', 500));
+  const removeB = addPendingChange(statusPatch('b', 'waiting', 600));
+  try {
+    const server = snapshot([runner('a', 'running'), runner('b', 'warming_up')]);
+    server.race.activeRunnerId = 'a';
+    server.race.activeStartedAt = 700;
+    server.revision = 3;
+    assert.deepEqual(waitingOrder(withPendingChanges(server)), ['a', 'b']);
+
+    const settled = removeA();
+    assert.ok(settled);
+    assert.equal(settled.runners.find((candidate) => candidate.id === 'a')?.status, 'running');
+    assert.deepEqual(waitingOrder(settled), ['b']);
+    assert.deepEqual(settled.race, server.race);
+    assert.equal(settled.revision, server.revision);
+    assert.deepEqual(removeB(), server);
+  } finally {
+    removeA();
+    removeB();
+  }
+});
+
+test('settling a reorder restores a newer queue order from another station', () => {
+  const remove = addPendingChange(orderPatch(['b', 'a']));
+  try {
+    const server = snapshot([runner('a', 'waiting', 0), runner('b', 'waiting', 1)]);
+    assert.deepEqual(waitingOrder(withPendingChanges(server)), ['b', 'a']);
+    assert.deepEqual(remove(), server);
+  } finally {
+    remove();
+  }
+});

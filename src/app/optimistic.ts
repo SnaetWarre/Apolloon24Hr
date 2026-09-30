@@ -24,10 +24,13 @@ export function confirmedSnapshot(): LiveAppSnapshot | null {
   return confirmed;
 }
 
-/** Registers a patch until the returned function is called. */
-export function addPendingChange(patch: Patch): () => void {
+/** Registers a patch; calling the returned function removes it and rebuilds the snapshot from the server state. */
+export function addPendingChange(patch: Patch): () => LiveAppSnapshot | null {
   pending.add(patch);
-  return () => pending.delete(patch);
+  return () => {
+    pending.delete(patch);
+    return confirmed ? withPendingChanges(confirmed) : null;
+  };
 }
 
 /** Queue positions of the waiting runners, first in line first. */
