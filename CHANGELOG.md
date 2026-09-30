@@ -4,6 +4,31 @@ All notable changes to Apolloon Telsysteem will be documented in this file.
 
 ## [Unreleased]
 
+Laptops koppelen alleen met dezelfde versie: zet de nieuwe versie op alle
+laptops.
+
+### Added
+
+- Beheer › Systeem & herstel › Backup terugzetten zet alle gekoppelde laptops
+  tegelijk terug naar een backup, zonder laptops af te sluiten of opnieuw te
+  koppelen. De huidige toestand wordt eerst als backup bewaard
+- Beheer › Activiteit toont elke wijziging met het tijdstip, het scherm en het
+  adres waarvan ze kwam, op elke laptop dezelfde lijst
+- Terwijl de wedstrijd loopt, houdt de desktop-app het scherm aan en de laptop
+  wakker, en vraagt ze bevestiging voor ze sluit
+- Een scherm dat vastloopt, toont een herstelscherm in plaats van een lege
+  pagina; de publieke schermen proberen zelf opnieuw. De fout komt in
+  `server.log`
+- Het venster opent op dezelfde plaats en grootte als waar het gesloten werd
+- Releases vermelden hun wijzigingen en hebben een `SHA256SUMS.txt`
+
+### Changed
+
+- Een pagina van de desktop-app die crasht of tien seconden niet reageert,
+  wordt vanzelf opnieuw geladen
+- Links naar andere sites openen in de browser in plaats van in het
+  app-venster
+
 ## [4.1.0] - 2026-09-30
 
 Laptops koppelen alleen met dezelfde versie: zet 4.1.0 op alle laptops. De app

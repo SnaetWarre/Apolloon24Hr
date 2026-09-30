@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
+import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { createTRPCClient, httpBatchLink } from '@trpc/client';
@@ -45,6 +46,7 @@ test('standalone mode stays writable and does not expose replication', { timeout
     assert.equal(health.ok, true);
     assert.equal(health.releaseId, 'e2e-test-release');
     assert.equal(health.database.ready, true);
+    assert.deepEqual((health as unknown as { race: unknown }).race, { active: false });
 
     const append = await fetch(`${server.baseUrl}/api/cluster/append`, { method: 'POST' });
     assert.equal(append.status, 404);
@@ -65,6 +67,156 @@ test('a manual backup can be downloaded as a SQLite file', { timeout: 15_000 }, 
     assert.match(download.headers.get('content-disposition') ?? '', new RegExp(record.fileName));
     const contents = Buffer.from(await download.arrayBuffer());
     assert.equal(contents.subarray(0, 16).toString('binary'), 'SQLite format 3\u0000');
+  } finally {
+    await stopServer(server);
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test(
+  'restoring a backup on one laptop puts the whole group back, after a safety backup, and says who did it',
+  { timeout: 40_000 },
+  async () => {
+    const root = testRoot('restore');
+    const servers: RunningServer[] = [];
+    try {
+      await startGroup(root, servers);
+      const leader = (await leaderOf(servers))!;
+      const [follower, other] = servers.filter((server) => server !== leader);
+      const kept = await client(leader).runners.create.mutate({ name: 'Kept', runnerNumber: 'R-1', status: 'waiting' });
+      await client(leader).runners.create.mutate({ name: 'Also kept', runnerNumber: 'R-2', status: 'waiting' });
+      const startedAt = Date.now() - 4_000;
+      await client(leader).race.startNext.mutate({ activeRunnerId: null, activeStartedAt: null, pressedAt: startedAt });
+      await waitForSameState(leader, follower);
+      await waitForSameState(leader, other);
+      const backup = await client(follower).backups.create.mutate();
+
+      // What goes wrong after the backup: a lap and a runner removed by mistake.
+      await client(other).race.handoff.mutate({
+        activeRunnerId: kept.id,
+        activeStartedAt: startedAt,
+        pressedAt: Date.now(),
+      });
+      const lost = await client(other).runners.create.mutate({ name: 'Added later', runnerNumber: 'R-3' });
+      await client(other).runners.delete.mutate({ id: lost.id });
+      assert.equal((await fetchState(leader)).laps.length, 1);
+
+      const preview = await client(follower).backups.preview.query({ fileName: backup.fileName });
+      assert.deepEqual([preview.runners, preview.laps, preview.raceStartedAt], [2, 0, startedAt]);
+
+      // Restored on a laptop that does not lead: the rows travel to the leader as one write.
+      const restored = await client(follower).backups.restore.mutate({ fileName: backup.fileName });
+      assert.deepEqual([restored.runners, restored.laps], [2, 0]);
+      assert.match(restored.safetyBackup, /pre-restore/);
+      assert.equal(restored.safetyHostUrl, leader.baseUrl);
+      assert.ok(
+        (await client(leader).backups.list.query()).some((record) => record.fileName === restored.safetyBackup),
+        'the state before the restore is kept'
+      );
+      for (const server of servers) {
+        await waitForSameState(follower, server);
+        const state = await fetchState(server);
+        assert.deepEqual(state.runners.map((runner) => runner.name).sort(), ['Also kept', 'Kept']);
+        assert.equal(state.laps.length, 0);
+        assert.equal(state.race.activeRunnerId, kept.id);
+        assert.equal(state.race.activeStartedAt, startedAt);
+      }
+
+      // Every laptop lists the same activity, the restore included, with where it came from.
+      const activity = await client(other).activity.list.query({});
+      assert.match(activity[0]?.summary ?? '', /^Backup van .+ teruggezet \(2 lopers, 0 rondes\)$/);
+      assert.match(activity[0]?.origin ?? '', /laptop/);
+      const summaries = activity.map((entry) => entry.summary);
+      assert.ok(summaries.includes('#R-3 Added later verwijderd'), summaries.join('\n'));
+      assert.ok(summaries.includes('Wedstrijd gestart'));
+      assert.ok(!summaries.some((summary) => /wissel/i.test(summary)), 'handoffs are the laps, not activity');
+      assert.deepEqual(await client(leader).activity.list.query({}), activity);
+    } catch (error) {
+      throw withServerOutput(error, ...servers);
+    } finally {
+      await Promise.all(servers.map(stopServer));
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
+);
+
+test(
+  'a restore from a stale follower can be undone using the leader’s safety backup',
+  { timeout: 40_000 },
+  async () => {
+    const root = testRoot('restore-stale');
+    const servers: RunningServer[] = [];
+    try {
+      await startGroup(root, servers);
+      const leader = (await leaderOf(servers))!;
+      const follower = servers.find((server) => server !== leader)!;
+      const kept = await client(leader).runners.create.mutate({ name: 'Kept', runnerNumber: 'KEEP' });
+      await waitForSameState(leader, follower);
+      const backup = await client(follower).backups.create.mutate();
+      await isolate(follower, true);
+      const latest = await client(leader).runners.create.mutate({ name: 'Latest committed', runnerNumber: 'LATEST' });
+      await client(leader).settings.updatePublicRecordMode.mutate({ publicRecordMode: 'off' });
+      assert.deepEqual(
+        (await fetchState(follower)).runners.map((runner) => runner.id),
+        [kept.id]
+      );
+
+      // The restore waits for the cable to return. Its safety copy must not use this stale data.
+      const restoring = client(follower).backups.restore.mutate({ fileName: backup.fileName });
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      await isolate(follower, false);
+      const restored = await restoring;
+      const safetyHost = servers.find((server) => server.baseUrl === restored.safetyHostUrl)!;
+      assert.ok(safetyHost);
+      const preview = await client(safetyHost).backups.preview.query({ fileName: restored.safetyBackup });
+      assert.equal(preview.runners, 2, 'the safety copy includes the write the follower had not received');
+      for (const server of servers) {
+        await waitForSameState(leader, server);
+        assert.equal((await fetchState(server)).settings.publicRecordMode, 'day');
+      }
+
+      await client(safetyHost).backups.restore.mutate({ fileName: restored.safetyBackup });
+      for (const server of servers) {
+        await waitForSameState(safetyHost, server);
+        const state = await fetchState(server);
+        assert.deepEqual(state.runners.map((runner) => runner.id).sort(), [kept.id, latest.id].sort());
+        assert.equal(state.settings.publicRecordMode, 'off');
+      }
+    } catch (error) {
+      throw withServerOutput(error, ...servers);
+    } finally {
+      await Promise.all(servers.map(stopServer));
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
+);
+
+test('writes during safety-backup verification are preserved before restoring', { timeout: 20_000 }, async () => {
+  const root = testRoot('restore-concurrent');
+  const server = await startServer({ port: await freePort(), dataPath: root, clusterEnabled: false });
+  try {
+    await client(server).runners.create.mutate({ name: 'Original', runnerNumber: 'ORIGINAL' });
+    const backup = await client(server).backups.create.mutate();
+    const restoring = client(server).backups.restore.mutate({ fileName: backup.fileName });
+    // The online snapshot starts before its worker checks finish. Add a write in that gap.
+    await waitFor(
+      async () => {
+        return (await fetchStatus(server)).backup.inProgress;
+      },
+      8_000,
+      1
+    );
+    await client(server).runners.create.mutate({ name: 'During backup', runnerNumber: 'DURING' });
+    const restored = await restoring;
+    const preview = await client(server).backups.preview.query({ fileName: restored.safetyBackup });
+    assert.equal(preview.runners, 2, 'the final safety copy includes the concurrent write');
+    await client(server).backups.restore.mutate({ fileName: restored.safetyBackup });
+    assert.deepEqual((await fetchState(server)).runners.map((runner) => runner.name).sort(), [
+      'During backup',
+      'Original',
+    ]);
+  } catch (error) {
+    throw withServerOutput(error, server);
   } finally {
     await stopServer(server);
     fs.rmSync(root, { recursive: true, force: true });
@@ -563,9 +715,8 @@ async function waitFor(predicate: () => Promise<boolean>, timeoutMs = 8_000, int
 }
 
 function testRoot(name: string): string {
-  const root = path.resolve(`.tmp-test-cluster-${name}-${process.pid}`);
-  fs.rmSync(root, { recursive: true, force: true });
-  return root;
+  // In the system's temporary folder, so a run that is cut off leaves nothing in the repository.
+  return fs.mkdtempSync(path.join(os.tmpdir(), `apolloon-test-cluster-${name}-`));
 }
 
 function withServerOutput(error: unknown, ...servers: Array<RunningServer | null>): Error {

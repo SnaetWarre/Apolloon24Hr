@@ -9,6 +9,7 @@ const CHECKS = [
   { name: 'workflow-ui', laptops: 1 },
   { name: 'dialog-ui', laptops: 1 },
   { name: 'theme-ui', laptops: 1 },
+  { name: 'recovery-ui', laptops: 1 },
   { name: 'failover-ui', laptops: 3 },
 ];
 

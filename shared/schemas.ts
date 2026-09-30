@@ -162,6 +162,47 @@ export type BackupStatus = {
   databaseBytes: number;
 };
 
+/** What a backup holds, so the operator knows what restoring it brings back. */
+export type BackupPreview = {
+  fileName: string;
+  createdAt: number;
+  runners: number;
+  laps: number;
+  lastLapAt: number | null;
+  raceStartedAt: number | null;
+  raceFinishedAt: number | null;
+};
+
+export const backupFileSchema = z.object({
+  fileName: z
+    .string()
+    .min(1)
+    .max(200)
+    .regex(/^apolloon-[\w-]+\.sqlite$/),
+});
+
+/** One change in Beheer › Activiteit: when, what, and from which screen and address. */
+export type ActivityEntry = {
+  id: string;
+  occurredAt: number;
+  /** The operation, such as `runners.delete`. */
+  action: string;
+  summary: string;
+  origin: string;
+};
+
+export const activityCursorSchema = z.object({
+  occurredAt: z.number().int().nonnegative(),
+  id: z.string().min(1).max(128),
+});
+
+export type ActivityCursor = z.infer<typeof activityCursorSchema>;
+
+export const activityPageSchema = z.object({
+  limit: z.number().int().positive().max(500).default(200),
+  before: activityCursorSchema.nullable().default(null),
+});
+
 export type ClusterRole = 'leader' | 'follower' | 'candidate';
 
 /**

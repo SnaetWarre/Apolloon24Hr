@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import path from 'node:path';
 import test from 'node:test';
 import Papa from 'papaparse';
+import { temporaryDataPath } from './temporary-data.ts';
 
-const dataPath = path.resolve(`.tmp-test-runner-import-${process.pid}`);
+const dataPath = temporaryDataPath('runner-import');
 process.env.DATA_PATH = dataPath;
 process.env.NODE_ENV = 'test';
 
@@ -62,6 +62,8 @@ test('Google Form import keeps every answer and preserves an existing runner on 
     assert.equal(updated?.status, 'warming_up');
     assert.equal((await caller.runners.registrations())[imported.id]?.estimatedLaps, '14');
   } finally {
+    // Windows cannot delete a database file that is still open.
+    db.closeDb();
     fs.rmSync(dataPath, { recursive: true, force: true });
   }
 });
@@ -100,6 +102,8 @@ test('hand-entered contact details and hours merge into the registration', async
     });
     assert.equal((await caller.runners.registrations())[manual.id], undefined);
   } finally {
+    // Windows cannot delete a database file that is still open.
+    db.closeDb();
     fs.rmSync(dataPath, { recursive: true, force: true });
   }
 });

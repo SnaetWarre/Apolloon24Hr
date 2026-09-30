@@ -66,7 +66,8 @@ function ConfirmModal({ options, onSettle }: { options: ConfirmOptions; onSettle
     <ModalDialog label={title} onRequestClose={() => onSettle(false)} initialFocusRef={danger ? cancelRef : confirmRef}>
       <div className={`confirm-modal${danger ? ' confirm-modal--danger' : ''}`}>
         <h3>{title}</h3>
-        {message && <p>{message}</p>}
+        {message &&
+          (typeof message === 'string' ? <p>{message}</p> : <div className="confirm-modal__body">{message}</div>)}
         <div className="modal-actions">
           <button ref={cancelRef} className="btn" onClick={() => onSettle(false)}>
             {cancelLabel}

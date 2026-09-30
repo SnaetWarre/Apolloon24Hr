@@ -157,6 +157,46 @@
   margin-top: var(--space-3);
 }
 
+.backup-table td {
+  font-variant-numeric: tabular-nums;
+}
+
+.backup-table .muted-label {
+  display: inline;
+  margin-left: var(--space-2);
+}
+
+.backup-table__action {
+  text-align: right;
+}
+
+.activity-table td {
+  vertical-align: top;
+}
+
+.activity-table__time {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.activity-table__origin {
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
+.activity-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+  margin-bottom: var(--space-3);
+}
+
+.activity-toolbar .input {
+  flex: 1 1 240px;
+  width: auto;
+}
+
 .management-content code {
   font-size: 12.5px;
   overflow-wrap: anywhere;

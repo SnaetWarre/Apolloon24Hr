@@ -1,0 +1,35 @@
+# Weekly update pull requests, grouped so a week brings a few PRs instead of dozens.
+# Each one runs the full CI, including both packaged installers.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '06:00'
+      timezone: Europe/Brussels
+    # A release must have been out for a week first: most compromised packages are pulled before that.
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+    groups:
+      production-dependencies:
+        dependency-type: production
+        update-types: [minor, patch]
+      development-dependencies:
+        dependency-type: development
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '06:00'
+      timezone: Europe/Brussels
+    cooldown:
+      default-days: 7
+    groups:
+      github-actions:
+        patterns: ['*']

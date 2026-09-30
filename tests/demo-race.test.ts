@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import path from 'node:path';
 import test from 'node:test';
+import { temporaryDataPath } from './temporary-data.ts';
 
-const dataPath = path.resolve(`.tmp-test-demo-race-${process.pid}`);
+const dataPath = temporaryDataPath('demo-race');
 process.env.DATA_PATH = dataPath;
 process.env.NODE_ENV = 'test';
 

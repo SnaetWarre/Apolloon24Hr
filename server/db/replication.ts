@@ -38,6 +38,7 @@ const REPLICATED_TABLES = [
   'race_events',
   'temporary_teams',
   'temporary_team_members',
+  'activity_log',
   'cluster_members',
   'forwarded_writes',
   'replication_log',

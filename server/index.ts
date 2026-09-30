@@ -4,6 +4,7 @@ import { createExpressMiddleware } from '@trpc/server/adapters/express';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { Server as SocketIOServer } from 'socket.io';
 import { historyCacheKey, liveAppSnapshot, raceHistory, type HistoryRequest } from './app-state.js';
+import { describeOrigin } from './activity.js';
 import { backupStatus, latestBackupPath, startBackupService, stopBackupService } from './backups.js';
 import { registerClusterRoutes, startClusterService, stopClusterService } from './cluster.js';
 import {
@@ -12,6 +13,7 @@ import {
   databaseReadiness,
   getAppDataRevision,
   getLabelImage,
+  getRaceState,
   initDb,
   markAppDataChanged,
   onAppDataChanged,
@@ -75,13 +77,28 @@ app.use(
   '/trpc',
   createExpressMiddleware({
     router: appRouter,
-    createContext: ({ req, res }) => ({
-      forwarded: req.header('x-apolloon-forwarded') === '1',
-      requestId: req.header('x-apolloon-request-id')?.slice(0, 128) || undefined,
-      reportLogSeq: (seq: number) => res.setHeader('x-apolloon-log-seq', String(seq)),
-    }),
+    createContext: ({ req, res }) => {
+      const forwarded = req.header('x-apolloon-forwarded') === '1';
+      return {
+        forwarded,
+        requestId: req.header('x-apolloon-request-id')?.slice(0, 128) || undefined,
+        reportLogSeq: (seq: number) => res.setHeader('x-apolloon-log-seq', String(seq)),
+        origin: forwarded
+          ? forwardedOrigin(req.header('x-apolloon-origin'))
+          : describeOrigin(req.header('x-apolloon-screen'), req.socket.remoteAddress, hostInfo().hostIpHint),
+      };
+    },
   })
 );
+
+/** The origin a laptop passed on with a forwarded write. */
+function forwardedOrigin(header: string | undefined): string | undefined {
+  try {
+    return header ? decodeURIComponent(header).slice(0, 200) : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 app.get('/api/state', (req, res, next) => {
   sendJson(req, res, `live:${getAppDataRevision()}:${hostInfo().url}`, liveAppSnapshot).catch(next);
@@ -145,12 +162,15 @@ app.get('/api/health', (_req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   try {
     const backup = backupStatus();
+    const race = getRaceState();
     res.json({
       ok: true,
       releaseId: RELEASE_ID,
       startedAt: processStartedAt,
       uptimeSeconds: Math.floor(process.uptime()),
       database: databaseReadiness(),
+      // The desktop app keeps the laptop awake and asks before closing while this is true.
+      race: { active: race.raceStartedAt !== null && race.raceFinishedAt === null },
       backup: {
         enabled: backup.enabled,
         latestCreatedAt: backup.latest?.createdAt ?? null,
@@ -166,6 +186,28 @@ app.get('/api/health', (_req, res) => {
       error: error instanceof Error ? error.message : 'database unavailable',
     });
   }
+});
+
+/** Screens report errors they hit, so `server.log` holds them after the event. */
+const CLIENT_ERRORS_PER_MINUTE = 30;
+let clientErrorWindowStart = 0;
+let clientErrorCount = 0;
+app.post('/api/client-errors', (req, res) => {
+  const now = Date.now();
+  if (now - clientErrorWindowStart > 60_000) {
+    clientErrorWindowStart = now;
+    clientErrorCount = 0;
+  }
+  clientErrorCount += 1;
+  if (clientErrorCount <= CLIENT_ERRORS_PER_MINUTE) {
+    const text = (value: unknown, max: number) => (typeof value === 'string' ? value.slice(0, max) : '');
+    const from = isLoopbackAddress(req.socket.remoteAddress) ? 'this laptop' : req.socket.remoteAddress;
+    console.error(
+      `Screen error on ${text(req.body?.path, 200)} (${from}): ${text(req.body?.message, 1_000)}\n` +
+        [text(req.body?.stack, 4_000), text(req.body?.componentStack, 4_000)].filter(Boolean).join('\n')
+    );
+  }
+  res.status(204).end();
 });
 
 app.get('/api/backups/latest', (_req, res) => {

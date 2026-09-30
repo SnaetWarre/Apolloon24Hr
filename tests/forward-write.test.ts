@@ -19,7 +19,13 @@ test('a write that reaches a laptop that no longer leads is repeated at the next
   // What the /trpc guard in cluster.ts answers when the leader stepped down meanwhile.
   const laptop = await fakeLaptop(409, { ok: false, code: 'not_leader', error: 'Deze laptop is niet de hoofdlaptop.' });
   try {
-    const outcome = await forwardWrite({ hostId: 'old-leader', url: laptop.url }, 'race.handoff', {}, 'request-1');
+    const outcome = await forwardWrite(
+      { hostId: 'old-leader', url: laptop.url },
+      'race.handoff',
+      {},
+      'request-1',
+      'test'
+    );
     assert.equal(outcome.ok, false);
     assert.equal(!outcome.ok && outcome.retry, true);
   } finally {
@@ -32,7 +38,7 @@ test('a refusal from the leader itself is not repeated', async () => {
     error: { message: 'Timingstatus is gewijzigd.', data: { code: 'CONFLICT' } },
   });
   try {
-    const outcome = await forwardWrite({ hostId: 'leader', url: laptop.url }, 'race.handoff', {}, 'request-2');
+    const outcome = await forwardWrite({ hostId: 'leader', url: laptop.url }, 'race.handoff', {}, 'request-2', 'test');
     assert.deepEqual(outcome, { ok: false, code: 'CONFLICT', message: 'Timingstatus is gewijzigd.', retry: false });
   } finally {
     laptop.close();

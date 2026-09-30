@@ -2,15 +2,15 @@ import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
-import path from 'node:path';
 import test from 'node:test';
 import { createTRPCClient, httpBatchLink } from '@trpc/client';
 import { io, type Socket } from 'socket.io-client';
 import type { AppRouter } from '../server/router.ts';
 import type { AppSnapshot, LiveAppSnapshot, RaceHistory } from '../shared/schemas.ts';
 import { buildLabelComparisons, filterLaps } from '../src/lib/analysis.ts';
+import { temporaryDataPath } from './temporary-data.ts';
 
-const dataPath = path.resolve(`.tmp-test-temporary-teams-e2e-${process.pid}`);
+const dataPath = temporaryDataPath('temporary-teams-e2e');
 
 test('night teams work through HTTP, realtime, analysis, exports, and a restart', { timeout: 45_000 }, async () => {
   fs.rmSync(dataPath, { recursive: true, force: true });

@@ -5,7 +5,7 @@ import { type SchemaProblem, type TableShape, referenceSchema, schemaProblems } 
 import { RUNNER_QUEUE_INDEX_SQL, SCHEMA_SQL } from './schema-sql.js';
 import { setLocalSetting } from './settings.js';
 
-export const DATABASE_SCHEMA_VERSION = 14;
+export const DATABASE_SCHEMA_VERSION = 15;
 
 type DefaultLabel = Required<LabelInput> & { id: string };
 

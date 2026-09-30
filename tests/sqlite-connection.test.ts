@@ -3,8 +3,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync, backup } from 'node:sqlite';
 import test from 'node:test';
+import { temporaryDataPath } from './temporary-data.ts';
 
-const dataPath = path.resolve(`.tmp-test-sqlite-connection-${process.pid}`);
+const dataPath = temporaryDataPath('sqlite-connection');
 process.env.DATA_PATH = dataPath;
 process.env.NODE_ENV = 'test';
 

@@ -136,19 +136,32 @@ BACKUP_MIN_FREE_BYTES=2147483648
 ## Recovery Runbook
 
 A failed laptop needs no recovery: the others carry on. Use a point-in-time
-backup when every laptop holds the same wrong change or no laptop survives.
+backup when every laptop holds the same wrong change, such as a deleted runner
+or a wrong import.
 
-Restoring a backup on a laptop:
+Beheer › Activiteit shows what changed, when, and from which screen and
+address, so the moment before the mistake is easy to find. Each entry is saved
+in the same write as the change, so every laptop lists the same activity.
+Handoffs are not listed: they are the laps.
 
-1. Stop Apolloon on every laptop.
-2. Preserve the complete current `<DATA_PATH>/data/` directory.
-3. Check the chosen backup with `PRAGMA quick_check`.
-4. Replace `<DATA_PATH>/data/app.db` with the backup and remove any
-   `app.db-wal` and `app.db-shm` files.
-5. Start Apolloon on this laptop only, check the runners and laps, then
-   create a manual backup.
-6. Link the other laptops to this one again (Beheer › Systeem › Laptops
-   koppelen); they take its data.
+Restoring a backup, from any linked laptop:
+
+1. Open Beheer › Systeem & herstel › Backup terugzetten on the laptop that
+   holds the backup; each laptop lists its own.
+2. Click Terugzetten next to the backup. The confirmation shows how many
+   runners and laps it holds, and warns when the race was running then.
+3. The laptop sends the backup's event data to the leader. The leader saves a
+   verified `pre-restore` backup of the current group state, retrying if a write
+   arrives while the backup is being checked, then restores as one ordinary
+   replicated write. Every linked laptop changes at once; nobody stops or
+   relinks a laptop. The activity log and the group itself are not restored.
+4. If the race was running at the backup, the runner on the track then is on
+   the track again with the start time of then. Check the timing screen.
+
+A restore can be undone by restoring its `pre-restore` backup on the laptop
+named in the restore result. When no laptop survives, copy a backup from USB
+to `<DATA_PATH>/backups/` on a new laptop,
+start Apolloon, and restore it there.
 
 ## How The Failover Is Tested
 
@@ -191,4 +204,7 @@ Before timing starts:
 
 1. Beheer › Voorbereiding shows all three laptops reachable and up to date.
 2. The last backup is recent; download one to a separate device.
-3. Every laptop is plugged into power and the router by cable.
+3. Every laptop is plugged into power and the router by cable. While the race
+   runs, the desktop app keeps the screen on and the laptop awake, and asks
+   before it closes; check that the operating system does not force sleep or
+   updates anyway.
