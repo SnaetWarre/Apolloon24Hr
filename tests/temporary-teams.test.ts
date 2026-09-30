@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
-import Database from 'better-sqlite3';
+import { DatabaseSync } from 'node:sqlite';
 
 const dataPath = path.resolve(`.tmp-test-temporary-teams-${process.pid}`);
 process.env.DATA_PATH = dataPath;
@@ -62,10 +62,10 @@ test('night teams swap the speedteam only inside their window, and laps keep the
       'window is over'
     );
 
-    const stored = new Database(path.join(dataPath, 'data', 'app.db'), { readonly: true, fileMustExist: true });
+    const stored = new DatabaseSync(path.join(dataPath, 'data', 'app.db'), { readOnly: true });
     try {
       const rawLabels = JSON.parse(
-        String(stored.prepare('SELECT labels_json FROM laps WHERE id = ?').pluck().get(aliceLaps[1].id))
+        String(stored.prepare('SELECT labels_json FROM laps WHERE id = ?').get(aliceLaps[1].id)?.labels_json)
       ) as Array<Record<string, unknown>>;
       assert.deepEqual(Object.keys(rawLabels[0]).sort(), ['color', 'icon', 'id', 'kind', 'name']);
     } finally {

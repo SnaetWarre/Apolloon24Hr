@@ -1,17 +1,17 @@
 import { parentPort, workerData } from 'node:worker_threads';
-import Database from 'better-sqlite3';
+import { openExistingDatabase, quickCheck } from './db/sqlite-file.js';
 
 // Runs off the main thread so integrity checks never delay a timing request.
 const { filePath } = workerData as { filePath: string };
 
 try {
-  const backup = new Database(filePath, { fileMustExist: true });
+  const backup = openExistingDatabase(filePath);
   try {
     // A standalone restore file: no -wal/-shm sidecars.
-    backup.pragma('journal_mode = DELETE');
-    const quickCheck = backup.pragma('quick_check', { simple: true });
-    if (quickCheck !== 'ok') throw new Error(`SQLite-controle mislukt (${String(quickCheck)})`);
-    const foreignKeyFailures = backup.pragma('foreign_key_check') as unknown[];
+    backup.exec('PRAGMA journal_mode = DELETE');
+    const check = quickCheck(backup);
+    if (check !== 'ok') throw new Error(`SQLite-controle mislukt (${check})`);
+    const foreignKeyFailures = backup.prepare('PRAGMA foreign_key_check').all();
     if (foreignKeyFailures.length)
       throw new Error(`${foreignKeyFailures.length} verwijzing(en) naar ontbrekende gegevens`);
   } finally {

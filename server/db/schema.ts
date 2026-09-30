@@ -300,7 +300,7 @@ export function migrateSchema(): void {
     }
     setLocalSetting('schema_version', String(DATABASE_SCHEMA_VERSION));
   });
-  getDb().pragma(`user_version = ${DATABASE_SCHEMA_VERSION}`);
+  getDb().exec(`PRAGMA user_version = ${DATABASE_SCHEMA_VERSION}`);
 }
 
 /** Schema 5 started storing each lap's labels; older laps get the runner's labels at migration time. */
