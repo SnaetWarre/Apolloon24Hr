@@ -29,11 +29,9 @@ test('any table that drifted from the schema is rebuilt with its rows, not only 
     DROP INDEX idx_laps_finished;
     CREATE INDEX idx_laps_finished ON laps(created_at);
   `);
-  const labelCount = (
-    new DatabaseSync(databasePath, { readOnly: true }).prepare('SELECT count(*) AS n FROM labels').get() as {
-      n: number;
-    }
-  ).n;
+  const counted = new DatabaseSync(databasePath, { readOnly: true });
+  const labelCount = (counted.prepare('SELECT count(*) AS n FROM labels').get() as { n: number }).n;
+  counted.close();
 
   const db = await import('../server/db.ts');
   const { schemaProblems } = await import('../server/db/schema-check.ts');

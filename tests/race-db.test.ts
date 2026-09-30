@@ -41,6 +41,8 @@ test('finishing a race retires the active runner without recording an extra lap'
     assert.equal(db.getRunnerById(first.id)?.lapCount, 0);
     assert.equal(db.getRunnerById(second.id)?.status, 'waiting');
   } finally {
+    // Windows cannot delete a database file that is still open.
+    db.closeDb();
     fs.rmSync(dataPath, { recursive: true, force: true });
   }
 });
@@ -65,6 +67,8 @@ test('reordering requires each waiting runner exactly once', async () => {
     assert.equal(queueIndexes.get(runners[0].id), 1);
     assert.equal(queueIndexes.get(runners[1].id), 2);
   } finally {
+    // Windows cannot delete a database file that is still open.
+    db.closeDb();
     fs.rmSync(dataPath, { recursive: true, force: true });
   }
 });
@@ -89,6 +93,8 @@ test('timing mutations reject a stale race state instead of recording an extra h
     assert.equal(db.getAllLaps().length, 0);
     assert.equal(db.getRaceState().activeRunnerId, first.id);
   } finally {
+    // Windows cannot delete a database file that is still open.
+    db.closeDb();
     fs.rmSync(dataPath, { recursive: true, force: true });
   }
 });
@@ -110,6 +116,8 @@ test('only one runner can be marked as running', async () => {
     assert.equal(db.getRaceState().activeRunnerId, first.id);
     assert.equal(db.getRunnerById(second.id)?.status, 'registered');
   } finally {
+    // Windows cannot delete a database file that is still open.
+    db.closeDb();
     fs.rmSync(dataPath, { recursive: true, force: true });
   }
 });
@@ -137,6 +145,8 @@ test('new runners cannot bypass timing state and waiting runners join the back o
     assert.equal(db.getRaceState().activeRunnerId, null);
     assert.equal(db.getAllRunners().length, 2);
   } finally {
+    // Windows cannot delete a database file that is still open.
+    db.closeDb();
     fs.rmSync(dataPath, { recursive: true, force: true });
   }
 });
@@ -155,6 +165,8 @@ test('label names are unique regardless of capitalization', async () => {
     assert.equal(db.findLabelByName('aUdIt TeAm')?.id, label.id);
     assert.equal(db.getLabels().filter((item) => item.name.toLowerCase() === 'audit team').length, 1);
   } finally {
+    // Windows cannot delete a database file that is still open.
+    db.closeDb();
     fs.rmSync(dataPath, { recursive: true, force: true });
   }
 });
@@ -194,6 +206,8 @@ test('operational SQLite access paths stay indexed and runner lookups agree', as
       inspectionDb.close();
     }
   } finally {
+    // Windows cannot delete a database file that is still open.
+    db.closeDb();
     fs.rmSync(dataPath, { recursive: true, force: true });
   }
 });
