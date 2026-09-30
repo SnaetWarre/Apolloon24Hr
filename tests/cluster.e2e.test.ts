@@ -381,7 +381,11 @@ async function startGroup(root: string, servers: RunningServer[]): Promise<void>
   for (const name of ['a', 'b', 'c']) {
     servers.push(await startServer({ port: await freePort(), dataPath: path.join(root, name) }));
   }
-  for (const server of servers.slice(1)) await client(server).cluster.join.mutate({ url: servers[0].baseUrl });
+  for (const server of servers.slice(1)) {
+    // Joining asks the first laptop for its leader, which it re-confirms after each new member.
+    await waitFor(async () => Boolean((await fetchStatus(servers[0])).leader), 10_000);
+    await client(server).cluster.join.mutate({ url: servers[0].baseUrl });
+  }
   await waitFor(async () => (await fetchStatus(servers[0])).state === 'healthy', 10_000);
 }
 
