@@ -10,6 +10,8 @@
       // Apply the operator theme before first paint (see src/app/theme.ts). Public displays own their look.
       (function () {
         var root = document.documentElement;
+        // Inside the desktop app the page draws its own title bar (src/styles/titlebar.css).
+        if (window.apolloonDesktop) root.setAttribute('data-desktop', window.apolloonDesktop.platform || '');
         if (location.pathname.indexOf('/display/') === 0) {
           var requested = new URLSearchParams(location.search).get('thema');
           var display = location.pathname.indexOf('/display/outside') === 0 ? 'outside' : 'inside';

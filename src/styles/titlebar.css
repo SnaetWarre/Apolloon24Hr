@@ -1,0 +1,191 @@
+/*
+ * Title bar of the desktop app (src/components/DesktopTitleBar.tsx). The window has no
+ * operating-system frame, so this bar is the drag handle and holds the window buttons.
+ * index.html sets data-desktop before first paint; --titlebar-h is 0 everywhere else,
+ * so the height rules elsewhere stay a no-op in a browser.
+ */
+html[data-desktop] {
+  --titlebar-h: 36px;
+}
+
+html[data-desktop][data-desktop-fullscreen] {
+  --titlebar-h: 0px;
+}
+
+/* The bar takes the first row; the app scrolls inside .desktop-page, so sticky elements keep top: 0. */
+html[data-desktop] body {
+  height: 100vh;
+  min-height: 0;
+  overflow: hidden;
+}
+
+html[data-desktop] #root {
+  display: grid;
+  grid-template-rows: var(--titlebar-h) minmax(0, 1fr);
+  height: 100vh;
+  min-height: 0;
+}
+
+.desktop-page {
+  grid-row: 2;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* The bar already shows the logo; the sidebar keeps only its toggle. */
+html[data-desktop] .sidebar__brand {
+  display: none;
+}
+
+.titlebar {
+  position: relative;
+  z-index: 60;
+  grid-row: 1;
+  display: flex;
+  align-items: center;
+  height: var(--titlebar-h);
+  padding-left: var(--space-2);
+  border-bottom: 1px solid var(--line);
+  background: var(--sidebar);
+  color: var(--ink);
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-app-region: drag;
+  transition: color var(--dur-2) var(--ease-out);
+}
+
+html[data-desktop-fullscreen] .titlebar {
+  display: none;
+}
+
+/* macOS draws its traffic lights in this corner. */
+.titlebar--mac {
+  padding-left: 78px;
+}
+
+.titlebar__brand {
+  display: flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+  transition: background-color var(--dur-1) var(--ease-out);
+}
+
+.titlebar__brand .brand-mark {
+  width: 60px;
+  height: 18px;
+}
+
+.titlebar__brand:hover {
+  background: var(--surface-3);
+}
+
+.titlebar__brand:focus-visible,
+.titlebar__control:focus-visible {
+  outline-offset: -2px;
+}
+
+.titlebar__controls {
+  display: flex;
+  align-self: stretch;
+  margin-left: auto;
+  -webkit-app-region: no-drag;
+}
+
+.titlebar__control {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  border: 0;
+  background: transparent;
+  color: var(--ink-2);
+  transition: background-color var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out);
+}
+
+.titlebar__control svg {
+  width: 10px;
+  height: 10px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  shape-rendering: geometricPrecision;
+}
+
+.titlebar__control:hover {
+  background: var(--surface-3);
+  color: var(--ink);
+}
+
+.titlebar__control:active {
+  background: var(--line-2);
+}
+
+.titlebar__control--close:hover {
+  background: #C42B1C;
+  color: #FFFFFF;
+}
+
+.titlebar__control--close:active {
+  background: #B1281A;
+  color: #FFFFFF;
+}
+
+/* Another window has focus: the bar steps back, as native frames do. */
+.titlebar.is-inactive,
+.titlebar.is-inactive .titlebar__control {
+  color: var(--ink-3);
+}
+
+/* Public displays own their look; the bar follows their tone instead of the operator theme. */
+html[data-surface="display"] .titlebar {
+  border-color: #262626;
+  background: #111111;
+  color: #D4D4D4;
+}
+
+html[data-surface="display"] .titlebar__control {
+  color: #9A9A9A;
+}
+
+html[data-surface="display"] .titlebar__brand:hover,
+html[data-surface="display"] .titlebar__control:hover {
+  background: #262626;
+  color: #FFFFFF;
+}
+
+html[data-surface="display"] .titlebar__control:active {
+  background: #333333;
+}
+
+html[data-surface="display"][data-display-tone="light"] .titlebar {
+  border-color: #E4E4E7;
+  background: #FFFFFF;
+  color: #18181B;
+}
+
+html[data-surface="display"][data-display-tone="light"] .titlebar__control {
+  color: #52525B;
+}
+
+html[data-surface="display"][data-display-tone="light"] .titlebar__brand:hover,
+html[data-surface="display"][data-display-tone="light"] .titlebar__control:hover {
+  background: #EDEDEF;
+  color: #18181B;
+}
+
+html[data-surface="display"][data-display-tone="light"] .titlebar__control:active {
+  background: #E0E0E3;
+}
+
+html[data-surface="display"] .titlebar__control--close:hover {
+  background: #C42B1C;
+  color: #FFFFFF;
+}
