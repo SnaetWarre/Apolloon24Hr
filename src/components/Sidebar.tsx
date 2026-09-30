@@ -164,7 +164,16 @@ function HostAddress() {
 function SystemStatusRow() {
   const { cluster, error } = useClusterStatus();
   const status = deriveSystemStatus(cluster, error);
-  if (!status) return null;
+  // Holds the row's place until the first status arrives, so the footer does not jump.
+  if (!status)
+    return (
+      <div className="system-status system-status--pending" aria-hidden="true">
+        <span className="system-status__dot" />
+        <span className="system-status__text">
+          <strong>Status laden…</strong>
+        </span>
+      </div>
+    );
   return (
     <Link
       to="/admin"

@@ -43,7 +43,8 @@
       html[data-display-tone="light"], html[data-display-tone="light"] body { background: #FFFFFF; }
       #root { min-height: 100vh; }
     </style>
-    <link rel="preload" as="image" href="/brand/apolloon-logo.png" fetchpriority="high" />
+    <!-- The logo is a CSS mask, which the browser fetches in CORS mode; the preload has to match. -->
+    <link rel="preload" as="image" href="/brand/apolloon-logo.png" fetchpriority="high" crossorigin />
     <link rel="preload" as="font" type="font/woff2" href="/fonts/geist-latin-wght-normal.woff2" crossorigin />
     <script>
       window.__APOLLOON_STATE_PROMISE__ = fetch('/api/state').then(function (response) {

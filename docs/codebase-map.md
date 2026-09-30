@@ -23,6 +23,12 @@ Shared contracts live in `shared/`. Anything imported by both client and server 
   - `useRegistrations.ts`: registration answers, for the profile, Beheer, and the
     "Nu beschikbaar" panel on Wachtrij.
   - `useAppActions.ts`: tRPC mutations that refresh this screen when they return.
+    Queue changes (lane moves, reordering) show at once and reach the server in
+    click order.
+  - `optimistic.ts`: those unconfirmed queue changes, kept on top of every
+    refetch until the server answers.
+  - Route loaders in `router.tsx` prefetch each page's queries (on hover, and at
+    most 300 ms on click), so pages open filled in instead of jumping.
   - `useRealtimeBridge.ts`: loads the realtime transport after the first state render.
   - `realtimeClient.ts`: refetches when the server announces a new revision,
     and keeps the server clock offset in sync.

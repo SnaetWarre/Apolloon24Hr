@@ -1,10 +1,12 @@
 import React from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { useChartTheme } from '../lib/chartPalette';
 import { useArrivals } from '../lib/motion';
 import { Icon } from './Icon';
 import { SectionNavigation } from './SectionNavigation';
 import { PageHeader } from './PageHeader';
 import { useAppData, useRaceHistory } from '../app/index';
+import { bundledReferenceQuery } from '../app/bundledReference';
 import {
   DEFAULT_MAXIMUM_LAP_SECONDS,
   DEFAULT_MINIMUM_LAP_SECONDS,
@@ -25,14 +27,12 @@ import {
   type HistoricalRace,
 } from '../lib/tactics';
 import { buildLiveQuarterHourTrend, buildLiveRivalTimeGap, projectScenarioRange } from '../lib/tacticsDeepDive';
-import { nowMs } from '../lib/time';
 import { useClockTick } from '../lib/useClockTick';
 import type { LapRecord, LiveAppSnapshot } from '../types';
 import { HistoricalAnalysisSection, HistoricalDataNotice, HistoricalDatasetManager } from './tactics/HistoricalPanels';
 import {
   APOLLOON_TEAM_ID,
   BUNDLED_REFERENCE_NAME,
-  BUNDLED_REFERENCE_URL,
   DEFAULT_TARGET_LAPS,
   HISTORICAL_RACE_NAME_STORAGE_KEY,
   HISTORICAL_RACE_STORAGE_KEY,
@@ -65,7 +65,7 @@ export function TacticsView() {
   // Chart configurations are built during render; re-render them with the new theme colours.
   useChartTheme();
   const { race } = useAppData(selectTacticsData);
-  useClockTick(30_000, race.raceStartedAt != null && race.raceFinishedAt == null);
+  const now = useClockTick(30_000, race.raceStartedAt != null && race.raceFinishedAt == null);
   const { laps, loading: historyLoading, error: historyError } = useRaceHistory({ scope: 'full' });
   const [section, setSection] = React.useState<TacticsSection>('live');
   const storedHistoricalRace = React.useMemo(loadStoredHistoricalRace, []);
@@ -77,29 +77,12 @@ export function TacticsView() {
   // A section chosen after the page opened rises in; the first one is simply there.
   const sectionChanged = useArrivals([`section:${section}`]).has(`section:${section}`);
 
-  React.useEffect(() => {
-    if (historicalRace) return;
-    let cancelled = false;
-    void fetch(BUNDLED_REFERENCE_URL)
-      .then(async (response) => {
-        if (!response.ok) throw new Error(`Quivr-referentie laden mislukt (${response.status}).`);
-        return response.text();
-      })
-      .then((jsonText) => {
-        if (cancelled) return;
-        setHistoricalRace(parseHistoricalRace(jsonText));
-        setHistoricalSourceName(BUNDLED_REFERENCE_NAME);
-        setHistoricalError(null);
-      })
-      .catch((error) => {
-        if (!cancelled) {
-          setHistoricalError(error instanceof Error ? error.message : 'De Quivr-referentie kon niet worden geladen.');
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [historicalRace]);
+  // An operator's own file wins; otherwise the reference that ships with the app, prefetched on hover.
+  const bundledReference = useQuery({ ...bundledReferenceQuery, enabled: !historicalRace });
+  const bundled = bundledReference.data ? readBundledReference(bundledReference.data) : null;
+  const shownRace = historicalRace ?? bundled?.race ?? null;
+  const shownError =
+    historicalError ?? (historicalRace ? null : (bundled?.error ?? bundledReference.error?.message ?? null));
 
   function storeHistoricalRace(jsonText: string, fileName: string) {
     try {
@@ -156,18 +139,18 @@ export function TacticsView() {
           <LiveTacticsSection
             laps={laps}
             raceStartedAt={race.raceStartedAt}
-            currentTimestamp={race.raceFinishedAt ?? nowMs()}
-            historicalRace={historicalRace}
+            currentTimestamp={race.raceFinishedAt ?? now}
+            historicalRace={shownRace}
             historicalSourceName={historicalSourceName}
-            historicalError={historicalError}
+            historicalError={shownError}
             onHistoricalRaceLoad={storeHistoricalRace}
             onHistoricalRaceClear={clearHistoricalRace}
           />
         ) : (
           <HistoricalAnalysisSection
-            historicalRace={historicalRace}
+            historicalRace={shownRace}
             historicalSourceName={historicalSourceName}
-            historicalError={historicalError}
+            historicalError={shownError}
             onHistoricalRaceLoad={storeHistoricalRace}
             onHistoricalRaceClear={clearHistoricalRace}
           />
@@ -175,6 +158,17 @@ export function TacticsView() {
       </div>
     </>
   );
+}
+
+function readBundledReference(jsonText: string): { race: HistoricalRace | null; error: string | null } {
+  try {
+    return { race: parseHistoricalRace(jsonText), error: null };
+  } catch (error) {
+    return {
+      race: null,
+      error: error instanceof Error ? error.message : 'De Quivr-referentie kon niet worden gelezen.',
+    };
+  }
 }
 
 function LiveTacticsSection({

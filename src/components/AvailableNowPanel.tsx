@@ -24,8 +24,8 @@ export function AvailableNowPanel({
   const registrations = useRegistrations();
   const [search, setSearch] = React.useState('');
   // Ticks exactly on the hour boundary; Brussels hours line up with UTC hours.
-  useClockTick(HOUR_MS);
-  const { hour, weekday } = brusselsMoment(Date.now());
+  const now = useClockTick(HOUR_MS);
+  const { hour, weekday } = brusselsMoment(now);
   const moment = { hour, weekday };
   const available = findAvailableUncalledRunners(runners, registrations, moment);
   const query = search.trim().toLowerCase();

@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { queryOptions, useQuery } from '@tanstack/react-query';
 import type { RaceHistory } from '../types';
 import { historyKey } from './snapshot';
 
@@ -14,22 +14,7 @@ export function useRaceHistory(request: RaceHistoryRequest = { scope: 'full' }):
   refresh: () => Promise<unknown>;
 } {
   const normalized = normalizeRequest(request);
-  const query = useQuery<RaceHistory, Error>({
-    queryKey: [...historyKey, normalized.scope, normalized.runnerId, normalized.limit],
-    enabled: normalized.scope !== 'runner' || Boolean(normalized.runnerId),
-    queryFn: async () => {
-      const params = new URLSearchParams();
-      if (normalized.scope === 'recent') {
-        params.set('scope', 'recent');
-        params.set('limit', String(normalized.limit));
-      } else if (normalized.scope === 'runner') {
-        params.set('runnerId', normalized.runnerId || '');
-      }
-      const response = await fetch(`/api/history${params.size ? `?${params}` : ''}`);
-      if (!response.ok) throw new Error(`Racegeschiedenis laden mislukt (${response.status})`);
-      return response.json() as Promise<RaceHistory>;
-    },
-  });
+  const query = useQuery(raceHistoryQuery(request));
   const fallback: RaceHistory = {
     scope: normalized.scope,
     runnerId: normalized.runnerId,
@@ -45,6 +30,27 @@ export function useRaceHistory(request: RaceHistoryRequest = { scope: 'full' }):
     error: query.error instanceof Error ? query.error : null,
     refresh: () => query.refetch(),
   };
+}
+
+/** Shared by the hook and the route loaders that fetch a page's laps before it opens. */
+export function raceHistoryQuery(request: RaceHistoryRequest = { scope: 'full' }) {
+  const normalized = normalizeRequest(request);
+  return queryOptions<RaceHistory, Error>({
+    queryKey: [...historyKey, normalized.scope, normalized.runnerId, normalized.limit],
+    enabled: normalized.scope !== 'runner' || Boolean(normalized.runnerId),
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      if (normalized.scope === 'recent') {
+        params.set('scope', 'recent');
+        params.set('limit', String(normalized.limit));
+      } else if (normalized.scope === 'runner') {
+        params.set('runnerId', normalized.runnerId || '');
+      }
+      const response = await fetch(`/api/history${params.size ? `?${params}` : ''}`);
+      if (!response.ok) throw new Error(`Racegeschiedenis laden mislukt (${response.status})`);
+      return response.json() as Promise<RaceHistory>;
+    },
+  });
 }
 
 function normalizeRequest(request: RaceHistoryRequest): {

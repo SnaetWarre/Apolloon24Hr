@@ -259,6 +259,19 @@
   font-weight: 500;
 }
 
+.system-status--pending:hover {
+  background: none;
+}
+
+.system-status--pending .system-status__dot {
+  background: var(--ink-3);
+}
+
+.system-status--pending .system-status__text strong {
+  color: var(--ink-3);
+  font-weight: 400;
+}
+
 /* Healthy: one quiet line. Details only appear when something needs attention. */
 .system-status--healthy .system-status__text span {
   display: none;

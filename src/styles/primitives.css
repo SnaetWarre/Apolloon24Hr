@@ -742,15 +742,18 @@ details[open] > .disclosure ~ * {
   animation: fade-in var(--dur-3) var(--ease-out) backwards;
 }
 
+/* Loading usually finishes within a blink; the message only fades in when it does not. */
+.app-state[role="status"] {
+  animation-delay: 300ms;
+}
+
 /* Waiting: the wordmark breathes until the data is there. */
 .app-state[role="status"] .brand-mark {
   animation: breathe 1.8s var(--ease-in-out) infinite;
 }
 
-/* Route chunks usually load within a frame; only show the message when they do not. */
 .app-state--inline {
   margin: var(--space-8) auto;
-  animation-delay: 160ms;
 }
 
 .app-state h1 {

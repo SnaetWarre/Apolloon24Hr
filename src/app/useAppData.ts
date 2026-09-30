@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import type { AppSettings, HostInfo, Label, LiveAppSnapshot, RaceState, Runner, TemporaryTeam } from '../types';
+import { withPendingChanges } from './optimistic';
 import { defaultSettings, emptyRace, snapshotKey } from './snapshot';
 
 declare global {
@@ -35,6 +36,10 @@ const emptySnapshot: LiveAppSnapshot = {
 };
 
 async function fetchSnapshot(): Promise<LiveAppSnapshot> {
+  return withPendingChanges(await fetchServerSnapshot());
+}
+
+async function fetchServerSnapshot(): Promise<LiveAppSnapshot> {
   // index.html starts this request before the bundle loads; use it once.
   const prefetched = window.__APOLLOON_STATE_PROMISE__;
   if (prefetched) {

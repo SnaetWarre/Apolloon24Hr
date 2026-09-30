@@ -43,7 +43,7 @@ export function AppRoot() {
     if (displayRoute)
       return (
         <div className="display-loading" role="status">
-          Wedstrijddata laden…
+          <p>Wedstrijddata laden…</p>
         </div>
       );
     return (
