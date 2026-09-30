@@ -113,11 +113,6 @@
       "!**/{appveyor.yml,.travis.yml,circle.yml}",
       "!**/{npm-debug.log,yarn.lock,.yarn-integrity,.yarn-metadata.json}"
     ],
-    "asarUnpack": [
-      "dist-server/**/*",
-      "node_modules/**/*",
-      "dist/**/*"
-    ],
     "win": {
       "target": "nsis",
       "icon": "build/icon.ico",

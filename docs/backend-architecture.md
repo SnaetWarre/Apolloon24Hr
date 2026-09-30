@@ -40,6 +40,10 @@ server/index.ts
 - Compiled to `dist-electron/` by `npm run electron:compile`; the Electron
   build scripts run that step first.
 - Starts the compiled backend as a child process and passes the app version.
+  The backend, frontend build, and dependencies all stay inside `app.asar`;
+  Electron's Node mode reads the archive, so nothing is unpacked.
+- The packaged smoke test (`scripts/package-smoke.mjs`) checks the database,
+  a verified backup (the worker thread), and a precompressed asset.
 - Restarts the backend with backoff when it stops unexpectedly; open screens
   reconnect on their own.
 - Stores configuration and SQLite data under Electron's per-user data path.
