@@ -85,14 +85,14 @@ test('three laptops form one group, every laptop writes, and each holds everythi
     await waitFor(async () =>
       (await fetchStatus(second)).nearby.some((group) => group.url === first.baseUrl && group.runners === 1)
     );
-    const joined = await client(second).cluster.join.mutate({ url: first.baseUrl });
+    const joined = await join(second, first);
     assert.match(joined.backupFile ?? '', /pre-join/);
     const third = await startServer({ port: await freePort(), dataPath: path.join(root, 'third') });
     servers.push(third);
     await waitFor(async () => (await fetchStatus(third)).nearby.some((group) => group.laptops === 2));
     assert.equal((await fetchStatus(third)).nearby.length, 1, 'the two linked laptops are listed as one group');
     // Joining through a laptop that does not lead works too.
-    await client(third).cluster.join.mutate({ url: second.baseUrl });
+    await join(third, second);
     await waitFor(async () => (await fetchStatus(first)).state === 'healthy', 10_000);
 
     for (const [index, server] of servers.entries()) {
@@ -381,12 +381,25 @@ async function startGroup(root: string, servers: RunningServer[]): Promise<void>
   for (const name of ['a', 'b', 'c']) {
     servers.push(await startServer({ port: await freePort(), dataPath: path.join(root, name) }));
   }
-  for (const server of servers.slice(1)) {
-    // Joining asks the first laptop for its leader, which it re-confirms after each new member.
-    await waitFor(async () => Boolean((await fetchStatus(servers[0])).leader), 10_000);
-    await client(server).cluster.join.mutate({ url: servers[0].baseUrl });
-  }
+  for (const server of servers.slice(1)) await join(server, servers[0]);
   await waitFor(async () => (await fetchStatus(servers[0])).state === 'healthy', 10_000);
+}
+
+/**
+ * Links `server` to the group of `target`. Right after a laptop joins, the
+ * group may briefly re-confirm its leader (a slow runner can miss a
+ * heartbeat), and joining then answers "try again"; like an operator, try again.
+ */
+async function join(server: RunningServer, target: RunningServer) {
+  const deadline = Date.now() + 15_000;
+  for (;;) {
+    try {
+      return await client(server).cluster.join.mutate({ url: target.baseUrl });
+    } catch (error) {
+      if (!/Probeer het zo opnieuw/.test(String(error)) || Date.now() > deadline) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+  }
 }
 
 async function leaderOf(servers: RunningServer[]): Promise<RunningServer | null> {
