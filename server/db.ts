@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { DATA_DIR, backupDatabase, getDb, openDatabase } from './db/connection.js';
 import { DATABASE_SCHEMA_VERSION, createSchema, migrateSchema, seedDefaultLabels } from './db/schema.js';
+import { schemaProblems } from './db/schema-check.js';
 import { getSetting, hostIdentity } from './db/settings.js';
 import { syncTemporaryTeamRows } from './db/teams.js';
 
@@ -23,6 +24,12 @@ export async function initDb(): Promise<void> {
     if (!fs.existsSync(backupPath)) await backupDatabase(backupPath);
   }
   createSchema();
+  // Keep a copy before rebuilding tables of a database whose structure is out of date. A failed
+  // repair changes nothing, so the restarts after it keep the first copy of the day.
+  if (!upgradesReplication && schemaProblems(database).some((problem) => problem.kind === 'table')) {
+    const backupPath = path.join(DATA_DIR, `app.pre-repair-${new Date().toISOString().slice(0, 10)}.sqlite`);
+    if (!fs.existsSync(backupPath)) await backupDatabase(backupPath);
+  }
   migrateSchema();
   if (upgradesReplication) getDb().exec('VACUUM');
   seedDefaultLabels();
@@ -48,6 +55,7 @@ export {
 } from './db/replication.js';
 export type { ReplicationLogEntry } from './db/types.js';
 export { DATABASE_SCHEMA_VERSION } from './db/schema.js';
+export { schemaProblems } from './db/schema-check.js';
 export { getClusterMembers, saveClusterMember, keepOnlyClusterMember, type ClusterMember } from './db/members.js';
 export { findForwardedWrite, saveForwardedWrite, touchForwardedWrite } from './db/forwarded-writes.js';
 export {

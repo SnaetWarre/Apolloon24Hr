@@ -4,6 +4,16 @@ All notable changes to the Leuven 24h Runner Tracker will be documented in this 
 
 ## [Unreleased]
 
+### Fixed
+
+- Bij het opstarten vergelijkt de app elke tabel met de huidige structuur, in
+  plaats van te vertrouwen op het schemanummer. Wijkt een tabel af, dan wordt
+  ze herbouwd met behoud van alle gegevens, na een kopie
+  (`app.pre-repair-<datum>.sqlite`). Lukt dat niet, dan start de server niet en
+  staat de reden in de foutmelding
+- Een database die een andere laptop doorstuurt, wordt op dezelfde manier
+  gecontroleerd
+
 ## [4.0.2] - 2026-09-30
 
 Laptops koppelen alleen met dezelfde versie: zet 4.0.2 op alle laptops.

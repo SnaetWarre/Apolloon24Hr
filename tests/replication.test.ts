@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
+import { DatabaseSync } from 'node:sqlite';
 
 const dataPath = path.resolve(`.tmp-test-replication-${process.pid}`);
 process.env.DATA_PATH = dataPath;
@@ -161,6 +162,25 @@ test('installing a leader image replaces the event data but keeps this laptop id
   );
   assert.deepEqual(db.getLogHead(), imageHead);
   assert.throws(() => db.installDatabaseImage(image, db.DATABASE_SCHEMA_VERSION + 1), /schema/);
+
+  // The right schema version on an outdated runners table is refused too.
+  const outdatedPath = path.join(dataPath, 'outdated.sqlite');
+  fs.writeFileSync(outdatedPath, image);
+  const outdated = new DatabaseSync(outdatedPath);
+  outdated.exec(`
+    PRAGMA foreign_keys = OFF;
+    DROP TABLE runners;
+    CREATE TABLE runners (id TEXT PRIMARY KEY, name TEXT NOT NULL, status TEXT NOT NULL, registration_json TEXT);
+  `);
+  outdated.close();
+  assert.throws(
+    () => db.installDatabaseImage(fs.readFileSync(outdatedPath), db.DATABASE_SCHEMA_VERSION),
+    /runners: column runner_number is missing/
+  );
+  assert.deepEqual(
+    db.getAllRunners().map((runner) => runner.name),
+    ['From leader']
+  );
   db.closeDb();
   fs.rmSync(dataPath, { recursive: true, force: true });
 });

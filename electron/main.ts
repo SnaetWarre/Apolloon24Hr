@@ -155,6 +155,7 @@ function launchServer(env: NodeJS.ProcessEnv, restartDelayMs = 1_000): ChildProc
   child.stderr?.on('data', (chunk: Buffer) => {
     process.stderr.write(chunk);
     log.write(chunk);
+    serverErrorTail = (serverErrorTail + chunk.toString()).slice(-4_000);
   });
 
   child.on('error', (err) => {
@@ -174,6 +175,8 @@ function launchServer(env: NodeJS.ProcessEnv, restartDelayMs = 1_000): ChildProc
 }
 
 const SERVER_LOG_MAX_BYTES = 5 * 1024 * 1024;
+/** The end of the server's error output, to say why it stopped. */
+let serverErrorTail = '';
 let serverLogStream: fs.WriteStream | null = null;
 
 /** `server.log` in the app data folder, started over once it grows past a few MB. */
@@ -190,7 +193,12 @@ async function waitForServer(url: string, child: ChildProcess, timeoutMs = 20_00
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (child.exitCode !== null) {
-      throw new Error(`Local server stopped before startup completed (exit ${child.exitCode}).`);
+      const reason = serverErrorTail.match(/^\w*Error: .*$/m)?.[0];
+      throw new Error(
+        `Local server stopped before startup completed (exit ${child.exitCode}).` +
+          (reason ? `\n\n${reason}` : '') +
+          `\n\nDetails: ${path.join(app.getPath('userData'), 'server.log')}`
+      );
     }
     try {
       const response = await fetch(`${url}/api/host-info`, {
@@ -225,10 +233,10 @@ if (!gotTheLock) {
       await startServer();
       await createWindow();
       if (smokeTest) {
-        await runPackagedSmokeChecks();
+        const runners = await runPackagedSmokeChecks();
         fs.writeFileSync(
           path.join(app.getPath('userData'), 'smoke-result.json'),
-          JSON.stringify({ version: app.getVersion(), renderer: true, database: true })
+          JSON.stringify({ version: app.getVersion(), renderer: true, database: true, runners })
         );
         app.quit();
       }
@@ -244,11 +252,21 @@ if (!gotTheLock) {
   });
 }
 
-/** Checks that the server works from inside app.asar: database, backup worker, and precompressed assets. */
-async function runPackagedSmokeChecks() {
+/**
+ * Checks that the server works from inside app.asar: database, backup worker,
+ * and precompressed assets. Returns how many runners the live state has.
+ */
+async function runPackagedSmokeChecks(): Promise<number> {
   const response = await fetch(`${appUrl}/api/health`);
   const health = (await response.json()) as { database?: { ready?: boolean } };
   if (!response.ok || !health.database?.ready) throw new Error('SQLite is not ready');
+
+  // Health does not read the event tables; the live state reads all of them.
+  const stateResponse = await fetch(`${appUrl}/api/state`);
+  const state = (await stateResponse.json()) as { runners?: unknown[]; error?: string };
+  if (!stateResponse.ok || !Array.isArray(state.runners)) {
+    throw new Error(`Live state failed (${stateResponse.status}): ${state.error ?? 'no runners'}`);
+  }
 
   const backup = await fetch(`${appUrl}/trpc/backups.create`, {
     method: 'POST',
@@ -263,6 +281,7 @@ async function runPackagedSmokeChecks() {
   if (!asset.ok || asset.headers.get('content-encoding') !== 'br') {
     throw new Error(`Precompressed asset not served (${asset.status}, ${asset.headers.get('content-encoding')})`);
   }
+  return state.runners.length;
 }
 
 function stopServer() {
