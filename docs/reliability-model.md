@@ -150,6 +150,17 @@ Restoring a backup on a laptop:
 6. Link the other laptops to this one again (Beheer › Systeem › Laptops
    koppelen); they take its data.
 
+## How The Failover Is Tested
+
+- `npm test` runs the consensus code for hundreds of seeded random runs on
+  a fake clock and network: laptops crash, sleep, and lose cables (also one
+  way), messages are lost, late, or duplicated, and clocks jump. After
+  every step it checks that there is one leader per term, that no confirmed
+  change is lost, and that no lap counts twice; afterwards the group must
+  recover by itself. A failing seed replays exactly.
+- `npm run rehearse` does the same with three real servers on one machine
+  and a bot pressing Space, and compares the lap logs of all laptops.
+
 ## Rehearsal Before The Event
 
 Do this once with the three event laptops on the event router, with the

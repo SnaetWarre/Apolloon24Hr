@@ -153,6 +153,8 @@ npm run build           Type-check the client, build Vite, and compile the serve
 npm test                Unit tests
 npm run test:e2e        Build, then run real servers (three laptops, failover, night teams)
 npm run test:ui         Browser checks against the build (npx playwright install chromium once)
+npm run test:sim        Consensus simulation: thousands of seeded crashes and partitions
+npm run rehearse        Three real servers under random failures, then compare the lap logs
 ```
 
 ```text

@@ -12,6 +12,7 @@ import {
   runUncaptured,
   transaction,
 } from './connection.js';
+import { type AppendOutcome, type LogView, canContinueFrom as canContinueFromLog, planAppend } from './append-rules.js';
 import { REPLICATED_SETTING_KEYS, getSetting } from './settings.js';
 import { openExistingDatabase, quickCheck } from './sqlite-file.js';
 import { type ReplicatedStatement, type ReplicationLogEntry } from './types.js';
@@ -104,15 +105,18 @@ export function getLogEntriesAfter(seq: number, limit = MAX_ENTRIES_PER_BATCH): 
   ]).map(entryFromRow);
 }
 
+/** This log as the append rules see it. */
+function sqliteLog(): LogView {
+  return {
+    headSeq: getLogHead().seq,
+    idAt: getLogEntryId,
+    oldestSeq: () => one<{ seq: number | null }>('SELECT MIN(seq) AS seq FROM replication_log')?.seq ?? null,
+  };
+}
+
 /** True when a follower at (`after`, `afterId`) holds a prefix of this log that is still retained. */
 export function canContinueFrom(after: number, afterId: string | null): boolean {
-  const head = getLogHead();
-  if (after > head.seq) return false;
-  if (after === 0) {
-    const oldest = one<{ seq: number }>('SELECT MIN(seq) AS seq FROM replication_log')?.seq ?? null;
-    return oldest === null || oldest <= 1;
-  }
-  return one<{ id: string }>('SELECT id FROM replication_log WHERE seq = ?', [after])?.id === afterId;
+  return canContinueFromLog(sqliteLog(), after, afterId);
 }
 
 function insertLogEntry(entry: ReplicationLogEntry): void {
@@ -164,28 +168,15 @@ export function applyLogEntries(entries: ReplicationLogEntry[]): void {
   markAppDataChanged();
 }
 
-export type AppendOutcome = { ok: true } | { ok: false; reason: 'behind' | 'diverged' };
-
-/**
- * Stores a leader's entries that follow (`prevSeq`, `prevId`). Entries this
- * log already holds with the same id are skipped. A different id at the same
- * position, or entries here the leader did not send, mean the histories
- * diverged, and this laptop must re-sync from a full copy.
- */
+/** Stores a leader's entries that follow (`prevSeq`, `prevId`); see `planAppend`. */
 export function appendFromLeader(
   prevSeq: number,
   prevId: string | null,
   entries: ReplicationLogEntry[]
 ): AppendOutcome {
-  const head = getLogHead();
-  if (prevSeq > head.seq) return { ok: false, reason: 'behind' };
-  if (prevSeq > 0 && getLogEntryId(prevSeq) !== prevId) return { ok: false, reason: 'diverged' };
-  const coveredSeq = entries.length ? entries[entries.length - 1].seq : prevSeq;
-  if (head.seq > coveredSeq) return { ok: false, reason: 'diverged' };
-  for (const entry of entries) {
-    if (entry.seq <= head.seq && getLogEntryId(entry.seq) !== entry.id) return { ok: false, reason: 'diverged' };
-  }
-  applyLogEntries(entries.filter((entry) => entry.seq > head.seq));
+  const plan = planAppend(sqliteLog(), prevSeq, prevId, entries);
+  if (!plan.ok) return plan;
+  applyLogEntries(plan.fresh);
   return { ok: true };
 }
 

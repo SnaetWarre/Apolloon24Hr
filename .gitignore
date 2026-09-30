@@ -34,4 +34,5 @@ Thumbs.db
 /backups/
 /.test-data/
 /.dev-data*/
+/.rehearse/
 /.tmp-*/

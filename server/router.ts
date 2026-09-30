@@ -111,7 +111,7 @@ function write<I, T>(action: (input: I) => T) {
       requestId ??= newRequestId();
       const outcome = await forwardWrite<T>(target, path, input, requestId);
       if (outcome.ok) return outcome.data;
-      if (outcome.retry && Date.now() < deadline) {
+      if (outcome.retry && performance.now() < deadline) {
         await new Promise((resolve) => setTimeout(resolve, 100));
         continue;
       }
