@@ -4,9 +4,9 @@ import path from 'node:path';
 
 const distRoot = path.resolve('dist');
 const indexPath = path.join(distRoot, 'index.html');
-// Includes about 22 KB of React Compiler memoization code.
-const maximumInitialJavaScriptBytes = 500 * 1_024;
-const maximumInitialBrotliBytes = 150 * 1_024;
+// Includes about 27 KB of React Compiler memoization code.
+const maximumInitialJavaScriptBytes = 505 * 1_024;
+const maximumInitialBrotliBytes = 151 * 1_024;
 
 const indexHtml = await fs.readFile(indexPath, 'utf8');
 const entryMatch = indexHtml.match(/<script\b[^>]*\bsrc=["']([^"']+\.js)["'][^>]*><\/script>/i);
