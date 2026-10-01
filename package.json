@@ -1,7 +1,7 @@
 {
   "name": "apolloon-telsysteem",
   "private": true,
-  "version": "4.1.0",
+  "version": "4.2.0",
   "description": "Telsysteem voor de Apolloon 24 Urenloop",
   "author": "Apolloon",
   "homepage": "https://github.com/SnaetWarre/Apolloon24Hr",
