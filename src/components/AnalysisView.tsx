@@ -16,7 +16,7 @@ import {
   Tooltip,
   type ChartConfiguration,
 } from 'chart.js';
-import { flexRender, getCoreRowModel, useReactTable, type ColumnDef } from '@tanstack/react-table';
+import { flexRender, tableFeatures, useTable, type ColumnDef, type RowData } from '@tanstack/react-table';
 import { useAppData, useRaceHistory } from '../app/index';
 import {
   buildDistribution,
@@ -774,7 +774,7 @@ function LabelComparisonList({ comparisons }: { comparisons: LabelComparison[] }
 }
 
 function RunnerInsightsTable({ insights }: { insights: RunnerInsight[] }) {
-  const columns = React.useMemo<ColumnDef<RunnerInsight>[]>(
+  const columns = React.useMemo<ColumnDef<DataTableFeatures, RunnerInsight>[]>(
     () => [
       { header: 'Nr.', accessorFn: (runner) => runner.runnerNumber || '-' },
       { header: 'Naam', accessorKey: 'runnerName' },
@@ -805,12 +805,11 @@ function EmptyAnalyticsState({ message }: { message: string }) {
   return <div className="empty-analytics-state">{message}</div>;
 }
 
-function DataTable<T>({ data, columns }: { data: T[]; columns: ColumnDef<T>[] }) {
-  const table = useReactTable({
-    data,
-    columns,
-    getCoreRowModel: getCoreRowModel(),
-  });
+const dataTableFeatures = tableFeatures({});
+type DataTableFeatures = typeof dataTableFeatures;
+
+function DataTable<T extends RowData>({ data, columns }: { data: T[]; columns: ColumnDef<DataTableFeatures, T>[] }) {
+  const table = useTable({ features: dataTableFeatures, data, columns });
 
   return (
     <table>
@@ -828,7 +827,7 @@ function DataTable<T>({ data, columns }: { data: T[]; columns: ColumnDef<T>[] })
       <tbody>
         {table.getRowModel().rows.map((row) => (
           <tr key={row.id}>
-            {row.getVisibleCells().map((cell) => (
+            {row.getAllCells().map((cell) => (
               <td key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</td>
             ))}
           </tr>
