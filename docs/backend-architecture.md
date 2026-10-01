@@ -10,7 +10,7 @@ Browser-only screens connect to any laptop and keep no database.
 ```text
 Browser / Electron renderer
   |
-  | HTTP, tRPC, Socket.IO
+  | HTTP, tRPC (live revision over WebSocket)
   v
 server/index.ts
   |-- server/router.ts -------- validated commands
@@ -58,8 +58,8 @@ server/index.ts
 - Mounts tRPC at `/trpc` (validated commands, see `docs/api-contracts.md`).
 - Serves the live snapshot (`/api/state`), lap history (`/api/history`), clock,
   host, health, backup download, and export endpoints under `/api`.
-- Announces the data revision over Socket.IO after every committed change;
-  clients refetch when their revision differs.
+- Announces the data revision over the `live.revision` tRPC subscription after
+  every committed change; clients refetch when their revision differs.
 - Re-announces the revision when a night team starts or stops, since their
   labels follow the clock rather than a write.
 - Initializes SQLite before listening and shuts down gracefully.
@@ -198,7 +198,7 @@ UI mutation on any laptop
        -> captured SQL appended to replication_log
   -> entry sent to the other laptops
   -> a majority stored it: tRPC response
-  -> Socket.IO state:revision on every laptop that stored it
+  -> live.revision on every laptop that stored it
 ```
 
 ## Storage And Durability

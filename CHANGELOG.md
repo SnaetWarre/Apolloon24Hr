@@ -4,6 +4,12 @@ All notable changes to Apolloon Telsysteem will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- Schermen horen live wijzigingen via een tRPC-abonnement in plaats van
+  Socket.IO, en zien binnen tien seconden dat de verbinding met hun laptop weg
+  is
+
 ## [4.2.0] - 2026-10-01
 
 Laptops koppelen alleen met dezelfde versie: zet 4.2.0 op alle laptops.

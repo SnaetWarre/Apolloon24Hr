@@ -3,7 +3,7 @@
 This app has three runtime surfaces:
 
 - `src/`: React/Vite client for event operators, displays, and exports.
-- `server/`: local Express, tRPC, Socket.IO, and SQLite runtime.
+- `server/`: local Express, tRPC, and SQLite runtime.
 - `electron/`: desktop wrapper that starts the compiled server and opens the app; compiled to `dist-electron/`.
 
 Shared contracts live in `shared/`. Anything imported by both client and server should go there instead of being duplicated in `src/` and `server/`.
@@ -74,7 +74,7 @@ Shared contracts live in `shared/`. Anything imported by both client and server 
 
 ## Server Shape
 
-- `server/index.ts`: HTTP, tRPC, and Socket.IO wiring, `/api` routes, startup and shutdown.
+- `server/index.ts`: HTTP, tRPC, and WebSocket wiring, `/api` routes, startup and shutdown.
 - `server/router.ts`: tRPC procedures and request validation.
 - `server/runner-import.ts`: runner CSV and Google Form import.
 - `server/exports.ts`: lap and event CSV/JSON exports and the Excel download route.

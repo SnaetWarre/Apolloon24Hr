@@ -28,15 +28,16 @@ Owns cacheable reads, file transfers, and operational endpoints.
 
 Rule: reads that benefit from HTTP caching, curl, or file download stay here. Do not add validated domain commands here.
 
-## Socket.IO (`server/index.ts`)
+## Live revision (tRPC subscription over WebSocket, `/trpc`)
 
-Owns server push only, and pushes one thing: `state:revision` with the current data revision.
+Owns server push only, and pushes one thing: `live.revision`, the current data revision. Screens subscribe through `src/app/realtimeClient.ts`; queries and writes stay on HTTP.
 
-- The server emits it after every committed change, after a follower stores new entries, and when a night team starts or stops.
+- The server sends it after every committed change, after a follower stores new entries, and when a night team starts or stops.
 - A client whose snapshot has another revision refetches everything under the `['app']` query key; unchanged responses come back as `304`.
-- On connect the server emits the current revision.
+- On (re)subscribe the server sends the current revision.
+- Both sides ping: the client reconnects when the server stops answering, and the server drops screens that vanished.
 
-Rule: do not add typed deltas or request/response flows on the socket; clients always refetch server state.
+Rule: do not add typed deltas or other subscriptions for event data; clients always refetch server state.
 
 ## Linked laptops (LAN only, `server/cluster.ts`)
 

@@ -9,8 +9,8 @@ export.
 ## Two sections
 
 - **Live race & doelverloop** reads the full race history through
-  `useRaceHistory({ scope: 'full' })`. Socket.IO patches that query whenever a
-  lap is added, deleted, or corrected, so every projection uses the same live
+  `useRaceHistory({ scope: 'full' })`. The live revision refreshes that query
+  whenever a lap is added, deleted, or corrected, so every projection uses the same live
   data as the timing screens.
 - **Analyse vorig jaar** compares two teams from the official historical
   timing export. Team 1 and team 4 are the defaults for Apolloon and VTK. It
@@ -95,7 +95,7 @@ workspace contains these five groups:
 Some presentation and input mechanisms are intentionally native:
 
 - The original live `laps.json` upload and manual start-time field are replaced
-  by Apolloon's full-history API, race state, and Socket.IO cache patches.
+  by Apolloon's full-history API, race state, and live revision refreshes.
 - The historical Quivr export is bundled and can still be replaced through the
   file picker. It is shared by historical and live comparisons.
 - A CSV schedule import is replaced by the editable 24-hour schedule with
