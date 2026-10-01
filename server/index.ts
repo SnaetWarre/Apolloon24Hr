@@ -1,4 +1,4 @@
-import 'dotenv/config';
+import './load-env.js';
 import http from 'node:http';
 import { createExpressMiddleware } from '@trpc/server/adapters/express';
 import { applyWSSHandler } from '@trpc/server/adapters/ws';
