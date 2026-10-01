@@ -1,9 +1,11 @@
 import React from 'react';
-import { flexRender, getCoreRowModel, useReactTable, type ColumnDef } from '@tanstack/react-table';
+import { flexRender, tableFeatures, useTable, type ColumnDef } from '@tanstack/react-table';
 import { LabelBadge } from '../LabelBadge';
 import { SourceBadge } from '../RunnerEntryModals';
 import { statusLabel } from './adminFormat';
 import type { Runner, RunnerRegistration } from '../../types';
+
+const features = tableFeatures({});
 
 export function AdminRunnerTable({
   runners,
@@ -18,7 +20,7 @@ export function AdminRunnerTable({
   onRestore: (runner: Runner) => Promise<void>;
   onRemove: (runner: Runner) => Promise<void>;
 }) {
-  const columns = React.useMemo<ColumnDef<Runner>[]>(
+  const columns = React.useMemo<ColumnDef<typeof features, Runner>[]>(
     () => [
       { header: 'Nr.', accessorFn: (runner) => runner.runnerNumber || '-' },
       { header: 'Naam', accessorKey: 'name' },
@@ -82,11 +84,7 @@ export function AdminRunnerTable({
     [onOpenProfile, onRemove, onRestore, registrations]
   );
 
-  const table = useReactTable({
-    data: runners,
-    columns,
-    getCoreRowModel: getCoreRowModel(),
-  });
+  const table = useTable({ features, data: runners, columns });
 
   return (
     <table>
@@ -104,7 +102,7 @@ export function AdminRunnerTable({
       <tbody>
         {table.getRowModel().rows.map((row) => (
           <tr key={row.original.id}>
-            {row.getVisibleCells().map((cell) => (
+            {row.getAllCells().map((cell) => (
               <td key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</td>
             ))}
           </tr>
