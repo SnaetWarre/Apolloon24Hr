@@ -4,8 +4,9 @@ All notable changes to Apolloon Telsysteem will be documented in this file.
 
 ## [Unreleased]
 
-Laptops koppelen alleen met dezelfde versie: zet de nieuwe versie op alle
-laptops.
+## [4.2.0] - 2026-10-01
+
+Laptops koppelen alleen met dezelfde versie: zet 4.2.0 op alle laptops.
 
 ### Added
 
@@ -28,6 +29,19 @@ laptops.
   wordt vanzelf opnieuw geladen
 - Links naar andere sites openen in de browser in plaats van in het
   app-venster
+- Timing toont een wissel zodra de spatiebalk ingedrukt wordt, en de knop
+  blijft bruikbaar terwijl de laptops de wissel bevestigen
+- Wijzigingen in de wachtrij verschijnen meteen en komen aan in de volgorde
+  waarin erop geklikt werd; klikken tijdens het opslaan gaan niet meer verloren
+- Pagina's laden hun gegevens vooraf en verspringen niet meer wanneer die
+  binnenkomen. Tactiek laadt de referentie van vorig jaar maar één keer
+- Onderliggende bibliotheken bijgewerkt
+
+### Fixed
+
+- De lopende rondetijd op Timing bleef stilstaan
+- Een loper in de wachtrij sprong na een klik soms terug naar de vorige
+  plaats
 
 ## [4.1.0] - 2026-09-30
 
