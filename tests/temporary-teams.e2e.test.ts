@@ -3,8 +3,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
 import test from 'node:test';
-import { createTRPCClient, httpBatchLink } from '@trpc/client';
-import { io, type Socket } from 'socket.io-client';
+import { createTRPCClient, createWSClient, httpBatchLink, wsLink } from '@trpc/client';
 import type { AppRouter } from '../server/router.ts';
 import type { AppSnapshot, LiveAppSnapshot, RaceHistory } from '../shared/schemas.ts';
 import { buildLabelComparisons, filterLaps } from '../src/lib/analysis.ts';
@@ -17,7 +16,7 @@ test('night teams work through HTTP, realtime, analysis, exports, and a restart'
   const port = await freePort();
   const baseUrl = `http://127.0.0.1:${port}`;
   let server: ChildProcess | null = null;
-  let socket: Socket | null = null;
+  let stopWatching: (() => void) | null = null;
   let serverOutput = '';
 
   try {
@@ -27,10 +26,7 @@ test('night teams work through HTTP, realtime, analysis, exports, and a restart'
     });
 
     const revisions: number[] = [];
-    socket = io(baseUrl, { transports: ['websocket'], reconnection: false, autoConnect: false });
-    socket.on('state:revision', (revision: number) => revisions.push(revision));
-    socket.connect();
-    await waitForSocket(socket);
+    stopWatching = watchRevisions(port, revisions);
     await waitFor(() => revisions.length > 0);
     const initialState = await fetchState(baseUrl);
     assert.equal(revisions.at(-1), initialState.revision);
@@ -180,8 +176,8 @@ test('night teams work through HTTP, realtime, analysis, exports, and a restart'
       /volgt haar planning/
     );
 
-    socket.close();
-    socket = null;
+    stopWatching();
+    stopWatching = null;
     await stopServer(server);
     server = null;
 
@@ -196,10 +192,9 @@ test('night teams work through HTTP, realtime, analysis, exports, and a restart'
       scheduledStart
     );
     // The team starts on the clock, without any write; clients hear about it through a revision.
-    socket = io(baseUrl, { transports: ['websocket'], reconnection: false });
     const revisionsAfterRestart: number[] = [];
-    socket.on('state:revision', (revision: number) => revisionsAfterRestart.push(revision));
-    await waitForSocket(socket);
+    stopWatching = watchRevisions(port, revisionsAfterRestart);
+    await waitFor(() => revisionsAfterRestart.length > 0);
     await waitFor(async () => currentTeamIds(await fetchState(baseUrl), charlie.id).includes(scheduled.labelId), 8_000);
     assert.ok(revisionsAfterRestart.length > 1);
     await waitFor(async () => currentTeamIds(await fetchState(baseUrl), charlie.id).includes(blue.id), 8_000);
@@ -226,7 +221,7 @@ test('night teams work through HTTP, realtime, analysis, exports, and a restart'
       }
     );
   } finally {
-    socket?.close();
+    stopWatching?.();
     await stopServer(server);
     fs.rmSync(dataPath, { recursive: true, force: true });
   }
@@ -295,19 +290,17 @@ async function fetchState(baseUrl: string): Promise<AppSnapshot> {
   return { ...state, laps: history.laps, events: history.events };
 }
 
-async function waitForSocket(socket: Socket): Promise<void> {
-  if (socket.connected) return;
-  await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('Socket.IO connection timed out')), 5_000);
-    socket.once('connect', () => {
-      clearTimeout(timer);
-      resolve();
-    });
-    socket.once('connect_error', (error) => {
-      clearTimeout(timer);
-      reject(error);
-    });
+/** Collects the revisions the server announces over the live subscription. */
+function watchRevisions(port: number, revisions: number[]): () => void {
+  const wsClient = createWSClient({ url: `ws://127.0.0.1:${port}/trpc` });
+  const client = createTRPCClient<AppRouter>({ links: [wsLink({ client: wsClient })] });
+  const subscription = client.live.revision.subscribe(undefined, {
+    onData: (revision) => revisions.push(revision),
   });
+  return () => {
+    subscription.unsubscribe();
+    void wsClient.close();
+  };
 }
 
 async function waitFor(check: () => boolean | Promise<boolean>, timeoutMs = 5_000): Promise<void> {

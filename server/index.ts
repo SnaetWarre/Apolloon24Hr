@@ -1,8 +1,9 @@
 import 'dotenv/config';
 import http from 'node:http';
 import { createExpressMiddleware } from '@trpc/server/adapters/express';
+import { applyWSSHandler } from '@trpc/server/adapters/ws';
 import express, { type NextFunction, type Request, type Response } from 'express';
-import { Server as SocketIOServer } from 'socket.io';
+import { WebSocketServer } from 'ws';
 import { historyCacheKey, liveAppSnapshot, raceHistory, type HistoryRequest } from './app-state.js';
 import { describeOrigin } from './activity.js';
 import { backupStatus, latestBackupPath, startBackupService, stopBackupService } from './backups.js';
@@ -16,7 +17,6 @@ import {
   getRaceState,
   initDb,
   markAppDataChanged,
-  onAppDataChanged,
 } from './db.js';
 import { RELEASE_ID } from './env.js';
 import { registerExportRoutes } from './exports.js';
@@ -31,28 +31,26 @@ import { isDemoRaceEnabled, startDemoRace } from './demo-race.js';
 const app = express();
 app.disable('x-powered-by');
 const server = http.createServer(app);
-const io = new SocketIOServer(server, {
-  cors: { origin: true, credentials: false },
-  serveClient: false,
-});
 const processStartedAt = Date.now();
 let shuttingDown = false;
 let temporaryTeamTimer: NodeJS.Timeout | null = null;
 let stopDemoRace: (() => void) | null = null;
 
-// Clients refetch when the revision moves; several changes in one tick send one event.
-let revisionEmitQueued = false;
-onAppDataChanged(() => {
-  if (revisionEmitQueued) return;
-  revisionEmitQueued = true;
-  setImmediate(() => {
-    revisionEmitQueued = false;
-    io.emit('state:revision', getAppDataRevision());
-  });
+// Screens subscribe to live changes over a WebSocket on /trpc; queries and writes stay on HTTP.
+const wss = new WebSocketServer({ noServer: true });
+applyWSSHandler({
+  wss,
+  router: appRouter,
+  createContext: () => ({}),
+  // Drops a screen that vanished from the network instead of keeping its subscription.
+  keepAlive: { enabled: true, pingMs: 10_000, pongWaitMs: 5_000 },
 });
-
-io.on('connection', (socket) => {
-  socket.emit('state:revision', getAppDataRevision());
+server.on('upgrade', (req, socket, head) => {
+  if (req.url?.split('?')[0] !== '/trpc') {
+    socket.destroy();
+    return;
+  }
+  wss.handleUpgrade(req, socket, head, (client) => wss.emit('connection', client, req));
 });
 
 /**
@@ -261,6 +259,7 @@ function shutdown(reason: string): void {
     }
   }, 5_000);
   forceExit.unref();
+  for (const client of wss.clients) client.terminate();
 
   let finished = false;
   const finish = () => {
@@ -277,7 +276,6 @@ function shutdown(reason: string): void {
     return;
   }
   server.close(finish);
-  io.close(finish);
 }
 
 process.once('SIGINT', () => shutdown('SIGINT'));

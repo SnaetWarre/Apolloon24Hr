@@ -65,11 +65,11 @@ See `docs/reliability-model.md` for the failover policy, retention rules, recove
 ## Tech Stack
 
 - Frontend: React 19, Vite 8, TanStack Router, TanStack Query, and TanStack Table.
-- Backend: Express 5 with tRPC on `/trpc`, Socket.IO realtime events, and SQLite through Node's built-in `node:sqlite`, so there is no native module to rebuild for Electron.
+- Backend: Express 5 with tRPC on `/trpc` (live updates as a subscription over a WebSocket on the same path), and SQLite through Node's built-in `node:sqlite`, so there is no native module to rebuild for Electron.
 - Packaging: Electron + electron-builder. Production builds compile the backend to `dist-server/` and serve the Vite build from the local server.
 - Exports: plain HTTP endpoints under `/api/export/*` for browser downloads and external tools.
 
-In development, Vite serves the frontend on `5173` and proxies `/trpc`, `/api`, and `/socket.io` to the backend on `3000`. `npm run dev` starts both after seeding `.dev-data/`.
+In development, Vite serves the frontend on `5173` and proxies `/trpc` (including its WebSocket) and `/api` to the backend on `3000`. `npm run dev` starts both after seeding `.dev-data/`.
 
 For the repository layout, runtime boundaries, and validation commands, see `docs/codebase-map.md`.
 For hosting the app directly on the VPS without a laptop tunnel, see `docs/vps-deploy.md`.

@@ -1,3 +1,4 @@
+import { EventEmitter, on } from 'node:events';
 import { TRPCError, initTRPC } from '@trpc/server';
 import { z } from 'zod';
 import {
@@ -46,6 +47,7 @@ import {
   finishRace,
   findForwardedWrite,
   getActivity,
+  getAppDataRevision,
   getLogHead,
   getRaceState,
   getRunnerById,
@@ -54,6 +56,7 @@ import {
   hideRunnerInQueue,
   insertRunner,
   logActivity,
+  onAppDataChanged,
   performHandoff,
   previewBackup,
   readRestoreData,
@@ -89,6 +92,19 @@ export type RequestContext = {
 };
 
 const t = initTRPC.context<RequestContext>().create();
+
+// Clients refetch when the revision moves; several changes in one tick send one event.
+const revisions = new EventEmitter<{ revision: [number] }>();
+revisions.setMaxListeners(0);
+let revisionEmitQueued = false;
+onAppDataChanged(() => {
+  if (revisionEmitQueued) return;
+  revisionEmitQueued = true;
+  setImmediate(() => {
+    revisionEmitQueued = false;
+    revisions.emit('revision', getAppDataRevision());
+  });
+});
 
 type ErrorCode = ConstructorParameters<typeof TRPCError>[0]['code'];
 
@@ -266,6 +282,16 @@ const applyRestore = write(
 );
 
 export const appRouter = t.router({
+  live: t.router({
+    /** The data revision now and after every committed change, over the WebSocket. */
+    revision: t.procedure.subscription(async function* ({ signal }) {
+      // Listen before reading the current revision, so no change falls in between.
+      const changes = on(revisions, 'revision', { signal });
+      yield getAppDataRevision();
+      for await (const [revision] of changes) yield revision as number;
+    }),
+  }),
+
   cluster: t.router({
     join: t.procedure
       .input(z.object({ url: z.string().trim().min(1).max(2_048) }))
