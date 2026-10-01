@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
 /**
@@ -27,7 +27,8 @@ Zet op alle laptops dezelfde versie. Controleer een download met \`SHA256SUMS.tx
 `;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+// Node loads the script from its real path, so a symlinked folder (macOS /var) must be resolved too.
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   const { version } = JSON.parse(readFileSync('package.json', 'utf8'));
   process.stdout.write(releaseNotes(readFileSync('CHANGELOG.md', 'utf8'), version));
 }

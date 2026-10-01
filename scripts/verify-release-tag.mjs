@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
 export function verifyReleaseTag(tag, version) {
@@ -7,7 +7,8 @@ export function verifyReleaseTag(tag, version) {
   }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+// Node loads the script from its real path, so a symlinked folder (macOS /var) must be resolved too.
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   const { version } = JSON.parse(readFileSync('package.json', 'utf8'));
   verifyReleaseTag(process.env.RELEASE_TAG, version);
   console.log(`Verified release v${version}`);
