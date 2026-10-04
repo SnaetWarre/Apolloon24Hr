@@ -672,7 +672,7 @@ const WINDOWS_SELECT_WIRED_ADAPTER = [
   `if (-not $adapter) { exit ${WINDOWS_NO_WIRED_ADAPTER_EXIT} }`,
 ];
 
-function buildWindowsSetStaticScript(ip: string, prefixLength: number, gateway: string | null): string {
+export function buildWindowsSetStaticScript(ip: string, prefixLength: number, gateway: string | null): string {
   const gatewayArgument = gateway ? ` -DefaultGateway '${gateway}'` : '';
   return [
     ...WINDOWS_SELECT_WIRED_ADAPTER,
@@ -693,7 +693,7 @@ function buildWindowsSetStaticScript(ip: string, prefixLength: number, gateway: 
   ].join('\r\n');
 }
 
-function buildWindowsRevertDhcpScript(): string {
+export function buildWindowsRevertDhcpScript(): string {
   return [
     ...WINDOWS_SELECT_WIRED_ADAPTER,
     `Set-NetIPInterface -InterfaceIndex $adapter.ifIndex -Dhcp Enabled | Out-Null`,

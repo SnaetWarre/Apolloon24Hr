@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import test from 'node:test';
 import {
   buildLinuxRevertDhcpScript,
@@ -20,6 +21,8 @@ import {
   shQuote,
   validateStaticRequest,
   buildWindowsLauncherCommand,
+  buildWindowsRevertDhcpScript,
+  buildWindowsSetStaticScript,
   describeElevationFailure,
   isWirelessWindowsAdapter,
   isWiredNmConnectionType,
@@ -201,3 +204,36 @@ test('Windows waits for the UAC prompt and reports a refusal or a missing cable'
   assert.equal(isWirelessWindowsAdapter('Ethernet'), false);
   assert.equal(isWirelessWindowsAdapter('Ethernet 2'), false);
 });
+
+// The elevated scripts cannot run in CI (they would repoint the runner's own adapter), so
+// PowerShell parses them and looks up every cmdlet they call, firewall rules included.
+const CHECK_POWERSHELL = [
+  '$errors = $null',
+  '$ast = [System.Management.Automation.Language.Parser]::ParseInput($env:APOLLOON_SCRIPT, [ref]$null, [ref]$errors)',
+  '$errors | ForEach-Object { "parse error: $($_.Message)" }',
+  '$ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.CommandAst] }, $true) |',
+  '  ForEach-Object { $_.GetCommandName() } | Sort-Object -Unique |',
+  '  Where-Object { $_ -and -not (Get-Command $_ -ErrorAction SilentlyContinue) } |',
+  '  ForEach-Object { "unknown command: $_" }',
+].join('\n');
+
+test(
+  'the elevated Windows scripts are valid PowerShell with known cmdlets',
+  { skip: process.platform !== 'win32' && 'PowerShell checks run on Windows' },
+  () => {
+    const scripts = [
+      buildWindowsSetStaticScript('192.168.1.211', 24, null),
+      buildWindowsSetStaticScript('192.168.1.211', 24, '192.168.1.1'),
+      buildWindowsRevertDhcpScript(),
+      buildWindowsLauncherCommand('QUJD'),
+    ];
+    for (const script of scripts) {
+      const problems = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', CHECK_POWERSHELL], {
+        encoding: 'utf8',
+        env: { ...process.env, APOLLOON_SCRIPT: script },
+        timeout: 60_000,
+      });
+      assert.equal(problems.trim(), '', script);
+    }
+  }
+);
