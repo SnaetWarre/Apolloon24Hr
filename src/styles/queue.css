@@ -38,17 +38,10 @@
   white-space: nowrap;
 }
 
-.race-strip__now .race-strip__label::before {
-  content: "";
-  display: inline-block;
-  width: 6px;
-  height: 6px;
+.race-strip__label .live-dot {
   margin-right: 6px;
-  border-radius: 50%;
-  background: var(--brand);
   vertical-align: 1px;
   --live-ring: var(--brand);
-  animation: live-ring 2.4s var(--ease-out) infinite;
 }
 
 .race-strip__runner {
@@ -184,7 +177,12 @@
   scrollbar-gutter: stable;
 }
 
+/* Each card is its own layout and paint island: a timer ticking or a card
+   animating in repaints that card, not the whole board of 100+ runners
+   (about two thirds of the board's work per change on a slow laptop). Nothing
+   in a card may draw outside it. */
 .queue-runner {
+  contain: layout paint style;
   display: grid;
   grid-template-columns: 16px 22px minmax(0, 1fr) 70px auto;
   align-items: center;
@@ -196,17 +194,10 @@
   transition: background-color var(--dur-1) var(--ease-out);
 }
 
-/* A runner that just moved into this lane rises in; the wash fades to the row's own colour. */
+/* A runner that just moved into this lane rises in; the wash (motion.css) fades to the row's own colour. */
 .queue-runner--arrived {
   --wash: color-mix(in srgb, var(--brand) 16%, var(--surface));
-  --wash-to: var(--surface);
-  animation:
-    rise-in var(--dur-2) var(--ease-out) backwards,
-    wash-out 1.2s var(--ease-out) backwards;
-}
-
-.queue-runner--next.queue-runner--arrived {
-  --wash-to: var(--brand-wash);
+  animation: rise-in var(--dur-2) var(--ease-out) backwards;
 }
 
 .queue-runner:not(:has(.queue-position)) {

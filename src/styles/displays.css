@@ -66,15 +66,6 @@ html[data-display-tone="light"] body {
   animation: display-rise var(--dur-3) var(--ease-out) backwards;
 }
 
-@keyframes display-live-ring {
-  0% {
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--live-ring, currentColor) 45%, transparent);
-  }
-  70%,
-  100% {
-    box-shadow: 0 0 0 0.6em transparent;
-  }
-}
 
 .display-loading {
   display: grid;
@@ -179,14 +170,11 @@ html[data-display-tone="light"] body {
   font: 500 clamp(22px, 2vw, 44px)/1 var(--font-body);
 }
 
-.outside-band--current .display-kicker::before {
-  content: "";
-  width: 0.45em;
-  height: 0.45em;
-  border-radius: 50%;
-  background: var(--apolloon-blue);
+/* 0.45em dot + 0.6em ring each side. */
+.display-kicker .live-dot {
+  --live-dot-size: 0.45em;
   --live-ring: var(--apolloon-blue);
-  animation: display-live-ring 2.4s var(--ease-out) infinite;
+  --live-ring-scale: 3.667;
 }
 
 /* The runner and their labels move as one when a new runner takes over. */
@@ -433,14 +421,11 @@ html[data-display-tone="light"] body {
   font-weight: 500;
 }
 
-.inside-now__label::before {
-  content: "";
-  width: 0.5em;
-  height: 0.5em;
-  border-radius: 50%;
-  background: #FFFFFF;
+/* 0.5em dot + 0.6em ring each side. */
+.inside-now__label .live-dot {
+  --live-dot-size: 0.5em;
   --live-ring: #FFFFFF;
-  animation: display-live-ring 2.4s var(--ease-out) infinite;
+  --live-ring-scale: 3.4;
 }
 
 .inside-now__runner {
@@ -818,11 +803,15 @@ html[data-display-tone="light"] body {
   overflow: hidden;
 }
 
+/* The bar is full width and slides in from the left; the track clips it. A
+   transform runs on the compositor, where a width transition laid out the
+   whole screen every frame. */
 .progress-track span {
   display: block;
   height: 100%;
   border-radius: 1vh;
-  transition: width 600ms ease;
+  transform: translateX(calc(var(--progress, 0%) - 100%));
+  transition: transform 600ms ease;
 }
 
 .progress-item em {

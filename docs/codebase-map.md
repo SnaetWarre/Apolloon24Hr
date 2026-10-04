@@ -109,7 +109,8 @@ backup retention, and the event-day recovery runbook.
 - `scripts/ensure-lan-dev-firewall.mjs`: development firewall helper.
 - `scripts/validation/`: Playwright browser checks; `run.mjs` runs each against its own seeded server.
 - `scripts/bench-network.mjs` (`npm run bench:network`): network traffic and update latency of seven
-  browser screens behind a shared slow link, and the idle traffic between three
+  browser screens behind a shared slow link, their first load and main-thread
+  time on a slowed-down CPU (`--cpu=4`), and the idle traffic between three
   laptops (`npm run build` first).
 - `public/event-network/`: static-address scripts, downloadable from Beheer for manual use.
 - `docs/beschrijving.txt`: the original requirements.
