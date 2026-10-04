@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
-// Dev: API on PORT (e.g. 3000) — see package.json "dev:all"
+// Dev: the API runs on VITE_DEV_API_PORT (3000 in the dev scripts); Vite proxies to it.
 const apiTarget = `http://127.0.0.1:${process.env.VITE_DEV_API_PORT || 3000}`;
 
 export default defineConfig({

@@ -38,6 +38,9 @@ import {
 export type { AppendRequest, AppendResponse, GroupView, Role, VoteRequest, VoteResponse };
 
 const enabled = isClusterEnabled();
+/** Read once here; cluster.ts uses the same values. Tests shorten them. */
+export const ELECTION_TIMEOUT_MS = readPositiveInt(process.env.CLUSTER_ELECTION_TIMEOUT_MS, 1_500);
+export const COMMIT_TIMEOUT_MS = readPositiveInt(process.env.CLUSTER_COMMIT_TIMEOUT_MS, 4_000);
 const MAX_ENTRIES_PER_APPEND = 500;
 const SNAPSHOT_ANSWER_TIMEOUT_MS = 10_000;
 const SNAPSHOT_TIMEOUT_MS = 60_000;
@@ -162,8 +165,8 @@ const raft = createRaft({
   random: Math.random,
   warn: (message) => console.warn(message),
   heartbeatMs: readPositiveInt(process.env.CLUSTER_HEARTBEAT_MS, 150),
-  electionTimeoutMs: readPositiveInt(process.env.CLUSTER_ELECTION_TIMEOUT_MS, 1_500),
-  commitTimeoutMs: readPositiveInt(process.env.CLUSTER_COMMIT_TIMEOUT_MS, 4_000),
+  electionTimeoutMs: ELECTION_TIMEOUT_MS,
+  commitTimeoutMs: COMMIT_TIMEOUT_MS,
   maxEntriesPerAppend: MAX_ENTRIES_PER_APPEND,
 });
 

@@ -2,10 +2,12 @@ import React from 'react';
 import { ModalDialog } from './ModalDialog';
 import { useConfirm } from './ConfirmDialog';
 import { AvailableHoursPicker } from './AvailableHoursPicker';
+import { groupLabels, toggleRunnerLabel } from '../lib/labels';
+import { runnerMatchesSearch, statusLabel } from '../lib/runners';
 import { runnerFormError } from '../lib/runnerForm';
 import { useAppActions, useAppData } from '../app/index';
-import type { Label, LiveAppSnapshot, Runner } from '../types';
-import { compareLabels, LabelBadge, labelKindTitle } from './LabelBadge';
+import type { LiveAppSnapshot, Runner } from '../types';
+import { LabelBadge, labelKindTitle } from './LabelBadge';
 
 const selectRunners = ({ runners }: LiveAppSnapshot) => ({ runners });
 const selectLabels = ({ labels }: LiveAppSnapshot) => ({ labels });
@@ -40,7 +42,7 @@ export function RunnerActivationModal({
     const exactNumberMatches = searchableRunners.filter((runner) => runner.runnerNumber?.trim().toLowerCase() === q);
     return exactNumberMatches.length
       ? exactNumberMatches
-      : searchableRunners.filter((runner) => runnerMatchesQuery(runner, q));
+      : searchableRunners.filter((runner) => runnerMatchesSearch(runner, q));
   }, [searchableRunners, query]);
 
   const visibleMatches = showAllMatches ? filteredMatches : filteredMatches.slice(0, 40);
@@ -304,17 +306,7 @@ export function RunnerAddModal({
   }
 
   function toggleLabel(labelId: string) {
-    const label = labels.find((item) => item.id === labelId);
-    if (!label) return;
-    const group = exclusiveLabelGroup(label.kind);
-
-    setSelectedLabels((current) => {
-      if (current.includes(labelId)) return current.filter((id) => id !== labelId);
-      return [
-        ...current.filter((id) => exclusiveLabelGroup(labels.find((item) => item.id === id)?.kind) !== group),
-        labelId,
-      ];
-    });
+    setSelectedLabels((current) => toggleRunnerLabel(current, labelId, labels));
   }
 
   return (
@@ -529,33 +521,7 @@ function isAvailableForActivation(runner: Runner) {
 }
 
 function runnerStatusLabel(runner: Runner) {
-  if (runner.hiddenFromQueue) return 'Verborgen';
-  switch (runner.status) {
-    case 'registered':
-      return 'Ingeschreven';
-    case 'ran':
-      return 'Heeft gelopen';
-    case 'warming_up':
-      return 'Aan het opwarmen';
-    case 'waiting':
-      return 'In de wachtrij';
-    case 'running':
-      return 'Op de piste';
-    default:
-      return runner.status;
-  }
-}
-
-function runnerMatchesQuery(runner: Runner, query: string) {
-  const labelText = runner.labels
-    .map((label) => label.name)
-    .join(' ')
-    .toLowerCase();
-  return (
-    runner.name.toLowerCase().includes(query) ||
-    (runner.runnerNumber || '').toLowerCase().includes(query) ||
-    labelText.includes(query)
-  );
+  return runner.hiddenFromQueue ? 'Verborgen' : statusLabel(runner.status);
 }
 
 function sortRunnerByNumberThenName(a: Runner, b: Runner) {
@@ -579,19 +545,4 @@ function normalizeSecondsInput(value: string) {
   const seconds = Number(value.trim() || 0);
   if (!Number.isFinite(seconds)) return '';
   return String(Math.min(59, Math.max(0, Math.round(seconds))));
-}
-
-function exclusiveLabelGroup(kind: string | undefined) {
-  if (kind === 'speedteam') return 'speedteam';
-  if (kind === 'zustervereniging' || kind === 'association') return 'zustervereniging';
-  return 'andere';
-}
-
-function groupLabels(labels: Label[]) {
-  const grouped = new Map<string, typeof labels>();
-  [...labels].sort(compareLabels).forEach((label) => {
-    if (!grouped.has(label.kind)) grouped.set(label.kind, []);
-    grouped.get(label.kind)?.push(label);
-  });
-  return [...grouped.entries()];
 }

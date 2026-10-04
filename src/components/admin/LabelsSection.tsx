@@ -4,7 +4,7 @@ import { useConfirm } from '../ConfirmDialog';
 import { labelKindTitle } from '../LabelBadge';
 import type { Label, Runner, TemporaryTeam } from '../../types';
 import { AdminNoticeBanner, useAdminAction } from './AdminNotice';
-import { groupLabels } from './adminFormat';
+import { groupLabels } from '../../lib/labels';
 import { LabelAdminRow } from './LabelAdminRow';
 import { LabelImagePicker } from './LabelImagePicker';
 import { TemporaryTeamAdminCard } from './TemporaryTeamAdminCard';

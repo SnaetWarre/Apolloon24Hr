@@ -9,7 +9,8 @@ Only 4.0 and later: the app puts an older database aside
 (`app.retired-<time>.sqlite`) and starts empty.
 
 - `v<version>.sqlite`: made by that release's own database code, with three
-  runners (Anna, Bert, Cas) and three laps. After a release, add one:
+  runners (Anna, Bert, Cas) and three laps. After a release that changes the
+  database tables, add one (a release with the same tables adds nothing new):
 
   ```sh
   node scripts/make-db-fixture.mjs v4.0.3

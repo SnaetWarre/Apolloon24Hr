@@ -16,7 +16,6 @@ import {
   Tooltip,
   type ChartConfiguration,
 } from 'chart.js';
-import { flexRender, tableFeatures, useTable, type ColumnDef, type RowData } from '@tanstack/react-table';
 import { useAppData, useRaceHistory } from '../app/index';
 import {
   buildDistribution,
@@ -33,16 +32,19 @@ import {
   type LabelComparison,
   type RunnerInsight,
 } from '../lib/analysis';
+import { groupLabels } from '../lib/labels';
+import { collectRankingLabels } from '../lib/ranking';
+import { lapRunnerLabel } from '../lib/runners';
 import { useArrivals } from '../lib/motion';
 import { formatClockTimeMs, formatDurationMs } from '../lib/time';
-import type { Label, LapRecord, LiveAppSnapshot, PublicRecordMode } from '../types';
+import type { Label, LiveAppSnapshot, PublicRecordMode } from '../types';
 
 const selectAnalysisData = ({ runners, labels, race }: LiveAppSnapshot) => ({
   runners,
   labels,
   race,
 });
-import { compareLabels, LabelBadge, labelKindTitle } from './LabelBadge';
+import { LabelBadge, labelKindTitle } from './LabelBadge';
 
 type RunnerInsightSort = 'laps' | 'average' | 'best' | 'consistency';
 type AnalysisRecordWindowMode = Exclude<PublicRecordMode, 'off'>;
@@ -100,7 +102,7 @@ export function AnalysisView() {
     };
   }, []);
 
-  const analysisLabels = mergeAnalysisLabels(labels, laps);
+  const analysisLabels = collectRankingLabels(labels, laps);
   const enabledLabelIds = filters.enabledLabelIds ?? analysisLabels.map((label) => label.id);
   const enabledLabels = analysisLabels.filter((label) => enabledLabelIds.includes(label.id));
   const filteredLaps = filterLaps(laps, filters);
@@ -329,15 +331,6 @@ export function AnalysisView() {
   );
 }
 
-function mergeAnalysisLabels(currentLabels: Label[], laps: LapRecord[]): Label[] {
-  const byId = new Map<string, Label>();
-  for (const lap of laps) {
-    for (const label of lap.labels) byId.set(label.id, label);
-  }
-  for (const label of currentLabels) byId.set(label.id, label);
-  return [...byId.values()].sort(compareLabels);
-}
-
 function StatPanel({ label, value, hero }: { label: string; value: string; hero?: boolean }) {
   const hasLongValue = value.length >= 10;
   // A figure that changes with the filter lifts briefly; the first figure is simply there.
@@ -399,7 +392,7 @@ function FastestLapWindowList({
               {windows.map((window) => (
                 <tr key={window.key}>
                   <td>{window.label}</td>
-                  <td>{formatLapRunner(window.lap)}</td>
+                  <td>{lapRunnerLabel(window.lap)}</td>
                   <td>{window.lap.lapNumber}</td>
                   <td>
                     <strong>{formatDurationMs(window.lap.durationMs)}</strong>
@@ -774,22 +767,37 @@ function LabelComparisonList({ comparisons }: { comparisons: LabelComparison[] }
 }
 
 function RunnerInsightsTable({ insights }: { insights: RunnerInsight[] }) {
-  const columns = React.useMemo<ColumnDef<DataTableFeatures, RunnerInsight>[]>(
-    () => [
-      { header: 'Nr.', accessorFn: (runner) => runner.runnerNumber || '-' },
-      { header: 'Naam', accessorKey: 'runnerName' },
-      { header: 'Toeren', accessorKey: 'count' },
-      { header: 'Totaal', cell: ({ row }) => formatDurationMs(row.original.totalMs) },
-      { header: 'Gem.', cell: ({ row }) => formatDurationMs(row.original.averageMs) },
-      { header: 'Mediaan', cell: ({ row }) => formatDurationMs(row.original.medianMs) },
-      { header: 'Snelste', cell: ({ row }) => formatDurationMs(row.original.bestMs) },
-      { header: 'Traagste', cell: ({ row }) => formatDurationMs(row.original.slowestMs) },
-      { header: 'Spreiding', cell: ({ row }) => formatDurationMs(row.original.standardDeviationMs) },
-    ],
-    []
-  );
   return insights.length ? (
-    <DataTable data={insights} columns={columns} />
+    <table>
+      <thead>
+        <tr>
+          <th>Nr.</th>
+          <th>Naam</th>
+          <th>Toeren</th>
+          <th>Totaal</th>
+          <th>Gem.</th>
+          <th>Mediaan</th>
+          <th>Snelste</th>
+          <th>Traagste</th>
+          <th>Spreiding</th>
+        </tr>
+      </thead>
+      <tbody>
+        {insights.map((runner) => (
+          <tr key={runner.runnerId}>
+            <td>{runner.runnerNumber || '-'}</td>
+            <td>{runner.runnerName}</td>
+            <td>{runner.count}</td>
+            <td>{formatDurationMs(runner.totalMs)}</td>
+            <td>{formatDurationMs(runner.averageMs)}</td>
+            <td>{formatDurationMs(runner.medianMs)}</td>
+            <td>{formatDurationMs(runner.bestMs)}</td>
+            <td>{formatDurationMs(runner.slowestMs)}</td>
+            <td>{formatDurationMs(runner.standardDeviationMs)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   ) : (
     <table>
       <tbody>
@@ -803,47 +811,6 @@ function RunnerInsightsTable({ insights }: { insights: RunnerInsight[] }) {
 
 function EmptyAnalyticsState({ message }: { message: string }) {
   return <div className="empty-analytics-state">{message}</div>;
-}
-
-const dataTableFeatures = tableFeatures({});
-type DataTableFeatures = typeof dataTableFeatures;
-
-function DataTable<T extends RowData>({ data, columns }: { data: T[]; columns: ColumnDef<DataTableFeatures, T>[] }) {
-  const table = useTable({ features: dataTableFeatures, data, columns });
-
-  return (
-    <table>
-      <thead>
-        {table.getHeaderGroups().map((headerGroup) => (
-          <tr key={headerGroup.id}>
-            {headerGroup.headers.map((header) => (
-              <th key={header.id}>
-                {header.isPlaceholder ? null : flexRender(header.column.columnDef.header, header.getContext())}
-              </th>
-            ))}
-          </tr>
-        ))}
-      </thead>
-      <tbody>
-        {table.getRowModel().rows.map((row) => (
-          <tr key={row.id}>
-            {row.getAllCells().map((cell) => (
-              <td key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</td>
-            ))}
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  );
-}
-
-function groupLabels(labels: Label[]) {
-  const grouped = new Map<string, Label[]>();
-  [...labels].sort(compareLabels).forEach((label) => {
-    if (!grouped.has(label.kind)) grouped.set(label.kind, []);
-    grouped.get(label.kind)?.push(label);
-  });
-  return [...grouped.entries()];
 }
 
 function formatNumber(value: number | null, digits: number) {
@@ -880,8 +847,4 @@ function sortRunnerInsight(mode: RunnerInsightSort) {
 
 function nullableAsc(a: number | null, b: number | null) {
   return (a ?? Number.MAX_SAFE_INTEGER) - (b ?? Number.MAX_SAFE_INTEGER);
-}
-
-function formatLapRunner(lap: Pick<FastestLapWindow['lap'], 'runnerName' | 'runnerNumber'>) {
-  return lap.runnerNumber ? `${lap.runnerNumber} ${lap.runnerName}` : lap.runnerName;
 }

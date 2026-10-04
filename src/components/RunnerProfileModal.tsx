@@ -2,11 +2,13 @@ import React from 'react';
 import { ModalDialog } from './ModalDialog';
 import { useConfirm } from './ConfirmDialog';
 import { AvailableHoursPicker } from './AvailableHoursPicker';
+import { groupLabels, toggleRunnerLabel } from '../lib/labels';
+import { runnerLabel, statusLabel } from '../lib/runners';
 import { runnerFormError } from '../lib/runnerForm';
 import { useAppActions, useAppData, useRaceHistory, useRegistrations } from '../app/index';
 import { formatClockTimeMs, formatDurationMs } from '../lib/time';
-import { compareLabels, labelKindTitle } from './LabelBadge';
-import type { Label, LiveAppSnapshot, Runner, RunnerRegistration, RunnerStatus } from '../types';
+import { labelKindTitle } from './LabelBadge';
+import type { LiveAppSnapshot, Runner, RunnerRegistration, RunnerStatus } from '../types';
 import { LiveElapsed } from './LiveTime';
 
 const selectRunnerProfileData = ({ runners, labels, temporaryTeams }: LiveAppSnapshot) => ({
@@ -129,15 +131,7 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
   }
 
   function toggleLabel(labelId: string) {
-    const label = labels.find((item) => item.id === labelId);
-    if (!label || label.kind === 'temporary_team') return;
-    setSelectedLabels((current) => {
-      if (current.includes(labelId)) return current.filter((id) => id !== labelId);
-      if (label.kind === 'speedteam') {
-        return [...current.filter((id) => labels.find((item) => item.id === id)?.kind !== 'speedteam'), labelId];
-      }
-      return [...current, labelId];
-    });
+    setSelectedLabels((current) => toggleRunnerLabel(current, labelId, labels));
   }
 
   async function removeFromQueueFlow() {
@@ -178,7 +172,7 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
         <div className="modal-header">
           <div>
             <span className="modal-kicker">Lopersprofiel</span>
-            <h2>{runnerTitle(runner)}</h2>
+            <h2>{runnerLabel(runner)}</h2>
           </div>
           <button className="icon-btn" onClick={requestClose} aria-label="Sluiten">
             ✕
@@ -496,10 +490,6 @@ function queueRemovalButtonLabel(status: RunnerStatus) {
   return null;
 }
 
-function runnerTitle(runner: Pick<Runner, 'runnerNumber' | 'name'>) {
-  return runner.runnerNumber ? `${runner.runnerNumber} ${runner.name}` : runner.name;
-}
-
 function isDirty({
   runner,
   registration,
@@ -558,28 +548,5 @@ function getEditableRunnerKey(runner: Runner, registration: RunnerRegistration |
 }
 
 function runnerStatusSummary(status: RunnerStatus) {
-  const showsElapsed = !['registered', 'ran'].includes(status);
-  switch (status) {
-    case 'registered':
-      return { title: 'Ingeschreven', showsElapsed };
-    case 'warming_up':
-      return { title: 'Aan het opwarmen', showsElapsed };
-    case 'waiting':
-      return { title: 'In de wachtrij', showsElapsed };
-    case 'running':
-      return { title: 'Loopt nu', showsElapsed };
-    case 'ran':
-      return { title: 'Heeft gelopen', showsElapsed };
-    default:
-      return { title: status, showsElapsed };
-  }
-}
-
-function groupLabels(labels: Label[]) {
-  const grouped = new Map<string, typeof labels>();
-  [...labels].sort(compareLabels).forEach((label) => {
-    if (!grouped.has(label.kind)) grouped.set(label.kind, []);
-    grouped.get(label.kind)?.push(label);
-  });
-  return [...grouped.entries()];
+  return { title: statusLabel(status), showsElapsed: !['registered', 'ran'].includes(status) };
 }

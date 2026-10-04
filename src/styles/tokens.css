@@ -21,7 +21,6 @@
   --radius-sm: 6px;
   --radius-md: 8px;
   --radius-lg: 10px;
-  --rail: 2px;
 
   --control-h: 34px;
   --control-h-sm: 28px;
@@ -74,8 +73,6 @@
   --stop-wash: #FDF0F0;
   --stop-line: #F4C4C4;
 
-  --bib: transparent;
-  --bib-line: transparent;
   --overlay: rgb(24 24 27 / 0.4);
   --shadow-overlay: 0 16px 48px rgb(24 24 27 / 0.16), 0 0 0 1px rgb(24 24 27 / 0.04);
   --shadow-drag: 0 8px 24px rgb(24 24 27 / 0.14);
@@ -128,8 +125,6 @@
   --stop-wash: #2E1B1B;
   --stop-line: #5E2A28;
 
-  --bib: transparent;
-  --bib-line: transparent;
   --overlay: rgb(0 0 0 / 0.55);
   --shadow-overlay: 0 16px 48px rgb(0 0 0 / 0.5), 0 0 0 1px rgb(255 255 255 / 0.04);
   --shadow-drag: 0 8px 24px rgb(0 0 0 / 0.5);

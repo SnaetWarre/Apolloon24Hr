@@ -1,4 +1,4 @@
-import { execFileSync, spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -303,20 +303,31 @@ function trackElevation(outcome: ElevationOutcome, launcher: ReturnType<typeof s
   });
 }
 
-/** Small local queries only, with a hard timeout. */
-function execFileSyncQuiet(file: string, args: string[]): string {
-  return execFileSync(file, args, { encoding: 'utf8', timeout: 8_000, stdio: ['ignore', 'pipe', 'ignore'] });
+/**
+ * Small local queries only, with a hard timeout. Never synchronous: PowerShell
+ * can take seconds to start, and the server must keep sending heartbeats and
+ * answering presses meanwhile.
+ */
+function execFileQuiet(file: string, args: string[]): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = execFile(file, args, { encoding: 'utf8', timeout: 8_000, windowsHide: true }, (error, stdout) =>
+      error ? reject(error) : resolve(stdout)
+    );
+    child.stdin?.end();
+  });
 }
 
-function readPowerShellCsv(command: string): string[] {
+async function readPowerShellCsv(command: string): Promise<string[]> {
   if (process.platform !== 'win32') return [];
   try {
-    return execFileSyncQuiet('powershell.exe', [
-      '-NoProfile',
-      '-NonInteractive',
-      '-Command',
-      `${command} | ConvertTo-Csv -NoTypeInformation`,
-    ])
+    return (
+      await execFileQuiet('powershell.exe', [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        `${command} | ConvertTo-Csv -NoTypeInformation`,
+      ])
+    )
       .split(/\r?\n/)
       .slice(1);
   } catch {
@@ -325,9 +336,11 @@ function readPowerShellCsv(command: string): string[] {
 }
 
 /** DHCP enabled per lowercased interface alias. */
-function readWindowsDhcpState(): Map<string, boolean> {
+async function readWindowsDhcpState(): Promise<Map<string, boolean>> {
   const states = new Map<string, boolean>();
-  for (const line of readPowerShellCsv('Get-NetIPInterface -AddressFamily IPv4 | Select-Object InterfaceAlias, Dhcp')) {
+  for (const line of await readPowerShellCsv(
+    'Get-NetIPInterface -AddressFamily IPv4 | Select-Object InterfaceAlias, Dhcp'
+  )) {
     const match = line.match(/^"([^"]+)","([^"]+)"$/);
     if (match) states.set(match[1].toLowerCase(), match[2].toLowerCase() === 'enabled');
   }
@@ -335,9 +348,9 @@ function readWindowsDhcpState(): Map<string, boolean> {
 }
 
 /** Prefix length per `lowercased alias|address`. */
-function readWindowsPrefixLengths(): Map<string, number> {
+async function readWindowsPrefixLengths(): Promise<Map<string, number>> {
   const lengths = new Map<string, number>();
-  for (const line of readPowerShellCsv(
+  for (const line of await readPowerShellCsv(
     'Get-NetIPAddress -AddressFamily IPv4 | Select-Object InterfaceAlias, IPAddress, PrefixLength'
   )) {
     const match = line.match(/^"([^"]+)","([^"]+)","([^"]+)"$/);
@@ -356,11 +369,11 @@ const TOOL_PROBE_ARGS: Record<string, string[]> = {
 
 const toolAvailability = new Map<string, boolean>();
 
-function toolAvailable(tool: string): boolean {
+async function toolAvailable(tool: string): Promise<boolean> {
   let available = toolAvailability.get(tool);
   if (available === undefined) {
     try {
-      execFileSyncQuiet(tool, TOOL_PROBE_ARGS[tool] ?? ['--version']);
+      await execFileQuiet(tool, TOOL_PROBE_ARGS[tool] ?? ['--version']);
       available = true;
     } catch {
       available = false;
@@ -370,9 +383,9 @@ function toolAvailable(tool: string): boolean {
   return available;
 }
 
-function readNmActiveConnections(): NmActiveConnection[] {
+async function readNmActiveConnections(): Promise<NmActiveConnection[]> {
   return parseNmcliActiveConnections(
-    execFileSyncQuiet('nmcli', ['-t', '-f', 'NAME,DEVICE,TYPE', 'connection', 'show', '--active'])
+    await execFileQuiet('nmcli', ['-t', '-f', 'NAME,DEVICE,TYPE', 'connection', 'show', '--active'])
   );
 }
 
@@ -384,7 +397,7 @@ type LinuxNetState = {
   gateway: string | null;
 };
 
-function readLinuxNetState(iface: string, address: string): LinuxNetState {
+async function readLinuxNetState(iface: string, address: string): Promise<LinuxNetState> {
   const state: LinuxNetState = {
     connection: null,
     connectionType: null,
@@ -392,16 +405,16 @@ function readLinuxNetState(iface: string, address: string): LinuxNetState {
     prefixLength: null,
     gateway: null,
   };
-  if (!toolAvailable('nmcli')) return state;
+  if (!(await toolAvailable('nmcli'))) return state;
   try {
-    const active = readNmActiveConnections();
+    const active = await readNmActiveConnections();
     const match =
       active.find((item) => item.device === iface) ?? active.find((item) => isWiredNmConnectionType(item.type));
     if (!match) return state;
     state.connection = match.name;
     state.connectionType = match.type;
     try {
-      const method = execFileSyncQuiet('nmcli', ['-t', '-f', 'ipv4.method', 'connection', 'show', match.name])
+      const method = (await execFileQuiet('nmcli', ['-t', '-f', 'ipv4.method', 'connection', 'show', match.name]))
         .split(':')[1]
         ?.trim()
         .toLowerCase();
@@ -412,7 +425,7 @@ function readLinuxNetState(iface: string, address: string): LinuxNetState {
     }
     try {
       const fields = parseNmcliDeviceFields(
-        execFileSyncQuiet('nmcli', ['-t', '-f', 'IP4.ADDRESS,IP4.GATEWAY', 'device', 'show', iface])
+        await execFileQuiet('nmcli', ['-t', '-f', 'IP4.ADDRESS,IP4.GATEWAY', 'device', 'show', iface])
       );
       const cidr = fields.get('IP4.ADDRESS') || '';
       const prefix = Number(cidr.match(/\/(\d{1,2})\b/)?.[1]);
@@ -437,15 +450,15 @@ type MacNetState = {
   gateway: string | null;
 };
 
-function readMacNetState(device: string): MacNetState {
+async function readMacNetState(device: string): Promise<MacNetState> {
   const state: MacNetState = { service: null, dhcp: null, prefixLength: null, gateway: null };
-  if (!toolAvailable('networksetup')) return state;
+  if (!(await toolAvailable('networksetup'))) return state;
   try {
-    const ports = parseNetworksetupHardwarePorts(execFileSyncQuiet('networksetup', ['-listallhardwareports']));
+    const ports = parseNetworksetupHardwarePorts(await execFileQuiet('networksetup', ['-listallhardwareports']));
     const match = ports.find((item) => item.device === device);
     if (!match) return state;
     state.service = match.port;
-    const info = parseNetworksetupInfo(execFileSyncQuiet('networksetup', ['-getinfo', match.port]));
+    const info = parseNetworksetupInfo(await execFileQuiet('networksetup', ['-getinfo', match.port]));
     state.dhcp = info.manual === null ? null : !info.manual;
     if (info.mask) state.prefixLength = maskToPrefixLength(info.mask);
     if (info.router && parseIpv4(info.router)) state.gateway = info.router;
@@ -471,24 +484,23 @@ function interfaceNamesByAddress(): Map<string, string> {
   return names;
 }
 
-function elevationSupport(platform: NodeJS.Platform): { method: ElevateMethod; hint: string | null } {
+async function elevationSupport(platform: NodeJS.Platform): Promise<{ method: ElevateMethod; hint: string | null }> {
   if (platform === 'win32') return { method: 'uac', hint: 'Windows vraagt om toestemming (klik op Ja)' };
-  if (platform === 'linux' && toolAvailable('nmcli') && toolAvailable('pkexec')) {
+  if (platform === 'linux' && (await toolAvailable('nmcli')) && (await toolAvailable('pkexec'))) {
     return { method: 'pkexec', hint: 'Linux vraagt om je wachtwoord' };
   }
-  if (platform === 'darwin' && toolAvailable('networksetup') && toolAvailable('osascript')) {
+  if (platform === 'darwin' && (await toolAvailable('networksetup')) && (await toolAvailable('osascript'))) {
     return { method: 'osascript', hint: 'macOS vraagt om je wachtwoord' };
   }
   return { method: null, hint: null };
 }
 
-export function getNetProfile(): NetProfile {
+export async function getNetProfile(): Promise<NetProfile> {
   const platform = process.platform;
   const windows = platform === 'win32';
-  const dhcpByAlias = readWindowsDhcpState();
-  const prefixByAliasIp = readWindowsPrefixLengths();
+  const [dhcpByAlias, prefixByAliasIp] = await Promise.all([readWindowsDhcpState(), readWindowsPrefixLengths()]);
   const aliasByAddress = interfaceNamesByAddress();
-  const linuxStates = new Map<string, LinuxNetState>();
+  const linuxStates = new Map<string, Promise<LinuxNetState>>();
   const linuxState = (iface: string, address: string) => {
     const key = `${iface}|${address}`;
     let state = linuxStates.get(key);
@@ -500,40 +512,41 @@ export function getNetProfile(): NetProfile {
   };
 
   let manager: string | null = null;
-  const adapters: NetAdapterProfile[] = lanAddresses().map((address) => {
+  const adapters: NetAdapterProfile[] = [];
+  for (const address of lanAddresses()) {
     const alias = aliasByAddress.get(address) || '';
     const aliasKey = alias.toLowerCase();
     let dhcp: boolean | null = alias ? (dhcpByAlias.get(aliasKey) ?? null) : null;
     let prefixLength: number | null = (alias ? prefixByAliasIp.get(`${aliasKey}|${address}`) : undefined) ?? 24;
     let connection: string | null = null;
     if (alias && platform === 'linux') {
-      const linux = linuxState(alias, address);
+      const linux = await linuxState(alias, address);
       connection = linux.connection;
       dhcp = linux.dhcp ?? dhcp;
       prefixLength = linux.prefixLength ?? prefixLength;
       if (linux.connection) manager = `NetworkManager: ${linux.connection}`;
     } else if (alias && platform === 'darwin') {
-      const mac = readMacNetState(alias);
+      const mac = await readMacNetState(alias);
       connection = mac.service;
       dhcp = mac.dhcp ?? dhcp;
       prefixLength = mac.prefixLength ?? prefixLength;
       if (mac.service) manager = `macOS-netwerkdienst: ${mac.service}`;
     }
-    return { name: alias || 'onbekend', address, prefixLength, dhcp, connection };
-  });
+    adapters.push({ name: alias || 'onbekend', address, prefixLength, dhcp, connection });
+  }
 
   const primary = adapters[0] ?? null;
   let primaryWired: boolean | null = null;
   if (primary && windows && primary.name !== 'onbekend') {
     primaryWired = !isWirelessWindowsAdapter(primary.name);
   } else if (primary && platform === 'linux') {
-    const type = linuxState(primary.name, primary.address).connectionType;
+    const type = (await linuxState(primary.name, primary.address)).connectionType;
     primaryWired = type ? isWiredNmConnectionType(type) : null;
   } else if (primary?.connection && platform === 'darwin') {
     primaryWired = !isWirelessMacService(primary.connection);
   }
   const apipa = primary ? isApipaAddress(primary.address) : false;
-  const elevation = elevationSupport(platform);
+  const elevation = await elevationSupport(platform);
   return {
     platform,
     windows,
@@ -690,13 +703,13 @@ function buildWindowsRevertDhcpScript(): string {
 }
 
 /** The wired connection behind the primary address, looked up fresh for an action. */
-function resolvePrimaryConnection(): { kind: 'nm' | 'macos'; name: string } | null {
-  const profile = getNetProfile();
+async function resolvePrimaryConnection(): Promise<{ kind: 'nm' | 'macos'; name: string } | null> {
+  const profile = await getNetProfile();
   if (!profile.primary || profile.apipa) return null;
   if (process.platform === 'linux') {
     // Only a wired connection: the wifi at home or at school must never be pinned.
     try {
-      const wired = readNmActiveConnections().filter((connection) => isWiredNmConnectionType(connection.type));
+      const wired = (await readNmActiveConnections()).filter((connection) => isWiredNmConnectionType(connection.type));
       const match = wired.find((connection) => connection.device === profile.primary?.name) ?? wired[0];
       return match ? { kind: 'nm', name: match.name } : null;
     } catch {
@@ -704,7 +717,7 @@ function resolvePrimaryConnection(): { kind: 'nm' | 'macos'; name: string } | nu
     }
   }
   if (process.platform === 'darwin') {
-    const service = readMacNetState(profile.primary.name).service;
+    const service = (await readMacNetState(profile.primary.name)).service;
     return service && !isWirelessMacService(service) ? { kind: 'macos', name: service } : null;
   }
   return null;
@@ -721,30 +734,30 @@ function started(outcome: ElevationOutcome): NetActionResult {
 }
 
 /** Runs one network change with the platform's elevation helper. */
-function launchNetAction(action: {
+async function launchNetAction(action: {
   verb: 'vastzetten' | 'terugzetten';
   windowsScript: () => string;
   linuxScript: (connection: string) => string;
   /** Null when the command cannot be built (invalid mask). */
   macCommand: (service: string) => string | null;
-}): NetActionResult {
+}): Promise<NetActionResult> {
   try {
     if (process.platform === 'win32') {
       return started(launchElevatedWindows(action.windowsScript()));
     }
     if (process.platform === 'linux') {
-      if (!toolAvailable('nmcli') || !toolAvailable('pkexec')) {
+      if (!(await toolAvailable('nmcli')) || !(await toolAvailable('pkexec'))) {
         return failed(`Automatisch ${action.verb} kan hier niet (NetworkManager of pkexec ontbreekt). ${MANUAL_HINT}`);
       }
-      const resolved = resolvePrimaryConnection();
+      const resolved = await resolvePrimaryConnection();
       if (resolved?.kind !== 'nm') return failed(NO_WIRED_CONNECTION);
       return started(launchElevatedLinuxScript(action.linuxScript(resolved.name)));
     }
     if (process.platform === 'darwin') {
-      if (!toolAvailable('networksetup') || !toolAvailable('osascript')) {
+      if (!(await toolAvailable('networksetup')) || !(await toolAvailable('osascript'))) {
         return failed(`Automatisch ${action.verb} kan hier niet. ${MANUAL_HINT}`);
       }
-      const resolved = resolvePrimaryConnection();
+      const resolved = await resolvePrimaryConnection();
       if (resolved?.kind !== 'macos') return failed(NO_WIRED_CONNECTION);
       const command = action.macCommand(resolved.name);
       if (!command) return failed('Ongeldig subnetmasker.');
@@ -756,7 +769,11 @@ function launchNetAction(action: {
   }
 }
 
-export function requestMakeStatic(input: { ip?: unknown; prefixLength?: unknown; gateway?: unknown }): NetActionResult {
+export async function requestMakeStatic(input: {
+  ip?: unknown;
+  prefixLength?: unknown;
+  gateway?: unknown;
+}): Promise<NetActionResult> {
   const validated = validateStaticRequest(input);
   if (!validated.ok) return validated;
   const { ip, prefixLength, gateway } = validated;
@@ -771,7 +788,10 @@ export function requestMakeStatic(input: { ip?: unknown; prefixLength?: unknown;
   });
 }
 
-export function requestRevertDhcp(input: { eventOver?: unknown; confirmText?: unknown }): NetActionResult {
+export async function requestRevertDhcp(input: {
+  eventOver?: unknown;
+  confirmText?: unknown;
+}): Promise<NetActionResult> {
   if (input.eventOver !== true) {
     return failed('Bevestig eerst dat het evenement helemaal voorbij is.');
   }

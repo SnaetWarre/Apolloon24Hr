@@ -3,7 +3,7 @@ import { useNavigate, useRouterState } from '@tanstack/react-router';
 import { useAppData, useRaceHistory } from '../app/index';
 import { buildKpis, isFastestLapForRecordMode, publicRecordModeTitle } from '../lib/analysis';
 import { formatClockTimeMs, formatDurationMs, formatElapsedSeconds } from '../lib/time';
-import { getNextWaitingRunner, lapRunnerLabel } from '../lib/runners';
+import { getNextWaitingRunner, lapRunnerLabel, runnerLabel } from '../lib/runners';
 import { observeDisplayHistory } from '../lib/displayHistory';
 import { useArrivals } from '../lib/motion';
 import { buildRecentLapSummaries, buildRunnerRanking, collectRankingLabels, type RankingMode } from '../lib/ranking';
@@ -235,7 +235,7 @@ export function InsideDisplay() {
             key={activeKey}
             className={`inside-now__runner${changed.has(`active:${activeKey}`) ? ' display-rise' : ''}`}
           >
-            {activeRunner ? runnerLabelWithoutDash(activeRunner) : 'Nog niemand gestart'}
+            {activeRunner ? runnerLabel(activeRunner) : 'Nog niemand gestart'}
           </strong>
           {activeRunner && race.activeStartedAt && (
             <LiveDuration
@@ -248,7 +248,7 @@ export function InsideDisplay() {
           <span className="inside-now__next">
             Volgende:{' '}
             <strong key={nextKey} className={changed.has(`next:${nextKey}`) ? 'display-rise' : undefined}>
-              {nextRunner ? runnerLabelWithoutDash(nextRunner) : 'niemand klaar'}
+              {nextRunner ? runnerLabel(nextRunner) : 'niemand klaar'}
             </strong>
           </span>
         </section>
@@ -264,9 +264,7 @@ export function InsideDisplay() {
                   {index === 0 ? 'Net binnen' : `Binnen om ${formatDisplayClockTime(lap.finishedAt)}`}, ronde{' '}
                   {lap.lapNumber}
                 </span>
-                <strong className="recent-lap-runner">
-                  {lap.runnerNumber ? `${lap.runnerNumber} ${lap.runnerName}` : lap.runnerName}
-                </strong>
+                <strong className="recent-lap-runner">{lapRunnerLabel(lap)}</strong>
                 <div className="recent-lap-times">
                   <div className="recent-lap-time recent-lap-time--current">
                     <span>Deze ronde</span>
@@ -323,7 +321,7 @@ export function InsideDisplay() {
             {ranking.map((runner, index) => (
               <li key={runner.runnerId} className="ranking-row">
                 <span>{index + 1}</span>
-                <strong>{rankingRunnerLabel(runner)}</strong>
+                <strong>{lapRunnerLabel(runner)}</strong>
                 <em>
                   {rankingMode === 'coefficient'
                     ? `${formatCoefficient(runner.coefficientTotal)} ptn · ${runner.lapCount} rondes`
@@ -419,10 +417,6 @@ export function InsideDisplay() {
   );
 }
 
-function runnerLabelWithoutDash(runner: Pick<Runner, 'runnerNumber' | 'name'>) {
-  return runner.runnerNumber ? `${runner.runnerNumber} ${runner.name}` : runner.name;
-}
-
 type DisplayPresentation = 'light' | 'dark';
 
 /**
@@ -462,10 +456,6 @@ function useDisplayPresentation(
     document.documentElement.dataset.displayTone = presentation;
   }, [presentation]);
   return [presentation, choose];
-}
-
-function rankingRunnerLabel(runner: { runnerName: string; runnerNumber: string | null }) {
-  return runner.runnerNumber ? `${runner.runnerNumber} ${runner.runnerName}` : runner.runnerName;
 }
 
 function formatCoefficient(coefficient: number) {
@@ -554,7 +544,7 @@ function OutsideBurgieFlash({ event }: { event: RaceEvent }) {
 
 function eventRunnerLabel(event: RaceEvent) {
   if (!event.runnerName) return 'Publiek moment';
-  return event.runnerNumber ? `${event.runnerNumber} ${event.runnerName}` : event.runnerName;
+  return lapRunnerLabel({ runnerNumber: event.runnerNumber, runnerName: event.runnerName });
 }
 
 function buildLabelStats(labels: Label[], runners: Runner[], laps: LapRecord[]) {

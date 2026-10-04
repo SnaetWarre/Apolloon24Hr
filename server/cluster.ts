@@ -26,6 +26,8 @@ import {
   stopConsensus,
   takeOverAlone,
   voteRequestSchema,
+  COMMIT_TIMEOUT_MS,
+  ELECTION_TIMEOUT_MS,
 } from './consensus.js';
 import {
   DATABASE_SCHEMA_VERSION,
@@ -61,14 +63,12 @@ import {
  */
 
 const enabled = isClusterEnabled();
-const electionTimeoutMs = readPositiveInt(process.env.CLUSTER_ELECTION_TIMEOUT_MS, 1_500);
-const commitTimeoutMs = readPositiveInt(process.env.CLUSTER_COMMIT_TIMEOUT_MS, 4_000);
 /** How long a write may take while the laptops choose a new leader. */
 const WRITE_DEADLINE_MS = readPositiveInt(process.env.CLUSTER_WRITE_DEADLINE_MS, 12_000);
 const MAINTENANCE_MS = 5_000;
 const MAX_KNOWN_PEERS = 16;
 /** A laptop without a leader this long says so plainly instead of "taking over". */
-const ELECTING_GRACE_MS = electionTimeoutMs * 5;
+const ELECTING_GRACE_MS = ELECTION_TIMEOUT_MS * 5;
 
 let joining = false;
 let lastError: string | null = null;
@@ -226,7 +226,7 @@ export async function forwardWrite<T>(
         'x-apolloon-request-id': requestId,
         'x-apolloon-origin': encodeURIComponent(origin),
       },
-      timeoutMs: commitTimeoutMs + 1_000,
+      timeoutMs: COMMIT_TIMEOUT_MS + 1_000,
       signal: abort.signal,
     });
   } catch {

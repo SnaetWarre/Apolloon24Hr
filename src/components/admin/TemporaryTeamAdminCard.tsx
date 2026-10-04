@@ -2,6 +2,7 @@ import React from 'react';
 import { LabelBadge } from '../LabelBadge';
 import { useConfirm } from '../ConfirmDialog';
 import { ModalDialog } from '../ModalDialog';
+import { runnerMatchesSearch } from '../../lib/runners';
 import { formatClockTimeMs } from '../../lib/time';
 import { compareRunnerIdentity, currentTeamName } from './adminFormat';
 import { RunnerIdentity } from './RunnerIdentity';
@@ -53,17 +54,9 @@ export function TemporaryTeamAdminCard({
     .map((id) => runners.find((runner) => runner.id === id))
     .filter((runner): runner is Runner => Boolean(runner))
     .sort(compareRunnerIdentity);
-  const normalizedQuery = query.trim().toLowerCase();
   const availableRunners = runners
     .filter((runner) => !selectedIds.includes(runner.id))
-    .filter((runner) => {
-      if (!normalizedQuery) return true;
-      return (
-        runner.name.toLowerCase().includes(normalizedQuery) ||
-        (runner.runnerNumber || '').toLowerCase().includes(normalizedQuery) ||
-        runner.labels.some((item) => item.name.toLowerCase().includes(normalizedQuery))
-      );
-    })
+    .filter((runner) => runnerMatchesSearch(runner, query))
     .sort(compareRunnerIdentity);
   const dirty = [...selectedIds].sort().join('|') !== [...team.memberRunnerIds].sort().join('|');
 
