@@ -1,3 +1,4 @@
+import { LiveDot } from './LiveDot';
 import React from 'react';
 import { Link } from '@tanstack/react-router';
 import { isModalDialogOpen, ModalDialog } from './ModalDialog';
@@ -233,6 +234,7 @@ export function TimingView() {
       <div className="timing-workspace">
         <section className={`timing-station${shownRunner ? ' is-running' : ''}`} aria-label="Timing bedienen">
           <span className="timing-station__label">
+            {shownRunner && <LiveDot />}
             {finished ? 'Race afgesloten' : shownRunner ? 'Nu op de piste' : 'Nog niemand op de piste'}
           </span>
           <div key={activeKey} className={`timing-now${changed.has(`active:${activeKey}`) ? ' rise-in' : ''}`}>

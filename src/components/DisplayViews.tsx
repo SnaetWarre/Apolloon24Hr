@@ -1,3 +1,4 @@
+import { LiveDot } from './LiveDot';
 import React from 'react';
 import { useNavigate, useRouterState } from '@tanstack/react-router';
 import { useAppData, useRaceHistory } from '../app/index';
@@ -118,7 +119,10 @@ export function OutsideDisplay() {
     <main className={`display-root display-root--outside display-root--${presentation}`}>
       <DisplayBrand />
       <section className="outside-band outside-band--current">
-        <span className="display-kicker">Nu op de piste</span>
+        <span className="display-kicker">
+          <LiveDot />
+          Nu op de piste
+        </span>
         <div
           key={activeKey}
           className={`outside-runner${changed.has(`active:${activeKey}`) ? ' outside-runner--in' : ''}`}
@@ -230,7 +234,10 @@ export function InsideDisplay() {
 
       <div className="inside-live">
         <section className="inside-now" aria-label="Nu op de piste">
-          <span className="inside-now__label">Nu op de piste</span>
+          <span className="inside-now__label">
+            <LiveDot />
+            Nu op de piste
+          </span>
           <strong
             key={activeKey}
             className={`inside-now__runner${changed.has(`active:${activeKey}`) ? ' display-rise' : ''}`}
@@ -396,10 +403,12 @@ export function InsideDisplay() {
                       <div className="progress-track">
                         <span
                           title={stat.target > 0 ? `${stat.laps} van ${stat.target} rondes` : `${stat.laps} rondes`}
-                          style={{
-                            width: `${stat.target > 0 ? Math.min(100, stat.percent) : competition.maxLaps > 0 ? (stat.laps / competition.maxLaps) * 100 : 0}%`,
-                            background: stat.label.color,
-                          }}
+                          style={
+                            {
+                              '--progress': `${stat.target > 0 ? Math.min(100, stat.percent) : competition.maxLaps > 0 ? (stat.laps / competition.maxLaps) * 100 : 0}%`,
+                              background: stat.label.color,
+                            } as React.CSSProperties
+                          }
                         />
                       </div>
                       <em>{stat.target > 0 ? `${stat.laps} / ${stat.target}` : `${stat.laps} rondes`}</em>

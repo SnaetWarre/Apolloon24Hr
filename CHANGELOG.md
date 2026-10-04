@@ -27,6 +27,11 @@ All notable changes to Apolloon Telsysteem will be documented in this file.
   drukken beantwoorden
 - De demowedstrijd (`DEMO_RACE`) start niet op gekoppelde laptops, omdat ze de
   database rechtstreeks aanpast
+- Schermen houden de processor niet meer bezig terwijl er niets gebeurt: het
+  knipperende live-bolletje, de oplichtende rij en de voortgangsbalken worden
+  door de grafische kaart getekend in plaats van de hele pagina elke frame
+  opnieuw. Op een trage laptop zakt de Wachtrij van ongeveer 50% naar 4%
+  processorgebruik en het Binnenscherm van 16% naar 2%
 
 ## [4.2.0] - 2026-10-01
 

@@ -35,6 +35,8 @@ const args = Object.fromEntries(
 );
 const MBIT = Number(args.mbit || 10);
 const ONE_WAY_MS = Number(args.latency || 3);
+/** Chromium CPU slowdown per screen, like a TV or an old laptop (1 = this machine). */
+const CPU_SLOWDOWN = Number(args.cpu || 1);
 const WRITES = Number(args.writes || 40);
 const WRITE_EVERY_MS = Number(args.every || 2_000);
 const IDLE_MS = Number(args.idle || 20_000);
@@ -242,7 +244,10 @@ async function benchScreens() {
     for (const definition of SCREENS) {
       const context = await browser.newContext({ viewport: { width: 1600, height: 900 } });
       const page = await context.newPage();
-      const screen = { ...definition, page, revisions: [], requests: [] };
+      const cdp = await context.newCDPSession(page);
+      await cdp.send('Performance.enable');
+      if (CPU_SLOWDOWN > 1) await cdp.send('Emulation.setCPUThrottlingRate', { rate: CPU_SLOWDOWN });
+      const screen = { ...definition, page, cdp, revisions: [], requests: [] };
       const started = new WeakMap();
       page.on('websocket', (socket) =>
         socket.on('framereceived', ({ payload }) => {
@@ -264,18 +269,39 @@ async function benchScreens() {
         const entry = started.get(request);
         if (entry) screen.requests.push({ ...entry, finishedAt: performance.now() });
       });
+      const loadStartedAt = performance.now();
+      const bytesBefore = link.counters.down;
       await page.goto(`${proxied}${definition.route}`, { waitUntil: 'load', timeout: 120_000 });
+      // Loaded once every request the screen needs for its data has finished.
+      const deadline = Date.now() + 60_000;
+      while (!definition.needs.every((type) => screen.requests.some((request) => request.type === type))) {
+        if (Date.now() > deadline) throw new Error(`${definition.name} never loaded its data`);
+        await sleep(20);
+      }
+      screen.loadMs = Math.max(...screen.requests.map((request) => request.finishedAt)) - loadStartedAt;
+      await sleep(1_000);
+      screen.loadBytes = link.counters.down - bytesBefore;
       screens.push(screen);
     }
     await sleep(8_000);
 
+    const mainThread = async () =>
+      Promise.all(
+        screens.map(async (screen) => {
+          const { metrics } = await screen.cdp.send('Performance.getMetrics');
+          return Object.fromEntries(metrics.map(({ name, value }) => [name, value]));
+        })
+      );
     link.reset();
     for (const screen of screens) screen.requests.length = 0;
+    const idleCpuBefore = await mainThread();
     await sleep(IDLE_MS);
+    const idleCpuAfter = await mainThread();
     const idle = { ...link.counters };
     const idleRequests = Object.fromEntries(screens.map((screen) => [screen.name, screen.requests.length]));
 
     link.reset();
+    const writeCpuBefore = await mainThread();
     const presses = [];
     const phaseStartedAt = performance.now();
     let lastFinisher = null;
@@ -306,8 +332,13 @@ async function benchScreens() {
     await sleep(Math.max(6_000, WRITE_EVERY_MS * 2));
     const writing = { ...link.counters };
     const writingMs = performance.now() - phaseStartedAt;
+    const writeCpuAfter = await mainThread();
 
-    const perScreen = screens.map((screen) => {
+    const perScreen = screens.map((screen, screenIndex) => {
+      // Main-thread busy time (TaskDuration, seconds, slowed down like the device).
+      const busy = (after, before) => after[screenIndex].TaskDuration - before[screenIndex].TaskDuration;
+      const idleBusyPerMs = busy(idleCpuAfter, idleCpuBefore) / IDLE_MS;
+      const writeBusy = busy(writeCpuAfter, writeCpuBefore) - idleBusyPerMs * writingMs;
       const latencies = [];
       for (const [index, press] of presses.entries()) {
         const until = presses[index + 1]?.at ?? Infinity;
@@ -331,6 +362,10 @@ async function benchScreens() {
         p95: percentile(latencies, 95),
         max: percentile(latencies, 100),
         idleRequestsPerMinute: (idleRequests[screen.name] * 60_000) / IDLE_MS,
+        loadMs: screen.loadMs,
+        loadKb: screen.loadBytes / 1024,
+        idleCpuPercent: idleBusyPerMs * 1_000 * 100,
+        cpuMsPerWrite: (writeBusy * 1_000) / presses.length,
       };
     });
     const writingNet = {
@@ -340,6 +375,7 @@ async function benchScreens() {
     return {
       lapCount,
       mbit: MBIT,
+      cpuSlowdown: CPU_SLOWDOWN,
       writes: presses.length,
       idleBytesPerSecond: { up: (idle.up * 1_000) / IDLE_MS, down: (idle.down * 1_000) / IDLE_MS },
       bytesPerWrite: { up: writingNet.up / presses.length, down: writingNet.down / presses.length },
@@ -440,6 +476,12 @@ if (result.screens) {
   for (const screen of s.screens) {
     console.log(
       `    ${screen.screen.padEnd(16)} p50 ${ms(screen.p50).padStart(7)}  p95 ${ms(screen.p95).padStart(7)}  max ${ms(screen.max).padStart(7)}  (${screen.updates} updates, ${screen.idleRequestsPerMinute.toFixed(0)} idle requests/min)`
+    );
+  }
+  console.log(`  main thread (CPU ${s.cpuSlowdown}x slower than this machine) and first load:`);
+  for (const screen of s.screens) {
+    console.log(
+      `    ${screen.screen.padEnd(16)} idle ${screen.idleCpuPercent.toFixed(1).padStart(5)}% busy  per write ${ms(screen.cpuMsPerWrite).padStart(7)}  first load ${ms(screen.loadMs).padStart(7)}, ${screen.loadKb.toFixed(0).padStart(4)} KB`
     );
   }
 }

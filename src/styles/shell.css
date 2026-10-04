@@ -423,14 +423,8 @@
     color var(--dur-2) var(--ease-out);
 }
 
-.header-tag--live::before {
-  content: "";
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--go);
+.header-tag .live-dot {
   --live-ring: var(--go);
-  animation: live-ring 2.4s var(--ease-out) infinite;
 }
 
 .header-tag--partial {
@@ -608,10 +602,6 @@
 /* A lap that landed while this page was open rises in and its wash fades. */
 .overview-laps tr.is-new {
   animation: rise-in var(--dur-3) var(--ease-out) backwards;
-}
-
-.overview-laps tr.is-new td {
-  animation: wash-out 1.2s var(--ease-out) backwards;
 }
 
 .overview-status {

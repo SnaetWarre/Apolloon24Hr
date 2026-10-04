@@ -1,3 +1,4 @@
+import { LiveDot } from './LiveDot';
 import React from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useChartTheme } from '../lib/chartPalette';
@@ -110,7 +111,8 @@ export function TacticsView() {
       <PageHeader
         title="Tactiek"
         meta={
-          <span className="header-tag header-tag--live" role="status">
+          <span className="header-tag" role="status">
+            <LiveDot />
             {historyLoading ? 'Live data laden' : `${laps.length} rondes live gekoppeld`}
           </span>
         }

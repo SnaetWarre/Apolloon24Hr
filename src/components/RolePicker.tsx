@@ -1,3 +1,4 @@
+import { LiveDot } from './LiveDot';
 import { Link } from '@tanstack/react-router';
 import { useAppData, useClusterStatus, useRaceHistory } from '../app/index';
 import { getNextWaitingRunner } from '../lib/runners';
@@ -69,7 +70,8 @@ export function RolePicker() {
           ) : race.raceFinishedAt ? (
             <span>Race afgesloten</span>
           ) : (
-            <span className="header-tag header-tag--live">
+            <span className="header-tag">
+              <LiveDot />
               Gestart om {formatClockTimeMs(race.raceStartedAt).slice(0, 5)}
             </span>
           )

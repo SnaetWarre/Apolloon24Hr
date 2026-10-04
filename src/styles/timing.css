@@ -26,15 +26,11 @@
   font-size: 12.5px;
 }
 
-.timing-station.is-running .timing-station__label::before {
-  content: "";
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--go);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--go) 20%, transparent);
+/* 7px dot + 5px ring each side. */
+.timing-station__label .live-dot {
+  --live-dot-size: 7px;
   --live-ring: var(--go);
-  animation: live-ring 2.4s var(--ease-out) infinite;
+  --live-ring-scale: 2.429;
 }
 
 .timing-now {
@@ -257,10 +253,6 @@
 /* The lap that was just clocked rises into the list; its wash fades. */
 .timing-log tr.is-new {
   animation: rise-in var(--dur-2) var(--ease-out) backwards;
-}
-
-.timing-log tr.is-new td {
-  animation: wash-out 1.2s var(--ease-out) backwards;
 }
 
 .timing-log .warning-banner {

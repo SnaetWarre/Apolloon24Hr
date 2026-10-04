@@ -105,14 +105,40 @@
 }
 
 /* A live dot breathes a soft ring: this screen receives data right now.
-   Set --live-ring on the dot to the dot's own colour. */
+   The ring is its own layer that only scales and fades, so the compositor
+   animates it; a box-shadow ring repainted the whole page every frame, about a
+   third of a slow laptop's CPU on Wachtrij. Set --live-ring to the dot's
+   colour, --live-dot-size, and --live-ring-scale for how far the ring grows
+   (6px dot + 5px ring each side = 16 / 6). */
+.live-dot {
+  position: relative;
+  display: inline-block;
+  flex: none;
+  width: var(--live-dot-size, 6px);
+  height: var(--live-dot-size, 6px);
+  border-radius: 50%;
+  background: var(--live-ring, currentColor);
+}
+
+.live-dot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: inherit;
+  opacity: 0;
+  animation: live-ring 2.4s var(--ease-out) infinite;
+}
+
 @keyframes live-ring {
   0% {
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--live-ring, currentColor) 45%, transparent);
+    opacity: 0.45;
+    transform: scale(1);
   }
   70%,
   100% {
-    box-shadow: 0 0 0 5px transparent;
+    opacity: 0;
+    transform: scale(var(--live-ring-scale, 2.667));
   }
 }
 
@@ -138,14 +164,38 @@
   }
 }
 
-/* A highlight wash that fades away: this row just arrived.
-   Set --wash-to to the row's resting colour when that is not transparent. */
+/* A highlight wash that fades away: this row just arrived. The wash is a
+   layer under the row's content that only fades, so the compositor animates
+   it; fading background-color repainted the whole page every frame for 1.2s.
+   Each washed row is listed here; it gets a position and `isolation: isolate`
+   so the layer sits between its own background and its content. Set --wash
+   for another colour. */
+.queue-runner--arrived,
+.overview-laps tr.is-new td,
+.timing-log tr.is-new td {
+  position: relative;
+  isolation: isolate;
+}
+
+.queue-runner--arrived::after,
+.overview-laps tr.is-new td::after,
+.timing-log tr.is-new td::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: var(--wash, var(--brand-wash));
+  opacity: 0;
+  pointer-events: none;
+  animation: wash-out 1.2s var(--ease-out) backwards;
+}
+
 @keyframes wash-out {
   from {
-    background-color: var(--wash, var(--brand-wash));
+    opacity: 1;
   }
   to {
-    background-color: var(--wash-to, transparent);
+    opacity: 0;
   }
 }
 

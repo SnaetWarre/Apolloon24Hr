@@ -1,3 +1,4 @@
+import { LiveDot } from './LiveDot';
 import React from 'react';
 import { useAppData } from '../app/index';
 import { useArrivals } from '../lib/motion';
@@ -34,7 +35,10 @@ export function QueuePage() {
       <PageHeader title="Wachtrij" actions={<QueueActions onOpenProfile={setProfileRunnerId} />} />
       <section className="race-strip" aria-label="Wisselzone">
         <div className="race-strip__now">
-          <span className="race-strip__label">Nu op de piste</span>
+          <span className="race-strip__label">
+            <LiveDot />
+            Nu op de piste
+          </span>
           <span key={activeKey} className={`race-strip__runner${moved(`active:${activeKey}`)}`}>
             {activeRunner ? <RunnerName runner={activeRunner} /> : 'Nog niemand gestart'}
           </span>
