@@ -13,6 +13,7 @@ import {
 import { useAppActions, useAppData } from '../app/index';
 import { useBoardSearch } from '../app/boardSearch';
 import { useArrivals } from '../lib/motion';
+import { runnerMatchesSearch } from '../lib/runners';
 import { formatDurationMs, formatElapsedSeconds } from '../lib/time';
 import { useSecondTick } from '../lib/useClockTick';
 import { kanbanCollisionDetection, resolveKanbanDrop } from '../lib/kanban';
@@ -102,17 +103,7 @@ export const KanbanBoard: React.FC<{ onOpenProfile: (runnerId: string) => void }
       return true;
     });
     if (!q) return visible;
-    return visible.filter((runner) => {
-      const labelText = runner.labels
-        .map((label) => label.name)
-        .join(' ')
-        .toLowerCase();
-      return (
-        runner.name.toLowerCase().includes(q) ||
-        (runner.runnerNumber || '').toLowerCase().includes(q) ||
-        labelText.includes(q)
-      );
-    });
+    return visible.filter((runner) => runnerMatchesSearch(runner, q));
   }, [runners, search, showHiddenRan]);
   const warmingUpSorted = React.useMemo(() => {
     return filteredRunners

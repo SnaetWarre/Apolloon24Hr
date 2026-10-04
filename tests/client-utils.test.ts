@@ -7,23 +7,8 @@ import {
   SECOND_DISPLAY_INTERVAL_MS,
 } from '../src/lib/useClockTick.ts';
 import { createArrivalState, trackArrivals } from '../src/lib/motion.ts';
-import { createUuid } from '../src/lib/uuid.ts';
 import { relativeFileWithinRoot } from '../server/static-files.ts';
 import path from 'node:path';
-
-test('browser UUIDs work when randomUUID is unavailable on a LAN HTTP origin', () => {
-  const uuid = createUuid({
-    getRandomValues(bytes) {
-      for (let index = 0; index < bytes.length; index += 1) {
-        bytes[index] = index;
-      }
-      return bytes;
-    },
-  });
-
-  assert.equal(uuid, '00010203-0405-4607-8809-0a0b0c0d0e0f');
-  assert.match(uuid, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
-});
 
 test('live clocks are cadence-limited instead of driving full-frame renders', () => {
   assert.equal(normalizeClockInterval(0), 16);

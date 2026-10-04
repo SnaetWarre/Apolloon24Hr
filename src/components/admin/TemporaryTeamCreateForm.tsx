@@ -1,5 +1,6 @@
 import React from 'react';
 import type { Runner, TemporaryTeam } from '../../types';
+import { runnerMatchesSearch } from '../../lib/runners';
 import { compareRunnerIdentity, currentTeamName } from './adminFormat';
 import { formatTeamWindow, parseTeamWindow, toLocalDateTime } from './temporaryTeamTime';
 
@@ -27,13 +28,7 @@ export function TemporaryTeamCreateForm({
   const [busy, setBusy] = React.useState(false);
   const [message, setMessage] = React.useState<string | null>(null);
   const assignedIds = new Set(allTeams.flatMap((team) => team.memberRunnerIds));
-  const visibleRunners = runners
-    .filter((runner) =>
-      `${runner.runnerNumber ?? ''} ${runner.name} ${runner.labels.map((label) => label.name).join(' ')}`
-        .toLowerCase()
-        .includes(query.toLowerCase().trim())
-    )
-    .sort(compareRunnerIdentity);
+  const visibleRunners = runners.filter((runner) => runnerMatchesSearch(runner, query)).sort(compareRunnerIdentity);
   const startMs = new Date(start).getTime();
   const endMs = new Date(end).getTime();
 

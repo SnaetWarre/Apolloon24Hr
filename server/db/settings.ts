@@ -46,6 +46,6 @@ export type HostIdentity = { hostId: string; clusterId: string };
 export function hostIdentity(): HostIdentity {
   return {
     hostId: ensureLocalSetting('host_id', randomUUID),
-    clusterId: ensureLocalSetting('replication_cluster_id', () => process.env.CLUSTER_ID?.trim() || randomUUID()),
+    clusterId: ensureLocalSetting('replication_cluster_id', () => randomUUID()),
   };
 }

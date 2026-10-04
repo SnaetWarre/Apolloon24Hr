@@ -4,6 +4,7 @@ import { getRaceState } from './db/race-state.js';
 import { insertRunner } from './db/runners.js';
 import { getNextWaitingRunner, getMaxQueueIndex } from './db/queue.js';
 import { performHandoff } from './db/timing.js';
+import { isClusterEnabled } from './env.js';
 
 /**
  * A race that runs itself, for the public test server (`DEMO_RACE=true`).
@@ -12,7 +13,8 @@ import { performHandoff } from './db/timing.js';
  * screens and charts always show a believable race without anyone pressing.
  */
 export function isDemoRaceEnabled(environment: NodeJS.ProcessEnv = process.env): boolean {
-  return environment.DEMO_RACE === 'true';
+  // It writes straight to the database, past replication, so never on linked laptops.
+  return environment.DEMO_RACE === 'true' && !isClusterEnabled(environment);
 }
 
 const RACE_START_HOUR = 20;

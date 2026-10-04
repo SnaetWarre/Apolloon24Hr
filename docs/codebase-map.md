@@ -112,7 +112,7 @@ backup retention, and the event-day recovery runbook.
   browser screens behind a shared slow link, and the idle traffic between three
   laptops (`npm run build` first).
 - `public/event-network/`: static-address scripts, downloadable from Beheer for manual use.
-- `docs/beschrijving.txt` and `docs/notes.txt`: the original requirements and design notes.
+- `docs/beschrijving.txt`: the original requirements.
 - `.dev-data/` and `.test-data/` are disposable local databases.
 - `data/app.db` is the normal local app database. Local databases are git-ignored;
   seed a fresh one with `npm run db:dev:seed` instead of committing one.
@@ -141,7 +141,6 @@ module (`race-db`, `replication`, `schema-migration`, `ranking`, ...).
 server, and drives headless Chromium through Playwright. Run
 `npx playwright install chromium` once. CI runs all of the above.
 
-The design rationale lives in `docs/apolloon-redesign-brief.html`.
 
 `tests/raft-sim.test.ts` runs the real `server/raft.ts` for hundreds of seeds on a fake clock and network with crashes, sleeping laptops, one-way and full partitions, lost, late and duplicated messages, and clock jumps, and checks after every step: one leader per term, terms never go back, one vote per term, no committed entry lost, no lap counted twice. It then heals everything and checks the group recovers by itself. A failure prints its seed; `RAFT_SIM_SEED=<seed> npm run test:sim` replays it exactly with the whole trace, and `RAFT_SIM_SEEDS=10000` searches further. The simulated log uses the same append rules as SQLite (`server/db/append-rules.ts`).
 

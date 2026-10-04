@@ -6,7 +6,8 @@ import { RunnerAddModal } from '../RunnerEntryModals';
 import type { Runner } from '../../types';
 import { AdminNoticeBanner, useAdminAction } from './AdminNotice';
 import { AdminRunnerTable } from './AdminRunnerTable';
-import { statusLabel, statusOrder } from './adminFormat';
+import { statusLabel } from '../../lib/runners';
+import { statusOrder } from './adminFormat';
 
 const MAX_VISIBLE_RUNNERS = 150;
 

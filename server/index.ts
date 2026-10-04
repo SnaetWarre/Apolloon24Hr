@@ -152,17 +152,17 @@ app.get('/api/host-info', (_req, res) => {
   res.json(hostInfo());
 });
 
-app.get('/api/net/profile', (_req, res) => {
+app.get('/api/net/profile', async (_req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   try {
-    res.json({ ok: true, profile: getNetProfile() });
+    res.json({ ok: true, profile: await getNetProfile() });
   } catch (error) {
     res.status(500).json({ ok: false, error: error instanceof Error ? error.message : 'Netwerkprofiel lezen mislukt' });
   }
 });
 
-app.post('/api/net/make-static', requireLoopback, (req, res) => {
-  const result = requestMakeStatic({
+app.post('/api/net/make-static', requireLoopback, async (req, res) => {
+  const result = await requestMakeStatic({
     ip: req.body?.ip,
     prefixLength: req.body?.prefixLength,
     gateway: req.body?.gateway,
@@ -170,8 +170,8 @@ app.post('/api/net/make-static', requireLoopback, (req, res) => {
   res.status(result.ok ? 200 : 400).json(result);
 });
 
-app.post('/api/net/revert-dhcp', requireLoopback, (req, res) => {
-  const result = requestRevertDhcp({ eventOver: req.body?.eventOver, confirmText: req.body?.confirmText });
+app.post('/api/net/revert-dhcp', requireLoopback, async (req, res) => {
+  const result = await requestRevertDhcp({ eventOver: req.body?.eventOver, confirmText: req.body?.confirmText });
   res.status(result.ok ? 200 : 400).json(result);
 });
 

@@ -16,6 +16,17 @@ All notable changes to Apolloon Telsysteem will be documented in this file.
   elk scherm er elke twee seconden om vraagt
 - De Wachtrij laadt de inschrijvingen niet meer opnieuw na elke wijziging als
   ze niet veranderd zijn
+- Een loper toevoegen laat nu ook meerdere andere labels toe (bv. 1ste jaar en
+  Dames), net als een loper bewerken; alleen het speedteam blijft er één
+- Een lopende loper heet overal "Op de piste"
+
+### Fixed
+
+- Beheer › Systeem op een Windows-laptop houdt de server niet meer vast terwijl
+  het netwerkprofiel wordt gelezen; de laptop blijft hartslagen sturen en
+  drukken beantwoorden
+- De demowedstrijd (`DEMO_RACE`) start niet op gekoppelde laptops, omdat ze de
+  database rechtstreeks aanpast
 
 ## [4.2.0] - 2026-10-01
 

@@ -49,7 +49,7 @@ If you deploy as a non-root user, that user needs passwordless `sudo` for instal
 
 ## Manual Deploy From This Laptop
 
-Default target is the existing VPS from the tunnel script:
+Default target is the existing VPS:
 
 ```bash
 npm run deploy:vps

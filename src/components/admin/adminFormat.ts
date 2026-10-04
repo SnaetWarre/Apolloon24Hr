@@ -1,5 +1,4 @@
-import { compareLabels } from '../LabelBadge';
-import type { Label, PublicRecordMode, Runner, RunnerStatus } from '../../types';
+import type { PublicRecordMode, Runner, RunnerStatus } from '../../types';
 
 export function formatFileSize(bytes: number): string {
   if (bytes < 1_024) return `${bytes} B`;
@@ -37,23 +36,6 @@ export function statusOrder(status: RunnerStatus) {
   }
 }
 
-export function statusLabel(status: RunnerStatus) {
-  switch (status) {
-    case 'registered':
-      return 'Ingeschreven';
-    case 'warming_up':
-      return 'Aan het opwarmen';
-    case 'waiting':
-      return 'In de wachtrij';
-    case 'running':
-      return 'Loopt';
-    case 'ran':
-      return 'Heeft gelopen';
-    default:
-      return status;
-  }
-}
-
 export function publicRecordModeLabel(mode: PublicRecordMode) {
   if (mode === 'off') return 'uit';
   if (mode === 'hour') return 'per uur';
@@ -75,13 +57,4 @@ export function currentTeamName(runner: Runner): string {
     runner.labels.find((label) => label.kind === 'speedteam' || label.kind === 'temporary_team')?.name ??
     'Geen speedteam'
   );
-}
-
-export function groupLabels(labels: Label[]) {
-  const grouped = new Map<string, typeof labels>();
-  [...labels].sort(compareLabels).forEach((label) => {
-    if (!grouped.has(label.kind)) grouped.set(label.kind, []);
-    grouped.get(label.kind)?.push(label);
-  });
-  return [...grouped.entries()];
 }
