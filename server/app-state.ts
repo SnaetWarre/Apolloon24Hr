@@ -13,7 +13,9 @@ import {
   getTemporaryTeams,
 } from './db.js';
 import { boundedHistoryLimit } from './db/values.js';
+import { createDeltaStore } from './deltas.js';
 import { hostInfo } from './host.js';
+import type { Delta } from '../shared/delta.js';
 
 /** Everything the operator screens and displays show live, without lap history. */
 export function liveAppSnapshot(): LiveAppSnapshot {
@@ -28,6 +30,18 @@ export function liveAppSnapshot(): LiveAppSnapshot {
   };
 }
 
+// The host address can change without a new revision, so it is always sent.
+const liveVersions = createDeltaStore<LiveAppSnapshot>({ alwaysSend: ['host'] });
+const fullHistoryVersions = createDeltaStore<RaceHistory>();
+
+/** The live snapshot, or only its changes for a screen that holds revision `since`. */
+export function liveAppState(since: number | null): LiveAppSnapshot | Delta<LiveAppSnapshot> {
+  const snapshot = liveAppSnapshot();
+  if (since !== null) return liveVersions.diff(since, snapshot) ?? snapshot;
+  liveVersions.remember(snapshot);
+  return snapshot;
+}
+
 export function appSnapshot(): AppSnapshot {
   return {
     ...liveAppSnapshot(),
@@ -40,6 +54,15 @@ export type HistoryRequest =
   | { scope: 'full' }
   | { scope: 'recent'; limit: number }
   | { scope: 'runner'; runnerId: string };
+
+/** Lap history; a screen that holds revision `since` of the full history gets only its changes. */
+export function raceHistoryState(request: HistoryRequest, since: number | null): RaceHistory | Delta<RaceHistory> {
+  const history = raceHistory(request);
+  if (request.scope !== 'full') return history;
+  if (since !== null) return fullHistoryVersions.diff(since, history) ?? history;
+  fullHistoryVersions.remember(history);
+  return history;
+}
 
 export function raceHistory(request: HistoryRequest): RaceHistory {
   const revision = getAppDataRevision();
@@ -75,9 +98,9 @@ export function raceHistory(request: HistoryRequest): RaceHistory {
   };
 }
 
-export function historyCacheKey(request: HistoryRequest): string {
+export function historyCacheKey(request: HistoryRequest, since: number | null): string {
   const revision = getAppDataRevision();
   if (request.scope === 'runner') return `history:${revision}:runner:${request.runnerId}`;
   if (request.scope === 'recent') return `history:${revision}:recent:${boundedHistoryLimit(request.limit)}`;
-  return `history:${revision}:full`;
+  return `history:${revision}:full:${since ?? ''}`;
 }

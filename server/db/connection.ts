@@ -14,7 +14,11 @@ let database: DatabaseSync | null = null;
 
 const statementCache = new Map<string, StatementSync>();
 
-let appDataRevision = 0;
+/**
+ * Starts at the clock instead of 0, so a restarted server never reuses a
+ * revision a screen still holds: screens fetch only the changes since theirs.
+ */
+let appDataRevision = Date.now();
 
 const revisionListeners = new Set<(revision: number) => void>();
 

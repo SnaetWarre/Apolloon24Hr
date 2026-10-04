@@ -59,7 +59,10 @@ server/index.ts
 - Serves the live snapshot (`/api/state`), lap history (`/api/history`), clock,
   host, health, backup download, and export endpoints under `/api`.
 - Announces the data revision over the `live.revision` tRPC subscription after
-  every committed change; clients refetch when their revision differs.
+  every committed change; clients refetch when their revision differs, and get
+  only the changes since the revision they hold (`server/deltas.ts`).
+- Pushes the laptop status over `live.cluster` when it changes, so screens do
+  not poll it.
 - Re-announces the revision when a night team starts or stops, since their
   labels follow the clock rather than a write.
 - Initializes SQLite before listening and shuts down gracefully.

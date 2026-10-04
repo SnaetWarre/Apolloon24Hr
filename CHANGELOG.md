@@ -9,6 +9,13 @@ All notable changes to Apolloon Telsysteem will be documented in this file.
 - Schermen horen live wijzigingen via een tRPC-abonnement in plaats van
   Socket.IO, en zien binnen tien seconden dat de verbinding met hun laptop weg
   is
+- Schermen halen na een wijziging alleen op wat veranderd is in plaats van de
+  hele wedstrijd: een ronde kost elk scherm een paar KB in plaats van ruim
+  100 KB, en de schermen tonen ze sneller op een traag netwerk
+- De status van de laptops komt binnen wanneer ze verandert, in plaats van dat
+  elk scherm er elke twee seconden om vraagt
+- De Wachtrij laadt de inschrijvingen niet meer opnieuw na elke wijziging als
+  ze niet veranderd zijn
 
 ## [4.2.0] - 2026-10-01
 

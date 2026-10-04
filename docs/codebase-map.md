@@ -31,7 +31,10 @@ Shared contracts live in `shared/`. Anything imported by both client and server 
     most 300 ms on click), so pages open filled in instead of jumping.
   - `useRealtimeBridge.ts`: loads the realtime transport after the first state render.
   - `realtimeClient.ts`: refetches when the server announces a new revision,
-    and keeps the server clock offset in sync.
+    keeps the server clock offset in sync, and receives the laptop status while
+    a screen shows it (`useClusterStatus.ts`).
+  - `deltaFetch.ts`: asks for only the changes since the revision held
+    (`/api/state`, full `/api/history`) and applies them (`shared/delta.ts`).
   - `useFailover.ts`: browsers remember the other laptops and reopen the page
     on one of them when theirs disappears.
 - `src/components/`: route-level screens and reusable UI pieces.
@@ -89,6 +92,8 @@ Shared contracts live in `shared/`. Anything imported by both client and server 
 - `server/backups.ts` and `backup-verify-worker.ts`: scheduled, verified backups and retention.
 - `server/app-state.ts`: live snapshot and lap history scopes.
 - `server/http-json.ts`: gzip, ETags, and one serialization per data revision.
+- `server/deltas.ts`: the last revisions of the snapshot and lap history, to answer `?since=` with only the changes.
+- `server/cluster-feed.ts`: pushes the laptop status to screens when it changes.
 - `server/host.ts`: event LAN URL selection.
 - `server/clock.ts`: the group clock shared by all laptops.
 - `server/net-setup.ts`: pins the laptop's wired adapter to a static address (and back to DHCP) through the OS permission prompt; only callable from the laptop itself.
@@ -103,6 +108,9 @@ backup retention, and the event-day recovery runbook.
 - `scripts/seed-test-db.mjs`: deterministic and stress-test development data.
 - `scripts/ensure-lan-dev-firewall.mjs`: development firewall helper.
 - `scripts/validation/`: Playwright browser checks; `run.mjs` runs each against its own seeded server.
+- `scripts/bench-network.mjs` (`npm run bench:network`): network traffic and update latency of seven
+  browser screens behind a shared slow link, and the idle traffic between three
+  laptops (`npm run build` first).
 - `public/event-network/`: static-address scripts, downloadable from Beheer for manual use.
 - `docs/beschrijving.txt` and `docs/notes.txt`: the original requirements and design notes.
 - `.dev-data/` and `.test-data/` are disposable local databases.

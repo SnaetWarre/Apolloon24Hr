@@ -1,5 +1,7 @@
 import { queryOptions, useQuery } from '@tanstack/react-query';
 import type { RaceHistory } from '../types';
+import { fetchSinceBase } from './deltaFetch';
+import { queryClient } from './queryClient';
 import { historyKey } from './snapshot';
 
 export type RaceHistoryRequest =
@@ -35,10 +37,11 @@ export function useRaceHistory(request: RaceHistoryRequest = { scope: 'full' }):
 /** Shared by the hook and the route loaders that fetch a page's laps before it opens. */
 export function raceHistoryQuery(request: RaceHistoryRequest = { scope: 'full' }) {
   const normalized = normalizeRequest(request);
+  const queryKey = [...historyKey, normalized.scope, normalized.runnerId, normalized.limit];
   return queryOptions<RaceHistory, Error>({
-    queryKey: [...historyKey, normalized.scope, normalized.runnerId, normalized.limit],
+    queryKey,
     enabled: normalized.scope !== 'runner' || Boolean(normalized.runnerId),
-    queryFn: async () => {
+    queryFn: () => {
       const params = new URLSearchParams();
       if (normalized.scope === 'recent') {
         params.set('scope', 'recent');
@@ -46,9 +49,13 @@ export function raceHistoryQuery(request: RaceHistoryRequest = { scope: 'full' }
       } else if (normalized.scope === 'runner') {
         params.set('runnerId', normalized.runnerId || '');
       }
-      const response = await fetch(`/api/history${params.size ? `?${params}` : ''}`);
-      if (!response.ok) throw new Error(`Racegeschiedenis laden mislukt (${response.status})`);
-      return response.json() as Promise<RaceHistory>;
+      // The full history grows by a lap at a time; fetch only the new laps on top of the ones held.
+      const base = normalized.scope === 'full' ? queryClient.getQueryData<RaceHistory>(queryKey) : null;
+      return fetchSinceBase<RaceHistory>(
+        `/api/history${params.size ? `?${params}` : ''}`,
+        base,
+        async (response) => new Error(`Racegeschiedenis laden mislukt (${response.status})`)
+      );
     },
   });
 }

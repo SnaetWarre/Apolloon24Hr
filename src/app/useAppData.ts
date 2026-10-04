@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import type { AppSettings, HostInfo, Label, LiveAppSnapshot, RaceState, Runner, TemporaryTeam } from '../types';
-import { withPendingChanges } from './optimistic';
+import { fetchSinceBase } from './deltaFetch';
+import { confirmedSnapshot, withPendingChanges } from './optimistic';
 import { defaultSettings, emptyRace, snapshotKey } from './snapshot';
 
 declare global {
@@ -46,12 +47,11 @@ async function fetchServerSnapshot(): Promise<LiveAppSnapshot> {
     delete window.__APOLLOON_STATE_PROMISE__;
     return prefetched;
   }
-  const response = await fetch('/api/state');
-  if (!response.ok) {
+  // Only what changed since the snapshot this screen holds, without its own unconfirmed changes.
+  return fetchSinceBase<LiveAppSnapshot>('/api/state', confirmedSnapshot(), async (response) => {
     const body = (await response.json().catch(() => null)) as { error?: string } | null;
-    throw new Error(`Serverstatus laden mislukt (${response.status})${body?.error ? `: ${body.error}` : ''}`);
-  }
-  return (await response.json()) as LiveAppSnapshot;
+    return new Error(`Serverstatus laden mislukt (${response.status})${body?.error ? `: ${body.error}` : ''}`);
+  });
 }
 
 export function useAppData(): FullAppData & AppQueryState;
