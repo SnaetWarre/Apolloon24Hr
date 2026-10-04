@@ -334,7 +334,7 @@ export function RunnerAddModal({
           {groupLabels(labels.filter((label) => label.kind !== 'temporary_team')).map(([kind, groupedLabels]) => (
             <section key={kind} className="label-picker-group">
               <h3>{labelKindTitle(kind)}</h3>
-              <p className="label-picker-help">Kies maximaal 1 optie.</p>
+              {kind === 'speedteam' && <p className="label-picker-help">Kies maximaal 1 optie.</p>}
               <div className="label-picker">
                 {groupedLabels.map((label) => (
                   <label key={label.id} className="check-pill">
