@@ -37,3 +37,27 @@ export function subscribeRealtimeConnection(listener: () => void): () => void {
 export function getRealtimeConnectionSnapshot(): ConnectionSnapshot {
   return snapshot;
 }
+
+// Screens that show the group status; while there are any, the live connection carries it.
+let clusterWatchers = 0;
+const clusterWatchListeners = new Set<() => void>();
+
+export function watchClusterStatus(): () => void {
+  clusterWatchers += 1;
+  for (const listener of clusterWatchListeners) listener();
+  return () => {
+    clusterWatchers -= 1;
+    for (const listener of clusterWatchListeners) listener();
+  };
+}
+
+export function isClusterStatusWatched(): boolean {
+  return clusterWatchers > 0;
+}
+
+export function onClusterWatchersChanged(listener: () => void): () => void {
+  clusterWatchListeners.add(listener);
+  return () => {
+    clusterWatchListeners.delete(listener);
+  };
+}

@@ -4,7 +4,7 @@ import { createExpressMiddleware } from '@trpc/server/adapters/express';
 import { applyWSSHandler } from '@trpc/server/adapters/ws';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { WebSocketServer } from 'ws';
-import { historyCacheKey, liveAppSnapshot, raceHistory, type HistoryRequest } from './app-state.js';
+import { historyCacheKey, liveAppState, raceHistoryState, type HistoryRequest } from './app-state.js';
 import { describeOrigin } from './activity.js';
 import { backupStatus, latestBackupPath, startBackupService, stopBackupService } from './backups.js';
 import { registerClusterRoutes, startClusterService, stopClusterService } from './cluster.js';
@@ -15,6 +15,7 @@ import {
   getAppDataRevision,
   getLabelImage,
   getRaceState,
+  getRunnerRegistrations,
   initDb,
   markAppDataChanged,
 } from './db.js';
@@ -30,6 +31,9 @@ import { isDemoRaceEnabled, startDemoRace } from './demo-race.js';
 
 const app = express();
 app.disable('x-powered-by');
+// No hashing every JSON answer (heartbeats between laptops included) for an ETag nothing revalidates;
+// sendJson sets its own where screens do.
+app.set('etag', false);
 const server = http.createServer(app);
 const processStartedAt = Date.now();
 let shuttingDown = false;
@@ -98,8 +102,17 @@ function forwardedOrigin(header: string | undefined): string | undefined {
   }
 }
 
+/** `?since=<revision>`: the revision a screen holds, so it gets only what changed (see shared/delta.ts). */
+function sinceRevision(req: Request): number | null {
+  const since = Number(req.query.since);
+  return Number.isSafeInteger(since) && since >= 0 ? since : null;
+}
+
 app.get('/api/state', (req, res, next) => {
-  sendJson(req, res, `live:${getAppDataRevision()}:${hostInfo().url}`, liveAppSnapshot).catch(next);
+  const since = sinceRevision(req);
+  sendJson(req, res, `live:${getAppDataRevision()}:${hostInfo().url}:${since ?? ''}`, () => liveAppState(since)).catch(
+    next
+  );
 });
 
 app.get('/api/history', (req, res, next) => {
@@ -109,7 +122,13 @@ app.get('/api/history', (req, res, next) => {
     : req.query.scope === 'recent'
       ? { scope: 'recent', limit: Number(req.query.limit) || 100 }
       : { scope: 'full' };
-  sendJson(req, res, historyCacheKey(request), () => raceHistory(request)).catch(next);
+  const since = sinceRevision(req);
+  sendJson(req, res, historyCacheKey(request, since), () => raceHistoryState(request, since)).catch(next);
+});
+
+// Contact details change rarely: the ETag lets a screen revalidate them with an empty 304 after every write.
+app.get('/api/registrations', (req, res, next) => {
+  sendJson(req, res, `registrations:${getAppDataRevision()}`, getRunnerRegistrations).catch(next);
 });
 
 app.get('/api/time', (_req, res) => {

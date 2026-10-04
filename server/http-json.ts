@@ -34,9 +34,8 @@ export async function sendJson(
   res.setHeader('Cache-Control', 'no-cache');
 
   if (req.acceptsEncodings('gzip') === 'gzip' && body.raw.length >= MINIMUM_COMPRESSION_BYTES) {
-    body.compressed ??= gzipAsync(body.raw, {
-      level: zlibConstants.Z_BEST_SPEED,
-    });
+    // Compressed once per revision and shared by every screen, so the smaller result is worth the time.
+    body.compressed ??= gzipAsync(body.raw, { level: zlibConstants.Z_DEFAULT_COMPRESSION });
     const compressed = await body.compressed;
     res.setHeader('Content-Encoding', 'gzip');
     res.setHeader('Content-Length', String(compressed.length));

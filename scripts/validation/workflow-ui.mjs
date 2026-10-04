@@ -210,7 +210,9 @@ try {
     has: page.locator('button.queue-identity').filter({ hasText: failedRefreshRunner.name }),
   });
   await refreshRow.getByRole('button', { name: 'Naar wachtrij', exact: true }).waitFor();
-  await page.route('**/api/state', (route) => route.fulfill({ status: 503, body: 'Unavailable' }));
+  // With or without `?since=`, the revision this screen holds.
+  const stateRequest = (url) => url.pathname === '/api/state';
+  await page.route(stateRequest, (route) => route.fulfill({ status: 503, body: 'Unavailable' }));
   try {
     await refreshRow.getByRole('button', { name: 'Naar wachtrij', exact: true }).click();
     const connectionError = page.getByRole('heading', { name: 'Geen verbinding met de lokale server', exact: true });
@@ -218,7 +220,7 @@ try {
     await page.waitForTimeout(300);
     assert.equal(await connectionError.isVisible(), true);
   } finally {
-    await page.unroute('**/api/state');
+    await page.unroute(stateRequest);
   }
   await page.getByRole('button', { name: 'Opnieuw proberen', exact: true }).click();
   await refreshRow.getByRole('button', { name: 'Opwarmen', exact: true }).waitFor();

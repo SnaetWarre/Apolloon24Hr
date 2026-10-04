@@ -35,4 +35,5 @@ Thumbs.db
 /.test-data/
 /.dev-data*/
 /.rehearse/
+/.bench-data/
 /.tmp-*/

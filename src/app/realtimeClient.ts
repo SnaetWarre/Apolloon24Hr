@@ -3,7 +3,12 @@ import { createTRPCClient, createWSClient, wsLink } from '@trpc/client';
 import type { AppRouter } from '../../server/router';
 import { syncServerClock } from '../lib/time';
 import type { LiveAppSnapshot } from '../types';
-import { markRealtimeConnected, markRealtimeDisconnected } from './realtimeConnection';
+import {
+  isClusterStatusWatched,
+  markRealtimeConnected,
+  markRealtimeDisconnected,
+  onClusterWatchersChanged,
+} from './realtimeConnection';
 import { appKey, clusterStatusKey, snapshotKey } from './snapshot';
 
 /**
@@ -39,7 +44,6 @@ export function connectRealtime(queryClient: QueryClient): () => void {
         connected = true;
         markRealtimeConnected();
       }
-      void queryClient.invalidateQueries({ queryKey: clusterStatusKey });
       void syncClock();
     },
     onClose: () => {
@@ -60,6 +64,21 @@ export function connectRealtime(queryClient: QueryClient): () => void {
     },
   });
 
+  // The group status arrives when it changes, for as long as a screen shows it.
+  let clusterSubscription: { unsubscribe: () => void } | null = null;
+  const followClusterWatchers = () => {
+    if (isClusterStatusWatched() && !clusterSubscription) {
+      clusterSubscription = client.live.cluster.subscribe(undefined, {
+        onData: (status) => queryClient.setQueryData(clusterStatusKey, status),
+      });
+    } else if (!isClusterStatusWatched() && clusterSubscription) {
+      clusterSubscription.unsubscribe();
+      clusterSubscription = null;
+    }
+  };
+  const stopFollowingClusterWatchers = onClusterWatchersChanged(followClusterWatchers);
+  followClusterWatchers();
+
   const clockSyncInterval = window.setInterval(() => void syncClock(), 120_000);
 
   return () => {
@@ -70,6 +89,8 @@ export function connectRealtime(queryClient: QueryClient): () => void {
       markRealtimeDisconnected();
     }
     subscription.unsubscribe();
+    stopFollowingClusterWatchers();
+    clusterSubscription?.unsubscribe();
     void wsClient.close();
   };
 }

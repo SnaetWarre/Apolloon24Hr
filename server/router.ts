@@ -37,6 +37,7 @@ import {
   writeDeadline,
   writeTarget,
 } from './cluster.js';
+import { clusterStatusUpdates } from './cluster-feed.js';
 import { currentTerm, waitForCommit } from './consensus.js';
 import { selfUrl } from './peers.js';
 import {
@@ -290,6 +291,8 @@ export const appRouter = t.router({
       yield getAppDataRevision();
       for await (const [revision] of changes) yield revision as number;
     }),
+    /** The group status now and whenever it changes, for the screens that show it. */
+    cluster: t.procedure.subscription(({ signal }) => clusterStatusUpdates(signal)),
   }),
 
   cluster: t.router({
