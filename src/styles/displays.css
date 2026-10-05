@@ -4,6 +4,11 @@
  * Default: Binnenscherm dark (indoor tv), Buitenscherm light (daylight).
  * Override per screen with ?thema=licht or ?thema=donker.
  * No sidebar, no large header: the data is the page.
+ *
+ * Sizes follow the screen width with a cap. Each cap is written as
+ * max(cap, min(cap/19.2 vw, cap/10.8 vh)): up to 1920×1080 it is the plain cap,
+ * and a bigger screen (a 4K tv) scales the whole 1080p layout up instead of
+ * leaving it small in the middle.
  */
 .display-root--light {
   --d-bg: #FFFFFF;
@@ -66,14 +71,13 @@ html[data-display-tone="light"] body {
   animation: display-rise var(--dur-3) var(--ease-out) backwards;
 }
 
-
 .display-loading {
   display: grid;
   min-height: calc(100vh - var(--titlebar-h));
   place-items: center;
   background: #111111;
   color: #B4B4B4;
-  font: 500 clamp(20px, 2vw, 36px) var(--font-body);
+  font: 500 clamp(20px, 2vw, max(36px, min(1.875vw, 3.3333vh))) var(--font-body);
 }
 
 .display-loading > * {
@@ -95,8 +99,8 @@ html[data-display-tone="light"] body {
 }
 
 .display-brand .brand-mark {
-  width: clamp(110px, 7vw, 160px);
-  height: clamp(34px, 2.2vw, 48px);
+  width: clamp(110px, 7vw, max(160px, min(8.3333vw, 14.8148vh)));
+  height: clamp(34px, 2.2vw, max(48px, min(2.5vw, 4.4444vh)));
 }
 
 .display-brand > span {
@@ -167,7 +171,7 @@ html[data-display-tone="light"] body {
   align-items: center;
   gap: 0.5em;
   color: var(--d-ink-3);
-  font: 500 clamp(22px, 2vw, 44px)/1 var(--font-body);
+  font: 500 clamp(22px, 2vw, max(44px, min(2.2917vw, 4.0741vh)))/1 var(--font-body);
 }
 
 /* 0.45em dot + 0.6em ring each side. */
@@ -195,7 +199,7 @@ html[data-display-tone="light"] body {
   gap: 0.35em;
   min-width: 0;
   padding-right: 12vw;
-  font-size: clamp(64px, 8.4vw, 176px);
+  font-size: clamp(64px, 8.4vw, max(176px, min(9.1667vw, 16.2963vh)));
 }
 
 .display-bib {
@@ -209,7 +213,7 @@ html[data-display-tone="light"] body {
 
 .display-runner-name {
   min-width: 0;
-  font-size: clamp(64px, 8.4vw, 176px);
+  font-size: clamp(64px, 8.4vw, max(176px, min(9.1667vw, 16.2963vh)));
   font-weight: 650;
   line-height: 1;
   letter-spacing: -0.035em;
@@ -227,16 +231,16 @@ html[data-display-tone="light"] body {
 }
 
 .outside-band .display-labels {
-  font-size: clamp(20px, 1.6vw, 34px);
+  font-size: clamp(20px, 1.6vw, max(34px, min(1.7708vw, 3.1481vh)));
 }
 
 .outside-band--next .display-runner {
-  font-size: clamp(44px, 5.4vw, 116px);
+  font-size: clamp(44px, 5.4vw, max(116px, min(6.0417vw, 10.7407vh)));
 }
 
 .outside-band--next .display-runner-name {
   color: var(--d-ink-2);
-  font-size: clamp(44px, 5.4vw, 116px);
+  font-size: clamp(44px, 5.4vw, max(116px, min(6.0417vw, 10.7407vh)));
 }
 
 /*
@@ -254,7 +258,7 @@ html[data-display-tone="light"] body {
   display: grid;
   place-items: center;
   overflow: hidden;
-  padding: clamp(26px, 5vw, 90px);
+  padding: clamp(26px, 5vw, max(90px, min(4.6875vw, 8.3333vh)));
   background: var(--apolloon-blue);
   color: #FFFFFF;
   pointer-events: none;
@@ -266,8 +270,8 @@ html[data-display-tone="light"] body {
 .outside-record-flash::before {
   content: "";
   position: absolute;
-  inset: clamp(16px, 2.4vw, 46px);
-  border: clamp(4px, 0.45vw, 9px) solid currentColor;
+  inset: clamp(16px, 2.4vw, max(46px, min(2.3958vw, 4.2593vh)));
+  border: clamp(4px, 0.45vw, max(9px, min(0.4688vw, 0.8333vh))) solid currentColor;
   border-radius: 12px;
   opacity: 0.72;
 }
@@ -277,12 +281,12 @@ html[data-display-tone="light"] body {
   z-index: 1;
   display: grid;
   justify-items: center;
-  width: min(100%, 1640px);
+  width: min(100%, max(1640px, min(85.4167vw, 151.852vh)));
   text-align: center;
 }
 
 .record-flash-content span {
-  font: 900 clamp(56px, min(12vw, 17vh), 238px)/0.84 var(--font-body);
+  font: 900 clamp(56px, min(12vw, 17vh), max(238px, min(12.3958vw, 22.037vh)))/0.84 var(--font-body);
   letter-spacing: -0.01em;
   text-transform: uppercase;
   text-wrap: balance;
@@ -291,15 +295,15 @@ html[data-display-tone="light"] body {
 
 /* "Snelste ronde van deze 2 uur" stays on two lines. */
 .record-flash-content--long span {
-  font-size: clamp(44px, min(7.5vw, 11vh), 150px);
+  font-size: clamp(44px, min(7.5vw, 11vh), max(150px, min(7.8125vw, 13.8889vh)));
 }
 
 .record-flash-content strong {
-  margin-top: clamp(16px, min(2.3vw, 3.4vh), 42px);
-  padding: clamp(8px, 1vw, 20px) clamp(22px, 2.2vw, 52px);
+  margin-top: clamp(16px, min(2.3vw, 3.4vh), max(42px, min(2.1875vw, 3.8889vh)));
+  padding: clamp(8px, 1vw, max(20px, min(1.0417vw, 1.8519vh))) clamp(22px, 2.2vw, max(52px, min(2.7083vw, 4.8148vh)));
   background: #FFCF24;
   color: #162033;
-  font: 900 clamp(72px, min(14vw, 24vh), 282px)/0.92 var(--font-body);
+  font: 900 clamp(72px, min(14vw, 24vh), max(282px, min(14.6875vw, 26.1111vh)))/0.92 var(--font-body);
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.03em;
   animation: display-pop 600ms var(--ease-spring) backwards;
@@ -307,9 +311,9 @@ html[data-display-tone="light"] body {
 
 .record-flash-content em {
   max-width: 100%;
-  margin-top: clamp(18px, min(2.6vw, 3.8vh), 48px);
+  margin-top: clamp(18px, min(2.6vw, 3.8vh), max(48px, min(2.5vw, 4.4444vh)));
   overflow-wrap: anywhere;
-  font: 900 clamp(30px, min(5.8vw, 9vh), 112px)/1 var(--font-body);
+  font: 900 clamp(30px, min(5.8vw, 9vh), max(112px, min(5.8333vw, 10.3704vh)))/1 var(--font-body);
   font-style: normal;
   letter-spacing: -0.02em;
   animation: display-rise var(--dur-3) var(--ease-out) 200ms backwards;
@@ -386,12 +390,12 @@ html[data-display-tone="light"] body {
 
 .inside-totals dt {
   color: var(--d-ink-3);
-  font-size: clamp(14px, 1vw, 22px);
+  font-size: clamp(14px, 1vw, max(22px, min(1.1458vw, 2.037vh)));
 }
 
 .inside-totals dd {
   margin: 0;
-  font-size: clamp(20px, 1.6vw, 34px);
+  font-size: clamp(20px, 1.6vw, max(34px, min(1.7708vw, 3.1481vh)));
   font-weight: 600;
   letter-spacing: -0.02em;
 }
@@ -417,7 +421,7 @@ html[data-display-tone="light"] body {
   align-items: center;
   gap: 0.5em;
   color: rgb(255 255 255 / 0.85);
-  font-size: clamp(14px, 1.05vw, 22px);
+  font-size: clamp(14px, 1.05vw, max(22px, min(1.1458vw, 2.037vh)));
   font-weight: 500;
 }
 
@@ -430,7 +434,7 @@ html[data-display-tone="light"] body {
 
 .inside-now__runner {
   display: block;
-  font-size: clamp(28px, 2.5vw, 54px);
+  font-size: clamp(28px, 2.5vw, max(54px, min(2.8125vw, 5vh)));
   font-weight: 650;
   line-height: 1.1;
   letter-spacing: -0.03em;
@@ -438,7 +442,7 @@ html[data-display-tone="light"] body {
 }
 
 .inside-now__time {
-  font-size: clamp(56px, 5vw, 108px);
+  font-size: clamp(56px, 5vw, max(108px, min(5.625vw, 10vh)));
   font-weight: 650;
   line-height: 1;
   letter-spacing: -0.05em;
@@ -449,7 +453,7 @@ html[data-display-tone="light"] body {
   padding-top: 1.2vh;
   border-top: 1px solid rgb(255 255 255 / 0.3);
   color: rgb(255 255 255 / 0.8);
-  font-size: clamp(15px, 1.15vw, 24px);
+  font-size: clamp(15px, 1.15vw, max(24px, min(1.25vw, 2.2222vh)));
 }
 
 .inside-now__next strong {
@@ -502,11 +506,11 @@ html[data-display-tone="light"] body {
 
 .recent-lap-card-header {
   color: var(--d-ink-3);
-  font-size: clamp(13px, 0.95vw, 20px);
+  font-size: clamp(13px, 0.95vw, max(20px, min(1.0417vw, 1.8519vh)));
 }
 
 .recent-lap-runner {
-  font-size: clamp(20px, 1.6vw, 34px);
+  font-size: clamp(20px, 1.6vw, max(34px, min(1.7708vw, 3.1481vh)));
   font-weight: 600;
   line-height: 1.15;
   letter-spacing: -0.02em;
@@ -528,17 +532,17 @@ html[data-display-tone="light"] body {
 .recent-lap-time span {
   display: block;
   color: var(--d-ink-3);
-  font-size: clamp(12px, 0.85vw, 17px);
+  font-size: clamp(12px, 0.85vw, max(17px, min(0.8854vw, 1.5741vh)));
 }
 
 .recent-lap-time strong {
-  font-size: clamp(18px, 1.4vw, 30px);
+  font-size: clamp(18px, 1.4vw, max(30px, min(1.5625vw, 2.7778vh)));
   font-weight: 600;
   letter-spacing: -0.02em;
 }
 
 .recent-lap-time--current strong {
-  font-size: clamp(34px, 3.1vw, 66px);
+  font-size: clamp(34px, 3.1vw, max(66px, min(3.4375vw, 6.1111vh)));
   line-height: 1;
   letter-spacing: -0.045em;
 }
@@ -572,7 +576,7 @@ html[data-display-tone="light"] body {
 }
 
 .inside-panel-heading h2 {
-  font-size: clamp(20px, 1.6vw, 34px);
+  font-size: clamp(20px, 1.6vw, max(34px, min(1.7708vw, 3.1481vh)));
   font-weight: 600;
   letter-spacing: -0.02em;
 }
@@ -580,7 +584,7 @@ html[data-display-tone="light"] body {
 .inside-panel-heading > span {
   margin-left: auto;
   color: var(--d-ink-3);
-  font-size: clamp(13px, 0.95vw, 20px);
+  font-size: clamp(13px, 0.95vw, max(20px, min(1.0417vw, 1.8519vh)));
 }
 
 .inside-ranking-modes {
@@ -598,7 +602,7 @@ html[data-display-tone="light"] body {
   border-radius: 0.3vw;
   background: transparent;
   color: var(--d-ink-3);
-  font: 500 clamp(13px, 0.95vw, 20px) var(--font-body);
+  font: 500 clamp(13px, 0.95vw, max(20px, min(1.0417vw, 1.8519vh))) var(--font-body);
   cursor: pointer;
 }
 
@@ -634,7 +638,7 @@ html[data-display-tone="light"] body {
 
 .inside-ranking-modes-help {
   color: var(--d-ink-3);
-  font-size: clamp(12px, 0.85vw, 17px);
+  font-size: clamp(12px, 0.85vw, max(17px, min(0.8854vw, 1.5741vh)));
 }
 
 .ranking-list {
@@ -654,7 +658,7 @@ html[data-display-tone="light"] body {
   gap: 1vw;
   min-height: 0;
   border-bottom: 1px solid var(--d-line);
-  font-size: clamp(16px, 1.3vw, 28px);
+  font-size: clamp(16px, 1.3vw, max(28px, min(1.4583vw, 2.5926vh)));
 }
 
 .ranking-row:last-child {
@@ -689,7 +693,7 @@ html[data-display-tone="light"] body {
 
 .ranking-row > em {
   color: var(--d-ink-2);
-  font-size: clamp(15px, 1.2vw, 26px);
+  font-size: clamp(15px, 1.2vw, max(26px, min(1.3542vw, 2.4074vh)));
   font-style: normal;
 }
 
@@ -754,7 +758,7 @@ html[data-display-tone="light"] body {
 .competition h3 {
   margin: 1.2vh 0 0.3vh;
   color: var(--d-ink-3);
-  font-size: clamp(13px, 0.95vw, 20px);
+  font-size: clamp(13px, 0.95vw, max(20px, min(1.0417vw, 1.8519vh)));
   font-weight: 500;
 }
 
@@ -764,7 +768,7 @@ html[data-display-tone="light"] body {
   align-items: center;
   gap: 1vw;
   padding: 0.35vh 0;
-  font-size: clamp(14px, 1.05vw, 22px);
+  font-size: clamp(14px, 1.05vw, max(22px, min(1.1458vw, 2.037vh)));
 }
 
 .progress-item .label-pill {
@@ -816,7 +820,7 @@ html[data-display-tone="light"] body {
 
 .progress-item em {
   color: var(--d-ink-2);
-  font-size: clamp(15px, 1.15vw, 24px);
+  font-size: clamp(15px, 1.15vw, max(24px, min(1.25vw, 2.2222vh)));
   font-style: normal;
   font-weight: 550;
   text-align: right;
@@ -835,11 +839,37 @@ html[data-display-tone="light"] body {
 .competition-list.is-dense .progress-item {
   grid-template-columns: minmax(0, 9vw) minmax(0, 1fr) auto;
   gap: 0.7vw;
-  font-size: clamp(13px, 0.95vw, 20px);
+  font-size: clamp(13px, 0.95vw, max(20px, min(1.0417vw, 1.8519vh)));
 }
 
 .competition-list.is-dense .progress-item em {
-  font-size: clamp(14px, 1vw, 22px);
+  font-size: clamp(14px, 1vw, max(22px, min(1.1458vw, 2.037vh)));
+}
+
+/* The rows of one competition share their columns, so the name column is as
+   wide as its longest name (ellipsis only when there is really no room) and
+   the bars still start at the same place. */
+@supports (grid-template-columns: subgrid) {
+  .competition {
+    display: grid;
+    grid-template-columns: minmax(0, max-content) minmax(5vw, 1fr) auto;
+    column-gap: 1vw;
+  }
+
+  .competition h3 {
+    grid-column: 1 / -1;
+  }
+
+  .competition .progress-item,
+  .competition-list.is-dense .progress-item {
+    grid-column: 1 / -1;
+    grid-template-columns: subgrid;
+    column-gap: inherit;
+  }
+
+  .competition-list.is-dense .competition {
+    column-gap: 0.7vw;
+  }
 }
 
 .inside-empty {
@@ -850,7 +880,7 @@ html[data-display-tone="light"] body {
   border: 1px dashed var(--d-line);
   border-radius: 0.7vw;
   color: var(--d-ink-3);
-  font-size: clamp(16px, 1.2vw, 26px);
+  font-size: clamp(16px, 1.2vw, max(26px, min(1.3542vw, 2.4074vh)));
   text-align: center;
 }
 
