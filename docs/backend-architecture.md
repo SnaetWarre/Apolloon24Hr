@@ -45,6 +45,9 @@ server/index.ts
   Electron's Node mode reads the archive, so nothing is unpacked.
 - The packaged smoke test (`scripts/package-smoke.mjs`) checks the database,
   a verified backup (the worker thread), and a precompressed asset.
+- `scripts/package-system-ui.mjs` opens Beheer › Systeem in the packaged window
+  and checks that reading the network profile never stops the server answering
+  or sending heartbeats.
 - Restarts the backend with backoff when it stops unexpectedly; open screens
   reconnect on their own.
 - Stores configuration and SQLite data under Electron's per-user data path.

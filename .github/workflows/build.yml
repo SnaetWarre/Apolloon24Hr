@@ -64,6 +64,45 @@ jobs:
       - name: Smoke test Windows package
         run: node scripts/package-smoke.mjs
 
+      - name: Keep the unpacked app for the Windows system check
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-unpacked
+          path: release/win-unpacked
+          retention-days: 1
+          if-no-files-found: error
+
+  # The Windows-only paths: Beheer › Systeem reads the network profile through PowerShell
+  # while the packaged app leads a second laptop.
+  windows-system-ui:
+    name: Windows Beheer › Systeem
+    needs: build-windows
+    runs-on: windows-latest
+    timeout-minutes: 15
+    env:
+      # Only Playwright is needed here; the packaged app brings its own Electron.
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --include=optional
+
+      - name: Get the unpacked app
+        uses: actions/download-artifact@v8
+        with:
+          name: windows-unpacked
+          path: release/win-unpacked
+
+      - name: Open Beheer › Systeem in the packaged app
+        run: node scripts/package-system-ui.mjs
+
   build-linux:
     runs-on: ubuntu-26.04
     steps:
@@ -97,10 +136,10 @@ jobs:
   required-ci:
     name: Required CI
     if: always()
-    needs: [tests, build-windows, build-linux]
+    needs: [tests, build-windows, windows-system-ui, build-linux]
     runs-on: ubuntu-26.04
     steps:
       - name: Require all checks to pass
         env:
           RESULTS: ${{ join(needs.*.result, ',') }}
-        run: test "$RESULTS" = 'success,success,success'
+        run: test "$RESULTS" = 'success,success,success,success'

@@ -5,6 +5,7 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 import net from 'node:net';
 import { DatabaseSync } from 'node:sqlite';
+import { packagedApp, version } from './packaged-app.mjs';
 
 /** A 3.x database, which the app puts aside before starting empty. */
 const SCHEMA_12_SQL = `
@@ -30,19 +31,8 @@ const SCENARIOS = [
 ];
 
 const temporary = mkdtempSync(path.join(tmpdir(), 'apolloon-package-smoke-'));
-const { version, build } = JSON.parse(readFileSync('package.json', 'utf8'));
 try {
-  let executable;
-  if (process.platform === 'win32') {
-    executable = path.resolve('release', 'win-unpacked', `${build.productName}.exe`);
-  } else if (process.platform === 'linux') {
-    const images = readdirSync('release').filter((file) => file === `${build.productName}-${version}.AppImage`);
-    assert.equal(images.length, 1, 'Expected exactly one AppImage');
-    execFileSync(path.resolve('release', images[0]), ['--appimage-extract'], { cwd: temporary, stdio: 'ignore' });
-    executable = path.join(temporary, 'squashfs-root', 'AppRun');
-  } else {
-    throw new Error(`Unsupported smoke test platform: ${process.platform}`);
-  }
+  const { executable } = packagedApp(temporary);
   for (const [index, scenario] of SCENARIOS.entries()) {
     const dataPath = path.join(temporary, `data-${index}`);
     mkdirSync(dataPath);

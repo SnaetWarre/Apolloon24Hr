@@ -108,6 +108,10 @@ backup retention, and the event-day recovery runbook.
 - `scripts/seed-test-db.mjs`: deterministic and stress-test development data.
 - `scripts/ensure-lan-dev-firewall.mjs`: development firewall helper.
 - `scripts/validation/`: Playwright browser checks; `run.mjs` runs each against its own seeded server.
+- `scripts/package-system-ui.mjs`: after an Electron build, starts the packaged app as the leader of
+  two laptops, opens Beheer › Systeem in its window over the DevTools protocol, and checks that the
+  network panel fills in while `/api/health` and the heartbeats keep going. CI runs it on Windows,
+  where the panel reads the profile through PowerShell.
 - `scripts/bench-network.mjs` (`npm run bench:network`): network traffic and update latency of seven
   browser screens behind a shared slow link, their first load and main-thread
   time on a slowed-down CPU (`--cpu=4`), and the idle traffic between three
