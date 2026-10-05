@@ -1,7 +1,7 @@
 /**
- * The small window that shows as soon as Apolloon is opened, while the local server
- * opens the database and the main window loads. Without it nothing appears for a few
- * seconds, and people click the icon again.
+ * The small window that shows when Apolloon takes more than half a second to open, while
+ * the local server opens the database and the main window loads. Without it nothing
+ * appears on a slow laptop for a few seconds, and people click the icon again.
  *
  * The page is self-contained (a data: URL with the logo and font inlined), because the
  * local server that serves everything else is not running yet.

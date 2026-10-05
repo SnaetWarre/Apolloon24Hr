@@ -45,8 +45,9 @@ if (smokeTest) {
   app.setPath('userData', process.env.APOLLOON_SMOKE_DATA);
 }
 
-async function createWindow() {
-  if (mainWindow) return; // Prevent multiple windows
+/** The main window, hidden until its page has loaded; made while the server still starts. */
+function createMainWindow(): BrowserWindow {
+  if (mainWindow) return mainWindow; // Prevent multiple windows
 
   const saved = smokeTest ? null : readWindowState();
   const bounds = restorableBounds(
@@ -78,7 +79,13 @@ async function createWindow() {
   guardNavigation(window);
   recoverRenderer(window);
   guardClose(window);
+  window.on('closed', () => {
+    if (mainWindow === window) mainWindow = null;
+  });
+  return window;
+}
 
+async function loadMainWindow(window: BrowserWindow) {
   if (!app.isPackaged) {
     await window.loadURL(appUrl);
     window.webContents.openDevTools();
@@ -86,13 +93,23 @@ async function createWindow() {
     await loadPackagedRenderer(window);
   }
   if (!smokeTest && !window.isDestroyed()) window.show();
-
-  window.on('closed', () => {
-    if (mainWindow === window) mainWindow = null;
-  });
 }
 
-/** Shows at once when the app opens, until the main window is ready (see electron/splash.ts). */
+/**
+ * How long the app may take before the splash shows. Most starts have the main window up
+ * sooner, and a splash that appears only to vanish again looks like a glitch.
+ */
+const SPLASH_DELAY_MS = 500;
+let splashTimer: NodeJS.Timeout | null = null;
+
+function showSplashUnlessQuick() {
+  splashTimer = setTimeout(() => {
+    splashTimer = null;
+    if (!mainWindow?.isVisible()) showSplash();
+  }, SPLASH_DELAY_MS);
+}
+
+/** Shows while the app opens, until the main window is ready (see electron/splash.ts). */
 function showSplash() {
   const dark = nativeTheme.shouldUseDarkColors;
   const window = new BrowserWindow({
@@ -138,7 +155,13 @@ function setSplashStatus(text: string) {
   splashWindow.webContents.executeJavaScript(`window.setStatus?.(${JSON.stringify(text)})`).catch(() => {});
 }
 
+function cancelSplash() {
+  if (splashTimer) clearTimeout(splashTimer);
+  splashTimer = null;
+}
+
 function closeSplash() {
+  cancelSplash();
   splashWindow?.destroy();
   splashWindow = null;
 }
@@ -274,8 +297,8 @@ function confirmQuitDuringRace(): Promise<boolean> {
 
 async function loadPackagedRenderer(window: BrowserWindow) {
   // A failed/older AppImage can leave cached 404 responses for the same hashed
-  // assets. Clear that persistent HTTP cache before loading the local UI.
-  await window.webContents.session.clearCache();
+  // assets. Clear that persistent HTTP cache when a version first opens.
+  await clearCacheAfterUpdate(window);
 
   const versionedUrl = new URL(appUrl);
   versionedUrl.searchParams.set('desktopVersion', app.getVersion());
@@ -292,6 +315,28 @@ async function loadPackagedRenderer(window: BrowserWindow) {
 
   if (!rendered) {
     throw new StartupError({ kind: 'screen', detail: 'De pagina bleef leeg, ook na een tweede poging.' });
+  }
+}
+
+const cacheVersionPath = () => path.join(app.getPath('userData'), 'page-cache-version');
+
+/**
+ * Clears the HTTP cache the first time a version opens. Not on every start: the cache also
+ * holds the compiled page scripts, which then load without being compiled again.
+ */
+async function clearCacheAfterUpdate(window: BrowserWindow) {
+  let cachedVersion = '';
+  try {
+    cachedVersion = fs.readFileSync(cacheVersionPath(), 'utf8');
+  } catch {
+    // Not opened before, or by a version from before this file existed.
+  }
+  if (cachedVersion === app.getVersion()) return;
+  await window.webContents.session.clearCache();
+  try {
+    fs.writeFileSync(cacheVersionPath(), app.getVersion());
+  } catch (error) {
+    desktopLog(`Page cache version not saved: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
@@ -426,6 +471,7 @@ function ensureEnvFile() {
 }
 
 async function startServer() {
+  ensureEnvFile();
   if (!app.isPackaged) {
     console.log('Development mode: using the external Vite/backend dev server.');
     return;
@@ -437,6 +483,8 @@ async function startServer() {
     CLUSTER_ENABLED: process.env.CLUSTER_ENABLED || 'true',
     DATA_PATH: app.getPath('userData'),
     APOLLOON_APP_VERSION: app.getVersion(),
+    // Node keeps the compiled server here, so later starts skip compiling it again.
+    NODE_COMPILE_CACHE: path.join(app.getPath('userData'), 'compile-cache'),
   };
   const envPath = path.join(app.getPath('userData'), '.env');
   if (fs.existsSync(envPath)) {
@@ -522,19 +570,36 @@ function serverLog(): fs.WriteStream {
 async function waitForServer(url: string, child: ChildProcess, timeoutMs = 20_000) {
   const deadline = Date.now() + timeoutMs;
   const port = Number(new URL(url).port);
-  while (Date.now() < deadline) {
-    if (child.exitCode !== null) {
-      throw new StartupError({ kind: 'server-exited', exitCode: child.exitCode, errorOutput: serverErrorTail, port });
-    }
-    try {
-      const response = await fetch(`${url}/api/host-info`, {
-        signal: AbortSignal.timeout(1_000),
+  // The server says when it listens (server/index.ts); asking it over HTTP stays as the fallback.
+  let listening = false;
+  let wake = () => {};
+  const onMessage = (message: unknown) => {
+    if ((message as { type?: unknown } | null)?.type !== 'listening') return;
+    listening = true;
+    wake();
+  };
+  child.on('message', onMessage);
+  try {
+    while (Date.now() < deadline) {
+      if (listening) return;
+      if (child.exitCode !== null) {
+        throw new StartupError({ kind: 'server-exited', exitCode: child.exitCode, errorOutput: serverErrorTail, port });
+      }
+      try {
+        const response = await fetch(`${url}/api/host-info`, {
+          signal: AbortSignal.timeout(1_000),
+        });
+        if (response.ok) return;
+      } catch {
+        // The local server can take a moment to open SQLite and bind its port.
+      }
+      await new Promise<void>((resolve) => {
+        wake = resolve;
+        setTimeout(resolve, 200);
       });
-      if (response.ok) return;
-    } catch {
-      // The local server can take a moment to open SQLite and bind its port.
     }
-    await new Promise((resolve) => setTimeout(resolve, 200));
+  } finally {
+    child.off('message', onMessage);
   }
   throw new StartupError({ kind: 'server-timeout', seconds: Math.round(timeoutMs / 1000), port });
 }
@@ -553,6 +618,11 @@ const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
   app.quit();
 } else {
+  // The server needs nothing from Chromium, so it opens the database while Electron gets ready.
+  const serverStarting = startServer();
+  // Handled once openApp awaits it; until then a failure must not count as unhandled.
+  serverStarting.catch(() => {});
+
   app.on('second-instance', () => {
     // Opening the app again while it starts brings the splash forward instead of doing nothing.
     // The main window stays hidden until its page has loaded, so whichever is on screen.
@@ -567,8 +637,7 @@ if (!gotTheLock) {
     // Windows and Linux show no menu in a frameless window; dropping it also stops the
     // default menu's F11 from toggling fullscreen a second time. macOS keeps its menu.
     if (!isMac) Menu.setApplicationMenu(null);
-    if (!smokeTest) showSplash();
-    ensureEnvFile();
+    if (!smokeTest) showSplashUnlessQuick();
     // Once, before any window asks for the status: a retried start must not register it again.
     updates = setUpUpdates({
       log: desktopLog,
@@ -578,16 +647,18 @@ if (!gotTheLock) {
       isRaceActive,
       makeBackup: backupBeforeUpdate,
     });
-    void openApp();
+    void openApp(serverStarting);
   });
 }
 
 let watchingRace = false;
 
-async function openApp() {
+async function openApp(serverStarting = startServer()) {
   try {
+    // The window and its page process get going while the server still starts.
+    const window = createMainWindow();
     setSplashStatus('Databank openen…');
-    await startServer();
+    await serverStarting;
     if (!watchingRace) {
       watchingRace = true;
       watchRace(
@@ -596,7 +667,7 @@ async function openApp() {
       );
     }
     setSplashStatus('Scherm laden…');
-    await createWindow();
+    await loadMainWindow(window);
     closeSplash();
     if (smokeTest) {
       const runners = await runPackagedSmokeChecks();
@@ -648,6 +719,7 @@ async function askToRetryStart(error: unknown): Promise<boolean> {
   // counts as an open window, so the app does not quit underneath the question. The dialog
   // has no owner: some window managers put it behind its owner, and Wayland ends the app
   // when the owner is not on screen yet.
+  cancelSplash();
   splashWindow?.hide();
   for (;;) {
     const { response } = await dialog.showMessageBox(options);
