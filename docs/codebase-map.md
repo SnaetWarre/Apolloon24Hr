@@ -36,7 +36,7 @@ Shared contracts live in `shared/`. Anything imported by both client and server 
   - `deltaFetch.ts`: asks for only the changes since the revision held
     (`/api/state`, full `/api/history`) and applies them (`shared/delta.ts`).
   - `useFailover.ts`: browsers remember the other laptops and reopen the page
-    on one of them when theirs disappears.
+    on one of them when theirs disappears and the others confirm it is gone.
 - `src/components/`: route-level screens and reusable UI pieces.
   - `AdminView.tsx`: Beheer tabs; each tab is a section component in
     `components/admin/` (`PreparationSection`, `RunnersSection`,
@@ -119,6 +119,9 @@ backup retention, and the event-day recovery runbook.
   browser screens behind a shared slow link, their first load and main-thread
   time on a slowed-down CPU (`--cpu=4`), and the idle traffic between three
   laptops (`npm run build` first).
+- `scripts/bench-failover.mjs` (`npm run bench:failover`): how long a TV and a
+  browser operator take to reopen on another laptop when theirs crashes or
+  freezes, and whether short freezes move them (`npm run build` first).
 - `public/event-network/`: static-address scripts, downloadable from Beheer for manual use.
 - `docs/beschrijving.txt`: the original requirements.
 - `.dev-data/` and `.test-data/` are disposable local databases.

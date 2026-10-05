@@ -264,6 +264,8 @@ async function waitForLocalSeq(seq: number): Promise<void> {
 export function registerClusterRoutes(app: Express): void {
   app.get('/api/cluster/status', (_req, res) => {
     res.setHeader('Cache-Control', 'no-store');
+    // A screen whose laptop stopped answering asks the others whether they lost it too (useFailover.ts).
+    res.setHeader('Access-Control-Allow-Origin', '*');
     res.json(clusterStatus());
   });
   if (!enabled) return;
