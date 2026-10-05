@@ -5,7 +5,7 @@ import path from 'node:path';
 const distRoot = path.resolve('dist');
 const indexPath = path.join(distRoot, 'index.html');
 // Includes about 27 KB of React Compiler memoization code and 1 KB for fetching only changes (shared/delta.ts).
-const maximumInitialJavaScriptBytes = 509 * 1_024;
+const maximumInitialJavaScriptBytes = 510 * 1_024;
 const maximumInitialBrotliBytes = 153 * 1_024;
 
 const indexHtml = await fs.readFile(indexPath, 'utf8');

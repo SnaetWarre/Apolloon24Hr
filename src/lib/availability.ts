@@ -132,9 +132,12 @@ export function eventHourGrid(): HourGridDay[] {
   return days;
 }
 
-/** Whether the list holds exactly the one-hour block starting at this hour. */
+/**
+ * Whether the list covers this hour: by its own one-hour block, or by a longer
+ * one such as the form's `12-14u (woensdag)`.
+ */
 export function hasHourBlock(hourTexts: string[], weekday: string, hour: number): boolean {
-  return hourTexts.some((text) => isHourBlock(text, weekday, hour));
+  return hourTexts.some((text) => coversHour(text, weekday, hour));
 }
 
 /** Adds or removes the one-hour block, keeping the list in event order. */
@@ -142,10 +145,23 @@ export function toggleHourBlock(hourTexts: string[], weekday: string, hour: numb
   return setHourBlock(hourTexts, weekday, hour, !hasHourBlock(hourTexts, weekday, hour));
 }
 
-/** Puts the one-hour block in or out of the list, keeping the list in event order. */
+/**
+ * Puts the hour in or out of the list. A new hour goes in as a one-hour block
+ * in event order; taking an hour out of a longer block keeps its other hours.
+ */
 export function setHourBlock(hourTexts: string[], weekday: string, hour: number, selected: boolean): string[] {
-  const without = hourTexts.filter((text) => !isHourBlock(text, weekday, hour));
-  return selected ? sortHourBlocks([...without, formatMomentBlock({ hour, weekday })]) : without;
+  if (selected) {
+    return hasHourBlock(hourTexts, weekday, hour)
+      ? hourTexts
+      : sortHourBlocks([...hourTexts, formatMomentBlock({ hour, weekday })]);
+  }
+  return hourTexts.flatMap((text) => {
+    const block = parseHourBlock(text);
+    if (!block || !blockCoversMoment(block, { hour, weekday })) return [text];
+    return blockHours(block)
+      .filter((blockHour) => blockHour !== hour)
+      .map((blockHour) => formatHour(blockHour, block.weekday));
+  });
 }
 
 export function sortHourBlocks(hourTexts: string[]): string[] {
@@ -158,9 +174,21 @@ export function sortHourBlocks(hourTexts: string[]): string[] {
   );
 }
 
-function isHourBlock(text: string, weekday: string, hour: number): boolean {
+function coversHour(text: string, weekday: string, hour: number): boolean {
   const block = parseHourBlock(text);
-  return block?.weekday === weekday && block.startHour === hour && block.endHour === (hour + 1) % 24;
+  return block !== null && blockCoversMoment(block, { hour, weekday });
+}
+
+function blockHours(block: HourBlock): number[] {
+  const hours: number[] = [];
+  for (let hour = block.startHour; hour !== block.endHour; hour = (hour + 1) % 24) hours.push(hour);
+  return hours;
+}
+
+function formatHour(hour: number, weekday: string | null): string {
+  if (weekday) return formatMomentBlock({ hour, weekday });
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return `${pad(hour)}-${pad((hour + 1) % 24)}u`;
 }
 
 function weekdayIndex(weekday: string): number {

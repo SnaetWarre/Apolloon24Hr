@@ -387,7 +387,6 @@ export function InsideDisplay() {
         <section className="display-panel inside-competitions">
           <div className="inside-panel-heading">
             <h2>Competities</h2>
-            <span>rondes van doel</span>
           </div>
           {competitions.length ? (
             <div className={`competition-list${competitionRowCount > 9 ? ' is-dense' : ''}`}>
@@ -402,16 +401,16 @@ export function InsideDisplay() {
                       <LabelBadge label={stat.label} />
                       <div className="progress-track">
                         <span
-                          title={stat.target > 0 ? `${stat.laps} van ${stat.target} rondes` : `${stat.laps} rondes`}
+                          title={`${stat.laps} rondes`}
                           style={
                             {
-                              '--progress': `${stat.target > 0 ? Math.min(100, stat.percent) : competition.maxLaps > 0 ? (stat.laps / competition.maxLaps) * 100 : 0}%`,
+                              '--progress': `${competition.maxLaps > 0 ? (stat.laps / competition.maxLaps) * 100 : 0}%`,
                               background: stat.label.color,
                             } as React.CSSProperties
                           }
                         />
                       </div>
-                      <em>{stat.target > 0 ? `${stat.laps} / ${stat.target}` : `${stat.laps} rondes`}</em>
+                      <em>{stat.laps} rondes</em>
                     </div>
                   ))}
                 </div>
@@ -557,16 +556,11 @@ function eventRunnerLabel(event: RaceEvent) {
 }
 
 function buildLabelStats(labels: Label[], runners: Runner[], laps: LapRecord[]) {
-  const totals = new Map(
-    labels.map((label) => [label.id, { label, runnerIds: new Set<string>(), laps: 0, calculatedTarget: 0 }])
-  );
+  const totals = new Map(labels.map((label) => [label.id, { label, runnerIds: new Set<string>(), laps: 0 }]));
 
   for (const runner of runners) {
     for (const label of runner.labels) {
-      const total = totals.get(label.id);
-      if (!total) continue;
-      total.runnerIds.add(runner.id);
-      total.calculatedTarget += runner.targetLaps || 0;
+      totals.get(label.id)?.runnerIds.add(runner.id);
     }
   }
 
@@ -581,16 +575,7 @@ function buildLabelStats(labels: Label[], runners: Runner[], laps: LapRecord[]) 
 
   return [...totals.values()]
     .filter((total) => total.runnerIds.size > 0 || total.laps > 0)
-    .map((total) => {
-      const target = total.label.targetLaps ?? total.calculatedTarget;
-      return {
-        label: total.label,
-        runnerCount: total.runnerIds.size,
-        laps: total.laps,
-        target,
-        percent: target > 0 ? (total.laps / target) * 100 : 0,
-      };
-    })
+    .map((total) => ({ label: total.label, runnerCount: total.runnerIds.size, laps: total.laps }))
     .sort((a, b) => compareLabels(a.label, b.label));
 }
 
@@ -606,12 +591,9 @@ function groupCompetitions(stats: ReturnType<typeof buildLabelStats>) {
       title,
       order: labelKindOrder(groupStats[0].label.kind),
       maxLaps: Math.max(0, ...groupStats.map((stat) => stat.laps)),
-      // Within a competition the leader goes first: progress towards target, otherwise laps.
+      // Within a competition the leader goes first.
       stats: [...groupStats].sort(
-        (first, second) =>
-          (second.target > 0 && first.target > 0 ? second.percent - first.percent : 0) ||
-          second.laps - first.laps ||
-          first.label.name.localeCompare(second.label.name, 'nl-BE')
+        (first, second) => second.laps - first.laps || first.label.name.localeCompare(second.label.name, 'nl-BE')
       ),
     }))
     .sort((first, second) => first.order - second.order);

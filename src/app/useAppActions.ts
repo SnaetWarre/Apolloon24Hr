@@ -13,6 +13,7 @@ import type {
   RunnerStatus,
 } from '../types';
 import type { PressTime } from '../lib/pressTiming';
+import type { RegistrationFile } from '../lib/registrationFile';
 import { nowMs } from '../lib/time';
 import { addPendingChange, confirmedSnapshot, orderPatch, statusPatch, waitingOrder } from './optimistic';
 import { appKey, backupsKey, clusterStatusKey, snapshotKey } from './snapshot';
@@ -124,9 +125,13 @@ export function useAppActions() {
       deleteRunner: action((id: string) => trpc.runners.delete.mutate({ id })),
       hideRunner: action((id: string) => trpc.runners.hide.mutate({ id })),
       unhideRunner: action((id: string) => trpc.runners.unhide.mutate({ id })),
-      importRunnersCsv: action(async (csvText: string) => {
-        const summary = await trpc.runners.importCsv.mutate({ csvText });
-        return `${summary.created} aangemaakt, ${summary.updated} bijgewerkt, ${summary.skipped} overgeslagen`;
+      importRunners: action(async (file: RegistrationFile) => {
+        const summary =
+          file.kind === 'xlsx'
+            ? await trpc.runners.importXlsx.mutate({ dataBase64: file.dataBase64 })
+            : await trpc.runners.importCsv.mutate({ csvText: file.csvText });
+        const counts = `${summary.created} aangemaakt, ${summary.updated} bijgewerkt, ${summary.skipped} overgeslagen`;
+        return summary.errors.length ? `${counts}. ${summary.errors.join('. ')}.` : counts;
       }),
       createLabel: action((input: LabelInput) => trpc.labels.create.mutate(input)),
       updateLabel: action((id: string, fields: LabelPatch) => trpc.labels.update.mutate({ id, fields })),

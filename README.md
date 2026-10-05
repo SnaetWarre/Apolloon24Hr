@@ -104,15 +104,15 @@ A tijdelijke nachtploeg (Beheer › Ploegen & labels) moves its members from the
 
 ## Registration Import
 
-Import the registrations in Beheer › Voorbereiding › Inschrijvingen importeren, from a CSV file. Imported runners stay in the `Ingeschreven` state and do not appear on the queue board until Wachtrij moves them to warm-up.
+Import the registrations in Beheer › Voorbereiding › Inschrijvingen importeren, from the form's Excel file (`.xlsx`, as downloaded from Google Sheets) or a CSV file. An Excel file is read from its first sheet and then imported exactly like a CSV. Imported runners stay in the `Ingeschreven` state and do not appear on the queue board until Wachtrij moves them to warm-up.
 
-Two kinds of CSV are accepted:
+Two kinds of sheet are accepted:
 
-- **The Google Form export.** It is recognised by its e-mail column. The row number becomes the runner number, the answers (availability, estimates, remarks, contact details) go into the runner's profile, and the "Behoor je tot" answers become labels.
+- **The Google Form export.** It is recognised by its e-mail column. The row number becomes the runner number, the answers (availability, estimates, remarks, contact details) go into the runner's profile as typed, and the "Behoor je tot" answers become labels. Every row with a name is imported. On a repeat import a row updates the runner it became before, found by its e-mail address, else its submission time, else its row number and name, so answers such as `///` in the e-mail field do not mix runners up.
 - **A plain runner list** with these columns:
 
   ```text
-  runner_number,name,labels,target_laps,historical_avg,historical_best
+  runner_number,name,labels,historical_avg,historical_best
   ```
 
   `runner_number` and `name` are required. `labels` can hold several labels separated by commas, semicolons, or pipes. Columns such as `zustervereniging`, `vereniging`, `club`, `team`, `speedteam`, `jaar`, and `groep` are read as labels too. Times accept `ss`, `mm:ss`, or `hh:mm:ss`.
@@ -127,7 +127,7 @@ Default labels:
 - Zusterverenigingen: `HILOK`, `Mesacosa`, `Kinesia`, with their logos from `public/labels/`
 - Andere: `1ste jaar`, `Anciens`, `Dames`
 
-Labels are listed by kind, then by name. In Beheer › Ploegen & labels each label can get a logo and a **Doel (rondes)**. Without a goal, the app uses the sum of the target laps of all runners with that label.
+Labels are listed by kind, then by name. In Beheer › Ploegen & labels each label can get a logo. The inside screen compares the labels of each kind by their laps; there are no lap goals per team.
 
 ## Timing Flow
 

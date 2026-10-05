@@ -65,7 +65,6 @@ function LabelsPanel({ labels }: { labels: Label[] }) {
   const [color, setColor] = React.useState('#3b82f6');
   const [kind, setKind] = React.useState('andere');
   const [imageUrl, setImageUrl] = React.useState<string | null>(null);
-  const [targetLaps, setTargetLaps] = React.useState('');
 
   async function addLabel() {
     const labelName = name.trim();
@@ -78,7 +77,6 @@ function LabelsPanel({ labels }: { labels: Label[] }) {
           icon: labelName.slice(0, 2).toUpperCase(),
           kind,
           imageUrl,
-          targetLaps: targetLaps ? Number(targetLaps) : null,
         }),
       `${labelName} is toegevoegd.`,
       'Label toevoegen mislukt'
@@ -86,7 +84,6 @@ function LabelsPanel({ labels }: { labels: Label[] }) {
     if (!created) return;
     setName('');
     setImageUrl(null);
-    setTargetLaps('');
   }
 
   async function removeLabel(label: Label) {
@@ -123,14 +120,6 @@ function LabelsPanel({ labels }: { labels: Label[] }) {
           <option value="custom">Custom</option>
         </select>
         <LabelImagePicker imageUrl={imageUrl} onChange={setImageUrl} />
-        <input
-          className="input input--number"
-          type="number"
-          min="0"
-          value={targetLaps}
-          onChange={(event) => setTargetLaps(event.target.value)}
-          placeholder="Doel"
-        />
         <button className="btn btn--primary" onClick={() => void addLabel()} disabled={!name.trim() || pending}>
           {pending ? 'Toevoegen...' : 'Label toevoegen'}
         </button>

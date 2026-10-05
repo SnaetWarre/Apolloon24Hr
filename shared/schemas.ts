@@ -71,6 +71,8 @@ export const runnerRegistrationSchema = z.object({
   flexibility: z.string(),
   remarks: z.string(),
   categories: z.array(z.string()),
+  /** Added for 2026; registrations imported before have none. */
+  fastestLap: z.string().default(''),
 });
 export type RunnerRegistration = z.infer<typeof runnerRegistrationSchema>;
 
@@ -401,6 +403,14 @@ export type TimingPress = z.infer<typeof timingPressSchema>;
 
 export const importCsvSchema = z.object({
   csvText: z.string().min(1),
+});
+
+export const importXlsxSchema = z.object({
+  dataBase64: z
+    .string()
+    .min(1)
+    .max(20_000_000)
+    .regex(/^[A-Za-z0-9+/]+={0,2}$/),
 });
 
 export type ImportSummary = {

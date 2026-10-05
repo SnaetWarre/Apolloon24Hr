@@ -5,6 +5,7 @@ import { AvailableHoursPicker } from './AvailableHoursPicker';
 import { groupLabels, toggleRunnerLabel } from '../lib/labels';
 import { runnerLabel, statusLabel } from '../lib/runners';
 import { runnerFormError } from '../lib/runnerForm';
+import { mailHref, phoneHref } from '../lib/contact';
 import { useAppActions, useAppData, useRaceHistory, useRegistrations } from '../app/index';
 import { formatClockTimeMs, formatDurationMs } from '../lib/time';
 import { labelKindTitle } from './LabelBadge';
@@ -26,7 +27,6 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
   const registration = useRegistrations()[runnerId] ?? null;
   const [runnerNumber, setRunnerNumber] = React.useState('');
   const [name, setName] = React.useState('');
-  const [targetLaps, setTargetLaps] = React.useState('');
   const [notes, setNotes] = React.useState('');
   const [phone, setPhone] = React.useState('');
   const [email, setEmail] = React.useState('');
@@ -47,7 +47,6 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
         registration: registrationBaseline,
         runnerNumber,
         name,
-        targetLaps,
         notes,
         phone,
         email,
@@ -71,7 +70,6 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
     setRegistrationBaseline(registration);
     setRunnerNumber(runner.runnerNumber || '');
     setName(runner.name);
-    setTargetLaps(runner.targetLaps?.toString() || '');
     setNotes(runner.notes || '');
     setPhone(registration?.phone || '');
     setEmail(registration?.email || '');
@@ -97,7 +95,7 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
 
   async function saveAndClose() {
     if (saving || profileChangedElsewhere) return;
-    const validationError = runnerFormError(name, targetLaps);
+    const validationError = runnerFormError(name);
     if (validationError) {
       setSaveError(validationError);
       return;
@@ -108,7 +106,6 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
       await updateRunner(runnerId, {
         runnerNumber,
         name,
-        targetLaps: targetLaps ? Number(targetLaps) : null,
         notes,
         registrationDetails: { phone, email, availableHours },
         labels: selectedLabels,
@@ -165,6 +162,8 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
   const statusSummary = runnerStatusSummary(runner.status);
   const recentLaps = laps.slice(0, 10);
   const queueRemovalLabel = queueRemovalButtonLabel(runner.status);
+  const phoneLink = phoneHref(phone);
+  const mailLink = mailHref(email);
 
   return (
     <ModalDialog label="Lopersprofiel" onRequestClose={requestClose} closeOnBackdrop>
@@ -187,16 +186,6 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
           <label>
             Naam
             <input className="input" value={name} onChange={(event) => setName(event.target.value)} />
-          </label>
-          <label>
-            Doel (rondes)
-            <input
-              className="input"
-              type="number"
-              min="0"
-              value={targetLaps}
-              onChange={(event) => setTargetLaps(event.target.value)}
-            />
           </label>
         </div>
 
@@ -238,8 +227,8 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
                   value={phone}
                   onChange={(event) => setPhone(event.target.value)}
                 />
-                {phone.trim() && (
-                  <a className="btn btn--ghost" href={`tel:${phone.replace(/\s+/g, '')}`}>
+                {phoneLink && (
+                  <a className="btn btn--ghost" href={phoneLink}>
                     Bellen
                   </a>
                 )}
@@ -255,8 +244,8 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
                   value={email}
                   onChange={(event) => setEmail(event.target.value)}
                 />
-                {email.trim() && (
-                  <a className="btn btn--ghost" href={`mailto:${email.trim()}`}>
+                {mailLink && (
+                  <a className="btn btn--ghost" href={mailLink}>
                     Mailen
                   </a>
                 )}
@@ -321,6 +310,7 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
               <RegistrationField label="Geschat totaal rondjes" value={registration.estimatedLaps} />
               <RegistrationField label="Geschat gemiddeld tempo op 515 m" value={registration.estimatedPace} />
               <RegistrationField label="Maximum rondjes per blok van 2 uur" value={registration.maxLapsPerBlock} />
+              <RegistrationField label="Snelste (test)ronde" value={registration.fastestLap} />
               <RegistrationField label="Flexibiliteit" value={registration.flexibility} />
               <RegistrationField label="Categorieën" value={registration.categories.join(', ')} />
               <RegistrationField label="Toestemming voor hergebruik" value={registration.reuseConsent} />
@@ -461,6 +451,7 @@ function hasRegistrationAnswers(registration: RunnerRegistration) {
       registration.estimatedLaps,
       registration.estimatedPace,
       registration.maxLapsPerBlock,
+      registration.fastestLap,
       registration.flexibility,
       registration.reuseConsent,
       registration.remarks,
@@ -495,7 +486,6 @@ function isDirty({
   registration,
   runnerNumber,
   name,
-  targetLaps,
   notes,
   phone,
   email,
@@ -506,7 +496,6 @@ function isDirty({
   registration: RunnerRegistration | null;
   runnerNumber: string;
   name: string;
-  targetLaps: string;
   notes: string;
   phone: string;
   email: string;
@@ -521,7 +510,6 @@ function isDirty({
   return (
     runnerNumber.trim() !== (runner.runnerNumber || '') ||
     name.trim() !== runner.name ||
-    targetLaps.trim() !== (runner.targetLaps?.toString() || '') ||
     notes !== (runner.notes || '') ||
     phone.trim() !== (registration?.phone || '') ||
     email.trim() !== (registration?.email || '') ||
@@ -535,7 +523,6 @@ function getEditableRunnerKey(runner: Runner, registration: RunnerRegistration |
     runner.id,
     runner.runnerNumber || '',
     runner.name,
-    runner.targetLaps ?? '',
     runner.notes || '',
     runner.labels
       .map((label) => label.id)

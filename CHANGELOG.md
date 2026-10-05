@@ -6,6 +6,9 @@ All notable changes to Apolloon Telsysteem will be documented in this file.
 
 ### Added
 
+- Inschrijvingen importeren kan nu ook rechtstreeks uit het Excel-bestand
+  (`.xlsx`) van het formulier, naast de CSV-export
+- Het profiel toont het antwoord op "snelste (test)ronde" uit het formulier
 - Op Windows en Linux (AppImage) downloadt de app een nieuwe versie op de
   achtergrond. Eén klik op **Nu installeren en herstarten** maakt een backup,
   installeert ze, ruimt het installatiebestand op en start de nieuwe versie.
@@ -45,9 +48,22 @@ All notable changes to Apolloon Telsysteem will be documented in this file.
 - Een loper toevoegen laat nu ook meerdere andere labels toe (bv. 1ste jaar en
   Dames), net als een loper bewerken; alleen het speedteam blijft er één
 - Een lopende loper heet overal "Op de piste"
+- Elke rij met een naam wordt geïmporteerd, zoals ze getypt is: ook met `////`
+  als e-mail of "contacteer Thomas" als telefoon. Bellen en Mailen verschijnen
+  alleen bij een echt nummer of adres. Een opnieuw geïmporteerde rij vindt
+  haar loper terug via het e-mailadres, het tijdstip van inschrijven of rij en
+  naam, zodat dezelfde nepmail lopers niet meer door elkaar haalt
+- Is het rijnummer van een nieuwe inschrijving al in gebruik, dan komt de loper
+  binnen zonder nummer en zegt de import welke rij het was. De import toont nu
+  ook waarom een rij overgeslagen werd
+- De doelen (rondes) van ploegen, labels en lopers zijn weg. Competities op het
+  Binnenscherm vergelijken de ploegen op hun rondes
 
 ### Fixed
 
+- Het lopersprofiel toont de uren van woensdag uit het formulier (blokken van
+  twee uur, zoals `12-14u (woensdag)`) als aangeduid; één uur eruit halen laat
+  het andere staan
 - Beheer › Systeem op een Windows-laptop houdt de server niet meer vast terwijl
   het netwerkprofiel wordt gelezen; de laptop blijft hartslagen sturen en
   drukken beantwoorden

@@ -60,9 +60,12 @@ Shared contracts live in `shared/`. Anything imported by both client and server 
 - `src/lib/`: browser-side helpers and app-specific utility functions.
   - `tactics.ts`: historical race validation, live comparison, and target-scenario calculations for Tactiek.
   - `tacticsDeepDive.ts`: detailed historical statistics, race-gap models, live uncertainty, and drafting tests.
-  - `availability.ts`: matches the form's hour blocks (`20-21u (dinsdag)`) to the
-    Brussels clock, for `AvailableNowPanel.tsx` on Wachtrij: who can run this
-    hour but is not warming up or waiting, with their phone number.
+  - `availability.ts`: matches the form's hour blocks (`20-21u (dinsdag)`, and
+    two-hour ones such as `12-14u (woensdag)`) to the Brussels clock, for
+    `AvailableNowPanel.tsx` on Wachtrij: who can run this hour but is not warming
+    up or waiting, with their phone number. Also backs the hours picker.
+  - `contact.ts`: call and mail links, only for answers that are a real number or address.
+  - `registrationFile.ts`: reads the picked registration file as CSV text or base64 `.xlsx`.
   - `pressTiming.ts`: dates timing presses from their key events and measures
     laps on the monotonic clock.
   - `readiness.ts` and `systemStatus.ts`: the event readiness checklist and the
@@ -88,7 +91,7 @@ Shared contracts live in `shared/`. Anything imported by both client and server 
 
 - `server/index.ts`: HTTP, tRPC, and WebSocket wiring, `/api` routes, startup and shutdown.
 - `server/router.ts`: tRPC procedures and request validation.
-- `server/runner-import.ts`: runner CSV and Google Form import.
+- `server/runner-import.ts`: runner CSV and Google Form import; an `.xlsx` is turned into CSV text first (`read-excel-file`).
 - `server/exports.ts`: lap and event CSV/JSON exports and the Excel download route.
 - `server/excel-export.ts`: the Excel workbook (laps and events, local time, lap times as time values).
 - `server/static-files.ts`: packaged frontend serving.

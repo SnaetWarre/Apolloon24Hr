@@ -1,6 +1,7 @@
 import React from 'react';
 import { useRegistrations } from '../app/index';
 import { brusselsMoment, findAvailableUncalledRunners, formatMomentBlock } from '../lib/availability';
+import { phoneHref } from '../lib/contact';
 import { useClockTick } from '../lib/useClockTick';
 import type { Runner } from '../types';
 import { Icon } from './Icon';
@@ -63,28 +64,13 @@ export function AvailableNowPanel({
       </div>
       <div className="available-now__rows">
         {shown.map(({ runner, phone, flexibility }) => (
-          <div key={runner.id} className="available-now__row">
-            <button type="button" className="queue-identity" onClick={() => onOpenProfile(runner.id)}>
-              <span className="runner-title">
-                <RunnerName runner={runner} />
-              </span>
-              <span className="queue-runner__details">
-                {runner.labels.map((label) => (
-                  <LabelBadge key={label.id} label={label} compact />
-                ))}
-                <span>{runner.status === 'ran' ? `${runner.lapCount} gelopen` : 'nog niet gelopen'}</span>
-                {flexibility && <span>{flexibility}</span>}
-              </span>
-            </button>
-            {phone ? (
-              <a className="btn btn--sm available-now__phone" href={`tel:${phone.replace(/\s+/g, '')}`}>
-                <Icon name="phone" size={14} />
-                {phone}
-              </a>
-            ) : (
-              <span className="available-now__phone available-now__phone--none">Geen nummer</span>
-            )}
-          </div>
+          <AvailableRunnerRow
+            key={runner.id}
+            runner={runner}
+            phone={phone}
+            flexibility={flexibility}
+            onOpenProfile={onOpenProfile}
+          />
         ))}
         {!shown.length && (
           <p className="empty-inline">
@@ -97,5 +83,43 @@ export function AvailableNowPanel({
         )}
       </div>
     </details>
+  );
+}
+
+function AvailableRunnerRow({
+  runner,
+  phone,
+  flexibility,
+  onOpenProfile,
+}: {
+  runner: Runner;
+  phone: string;
+  flexibility: string;
+  onOpenProfile: (runnerId: string) => void;
+}) {
+  const phoneLink = phoneHref(phone);
+  return (
+    <div className="available-now__row">
+      <button type="button" className="queue-identity" onClick={() => onOpenProfile(runner.id)}>
+        <span className="runner-title">
+          <RunnerName runner={runner} />
+        </span>
+        <span className="queue-runner__details">
+          {runner.labels.map((label) => (
+            <LabelBadge key={label.id} label={label} compact />
+          ))}
+          <span>{runner.status === 'ran' ? `${runner.lapCount} gelopen` : 'nog niet gelopen'}</span>
+          {flexibility && <span>{flexibility}</span>}
+        </span>
+      </button>
+      {phoneLink ? (
+        <a className="btn btn--sm available-now__phone" href={phoneLink}>
+          <Icon name="phone" size={14} />
+          {phone}
+        </a>
+      ) : (
+        <span className="available-now__phone available-now__phone--none">{phone || 'Geen nummer'}</span>
+      )}
+    </div>
   );
 }

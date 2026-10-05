@@ -54,6 +54,7 @@ function registration(availableHours: string[], phone = '0470 00 00 00'): Runner
     flexibility: 'Een kwartier vroeger of later',
     remarks: '',
     categories: [],
+    fastestLap: '',
   };
 }
 
@@ -145,4 +146,17 @@ test('ticking an hour writes it in the form format, in event order', () => {
   assert.deepEqual(toggleHourBlock(picked, 'dinsdag', 23), ['20-21u (dinsdag)', '01-02u (woensdag)']);
   assert.deepEqual(setHourBlock(picked, 'dinsdag', 20, true), picked);
   assert.deepEqual(setHourBlock(picked, 'dinsdag', 20, false), ['23-00u (dinsdag)', '01-02u (woensdag)']);
+});
+
+test('the form’s two-hour blocks tick both hours and lose only the hour taken out', () => {
+  const fromForm = ['23-00u (dinsdag)', '12-14u (woensdag)', '14-16u (woensdag)'];
+  assert.equal(hasHourBlock(fromForm, 'woensdag', 12), true);
+  assert.equal(hasHourBlock(fromForm, 'woensdag', 13), true);
+  assert.equal(hasHourBlock(fromForm, 'woensdag', 16), false);
+  assert.deepEqual(setHourBlock(fromForm, 'woensdag', 13, true), fromForm);
+  assert.deepEqual(toggleHourBlock(fromForm, 'woensdag', 12), [
+    '23-00u (dinsdag)',
+    '13-14u (woensdag)',
+    '14-16u (woensdag)',
+  ]);
 });

@@ -42,8 +42,8 @@ export function WelcomeView({
             </span>
             <h3>Dit is de eerste laptop</h3>
             <p>
-              Importeer hier de inschrijvingen: de CSV-export van het inschrijvingsformulier. De andere laptops koppel
-              je daarna aan deze.
+              Importeer hier de inschrijvingen: het Excel-bestand of de CSV-export van het inschrijvingsformulier. De
+              andere laptops koppel je daarna aan deze.
             </p>
             <div className="welcome-choice__actions">
               <button type="button" className="btn btn--primary" onClick={() => onOpenAdmin('preparation')}>
