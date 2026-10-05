@@ -2,6 +2,10 @@
  * Looks up the newest published version. The source repository is private, so every
  * release is copied to a public one (.github/workflows/publish-public-release.yml),
  * which the app reads without a token and links to for the download.
+ *
+ * On Windows and from an AppImage, electron/updates.ts downloads and installs it in the
+ * app instead; this check is what the other installs (macOS, development) and a failed
+ * updater fall back to.
  */
 export const RELEASES_REPO = 'SnaetWarre/apolloon-releases';
 export const RELEASES_PAGE = `https://github.com/${RELEASES_REPO}/releases`;
@@ -19,9 +23,17 @@ export type AvailableUpdate = {
 export type UpdateStatus =
   | { state: 'checking'; checkedAt: number | null }
   | { state: 'current'; checkedAt: number }
-  | { state: 'available'; checkedAt: number; update: AvailableUpdate }
   /** No internet, which is normal at the event, or the release source did not answer. */
-  | { state: 'unreachable'; checkedAt: number };
+  | { state: 'unreachable'; checkedAt: number }
+  /** A newer version to download and install by hand; `problem` says why the app did not do it. */
+  | { state: 'available'; checkedAt: number; update: AvailableUpdate; problem: string | null }
+  | { state: 'downloading'; checkedAt: number; update: AvailableUpdate; percent: number }
+  /** Downloaded and checked: one click installs it and reopens the app. */
+  | { state: 'ready'; checkedAt: number; update: AvailableUpdate }
+  | { state: 'installing'; checkedAt: number; update: AvailableUpdate };
+
+/** How the last update installed from the app went, told once after the restart. */
+export type InstallOutcome = { version: string; ok: boolean };
 
 type ReleaseAsset = { name?: unknown; browser_download_url?: unknown };
 type ReleaseJson = { tag_name?: unknown; html_url?: unknown; published_at?: unknown; assets?: unknown };
@@ -100,11 +112,50 @@ export async function checkForUpdate({
     const update = readRelease(await response.json(), platform, arch);
     if (!update) return { state: 'unreachable', checkedAt: now() };
     return compareVersions(update.version, currentVersion) > 0
-      ? { state: 'available', checkedAt: now(), update }
+      ? { state: 'available', checkedAt: now(), update, problem: null }
       : { state: 'current', checkedAt: now() };
   } catch {
     return { state: 'unreachable', checkedAt: now() };
   }
+}
+
+export function releasePage(version: string): string {
+  return `${RELEASES_PAGE}/tag/v${version.replace(/^v/i, '')}`;
+}
+
+/**
+ * Whether this install can update itself: the Windows installer and an AppImage can,
+ * macOS only for signed apps (these are not), and development or unpacked builds have
+ * nothing to replace.
+ */
+export function canInstallInApp({
+  isPackaged,
+  platform,
+  appImage,
+}: {
+  isPackaged: boolean;
+  platform: string;
+  appImage: string | undefined;
+}): boolean {
+  if (!isPackaged) return false;
+  return platform === 'win32' || (platform === 'linux' && Boolean(appImage));
+}
+
+/** Reads the note left before installing: did the app come back as that version? */
+export function installOutcome(noteText: string | null, currentVersion: string): InstallOutcome | null {
+  if (!noteText) return null;
+  try {
+    const { version } = JSON.parse(noteText) as { version?: unknown };
+    if (typeof version !== 'string') return null;
+    return { version, ok: compareVersions(currentVersion, version) >= 0 };
+  } catch {
+    return null;
+  }
+}
+
+/** The updater's cache folder name, from the app-update.yml electron-builder writes. */
+export function updaterCacheDirName(appUpdateYml: string | null, fallback: string): string {
+  return appUpdateYml?.match(/^updaterCacheDirName:\s*['"]?([\w.-]+)['"]?\s*$/m)?.[1] ?? fallback;
 }
 
 /** Only addresses of the releases repository are opened from the update notice. */

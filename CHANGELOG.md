@@ -6,6 +6,11 @@ All notable changes to Apolloon Telsysteem will be documented in this file.
 
 ### Added
 
+- Op Windows en Linux (AppImage) downloadt de app een nieuwe versie op de
+  achtergrond. Eén klik op **Nu installeren en herstarten** maakt een backup,
+  installeert ze, ruimt het installatiebestand op en start de nieuwe versie.
+  Nooit vanzelf en niet terwijl de wedstrijd loopt; op macOS blijft het een
+  download
 - De desktop-app toont meteen een startvenster terwijl de databank opent, in
   plaats van enkele seconden niets
 - Een laptop zonder lopers opent op een welkomstscherm: inschrijvingen
@@ -22,10 +27,11 @@ All notable changes to Apolloon Telsysteem will be documented in this file.
 
 ### Changed
 
+- Installatiebestanden heten nu `Apolloon-Telsysteem-<versie>-…`, zonder
+  spatie, zodat de app ze zelf kan vinden en installeren
 - Als de app niet kan starten, zegt ze in het Nederlands waarom (poort in
   gebruik, volle schijf, beschadigde databank, …) en kan je opnieuw proberen of
   de logmap openen, in plaats van een Engelse foutmelding en afsluiten
-
 - Schermen horen live wijzigingen via een tRPC-abonnement in plaats van
   Socket.IO, en zien binnen tien seconden dat de verbinding met hun laptop weg
   is

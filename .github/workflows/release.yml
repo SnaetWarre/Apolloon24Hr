@@ -66,17 +66,18 @@ jobs:
           - name: Windows x64
             os: windows-latest
             script: electron:build:win
-            assets: release/*.exe
+            # latest*.yml tells installed apps about the new version and its installer (electron/updates.ts).
+            assets: release/*.exe release/latest.yml
             smoke: node scripts/package-smoke.mjs
           - name: Linux x64
             os: ubuntu-26.04
             script: electron:build:linux
-            assets: release/*.AppImage
+            assets: release/*.AppImage release/latest-linux.yml
             smoke: xvfb-run -a node scripts/package-smoke.mjs
           - name: macOS Apple Silicon
             os: macos-latest
             script: electron:build:mac
-            assets: release/*.dmg release/*.zip
+            assets: release/*.dmg release/*.zip release/latest-mac.yml
             smoke: ''
 
     steps:

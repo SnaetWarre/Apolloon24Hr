@@ -1,6 +1,16 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { checkForUpdate, compareVersions, isReleaseUrl, pickInstaller, readRelease } from '../electron/update-check.ts';
+import {
+  canInstallInApp,
+  checkForUpdate,
+  compareVersions,
+  installOutcome,
+  isReleaseUrl,
+  pickInstaller,
+  readRelease,
+  releasePage,
+  updaterCacheDirName,
+} from '../electron/update-check.ts';
 
 const download = (name: string) => ({
   name,
@@ -85,4 +95,30 @@ test('only pages of the releases repository open from the update notice', () => 
     readRelease({ ...release, html_url: 'https://example.com/' }, 'linux', 'x64')?.pageUrl,
     'https://github.com/SnaetWarre/apolloon-releases/releases'
   );
+});
+
+test('only the Windows installer and an AppImage update themselves', () => {
+  assert.equal(canInstallInApp({ isPackaged: true, platform: 'win32', appImage: undefined }), true);
+  assert.equal(canInstallInApp({ isPackaged: true, platform: 'linux', appImage: '/home/a/Apolloon.AppImage' }), true);
+  // Unpacked Linux build, unsigned macOS app, development: a link to the installer instead.
+  assert.equal(canInstallInApp({ isPackaged: true, platform: 'linux', appImage: undefined }), false);
+  assert.equal(canInstallInApp({ isPackaged: true, platform: 'darwin', appImage: undefined }), false);
+  assert.equal(canInstallInApp({ isPackaged: false, platform: 'win32', appImage: undefined }), false);
+});
+
+test('after the restart, the note says whether the new version is running', () => {
+  const note = JSON.stringify({ version: '4.3.0', from: '4.2.0' });
+  assert.deepEqual(installOutcome(note, '4.3.0'), { version: '4.3.0', ok: true });
+  assert.deepEqual(installOutcome(note, '4.2.0'), { version: '4.3.0', ok: false });
+  assert.equal(installOutcome(null, '4.3.0'), null);
+  assert.equal(installOutcome('{"version":', '4.3.0'), null);
+  assert.equal(installOutcome('{"other":1}', '4.3.0'), null);
+});
+
+test('the downloaded installer is found where electron-updater keeps it', () => {
+  const yml =
+    'owner: SnaetWarre\nrepo: apolloon-releases\nprovider: github\nupdaterCacheDirName: apolloon-telsysteem-updater\n';
+  assert.equal(updaterCacheDirName(yml, 'Apolloon Telsysteem'), 'apolloon-telsysteem-updater');
+  assert.equal(updaterCacheDirName(null, 'Apolloon Telsysteem'), 'Apolloon Telsysteem');
+  assert.equal(releasePage('v4.3.0'), 'https://github.com/SnaetWarre/apolloon-releases/releases/tag/v4.3.0');
 });

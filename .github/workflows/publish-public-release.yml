@@ -1,9 +1,9 @@
 name: Publish public release
 
 # This repository is private, so the desktop app cannot see its releases. Once a draft
-# release is published, its installers and notes are copied to the public releases
-# repository, which the app checks for a newer version (electron/update-check.ts) and
-# where anyone can download the installer without a GitHub account.
+# release is published, its installers, notes and latest*.yml are copied to the public
+# releases repository, which the app checks for a newer version and installs from
+# (electron/updates.ts), and where anyone can download the installer without a GitHub account.
 
 on:
   release:
@@ -38,7 +38,8 @@ jobs:
         run: |
           mkdir assets
           gh release download "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --dir assets \
-            --pattern '*.exe' --pattern '*.AppImage' --pattern '*.dmg' --pattern '*.zip' --pattern 'SHA256SUMS.txt'
+            --pattern '*.exe' --pattern '*.AppImage' --pattern '*.dmg' --pattern '*.zip' --pattern 'SHA256SUMS.txt' \
+            --pattern 'latest*.yml'
           gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --json body --jq .body > notes.md
           ls -l assets
 

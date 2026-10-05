@@ -196,7 +196,16 @@ npm run electron:build:mac     macOS dmg and zip (on macOS)
 
 A version tag (`v4.3.0`) builds the installers into a draft release (`.github/workflows/release.yml`). Publishing that draft copies the installers, notes, and `SHA256SUMS.txt` to the public repository [SnaetWarre/apolloon-releases](https://github.com/SnaetWarre/apolloon-releases/releases) (`publish-public-release.yml`), because this repository is private. That workflow runs in the `public-releases` environment, whose `PUBLIC_RELEASES_TOKEN` may write to the public repository.
 
-The desktop app reads the latest release there a few seconds after it starts and every six hours. A newer version shows in Beheer › Systeem & herstel › Over deze installatie, with the installer for that operating system, and in the sidebar while the race is not running. Nothing installs by itself: all laptops must run the same version, so updating stays a deliberate step before the event. Without internet the check stays quiet. `APOLLOON_UPDATE_CHECK=0` turns it off.
+The desktop app reads the latest release there a few seconds after it starts and every six hours. On Windows and from an AppImage it downloads a newer version in the background (`electron-updater`, from the release's `latest.yml` / `latest-linux.yml`), and Beheer › Systeem & herstel › Over deze installatie then offers **Nu installeren en herstarten**: it makes a verified backup, closes, installs silently, removes the downloaded installer, and starts the new version. The sidebar says when an update is ready. Nothing installs by itself, and not while the race runs: all laptops must run the same version, so updating stays a deliberate step before the event. macOS (unsigned, so it cannot update itself) and development builds get a link to the installer instead, as does an install whose automatic download failed. Without internet the check stays quiet. `APOLLOON_UPDATE_CHECK=0` turns it off.
+
+To try an update without publishing one, build two versions and serve the newer one's files:
+
+```text
+npx electron-builder --publish never --linux -c.extraMetadata.version=4.2.99   # copy the AppImage and latest-linux.yml to a folder
+npx electron-builder --publish never --linux -c.extraMetadata.version=4.2.98
+python3 -m http.server 8099 --directory <that folder>
+APOLLOON_UPDATE_FEED=http://127.0.0.1:8099/ ./Apolloon-Telsysteem-4.2.98.AppImage
+```
 
 The same panel shows the version and data folder, opens the log folder, and copies a diagnosis (version, laptops, backups, the end of `server.log`) to paste into a message when asking for help.
 

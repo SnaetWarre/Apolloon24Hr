@@ -19,7 +19,8 @@ export function packagedApp(temporary) {
     return { executable, binary: executable, resources: path.join(root, 'resources') };
   }
   if (process.platform === 'linux') {
-    const images = readdirSync('release').filter((file) => file === `${build.productName}-${version}.AppImage`);
+    const image = build.linux.artifactName.replace('${version}', version).replace('${ext}', 'AppImage');
+    const images = readdirSync('release').filter((file) => file === image);
     assert.equal(images.length, 1, 'Expected exactly one AppImage');
     execFileSync(path.resolve('release', images[0]), ['--appimage-extract'], { cwd: temporary, stdio: 'ignore' });
     const root = path.join(temporary, 'squashfs-root');

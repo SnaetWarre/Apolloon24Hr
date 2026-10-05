@@ -6,7 +6,8 @@ This app has three runtime surfaces:
 - `server/`: local Express, tRPC, and SQLite runtime.
 - `electron/`: desktop wrapper that starts the compiled server and opens the app; compiled to `dist-electron/`.
   `splash.ts` is the window shown while it starts, `startup-error.ts` says in Dutch why it could not,
-  and `update-check.ts` reads the latest release from the public releases repository.
+  `update-check.ts` reads the latest release from the public releases repository, and `updates.ts`
+  downloads and installs it from the app on Windows and from an AppImage (`electron-updater`).
 
 Shared contracts live in `shared/`. Anything imported by both client and server should go there instead of being duplicated in `src/` and `server/`.
 

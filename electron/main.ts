@@ -18,7 +18,7 @@ import { isRaceActive, stopWatchingRace, watchRace } from './race-guard.js';
 import { parseEnvText, resolveServerAddress } from './server-config.js';
 import { SPLASH_SIZE, splashBackground, splashHtml } from './splash.js';
 import { describeUnexpectedStartupError, StartupError } from './startup-error.js';
-import { checkForUpdate, isReleaseUrl, RELEASES_PAGE, type UpdateStatus } from './update-check.js';
+import { setUpUpdates } from './updates.js';
 import {
   DEFAULT_WINDOW_SIZE,
   MIN_WINDOW_SIZE,
@@ -403,52 +403,17 @@ async function readLogTail(filePath: string, lines: number): Promise<string> {
   }
 }
 
-/** Every six hours, so a laptop that sits on a desk for days still finds out. */
-const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
-let updateStatus: UpdateStatus = { state: 'checking', checkedAt: null };
-let updateTimer: NodeJS.Timeout | null = null;
-let updateCheck: Promise<UpdateStatus> | null = null;
+let updates: ReturnType<typeof setUpUpdates> | null = null;
 
-function runUpdateCheck(): Promise<UpdateStatus> {
-  updateCheck ??= (async () => {
-    const previous = updateStatus;
-    updateStatus = { state: 'checking', checkedAt: previous.checkedAt };
-    sendUpdateStatus();
-    const result = await checkForUpdate({
-      currentVersion: app.getVersion(),
-      platform: process.platform,
-      arch: process.arch,
-    });
-    // Offline at the event: keep showing an update found earlier instead of forgetting it.
-    updateStatus = result.state === 'unreachable' && previous.state === 'available' ? previous : result;
-    if (updateStatus.state === 'available') desktopLog(`Update available: ${updateStatus.update.version}`);
-    sendUpdateStatus();
-    return updateStatus;
-  })().finally(() => {
-    updateCheck = null;
+/** The verified backup taken before installing an update, through the local server. */
+async function backupBeforeUpdate(): Promise<void> {
+  const response = await fetch(`${appUrl}/trpc/backups.create`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    signal: AbortSignal.timeout(60_000),
   });
-  return updateCheck;
+  if (!response.ok) throw new Error(`server antwoordde ${response.status}`);
 }
-
-function sendUpdateStatus() {
-  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('apolloon:update-status', updateStatus);
-}
-
-/** APOLLOON_UPDATE_CHECK=0 turns it off, for rehearsals and machines without internet on purpose. */
-function startUpdateChecks() {
-  if (updateTimer || process.env.APOLLOON_UPDATE_CHECK === '0') return;
-  // Not right at startup: the first seconds belong to opening the database and the window.
-  updateTimer = setTimeout(function next() {
-    void runUpdateCheck();
-    updateTimer = setTimeout(next, UPDATE_CHECK_INTERVAL_MS);
-  }, 10_000);
-}
-
-ipcMain.handle('apolloon:update-status', () => updateStatus);
-ipcMain.handle('apolloon:check-update', () => runUpdateCheck());
-ipcMain.handle('apolloon:open-release', (_event, url: unknown) => {
-  void shell.openExternal(typeof url === 'string' && isReleaseUrl(url) ? url : RELEASES_PAGE);
-});
 
 function ensureEnvFile() {
   const envPath = path.join(app.getPath('userData'), '.env');
@@ -604,6 +569,15 @@ if (!gotTheLock) {
     if (!isMac) Menu.setApplicationMenu(null);
     if (!smokeTest) showSplash();
     ensureEnvFile();
+    // Once, before any window asks for the status: a retried start must not register it again.
+    updates = setUpUpdates({
+      log: desktopLog,
+      send: (status) => {
+        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('apolloon:update-status', status);
+      },
+      isRaceActive,
+      makeBackup: backupBeforeUpdate,
+    });
     void openApp();
   });
 }
@@ -633,7 +607,7 @@ async function openApp() {
       app.quit();
       return;
     }
-    startUpdateChecks();
+    updates?.start();
   } catch (error) {
     console.error('Failed to initialize Apolloon:', error);
     if (smokeTest) {
@@ -719,7 +693,7 @@ async function runPackagedSmokeChecks(): Promise<number> {
 
 function stopServer() {
   quitting = true;
-  if (updateTimer) clearTimeout(updateTimer);
+  updates?.stop();
   stopWatchingRace();
   serverProcess?.kill();
 }
