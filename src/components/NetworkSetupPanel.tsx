@@ -249,23 +249,28 @@ export function NetworkSetupPanel() {
 
       {profile.primary && !profile.apipa && (
         <div className="host-hint">
-          <strong>Nu:</strong> {profile.primary.address} (adapter: {profile.primary.name}) ·{' '}
-          {profile.primary.dhcp === null
-            ? 'adresbron onbekend'
-            : profile.primary.dhcp
-              ? 'automatisch adres (kan veranderen!)'
-              : 'vast adres (blijft staan!) '}
-          {profile.eventUrl && (
-            <>
-              · Schermen verbinden met <strong>{profile.eventUrl}</strong>
-            </>
-          )}
+          <span>
+            <strong>Nu:</strong> {profile.primary.address} (adapter: {profile.primary.name}) ·{' '}
+            {profile.primary.dhcp === null
+              ? 'adresbron onbekend'
+              : profile.primary.dhcp
+                ? 'automatisch adres (kan veranderen!)'
+                : 'vast adres (blijft staan!)'}
+            {profile.eventUrl && (
+              <>
+                {' '}
+                · Schermen verbinden met <strong>{profile.eventUrl}</strong>
+              </>
+            )}
+          </span>
         </div>
       )}
 
       {profile.manager && (
         <div className="host-hint">
-          Beheerd door <strong>{profile.manager}</strong>.
+          <span>
+            Beheerd door <strong>{profile.manager}</strong>.
+          </span>
         </div>
       )}
 
@@ -351,8 +356,10 @@ export function NetworkSetupPanel() {
 
       {isStatic && profile.primary && (
         <div className="host-hint">
-          <strong>Dit adres staat vast:</strong> {profile.primary.address}. Goed zo — hier hoef je niets meer te doen
-          tot het evenement voorbij is.
+          <span>
+            <strong>Dit adres staat vast:</strong> {profile.primary.address}. Goed zo — hier hoef je niets meer te doen
+            tot het evenement voorbij is.
+          </span>
         </div>
       )}
 

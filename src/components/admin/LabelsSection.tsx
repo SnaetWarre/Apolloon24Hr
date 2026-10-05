@@ -110,10 +110,16 @@ function LabelsPanel({ labels }: { labels: Label[] }) {
         <input
           className="input input--color"
           type="color"
+          aria-label="Kleur van het nieuwe label"
           value={color}
           onChange={(event) => setColor(event.target.value)}
         />
-        <select className="input" value={kind} onChange={(event) => setKind(event.target.value)}>
+        <select
+          className="input"
+          aria-label="Soort van het nieuwe label"
+          value={kind}
+          onChange={(event) => setKind(event.target.value)}
+        >
           <option value="speedteam">Speedteam</option>
           <option value="zustervereniging">Zustervereniging</option>
           <option value="andere">Andere</option>
