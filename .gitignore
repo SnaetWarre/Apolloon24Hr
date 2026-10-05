@@ -35,5 +35,6 @@ Thumbs.db
 /.test-data/
 /.dev-data*/
 /.rehearse/
+/rehearse-laptops.json
 /.bench-data/
 /.tmp-*/

@@ -173,6 +173,9 @@ start Apolloon, and restore it there.
   recover by itself. A failing seed replays exactly.
 - `npm run rehearse` does the same with three real servers on one machine
   and a bot pressing Space, and compares the lap logs of all laptops.
+- `npm run rehearse -- --hardware` does it on the three event laptops over
+  SSH, with firewall rules for cables, also between only two of them; see
+  `docs/rehearse-hardware.md`.
 
 ## Rehearsal Before The Event
 
