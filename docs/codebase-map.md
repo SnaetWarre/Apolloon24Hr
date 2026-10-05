@@ -147,6 +147,12 @@ module (`race-db`, `replication`, `schema-migration`, `ranking`, ...).
 server, and drives headless Chromium through Playwright. Run
 `npx playwright install chromium` once. CI runs all of the above.
 
+`race-day-ui` is the race-day walkthrough on three laptops: a Timing press
+reaching the Binnenscherm on another laptop, queue moves, a new runner with
+labels, Beheer › Systeem, the leader killed mid-lap, a TV switching laptops, and
+the dead laptop rejoining. Every step has a time budget and fails when it gets
+slower; the times print at the end and land in the CI job summary.
+
 
 `tests/raft-sim.test.ts` runs the real `server/raft.ts` for hundreds of seeds on a fake clock and network with crashes, sleeping laptops, one-way and full partitions, lost, late and duplicated messages, and clock jumps, and checks after every step: one leader per term, terms never go back, one vote per term, no committed entry lost, no lap counted twice. It then heals everything and checks the group recovers by itself. A failure prints its seed; `RAFT_SIM_SEED=<seed> npm run test:sim` replays it exactly with the whole trace, and `RAFT_SIM_SEEDS=10000` searches further. The simulated log uses the same append rules as SQLite (`server/db/append-rules.ts`).
 
