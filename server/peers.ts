@@ -4,7 +4,8 @@ import { APP_VERSION, readPositiveInt } from './env.js';
 import { hostInfo } from './host.js';
 
 const configuredSelfUrl = normalizeUrl(process.env.CLUSTER_SELF_URL);
-const REQUEST_TIMEOUT_MS = readPositiveInt(process.env.CLUSTER_REQUEST_TIMEOUT_MS, 1_000);
+/** How long another laptop may take to answer, connecting included. */
+export const PEER_REQUEST_TIMEOUT_MS = readPositiveInt(process.env.CLUSTER_REQUEST_TIMEOUT_MS, 1_000);
 
 /** Tests cut a laptop off from the others to simulate a broken cable. */
 let isolated = false;
@@ -29,18 +30,24 @@ export function peerFetch(
   } = {}
 ): Promise<globalThis.Response> {
   if (isolated) return Promise.reject(new Error('isolated for a test'));
-  const timeout = AbortSignal.timeout(init.timeoutMs ?? REQUEST_TIMEOUT_MS);
+  const timeout = AbortSignal.timeout(init.timeoutMs ?? PEER_REQUEST_TIMEOUT_MS);
   return fetch(url, {
     method: init.method ?? 'GET',
-    headers: {
-      'content-type': 'application/json',
-      'x-apolloon-app-version': APP_VERSION,
-      'x-apolloon-schema-version': String(DATABASE_SCHEMA_VERSION),
-      ...init.headers,
-    },
+    headers: { 'content-type': 'application/json', ...versionHeaders(), ...init.headers },
     body: init.body === undefined ? undefined : JSON.stringify(init.body),
     signal: init.signal ? AbortSignal.any([timeout, init.signal]) : timeout,
   });
+}
+
+/** Sent with every request and peer socket, so laptops on another version are refused early. */
+export function versionHeaders(): Record<string, string> {
+  return { 'x-apolloon-app-version': APP_VERSION, 'x-apolloon-schema-version': String(DATABASE_SCHEMA_VERSION) };
+}
+
+/** Why a laptop sending these version headers is refused, or null when it runs this version. */
+export function versionRefusal(appVersion: string | undefined, schemaVersion: string | undefined): string | null {
+  if (appVersion === APP_VERSION && Number(schemaVersion) === DATABASE_SCHEMA_VERSION) return null;
+  return versionMismatchMessage(appVersion || 'onbekend');
 }
 
 const peerErrorSchema = z.object({

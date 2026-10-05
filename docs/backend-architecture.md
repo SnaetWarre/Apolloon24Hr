@@ -19,11 +19,12 @@ server/index.ts
   |   server/db.ts ----------- SQLite + replication log
   |
   |-- server/raft.ts ---------- leader election, log replication, majority commit
-  |-- server/consensus.ts ----- runs raft.ts on SQLite, HTTP, and real timers
+  |-- server/consensus.ts ----- runs raft.ts on SQLite, peer sockets, and real timers
   |-- server/cluster.ts ------- peer endpoints, joining, forwarding writes, status
   |-- server/discovery.ts ----- UDP announcements: finding laptops on the LAN
   |     |
-  |     | HTTP: /api/cluster/append, /vote, /snapshot, /members
+  |     | WebSocket /api/cluster/peer: appends, votes
+  |     | HTTP: /api/cluster/snapshot, /members, /api/time
   |     v
   |   the other Electron laptops
   |
@@ -122,8 +123,9 @@ replication_log
 
 Raft among the laptops in `cluster_members`. `raft.ts` holds the algorithm
 and receives its storage, network, clock, timers, and randomness;
-`consensus.ts` passes the SQLite log, HTTP, and real timers, and the
-simulation tests pass fakes.
+`consensus.ts` passes the SQLite log, a WebSocket per other laptop for
+appends and votes (`peer-socket.ts`), HTTP for full copies and the clock,
+and real timers; the simulation tests pass fakes.
 
 - Terms and this laptop's vote are host-local settings, so a laptop never
   votes twice in a term, also across restarts. Log entries carry the term
