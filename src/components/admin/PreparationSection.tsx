@@ -1,6 +1,7 @@
 import React from 'react';
 import { useAppActions } from '../../app/index';
 import { buildEventReadiness, readinessSummary, type ReadinessCheck } from '../../lib/readiness';
+import { REGISTRATION_FILE_TYPES, readRegistrationFile, type RegistrationFile } from '../../lib/registrationFile';
 import type { ClusterStatus } from '../../types';
 import { AdminNoticeBanner, useAdminAction } from './AdminNotice';
 
@@ -86,8 +87,8 @@ function sortByLevel(checks: ReadinessCheck[]): ReadinessCheck[] {
 }
 
 function ImportPanel() {
-  const { importRunnersCsv } = useAppActions();
-  const [csvText, setCsvText] = React.useState('');
+  const { importRunners } = useAppActions();
+  const [registrationFile, setRegistrationFile] = React.useState<RegistrationFile | null>(null);
   const [fileName, setFileName] = React.useState('');
   const { pending, notice, setNotice, run } = useAdminAction();
 
@@ -96,32 +97,34 @@ function ImportPanel() {
     if (!file) return;
     setNotice(null);
     setFileName(file.name);
-    setCsvText(await file.text());
+    setRegistrationFile(await readRegistrationFile(file));
   }
 
   return (
     <section className="panel">
       <h2>Inschrijvingen importeren</h2>
       <p className="panel-copy">
-        Kies de CSV-export van het inschrijvingsformulier. Nieuwe lopers komen in de databank en verschijnen op het bord
-        zodra je ze aanmeldt in Wachtrij. Het rijnummer wordt het lopersnummer en alle antwoorden komen in het profiel.
+        Kies het Excel-bestand of de CSV-export van het inschrijvingsformulier. Nieuwe lopers komen in de databank en
+        verschijnen op het bord zodra je ze aanmeldt in Wachtrij. Het rijnummer wordt het lopersnummer en alle
+        antwoorden komen in het profiel.
       </p>
       <div className="file-import-row">
         <label className="file-picker">
-          <input type="file" accept=".csv,text/csv" onChange={onFileChange} />
-          <span>CSV-bestand kiezen</span>
+          <input type="file" accept={REGISTRATION_FILE_TYPES} onChange={onFileChange} />
+          <span>Bestand kiezen</span>
         </label>
         <span className="file-name">{fileName || 'Geen bestand gekozen'}</span>
         <button
           className="btn btn--primary btn--fixed"
-          onClick={() =>
-            void run(
-              () => importRunnersCsv(csvText),
-              (summary) => summary,
-              'Import mislukt'
-            )
-          }
-          disabled={!csvText.trim() || pending}
+          onClick={() => {
+            if (registrationFile)
+              void run(
+                () => importRunners(registrationFile),
+                (summary) => summary,
+                'Import mislukt'
+              );
+          }}
+          disabled={!registrationFile || pending}
         >
           {pending ? 'Importeren...' : 'Importeren'}
         </button>

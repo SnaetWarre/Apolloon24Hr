@@ -215,7 +215,6 @@ export function RunnerAddModal({
   const { addRunner } = useAppActions();
   const [runnerNumber, setRunnerNumber] = React.useState('');
   const [name, setName] = React.useState('');
-  const [targetLaps, setTargetLaps] = React.useState('');
   const [historicalAvgMinutes, setHistoricalAvgMinutes] = React.useState('');
   const [historicalAvgSeconds, setHistoricalAvgSeconds] = React.useState('');
   const [historicalBestMinutes, setHistoricalBestMinutes] = React.useState('');
@@ -239,7 +238,6 @@ export function RunnerAddModal({
       [
         runnerNumber,
         name,
-        targetLaps,
         notes,
         phone,
         email,
@@ -266,7 +264,7 @@ export function RunnerAddModal({
   async function save() {
     if (saveBusyRef.current) return;
     const cleanName = name.trim();
-    const validationError = runnerFormError(name, targetLaps);
+    const validationError = runnerFormError(name);
     if (validationError) {
       setError(validationError);
       return;
@@ -279,7 +277,6 @@ export function RunnerAddModal({
       await addRunner({
         runnerNumber: runnerNumber.trim() || null,
         name: cleanName,
-        targetLaps: targetLaps ? Number(targetLaps) : null,
         historicalAvgMs: minuteSecondInputToMs(historicalAvgMinutes, historicalAvgSeconds),
         historicalBestMs: minuteSecondInputToMs(historicalBestMinutes, historicalBestSeconds),
         registrationSource: 'manual',
@@ -389,19 +386,9 @@ export function RunnerAddModal({
 
         <details className="runner-extra-details">
           <summary className="disclosure">
-            Extra gegevens <span>Doel, historische tijden en notities</span>
+            Extra gegevens <span>Historische tijden en notities</span>
           </summary>
           <div className="form-grid">
-            <label>
-              Doel (rondes)
-              <input
-                className="input"
-                type="number"
-                min="0"
-                value={targetLaps}
-                onChange={(event) => setTargetLaps(event.target.value)}
-              />
-            </label>
             <label>
               Historisch gemiddelde
               <div className="duration-input">

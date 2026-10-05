@@ -3,6 +3,7 @@ import { TRPCError, initTRPC } from '@trpc/server';
 import { z } from 'zod';
 import {
   importCsvSchema,
+  importXlsxSchema,
   labelImageUploadSchema,
   labelInputSchema,
   labelPatchSchema,
@@ -78,7 +79,7 @@ import {
   updateRunnerStatus,
   updateWaitingOrder,
 } from './db.js';
-import { CsvImportError, importRunnersFromCsv } from './runner-import.js';
+import { CsvImportError, csvFromXlsx, importRunnersFromCsv } from './runner-import.js';
 
 /**
  * A write another laptop passed on is `forwarded` and carries that laptop's
@@ -282,6 +283,15 @@ const applyRestore = write(
   }
 );
 
+const importCsv = write((input: z.infer<typeof importCsvSchema>) => {
+  try {
+    return importRunnersFromCsv(input.csvText);
+  } catch (error) {
+    if (error instanceof CsvImportError) fail('BAD_REQUEST', error.message);
+    throw error;
+  }
+});
+
 export const appRouter = t.router({
   live: t.router({
     /** The data revision now and after every committed change, over the WebSocket. */
@@ -375,16 +385,18 @@ export const appRouter = t.router({
     unhide: t.procedure
       .input(runnerIdSchema)
       .mutation(write((input) => unhideRunnerInQueue(input.id) ?? fail('NOT_FOUND', 'Loper niet gevonden'))),
-    importCsv: t.procedure.input(importCsvSchema).mutation(
-      write((input) => {
-        try {
-          return importRunnersFromCsv(input.csvText);
-        } catch (error) {
-          if (error instanceof CsvImportError) fail('BAD_REQUEST', error.message);
-          throw error;
-        }
-      })
-    ),
+    importCsv: t.procedure.input(importCsvSchema).mutation(importCsv),
+    // Read here, then imported as CSV: the write itself must not wait, and the leader gets plain text.
+    importXlsx: t.procedure.input(importXlsxSchema).mutation(async ({ input, ctx }) => {
+      let csvText: string;
+      try {
+        csvText = await csvFromXlsx(Buffer.from(input.dataBase64, 'base64'));
+      } catch (error) {
+        if (error instanceof CsvImportError) fail('BAD_REQUEST', error.message);
+        throw error;
+      }
+      return importCsv({ input: { csvText }, path: 'runners.importCsv', ctx });
+    }),
   }),
 
   labels: t.router({

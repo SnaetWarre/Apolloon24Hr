@@ -1,8 +1,9 @@
 import Papa from 'papaparse';
+import { readSheet } from 'read-excel-file/node';
 import { type ImportSummary, type RunnerInput, type RunnerRegistration } from '../shared/schemas.js';
 import { upsertRunnerFromImport } from './db.js';
 
-/** Thrown for a CSV that cannot be read at all, as opposed to individual bad rows. */
+/** Thrown for a file that cannot be read at all, as opposed to individual bad rows. */
 export class CsvImportError extends Error {}
 
 const IGNORED_LABEL_VALUES = new Set(['nee', 'neen', 'geen', 'n/a', 'na', 'none', '-', 'ja']);
@@ -22,13 +23,6 @@ function text(value: unknown): string {
 
 function parseDecimal(value: string): number {
   return Number(value.replace(',', '.'));
-}
-
-function parsePositiveInt(value: unknown): number | null {
-  const raw = text(value);
-  if (!raw) return null;
-  const n = parseDecimal(raw);
-  return Number.isFinite(n) ? Math.max(0, Math.round(n)) : null;
 }
 
 /** Accepts `ss`, `mm:ss`, or `hh:mm:ss`, with a comma or dot as decimal separator. */
@@ -90,6 +84,7 @@ function registrationFromRow(row: Record<string, unknown>): RunnerRegistration {
     flexibility: formValue(row, 'Hoe flexibel ben jij'),
     remarks: formValue(row, 'Nog iets dat wij best kunnen weten'),
     categories: splitFormChoices(formValue(row, 'Behoor je tot')),
+    fastestLap: formValue(row, 'Wat was de tijd van jouw snelste'),
   };
 }
 
@@ -115,10 +110,38 @@ function runnerInputFromRow(
       columnValue(row, ['team', 'speedteam']),
       columnValue(row, ['jaar', 'groep']),
     ]),
-    targetLaps: parsePositiveInt(columnValue(row, ['target_laps', 'doelstelling', 'target'])),
     historicalAvgMs: parseDurationMs(columnValue(row, ['historical_avg', 'gemiddelde', 'avg', 'average'])),
     historicalBestMs: parseDurationMs(columnValue(row, ['historical_best', 'snelste', 'best', 'fastest'])),
   };
+}
+
+/** Excel keeps the clock time without a time zone; the library hands it over as that time in UTC. */
+function excelDateText(date: Date): string {
+  const pad = (value: number) => String(value).padStart(2, '0');
+  const time = `${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())}`;
+  // A cell holding only a time, such as a lap time typed as 1:20.
+  if (date.getUTCFullYear() < 1900) return time;
+  return `${pad(date.getUTCDate())}/${pad(date.getUTCMonth() + 1)}/${date.getUTCFullYear()} ${time}`;
+}
+
+function cellText(value: unknown): string {
+  if (value === null || value === undefined) return '';
+  return value instanceof Date ? excelDateText(value) : String(value);
+}
+
+/**
+ * The first sheet of an .xlsx, such as the form's response sheet, as CSV text,
+ * so an Excel file takes exactly the same import as a CSV export.
+ */
+export async function csvFromXlsx(file: Buffer): Promise<string> {
+  let rows: unknown[][];
+  try {
+    rows = await readSheet(file);
+  } catch {
+    throw new CsvImportError('Het Excel-bestand kon niet gelezen worden.');
+  }
+  if (!rows.length) throw new CsvImportError('Het Excel-bestand is leeg.');
+  return Papa.unparse(rows.map((row) => row.map(cellText)));
 }
 
 /**
@@ -150,21 +173,27 @@ export function importRunnersFromCsv(csvText: string): ImportSummary {
   for (const [index, row] of parsed.data.entries()) {
     // Spreadsheet row number: the header is row 1.
     const rowNumber = index + 2;
+    // A row left blank in the sheet, such as a formatted row under the answers.
+    if (Object.values(row).every((value) => !text(value))) continue;
     const registration = formExport ? registrationFromRow(row) : null;
     const runnerNumber =
       text(columnValue(row, ['runner_number', 'lopersnummer', 'nummer', 'number', 'bib'])) ||
       (formExport ? String(rowNumber) : '');
     const name = text(columnValue(row, ['name', 'naam', 'runner_name', 'loper', 'voornaam_+_naam']));
 
-    if (!runnerNumber || !name || (registration && !registration.email)) {
+    // Form answers are typed by hand: anything goes, as long as there is a name.
+    if (!runnerNumber || !name) {
       summary.skipped += 1;
-      summary.errors.push(`Rij ${rowNumber}: lopersnummer, naam en bij formulierexport e-mailadres zijn verplicht`);
+      summary.errors.push(`Rij ${rowNumber}: ${formExport ? 'naam' : 'lopersnummer en naam'} ontbreekt`);
       continue;
     }
 
     try {
       const result = upsertRunnerFromImport(runnerInputFromRow(row, runnerNumber, name, registration));
       summary[result.action] += 1;
+      if (result.numberTaken) {
+        summary.errors.push(`Rij ${rowNumber}: nummer ${runnerNumber} is al in gebruik, ${name} kreeg geen nummer`);
+      }
     } catch (error) {
       summary.skipped += 1;
       summary.errors.push(`Rij ${rowNumber}: ${error instanceof Error ? error.message : 'import mislukt'}`);

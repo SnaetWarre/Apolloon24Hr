@@ -38,6 +38,46 @@ function findRunnerIdByEmail(email: string): string | null {
   );
 }
 
+function findRunnerIdBySubmission(submittedAt: string): string | null {
+  return (
+    one<{ id: string }>("SELECT id FROM runners WHERE json_extract(registration_json, '$.submittedAt') = ? LIMIT 1", [
+      submittedAt,
+    ])?.id ?? null
+  );
+}
+
+/** The form's e-mail is typed by hand; answers such as `///` are no address and identify nobody. */
+function usableEmail(email: string): string | null {
+  const trimmed = email.trim();
+  return /^[^\s@]+@[^\s@]+$/.test(trimmed) ? trimmed : null;
+}
+
+function findRunnerIdByNumberAndName(runnerNumber: string, name: string): string | null {
+  return (
+    one<{ id: string }>('SELECT id FROM runners WHERE runner_number = ? AND name = ?', [runnerNumber, name.trim()])
+      ?.id ?? null
+  );
+}
+
+/**
+ * The runner an imported row was imported as before. A form answer is known
+ * by its e-mail, else by its submission time. A CSV export and the Excel file
+ * write that time differently, so last comes the same sheet row and name.
+ * A plain runner list is known by its runner number.
+ */
+function findImportedRunnerId(input: RunnerInput, runnerNumber: string | undefined): string | null {
+  const registration = input.registration;
+  if (!registration) return runnerNumber ? findRunnerIdByNumber(runnerNumber) : null;
+  const email = usableEmail(registration.email);
+  const submittedAt = registration.submittedAt.trim();
+  return (
+    (email && findRunnerIdByEmail(email)) ||
+    (submittedAt && findRunnerIdBySubmission(submittedAt)) ||
+    (runnerNumber && findRunnerIdByNumberAndName(runnerNumber, input.name)) ||
+    null
+  );
+}
+
 const EMPTY_REGISTRATION: RunnerRegistration = {
   submittedAt: '',
   email: '',
@@ -51,6 +91,7 @@ const EMPTY_REGISTRATION: RunnerRegistration = {
   flexibility: '',
   remarks: '',
   categories: [],
+  fastestLap: '',
 };
 
 /**
@@ -210,27 +251,40 @@ export function updateRunner(id: string, fields: RunnerPatch): Runner | null {
  * number. A form re-import keeps the operator's number, notes, and labels,
  * because the row's position in the sheet can change between exports.
  */
+/**
+ * A form answer updates the runner it was imported as before and keeps what
+ * operators changed since (number, notes, labels). A new runner whose number
+ * is already taken is imported without one, so `numberTaken` asks the
+ * operator to pick one.
+ */
 export function upsertRunnerFromImport(input: RunnerInput): {
   action: 'created' | 'updated';
   runner: Runner;
+  numberTaken: boolean;
 } {
   const runnerNumber = input.runnerNumber?.trim();
-  const email = input.registration?.email.trim();
-  const existingId = email ? findRunnerIdByEmail(email) : runnerNumber ? findRunnerIdByNumber(runnerNumber) : null;
+  const existingId = findImportedRunnerId(input, runnerNumber);
   if (existingId) {
     const { status: _status, statusSince: _statusSince, ...profileFields } = input;
-    if (email) {
+    if (input.registration) {
       delete profileFields.runnerNumber;
       delete profileFields.notes;
       delete profileFields.labels;
     }
     const runner = updateRunner(existingId, profileFields);
     if (!runner) throw new Error('runner update failed');
-    return { action: 'updated', runner };
+    return { action: 'updated', runner, numberTaken: false };
   }
+  const numberTaken = Boolean(runnerNumber && findRunnerIdByNumber(runnerNumber));
   return {
     action: 'created',
-    runner: insertRunner({ ...input, status: 'registered', registrationSource: 'import' }),
+    runner: insertRunner({
+      ...input,
+      runnerNumber: numberTaken ? null : input.runnerNumber,
+      status: 'registered',
+      registrationSource: 'import',
+    }),
+    numberTaken,
   };
 }
 

@@ -21,7 +21,7 @@ function lap(id: string, finishedAt: number, durationMs: number, runnerNumber: s
   };
 }
 
-const runner = { id: 'runner-1', targetLaps: 12, historicalAvgMs: 80_000, historicalBestMs: null } as Runner;
+const runner = { id: 'runner-1', historicalAvgMs: 80_000, historicalBestMs: null } as Runner;
 
 const event: RaceEvent = {
   id: 'event-1',
@@ -47,8 +47,8 @@ test('the Excel export lists laps oldest first in Belgian time, with lap times E
   assert.equal(first[1], 'A7');
   assert.equal(second[1], 113);
   assert.deepEqual(first[4], { value: 77_125 / 86_400_000, format: '[m]:ss.000' });
-  assert.equal(first[6], 12);
-  assert.equal(first[8], null);
+  assert.deepEqual(first[6], { value: 80_000 / 86_400_000, format: '[m]:ss.000' });
+  assert.equal(first[7], null);
 
   assert.equal(events.sheet, 'Gebeurtenissen');
   assert.equal((events.data[1][0] as Date).getUTCHours(), 21);

@@ -21,7 +21,6 @@ const LAP_COLUMNS = [
   'lap_time_ms',
   'lap_time_readable',
   'labels',
-  'target_laps',
   'historical_avg_ms',
   'historical_best_ms',
   'source',
@@ -29,7 +28,7 @@ const LAP_COLUMNS = [
 
 const EVENT_COLUMNS = ['timestamp', 'type', 'message', 'runner_id', 'runner_number', 'runner_name', 'created_at'];
 
-/** Laps oldest first, with the runner's targets for spreadsheet analysis. */
+/** Laps oldest first, with the runner's historical times for spreadsheet analysis. */
 function lapRows(): CsvRow[] {
   const runnersById = new Map(getAllRunners().map((runner) => [runner.id, runner]));
   return getAllLaps()
@@ -44,7 +43,6 @@ function lapRows(): CsvRow[] {
         lap_time_ms: lap.durationMs,
         lap_time_readable: formatDurationMs(lap.durationMs),
         labels: lap.labels.map((label) => label.name).join(', '),
-        target_laps: runner?.targetLaps ?? '',
         historical_avg_ms: runner?.historicalAvgMs ?? '',
         historical_best_ms: runner?.historicalBestMs ?? '',
         source: lap.source,

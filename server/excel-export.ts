@@ -42,7 +42,6 @@ export function excelSheets(laps: LapRecord[], runners: Runner[], events: RaceEv
         lap.lapNumber,
         excelDuration(lap.durationMs),
         lap.labels.map((label) => label.name).join(', '),
-        runner?.targetLaps ?? null,
         excelDuration(runner?.historicalAvgMs),
         excelDuration(runner?.historicalBestMs),
       ];
@@ -66,7 +65,6 @@ export function excelSheets(laps: LapRecord[], runners: Runner[], events: RaceEv
           'Ronde',
           'Rondetijd',
           'Labels',
-          'Doel rondes',
           'Historisch gemiddelde',
           'Historisch snelste',
         ]),
@@ -81,7 +79,6 @@ export function excelSheets(laps: LapRecord[], runners: Runner[], events: RaceEv
         { width: 8 },
         { width: 11 },
         { width: 32 },
-        { width: 12 },
         { width: 21 },
         { width: 18 },
       ],

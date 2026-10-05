@@ -224,7 +224,7 @@
 
 .label-admin-row {
   display: grid;
-  grid-template-columns: minmax(160px, 1fr) 200px 96px auto auto;
+  grid-template-columns: minmax(160px, 1fr) 200px auto;
   gap: var(--space-2);
   align-items: end;
   padding: 8px 0;
@@ -236,20 +236,15 @@
   align-self: center;
 }
 
-.label-target-editor {
+.label-logo-editor {
   display: grid;
   gap: 4px;
   color: var(--ink-3);
   font-size: 12px;
 }
 
-.label-target-editor .input {
-  width: 100%;
-  min-height: var(--control-h-sm);
-}
-
 /* Column captions only on the first row of each group. */
-.label-admin-row + .label-admin-row .label-target-editor__caption {
+.label-admin-row + .label-admin-row .label-logo-editor__caption {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -260,7 +255,7 @@
 
 .label-create-row {
   display: grid;
-  grid-template-columns: minmax(140px, 1.3fr) 44px minmax(120px, 1fr) minmax(140px, 1.3fr) 84px auto;
+  grid-template-columns: minmax(140px, 1.3fr) 44px minmax(120px, 1fr) minmax(140px, 1.3fr) auto;
   align-items: center;
 }
 
