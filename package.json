@@ -40,6 +40,7 @@
     "test:sim": "node --import tsx --test tests/raft-sim.test.ts",
     "rehearse": "node scripts/rehearse.mjs",
     "bench:network": "node scripts/bench-network.mjs",
+    "bench:failover": "node scripts/bench-failover.mjs",
     "check": "npm run typecheck && npm run lint && npm run format:check && npm run client:build",
     "build": "npm run typecheck:client && npm run client:build && npm run server:build",
     "electron:dev": "npm run electron:compile && node scripts/ensure-lan-dev-firewall.mjs && concurrently -k \"npm run dev:seeded\" \"wait-on http://localhost:5173 && electron .\"",

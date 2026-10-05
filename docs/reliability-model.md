@@ -50,8 +50,14 @@ are therefore not enough: then losing either one stops saving.
   group never confirmed, it backs up its database (`pre-resync`) and installs
   a full copy from the leader.
 - Browsers (TVs, extra screens) remember the laptops and reopen the same page
-  on another laptop when theirs stays unreachable for about eight seconds. The
-  Electron app always stays on its own laptop.
+  on another laptop when theirs dies. A browser notices within 2.5 seconds
+  that its laptop stopped answering, then asks the other laptops: once they
+  have a leader and say they lost that laptop too, and it has still not
+  answered two seconds after the browser lost it, the browser moves. A laptop
+  that is back within two seconds never moves a screen, and in
+  `npm run bench:failover` freezes of up to three seconds did not either. When the others cannot
+  say (too few laptops left, or they still reach it), the browser moves after
+  eight seconds. The Electron app always stays on its own laptop.
 - Every laptop announces itself on the LAN every two seconds (UDP broadcast,
   port 45737). A laptop on its own lists the laptops it can join, so linking
   is one click. Laptops of a group use the announcements to find each other
@@ -176,6 +182,10 @@ start Apolloon, and restore it there.
 - `npm run rehearse -- --hardware` does it on the three event laptops over
   SSH, with firewall rules for cables, also between only two of them; see
   `docs/rehearse-hardware.md`.
+- `npm run bench:failover` opens a TV and a browser operator on one of three
+  real servers, crashes or freezes that laptop, and measures how long until
+  each screen shows its page from another laptop; it also checks that
+  freezes of one to three seconds move no screen.
 
 ## Rehearsal Before The Event
 
@@ -193,7 +203,8 @@ people who will sit at them watching.
    de wijzigingen"). Within a few seconds the others show "Eén laptop
    onbereikbaar". Press the timing key during those seconds: the lap still
    counts, with the time of the press.
-5. Check that the TV reopened on another laptop within about ten seconds.
+5. Check that the TV reopened on another laptop within about five seconds
+   (up to ten when the laptop that leads lost its power or cable).
 6. Keep working on the queue desk and the warm-up post; everything saves.
 7. Start the laptop again. It shows the same runners and laps within seconds,
    and the status returns to "Alles veilig".

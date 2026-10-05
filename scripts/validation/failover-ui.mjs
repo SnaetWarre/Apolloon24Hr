@@ -1,5 +1,5 @@
 // Three laptops: APOLLOON_TEST_URL (seeded, will disappear) and the comma-separated APOLLOON_OTHER_URLS.
-// APOLLOON_TEST_PID is the process to stop. Started by scripts/validation/run.mjs.
+// APOLLOON_TEST_PID is the process to freeze. Started by scripts/validation/run.mjs.
 import assert from 'node:assert/strict';
 
 const firstUrl = process.env.APOLLOON_TEST_URL;
@@ -54,7 +54,8 @@ try {
     otherUrls
   );
 
-  process.kill(firstPid, 'SIGKILL');
+  // Frozen rather than stopped: like a power cut or a pulled cable, nothing answers, not even "nobody here".
+  process.kill(firstPid, 'SIGSTOP');
   // The two laptops left are a majority: they choose a new main laptop by themselves and say one is missing.
   await groupState.getByText('Eén laptop onbereikbaar').waitFor({ timeout: 15_000 });
   console.log('PASS the other laptops carry on by themselves and say that one laptop is missing');
@@ -69,7 +70,7 @@ try {
 
   // The display waits a few seconds for its own laptop to return, then reopens elsewhere.
   await tv.waitForURL((url) => otherUrls.includes(url.origin) && url.pathname === '/display/outside', {
-    timeout: 25_000,
+    timeout: 10_000,
   });
   await tv.locator('#root > *').first().waitFor();
   console.log('PASS a browser display reopens on another laptop when its laptop disappears');
@@ -78,4 +79,6 @@ try {
   console.log('PASS the Electron app never switches away from its own laptop');
 } finally {
   await browser.close();
+  // Thawed, so run.mjs can stop it.
+  process.kill(firstPid, 'SIGCONT');
 }
