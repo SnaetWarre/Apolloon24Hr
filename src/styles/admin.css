@@ -970,6 +970,24 @@ details.host-hint > summary {
   color: var(--ink);
 }
 
+/* Download progress: a thin bar in the brand colour, like the splash. */
+.update-progress {
+  display: block;
+  height: 4px;
+  margin: 4px 0 2px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--brand) 18%, transparent);
+}
+
+.update-progress > span {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  background: var(--brand);
+  transition: width var(--dur-2) var(--ease-out);
+}
+
 .update-notice__actions {
   display: flex;
   flex-wrap: wrap;

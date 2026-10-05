@@ -146,16 +146,17 @@ function UpdateRow() {
   const { race } = useAppData(selectRaceClockData);
   const { status } = useDesktopUpdate();
   const raceRunning = Boolean(race.raceStartedAt && !race.raceFinishedAt);
-  if (status?.state !== 'available' || raceRunning) return null;
+  if (!status || !('update' in status) || raceRunning) return null;
+  const label = `Update ${status.update.version} ${status.state === 'ready' ? 'klaar' : 'beschikbaar'}`;
   return (
     <Link
       to="/admin"
       search={{ section: 'system' }}
       className="sidebar-row sidebar-row--button sidebar-update"
-      title={`Apolloon ${status.update.version} is beschikbaar. Open Beheer › Systeem & herstel.`}
+      title={`${label}. Open Beheer › Systeem & herstel.`}
     >
       <Icon name="download" size={14} />
-      <span className="sidebar-row__label">Update {status.update.version} beschikbaar</span>
+      <span className="sidebar-row__label">{label}</span>
     </Link>
   );
 }

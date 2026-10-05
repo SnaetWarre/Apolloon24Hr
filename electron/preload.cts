@@ -18,6 +18,10 @@ contextBridge.exposeInMainWorld('apolloonDesktop', {
   update: {
     getStatus: (): Promise<UpdateStatus> => ipcRenderer.invoke('apolloon:update-status'),
     check: (): Promise<UpdateStatus> => ipcRenderer.invoke('apolloon:check-update'),
+    /** Backup, install the downloaded update and restart; resolves to the reason when it does not. */
+    install: (): Promise<string | null> => ipcRenderer.invoke('apolloon:install-update'),
+    /** How the last update from the app went, once after the restart; null otherwise. */
+    lastInstall: (): Promise<{ version: string; ok: boolean } | null> => ipcRenderer.invoke('apolloon:last-install'),
     /** Opens a page or installer of the releases repository in the browser. */
     open: (url: string) => ipcRenderer.invoke('apolloon:open-release', url),
     onChange: (listener: (status: UpdateStatus) => void) => {

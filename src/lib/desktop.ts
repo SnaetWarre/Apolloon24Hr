@@ -15,8 +15,11 @@ export type DesktopUpdate = {
 export type DesktopUpdateStatus =
   | { state: 'checking'; checkedAt: number | null }
   | { state: 'current'; checkedAt: number }
-  | { state: 'available'; checkedAt: number; update: DesktopUpdate }
-  | { state: 'unreachable'; checkedAt: number };
+  | { state: 'unreachable'; checkedAt: number }
+  | { state: 'available'; checkedAt: number; update: DesktopUpdate; problem: string | null }
+  | { state: 'downloading'; checkedAt: number; update: DesktopUpdate; percent: number }
+  | { state: 'ready'; checkedAt: number; update: DesktopUpdate }
+  | { state: 'installing'; checkedAt: number; update: DesktopUpdate };
 
 export type DesktopDiagnostics = {
   appVersion: string;
@@ -36,6 +39,8 @@ export type DesktopBridge = {
   update: {
     getStatus: () => Promise<DesktopUpdateStatus>;
     check: () => Promise<DesktopUpdateStatus>;
+    install: () => Promise<string | null>;
+    lastInstall: () => Promise<{ version: string; ok: boolean } | null>;
     open: (url: string) => Promise<void>;
     onChange: (listener: (status: DesktopUpdateStatus) => void) => () => void;
   };

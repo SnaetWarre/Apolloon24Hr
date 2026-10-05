@@ -4,7 +4,7 @@
       "name": "timing",
       "ip": "192.168.1.11",
       "os": "linux",
-      "app": "/home/warre/Applications/Apolloon Telsysteem-4.2.0.AppImage"
+      "app": "/home/warre/Applications/Apolloon-Telsysteem-4.2.0.AppImage"
     },
     { "name": "desk", "ip": "192.168.1.12", "os": "windows", "ssh": "apolloon@192.168.1.12" },
     { "name": "warmup", "ip": "192.168.1.13", "os": "windows", "ssh": "apolloon@192.168.1.13" }
