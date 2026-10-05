@@ -1,4 +1,4 @@
-import React from 'react';
+import { useRouter, useRouterState } from '@tanstack/react-router';
 import { useAppData, useClusterStatus } from '../app/index';
 import { useArrivals } from '../lib/motion';
 import { buildEventReadiness, readinessSummary } from '../lib/readiness';
@@ -9,6 +9,7 @@ import { PreparationSection } from './admin/PreparationSection';
 import { PublicSection } from './admin/PublicSection';
 import { RunnersSection } from './admin/RunnersSection';
 import { SystemSection } from './admin/SystemSection';
+import { ADMIN_SECTIONS, isAdminSection, type AdminSection } from './adminSections';
 import { PageHeader } from './PageHeader';
 import { SectionNavigation } from './SectionNavigation';
 
@@ -20,19 +21,14 @@ const selectAdminData = ({ labels, runners, settings, temporaryTeams, host }: Li
   host,
 });
 
-type AdminSection = 'preparation' | 'runners' | 'labels' | 'public' | 'activity' | 'system';
-
-const ADMIN_SECTIONS: ReadonlyArray<{ id: AdminSection; label: string }> = [
-  { id: 'preparation', label: 'Voorbereiding' },
-  { id: 'runners', label: 'Lopers' },
-  { id: 'labels', label: 'Ploegen & labels' },
-  { id: 'public', label: 'Publiek' },
-  { id: 'activity', label: 'Activiteit' },
-  { id: 'system', label: 'Systeem & herstel' },
-];
-
 export function AdminView() {
-  const [activeSection, setActiveSection] = React.useState<AdminSection>('preparation');
+  // The tab is in the address (?section=system), so links can open Beheer on a given tab.
+  // useRouterState and useRouter rather than useSearch and useNavigate: those split the first download.
+  const requested = useRouterState({ select: (state) => state.location.search.section });
+  const activeSection: AdminSection = isAdminSection(requested) ? requested : 'preparation';
+  const router = useRouter();
+  const setActiveSection = (section: AdminSection) =>
+    void router.navigate({ to: '/admin', search: { section }, replace: true });
   const { labels, runners, settings, temporaryTeams, host } = useAppData(selectAdminData);
   const { cluster, error: clusterError } = useClusterStatus();
   const needsAttention = readinessSummary(buildEventReadiness(cluster)) !== 'ready';

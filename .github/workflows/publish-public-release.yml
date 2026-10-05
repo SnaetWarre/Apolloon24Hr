@@ -1,0 +1,61 @@
+name: Publish public release
+
+# This repository is private, so the desktop app cannot see its releases. Once a draft
+# release is published, its installers and notes are copied to the public releases
+# repository, which the app checks for a newer version (electron/update-check.ts) and
+# where anyone can download the installer without a GitHub account.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published version tag to copy again, such as v4.2.0
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: public-release-${{ inputs.tag || github.event.release.tag_name }}
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: ${{ inputs.tag || github.event.release.tag_name }}
+  PUBLIC_REPO: SnaetWarre/apolloon-releases
+
+jobs:
+  publish:
+    if: ${{ !github.event.release.prerelease }}
+    runs-on: ubuntu-26.04
+    # The token that may write to the public repository only exists in this environment.
+    environment: public-releases
+    steps:
+      - name: Download installers and notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir assets
+          gh release download "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --dir assets \
+            --pattern '*.exe' --pattern '*.AppImage' --pattern '*.dmg' --pattern '*.zip' --pattern 'SHA256SUMS.txt'
+          gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --json body --jq .body > notes.md
+          ls -l assets
+
+      - name: Publish in the public repository
+        env:
+          GH_TOKEN: ${{ secrets.PUBLIC_RELEASES_TOKEN }}
+        run: |
+          # The app reads "latest", so copying an older version again must not make it the latest.
+          newest=$( { gh release list --repo "${PUBLIC_REPO}" --limit 100 --json tagName --jq '.[].tagName'; echo "${RELEASE_TAG}"; } | sort -V | tail -n 1)
+          if [ "${newest}" = "${RELEASE_TAG}" ]; then latest=--latest; else latest=--latest=false; fi
+          if gh release view "${RELEASE_TAG}" --repo "${PUBLIC_REPO}" >/dev/null 2>&1; then
+            gh release edit "${RELEASE_TAG}" --repo "${PUBLIC_REPO}" --notes-file notes.md "${latest}"
+            gh release upload "${RELEASE_TAG}" assets/* --repo "${PUBLIC_REPO}" --clobber
+          else
+            gh release create "${RELEASE_TAG}" assets/* \
+              --repo "${PUBLIC_REPO}" \
+              --title "Apolloon Telsysteem ${RELEASE_TAG#v}" \
+              --notes-file notes.md \
+              "${latest}"
+          fi

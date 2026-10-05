@@ -1,10 +1,12 @@
+import React from 'react';
 import { LiveDot } from './LiveDot';
-import { Link } from '@tanstack/react-router';
+import { Link, useNavigate } from '@tanstack/react-router';
 import { useAppData, useClusterStatus, useRaceHistory } from '../app/index';
 import { getNextWaitingRunner } from '../lib/runners';
 import { deriveSystemStatus } from '../lib/systemStatus';
 import { useCopyText } from '../lib/clipboard';
 import { useArrivals } from '../lib/motion';
+import { shouldShowWelcome, useWelcomeSkipped } from '../lib/welcome';
 import { formatClockTimeMs, formatDurationMs } from '../lib/time';
 import { Icon } from './Icon';
 import { LiveDuration, LiveElapsed } from './LiveTime';
@@ -12,11 +14,16 @@ import { PageHeader } from './PageHeader';
 import { RunnerName } from './RunnerName';
 import type { LiveAppSnapshot } from '../types';
 
+// Only a laptop without runners shows it, so it stays out of the first download.
+const WelcomeView = React.lazy(() => import('./WelcomeView').then((module) => ({ default: module.WelcomeView })));
+
 const selectOverviewData = ({ host, runners, race }: LiveAppSnapshot) => ({ host, runners, race });
 
 /** Overzicht: what is happening in the race right now, at a glance. */
 export function RolePicker() {
   const { host, runners, race } = useAppData(selectOverviewData);
+  const [welcomeSkipped, skipWelcome] = useWelcomeSkipped();
+  const navigate = useNavigate();
   const { laps: recentLaps, loading: lapsLoading } = useRaceHistory({ scope: 'recent', limit: 8 });
   const { cluster, error: clusterError } = useClusterStatus();
   const systemStatus = deriveSystemStatus(cluster, clusterError);
@@ -59,6 +66,22 @@ export function RolePicker() {
     recentLaps.map((lap) => lap.id),
     !lapsLoading
   );
+
+  if (
+    shouldShowWelcome({
+      runnerCount: runners.length,
+      raceStarted: Boolean(race.raceStartedAt),
+      skipped: welcomeSkipped,
+    })
+  )
+    return (
+      <React.Suspense fallback={null}>
+        <WelcomeView
+          onSkip={skipWelcome}
+          onOpenAdmin={(section) => void navigate({ to: '/admin', search: { section } })}
+        />
+      </React.Suspense>
+    );
 
   return (
     <>

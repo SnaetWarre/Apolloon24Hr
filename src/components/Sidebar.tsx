@@ -3,6 +3,7 @@ import { Link, useRouterState } from '@tanstack/react-router';
 import { useAppData, useClusterStatus } from '../app/index';
 import { useSidebarCollapsed } from '../app/sidebar';
 import { useCopyText } from '../lib/clipboard';
+import { useDesktopUpdate } from '../lib/desktop';
 import { deriveSystemStatus } from '../lib/systemStatus';
 import type { LiveAppSnapshot } from '../types';
 import { Icon, type IconName } from './Icon';
@@ -111,6 +112,7 @@ function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => 
       </nav>
       <div className="sidebar__footer">
         <SystemStatusRow />
+        <UpdateRow />
         <RaceClock />
         <HostAddress />
         <ThemeSwitch />
@@ -136,6 +138,25 @@ function RaceClock() {
         )}
       </span>
     </div>
+  );
+}
+
+/** A newer version, mentioned only while the race is not running: installing then is never right. */
+function UpdateRow() {
+  const { race } = useAppData(selectRaceClockData);
+  const { status } = useDesktopUpdate();
+  const raceRunning = Boolean(race.raceStartedAt && !race.raceFinishedAt);
+  if (status?.state !== 'available' || raceRunning) return null;
+  return (
+    <Link
+      to="/admin"
+      search={{ section: 'system' }}
+      className="sidebar-row sidebar-row--button sidebar-update"
+      title={`Apolloon ${status.update.version} is beschikbaar. Open Beheer › Systeem & herstel.`}
+    >
+      <Icon name="download" size={14} />
+      <span className="sidebar-row__label">Update {status.update.version} beschikbaar</span>
+    </Link>
   );
 }
 

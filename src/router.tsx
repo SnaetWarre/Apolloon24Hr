@@ -78,6 +78,10 @@ const routeTree = rootRoute.addChildren([
   createRoute({
     getParentRoute: () => rootRoute,
     path: '/admin',
+    // ?section=system opens Beheer on that tab, for links from the welcome screen and the sidebar.
+    // AdminView checks that it names a tab; importing that list here would split the first download.
+    validateSearch: (search: Record<string, unknown>): { section?: string } =>
+      typeof search.section === 'string' ? { section: search.section } : {},
     loader: prefetch(clusterStatus),
     component: lazyRouteComponent(() => import('./components/AdminView'), 'AdminView'),
     pendingComponent: pending('Beheer wordt geladen...'),

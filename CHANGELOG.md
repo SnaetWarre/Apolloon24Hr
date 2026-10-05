@@ -4,7 +4,27 @@ All notable changes to Apolloon Telsysteem will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- De desktop-app toont meteen een startvenster terwijl de databank opent, in
+  plaats van enkele seconden niets
+- Een laptop zonder lopers opent op een welkomstscherm: inschrijvingen
+  importeren op deze laptop, of in één klik koppelen aan een laptop die op het
+  netwerk gevonden is
+- Beheer › Systeem & herstel › Over deze installatie toont de versie en de
+  gegevensmap, opent de logmap en kopieert een diagnose om door te sturen
+- De desktop-app meldt een nieuwere versie, met het installatiebestand voor
+  die laptop. Installeren blijft een bewuste stap: alle laptops moeten dezelfde
+  versie hebben
+- Gepubliceerde versies staan ook in de publieke repository
+  `SnaetWarre/apolloon-releases`, zodat iedereen ze kan downloaden
+- Beheer opent op het gekozen onderdeel via het adres (`/admin?section=system`)
+
 ### Changed
+
+- Als de app niet kan starten, zegt ze in het Nederlands waarom (poort in
+  gebruik, volle schijf, beschadigde databank, …) en kan je opnieuw proberen of
+  de logmap openen, in plaats van een Engelse foutmelding en afsluiten
 
 - Schermen horen live wijzigingen via een tRPC-abonnement in plaats van
   Socket.IO, en zien binnen tien seconden dat de verbinding met hun laptop weg
