@@ -5,9 +5,11 @@ import { formatClockTimeMs } from '../../lib/time';
 import { useConfirm } from '../ConfirmDialog';
 import { NetworkSetupPanel } from '../NetworkSetupPanel';
 import type { BackupStatus, ClusterStatus, NearbyGroup, Runner } from '../../types';
+import { AboutPanel } from './AboutPanel';
 import { AdminNoticeBanner, useAdminAction } from './AdminNotice';
 import { RestorePanel } from './RestorePanel';
 import { formatFileSize, formatRelativeAge } from './adminFormat';
+import { countLabel, shortUrl, useJoinGroup } from './useJoinGroup';
 
 export function SystemSection({
   cluster,
@@ -45,6 +47,7 @@ export function SystemSection({
           </div>
         </div>
       </section>
+      <AboutPanel cluster={cluster} />
     </>
   );
 }
@@ -59,28 +62,16 @@ function ClusterPanel({
   runnerCount: number;
 }) {
   const confirm = useConfirm();
-  const { joinGroup, continueAlone } = useAppActions();
-  const { pending, notice, run } = useAdminAction();
+  const { continueAlone } = useAppActions();
+  const { pending: alonePending, notice: aloneNotice, run } = useAdminAction();
+  const { join: joinGroup, pending: joinPending, notice: joinNotice } = useJoinGroup(runnerCount);
   const [otherUrl, setOtherUrl] = React.useState('');
   const group = describeGroup(cluster);
+  const pending = alonePending || joinPending;
   const busy = pending || Boolean(cluster.busy);
 
   async function join(url: string, found?: NearbyGroup) {
-    if (!url || pending) return;
-    const confirmed = await confirm({
-      title: 'Deze laptop koppelen?',
-      message: `Deze laptop neemt alle gegevens van ${found ? `${shortUrl(found.url)} (${countLabel(found.runners, 'loper', 'lopers')})` : 'de andere laptops'} over en werkt daarna mee. Wat nu op deze laptop staat (${countLabel(runnerCount, 'loper', 'lopers')}), wordt eerst als backup bewaard.`,
-      confirmLabel: 'Koppelen',
-      tone: 'danger',
-    });
-    if (!confirmed) return;
-    const result = await run(
-      () => joinGroup(url),
-      ({ backupFile }) =>
-        backupFile ? `Gekoppeld. De vorige gegevens staan in de backup ${backupFile}.` : 'Gekoppeld.',
-      'Koppelen mislukt'
-    );
-    if (result) setOtherUrl('');
+    if (await joinGroup(url, found)) setOtherUrl('');
   }
 
   async function goOnAlone() {
@@ -210,20 +201,10 @@ function ClusterPanel({
           </p>
         </>
       )}
-      <div className="host-hint">
-        <strong>Deze versie:</strong> Apolloon {cluster.appVersion} · schema {cluster.schemaVersion}
-      </div>
-      <AdminNoticeBanner notice={notice} />
+      <AdminNoticeBanner notice={joinNotice} />
+      <AdminNoticeBanner notice={aloneNotice} />
     </section>
   );
-}
-
-function shortUrl(url: string): string {
-  return url.replace(/^https?:\/\//, '');
-}
-
-function countLabel(count: number, one: string, many: string): string {
-  return `${count} ${count === 1 ? one : many}`;
 }
 
 function BackupPanel({ backup }: { backup: BackupStatus }) {

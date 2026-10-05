@@ -54,6 +54,12 @@ Every host creates a verified SQLite backup every five minutes and keeps the lat
 
 **Backup terugzetten** in the same section puts every linked laptop back to one of this laptop's backups at once. The leader first keeps the current group state as a verified `pre-restore` backup; the result tells you which laptop holds it so you can undo the restore there. Beheer › Activiteit lists every change with the screen and address it came from, on every laptop, so the moment before a mistake is easy to find.
 
+### First start
+
+The desktop app shows a small window as soon as it is opened, while the local server opens the database. If it cannot start, it says why in Dutch (port already in use, disk full, damaged database, …) and offers **Opnieuw proberen** and **Logmap openen**.
+
+A laptop without runners opens on a welcome screen with the two ways to begin: import the registrations on this laptop, or link to a laptop the app found on the network. It goes away by itself once the laptop has runners.
+
 ### Desktop app on race day
 
 While the race runs, the desktop app keeps the screen on and the laptop awake, and asks before it closes: a closed or sleeping laptop drops out of the group. A page that crashes or freezes for ten seconds is reloaded by itself, and every screen shows a recovery screen instead of going blank; the error goes to `server.log` in the app data folder. The window reopens where it was.
@@ -185,6 +191,14 @@ npm run electron:build:win     Windows installer (on Windows)
 npm run electron:build:linux   Linux AppImage
 npm run electron:build:mac     macOS dmg and zip (on macOS)
 ```
+
+## Releases And Updates
+
+A version tag (`v4.3.0`) builds the installers into a draft release (`.github/workflows/release.yml`). Publishing that draft copies the installers, notes, and `SHA256SUMS.txt` to the public repository [SnaetWarre/apolloon-releases](https://github.com/SnaetWarre/apolloon-releases/releases) (`publish-public-release.yml`), because this repository is private. That workflow runs in the `public-releases` environment, whose `PUBLIC_RELEASES_TOKEN` may write to the public repository.
+
+The desktop app reads the latest release there a few seconds after it starts and every six hours. A newer version shows in Beheer › Systeem & herstel › Over deze installatie, with the installer for that operating system, and in the sidebar while the race is not running. Nothing installs by itself: all laptops must run the same version, so updating stays a deliberate step before the event. Without internet the check stays quiet. `APOLLOON_UPDATE_CHECK=0` turns it off.
+
+The same panel shows the version and data folder, opens the log folder, and copies a diagnosis (version, laptops, backups, the end of `server.log`) to paste into a message when asking for help.
 
 
 ## Exports

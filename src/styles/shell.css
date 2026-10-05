@@ -223,6 +223,23 @@
   color: var(--ink-3);
 }
 
+/* A newer version: brand-coloured, so it is noticed without looking like a problem. */
+.sidebar-update {
+  color: var(--brand-ink);
+  text-decoration: none;
+}
+
+.sidebar-update .icon {
+  order: -1;
+  margin-left: 0;
+  color: var(--brand-ink);
+}
+
+.sidebar-update:hover {
+  background: var(--brand-wash);
+  color: var(--brand-ink);
+}
+
 .system-status {
   display: flex;
   align-items: flex-start;
@@ -752,4 +769,206 @@
     padding-inline: var(--space-4);
   }
 
+}
+
+/* ---------- Welcome (Overzicht of a laptop without runners) ---------- */
+.welcome {
+  display: grid;
+  gap: var(--space-5);
+  max-width: 920px;
+  animation: fade-in var(--dur-3) var(--ease-out) backwards;
+}
+
+.welcome__intro h2 {
+  color: var(--ink);
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.welcome__intro p {
+  margin-top: var(--space-1);
+  color: var(--ink-2);
+  font-size: 14px;
+}
+
+.welcome__choices {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+
+.welcome__choices--single {
+  grid-template-columns: minmax(0, 460px);
+}
+
+.welcome-choice {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-5);
+}
+
+.welcome-choice h3 {
+  color: var(--ink);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.welcome-choice p {
+  margin: calc(var(--space-2) * -1) 0 0;
+  color: var(--ink-2);
+  font-size: 13.5px;
+}
+
+.welcome-choice__icon {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-md);
+  background: var(--brand-wash);
+  color: var(--brand-ink);
+}
+
+.welcome-choice__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: auto;
+  padding-top: var(--space-1);
+}
+
+.welcome-choice__actions .btn .icon {
+  transition: transform var(--dur-1) var(--ease-out);
+}
+
+.welcome-choice__actions .btn:hover .icon {
+  transform: translateX(2px);
+}
+
+.welcome-nearby {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.welcome-nearby .cluster-peer-row {
+  margin-top: 0;
+}
+
+.welcome-nearby .cluster-peer-row > span,
+.welcome-searching > span {
+  display: grid;
+  gap: 1px;
+}
+
+.welcome-nearby small,
+.welcome-searching small {
+  color: var(--ink-3);
+  font-size: 12.5px;
+}
+
+.welcome-nearby__mismatch {
+  flex: 1 1 100%;
+  color: var(--warn-ink) !important;
+}
+
+.welcome-searching {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: 10px 12px;
+  border: 1px dashed var(--line-2);
+  border-radius: var(--radius-sm);
+  font-size: 13.5px;
+}
+
+.welcome-searching strong {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+/* Breathes like the loading wordmark: it is looking, nothing is wrong. */
+.welcome-searching__dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  margin-top: 6px;
+  border-radius: 50%;
+  background: var(--brand);
+  animation: breathe 1.8s var(--ease-in-out) infinite;
+}
+
+.welcome-next {
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+}
+
+.welcome-next h3 {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.welcome-next ol {
+  display: grid;
+  gap: var(--space-2);
+  margin: var(--space-2) 0 0;
+  padding-left: 1.3em;
+  color: var(--ink-2);
+  font-size: 13.5px;
+}
+
+.welcome-next li::marker {
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.welcome-next strong {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.welcome-address {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.welcome-address:hover {
+  border-color: var(--ink-3);
+}
+
+.welcome-address .icon {
+  color: var(--ink-3);
+}
+
+.welcome__skip {
+  justify-self: start;
+}
+
+@media (max-width: 760px) {
+  .welcome__choices {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .welcome,
+  .welcome-searching__dot {
+    animation: none;
+  }
 }

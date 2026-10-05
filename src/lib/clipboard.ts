@@ -7,7 +7,7 @@ export type CopyResult = 'copied' | 'manual';
  * (https or localhost), so laptops that open Apolloon via http://<LAN-IP> fall
  * back to a hidden textarea, and finally to a prompt with the text selected.
  */
-async function copyText(text: string): Promise<CopyResult> {
+export async function copyText(text: string): Promise<CopyResult> {
   if (window.isSecureContext && navigator.clipboard) {
     try {
       await navigator.clipboard.writeText(text);
@@ -31,7 +31,7 @@ async function copyText(text: string): Promise<CopyResult> {
   }
   textarea.remove();
   if (copied) return 'copied';
-  window.prompt('Kopiëren lukt hier niet automatisch. Kopieer het adres hieronder met Ctrl+C:', text);
+  window.prompt('Kopiëren lukt hier niet automatisch. Kopieer de tekst hieronder met Ctrl+C:', text);
   return 'manual';
 }
 

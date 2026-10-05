@@ -1,10 +1,24 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, screen, shell, type OpenDialogOptions } from 'electron';
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  Menu,
+  nativeTheme,
+  screen,
+  shell,
+  type OpenDialogOptions,
+} from 'electron';
 import path from 'path';
+import os from 'os';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
 import { fork, type ChildProcess } from 'child_process';
 import { isRaceActive, stopWatchingRace, watchRace } from './race-guard.js';
 import { parseEnvText, resolveServerAddress } from './server-config.js';
+import { SPLASH_SIZE, splashBackground, splashHtml } from './splash.js';
+import { describeUnexpectedStartupError, StartupError } from './startup-error.js';
+import { checkForUpdate, isReleaseUrl, RELEASES_PAGE, type UpdateStatus } from './update-check.js';
 import {
   DEFAULT_WINDOW_SIZE,
   MIN_WINDOW_SIZE,
@@ -17,6 +31,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 let mainWindow: BrowserWindow | null = null;
+let splashWindow: BrowserWindow | null = null;
 let serverProcess: ChildProcess | undefined;
 let quitting = false;
 /** Set once the operator confirmed closing the app while the race runs. */
@@ -75,6 +90,57 @@ async function createWindow() {
   window.on('closed', () => {
     if (mainWindow === window) mainWindow = null;
   });
+}
+
+/** Shows at once when the app opens, until the main window is ready (see electron/splash.ts). */
+function showSplash() {
+  const dark = nativeTheme.shouldUseDarkColors;
+  const window = new BrowserWindow({
+    ...SPLASH_SIZE,
+    // At once, not on ready-to-show: the first paint can take most of a second, which is
+    // the wait this window is for. Its background matches the page, so nothing flashes.
+    show: true,
+    frame: false,
+    resizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    center: true,
+    title: 'Apolloon Telsysteem',
+    backgroundColor: splashBackground(dark),
+    webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true, spellcheck: false },
+  });
+  splashWindow = window;
+  window.on('closed', () => {
+    if (splashWindow === window) splashWindow = null;
+  });
+  const html = splashHtml({
+    dark,
+    version: app.getVersion(),
+    logoDataUrl: inlineAsset(path.join('brand', 'apolloon-logo.png'), 'image/png'),
+    fontDataUrl: inlineAsset(path.join('fonts', 'geist-latin-wght-normal.woff2'), 'font/woff2'),
+  });
+  void window.loadURL(`data:text/html;charset=utf-8;base64,${Buffer.from(html).toString('base64')}`);
+}
+
+/** A file from the client's public folder as a data: URL, or null when it is missing. */
+function inlineAsset(relativePath: string, type: string): string | null {
+  const folder = app.isPackaged ? 'dist' : 'public';
+  try {
+    const bytes = fs.readFileSync(path.join(app.getAppPath(), folder, relativePath));
+    return `data:${type};base64,${bytes.toString('base64')}`;
+  } catch {
+    return null;
+  }
+}
+
+function setSplashStatus(text: string) {
+  if (!splashWindow || splashWindow.isDestroyed()) return;
+  splashWindow.webContents.executeJavaScript(`window.setStatus?.(${JSON.stringify(text)})`).catch(() => {});
+}
+
+function closeSplash() {
+  splashWindow?.destroy();
+  splashWindow = null;
 }
 
 const windowStatePath = () => path.join(app.getPath('userData'), 'window-state.json');
@@ -225,7 +291,7 @@ async function loadPackagedRenderer(window: BrowserWindow) {
   }
 
   if (!rendered) {
-    throw new Error('De gebruikersinterface kon niet worden geladen.');
+    throw new StartupError({ kind: 'screen', detail: 'De pagina bleef leeg, ook na een tweede poging.' });
   }
 }
 
@@ -303,6 +369,87 @@ ipcMain.handle('apolloon:pick-image', async (event) => {
   return { name: path.basename(filePath), bytes: await fs.promises.readFile(filePath) };
 });
 
+/** Opens the app data folder, which holds server.log, the database and the backups. */
+ipcMain.handle('apolloon:open-data-folder', async () => {
+  const error = await shell.openPath(app.getPath('userData'));
+  return error || null;
+});
+
+/** What the person who supports this laptop needs to know, for "Diagnose kopiëren". */
+ipcMain.handle('apolloon:diagnostics', async () => ({
+  appVersion: app.getVersion(),
+  electron: process.versions.electron,
+  chrome: process.versions.chrome,
+  os: `${os.type()} ${os.release()} ${process.arch}`,
+  dataPath: app.getPath('userData'),
+  logTail: await readLogTail(serverLogPath(), 60),
+}));
+
+/** The last lines of a log file; empty when there is none yet. */
+async function readLogTail(filePath: string, lines: number): Promise<string> {
+  try {
+    const handle = await fs.promises.open(filePath, 'r');
+    try {
+      const { size } = await handle.stat();
+      const length = Math.min(size, 16 * 1024);
+      const buffer = Buffer.alloc(length);
+      await handle.read(buffer, 0, length, size - length);
+      return buffer.toString('utf8').split(/\r?\n/).slice(-lines).join('\n').trim();
+    } finally {
+      await handle.close();
+    }
+  } catch {
+    return '';
+  }
+}
+
+/** Every six hours, so a laptop that sits on a desk for days still finds out. */
+const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+let updateStatus: UpdateStatus = { state: 'checking', checkedAt: null };
+let updateTimer: NodeJS.Timeout | null = null;
+let updateCheck: Promise<UpdateStatus> | null = null;
+
+function runUpdateCheck(): Promise<UpdateStatus> {
+  updateCheck ??= (async () => {
+    const previous = updateStatus;
+    updateStatus = { state: 'checking', checkedAt: previous.checkedAt };
+    sendUpdateStatus();
+    const result = await checkForUpdate({
+      currentVersion: app.getVersion(),
+      platform: process.platform,
+      arch: process.arch,
+    });
+    // Offline at the event: keep showing an update found earlier instead of forgetting it.
+    updateStatus = result.state === 'unreachable' && previous.state === 'available' ? previous : result;
+    if (updateStatus.state === 'available') desktopLog(`Update available: ${updateStatus.update.version}`);
+    sendUpdateStatus();
+    return updateStatus;
+  })().finally(() => {
+    updateCheck = null;
+  });
+  return updateCheck;
+}
+
+function sendUpdateStatus() {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('apolloon:update-status', updateStatus);
+}
+
+/** APOLLOON_UPDATE_CHECK=0 turns it off, for rehearsals and machines without internet on purpose. */
+function startUpdateChecks() {
+  if (updateTimer || process.env.APOLLOON_UPDATE_CHECK === '0') return;
+  // Not right at startup: the first seconds belong to opening the database and the window.
+  updateTimer = setTimeout(function next() {
+    void runUpdateCheck();
+    updateTimer = setTimeout(next, UPDATE_CHECK_INTERVAL_MS);
+  }, 10_000);
+}
+
+ipcMain.handle('apolloon:update-status', () => updateStatus);
+ipcMain.handle('apolloon:check-update', () => runUpdateCheck());
+ipcMain.handle('apolloon:open-release', (_event, url: unknown) => {
+  void shell.openExternal(typeof url === 'string' && isReleaseUrl(url) ? url : RELEASES_PAGE);
+});
+
 function ensureEnvFile() {
   const envPath = path.join(app.getPath('userData'), '.env');
   if (!fs.existsSync(envPath)) {
@@ -377,7 +524,8 @@ function launchServer(env: NodeJS.ProcessEnv, restartDelayMs = 1_000): ChildProc
     const nextDelayMs = Date.now() - startedAt < 30_000 ? Math.min(restartDelayMs * 2, 30_000) : 1_000;
     console.warn(`Restarting server in ${restartDelayMs} ms`);
     setTimeout(() => {
-      if (!quitting) launchServer(env, nextDelayMs);
+      // A failed start that is being retried has replaced or dropped this server already.
+      if (!quitting && serverProcess === child) launchServer(env, nextDelayMs);
     }, restartDelayMs);
   });
   return child;
@@ -394,10 +542,12 @@ function desktopLog(message: string) {
   if (app.isReady()) serverLog().write(`[desktop ${new Date().toISOString()}] ${message}\n`);
 }
 
+const serverLogPath = () => path.join(app.getPath('userData'), 'server.log');
+
 /** `server.log` in the app data folder, started over once it grows past a few MB. */
 function serverLog(): fs.WriteStream {
   if (serverLogStream) return serverLogStream;
-  const logPath = path.join(app.getPath('userData'), 'server.log');
+  const logPath = serverLogPath();
   const tooLarge = fs.existsSync(logPath) && fs.statSync(logPath).size > SERVER_LOG_MAX_BYTES;
   serverLogStream = fs.createWriteStream(logPath, { flags: tooLarge ? 'w' : 'a' });
   serverLogStream.on('error', (error) => console.error('Server log unavailable:', error));
@@ -406,14 +556,10 @@ function serverLog(): fs.WriteStream {
 
 async function waitForServer(url: string, child: ChildProcess, timeoutMs = 20_000) {
   const deadline = Date.now() + timeoutMs;
+  const port = Number(new URL(url).port);
   while (Date.now() < deadline) {
     if (child.exitCode !== null) {
-      const reason = serverErrorTail.match(/^\w*Error: .*$/m)?.[0];
-      throw new Error(
-        `Local server stopped before startup completed (exit ${child.exitCode}).` +
-          (reason ? `\n\n${reason}` : '') +
-          `\n\nDetails: ${path.join(app.getPath('userData'), 'server.log')}`
-      );
+      throw new StartupError({ kind: 'server-exited', exitCode: child.exitCode, errorOutput: serverErrorTail, port });
     }
     try {
       const response = await fetch(`${url}/api/host-info`, {
@@ -425,7 +571,15 @@ async function waitForServer(url: string, child: ChildProcess, timeoutMs = 20_00
     }
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
-  throw new Error(`Local server did not become ready at ${url} within ${timeoutMs} ms.`);
+  throw new StartupError({ kind: 'server-timeout', seconds: Math.round(timeoutMs / 1000), port });
+}
+
+/** Stops a server that failed to start, without the automatic restart, so a retry starts clean. */
+function dropServer() {
+  const child = serverProcess;
+  serverProcess = undefined;
+  child?.kill();
+  serverErrorTail = '';
 }
 
 // Prevent multiple instances
@@ -435,43 +589,100 @@ if (!gotTheLock) {
   app.quit();
 } else {
   app.on('second-instance', () => {
-    if (mainWindow) {
-      if (mainWindow.isMinimized()) mainWindow.restore();
-      mainWindow.focus();
-    }
+    // Opening the app again while it starts brings the splash forward instead of doing nothing.
+    // The main window stays hidden until its page has loaded, so whichever is on screen.
+    const window = [mainWindow, splashWindow].find((each) => each && !each.isDestroyed() && each.isVisible());
+    if (!window) return;
+    if (window.isMinimized()) window.restore();
+    window.focus();
   });
 
-  app.whenReady().then(async () => {
+  app.whenReady().then(() => {
     console.log('App starting');
     // Windows and Linux show no menu in a frameless window; dropping it also stops the
     // default menu's F11 from toggling fullscreen a second time. macOS keeps its menu.
     if (!isMac) Menu.setApplicationMenu(null);
+    if (!smokeTest) showSplash();
     ensureEnvFile();
-    try {
-      await startServer();
+    void openApp();
+  });
+}
+
+let watchingRace = false;
+
+async function openApp() {
+  try {
+    setSplashStatus('Databank openen…');
+    await startServer();
+    if (!watchingRace) {
+      watchingRace = true;
       watchRace(
         () => appUrl,
         (active) => desktopLog(active ? 'Race running: keeping the screen awake' : 'Race stopped')
       );
-      await createWindow();
-      if (smokeTest) {
-        const runners = await runPackagedSmokeChecks();
-        fs.writeFileSync(
-          path.join(app.getPath('userData'), 'smoke-result.json'),
-          JSON.stringify({ version: app.getVersion(), renderer: true, database: true, runners })
-        );
-        app.quit();
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.error('Failed to initialize Apolloon:', error);
-      if (smokeTest) app.exit(1);
-      else {
-        dialog.showErrorBox('Apolloon kon niet starten', message);
-        app.quit();
-      }
     }
-  });
+    setSplashStatus('Scherm laden…');
+    await createWindow();
+    closeSplash();
+    if (smokeTest) {
+      const runners = await runPackagedSmokeChecks();
+      fs.writeFileSync(
+        path.join(app.getPath('userData'), 'smoke-result.json'),
+        JSON.stringify({ version: app.getVersion(), renderer: true, database: true, runners })
+      );
+      app.quit();
+      return;
+    }
+    startUpdateChecks();
+  } catch (error) {
+    console.error('Failed to initialize Apolloon:', error);
+    if (smokeTest) {
+      app.exit(1);
+      return;
+    }
+    desktopLog(`Start failed: ${error instanceof Error ? error.message : String(error)}`);
+    // No restarts behind the question: a retry starts the server once, from the beginning.
+    dropServer();
+    if (await askToRetryStart(error)) {
+      // The splash comes back before the half-opened main window goes, so the app does not quit.
+      if (splashWindow) splashWindow.show();
+      else showSplash();
+      mainWindow?.destroy();
+      mainWindow = null;
+      setSplashStatus('Opnieuw proberen…');
+      void openApp();
+    } else {
+      app.quit();
+    }
+  }
+}
+
+/** Says why the app did not open, in Dutch, with a way to retry and to find the log. */
+async function askToRetryStart(error: unknown): Promise<boolean> {
+  const { message, detail } = describeUnexpectedStartupError(error, serverLogPath());
+  const options = {
+    type: 'error' as const,
+    title: 'Apolloon kon niet starten',
+    message,
+    detail,
+    buttons: ['Opnieuw proberen', 'Logmap openen', 'Afsluiten'],
+    defaultId: 0,
+    cancelId: 2,
+    noLink: true,
+  };
+  // The splash says it is still opening, so it steps aside for the dialog. Hidden, it still
+  // counts as an open window, so the app does not quit underneath the question. The dialog
+  // has no owner: some window managers put it behind its owner, and Wayland ends the app
+  // when the owner is not on screen yet.
+  splashWindow?.hide();
+  for (;;) {
+    const { response } = await dialog.showMessageBox(options);
+    if (response === 1) {
+      await shell.openPath(app.getPath('userData'));
+      continue;
+    }
+    return response === 0;
+  }
 }
 
 /**
@@ -508,6 +719,7 @@ async function runPackagedSmokeChecks(): Promise<number> {
 
 function stopServer() {
   quitting = true;
+  if (updateTimer) clearTimeout(updateTimer);
   stopWatchingRace();
   serverProcess?.kill();
 }

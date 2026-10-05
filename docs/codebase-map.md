@@ -5,6 +5,8 @@ This app has three runtime surfaces:
 - `src/`: React/Vite client for event operators, displays, and exports.
 - `server/`: local Express, tRPC, and SQLite runtime.
 - `electron/`: desktop wrapper that starts the compiled server and opens the app; compiled to `dist-electron/`.
+  `splash.ts` is the window shown while it starts, `startup-error.ts` says in Dutch why it could not,
+  and `update-check.ts` reads the latest release from the public releases repository.
 
 Shared contracts live in `shared/`. Anything imported by both client and server should go there instead of being duplicated in `src/` and `server/`.
 
@@ -15,6 +17,9 @@ Shared contracts live in `shared/`. Anything imported by both client and server 
   Tactiek, Beheer, and the displays are lazy routes preloaded on hover.
 - `src/App.tsx`: app shell, loading/error states, and the connection and
   "too few laptops" banners. `components/Sidebar.tsx` holds the navigation.
+- `src/components/WelcomeView.tsx`: what Overzicht shows on a laptop without
+  runners (import here, or link to a laptop found on the network); loaded lazily
+  by `RolePicker.tsx`. `lib/welcome.ts` decides when.
 - `src/app/`: app-wide data layer.
   - `queryClient.ts`: TanStack Query configuration.
   - `snapshot.ts`: query keys; everything server-derived lives under `['app']`.
@@ -41,7 +46,10 @@ Shared contracts live in `shared/`. Anything imported by both client and server 
   - `AdminView.tsx`: Beheer tabs; each tab is a section component in
     `components/admin/` (`PreparationSection`, `RunnersSection`,
     `LabelsSection`, `PublicSection`, `SystemSection`). `AdminNotice.tsx` holds
-    the shared busy/message hook.
+    the shared busy/message hook. The open tab is `?section=` in the address
+    (`adminSections.ts`). `useJoinGroup.ts` links this laptop to another one,
+    for Systeem and the welcome screen; `AboutPanel.tsx` shows the version,
+    updates, the log folder, and the diagnosis (`lib/diagnostics.ts`).
   - `TacticsView.tsx`: live API-backed tactics and the historical workspace shell.
   - `tactics/HistoricalDeepDive.tsx`: detailed historical charts, diagnostics, and drafting controls.
   - `ModalDialog.tsx`: native modal `<dialog>` wrapper; `isModalDialogOpen()`

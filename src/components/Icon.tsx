@@ -69,6 +69,14 @@ const PATHS = {
   close: <path d="M18 6 6 18M6 6l12 12" />,
   download: <path d="M12 3v12m0 0-4-4m4 4 4-4M4 21h16" />,
   arrowRight: <path d="M5 12h14m-6-6 6 6-6 6" />,
+  folder: <path d="M3 6a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />,
+  upload: <path d="M12 21V9m0 0-4 4m4-4 4 4M4 3h16" />,
+  link: (
+    <>
+      <path d="M10 14a4 4 0 0 0 5.66 0l3-3a4 4 0 0 0-5.66-5.66l-1 1" />
+      <path d="M14 10a4 4 0 0 0-5.66 0l-3 3a4 4 0 0 0 5.66 5.66l1-1" />
+    </>
+  ),
   panelLeft: (
     <>
       <rect x="3" y="3" width="18" height="18" rx="2" />

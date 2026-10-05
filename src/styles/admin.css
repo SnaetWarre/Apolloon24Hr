@@ -917,3 +917,66 @@ details.host-hint > summary {
 .cluster-manual-join .form-row {
   margin-top: var(--space-2);
 }
+
+/* ---------- Over deze installatie ---------- */
+.about-facts {
+  grid-template-columns: minmax(140px, auto) minmax(140px, auto) minmax(0, 1fr);
+  margin-top: 0;
+}
+
+@media (max-width: 900px) {
+  .about-facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .about-facts__wide {
+    grid-column: 1 / -1;
+  }
+}
+
+.about-facts code {
+  overflow-wrap: anywhere;
+  font-size: 12.5px;
+}
+
+.update-status {
+  justify-content: space-between;
+  margin-top: var(--space-3);
+}
+
+.update-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid color-mix(in srgb, var(--brand) 30%, transparent);
+  border-radius: var(--radius-md);
+  background: var(--brand-wash);
+  font-size: 13.5px;
+  animation: notice-in var(--dur-2) var(--ease-out) backwards;
+}
+
+.update-notice > div:first-child {
+  display: grid;
+  flex: 1 1 320px;
+  gap: 2px;
+  color: var(--ink-2);
+}
+
+.update-notice strong {
+  color: var(--ink);
+}
+
+.update-notice__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.about-browser-note,
+.about-help {
+  margin-top: var(--space-3);
+}
