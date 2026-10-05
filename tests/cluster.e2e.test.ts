@@ -6,6 +6,8 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { createTRPCClient, httpBatchLink } from '@trpc/client';
+import WebSocket from 'ws';
+import { PEER_SOCKET_PATH } from '../server/peer-socket.ts';
 import type { AppRouter } from '../server/router.ts';
 import type { AppSnapshot, ClusterStatus, LiveAppSnapshot, RaceHistory } from '../shared/schemas.ts';
 
@@ -48,8 +50,7 @@ test('standalone mode stays writable and does not expose replication', { timeout
     assert.equal(health.database.ready, true);
     assert.deepEqual((health as unknown as { race: unknown }).race, { active: false });
 
-    const append = await fetch(`${server.baseUrl}/api/cluster/append`, { method: 'POST' });
-    assert.equal(append.status, 404);
+    assert.equal(await peerSocketStatus(server, {}), 404);
   } finally {
     await stopServer(server);
     fs.rmSync(root, { recursive: true, force: true });
@@ -506,16 +507,10 @@ test('laptops with different app versions refuse to couple', { timeout: 20_000 }
     const other = await startServer({ port: await freePort(), dataPath: path.join(root, 'b'), appVersion: '2.0.0' });
     servers.push(first, other);
     await assert.rejects(client(other).cluster.join.mutate({ url: first.baseUrl }), /Upgrade vereist/);
-    const append = await fetch(`${first.baseUrl}/api/cluster/append`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-apolloon-app-version': '2.0.0',
-        'x-apolloon-schema-version': '13',
-      },
-      body: '{}',
-    });
-    assert.equal(append.status, 426);
+    assert.equal(
+      await peerSocketStatus(first, { 'x-apolloon-app-version': '2.0.0', 'x-apolloon-schema-version': '13' }),
+      426
+    );
   } catch (error) {
     throw withServerOutput(error, ...servers);
   } finally {
@@ -523,6 +518,22 @@ test('laptops with different app versions refuse to couple', { timeout: 20_000 }
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+/** The HTTP status another laptop gets when it opens the socket for appends and votes; 101 when accepted. */
+function peerSocketStatus(server: RunningServer, headers: Record<string, string>): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const socket = new WebSocket(`${server.baseUrl.replace(/^http/, 'ws')}${PEER_SOCKET_PATH}`, { headers });
+    socket.on('unexpected-response', (_request, response) => {
+      resolve(response.statusCode ?? 0);
+      socket.terminate();
+    });
+    socket.on('open', () => {
+      resolve(101);
+      socket.terminate();
+    });
+    socket.on('error', reject);
+  });
+}
 
 function client(server: RunningServer) {
   return createTRPCClient<AppRouter>({ links: [httpBatchLink({ url: `${server.baseUrl}/trpc` })] });

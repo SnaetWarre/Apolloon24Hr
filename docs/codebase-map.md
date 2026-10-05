@@ -85,9 +85,10 @@ Shared contracts live in `shared/`. Anything imported by both client and server 
 - `server/static-files.ts`: packaged frontend serving.
 - `server/db.ts`: facade over `server/db/` (SQLite schema, reads, writes, race-state transitions, replication log).
 - `server/raft.ts`: leader election by majority (Raft), log replication, and majority commit, with storage, network, clock, and timers passed in.
-- `server/consensus.ts`: runs `raft.ts` on this laptop's SQLite log, HTTP, and real timers.
+- `server/consensus.ts`: runs `raft.ts` on this laptop's SQLite log, the peer sockets, and real timers.
 - `server/cluster.ts`: endpoints between laptops, joining, passing writes to the leader, and the group status.
 - `server/peers.ts`: requests between laptops and their addresses.
+- `server/peer-socket.ts`: one WebSocket per other laptop carrying appends and votes, so a heartbeat costs its JSON and no HTTP headers.
 - `server/discovery.ts`: UDP announcements so laptops find each other on the LAN.
 - `server/backups.ts` and `backup-verify-worker.ts`: scheduled, verified backups and retention.
 - `server/app-state.ts`: live snapshot and lap history scopes.

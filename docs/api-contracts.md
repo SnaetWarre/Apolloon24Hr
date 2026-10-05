@@ -47,8 +47,10 @@ Rule: do not push event data or add typed deltas; clients always refetch server 
 
 Machine-to-machine endpoints between Electron laptops, refused with HTTP 426 when app or schema versions differ:
 
-- `POST /api/cluster/append`: the leader sends log entries (or a heartbeat); the answer carries the follower's log position.
-- `POST /api/cluster/vote`: a (pre-)vote request during an election.
+- `WebSocket /api/cluster/peer` (`server/peer-socket.ts`): one socket per other laptop, opened when first needed and closed after 30 s unused. Messages are JSON `{ id, type, body }`, answered with `{ id, body }` or `{ id, refused: { code, error } }`:
+  - `append`: the leader sends log entries (or a heartbeat); the answer carries the follower's log position.
+  - `vote`: a (pre-)vote request during an election.
+  A request without an answer within `CLUSTER_REQUEST_TIMEOUT_MS` counts as unreachable; if nothing at all came back on the socket meanwhile, it is dropped and the next request opens a new one.
 - `GET /api/cluster/snapshot`: a full database image for a joining or diverged laptop.
 - `POST /api/cluster/members`: a laptop asks the leader to join the group.
 - UDP 45737 (`server/discovery.ts`): a JSON announcement broadcast every two seconds, used to find laptops; it never changes data.

@@ -1,4 +1,6 @@
 import crypto from 'node:crypto';
+import type { IncomingMessage } from 'node:http';
+import type { Duplex } from 'node:stream';
 import type { Express, NextFunction, Request, Response } from 'express';
 import { z } from 'zod';
 import type { ClusterMemberStatus, ClusterStatus, GroupState, NearbyGroup } from '../shared/schemas.js';
@@ -45,6 +47,7 @@ import {
 } from './db.js';
 import { currentUrl, heardLaptops, startDiscovery, stopDiscovery } from './discovery.js';
 import { APP_VERSION, isClusterEnabled, readPositiveInt } from './env.js';
+import { acceptPeerSocket, closePeerSockets, refusal, refuseUpgrade, type PeerAnswer } from './peer-socket.js';
 import {
   isIsolated,
   normalizeUrl,
@@ -53,13 +56,14 @@ import {
   selfUrl,
   setIsolated,
   versionMismatchMessage,
+  versionRefusal,
 } from './peers.js';
 
 /*
  * The laptops in a group agree on one leader by majority vote
- * (consensus.ts). This module is the rest: the HTTP endpoints between
- * laptops, joining a group, passing writes made on any laptop to the leader,
- * and the status the screens show.
+ * (consensus.ts). This module is the rest: the endpoints between laptops,
+ * joining a group, passing writes made on any laptop to the leader, and the
+ * status the screens show.
  */
 
 const enabled = isClusterEnabled();
@@ -268,6 +272,7 @@ export function registerClusterRoutes(app: Express): void {
     // Simulates a pulled network cable: requests from other laptops (they carry a version header) fail.
     app.post('/api/cluster/test/isolate', (req, res) => {
       setIsolated(Boolean(req.body?.isolated));
+      if (isIsolated()) closePeerSockets();
       res.json({ ok: true, isolated: isIsolated() });
     });
     app.use((req, res, next) => {
@@ -276,34 +281,12 @@ export function registerClusterRoutes(app: Express): void {
     });
   }
 
-  app.use(
-    ['/api/cluster/append', '/api/cluster/vote', '/api/cluster/snapshot', '/api/cluster/members'],
-    requireSameVersion
-  );
+  app.use(['/api/cluster/snapshot', '/api/cluster/members'], requireSameVersion);
   // A forwarded write that reaches a laptop that no longer leads is refused before anything runs, so it can be repeated.
   app.use('/trpc', (req, res, next) => {
     if (req.header('x-apolloon-forwarded') === '1' && (!isLeader() || busy())) {
       sendPeerError(res, 409, 'not_leader', 'Deze laptop is niet de hoofdlaptop.');
     } else next();
-  });
-
-  app.post('/api/cluster/append', (req, res) => {
-    const request = appendRequestSchema.safeParse(req.body);
-    if (!request.success || request.data.clusterId !== hostIdentity().clusterId) {
-      sendPeerError(res, 409, 'cluster_mismatch', 'Deze laptops horen bij een andere groep.');
-      return;
-    }
-    res.json(handleAppend(request.data));
-  });
-
-  app.post('/api/cluster/vote', (req, res) => {
-    const request = voteRequestSchema.safeParse(req.body);
-    if (!request.success) {
-      sendPeerError(res, 400, 'invalid_request', 'Ongeldige stemaanvraag.');
-      return;
-    }
-    welcomeBack(request.data.candidateId, request.data.candidateUrl, request.data.clusterId);
-    res.json(handleVoteRequest(request.data));
   });
 
   app.get('/api/cluster/snapshot', (_req, res) => {
@@ -335,14 +318,37 @@ export function registerClusterRoutes(app: Express): void {
   });
 }
 
-function requireSameVersion(req: Request, res: Response, next: NextFunction): void {
-  const appVersion = req.header('x-apolloon-app-version') || 'onbekend';
-  const schemaVersion = Number(req.header('x-apolloon-schema-version'));
-  if (appVersion === APP_VERSION && schemaVersion === DATABASE_SCHEMA_VERSION) {
-    next();
-    return;
+/** The socket another laptop sends appends and votes over (peer-socket.ts). */
+export function handlePeerUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): void {
+  const header = (name: string) => [req.headers[name]].flat()[0];
+  const mismatch = versionRefusal(header('x-apolloon-app-version'), header('x-apolloon-schema-version'));
+  if (!enabled) refuseUpgrade(socket, 404, 'not_found', 'Laptops koppelen staat uit op deze installatie.');
+  else if (isIsolated()) refuseUpgrade(socket, 503, 'isolated', 'isolated');
+  else if (mismatch) refuseUpgrade(socket, 426, 'upgrade_required', mismatch);
+  else acceptPeerSocket(req, socket, head, answerPeer);
+}
+
+function answerPeer(type: unknown, body: unknown): PeerAnswer {
+  if (type === 'append') {
+    const request = appendRequestSchema.safeParse(body);
+    if (!request.success || request.data.clusterId !== hostIdentity().clusterId) {
+      return refusal('cluster_mismatch', 'Deze laptops horen bij een andere groep.');
+    }
+    return { body: handleAppend(request.data) };
   }
-  sendPeerError(res, 426, 'upgrade_required', versionMismatchMessage(appVersion));
+  if (type === 'vote') {
+    const request = voteRequestSchema.safeParse(body);
+    if (!request.success) return refusal('invalid_request', 'Ongeldige stemaanvraag.');
+    welcomeBack(request.data.candidateId, request.data.candidateUrl, request.data.clusterId);
+    return { body: handleVoteRequest(request.data) };
+  }
+  return refusal('invalid_request', 'Onbekende aanvraag.');
+}
+
+function requireSameVersion(req: Request, res: Response, next: NextFunction): void {
+  const mismatch = versionRefusal(req.header('x-apolloon-app-version'), req.header('x-apolloon-schema-version'));
+  if (mismatch) sendPeerError(res, 426, 'upgrade_required', mismatch);
+  else next();
 }
 
 function sendPeerError(res: Response, status: number, code: string, error: string): void {
@@ -520,6 +526,7 @@ export function startClusterService(): void {
 
 export function stopClusterService(): void {
   stopConsensus();
+  closePeerSockets();
   stopDiscovery();
   if (maintenanceTimer) clearInterval(maintenanceTimer);
   maintenanceTimer = null;

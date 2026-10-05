@@ -7,7 +7,7 @@ import { WebSocketServer } from 'ws';
 import { historyCacheKey, liveAppState, raceHistoryState, type HistoryRequest } from './app-state.js';
 import { describeOrigin } from './activity.js';
 import { backupStatus, latestBackupPath, startBackupService, stopBackupService } from './backups.js';
-import { registerClusterRoutes, startClusterService, stopClusterService } from './cluster.js';
+import { handlePeerUpgrade, registerClusterRoutes, startClusterService, stopClusterService } from './cluster.js';
 import {
   activeTemporaryTeamsKey,
   closeDb,
@@ -24,6 +24,7 @@ import { registerExportRoutes } from './exports.js';
 import { hostInfo, SERVER_PORT } from './host.js';
 import { sendJson } from './http-json.js';
 import { getNetProfile, isLoopbackAddress, requestMakeStatic, requestRevertDhcp } from './net-setup.js';
+import { PEER_SOCKET_PATH } from './peer-socket.js';
 import { appRouter } from './router.js';
 import { registerStaticFrontend } from './static-files.js';
 import { clusterNow } from './clock.js';
@@ -41,6 +42,7 @@ let temporaryTeamTimer: NodeJS.Timeout | null = null;
 let stopDemoRace: (() => void) | null = null;
 
 // Screens subscribe to live changes over a WebSocket on /trpc; queries and writes stay on HTTP.
+// Other laptops send appends and votes over one on PEER_SOCKET_PATH.
 const wss = new WebSocketServer({ noServer: true });
 applyWSSHandler({
   wss,
@@ -50,11 +52,10 @@ applyWSSHandler({
   keepAlive: { enabled: true, pingMs: 10_000, pongWaitMs: 5_000 },
 });
 server.on('upgrade', (req, socket, head) => {
-  if (req.url?.split('?')[0] !== '/trpc') {
-    socket.destroy();
-    return;
-  }
-  wss.handleUpgrade(req, socket, head, (client) => wss.emit('connection', client, req));
+  const path = req.url?.split('?')[0];
+  if (path === '/trpc') wss.handleUpgrade(req, socket, head, (client) => wss.emit('connection', client, req));
+  else if (path === PEER_SOCKET_PATH) handlePeerUpgrade(req, socket, head);
+  else socket.destroy();
 });
 
 /**

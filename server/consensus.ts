@@ -19,6 +19,7 @@ import {
 } from './db.js';
 import { isClusterEnabled, readPositiveInt } from './env.js';
 import { currentUrl } from './discovery.js';
+import { peerRequest, type PeerRequestType } from './peer-socket.js';
 import { peerFetch, readPeerError, selfUrl } from './peers.js';
 import {
   createRaft,
@@ -31,8 +32,8 @@ import {
 } from './raft.js';
 
 /*
- * Runs the majority voting of raft.ts on this laptop: its SQLite log, HTTP
- * to the other laptops, and real timers.
+ * Runs the majority voting of raft.ts on this laptop: its SQLite log, a
+ * socket to each other laptop (peer-socket.ts), and real timers.
  */
 
 export type { AppendRequest, AppendResponse, GroupView, Role, VoteRequest, VoteResponse };
@@ -97,9 +98,9 @@ export function members(): ClusterMember[] {
   return stored.some((member) => member.hostId === self().hostId) ? stored : [self(), ...stored];
 }
 
-async function post<T>(url: string, body: unknown, schema: z.ZodType<T>): Promise<T | null> {
-  const response = await peerFetch(url, { method: 'POST', body });
-  return response.ok ? schema.parse(await response.json()) : null;
+async function send<T>(member: ClusterMember, type: PeerRequestType, body: unknown, schema: z.ZodType<T>) {
+  const answer = await peerRequest(member.url, type, body);
+  return answer === null ? null : schema.parse(answer);
 }
 
 const raft = createRaft({
@@ -120,8 +121,8 @@ const raft = createRaft({
     canContinueFrom,
     appendFromLeader,
   },
-  sendAppend: (member, request) => post(`${member.url}/api/cluster/append`, request, appendResponseSchema),
-  sendVote: (member, request) => post(`${member.url}/api/cluster/vote`, request, voteResponseSchema),
+  sendAppend: (member, request) => send(member, 'append', request, appendResponseSchema),
+  sendVote: (member, request) => send(member, 'vote', request, voteResponseSchema),
   async installCopyFrom(url, backupReason, signal) {
     // A leader answers at once; only the download itself may take a while.
     const answered = new AbortController();
