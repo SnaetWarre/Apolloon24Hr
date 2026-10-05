@@ -133,6 +133,7 @@
 }
 
 .queue-lane {
+  container: queue-lane / inline-size;
   min-width: 0;
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
@@ -202,6 +203,28 @@
 
 .queue-runner:not(:has(.queue-position)) {
   grid-template-columns: 16px minmax(0, 1fr) 70px auto;
+}
+
+/* A narrow lane (small window, half a screen) puts the timer beside the name and
+   the buttons on a line below, so the name keeps the width it needs. */
+@container queue-lane (max-width: 460px) {
+  .queue-runner {
+    grid-template-columns: 16px 22px minmax(0, 1fr) auto;
+    row-gap: 6px;
+  }
+
+  .queue-runner:not(:has(.queue-position)) {
+    grid-template-columns: 16px minmax(0, 1fr) auto;
+  }
+
+  .queue-drag,
+  .queue-position {
+    grid-row: span 2;
+  }
+
+  .queue-row-actions {
+    grid-column: span 2 / -1;
+  }
 }
 
 .queue-runner:hover {
@@ -411,6 +434,7 @@
 }
 
 .queue-completed {
+  container: queue-lane / inline-size;
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
   background: var(--surface);

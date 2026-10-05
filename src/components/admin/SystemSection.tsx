@@ -191,8 +191,10 @@ function ClusterPanel({
         <>
           {cluster.nearby.map((found) => (
             <div className="host-hint" key={found.url}>
-              Nieuwe laptop gevonden: <strong>{shortUrl(found.url)}</strong>. Open daar Beheer › Systeem & herstel en
-              klik op Koppelen naast deze groep.
+              <span>
+                Nieuwe laptop gevonden: <strong>{shortUrl(found.url)}</strong>. Open daar Beheer › Systeem & herstel en
+                klik op Koppelen naast deze groep.
+              </span>
             </div>
           ))}
           <p className="panel-copy">
