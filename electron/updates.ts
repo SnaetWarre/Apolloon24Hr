@@ -1,5 +1,5 @@
 import { app, ipcMain, shell } from 'electron';
-import electronUpdater, { type AppUpdater } from 'electron-updater';
+import type { AppUpdater } from 'electron-updater';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -65,8 +65,13 @@ export function setUpUpdates({
     send(status);
   }
 
-  /** Created on first use: the getter builds the platform's updater. */
-  function updater(): AppUpdater {
+  /**
+   * Created on first use: the getter builds the platform's updater. Loaded then too, because
+   * importing electron-updater at launch held up the start by about a tenth of a second.
+   */
+  async function updater(): Promise<AppUpdater> {
+    if (updaterInstance) return updaterInstance;
+    const { default: electronUpdater } = await import('electron-updater');
     if (updaterInstance) return updaterInstance;
     const instance = electronUpdater.autoUpdater;
     instance.logger = {
@@ -105,7 +110,7 @@ export function setUpUpdates({
       setStatus({ state: 'checking', checkedAt: previous.checkedAt });
       if (inApp) {
         try {
-          const result = await updater().checkForUpdates();
+          const result = await (await updater()).checkForUpdates();
           const info = result?.updateInfo;
           if (info && compareVersions(info.version, app.getVersion()) > 0) {
             const releasedAt = Date.parse(info.releaseDate);
@@ -145,7 +150,7 @@ export function setUpUpdates({
   async function download(update: AvailableUpdate) {
     setStatus({ state: 'downloading', checkedAt: Date.now(), update, percent: 0 });
     try {
-      await updater().downloadUpdate();
+      await (await updater()).downloadUpdate();
       log(`Update ${update.version} downloaded and ready to install`);
       setStatus({ state: 'ready', checkedAt: Date.now(), update });
     } catch (error) {
@@ -176,10 +181,11 @@ export function setUpUpdates({
       setStatus(ready);
       return RACE_RUNNING;
     }
+    const instance = await updater();
     fs.writeFileSync(notePath, JSON.stringify({ version: ready.update.version, from: app.getVersion() }));
     log(`Installing update ${ready.update.version} and restarting`);
     // Silent, then start the new version. Closing goes through the normal quit, which stops the server.
-    setImmediate(() => updater().quitAndInstall(true, true));
+    setImmediate(() => instance.quitAndInstall(true, true));
     return null;
   }
 

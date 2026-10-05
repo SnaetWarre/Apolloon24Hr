@@ -5,7 +5,8 @@ This app has three runtime surfaces:
 - `src/`: React/Vite client for event operators, displays, and exports.
 - `server/`: local Express, tRPC, and SQLite runtime.
 - `electron/`: desktop wrapper that starts the compiled server and opens the app; compiled to `dist-electron/`.
-  `splash.ts` is the window shown while it starts, `startup-error.ts` says in Dutch why it could not,
+  The server is bundled into one file (`scripts/bundle-server.mjs`) and started before Electron is ready.
+  `splash.ts` is the window shown when the start is slow, `startup-error.ts` says in Dutch why it could not,
   `update-check.ts` reads the latest release from the public releases repository, and `updates.ts`
   downloads and installs it from the app on Windows and from an AppImage (`electron-updater`).
 

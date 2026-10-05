@@ -1,5 +1,6 @@
 import './load-env.js';
 import http from 'node:http';
+import { flushCompileCache } from 'node:module';
 import { createExpressMiddleware } from '@trpc/server/adapters/express';
 import { applyWSSHandler } from '@trpc/server/adapters/ws';
 import express, { type NextFunction, type Request, type Response } from 'express';
@@ -309,6 +310,11 @@ watchTemporaryTeams();
 if (isDemoRaceEnabled()) stopDemoRace = startDemoRace();
 
 server.listen(SERVER_PORT, () => {
+  // The desktop app waits for this before it loads the window (electron/main.ts).
+  process.send?.({ type: 'listening' });
   console.log(`Server listening on http://0.0.0.0:${SERVER_PORT}`);
   console.log(`Event URL for laptops: ${hostInfo().url}`);
+  // With NODE_COMPILE_CACHE set (the desktop app sets it), the next start loads the compiled
+  // server from disk. Written now, because Node otherwise only writes it on a clean exit.
+  flushCompileCache();
 });
