@@ -312,3 +312,45 @@ test('a hand-made list imports rows that leave off empty trailing columns', asyn
     fs.rmSync(dataPath, { recursive: true, force: true });
   }
 });
+
+test('runners who share one e-mail address stay separate runners', async () => {
+  fs.rmSync(dataPath, { recursive: true, force: true });
+  const db = await import('../server/db.ts');
+  const { appRouter } = await import('../server/router.ts');
+  try {
+    await db.initDb();
+    const caller = appRouter.createCaller({});
+    const header = ['Tijdstempel', 'E-mailadres', 'Voornaam + naam', 'Behoor je tot'];
+    const rows = [
+      ['01/10/2026 10:00:00', 'secretariaat@hilok.be', 'Anna Claes', 'HILOK Gent'],
+      ['01/10/2026 10:05:00', 'secretariaat@hilok.be', 'Bert Maes', 'HILOK Gent'],
+      ['01/10/2026 10:09:00', 'secretariaat@hilok.be', 'Chris Smet', 'HILOK Gent'],
+    ];
+    const csvText = Papa.unparse([header, ...rows]);
+    const names = () =>
+      db
+        .getAllRunners()
+        .map((runner) => runner.name)
+        .sort();
+
+    const first = await caller.runners.importCsv({ csvText });
+    assert.deepEqual(first, { created: 3, updated: 0, skipped: 0, errors: [] });
+    assert.deepEqual(names(), ['Anna Claes', 'Bert Maes', 'Chris Smet']);
+
+    const repeat = await caller.runners.importCsv({ csvText });
+    assert.deepEqual(repeat, { created: 0, updated: 3, skipped: 0, errors: [] });
+    assert.deepEqual(names(), ['Anna Claes', 'Bert Maes', 'Chris Smet']);
+
+    // Anna sends the form again later; her new answer replaces the old one.
+    const anna = db.getAllRunners().find((runner) => runner.name === 'Anna Claes');
+    const again = await caller.runners.importCsv({
+      csvText: Papa.unparse([header, ['02/10/2026 09:00:00', 'Secretariaat@hilok.be', ' anna claes ', 'HILOK Gent']]),
+    });
+    assert.deepEqual(again, { created: 0, updated: 1, skipped: 0, errors: [] });
+    assert.equal(db.getAllRunners().length, 3);
+    assert.equal((await caller.runners.registrations())[anna!.id]?.submittedAt, '02/10/2026 09:00:00');
+  } finally {
+    db.closeDb();
+    fs.rmSync(dataPath, { recursive: true, force: true });
+  }
+});
