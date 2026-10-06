@@ -26,6 +26,7 @@ import {
   buildRunnerInsights,
   buildTimeBuckets,
   filterLaps,
+  toggleLabelFilter,
   type AnalysisFilters,
   type DistributionBin,
   type FastestLapWindow,
@@ -127,14 +128,13 @@ export function AnalysisView() {
   }
 
   function toggleLabel(labelId: string) {
-    setFilters((current) => {
-      const currentIds = current.enabledLabelIds ?? analysisLabels.map((label) => label.id);
-      return {
-        enabledLabelIds: currentIds.includes(labelId)
-          ? currentIds.filter((id) => id !== labelId)
-          : [...currentIds, labelId],
-      };
-    });
+    setFilters((current) =>
+      toggleLabelFilter(
+        current,
+        labelId,
+        analysisLabels.map((label) => label.id)
+      )
+    );
   }
 
   return (
