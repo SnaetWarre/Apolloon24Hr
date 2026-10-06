@@ -59,6 +59,7 @@ test('the CSV exports start with a UTF-8 BOM so Excel keeps accented names intac
 test('the CSV exports also start with the BOM before the first row', () => {
   const csv = csvText(['timestamp', 'type'], []);
 
-  assert.equal(csv, '﻿timestamp,type\n');
+  assert.equal(csv.charCodeAt(0), 0xfeff);
+  assert.equal(csv.slice(1), 'timestamp,type\n');
   assert.deepEqual(Papa.parse(csv, { header: true }).meta.fields, ['timestamp', 'type']);
 });
