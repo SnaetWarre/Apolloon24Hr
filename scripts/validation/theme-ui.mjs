@@ -72,10 +72,11 @@ try {
   assert.equal((await theme(page)).stored, 'dark', 'Space must not change the theme');
   console.log('PASS theme control supports arrow keys and never captures the timing key');
 
-  // Record a few laps so Analyse has chart data.
+  // Record a few laps so Analyse has chart data. Laps this short need a confirmation.
   for (let lap = 1; lap <= 3; lap++) {
     await page.waitForTimeout(400);
     await page.keyboard.press('Space');
+    await page.getByRole('dialog', { name: 'Toch afklokken?' }).getByRole('button', { name: 'Toch afklokken' }).click();
     await page.getByText(/Ronde opgeslagen/).waitFor();
   }
 

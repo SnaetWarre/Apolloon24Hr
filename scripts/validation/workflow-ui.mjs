@@ -76,10 +76,27 @@ try {
   const clockBefore = await lapClock.innerText();
   await page.waitForTimeout(400);
   assert.notEqual(await lapClock.innerText(), clockBefore, 'The lap clock keeps running');
+  // A second press this soon is a double tap: Timing asks, and Space in the question cancels it.
+  const runningRace = (await snapshot()).race;
+  const quickPrompt = page.getByRole('dialog', { name: 'Toch afklokken?', exact: true });
   await page.keyboard.press('Space');
+  await quickPrompt.waitFor();
+  await page.keyboard.press('Space');
+  await quickPrompt.waitFor({ state: 'detached' });
+  assert.deepEqual((await snapshot()).race, runningRace, 'A cancelled double press records nothing');
+  await page.getByRole('button', { name: /^Klok / }).click();
+  const clickedAt = Date.now();
+  await page.waitForTimeout(500);
+  await quickPrompt.getByRole('button', { name: 'Toch afklokken', exact: true }).click();
   await page.getByText('Ronde opgeslagen. Niemand actief; de wachtrij is leeg.').waitFor();
   assert.equal((await snapshot()).race.activeRunnerId, null);
-  console.log('PASS empty queue, modified shortcuts, running lap clock, final runner handoff feedback');
+  const { laps } = await (await fetch(`${baseUrl}/api/history?scope=full`)).json();
+  const quickLap = laps.find((lap) => lap.runnerId === firstRunner.id);
+  assert.ok(
+    quickLap.durationMs <= clickedAt - runningRace.activeStartedAt + 50,
+    'A confirmed lap ends at the press, not at the answer'
+  );
+  console.log('PASS empty queue, modified shortcuts, running lap clock, double press asks, final runner handoff');
 
   await rpc.runners.setStatus.mutate({ id: firstRunner.id, status: 'waiting' });
   await rpc.race.startNext.mutate(await expectation());

@@ -34,6 +34,20 @@ test('a press is timed from its input event and measures the lap on one monotoni
   assert.equal(timePress(now, first.pressedAt + 1).measuredDurationMs, undefined, 'another lap is running');
 });
 
+test('a press soon after the start is a too-short lap, by the monotonic lap when there is one', async () => {
+  const { MIN_LAP_MS, tooShortLapMs } = await import('../src/lib/pressTiming.ts');
+  const startedAt = 1_000_000;
+  assert.equal(tooShortLapMs({ pressedAt: startedAt + 377 }, startedAt), 377, 'a double tap');
+  assert.equal(tooShortLapMs({ pressedAt: startedAt + MIN_LAP_MS }, startedAt), null, 'long enough');
+  assert.equal(tooShortLapMs({ pressedAt: startedAt + 90_000 }, null), null, 'nobody is running');
+  assert.equal(tooShortLapMs({ pressedAt: startedAt - 50 }, startedAt), 0, 'a clock correction never goes below 0');
+  assert.equal(
+    tooShortLapMs({ pressedAt: startedAt + MIN_LAP_MS + 100, measuredDurationMs: 400 }, startedAt),
+    400,
+    'the lap measured on the monotonic clock decides'
+  );
+});
+
 test('the server takes the press moment and the measured lap, within sane bounds', async () => {
   fs.rmSync(dataPath, { recursive: true, force: true });
   const db = await import('../server/db.ts');
