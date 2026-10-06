@@ -78,7 +78,7 @@ test('a replicated write with nested transactions logs one entry without the und
       );
       connection.run("INSERT INTO scratch VALUES ('after')");
     });
-    const entries = db.getLogEntriesAfter(0);
+    const entries = db.getLogEntriesAfter(0)!;
     assert.equal(entries.length, 1);
     assert.deepEqual(
       entries[0].statements.map((statement) => statement.sql),

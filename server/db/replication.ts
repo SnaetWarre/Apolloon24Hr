@@ -4,9 +4,9 @@ import path from 'node:path';
 import { z } from 'zod';
 import {
   DATA_DIR,
-  all,
   captureWrite,
   getDb,
+  iterate,
   markAppDataChanged,
   one,
   runUncaptured,
@@ -25,6 +25,18 @@ import { type ReplicatedStatement, type ReplicationLogEntry } from './types.js';
 const LOG_RETENTION = 5_000;
 
 const MAX_ENTRIES_PER_BATCH = 500;
+
+/*
+ * A batch of entries travels to a laptop in one peer message, which may be
+ * at most 20 MB (peer-socket.ts). A batch stops at MAX_BATCH_BYTES, well
+ * under that, but always holds at least one entry. An entry too large for a
+ * message on its own (a restore with many logos) is never sent: the laptop
+ * that misses it takes a full copy instead.
+ */
+export const MAX_BATCH_BYTES = 4 * 1024 * 1024;
+export const MAX_ENTRY_BYTES = 16 * 1024 * 1024;
+/** The fields around an entry's statements, generously. */
+const ENTRY_OVERHEAD_BYTES = 512;
 
 /** Event tables in foreign-key insert order, plus the log itself. */
 const REPLICATED_TABLES = [
@@ -100,11 +112,28 @@ export function getLogEntryId(seq: number): string | null {
   return one<{ id: string }>('SELECT id FROM replication_log WHERE seq = ?', [seq])?.id ?? null;
 }
 
-export function getLogEntriesAfter(seq: number, limit = MAX_ENTRIES_PER_BATCH): ReplicationLogEntry[] {
-  return all<LogRow>(`${LOG_SELECT} WHERE seq > ? ORDER BY seq LIMIT ?`, [
+/**
+ * The entries after `seq`, as many as fit in `maxBytes` but at least one;
+ * null when the next entry alone is too large to send to another laptop.
+ */
+export function getLogEntriesAfter(
+  seq: number,
+  limit = MAX_ENTRIES_PER_BATCH,
+  maxBytes = MAX_BATCH_BYTES
+): ReplicationLogEntry[] | null {
+  const entries: ReplicationLogEntry[] = [];
+  let bytes = 0;
+  for (const row of iterate<LogRow>(`${LOG_SELECT} WHERE seq > ? ORDER BY seq LIMIT ?`, [
     seq,
     Math.min(Math.max(1, limit), MAX_ENTRIES_PER_BATCH),
-  ]).map(entryFromRow);
+  ])) {
+    const size = Buffer.byteLength(row.statementsJson) + ENTRY_OVERHEAD_BYTES;
+    if (!entries.length && size > MAX_ENTRY_BYTES) return null;
+    if (entries.length && bytes + size > maxBytes) break;
+    bytes += size;
+    entries.push(entryFromRow(row));
+  }
+  return entries;
 }
 
 /** This log as the append rules see it. */
