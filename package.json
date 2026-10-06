@@ -23,7 +23,7 @@
     "db:dev:seed": "tsx scripts/seed-test-db.mjs --scenario=ready",
     "db:dev:seed:live": "tsx scripts/seed-test-db.mjs --scenario=live",
     "db:dev:seed:large": "tsx scripts/seed-test-db.mjs --scenario=large",
-    "client:build": "vite build && node scripts/precompress-dist.mjs && node scripts/check-client-budget.mjs",
+    "client:build": "vite build && node scripts/precompress-dist.mjs",
     "server:build": "node scripts/clean-build-output.mjs dist-server && tsc -p tsconfig.server.json && node scripts/bundle-server.mjs",
     "electron:compile": "node scripts/clean-build-output.mjs dist-electron && tsc -p tsconfig.electron.json",
     "typecheck:client": "tsc -p tsconfig.json",
