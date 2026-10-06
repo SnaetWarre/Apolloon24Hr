@@ -1,4 +1,5 @@
 let serverTimeOffsetMs = 0;
+const syncListeners = new Set<() => void>();
 
 export { formatClockTimeMs, formatDurationMs, formatElapsedSeconds } from '../../shared/time';
 
@@ -24,10 +25,17 @@ export async function syncServerClock(
   }
   if (!best) throw new Error('server clock sync failed');
   serverTimeOffsetMs = best.offsetMs;
+  for (const listener of syncListeners) listener();
   return best;
 }
 
 /** The current time on the server's clock, which stamps every lap. */
 export function nowMs(): number {
   return Date.now() + serverTimeOffsetMs;
+}
+
+/** Calls `listener` after every sync, which can move nowMs() against this laptop's clock. */
+export function onServerClockSync(listener: () => void): () => void {
+  syncListeners.add(listener);
+  return () => syncListeners.delete(listener);
 }
