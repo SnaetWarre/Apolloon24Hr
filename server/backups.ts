@@ -16,8 +16,12 @@ const minimumFreeBytes = readPositiveInt(process.env.BACKUP_MIN_FREE_BYTES, 2 * 
 
 /** Four hours of scheduled backups at the default interval. */
 const KEEP_SCHEDULED = 48;
-/** Manual backups and the safety copies taken before joining or resynchronizing. */
-const KEEP_OTHER = 20;
+/** Beyond those, the newest scheduled backup of each clock hour, so a whole race can be rolled back. */
+const KEEP_HOURLY_MS = 30 * 60 * 60_000;
+/** Backups an operator made; kept apart so automatic copies never push them out. */
+const KEEP_MANUAL = 20;
+/** The safety copies taken before joining, resynchronizing or restoring. */
+const KEEP_SAFETY = 20;
 
 const verifyWorkerUrl = new URL(
   `./backup-verify-worker${path.extname(fileURLToPath(import.meta.url))}`,
@@ -100,15 +104,30 @@ export function backupFile(fileName: string): { record: BackupRecord; path: stri
   return fs.existsSync(filePath) ? { record, path: filePath } : null;
 }
 
-/** Keeps the newest scheduled and the newest other backups; returns the file names to keep. */
+/** Keeps the newest backups of each kind plus one scheduled backup per hour; returns the file names to keep. */
 export function backupsToRetain(candidates: BackupRecord[]): Set<string> {
   const newestFirst = candidates.slice().sort((a, b) => b.createdAt - a.createdAt);
+  const scheduled = newestFirst.filter((record) => record.scheduled);
+  const manual = newestFirst.filter((record) => !record.scheduled && isManual(record.fileName));
+  const safety = newestFirst.filter((record) => !record.scheduled && !isManual(record.fileName));
+  const hourlySince = (newestFirst[0]?.createdAt ?? 0) - KEEP_HOURLY_MS;
+  const hourly = new Map<number, BackupRecord>();
+  for (const record of scheduled) {
+    const hour = Math.floor(record.createdAt / 3_600_000);
+    if (record.createdAt > hourlySince && !hourly.has(hour)) hourly.set(hour, record);
+  }
   return new Set(
     [
-      ...newestFirst.filter((record) => record.scheduled).slice(0, KEEP_SCHEDULED),
-      ...newestFirst.filter((record) => !record.scheduled).slice(0, KEEP_OTHER),
+      ...scheduled.slice(0, KEEP_SCHEDULED),
+      ...hourly.values(),
+      ...manual.slice(0, KEEP_MANUAL),
+      ...safety.slice(0, KEEP_SAFETY),
     ].map((record) => record.fileName)
   );
+}
+
+function isManual(fileName: string): boolean {
+  return /-manual-[0-9a-f]{8}\.sqlite$/.test(fileName);
 }
 
 async function performBackup(reason: string): Promise<BackupRecord> {
