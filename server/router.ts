@@ -454,6 +454,9 @@ export const appRouter = t.router({
     undoLastHandoff: t.procedure.input(raceStateExpectationSchema).mutation(
       write((input) => {
         assertExpectedRaceState(input);
+        if (getRaceState().raceFinishedAt) {
+          fail('CONFLICT', 'De race is afgesloten. Hervat de race eerst om een wissel ongedaan te maken.');
+        }
         const result = undoLastHandoff();
         return result.ok ? result : fail('CONFLICT', 'Er is geen wissel om ongedaan te maken');
       })
