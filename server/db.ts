@@ -71,7 +71,13 @@ export {
 export type { ReplicationLogEntry } from './db/types.js';
 export { DATABASE_SCHEMA_VERSION } from './db/schema.js';
 export { schemaProblems } from './db/schema-check.js';
-export { getClusterMembers, saveClusterMember, keepOnlyClusterMember, type ClusterMember } from './db/members.js';
+export {
+  getClusterMembers,
+  saveClusterMember,
+  removeClusterMember,
+  keepOnlyClusterMember,
+  type ClusterMember,
+} from './db/members.js';
 export { findForwardedWrite, saveForwardedWrite, touchForwardedWrite } from './db/forwarded-writes.js';
 export {
   getLabels,

@@ -21,6 +21,11 @@ export function saveClusterMember(member: ClusterMember): void {
   );
 }
 
+/** Takes a laptop out of the group; a replicated write. */
+export function removeClusterMember(hostId: string): void {
+  run('DELETE FROM cluster_members WHERE host_id = ?', [hostId]);
+}
+
 /** Leaves only this laptop in the group; a replicated write. */
 export function keepOnlyClusterMember(hostId: string): void {
   run('DELETE FROM cluster_members WHERE host_id <> ?', [hostId]);

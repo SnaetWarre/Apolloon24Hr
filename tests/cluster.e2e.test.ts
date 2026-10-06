@@ -441,6 +441,43 @@ test(
   }
 );
 
+test(
+  'a laptop whose data was wiped and linked again replaces its old self, so two of three still save',
+  { timeout: 60_000 },
+  async () => {
+    const root = testRoot('relink-wiped');
+    const servers: RunningServer[] = [];
+    try {
+      await startGroup(root, servers);
+      const [first, second, wiped] = servers;
+      const oldHostId = (await fetchStatus(wiped)).hostId;
+
+      // A reinstall: the same laptop at the same address, with a new host id.
+      await stopServer(wiped);
+      fs.rmSync(wiped.dataPath, { recursive: true, force: true });
+      const relinked = await startServer({ port: wiped.port, dataPath: wiped.dataPath });
+      servers[2] = relinked;
+      await join(relinked, first);
+      await waitForSameState(first, relinked);
+
+      const status = await fetchStatus(first);
+      assert.equal(status.members.length, 3, JSON.stringify(status.members));
+      assert.equal(status.majority, 2);
+      assert.ok(!status.members.some((member) => member.hostId === oldHostId));
+
+      await killServer(relinked);
+      await waitFor(async () => (await leaderOf([first, second])) !== null, 10_000);
+      const leader = (await leaderOf([first, second]))!;
+      await client(leader).runners.create.mutate({ name: 'Saved by two of three', runnerNumber: 'W-1' });
+    } catch (error) {
+      throw withServerOutput(error, ...servers);
+    } finally {
+      await Promise.all(servers.map(stopServer));
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
+);
+
 test('the laptops find each other again when every address changes', { timeout: 60_000 }, async () => {
   const root = testRoot('new-addresses');
   const servers: RunningServer[] = [];
