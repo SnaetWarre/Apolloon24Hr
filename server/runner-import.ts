@@ -155,10 +155,11 @@ export function importRunnersFromCsv(csvText: string): ImportSummary {
     skipEmptyLines: true,
   }) as {
     data: Array<Record<string, unknown>>;
-    errors: Array<{ message: string }>;
+    errors: Array<{ type: string; message: string }>;
   };
-  if (parsed.errors.length)
-    throw new CsvImportError(`Het CSV-bestand kon niet gelezen worden: ${parsed.errors[0].message}`);
+  // A hand-made list often leaves off empty trailing columns; those rows are fine, the missing fields are empty.
+  const unreadable = parsed.errors.find((error) => error.type !== 'FieldMismatch');
+  if (unreadable) throw new CsvImportError(`Het CSV-bestand kon niet gelezen worden: ${unreadable.message}`);
 
   const summary: ImportSummary = {
     created: 0,
@@ -173,13 +174,18 @@ export function importRunnersFromCsv(csvText: string): ImportSummary {
   for (const [index, row] of parsed.data.entries()) {
     // Spreadsheet row number: the header is row 1.
     const rowNumber = index + 2;
+    // Papa keeps values beyond the header's columns apart; no column can take them.
+    const { __parsed_extra: extra, ...fields } = row;
+    if (Array.isArray(extra) && extra.some((value) => text(value))) {
+      summary.errors.push(`Rij ${rowNumber}: meer waarden dan kolommen, genegeerd: ${extra.join(', ')}`);
+    }
     // A row left blank in the sheet, such as a formatted row under the answers.
-    if (Object.values(row).every((value) => !text(value))) continue;
-    const registration = formExport ? registrationFromRow(row) : null;
+    if (Object.values(fields).every((value) => !text(value))) continue;
+    const registration = formExport ? registrationFromRow(fields) : null;
     const runnerNumber =
-      text(columnValue(row, ['runner_number', 'lopersnummer', 'nummer', 'number', 'bib'])) ||
+      text(columnValue(fields, ['runner_number', 'lopersnummer', 'nummer', 'number', 'bib'])) ||
       (formExport ? String(rowNumber) : '');
-    const name = text(columnValue(row, ['name', 'naam', 'runner_name', 'loper', 'voornaam_+_naam']));
+    const name = text(columnValue(fields, ['name', 'naam', 'runner_name', 'loper', 'voornaam_+_naam']));
 
     // Form answers are typed by hand: anything goes, as long as there is a name.
     if (!runnerNumber || !name) {
@@ -189,7 +195,7 @@ export function importRunnersFromCsv(csvText: string): ImportSummary {
     }
 
     try {
-      const result = upsertRunnerFromImport(runnerInputFromRow(row, runnerNumber, name, registration));
+      const result = upsertRunnerFromImport(runnerInputFromRow(fields, runnerNumber, name, registration));
       summary[result.action] += 1;
       if (result.numberTaken) {
         summary.errors.push(`Rij ${rowNumber}: nummer ${runnerNumber} is al in gebruik, ${name} kreeg geen nummer`);

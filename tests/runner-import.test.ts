@@ -226,3 +226,46 @@ test('the form’s Excel file imports like its CSV export, without doubling runn
     fs.rmSync(dataPath, { recursive: true, force: true });
   }
 });
+
+test('a hand-made list imports rows that leave off empty trailing columns', async () => {
+  fs.rmSync(dataPath, { recursive: true, force: true });
+  const db = await import('../server/db.ts');
+  const { appRouter } = await import('../server/router.ts');
+  try {
+    await db.initDb();
+    const caller = appRouter.createCaller({});
+    const csvText = [
+      'runner_number,naam,labels,snelste',
+      '1,Anna Peeters',
+      '2,Bert Claes,HILOK,1:20',
+      '   ',
+      '3,Cas Jacobs,Dames',
+      '4,Peeters, Dirk,Kinesia,1:25',
+    ].join('\n');
+
+    const summary = await caller.runners.importCsv({ csvText });
+    assert.deepEqual(summary, {
+      created: 4,
+      updated: 0,
+      skipped: 0,
+      errors: ['Rij 6: meer waarden dan kolommen, genegeerd: 1:25'],
+    });
+    const runners = new Map(db.getAllRunners().map((runner) => [runner.runnerNumber, runner]));
+    assert.equal(runners.get('1')?.name, 'Anna Peeters');
+    assert.deepEqual(runners.get('1')?.labels, []);
+    assert.equal(runners.get('2')?.historicalBestMs, 80_000);
+    assert.deepEqual(
+      runners.get('3')?.labels.map((label) => label.name),
+      ['Dames']
+    );
+    assert.equal(runners.get('4')?.name, 'Peeters');
+
+    await assert.rejects(
+      caller.runners.importCsv({ csvText: 'runner_number,naam\n5,"Eva Maes\n6,Fien Wouters' }),
+      /Het CSV-bestand kon niet gelezen worden/
+    );
+  } finally {
+    db.closeDb();
+    fs.rmSync(dataPath, { recursive: true, force: true });
+  }
+});
