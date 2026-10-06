@@ -61,6 +61,12 @@ function shownAt(page, selector, text, { absent = false } = {}) {
   return seen;
 }
 
+/** Waits until the running lap is long enough that Timing counts a press without asking (MIN_LAP_MS, 20 s). */
+async function waitForRealLap(url) {
+  const { activeStartedAt } = (await snapshot(url)).race;
+  await new Promise((resolve) => setTimeout(resolve, Math.max(0, activeStartedAt + 20_250 - Date.now())));
+}
+
 /** Presses Space on Timing; returns when the key arrived and how long until the laptops confirmed it. */
 async function press(timing) {
   const saved = timing.waitForResponse((response) => /\/trpc\/race\.(handoff|startNext)/.test(response.url()), {
@@ -234,13 +240,14 @@ try {
   );
 
   // With Beheer open, a press is just as fast.
+  await waitForRealLap(timingUrl);
   const secondOnTv = shownAt(tv, '.inside-now__runner', secondWaiting.name);
   const secondPress = await press(timing);
   record('Timing press with Beheer open is confirmed', secondPress.savedMs, 300);
   record('that press reaches the Binnenscherm', (await secondOnTv) - secondPress.at, 500);
 
   // 5. The leader dies mid-lap and Timing presses straight away: the press waits out the takeover.
-  await timing.waitForTimeout(1_000);
+  await waitForRealLap(timingUrl);
   const missingShown = shownAt(admin, '.cluster-state', 'Eén laptop onbereikbaar');
   const killedAt = performance.timeOrigin + performance.now();
   process.kill(leader.pid, 'SIGKILL');
@@ -296,6 +303,7 @@ try {
   const tvOnReturned = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
   await tvOnReturned.goto(`${leaderUrl}/display/inside`);
   await tvOnReturned.locator('.inside-now__runner').getByText(newcomer.name).waitFor({ timeout: PATIENCE_MS });
+  await waitForRealLap(timingUrl);
   const lastOnTv = shownAt(tvOnReturned, '.inside-now__runner', lateRunner.name);
   const lastPress = await press(timing);
   record('Timing press after the rejoin is confirmed', lastPress.savedMs, 300);

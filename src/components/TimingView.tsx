@@ -11,7 +11,7 @@ import { RunnerName } from './RunnerName';
 import { compareWaitingOrder } from '../lib/runners';
 import { PageHeader } from './PageHeader';
 import { useArrivals, usePulse } from '../lib/motion';
-import { forgetLapStart, rememberLapStart, timePress, type PressTime } from '../lib/pressTiming';
+import { forgetLapStart, rememberLapStart, timePress, tooShortLapMs, type PressTime } from '../lib/pressTiming';
 import { LIVE_MILLISECOND_INTERVAL_MS, useClockTick } from '../lib/useClockTick';
 
 const selectTimingData = ({ runners, race }: LiveAppSnapshot) => ({ runners, race });
@@ -39,6 +39,11 @@ export function TimingView() {
     startedAt: number;
   } | null>(null);
   const handoffBusyRef = React.useRef(false);
+  // A question can stay open while another laptop clocks; its answer then belongs to an old lap.
+  const activeStartedAtRef = React.useRef(race.activeStartedAt);
+  React.useEffect(() => {
+    activeStartedAtRef.current = race.activeStartedAt;
+  });
   const confirm = useConfirm();
   // A press flashes the key, also when it came from the keyboard.
   const [pressed, flashPress] = usePulse(240);
@@ -86,6 +91,22 @@ export function TimingView() {
       eventTime = performance.now();
     }
     const press = timePress(eventTime, race.activeStartedAt);
+    const shortLapMs = tooShortLapMs(press, race.activeStartedAt);
+    if (activeRunner && shortLapMs !== null) {
+      const seconds = (shortLapMs / 1000).toLocaleString('nl-BE', { maximumFractionDigits: 1 });
+      const count = await confirm({
+        title: 'Toch afklokken?',
+        message: `${shortRunnerName(activeRunner)} is pas ${seconds} s onderweg. Dubbel gedrukt? Kies Annuleer.`,
+        confirmLabel: 'Toch afklokken',
+        tone: 'danger',
+      });
+      if (!count) return;
+      // The lap still ends at the press, not at the answer, unless another laptop clocked in between.
+      if (activeStartedAtRef.current !== race.activeStartedAt) {
+        setActionError('De loper is intussen gewisseld. Druk opnieuw.');
+        return;
+      }
+    }
     setPressedHandoff({
       fromStartedAt: race.activeStartedAt,
       runnerId: nextRunner?.id ?? null,

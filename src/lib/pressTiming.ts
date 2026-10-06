@@ -30,3 +30,13 @@ export function rememberLapStart(press: PressTime, eventTime: number): void {
 export function forgetLapStart(): void {
   previousPress = null;
 }
+
+/** Real laps take minutes; a lap shorter than this is a double press, so Timing asks before it counts. */
+export const MIN_LAP_MS = 20_000;
+
+/** How long the running lap lasted at `press`, if that is too short to be a real lap. */
+export function tooShortLapMs(press: PressTime, activeStartedAt: number | null): number | null {
+  if (activeStartedAt === null) return null;
+  const lapMs = press.measuredDurationMs ?? press.pressedAt - activeStartedAt;
+  return lapMs < MIN_LAP_MS ? Math.max(0, lapMs) : null;
+}
