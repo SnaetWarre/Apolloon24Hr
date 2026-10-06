@@ -114,10 +114,14 @@ function registrationJsonWithDetails(
   return hasAnswers ? JSON.stringify(next) : null;
 }
 
+const LABEL_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /**
  * Replaces the runner's stored labels. Values may be label ids or names;
- * unknown names create a label. Night team labels are derived, never stored,
- * and while a night team is active the runner keeps their speedteam.
+ * unknown names create a label. An unknown id is a label another laptop
+ * deleted meanwhile and is skipped, not turned into a name. Night team
+ * labels are derived, never stored, and while a night team is active the
+ * runner keeps their speedteam.
  */
 function setRunnerLabels(runnerId: string, labelNamesOrIds: string[]): void {
   const keepSpeedteam = Boolean(activeTemporaryTeamIdForRunner(runnerId));
@@ -128,7 +132,8 @@ function setRunnerLabels(runnerId: string, labelNamesOrIds: string[]): void {
   );
   for (const value of labelNamesOrIds) {
     const label =
-      one<{ id: string; kind: string }>('SELECT id, kind FROM labels WHERE id = ?', [value]) ?? ensureLabel(value);
+      one<{ id: string; kind: string }>('SELECT id, kind FROM labels WHERE id = ?', [value]) ??
+      (LABEL_ID_PATTERN.test(value.trim()) ? null : ensureLabel(value));
     if (!label || label.kind === TEMPORARY_TEAM_KIND || (keepSpeedteam && label.kind === 'speedteam')) continue;
     run('INSERT OR IGNORE INTO runner_labels (runner_id, label_id) VALUES (?, ?)', [runnerId, label.id]);
   }
