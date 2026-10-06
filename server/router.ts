@@ -46,6 +46,7 @@ import {
   createLabel,
   deleteLabel,
   deleteRunner,
+  canUndoFinish,
   finishRace,
   findForwardedWrite,
   getActivity,
@@ -454,7 +455,8 @@ export const appRouter = t.router({
     undoLastHandoff: t.procedure.input(raceStateExpectationSchema).mutation(
       write((input) => {
         assertExpectedRaceState(input);
-        if (getRaceState().raceFinishedAt) {
+        // A finish without its own undo step would make undo take back the handoff before it.
+        if (getRaceState().raceFinishedAt && !canUndoFinish()) {
           fail('CONFLICT', 'De race is afgesloten. Hervat de race eerst om een wissel ongedaan te maken.');
         }
         const result = undoLastHandoff();

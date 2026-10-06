@@ -47,6 +47,49 @@ test('finishing a race retires the active runner without recording an extra lap'
   }
 });
 
+test('undo after finishing reopens the race and keeps the laps', async () => {
+  fs.rmSync(dataPath, { recursive: true, force: true });
+  const db = await import('../server/db.ts');
+
+  try {
+    await db.initDb();
+    const [zoe, arne] = ['Zoë', 'Arne'].map((name, index) =>
+      db.insertRunner({ name, runnerNumber: String(index + 1) })
+    );
+    db.updateRunnerStatus({ id: zoe.id, status: 'waiting', statusSince: 1 });
+    db.updateRunnerStatus({ id: arne.id, status: 'waiting', statusSince: 2 });
+    db.performHandoff(1_000);
+    const handoff = db.performHandoff(90_000);
+    assert.equal(handoff.ok && handoff.startedRunnerId, arne.id);
+
+    db.finishRace(120_000);
+    assert.deepEqual(db.undoLastHandoff(), { ok: true, deletedLapIds: [] });
+
+    assert.deepEqual(db.getRaceState(), {
+      id: 1,
+      activeRunnerId: arne.id,
+      activeStartedAt: 90_000,
+      raceStartedAt: 1_000,
+      raceFinishedAt: null,
+      activeLabels: [],
+    });
+    assert.equal(db.getRunnerById(arne.id)?.status, 'running');
+    assert.equal(db.getRunnerById(arne.id)?.statusSince, 90_000);
+    assert.equal(db.getRunnerById(zoe.id)?.status, 'ran');
+    assert.equal(db.getRunnerById(zoe.id)?.lapCount, 1);
+
+    // The next undo takes back the handoff before the finish, as usual.
+    assert.deepEqual(db.undoLastHandoff(), { ok: true, deletedLapIds: handoff.ok ? [handoff.lapId] : [] });
+    assert.equal(db.getRaceState().activeRunnerId, zoe.id);
+    assert.equal(db.getRunnerById(zoe.id)?.lapCount, 0);
+    assert.equal(db.getRunnerById(arne.id)?.status, 'waiting');
+  } finally {
+    // Windows cannot delete a database file that is still open.
+    db.closeDb();
+    fs.rmSync(dataPath, { recursive: true, force: true });
+  }
+});
+
 test('reordering requires each waiting runner exactly once', async () => {
   fs.rmSync(dataPath, { recursive: true, force: true });
   const db = await import('../server/db.ts');
@@ -99,7 +142,7 @@ test('timing mutations reject a stale race state instead of recording an extra h
   }
 });
 
-test('undo after finishing the race is refused and keeps the laps and race state', async () => {
+test('undo is refused after a finish without its own undo step, and keeps the laps and race state', async () => {
   fs.rmSync(dataPath, { recursive: true, force: true });
   const db = await import('../server/db.ts');
   const { appRouter } = await import('../server/router.ts');
@@ -114,9 +157,17 @@ test('undo after finishing the race is refused and keeps the laps and race state
     db.performHandoff(1_000);
     db.performHandoff(61_000);
     db.finishRace(90_000);
+    const caller = appRouter.createCaller({});
+    // Through the router, too, undo reopens a normal finish; finish again for the old case below.
+    await caller.race.undoLastHandoff({ activeRunnerId: null, activeStartedAt: null });
+    assert.equal(db.getRaceState().activeRunnerId, second.id);
+    db.finishRace(90_000);
+    // Races finished on an older build have no undo step for the finish.
+    const file = new DatabaseSync(path.join(dataPath, 'data', 'app.db'));
+    file.prepare('DELETE FROM handoff_history WHERE created_at = 90000').run();
+    file.close();
     const finished = db.getRaceState();
 
-    const caller = appRouter.createCaller({});
     await assert.rejects(
       caller.race.undoLastHandoff({ activeRunnerId: null, activeStartedAt: null }),
       /De race is afgesloten/

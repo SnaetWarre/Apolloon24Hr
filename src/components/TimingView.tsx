@@ -170,16 +170,32 @@ export function TimingView() {
 
   async function undo() {
     if (handoffBusyRef.current) return;
+    // After "Race beëindigen" the last step is the finish itself: undoing it reopens the race.
+    const reopen = Boolean(race.raceFinishedAt);
     if (
-      !(await confirm({
-        title: 'Laatste wissel ongedaan maken?',
-        message: 'Wachtrij, actieve loper en eventuele ronde gaan terug naar de toestand van vóór de laatste wissel.',
-        confirmLabel: 'Ongedaan maken',
-        tone: 'danger',
-      }))
+      !(await confirm(
+        reopen
+          ? {
+              title: 'Race beëindigen ongedaan maken?',
+              message:
+                'De race gaat weer open. De loper die op de piste was, loopt verder met dezelfde starttijd. Alle rondes blijven staan.',
+              confirmLabel: 'Race heropenen',
+              tone: 'danger',
+            }
+          : {
+              title: 'Laatste wissel ongedaan maken?',
+              message:
+                'Wachtrij, actieve loper en eventuele ronde gaan terug naar de toestand van vóór de laatste wissel.',
+              confirmLabel: 'Ongedaan maken',
+              tone: 'danger',
+            }
+      ))
     )
       return;
-    await runExclusiveRaceAction(undoLastHandoff, 'Laatste wissel ongedaan gemaakt.');
+    await runExclusiveRaceAction(
+      undoLastHandoff,
+      reopen ? 'Race heropend. Beëindigen ongedaan gemaakt.' : 'Laatste wissel ongedaan gemaakt.'
+    );
   }
 
   function startFinish(eventTime: number) {
@@ -371,7 +387,7 @@ export function TimingView() {
               <span className="muted-label">Race gestart</span>
               <strong>{race.raceStartedAt ? formatClockTimeMs(race.raceStartedAt).split('.')[0] : 'Nog niet'}</strong>
             </div>
-            <button className="btn timing-undo" onClick={undo} disabled={timingBlocked || Boolean(race.raceFinishedAt)}>
+            <button className="btn timing-undo" onClick={undo} disabled={timingBlocked}>
               Laatste wissel ongedaan maken
             </button>
           </div>
