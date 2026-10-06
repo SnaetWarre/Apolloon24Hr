@@ -1,5 +1,5 @@
 import { type LabelInput } from '../../shared/schemas.js';
-import { all, getDb, run, transaction } from './connection.js';
+import { all, getDb, one, run, transaction } from './connection.js';
 import { createLabelRecord, findLabelByName } from './labels.js';
 import { type SchemaProblem, type TableShape, referenceSchema, schemaProblems } from './schema-check.js';
 import { RUNNER_QUEUE_INDEX_SQL, SCHEMA_SQL } from './schema-sql.js';
@@ -203,23 +203,18 @@ function warnAboutForeignKeyViolations(): void {
   }
 }
 
+/**
+ * Adds the built-in labels to a database created on this start. Runs outside
+ * `recordWrite`, so it must never touch a database that already holds event
+ * data: a renamed, edited or deleted built-in label is the operator's choice
+ * and has already reached the other laptops. A default whose id or name is
+ * taken is skipped, never overwritten.
+ */
 export function seedDefaultLabels(): void {
-  for (const label of DEFAULT_LABELS) {
-    const existing = findLabelByName(label.name);
-    if (existing) {
-      run(
-        `UPDATE labels
-         SET color = ?,
-             icon = ?,
-             kind = ?,
-             image_url = ?,
-             target_laps = COALESCE(target_laps, ?),
-             sort_order = COALESCE(sort_order, ?)
-         WHERE id = ?`,
-        [label.color, label.icon, label.kind, label.imageUrl, label.targetLaps, label.sortOrder, existing.id]
-      );
-      continue;
+  transaction(() => {
+    for (const label of DEFAULT_LABELS) {
+      if (one('SELECT 1 FROM labels WHERE id = ?', [label.id]) || findLabelByName(label.name)) continue;
+      createLabelRecord(label, label.id, DEFAULT_LABEL_CREATED_AT);
     }
-    createLabelRecord(label, label.id, DEFAULT_LABEL_CREATED_AT);
-  }
+  });
 }

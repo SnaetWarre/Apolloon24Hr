@@ -22,7 +22,8 @@ export async function initDb(): Promise<void> {
       `database schema ${storedSchemaVersion} is newer than this Apolloon release (${DATABASE_SCHEMA_VERSION})`
     );
   }
-  if (hasTables && storedSchemaVersion < FIRST_KEPT_SCHEMA_VERSION) database = retireDatabase(storedSchemaVersion);
+  const retired = hasTables && storedSchemaVersion < FIRST_KEPT_SCHEMA_VERSION;
+  if (retired) database = retireDatabase(storedSchemaVersion);
   createSchema();
   // Keep a copy before rebuilding tables of a database whose structure is out of date. A failed
   // repair changes nothing, so the restarts after it keep the first copy of the day.
@@ -31,7 +32,8 @@ export async function initDb(): Promise<void> {
     if (!fs.existsSync(backupPath)) await backupDatabase(backupPath);
   }
   migrateSchema();
-  seedDefaultLabels();
+  // Only a new database gets the built-in labels; in an existing one they are event data.
+  if (!hasTables || retired) seedDefaultLabels();
   syncTemporaryTeamRows();
   hostIdentity();
 }
