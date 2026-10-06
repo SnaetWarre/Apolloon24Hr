@@ -7,6 +7,7 @@ import {
   SECOND_DISPLAY_INTERVAL_MS,
 } from '../src/lib/useClockTick.ts';
 import { createArrivalState, trackArrivals } from '../src/lib/motion.ts';
+import { decodeCsvBytes } from '../src/lib/registrationFile.ts';
 import { relativeFileWithinRoot } from '../server/static-files.ts';
 import path from 'node:path';
 
@@ -70,4 +71,17 @@ test('packaged static files stay relative to the AppImage mount root', () => {
   );
   assert.equal(relativeFileWithinRoot(distRoot, path.join(distRoot, 'index.html')), 'index.html');
   assert.equal(relativeFileWithinRoot(distRoot, path.join(hiddenMountRoot, 'secret.txt')), null);
+});
+
+test('registration CSVs are read as UTF-8, or as Windows-1252 when Excel saved them that way', () => {
+  const header = 'runner_number;naam\r\n';
+  assert.equal(decodeCsvBytes(new TextEncoder().encode(`${header}901;Zoë Desmét\r\n`)), `${header}901;Zoë Desmét\r\n`);
+  assert.equal(
+    decodeCsvBytes(new Uint8Array([0xef, 0xbb, 0xbf, ...new TextEncoder().encode(`${header}902;François\r\n`)])),
+    `${header}902;François\r\n`
+  );
+  const ansi = Uint8Array.from(`${header}901;Zo\xeb Desm\xe9t\r\n902;Fran\xe7ois L\xe9vesque\r\n`, (char) =>
+    char.charCodeAt(0)
+  );
+  assert.equal(decodeCsvBytes(ansi), `${header}901;Zoë Desmét\r\n902;François Lévesque\r\n`);
 });
