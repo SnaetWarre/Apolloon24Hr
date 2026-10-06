@@ -40,6 +40,7 @@ import {
   hostIdentity,
   keepOnlyClusterMember,
   recordWrite,
+  removeClusterMember,
   saveClusterMember,
   serializeDatabase,
   setLocalSetting,
@@ -358,12 +359,24 @@ function sendPeerError(res: Response, status: number, code: string, error: strin
   res.status(status).json({ ok: false, code, error });
 }
 
-/** Adds a laptop to the group, or records its new address; a replicated write. */
+/**
+ * Adds a laptop to the group, or records its new address; a replicated write.
+ * A laptop whose app data was wiped comes back with a new host id, usually at
+ * its old address. Its old id can never answer again, so it is replaced in
+ * the same write; otherwise the group would count a fourth laptop and need
+ * three for a majority. An old id that still announces itself elsewhere (its
+ * address went to another laptop) is a live laptop and stays.
+ */
 function addMember(member: ClusterMember): void {
   recordWrite('cluster.addMember', () => {
     const self = selfMember();
     const stored = getClusterMembers().find((existing) => existing.hostId === self.hostId);
     if (stored?.url !== self.url) saveClusterMember(self);
+    for (const old of members()) {
+      if (old.url === member.url && old.hostId !== member.hostId && old.hostId !== self.hostId) {
+        removeClusterMember(old.hostId);
+      }
+    }
     saveClusterMember(member);
   });
 }
