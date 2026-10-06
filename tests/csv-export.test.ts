@@ -45,3 +45,20 @@ test('the CSV exports quote formulas that span several lines, and leave numbers 
   assert.deepEqual(multiLine, ['\'=HYPERLINK("http://evil.example","Klik")\nFien', "'@team", '77125']);
   assert.deepEqual(normal, ['Fien Goossens', "'+32 470", '-1']);
 });
+
+test('the CSV exports start with a UTF-8 BOM so Excel keeps accented names intact', () => {
+  const csv = csvText(['timestamp', 'name'], [{ timestamp: '2026-10-10T18:00:00.000Z', name: 'Zoë Dupré' }]);
+
+  assert.equal(Buffer.from(csv).subarray(0, 3).toString('hex'), 'efbbbf');
+  const parsed = Papa.parse<Record<string, string>>(csv, { header: true, skipEmptyLines: true });
+  assert.deepEqual(parsed.meta.fields, ['timestamp', 'name']);
+  assert.equal(parsed.data[0].timestamp, '2026-10-10T18:00:00.000Z');
+  assert.equal(parsed.data[0].name, 'Zoë Dupré');
+});
+
+test('the CSV exports also start with the BOM before the first row', () => {
+  const csv = csvText(['timestamp', 'type'], []);
+
+  assert.equal(csv, '﻿timestamp,type\n');
+  assert.deepEqual(Papa.parse(csv, { header: true }).meta.fields, ['timestamp', 'type']);
+});
