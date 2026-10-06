@@ -99,6 +99,39 @@ test('timing mutations reject a stale race state instead of recording an extra h
   }
 });
 
+test('undo after finishing the race is refused and keeps the laps and race state', async () => {
+  fs.rmSync(dataPath, { recursive: true, force: true });
+  const db = await import('../server/db.ts');
+  const { appRouter } = await import('../server/router.ts');
+
+  try {
+    await db.initDb();
+    const first = db.insertRunner({ name: 'First runner', runnerNumber: '1' });
+    const second = db.insertRunner({ name: 'Second runner', runnerNumber: '2' });
+    db.updateRunnerStatus({ id: first.id, status: 'waiting', statusSince: 900, queueIndex: 0 });
+    db.updateRunnerStatus({ id: second.id, status: 'waiting', statusSince: 900, queueIndex: 1 });
+
+    db.performHandoff(1_000);
+    db.performHandoff(61_000);
+    db.finishRace(90_000);
+    const finished = db.getRaceState();
+
+    const caller = appRouter.createCaller({});
+    await assert.rejects(
+      caller.race.undoLastHandoff({ activeRunnerId: null, activeStartedAt: null }),
+      /De race is afgesloten/
+    );
+    assert.equal(db.getAllLaps().length, 1);
+    assert.deepEqual(db.getRaceState(), finished);
+    assert.equal(db.getRunnerById(first.id)?.status, 'ran');
+    assert.equal(db.getRunnerById(second.id)?.status, 'ran');
+  } finally {
+    // Windows cannot delete a database file that is still open.
+    db.closeDb();
+    fs.rmSync(dataPath, { recursive: true, force: true });
+  }
+});
+
 test('only one runner can be marked as running', async () => {
   fs.rmSync(dataPath, { recursive: true, force: true });
   const db = await import('../server/db.ts');
