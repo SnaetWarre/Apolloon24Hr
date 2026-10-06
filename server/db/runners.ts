@@ -7,7 +7,7 @@ import {
   type RunnerRegistration,
   type RunnerRegistrationDetails,
 } from '../../shared/schemas.js';
-import { one, run, transaction } from './connection.js';
+import { all, one, run, transaction } from './connection.js';
 import { TEMPORARY_TEAM_KIND, activeTemporaryTeamIdForRunner, ensureLabel } from './labels.js';
 import { getMaxQueueIndex } from './queue.js';
 import { clearActiveRunner } from './race-state.js';
@@ -29,12 +29,19 @@ function findRunnerIdByNumber(runnerNumber: string): string | null {
   return one<{ id: string }>('SELECT id FROM runners WHERE runner_number = ?', [runnerNumber])?.id ?? null;
 }
 
-function findRunnerIdByEmail(email: string): string | null {
+/** Names as typed in the form: case and spacing differ between two answers by the same person. */
+function sameName(a: string, b: string): boolean {
+  const canonical = (name: string) => name.trim().replace(/\s+/g, ' ').toLocaleLowerCase('nl');
+  return canonical(a) === canonical(b);
+}
+
+/** A club secretary or a parent registers several runners with one address, so the name must match too. */
+function findRunnerIdByEmailAndName(email: string, name: string): string | null {
   return (
-    one<{ id: string }>(
-      "SELECT id FROM runners WHERE lower(json_extract(registration_json, '$.email')) = lower(?) LIMIT 1",
+    all<{ id: string; name: string }>(
+      "SELECT id, name FROM runners WHERE lower(json_extract(registration_json, '$.email')) = lower(?)",
       [email]
-    )?.id ?? null
+    ).find((runner) => sameName(runner.name, name))?.id ?? null
   );
 }
 
@@ -61,8 +68,9 @@ function findRunnerIdByNumberAndName(runnerNumber: string, name: string): string
 
 /**
  * The runner an imported row was imported as before. A form answer is known
- * by its e-mail, else by its submission time. A CSV export and the Excel file
- * write that time differently, so last comes the same sheet row and name.
+ * by its e-mail and name, else by its submission time. A CSV export and the
+ * Excel file write that time differently, so last comes the same sheet row
+ * and name.
  * A plain runner list is known by its runner number.
  */
 function findImportedRunnerId(input: RunnerInput, runnerNumber: string | undefined): string | null {
@@ -71,7 +79,7 @@ function findImportedRunnerId(input: RunnerInput, runnerNumber: string | undefin
   const email = usableEmail(registration.email);
   const submittedAt = registration.submittedAt.trim();
   return (
-    (email && findRunnerIdByEmail(email)) ||
+    (email && findRunnerIdByEmailAndName(email, input.name)) ||
     (submittedAt && findRunnerIdBySubmission(submittedAt)) ||
     (runnerNumber && findRunnerIdByNumberAndName(runnerNumber, input.name)) ||
     null
