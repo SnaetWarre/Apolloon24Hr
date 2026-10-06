@@ -68,9 +68,8 @@ function findRunnerIdByNumberAndName(runnerNumber: string, name: string): string
 
 /**
  * The runner an imported row was imported as before. A form answer is known
- * by its e-mail and name, else by its submission time. A CSV export and the
- * Excel file write that time differently, so last comes the same sheet row
- * and name.
+ * by its e-mail and name, else by its submission time. CSV and Excel exports
+ * write that time differently, so last comes the same sheet row and name.
  * A plain runner list is known by its runner number.
  */
 function findImportedRunnerId(input: RunnerInput, runnerNumber: string | undefined): string | null {
