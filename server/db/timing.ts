@@ -136,7 +136,7 @@ export function undoLastHandoff(): { ok: true; deletedLapIds: string[] } | { ok:
     `SELECT id, payload_json AS payloadJson
      FROM handoff_history
      WHERE undone = 0
-     ORDER BY created_at DESC
+     ORDER BY created_at DESC, rowid DESC
      LIMIT 1`
   );
   if (!row) {
@@ -213,7 +213,7 @@ export function canUndoFinish(): boolean {
     `SELECT created_at AS createdAt
      FROM handoff_history
      WHERE undone = 0
-     ORDER BY created_at DESC
+     ORDER BY created_at DESC, rowid DESC
      LIMIT 1`
   );
   return raceFinishedAt !== null && row?.createdAt === raceFinishedAt;

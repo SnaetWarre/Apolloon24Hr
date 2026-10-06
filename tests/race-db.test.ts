@@ -90,6 +90,47 @@ test('undo after finishing reopens the race and keeps the laps', async () => {
   }
 });
 
+test('undo reverts the latest handoff when two share the same moment', async () => {
+  fs.rmSync(dataPath, { recursive: true, force: true });
+  const db = await import('../server/db.ts');
+
+  try {
+    await db.initDb();
+    const [a, b, c] = ['A', 'B', 'C'].map((name, index) => {
+      const runner = db.insertRunner({ name, runnerNumber: String(index + 1) });
+      db.updateRunnerStatus({ id: runner.id, status: 'waiting', statusSince: 900, queueIndex: index });
+      return runner;
+    });
+
+    db.performHandoff(1_000);
+    db.performHandoff(61_000);
+    // A press from a laptop whose clock runs behind is clamped to the previous handoff.
+    db.performHandoff(61_000);
+    assert.equal(db.getRaceState().activeRunnerId, c.id);
+
+    assert.equal(db.undoLastHandoff().ok, true);
+
+    assert.equal(db.getRaceState().activeRunnerId, b.id);
+    assert.equal(db.getRaceState().activeStartedAt, 61_000);
+    assert.equal(db.getAllLaps().length, 1);
+    assert.equal(db.getRunnerById(a.id)?.status, 'ran');
+    assert.equal(db.getRunnerById(b.id)?.status, 'running');
+    assert.equal(db.getRunnerById(c.id)?.status, 'waiting');
+
+    // A finish on that same moment is also the latest step, so undo reopens the race.
+    db.finishRace(61_000);
+    assert.equal(db.canUndoFinish(), true);
+    assert.deepEqual(db.undoLastHandoff(), { ok: true, deletedLapIds: [] });
+    assert.equal(db.getRaceState().raceFinishedAt, null);
+    assert.equal(db.getRaceState().activeRunnerId, b.id);
+    assert.equal(db.getAllLaps().length, 1);
+  } finally {
+    // Windows cannot delete a database file that is still open.
+    db.closeDb();
+    fs.rmSync(dataPath, { recursive: true, force: true });
+  }
+});
+
 test('reordering requires each waiting runner exactly once', async () => {
   fs.rmSync(dataPath, { recursive: true, force: true });
   const db = await import('../server/db.ts');
