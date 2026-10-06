@@ -71,7 +71,8 @@ export type RaftStorage = {
   recordVote(term: number, hostId: string): void;
   head(): LogHead;
   entryId(seq: number): string | null;
-  entriesAfter(seq: number, limit: number): ReplicationLogEntry[];
+  /** Null when the next entry is too large to send; the follower then takes a full copy. */
+  entriesAfter(seq: number, limit: number): ReplicationLogEntry[] | null;
   canContinueFrom(seq: number, id: string | null): boolean;
   appendFromLeader(prevSeq: number, prevId: string | null, entries: ReplicationLogEntry[]): AppendOutcome;
 };
@@ -337,6 +338,10 @@ export function createRaft(deps: RaftDeps) {
         const head = storage.head();
         const prevSeq = follower.matchSeq ?? head.seq;
         const prevId = prevSeq === 0 ? null : storage.entryId(prevSeq);
+        const entries =
+          follower.matchSeq === null || follower.needsResync
+            ? []
+            : storage.entriesAfter(prevSeq, deps.maxEntriesPerAppend);
         const request: AppendRequest = {
           clusterId: deps.clusterId(),
           term,
@@ -344,12 +349,9 @@ export function createRaft(deps: RaftDeps) {
           leaderUrl: deps.self().url,
           prevSeq,
           prevId,
-          entries:
-            follower.matchSeq === null || follower.needsResync
-              ? []
-              : storage.entriesAfter(prevSeq, deps.maxEntriesPerAppend),
-          // Entries the follower needs may be pruned here; then it takes a full copy.
-          resync: follower.needsResync || (prevSeq > 0 && prevId === null),
+          entries: entries ?? [],
+          // Entries the follower needs may be pruned here, or too large to send; then it takes a full copy.
+          resync: follower.needsResync || (prevSeq > 0 && prevId === null) || entries === null,
           group: leaderGroupView(),
         };
         const answer = await deps.sendAppend(member, request);

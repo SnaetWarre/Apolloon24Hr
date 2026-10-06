@@ -38,7 +38,7 @@ test('each committed write is logged once; reads and rolled-back writes are not'
       ['Logged']
     );
     assert.equal(db.getLogHead().seq, 1);
-    assert.equal(db.getLogEntriesAfter(0)[0]?.type, 'test.create');
+    assert.equal(db.getLogEntriesAfter(0)![0]?.type, 'test.create');
     assert.equal(revisions.length, 1, 'only the committed change notifies clients');
   } finally {
     stopListening();
@@ -72,7 +72,7 @@ test('replaying the log on another database reproduces the leader exactly', asyn
     return snapshot;
   };
   const expected = comparable();
-  const entries = db.getLogEntriesAfter(0);
+  const entries = db.getLogEntriesAfter(0)!;
   assert.equal(entries.length, 10);
 
   db.closeDb();
@@ -108,7 +108,58 @@ test('a follower can only continue from a retained prefix of the leader log', as
   assert.equal(db.canContinueFrom(5_500, 'entry-5500'), true);
   assert.equal(db.canContinueFrom(100, 'entry-100'), false, 'pruned entries force a full re-sync');
   assert.equal(db.canContinueFrom(0, null), false);
-  assert.ok(db.getLogEntriesAfter(0)[0]!.seq > 1);
+  assert.ok(db.getLogEntriesAfter(0)![0]!.seq > 1);
+  db.closeDb();
+});
+
+test('a batch for a lagging laptop fits in one message; an entry too large for one is not sent', async () => {
+  const db = await freshDatabase();
+  const { MAX_BATCH_BYTES, MAX_ENTRY_BYTES } = await import('../server/db/replication.ts');
+  const entry = (seq: number, bytes: number) => ({
+    seq,
+    id: `entry-${seq}`,
+    epoch: 0,
+    type: 'labels.uploadImage',
+    statements: [
+      {
+        sql: 'UPDATE race_state SET race_finished_at = race_finished_at WHERE id = 1 AND ? IS NOT NULL',
+        params: ['A'.repeat(bytes)],
+      },
+    ],
+    createdAt: seq,
+  });
+  // Logos of about 1 MB each, like the uploads a laptop that was off misses.
+  db.applyLogEntries(Array.from({ length: 25 }, (_, index) => entry(index + 1, 1_000_000)));
+
+  const sent: number[] = [];
+  for (let after = 0; after < 25;) {
+    const batch = db.getLogEntriesAfter(after)!;
+    assert.ok(batch.length >= 1);
+    assert.ok(Buffer.byteLength(JSON.stringify(batch)) <= MAX_BATCH_BYTES);
+    assert.equal(batch[0]!.seq, after + 1);
+    sent.push(batch.length);
+    after = batch.at(-1)!.seq;
+  }
+  assert.ok(sent.length > 1, 'the missing logos must not travel in one message');
+
+  // An entry over the budget still travels, on its own.
+  db.applyLogEntries([entry(26, MAX_BATCH_BYTES + 1_000), entry(27, 10)]);
+  assert.deepEqual(
+    db.getLogEntriesAfter(25)!.map(({ seq }) => seq),
+    [26]
+  );
+  assert.deepEqual(
+    db.getLogEntriesAfter(26)!.map(({ seq }) => seq),
+    [27]
+  );
+
+  // One too large for any message: the laptop that needs it takes a full copy instead.
+  db.applyLogEntries([entry(28, MAX_ENTRY_BYTES)]);
+  assert.equal(db.getLogEntriesAfter(27), null);
+  assert.deepEqual(
+    db.getLogEntriesAfter(26)!.map(({ seq }) => seq),
+    [27]
+  );
   db.closeDb();
 });
 

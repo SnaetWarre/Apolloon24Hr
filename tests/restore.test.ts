@@ -23,7 +23,7 @@ test('restore returns missing settings to their defaults and keeps host-local se
     assert.deepEqual(db.hostIdentity(), identity);
     assert.ok(
       db
-        .getLogEntriesAfter(0)
+        .getLogEntriesAfter(0)!
         .at(-1)
         ?.statements.some((statement) => statement.sql === 'DELETE FROM settings WHERE key = ?'),
       'the setting reset must also reach the other laptops'

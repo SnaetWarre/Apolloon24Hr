@@ -53,6 +53,11 @@ export function all<T>(sql: string, params: SqlValue[] = []): T[] {
   return statement(sql).all(...params) as T[];
 }
 
+/** Reads rows one at a time, so a caller that stops early never loads the rest. */
+export function iterate<T>(sql: string, params: SqlValue[] = []): IterableIterator<T> {
+  return statement(sql).iterate(...params) as IterableIterator<T>;
+}
+
 export function one<T>(sql: string, params: SqlValue[] = []): T | null {
   return (statement(sql).get(...params) as T | undefined) ?? null;
 }

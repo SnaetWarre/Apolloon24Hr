@@ -65,6 +65,14 @@ const SNAPSHOT_ANSWER_TIMEOUT_MS = 10_000;
 const WRITE_DEADLINE_MS = 12_000;
 /** Small batches and a short log, so batching and re-syncing after pruning are exercised. */
 const MAX_ENTRIES_PER_APPEND = 4;
+/**
+ * Entry sizes, as consensus.ts limits them in bytes: a desk change may be a
+ * logo, which fills most of a batch, or a restore, too large for any message,
+ * which makes a laptop that misses it take a full copy.
+ */
+const MAX_BATCH_SIZE = 4;
+const MAX_ENTRY_SIZE = 10;
+const ENTRY_SIZES: Record<string, number> = { logo: 3, restore: 20 };
 const LOG_RETENTION = 24;
 const PRUNE_EVERY = 8;
 const TRACE_TAIL = 300;
@@ -298,6 +306,11 @@ export async function simulate(options: SimOptions): Promise<SimResult> {
     };
   }
 
+  function entrySize(entry: ReplicationLogEntry): number {
+    const noteId = entry.statements[0]?.sql === 'note' ? String(entry.statements[0].params[0]) : '';
+    return ENTRY_SIZES[noteId.replace(/\d+$/, '')] ?? 1;
+  }
+
   function applyEntry(node: SimNode, entry: ReplicationLogEntry): void {
     const { state } = node.disk;
     for (const { sql, params } of entry.statements) {
@@ -348,12 +361,18 @@ export async function simulate(options: SimOptions): Promise<SimResult> {
         return last ? { seq: last.seq, id: last.id, epoch: last.epoch } : { seq: 0, id: null, epoch: 0 };
       },
       entryId: (seq) => logView(disk()).idAt(seq),
-      entriesAfter: (seq, limit) =>
-        structuredClone(
-          disk()
-            .log.filter((entry) => entry.seq > seq)
-            .slice(0, limit)
-        ),
+      entriesAfter: (seq, limit) => {
+        const batch: ReplicationLogEntry[] = [];
+        let size = 0;
+        for (const entry of disk().log) {
+          if (entry.seq <= seq) continue;
+          if (!batch.length && entrySize(entry) > MAX_ENTRY_SIZE) return null;
+          if (batch.length === limit || (batch.length && size + entrySize(entry) > MAX_BATCH_SIZE)) break;
+          size += entrySize(entry);
+          batch.push(entry);
+        }
+        return structuredClone(batch);
+      },
       canContinueFrom: (seq, id) => canContinueFrom(logView(disk()), seq, id),
       appendFromLeader: (prevSeq, prevId, entries) => {
         const plan = planAppend(logView(disk()), prevSeq, prevId, entries);
@@ -836,7 +855,12 @@ export async function simulate(options: SimOptions): Promise<SimResult> {
 
   for (const node of nodes) at(random.between(0, 300), () => boot(node));
   runBot(200, 1_500, timingPress);
-  runBot(300, 3_000, () => ({ kind: 'note', noteId: `c${nextId++}` }));
+  let deskChanges = 0;
+  runBot(300, 3_000, () => {
+    deskChanges += 1;
+    const kind = deskChanges % 7 === 0 ? 'restore' : deskChanges % 3 === 0 ? 'logo' : 'c';
+    return { kind: 'note', noteId: `${kind}${nextId++}` };
+  });
   scheduleChaos();
   at(chaosMs, heal);
   const end = chaosMs + healMs;

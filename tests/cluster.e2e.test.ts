@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
@@ -361,6 +362,42 @@ test('a laptop that was off catches up by itself, also across many batches', { t
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test(
+  'a laptop that was off catches up when it missed more logos than fit in one message',
+  { timeout: 60_000 },
+  async () => {
+    const root = testRoot('follower-off-logos');
+    const servers: RunningServer[] = [];
+    try {
+      await startGroup(root, servers);
+      const leader = (await leaderOf(servers))!;
+      const offline = servers.find((server) => server !== leader)!;
+      await killServer(offline);
+      // 25 logos of about 1 MB each: more than one 20 MB peer message.
+      const images: string[] = [];
+      for (let index = 0; index < 25; index += 1) {
+        const dataBase64 = crypto.randomBytes(740_000).toString('base64');
+        images.push((await client(leader).labels.uploadImage.mutate({ mime: 'image/png', dataBase64 })).imageUrl);
+      }
+      const restarted = await startServer({ port: offline.port, dataPath: offline.dataPath });
+      servers[servers.indexOf(offline)] = restarted;
+      const { logHead } = await fetchStatus(leader);
+      await waitFor(async () => (await fetchStatus(restarted)).logHead === logHead, 30_000, 200);
+      const { hostId } = (await fetchStatus(restarted)).members.find((member) => member.self)!;
+      await waitFor(async () => {
+        const member = (await fetchStatus(leader)).members.find((entry) => entry.hostId === hostId);
+        return Boolean(member?.reachable && member.caughtUp);
+      });
+      assert.equal((await fetch(`${restarted.baseUrl}${images.at(-1)}`)).status, 200);
+    } catch (error) {
+      throw withServerOutput(error, ...servers);
+    } finally {
+      await Promise.all(servers.map(stopServer));
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
+);
 
 test(
   'a laptop cut off from the others saves nothing, and takes the group data when the cable is back',
