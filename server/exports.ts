@@ -14,10 +14,14 @@ type CsvRow = Record<string, string | number>;
  */
 const FORMULA_START = /^[=+\-@\t\r]/;
 
+/** Without a UTF-8 byte order mark, Excel on Windows reads the file as ANSI and shows Zoë as ZoÃ«. */
+const UTF8_BOM = '\uFEFF';
+
 export function csvText(columns: string[], rows: CsvRow[]): string {
-  return rows.length
+  const body = rows.length
     ? Papa.unparse(rows, { header: true, columns, escapeFormulae: FORMULA_START })
     : `${columns.join(',')}\n`;
+  return UTF8_BOM + body;
 }
 
 function sendCsv(res: Response, fileName: string, columns: string[], rows: CsvRow[]): void {
