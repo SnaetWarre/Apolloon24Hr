@@ -87,6 +87,14 @@ export function filterLaps(laps: LapRecord[], filters: AnalysisFilters): LapReco
   });
 }
 
+// Turning every label back on means "all laps" again, unlabeled ones included.
+export function toggleLabelFilter(current: AnalysisFilters, labelId: string, allLabelIds: string[]): AnalysisFilters {
+  const currentIds = current.enabledLabelIds ?? allLabelIds;
+  const nextIds = currentIds.includes(labelId) ? currentIds.filter((id) => id !== labelId) : [...currentIds, labelId];
+  if (allLabelIds.every((id) => nextIds.includes(id))) return { enabledLabelIds: null };
+  return { enabledLabelIds: nextIds };
+}
+
 function calculateDurationStats(laps: Pick<LapRecord, 'durationMs'>[]): DurationStats {
   const durations = laps
     .filter(hasPlausibleDuration)
