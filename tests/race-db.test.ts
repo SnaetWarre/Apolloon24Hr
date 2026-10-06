@@ -142,7 +142,7 @@ test('timing mutations reject a stale race state instead of recording an extra h
   }
 });
 
-test('undo after finishing the race is refused and keeps the laps and race state', async () => {
+test('undo is refused after a finish without its own undo step, and keeps the laps and race state', async () => {
   fs.rmSync(dataPath, { recursive: true, force: true });
   const db = await import('../server/db.ts');
   const { appRouter } = await import('../server/router.ts');
@@ -157,9 +157,17 @@ test('undo after finishing the race is refused and keeps the laps and race state
     db.performHandoff(1_000);
     db.performHandoff(61_000);
     db.finishRace(90_000);
+    const caller = appRouter.createCaller({});
+    // Through the router, too, undo reopens a normal finish; finish again for the old case below.
+    await caller.race.undoLastHandoff({ activeRunnerId: null, activeStartedAt: null });
+    assert.equal(db.getRaceState().activeRunnerId, second.id);
+    db.finishRace(90_000);
+    // Races finished on an older build have no undo step for the finish.
+    const file = new DatabaseSync(path.join(dataPath, 'data', 'app.db'));
+    file.prepare('DELETE FROM handoff_history WHERE created_at = 90000').run();
+    file.close();
     const finished = db.getRaceState();
 
-    const caller = appRouter.createCaller({});
     await assert.rejects(
       caller.race.undoLastHandoff({ activeRunnerId: null, activeStartedAt: null }),
       /De race is afgesloten/

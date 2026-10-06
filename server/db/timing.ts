@@ -205,3 +205,16 @@ export function finishRace(nowMs = clusterNow()): void {
     );
   });
 }
+
+/** Whether the last undo step is this finish. Races finished before finishing stored one have none. */
+export function canUndoFinish(): boolean {
+  const { raceFinishedAt } = getRaceState();
+  const row = one<{ createdAt: number }>(
+    `SELECT created_at AS createdAt
+     FROM handoff_history
+     WHERE undone = 0
+     ORDER BY created_at DESC
+     LIMIT 1`
+  );
+  return raceFinishedAt !== null && row?.createdAt === raceFinishedAt;
+}

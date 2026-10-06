@@ -366,7 +366,7 @@ export function TimingView() {
               <span className="muted-label">Race gestart</span>
               <strong>{race.raceStartedAt ? formatClockTimeMs(race.raceStartedAt).split('.')[0] : 'Nog niet'}</strong>
             </div>
-            <button className="btn timing-undo" onClick={undo} disabled={timingBlocked || Boolean(race.raceFinishedAt)}>
+            <button className="btn timing-undo" onClick={undo} disabled={timingBlocked}>
               Laatste wissel ongedaan maken
             </button>
           </div>
