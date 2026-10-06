@@ -354,3 +354,47 @@ test('runners who share one e-mail address stay separate runners', async () => {
     fs.rmSync(dataPath, { recursive: true, force: true });
   }
 });
+
+test('a separate plain list never renames form runners that hold its numbers', async () => {
+  fs.rmSync(dataPath, { recursive: true, force: true });
+  const db = await import('../server/db.ts');
+  const { appRouter } = await import('../server/router.ts');
+  try {
+    await db.initDb();
+    const caller = appRouter.createCaller({});
+    await caller.runners.importCsv({
+      csvText: [
+        'Tijdstempel,E-mailadres,Voornaam + naam',
+        '01/10/2026 10:00:00,anna@x.be,Anna Claes',
+        '01/10/2026 10:05:00,bert@x.be,Bert Maes',
+      ].join('\n'),
+    });
+    const anciens = 'nummer;naam;groep\n2;Dirk Peeters;Anciens\n3;Els Wouters;Anciens\n';
+
+    const first = await caller.runners.importCsv({ csvText: anciens });
+    assert.equal(first.created, 2);
+    assert.equal(first.updated, 0);
+    assert.deepEqual(first.errors, [
+      'Rij 2: nummer 2 is al in gebruik, Dirk Peeters kreeg geen nummer',
+      'Rij 3: nummer 3 is al in gebruik, Els Wouters kreeg geen nummer',
+    ]);
+    const registrations = await caller.runners.registrations();
+    const byName = () => new Map(db.getAllRunners().map((runner) => [runner.name, runner]));
+    const runners = byName();
+    assert.equal(runners.get('Anna Claes')?.runnerNumber, '2');
+    assert.equal(registrations[runners.get('Anna Claes')!.id]?.email, 'anna@x.be');
+    assert.equal(runners.get('Bert Maes')?.runnerNumber, '3');
+    assert.equal(registrations[runners.get('Bert Maes')!.id]?.email, 'bert@x.be');
+    assert.equal(runners.get('Dirk Peeters')?.runnerNumber, null);
+    assert.equal(runners.get('Els Wouters')?.runnerNumber, null);
+
+    const repeat = await caller.runners.importCsv({ csvText: anciens });
+    assert.equal(repeat.created, 0);
+    assert.equal(repeat.updated, 2);
+    assert.equal(db.getAllRunners().length, 4);
+    assert.equal(byName().get('Anna Claes')?.runnerNumber, '2');
+  } finally {
+    db.closeDb();
+    fs.rmSync(dataPath, { recursive: true, force: true });
+  }
+});

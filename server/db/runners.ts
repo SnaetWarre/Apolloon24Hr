@@ -67,14 +67,32 @@ function findRunnerIdByNumberAndName(runnerNumber: string, name: string): string
 }
 
 /**
+ * A plain runner list is made apart from the form, so its numbers can be ones
+ * the form import already gave to someone else. The number's runner is only
+ * this row when it came from a plain list too or carries the same name; else
+ * the row is the runner imported before under that name without the number.
+ */
+function findPlainListRunnerId(runnerNumber: string, name: string): string | null {
+  const numbered = one<{ id: string; name: string; registration_json: string | null }>(
+    'SELECT id, name, registration_json FROM runners WHERE runner_number = ?',
+    [runnerNumber]
+  );
+  if (numbered && (!numbered.registration_json || numbered.name === name.trim())) return numbered.id;
+  return (
+    one<{ id: string }>('SELECT id FROM runners WHERE name = ? AND registration_json IS NULL LIMIT 1', [name.trim()])
+      ?.id ?? null
+  );
+}
+
+/**
  * The runner an imported row was imported as before. A form answer is known
  * by its e-mail and name, else by its submission time. CSV and Excel exports
  * write that time differently, so last comes the same sheet row and name.
- * A plain runner list is known by its runner number.
+ * A plain runner list is known by its runner number, see `findPlainListRunnerId`.
  */
 function findImportedRunnerId(input: RunnerInput, runnerNumber: string | undefined): string | null {
   const registration = input.registration;
-  if (!registration) return runnerNumber ? findRunnerIdByNumber(runnerNumber) : null;
+  if (!registration) return runnerNumber ? findPlainListRunnerId(runnerNumber, input.name) : null;
   const email = usableEmail(registration.email);
   const submittedAt = registration.submittedAt.trim();
   return (
@@ -317,9 +335,13 @@ export function upsertRunnerFromImport(input: RunnerInput): {
       delete profileFields.labels;
       profileFields.registration = registrationKeepingCorrections(existingId, input.registration);
     }
+    // A plain-list runner found by name keeps their number when the row's number belongs to someone else.
+    const numberHolder = !input.registration && runnerNumber ? findRunnerIdByNumber(runnerNumber) : null;
+    const numberTaken = Boolean(numberHolder && numberHolder !== existingId);
+    if (numberTaken) delete profileFields.runnerNumber;
     const runner = updateRunner(existingId, profileFields);
     if (!runner) throw new Error('runner update failed');
-    return { action: 'updated', runner, numberTaken: false };
+    return { action: 'updated', runner, numberTaken };
   }
   const numberTaken = Boolean(runnerNumber && findRunnerIdByNumber(runnerNumber));
   return {
