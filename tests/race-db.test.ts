@@ -229,6 +229,53 @@ test('new runners cannot bypass timing state and waiting runners join the back o
   }
 });
 
+test('undoing a handoff after a reorder keeps every waiting runner in its own place', async () => {
+  fs.rmSync(dataPath, { recursive: true, force: true });
+  const db = await import('../server/db.ts');
+  const { getNextWaitingRunner } = await import('../src/lib/runners.ts');
+
+  try {
+    await db.initDb();
+    const waiting = (name: string, runnerNumber: string, statusSince: number) => {
+      const runner = db.insertRunner({ name, runnerNumber });
+      db.updateRunnerStatus({ id: runner.id, status: 'waiting', statusSince });
+      return runner;
+    };
+    const first = waiting('A', '1', 100);
+    const restored = waiting('Zed', '2', 200);
+    const last = waiting('C', '3', 300);
+
+    db.performHandoff(1_000);
+    db.updateWaitingOrder([restored.id, last.id]);
+    assert.equal(db.performHandoff(2_000).ok && db.getRaceState().activeRunnerId, restored.id);
+    // Ann sorts before Zed by name, so the old tie would make screens disagree with the server.
+    const joined = waiting('Ann', '4', 2_500);
+    db.updateWaitingOrder([joined.id, last.id]);
+
+    assert.equal(db.undoLastHandoff().ok, true);
+
+    const queue = db
+      .getAllRunners()
+      .filter((runner) => runner.status === 'waiting')
+      .sort((a, b) => (a.queueIndex ?? 0) - (b.queueIndex ?? 0));
+    assert.deepEqual(
+      queue.map((runner) => [runner.id, runner.queueIndex]),
+      [
+        [restored.id, 0],
+        [joined.id, 1],
+        [last.id, 2],
+      ]
+    );
+    assert.equal(db.getRaceState().activeRunnerId, first.id);
+    assert.equal(getNextWaitingRunner(db.getAllRunners())?.id, restored.id);
+    assert.equal(db.performHandoff(3_000).ok && db.getRaceState().activeRunnerId, restored.id);
+  } finally {
+    // Windows cannot delete a database file that is still open.
+    db.closeDb();
+    fs.rmSync(dataPath, { recursive: true, force: true });
+  }
+});
+
 test('label names are unique regardless of capitalization', async () => {
   fs.rmSync(dataPath, { recursive: true, force: true });
   const db = await import('../server/db.ts');

@@ -1,12 +1,21 @@
 import type { LapRecord, Runner, RunnerStatus } from '../types';
 
+/** The server's queue order: place in line, then who joined first when two share a place. */
+export function compareWaitingOrder(
+  a: Pick<Runner, 'queueIndex' | 'statusSince'>,
+  b: Pick<Runner, 'queueIndex' | 'statusSince'>
+): number {
+  return (
+    (a.queueIndex ?? Number.MAX_SAFE_INTEGER) - (b.queueIndex ?? Number.MAX_SAFE_INTEGER) ||
+    (a.statusSince ?? Number.MAX_SAFE_INTEGER) - (b.statusSince ?? Number.MAX_SAFE_INTEGER)
+  );
+}
+
 export function getNextWaitingRunner(runners: Runner[]): Runner | null {
   let nextRunner: Runner | null = null;
   for (const runner of runners) {
     if (runner.status !== 'waiting') continue;
-    if (!nextRunner || (runner.queueIndex ?? 0) < (nextRunner.queueIndex ?? 0)) {
-      nextRunner = runner;
-    }
+    if (!nextRunner || compareWaitingOrder(runner, nextRunner) < 0) nextRunner = runner;
   }
   return nextRunner;
 }

@@ -8,6 +8,8 @@ import {
 } from '../src/lib/useClockTick.ts';
 import { createArrivalState, trackArrivals } from '../src/lib/motion.ts';
 import { decodeCsvBytes } from '../src/lib/registrationFile.ts';
+import { getNextWaitingRunner } from '../src/lib/runners.ts';
+import type { Runner } from '../src/types.ts';
 import { relativeFileWithinRoot } from '../server/static-files.ts';
 import path from 'node:path';
 
@@ -84,4 +86,19 @@ test('registration CSVs are read as UTF-8, or as Windows-1252 when Excel saved t
     char.charCodeAt(0)
   );
   assert.equal(decodeCsvBytes(ansi), `${header}901;Zoë Desmét\r\n902;François Lévesque\r\n`);
+});
+
+test('the next runner breaks a shared queue place the way the server does', () => {
+  const runner = (id: string, status: Runner['status'], queueIndex: number | null, statusSince: number) =>
+    ({ id, status, queueIndex, statusSince }) as Runner;
+  // The server lists runners by name and starts the one that joined first when two share a place.
+  const runners = [
+    runner('ann', 'waiting', 0, 2_500),
+    runner('bob', 'running', null, 100),
+    runner('zed', 'waiting', 0, 200),
+    runner('cas', 'waiting', 1, 50),
+  ];
+  assert.equal(getNextWaitingRunner(runners)?.id, 'zed');
+  assert.equal(getNextWaitingRunner(runners.filter((other) => other.id !== 'zed'))?.id, 'ann');
+  assert.equal(getNextWaitingRunner([runners[1]]), null);
 });

@@ -8,6 +8,7 @@ import { formatClockTimeMs, formatDurationMs } from '../lib/time';
 import type { LiveAppSnapshot, Runner } from '../types';
 import { LabelBadge } from './LabelBadge';
 import { RunnerName } from './RunnerName';
+import { compareWaitingOrder } from '../lib/runners';
 import { PageHeader } from './PageHeader';
 import { useArrivals, usePulse } from '../lib/motion';
 import { forgetLapStart, rememberLapStart, timePress, type PressTime } from '../lib/pressTiming';
@@ -45,9 +46,7 @@ export function TimingView() {
   const timingBlocked = cluster?.state === 'no-majority';
 
   const activeRunner = runners.find((runner) => runner.id === race.activeRunnerId) || null;
-  const waitingRunners = runners
-    .filter((runner) => runner.status === 'waiting')
-    .sort((first, second) => (first.queueIndex ?? 0) - (second.queueIndex ?? 0));
+  const waitingRunners = runners.filter((runner) => runner.status === 'waiting').sort(compareWaitingOrder);
   const nextRunner = waitingRunners[0] ?? null;
   const recentLaps = laps.slice(0, 10);
   const runExclusiveRaceAction = React.useCallback(
