@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { DATABASE_SCHEMA_VERSION } from './db.js';
 import { APP_VERSION, readPositiveInt } from './env.js';
-import { hostInfo } from './host.js';
+import { hostInfo, PUBLIC_APP_PORT } from './host.js';
 
 const configuredSelfUrl = normalizeUrl(process.env.CLUSTER_SELF_URL);
 /** How long another laptop may take to answer, connecting included. */
@@ -73,6 +73,22 @@ export function versionMismatchMessage(otherVersion: string): string {
 /** The address other laptops use to reach this one. */
 export function selfUrl(): string {
   return configuredSelfUrl || normalizeUrl(hostInfo().url);
+}
+
+/**
+ * The laptop an operator typed to join. People read the IP off the other
+ * screen, so an address without a port means the app port, not port 80.
+ * Decided on the typed text because `URL` drops an explicit `:80`.
+ */
+export function joinUrl(value: unknown, port = PUBLIC_APP_PORT): string {
+  const origin = normalizeUrl(value);
+  if (!origin) return '';
+  const typed = String(value).trim();
+  const authority = typed.replace(/^[a-z][a-z\d+.-]*:\/\//i, '').split(/[/?#]/, 1)[0] ?? '';
+  if (/:\d+$/.test(authority)) return origin;
+  const url = new URL(origin);
+  url.port = String(port);
+  return url.origin;
 }
 
 export function normalizeUrl(value: unknown): string {
