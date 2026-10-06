@@ -6,7 +6,7 @@ import { RunnerAddModal } from '../RunnerEntryModals';
 import type { Runner } from '../../types';
 import { AdminNoticeBanner, useAdminAction } from './AdminNotice';
 import { AdminRunnerTable } from './AdminRunnerTable';
-import { statusLabel } from '../../lib/runners';
+import { foldSearchText, statusLabel } from '../../lib/runners';
 import { statusOrder } from './adminFormat';
 
 const MAX_VISIBLE_RUNNERS = 150;
@@ -25,7 +25,7 @@ export function RunnersSection({ runners }: { runners: Runner[] }) {
     ...new Set(Object.values(registrations).flatMap((registration) => registration.availableHours)),
   ].sort((a, b) => weekdayOrder(a) - weekdayOrder(b) || a.localeCompare(b, 'nl-BE', { numeric: true }));
 
-  const q = query.trim().toLowerCase();
+  const q = foldSearchText(query.trim());
   const matchingRunners = runners
     .filter((runner) => !hour || registrations[runner.id]?.availableHours.includes(hour))
     .filter((runner) => {
@@ -38,7 +38,7 @@ export function RunnersSection({ runners }: { runners: Runner[] }) {
         ...runner.labels.map((label) => label.name),
         ...(registrations[runner.id]?.availableHours ?? []),
       ];
-      return searchable.some((text) => text.toLowerCase().includes(q));
+      return searchable.some((text) => foldSearchText(text).includes(q));
     })
     .sort(
       (a, b) =>

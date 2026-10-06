@@ -3,7 +3,7 @@ import { ModalDialog } from './ModalDialog';
 import { useConfirm } from './ConfirmDialog';
 import { AvailableHoursPicker } from './AvailableHoursPicker';
 import { groupLabels, toggleRunnerLabel } from '../lib/labels';
-import { runnerMatchesSearch, statusLabel } from '../lib/runners';
+import { foldSearchText, runnerMatchesSearch, statusLabel } from '../lib/runners';
 import { runnerFormError } from '../lib/runnerForm';
 import { useAppActions, useAppData } from '../app/index';
 import type { LiveAppSnapshot, Runner } from '../types';
@@ -37,9 +37,11 @@ export function RunnerActivationModal({
   }, [runners]);
 
   const filteredMatches = React.useMemo(() => {
-    const q = query.trim().toLowerCase();
+    const q = foldSearchText(query.trim());
     if (!q) return searchableRunners;
-    const exactNumberMatches = searchableRunners.filter((runner) => runner.runnerNumber?.trim().toLowerCase() === q);
+    const exactNumberMatches = searchableRunners.filter(
+      (runner) => foldSearchText(runner.runnerNumber?.trim() ?? '') === q
+    );
     return exactNumberMatches.length
       ? exactNumberMatches
       : searchableRunners.filter((runner) => runnerMatchesSearch(runner, q));

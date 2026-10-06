@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { toggleRunnerLabel } from '../src/lib/labels.ts';
-import { runnerMatchesSearch } from '../src/lib/runners.ts';
+import { foldSearchText, runnerMatchesSearch } from '../src/lib/runners.ts';
 import type { Label } from '../src/types.ts';
 
 const label = (id: string, kind: string, name = id): Label => ({
@@ -41,4 +41,18 @@ test('runner search matches number, name, and labels together', () => {
   assert.equal(runnerMatchesSearch(runner, 'hilok'), true);
   assert.equal(runnerMatchesSearch(runner, 'lenaerts'), true);
   assert.equal(runnerMatchesSearch(runner, 'kobe'), false);
+});
+
+test('runner search ignores accents both ways', () => {
+  const runner = (name: string) => ({ runnerNumber: '12', name, labels: [] });
+  assert.equal(runnerMatchesSearch(runner('Zoë Peeters'), 'zoe'), true);
+  assert.equal(runnerMatchesSearch(runner('Zoë Peeters'), 'zoë'), true);
+  assert.equal(runnerMatchesSearch(runner('Céline Maes'), 'celine'), true);
+  assert.equal(runnerMatchesSearch(runner('Anaïs Claes'), 'ANAIS'), true);
+  assert.equal(runnerMatchesSearch(runner('Helene Wouters'), 'hélène'), true);
+  assert.equal(runnerMatchesSearch(runner('Zoë Peeters'), 'celine'), false);
+});
+
+test('search text folds case and accents', () => {
+  assert.equal(foldSearchText('Hélène ANAÏS Zoë'), 'helene anais zoe');
 });
