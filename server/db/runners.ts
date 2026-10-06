@@ -247,13 +247,46 @@ export function updateRunner(id: string, fields: RunnerPatch): Runner | null {
 }
 
 /**
+ * The form's time as a CSV export writes it (`10/4/2026 18:14:44`, as the
+ * sheet shows it) or as read from the Excel file (`04/10/2026 18:14:44`).
+ */
+function sameSubmissionTime(stored: string, incoming: string): boolean {
+  const parts = (value: string) =>
+    value
+      .trim()
+      .match(/^(\d{1,2})\/(\d{1,2})\/(\d{4}) (\d{1,2}):(\d{2}):(\d{2})$/)
+      ?.slice(1)
+      .map(Number);
+  const a = parts(stored);
+  const b = parts(incoming);
+  if (!a || !b) return stored.trim() === incoming.trim();
+  const sameDay = (a[0] === b[0] && a[1] === b[1]) || (a[0] === b[1] && a[1] === b[0]);
+  return sameDay && a.slice(2).join() === b.slice(2).join();
+}
+
+/**
+ * Importing the same form answer again keeps the e-mail, phone, and hours
+ * operators corrected since; a newer answer from the runner replaces them.
+ */
+function registrationKeepingCorrections(runnerId: string, incoming: RunnerRegistration): RunnerRegistration {
+  const storedJson = one<{ registration_json: string | null }>('SELECT registration_json FROM runners WHERE id = ?', [
+    runnerId,
+  ])?.registration_json;
+  if (!storedJson) return incoming;
+  const stored = runnerRegistrationSchema.parse(JSON.parse(storedJson));
+  if (!sameSubmissionTime(stored.submittedAt, incoming.submittedAt)) return incoming;
+  return { ...incoming, email: stored.email, phone: stored.phone, availableHours: stored.availableHours };
+}
+
+/**
  * Imports match an existing runner by registration e-mail, else by runner
  * number. A form re-import keeps the operator's number, notes, and labels,
  * because the row's position in the sheet can change between exports.
  */
 /**
  * A form answer updates the runner it was imported as before and keeps what
- * operators changed since (number, notes, labels). A new runner whose number
+ * operators changed since (number, notes, labels, and for the same answer
+ * the e-mail, phone, and hours). A new runner whose number
  * is already taken is imported without one, so `numberTaken` asks the
  * operator to pick one.
  */
@@ -270,6 +303,7 @@ export function upsertRunnerFromImport(input: RunnerInput): {
       delete profileFields.runnerNumber;
       delete profileFields.notes;
       delete profileFields.labels;
+      profileFields.registration = registrationKeepingCorrections(existingId, input.registration);
     }
     const runner = updateRunner(existingId, profileFields);
     if (!runner) throw new Error('runner update failed');

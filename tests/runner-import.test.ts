@@ -108,6 +108,49 @@ test('hand-entered contact details and hours merge into the registration', async
   }
 });
 
+test('re-importing the same form answer keeps corrected contact details and hours', async () => {
+  fs.rmSync(dataPath, { recursive: true, force: true });
+  const db = await import('../server/db.ts');
+  const { appRouter } = await import('../server/router.ts');
+  try {
+    await db.initDb();
+    const caller = appRouter.createCaller({});
+    const answer = (submittedAt: string, hours: string) =>
+      Papa.unparse([
+        {
+          Tijdstempel: submittedAt,
+          'E-mailadres': 'zoe@example.be',
+          'Voornaam + naam': 'Zoë Peeters',
+          'GSM-nummer': '0471 11 22 33',
+          'Ik ben volgende uren beschikbaar': hours,
+        },
+      ]);
+    const original = answer('01/10/2026 10:00:00', '20-21u (dinsdag), 22-23u (dinsdag)');
+    await caller.runners.importCsv({ csvText: original });
+    const [zoe] = db.getAllRunners();
+    db.updateRunner(zoe.id, { registrationDetails: { phone: '0499 99 99 99', availableHours: ['20-21u (dinsdag)'] } });
+    const details = async () => {
+      const registration = (await caller.runners.registrations())[zoe.id];
+      return { phone: registration?.phone, availableHours: registration?.availableHours };
+    };
+    const corrected = { phone: '0499 99 99 99', availableHours: ['20-21u (dinsdag)'] };
+
+    assert.equal((await caller.runners.importCsv({ csvText: original })).updated, 1);
+    assert.deepEqual(await details(), corrected);
+    // The sheet's own CSV export writes the month first.
+    await caller.runners.importCsv({ csvText: answer('10/1/2026 10:00:00', '20-21u (dinsdag), 22-23u (dinsdag)') });
+    assert.deepEqual(await details(), corrected);
+
+    // Zoë filled in the form again.
+    await caller.runners.importCsv({ csvText: answer('03/10/2026 09:30:00', '23-24u (dinsdag)') });
+    assert.deepEqual(await details(), { phone: '0471 11 22 33', availableHours: ['23-24u (dinsdag)'] });
+    assert.equal(db.getAllRunners().length, 1);
+  } finally {
+    db.closeDb();
+    fs.rmSync(dataPath, { recursive: true, force: true });
+  }
+});
+
 test('hand-typed form answers import as they are and re-import onto the same runners', async () => {
   fs.rmSync(dataPath, { recursive: true, force: true });
   const db = await import('../server/db.ts');
