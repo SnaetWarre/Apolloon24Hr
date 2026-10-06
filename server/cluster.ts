@@ -50,6 +50,7 @@ import { APP_VERSION, isClusterEnabled, readPositiveInt } from './env.js';
 import { acceptPeerSocket, closePeerSockets, refusal, refuseUpgrade, type PeerAnswer } from './peer-socket.js';
 import {
   isIsolated,
+  joinUrl,
   normalizeUrl,
   peerFetch,
   readPeerError,
@@ -382,7 +383,7 @@ function welcomeBack(hostId: string, url: string, clusterId: string): void {
 /** Joins the group of the laptop at `rawUrl`, replacing this laptop's data with the group's. */
 export async function joinGroup(rawUrl: string): Promise<{ backupFile: string | null }> {
   if (!enabled) throw new Error('Laptops koppelen staat uit op deze installatie.');
-  const url = normalizeUrl(rawUrl);
+  const url = joinUrl(rawUrl);
   if (!url || url === selfUrl()) throw new Error('Vul het adres van een andere laptop in.');
   if (busy()) throw new Error('Deze laptop wordt al gekoppeld of bijgewerkt.');
   joining = true;
