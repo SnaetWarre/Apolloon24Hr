@@ -66,7 +66,7 @@ export type FastestLapWindow = {
  */
 export const MAX_PLAUSIBLE_LAP_MS = 10 * 60_000;
 
-function hasPlausibleDuration(lap: Pick<LapRecord, 'durationMs'>): boolean {
+export function hasPlausibleDuration(lap: Pick<LapRecord, 'durationMs'>): boolean {
   return Number.isFinite(lap.durationMs) && lap.durationMs >= 0 && lap.durationMs <= MAX_PLAUSIBLE_LAP_MS;
 }
 

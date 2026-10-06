@@ -140,3 +140,66 @@ test('the three recent laps show each runners all-time best and average', () => 
   assert.equal(summaries[0]?.bestLapMs, 70_000);
   assert.equal(summaries[0]?.averageLapMs, 80_000);
 });
+
+test('a lap where nobody handed off still counts but stays out of the averages', () => {
+  const runners = [
+    { id: 'anna', name: 'Anna', runnerNumber: '1' },
+    { id: 'bert', name: 'Bert', runnerNumber: '2' },
+    { id: 'cas', name: 'Cas', runnerNumber: '3' },
+  ] as Runner[];
+  const lap = (id: string, runnerId: string, durationMs: number, finishedAt: number): LapRecord => ({
+    id,
+    runnerId,
+    runnerName: runnerId,
+    runnerNumber: null,
+    lapNumber: 1,
+    startedAt: finishedAt - durationMs,
+    finishedAt,
+    durationMs,
+    source: 'handoff',
+    createdAt: finishedAt,
+    labels: [],
+  });
+  const annaAndBert = [
+    lap('anna-1', 'anna', 90_000, 1_000),
+    lap('anna-idle', 'anna', 25 * 60_000, 2_000),
+    lap('anna-3', 'anna', 90_000, 3_000),
+    lap('bert-1', 'bert', 95_000, 1_100),
+    lap('bert-2', 'bert', 95_000, 2_100),
+    lap('bert-3', 'bert', 95_000, 3_100),
+  ];
+
+  const ranking = buildRunnerRanking(runners, annaAndBert, 'laps', null);
+  assert.deepEqual(
+    ranking.map((entry) => [entry.runnerId, entry.lapCount, entry.averageLapMs]),
+    [
+      ['anna', 3, 90_000],
+      ['bert', 3, 95_000],
+    ]
+  );
+
+  const [annaSummary] = buildRecentLapSummaries([...annaAndBert, lap('anna-4', 'anna', 90_000, 4_000)], 1);
+  assert.equal(annaSummary?.lap.id, 'anna-4');
+  assert.equal(annaSummary?.bestLapMs, 90_000);
+  assert.equal(annaSummary?.averageLapMs, 90_000);
+
+  // Cas only has idle laps: no average, so he sorts after Anna on the tie-break.
+  const withCas = [
+    ...annaAndBert,
+    lap('cas-1', 'cas', 15 * 60_000, 1_200),
+    lap('cas-2', 'cas', 15 * 60_000, 2_200),
+    lap('cas-3', 'cas', 15 * 60_000, 5_000),
+  ];
+  const casRanking = buildRunnerRanking(runners, withCas, 'laps', null);
+  assert.deepEqual(
+    casRanking.map((entry) => entry.runnerId),
+    ['anna', 'bert', 'cas']
+  );
+  assert.equal(casRanking[2]?.lapCount, 3);
+  assert.equal(casRanking[2]?.averageLapMs, null);
+
+  const [casSummary] = buildRecentLapSummaries(withCas, 1);
+  assert.equal(casSummary?.lap.id, 'cas-3');
+  assert.equal(casSummary?.bestLapMs, null);
+  assert.equal(casSummary?.averageLapMs, null);
+});
