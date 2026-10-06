@@ -1,3 +1,4 @@
+import { compareWaitingOrder } from '../lib/runners';
 import type { LiveAppSnapshot, RunnerStatus } from '../types';
 
 /**
@@ -37,11 +38,7 @@ export function addPendingChange(patch: Patch): () => LiveAppSnapshot | null {
 export function waitingOrder(snapshot: LiveAppSnapshot): string[] {
   return snapshot.runners
     .filter((runner) => runner.status === 'waiting')
-    .sort(
-      (a, b) =>
-        (a.queueIndex ?? Number.MAX_SAFE_INTEGER) - (b.queueIndex ?? Number.MAX_SAFE_INTEGER) ||
-        (a.statusSince ?? Number.MAX_SAFE_INTEGER) - (b.statusSince ?? Number.MAX_SAFE_INTEGER)
-    )
+    .sort(compareWaitingOrder)
     .map((runner) => runner.id);
 }
 

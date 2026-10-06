@@ -106,6 +106,13 @@ export function getQueueStates(ids: string[]): QueueState[] {
 }
 
 export function restoreQueueState(state: QueueState): void {
+  // The queue may have been reordered since; make room so no two waiting runners share a place.
+  if (state.status === 'waiting' && state.queueIndex != null) {
+    run("UPDATE runners SET queue_index = queue_index + 1 WHERE status = 'waiting' AND queue_index >= ? AND id != ?", [
+      state.queueIndex,
+      state.runnerId,
+    ]);
+  }
   run('UPDATE runners SET status = ?, queue_index = ?, status_since = ?, hidden_at = ? WHERE id = ?', [
     state.status,
     state.queueIndex ?? null,

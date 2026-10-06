@@ -13,7 +13,7 @@ import {
 import { useAppActions, useAppData } from '../app/index';
 import { useBoardSearch } from '../app/boardSearch';
 import { useArrivals } from '../lib/motion';
-import { runnerMatchesSearch } from '../lib/runners';
+import { compareWaitingOrder, runnerMatchesSearch } from '../lib/runners';
 import { formatDurationMs, formatElapsedSeconds } from '../lib/time';
 import { useSecondTick } from '../lib/useClockTick';
 import { kanbanCollisionDetection, resolveKanbanDrop } from '../lib/kanban';
@@ -114,12 +114,7 @@ export const KanbanBoard: React.FC<{ onOpenProfile: (runnerId: string) => void }
   const completeWaitingQueue = React.useMemo(() => {
     return runners
       .filter((runner) => runner.status === 'waiting')
-      .sort(
-        (a, b) =>
-          (a.queueIndex ?? LAST_IN_ORDER) - (b.queueIndex ?? LAST_IN_ORDER) ||
-          compareByStatusSinceAsc(a, b) ||
-          runnerNumberValue(a) - runnerNumberValue(b)
-      );
+      .sort((a, b) => compareWaitingOrder(a, b) || runnerNumberValue(a) - runnerNumberValue(b));
   }, [runners]);
   const visibleRunnerIds = new Set(filteredRunners.map((runner) => runner.id));
   const waitingSorted = completeWaitingQueue.filter((runner) => visibleRunnerIds.has(runner.id));
