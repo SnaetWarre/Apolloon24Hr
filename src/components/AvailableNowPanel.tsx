@@ -2,6 +2,7 @@ import React from 'react';
 import { useRegistrations } from '../app/index';
 import { brusselsMoment, findAvailableUncalledRunners, formatMomentBlock } from '../lib/availability';
 import { phoneHref } from '../lib/contact';
+import { foldSearchText } from '../lib/runners';
 import { useClockTick } from '../lib/useClockTick';
 import type { Runner } from '../types';
 import { Icon } from './Icon';
@@ -29,12 +30,12 @@ export function AvailableNowPanel({
   const { hour, weekday } = brusselsMoment(now);
   const moment = { hour, weekday };
   const available = findAvailableUncalledRunners(runners, registrations, moment);
-  const query = search.trim().toLowerCase();
+  const query = foldSearchText(search.trim());
   const shown = query
     ? available.filter(
         ({ runner, phone }) =>
-          runner.name.toLowerCase().includes(query) ||
-          (runner.runnerNumber ?? '').toLowerCase().includes(query) ||
+          foldSearchText(runner.name).includes(query) ||
+          foldSearchText(runner.runnerNumber ?? '').includes(query) ||
           phone.replace(/\s+/g, '').includes(query.replace(/\s+/g, ''))
       )
     : available;

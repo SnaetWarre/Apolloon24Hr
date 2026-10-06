@@ -34,7 +34,7 @@ import {
 } from '../lib/analysis';
 import { groupLabels } from '../lib/labels';
 import { collectRankingLabels } from '../lib/ranking';
-import { lapRunnerLabel } from '../lib/runners';
+import { foldSearchText, lapRunnerLabel } from '../lib/runners';
 import { useArrivals } from '../lib/motion';
 import { formatClockTimeMs, formatDurationMs } from '../lib/time';
 import type { Label, LiveAppSnapshot, PublicRecordMode } from '../types';
@@ -822,11 +822,11 @@ function formatNumber(value: number | null, digits: number) {
 }
 
 function runnerInsightMatches(insight: RunnerInsight, query: string) {
-  const normalized = query.trim().toLowerCase();
+  const normalized = foldSearchText(query.trim());
   if (!normalized) return true;
   return (
-    insight.runnerName.toLowerCase().includes(normalized) ||
-    (insight.runnerNumber || '').toLowerCase().includes(normalized)
+    foldSearchText(insight.runnerName).includes(normalized) ||
+    foldSearchText(insight.runnerNumber || '').includes(normalized)
   );
 }
 

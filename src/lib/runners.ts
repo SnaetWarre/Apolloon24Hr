@@ -47,11 +47,19 @@ export function statusLabel(status: RunnerStatus): string {
   }
 }
 
+/** Lowercase without accents, so "zoe" finds Zoë and "celine" finds Céline. */
+export function foldSearchText(text: string): string {
+  return text
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+}
+
 /** Whether a runner matches a search: number, name, and labels together, so "149 bram" finds Bram with 149. */
 export function runnerMatchesSearch(runner: Pick<Runner, 'runnerNumber' | 'name' | 'labels'>, query: string): boolean {
-  const q = query.trim().toLowerCase();
+  const q = foldSearchText(query.trim());
   if (!q) return true;
-  return `${runner.runnerNumber ?? ''} ${runner.name} ${runner.labels.map((label) => label.name).join(' ')}`
-    .toLowerCase()
-    .includes(q);
+  return foldSearchText(
+    `${runner.runnerNumber ?? ''} ${runner.name} ${runner.labels.map((label) => label.name).join(' ')}`
+  ).includes(q);
 }
