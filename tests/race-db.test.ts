@@ -47,6 +47,49 @@ test('finishing a race retires the active runner without recording an extra lap'
   }
 });
 
+test('undo after finishing reopens the race and keeps the laps', async () => {
+  fs.rmSync(dataPath, { recursive: true, force: true });
+  const db = await import('../server/db.ts');
+
+  try {
+    await db.initDb();
+    const [zoe, arne] = ['Zoë', 'Arne'].map((name, index) =>
+      db.insertRunner({ name, runnerNumber: String(index + 1) })
+    );
+    db.updateRunnerStatus({ id: zoe.id, status: 'waiting', statusSince: 1 });
+    db.updateRunnerStatus({ id: arne.id, status: 'waiting', statusSince: 2 });
+    db.performHandoff(1_000);
+    const handoff = db.performHandoff(90_000);
+    assert.equal(handoff.ok && handoff.startedRunnerId, arne.id);
+
+    db.finishRace(120_000);
+    assert.deepEqual(db.undoLastHandoff(), { ok: true, deletedLapIds: [] });
+
+    assert.deepEqual(db.getRaceState(), {
+      id: 1,
+      activeRunnerId: arne.id,
+      activeStartedAt: 90_000,
+      raceStartedAt: 1_000,
+      raceFinishedAt: null,
+      activeLabels: [],
+    });
+    assert.equal(db.getRunnerById(arne.id)?.status, 'running');
+    assert.equal(db.getRunnerById(arne.id)?.statusSince, 90_000);
+    assert.equal(db.getRunnerById(zoe.id)?.status, 'ran');
+    assert.equal(db.getRunnerById(zoe.id)?.lapCount, 1);
+
+    // The next undo takes back the handoff before the finish, as usual.
+    assert.deepEqual(db.undoLastHandoff(), { ok: true, deletedLapIds: handoff.ok ? [handoff.lapId] : [] });
+    assert.equal(db.getRaceState().activeRunnerId, zoe.id);
+    assert.equal(db.getRunnerById(zoe.id)?.lapCount, 0);
+    assert.equal(db.getRunnerById(arne.id)?.status, 'waiting');
+  } finally {
+    // Windows cannot delete a database file that is still open.
+    db.closeDb();
+    fs.rmSync(dataPath, { recursive: true, force: true });
+  }
+});
+
 test('reordering requires each waiting runner exactly once', async () => {
   fs.rmSync(dataPath, { recursive: true, force: true });
   const db = await import('../server/db.ts');

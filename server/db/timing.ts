@@ -175,9 +175,24 @@ export function undoLastHandoff(): { ok: true; deletedLapIds: string[] } | { ok:
   return { ok: true, deletedLapIds };
 }
 
+/**
+ * Ends the race without recording a lap for the active runner. Stores what it
+ * replaced, so the next undo reopens the race with that runner still running.
+ */
 export function finishRace(nowMs = clusterNow()): void {
-  const activeRunnerId = getRaceState().activeRunnerId;
+  const raceState = getRaceState();
+  const activeRunnerId = raceState.activeRunnerId;
+  const snapshot: HandoffSnapshot = {
+    raceState,
+    queueEntries: getQueueStates(activeRunnerId ? [activeRunnerId] : []),
+    lapIds: [],
+  };
   transaction(() => {
+    run(
+      `INSERT INTO handoff_history (id, created_at, payload_json, undone)
+       VALUES (?, ?, ?, 0)`,
+      [randomUUID(), nowMs, JSON.stringify(snapshot)]
+    );
     if (activeRunnerId) setRaceStatus(activeRunnerId, 'ran', nowMs);
     run(
       `UPDATE race_state
