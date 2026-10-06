@@ -8,9 +8,16 @@ import { raceWorkbook } from './excel-export.js';
 
 type CsvRow = Record<string, string | number>;
 
-/** Names come from the public form, so cells Excel would run as a formula get a leading quote. */
+/**
+ * Names come from the public form, so cells Excel would run as a formula get a leading quote. Papa's own pattern
+ * (escapeFormulae: true) misses text that spans several lines.
+ */
+const FORMULA_START = /^[=+\-@\t\r]/;
+
 export function csvText(columns: string[], rows: CsvRow[]): string {
-  return rows.length ? Papa.unparse(rows, { header: true, columns, escapeFormulae: true }) : `${columns.join(',')}\n`;
+  return rows.length
+    ? Papa.unparse(rows, { header: true, columns, escapeFormulae: FORMULA_START })
+    : `${columns.join(',')}\n`;
 }
 
 function sendCsv(res: Response, fileName: string, columns: string[], rows: CsvRow[]): void {

@@ -31,3 +31,17 @@ test('the laps CSV keeps names from the form from running as Excel formulas', ()
   assert.equal(normal[2], 'Fien Goossens');
   assert.equal(normal[4], '80000');
 });
+
+test('the CSV exports quote formulas that span several lines, and leave numbers alone', () => {
+  const csv = csvText(
+    ['name', 'message', 'lap_time_ms'],
+    [
+      { name: '=HYPERLINK("http://evil.example","Klik")\nFien', message: '@team', lap_time_ms: 77_125 },
+      { name: 'Fien Goossens', message: '+32 470', lap_time_ms: -1 },
+    ]
+  );
+  const [, multiLine, normal] = Papa.parse<string[]>(csv).data;
+
+  assert.deepEqual(multiLine, ['\'=HYPERLINK("http://evil.example","Klik")\nFien', "'@team", '77125']);
+  assert.deepEqual(normal, ['Fien Goossens', "'+32 470", '-1']);
+});
