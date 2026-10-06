@@ -3,9 +3,11 @@ import test from 'node:test';
 import { observeDisplayHistory } from '../src/lib/displayHistory.ts';
 import {
   LIVE_MILLISECOND_INTERVAL_MS,
+  msUntilNextTick,
   normalizeClockInterval,
   SECOND_DISPLAY_INTERVAL_MS,
 } from '../src/lib/useClockTick.ts';
+import { nowMs, onServerClockSync, syncServerClock } from '../src/lib/time.ts';
 import { createArrivalState, trackArrivals } from '../src/lib/motion.ts';
 import { decodeCsvBytes } from '../src/lib/registrationFile.ts';
 import { getNextWaitingRunner } from '../src/lib/runners.ts';
@@ -20,6 +22,35 @@ test('live clocks are cadence-limited instead of driving full-frame renders', ()
   assert.equal(SECOND_DISPLAY_INTERVAL_MS, 500);
   assert.equal(normalizeClockInterval(100), 100);
   assert.equal(normalizeClockInterval(Number.NaN), 1_000);
+});
+
+test('clock ticks fall on the group clock hour, not on this laptop clock hour', async () => {
+  const hourMs = 3_600_000;
+  const laptopElevenMs = Date.parse('2026-10-06T11:00:00+02:00');
+
+  // This laptop runs 5 s ahead: at its 11:00:00 the group clock still reads 10:59:55.
+  assert.equal(msUntilNextTick(laptopElevenMs - 5_000, hourMs), 5_000);
+  // This laptop runs 5 s behind: at its 10:59:50 the group clock reads 10:59:55, five seconds from the hour.
+  assert.equal(msUntilNextTick(laptopElevenMs - 10_000 + 5_000, hourMs), 5_000);
+  assert.equal(msUntilNextTick(laptopElevenMs, hourMs), hourMs);
+
+  // The sync lands after the hour clock was scheduled on the laptop clock: running clocks hear of it and reschedule.
+  let syncs = 0;
+  const stop = onServerClockSync(() => (syncs += 1));
+  try {
+    const laptopNowMs = Date.now();
+    await syncServerClock(1, async () => Date.now() - 5_000);
+    assert.equal(syncs, 1);
+    const groupNowMs = nowMs();
+    assert.ok(Math.abs(groupNowMs - (Date.now() - 5_000)) < 50);
+    // The tick that was due at the laptop's next hour now waits five seconds longer, for the group clock to get there.
+    const shiftMs = (msUntilNextTick(groupNowMs, hourMs) - msUntilNextTick(laptopNowMs, hourMs) + hourMs) % hourMs;
+    assert.ok(Math.abs(shiftMs - 5_000) < 50);
+  } finally {
+    stop();
+    await syncServerClock(1, async () => Date.now());
+  }
+  assert.equal(syncs, 1);
 });
 
 test('the outside display announces only history that is new since it opened', () => {

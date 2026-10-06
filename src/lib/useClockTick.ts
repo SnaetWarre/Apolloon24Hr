@@ -1,5 +1,5 @@
 import React from 'react';
-import { nowMs } from './time';
+import { nowMs, onServerClockSync } from './time';
 
 const MIN_CLOCK_INTERVAL_MS = 16;
 export const LIVE_MILLISECOND_INTERVAL_MS = 1_000 / 30;
@@ -60,15 +60,31 @@ function notify(clock: Clock): void {
   for (const listener of clock.listeners) listener(now);
 }
 
+/** Ticks fall on the group clock's boundaries, not this laptop's: their clocks differ by seconds. */
+export function msUntilNextTick(groupNowMs: number, cadenceMs: number): number {
+  return cadenceMs - (groupNowMs % cadenceMs);
+}
+
 function scheduleClock(clock: Clock): void {
   if (clock.timeoutId !== null || document.hidden || clock.listeners.size === 0) return;
-  const untilNextCadence = clock.cadenceMs - (Date.now() % clock.cadenceMs);
-  clock.timeoutId = window.setTimeout(() => {
-    clock.timeoutId = null;
-    notify(clock);
-    scheduleClock(clock);
-  }, untilNextCadence);
+  clock.timeoutId = window.setTimeout(
+    () => {
+      clock.timeoutId = null;
+      notify(clock);
+      scheduleClock(clock);
+    },
+    msUntilNextTick(nowMs(), clock.cadenceMs)
+  );
 }
+
+// A sync after a clock was scheduled moves its next boundary, and may already have passed one: tick now and reschedule.
+onServerClockSync(() => {
+  for (const clock of clocks.values()) {
+    notify(clock);
+    clearClock(clock);
+    scheduleClock(clock);
+  }
+});
 
 function clearClock(clock: Clock): void {
   if (clock.timeoutId === null) return;
