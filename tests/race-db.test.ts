@@ -155,6 +155,51 @@ test('only one runner can be marked as running', async () => {
   }
 });
 
+test('a stale queue click cannot take the active runner off the track', async () => {
+  fs.rmSync(dataPath, { recursive: true, force: true });
+  const db = await import('../server/db.ts');
+  const { appRouter } = await import('../server/router.ts');
+
+  try {
+    await db.initDb();
+    const first = db.insertRunner({ name: 'First runner', runnerNumber: '1' });
+    const second = db.insertRunner({ name: 'Second runner', runnerNumber: '2' });
+    db.updateRunnerStatus({ id: first.id, status: 'waiting', statusSince: 900, queueIndex: 0 });
+    db.updateRunnerStatus({ id: second.id, status: 'waiting', statusSince: 900, queueIndex: 1 });
+    db.performHandoff(1_000);
+    const liveRace = db.getRaceState();
+
+    assert.throws(
+      () => db.updateRunnerStatus({ id: first.id, status: 'warming_up', statusSince: 1_500 }),
+      /Deze loper is net gestart op Timing/
+    );
+    const caller = appRouter.createCaller({});
+    for (const status of ['registered', 'warming_up', 'waiting', 'ran'] as const) {
+      await assert.rejects(caller.runners.setStatus({ id: first.id, status }), (error: Error & { code?: string }) => {
+        assert.equal(error.code, 'CONFLICT');
+        assert.match(error.message, /Wissel via het timingscherm/);
+        return true;
+      });
+    }
+    assert.deepEqual(db.getRaceState(), liveRace);
+    assert.equal(db.getRunnerById(first.id)?.status, 'running');
+
+    // The rest of the queue still moves, and Timing's own handoff keeps the live lap.
+    await caller.runners.setStatus({ id: second.id, status: 'warming_up' });
+    await caller.runners.setStatus({ id: second.id, status: 'waiting' });
+    assert.equal(db.performHandoff(61_000).ok, true);
+    assert.deepEqual(
+      db.getAllLaps().map((lap) => [lap.runnerId, lap.durationMs]),
+      [[first.id, 60_000]]
+    );
+    assert.equal(db.getRaceState().activeRunnerId, second.id);
+  } finally {
+    // Windows cannot delete a database file that is still open.
+    db.closeDb();
+    fs.rmSync(dataPath, { recursive: true, force: true });
+  }
+});
+
 test('new runners cannot bypass timing state and waiting runners join the back of the queue', async () => {
   fs.rmSync(dataPath, { recursive: true, force: true });
   const db = await import('../server/db.ts');

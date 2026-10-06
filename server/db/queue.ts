@@ -1,6 +1,6 @@
 import { type Runner, type RunnerStatus } from '../../shared/schemas.js';
 import { all, one, run, transaction } from './connection.js';
-import { clearActiveRunner, getRaceState, startActiveRunner } from './race-state.js';
+import { getRaceState, startActiveRunner } from './race-state.js';
 import { getRunnerById } from './runner-queries.js';
 import { clusterNow } from '../clock.js';
 
@@ -35,11 +35,13 @@ export function updateRunnerStatus({
   queueIndex?: number | null;
 }): Runner | null {
   if (!one<{ id: string }>('SELECT id FROM runners WHERE id = ?', [id])) return null;
-  if (status === 'running') {
-    const activeRunnerId = getRaceState().activeRunnerId;
-    if (activeRunnerId && activeRunnerId !== id) {
-      throw new Error('Er loopt al een loper');
-    }
+  const activeRunnerId = getRaceState().activeRunnerId;
+  if (status === 'running' && activeRunnerId && activeRunnerId !== id) {
+    throw new Error('Er loopt al een loper');
+  }
+  // A screen that has not seen the start yet would drop the live lap; only Timing takes a runner off the track.
+  if (status !== 'running' && activeRunnerId === id) {
+    throw new Error('Deze loper is net gestart op Timing. Wissel via het timingscherm.');
   }
   const now = statusSince ?? clusterNow();
   const nextQueueIndex = status !== 'waiting' ? null : (queueIndex ?? getMaxQueueIndex() + 1);
@@ -52,7 +54,6 @@ export function updateRunnerStatus({
       id,
     ]);
     if (status === 'running') startActiveRunner(id, now);
-    else clearActiveRunner(id);
   });
 
   return getRunnerById(id);
