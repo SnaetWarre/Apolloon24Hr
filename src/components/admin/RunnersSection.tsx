@@ -33,8 +33,8 @@ export function RunnersSection({ runners }: { runners: Runner[] }) {
       const searchable = [
         runner.name,
         runner.runnerNumber || '',
-        runner.status,
-        runner.registrationSource,
+        statusLabel(runner.status),
+        runner.registrationSource === 'import' ? 'Import' : 'Manueel',
         ...runner.labels.map((label) => label.name),
         ...(registrations[runner.id]?.availableHours ?? []),
       ];
