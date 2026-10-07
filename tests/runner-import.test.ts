@@ -151,6 +151,39 @@ test('re-importing the same form answer keeps corrected contact details and hour
   }
 });
 
+test('re-importing the same form answer keeps the name an operator corrected', async () => {
+  fs.rmSync(dataPath, { recursive: true, force: true });
+  const db = await import('../server/db.ts');
+  const { appRouter } = await import('../server/router.ts');
+  try {
+    await db.initDb();
+    const caller = appRouter.createCaller({});
+    const answer = (submittedAt: string, name: string) =>
+      Papa.unparse([{ Tijdstempel: submittedAt, 'E-mailadres': 'jan@example.be', 'Voornaam + naam': name }]);
+    const original = answer('04/10/2026 18:14:44', 'jan peetrs');
+    await caller.runners.importCsv({ csvText: original });
+    const [jan] = db.getAllRunners();
+    const name = () => db.getRunnerById(jan.id)?.name;
+
+    // Only case and spacing fixed: still found by e-mail and name.
+    db.updateRunner(jan.id, { name: 'Jan  Peetrs' });
+    assert.equal((await caller.runners.importCsv({ csvText: original })).updated, 1);
+    assert.equal(name(), 'Jan  Peetrs');
+    // Spelling fixed: found by the submission time.
+    db.updateRunner(jan.id, { name: 'Jan Peeters' });
+    assert.equal((await caller.runners.importCsv({ csvText: original })).updated, 1);
+    assert.equal(name(), 'Jan Peeters');
+
+    // Jan filled in the form again.
+    await caller.runners.importCsv({ csvText: answer('05/10/2026 09:00:00', 'jan peeters') });
+    assert.equal(name(), 'jan peeters');
+    assert.equal(db.getAllRunners().length, 1);
+  } finally {
+    db.closeDb();
+    fs.rmSync(dataPath, { recursive: true, force: true });
+  }
+});
+
 test('hand-typed form answers import as they are and re-import onto the same runners', async () => {
   fs.rmSync(dataPath, { recursive: true, force: true });
   const db = await import('../server/db.ts');
