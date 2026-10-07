@@ -5,7 +5,7 @@ description: Finish an authorized change in the Apolloon repo as a reviewable pu
 
 # Ship an Apolloon PR
 
-Carry the requested change through a reviewable PR in the current checkout, with one agent. Use an ordinary Git branch, never a worktree. Keep unrelated changes out and stage only files that belong to the task. Proof that the change works comes from driving the built app with the `verify-apolloon` skill (`.claude/skills/verify-apolloon/SKILL.md`); read it before the first launch.
+Carry the requested change through a reviewable PR in the current checkout, with one agent. Use an ordinary Git branch and never create a worktree yourself; when T3 Code already started you in one (as `apolloon-bug-hunt` threads are), work there. Run `npm ci` first if `node_modules` is missing. Keep unrelated changes out and stage only files that belong to the task. Proof that the change works comes from driving the built app with the `verify-apolloon` skill (`.claude/skills/verify-apolloon/SKILL.md`); read it before the first launch.
 
 ## Prepare
 
@@ -77,7 +77,7 @@ Use the repo's own benchmarks when they fit: `npm run bench:network`, `npm run b
 
 ## Open or update the PR
 
-Fill in `.github/pull_request_template.md`: Context, What changed, Evidence (delete the sections that do not apply), Validation (tick only what you ran, with the result), Risks and follow-ups. In Validation, add which feature files you drove, the scenario, and the run's final `PASS` line. Write the title, body, commit message, and final report with the `unslop` skill. Titles in this repo describe the visible result in plain words, for example "Keep laps without labels on Analyse after turning a label off and on again".
+Fill in `.github/pull_request_template.md`: Context, What changed, Evidence (delete the sections that do not apply), Validation (tick only what you ran, with the result), Risks and follow-ups. In Validation, add which feature files you drove, the scenario, and the run's final `PASS` line. Write the title, body, commit message, and final report with the user's `unslop` skill (`/unslop`, installed in their Claude Code at `~/.claude/skills/unslop/SKILL.md`). Load it before writing the first one; if your agent does not list it, read that file and follow it. Titles in this repo describe the visible result in plain words, for example "Keep laps without labels on Analyse after turning a label off and on again".
 
 Then open the PR and check its title, body, base and head branches, and that every image renders. Clean up only after that: `rm -rf "$SHIP"`, and `verify.mjs list` must show no runs left.
 
