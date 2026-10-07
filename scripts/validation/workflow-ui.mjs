@@ -265,6 +265,23 @@ try {
   assert.ok((await snapshot()).runners.some((runner) => runner.runnerNumber === '9902'));
   fs.rmSync(path.dirname(importFile), { recursive: true, force: true });
   console.log('PASS picking the same file again after editing it imports the new rows');
+
+  // Operators search Beheer › Lopers with the Dutch status and source the table shows.
+  const { runners } = await snapshot();
+  await page.goto(`${baseUrl}/admin?section=runners`);
+  const runnerSearch = page.getByRole('textbox', { name: 'Lopers zoeken', exact: true });
+  for (const [word, expected] of [
+    ['Ingeschreven', runners.filter((runner) => runner.status === 'registered').length],
+    ['Manueel', runners.filter((runner) => runner.registrationSource === 'manual').length],
+  ]) {
+    assert.ok(expected > 0, `Requires runners that match ${word}`);
+    await runnerSearch.fill(word);
+    await page
+      .getByRole('status')
+      .filter({ hasText: new RegExp(`^${expected} lopers? gevonden`) })
+      .waitFor();
+  }
+  console.log('PASS searching the shown status and source finds those runners');
 } finally {
   await browser.close();
 }
