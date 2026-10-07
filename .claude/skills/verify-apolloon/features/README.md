@@ -41,5 +41,6 @@ Each feature file starts with an H1 title and one paragraph describing the user-
 - [Public displays](./public-displays.md) covers the Binnenscherm and Buitenscherm TV pages.
 - [Linked laptops](./linked-laptops.md) covers linking three laptops and carrying on when one disappears.
 - [Desktop window](./desktop-window.md) covers what only the Electron window adds: the title bar and the preload bridge.
+- [Activiteit](./activity.md) covers the change log in Beheer › Activiteit and the lines a runner profile save adds.
 
-Not mapped yet: Analyse (charts and the export links to `/api/export/*`), Tactiek, Beheer › Lopers, Ploegen & labels (night teams), Publiek, Activiteit, backup and restore in Systeem & herstel, the welcome screen on an `empty` laptop.
+Not mapped yet: Analyse (charts and the export links to `/api/export/*`), Tactiek, Beheer › Lopers, Ploegen & labels (night teams), Publiek, backup and restore in Systeem & herstel, the welcome screen on an `empty` laptop.

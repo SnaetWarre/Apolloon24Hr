@@ -33,3 +33,33 @@ test('activity pages include every entry when their boundary shares a timestamp'
     db.closeDb();
   }
 });
+
+test('a profile save that only changes the notes names only the notes', async () => {
+  const db = await import('../server/db.ts');
+  const { describeWrite } = await import('../server/activity.ts');
+  try {
+    await db.initDb();
+    const runner = db.insertRunner({
+      name: 'Noor',
+      runnerNumber: '7',
+      labels: ['Hilok'],
+      registrationDetails: { phone: '0470 12 34 56', availableHours: ['22:00'] },
+    });
+    // The profile sends every field, with labels as ids.
+    const input = {
+      id: runner.id,
+      fields: {
+        runnerNumber: '7',
+        name: 'Noor',
+        notes: 'Komt pas om 22u',
+        registrationDetails: { phone: '0470 12 34 56', email: '', availableHours: ['22:00'] },
+        labels: runner.labels.map((label) => label.id),
+      },
+    };
+    const describe = describeWrite('runners.update', input);
+    const result = db.updateRunner(runner.id, input.fields);
+    assert.equal(describe?.(result), '#7 Noor aangepast (notities)');
+  } finally {
+    db.closeDb();
+  }
+});
