@@ -140,6 +140,22 @@ export function hasHourBlock(hourTexts: string[], weekday: string, hour: number)
   return hourTexts.some((text) => coversHour(text, weekday, hour));
 }
 
+export type HourSlot = {
+  weekday: string;
+  hour: number;
+  /** `12-13u (woensdag)` */
+  label: string;
+};
+
+/** The event's one-hour slots that at least one of the lists covers, in event order. */
+export function coveredHourSlots(hourLists: string[][]): HourSlot[] {
+  return eventHourGrid().flatMap(({ weekday, hours }) =>
+    hours
+      .filter((hour) => hourLists.some((hourTexts) => hasHourBlock(hourTexts, weekday, hour)))
+      .map((hour) => ({ weekday, hour, label: formatMomentBlock({ hour, weekday }) }))
+  );
+}
+
 /** Adds or removes the one-hour block, keeping the list in event order. */
 export function toggleHourBlock(hourTexts: string[], weekday: string, hour: number): string[] {
   return setHourBlock(hourTexts, weekday, hour, !hasHourBlock(hourTexts, weekday, hour));

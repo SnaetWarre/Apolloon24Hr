@@ -8,6 +8,7 @@ import { AdminNoticeBanner, useAdminAction } from './AdminNotice';
 import { AdminRunnerTable } from './AdminRunnerTable';
 import { foldSearchText, statusLabel } from '../../lib/runners';
 import { statusOrder } from './adminFormat';
+import { coveredHourSlots, hasHourBlock } from '../../lib/availability';
 
 const MAX_VISIBLE_RUNNERS = 150;
 
@@ -21,13 +22,15 @@ export function RunnersSection({ runners }: { runners: Runner[] }) {
   const [profileRunnerId, setProfileRunnerId] = React.useState<string | null>(null);
   const [addOpen, setAddOpen] = React.useState(false);
 
-  const availableHours = [
-    ...new Set(Object.values(registrations).flatMap((registration) => registration.availableHours)),
-  ].sort((a, b) => weekdayOrder(a) - weekdayOrder(b) || a.localeCompare(b, 'nl-BE', { numeric: true }));
+  const hourSlots = coveredHourSlots(Object.values(registrations).map((registration) => registration.availableHours));
+  const hourSlot = hourSlots.find((slot) => slot.label === hour);
 
   const q = foldSearchText(query.trim());
   const matchingRunners = runners
-    .filter((runner) => !hour || registrations[runner.id]?.availableHours.includes(hour))
+    .filter(
+      (runner) =>
+        !hourSlot || hasHourBlock(registrations[runner.id]?.availableHours ?? [], hourSlot.weekday, hourSlot.hour)
+    )
     .filter((runner) => {
       if (!q) return true;
       const searchable = [
@@ -99,20 +102,20 @@ export function RunnersSection({ runners }: { runners: Runner[] }) {
           onChange={(event) => setHour(event.target.value)}
         >
           <option value="">Alle beschikbare uren</option>
-          {availableHours.map((option) => (
-            <option key={option} value={option}>
-              {option}
+          {hourSlots.map((slot) => (
+            <option key={slot.label} value={slot.label}>
+              {slot.label}
             </option>
           ))}
         </select>
       </div>
       <p className="panel-copy" role="status">
         {matchingRunners.length} {matchingRunners.length === 1 ? 'loper' : 'lopers'} gevonden
-        {hour ? ` voor ${hour}` : ''}
+        {hourSlot ? ` voor ${hourSlot.label}` : ''}
         {matchingRunners.length > MAX_VISIBLE_RUNNERS ? ` · eerste ${MAX_VISIBLE_RUNNERS} getoond` : ''}
         {statusCounts ? ` · ${statusCounts}` : ''}
       </p>
-      {hour && (
+      {hourSlot && (
         <p className="panel-copy">
           Beschikbaarheid komt uit de inschrijving. De status toont de huidige stap in de app, niet de fysieke locatie.
         </p>
@@ -137,10 +140,4 @@ export function RunnersSection({ runners }: { runners: Runner[] }) {
       )}
     </section>
   );
-}
-
-/** Registration hours read "dinsdag 20u-22u"; the event runs Tuesday to Thursday. */
-function weekdayOrder(hour: string): number {
-  const lower = hour.toLowerCase();
-  return lower.includes('dinsdag') ? 0 : lower.includes('woensdag') ? 1 : 2;
 }

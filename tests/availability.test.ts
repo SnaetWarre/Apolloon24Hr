@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   blockCoversMoment,
   brusselsMoment,
+  coveredHourSlots,
   eventHourGrid,
   findAvailableUncalledRunners,
   formatMomentBlock,
@@ -159,4 +160,22 @@ test('the form’s two-hour blocks tick both hours and lose only the hour taken 
     '13-14u (woensdag)',
     '14-16u (woensdag)',
   ]);
+});
+
+test('the hour filter finds a runner whether the hours came from the form or the picker', () => {
+  const fromForm = ['12-14u (woensdag)'];
+  const fromPicker = ['12-13u (woensdag)', '13-14u (woensdag)'];
+  const slots = coveredHourSlots([fromForm, fromPicker]);
+  assert.deepEqual(
+    slots.map((slot) => slot.label),
+    ['12-13u (woensdag)', '13-14u (woensdag)']
+  );
+  for (const slot of slots) {
+    assert.equal(hasHourBlock(fromForm, slot.weekday, slot.hour), true);
+    assert.equal(hasHourBlock(fromPicker, slot.weekday, slot.hour), true);
+  }
+  assert.deepEqual(
+    coveredHourSlots([['08-09u (woensdag)'], ['23-00u (dinsdag)', 'flexibel']]).map((slot) => slot.label),
+    ['23-00u (dinsdag)', '08-09u (woensdag)']
+  );
 });
