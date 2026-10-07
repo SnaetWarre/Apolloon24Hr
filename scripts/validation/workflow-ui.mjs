@@ -282,6 +282,24 @@ try {
       .waitFor();
   }
   console.log('PASS searching the shown status and source finds those runners');
+
+  // The Buitenscherm shows a long Belgian name in full on a TV instead of "Marie-Christine Van den…".
+  const longName = 'Marie-Christine Van den Broeck-Vandevelde';
+  const { activeRunnerId } = (await snapshot()).race;
+  assert.ok(activeRunnerId);
+  await rpc.runners.update.mutate({ id: activeRunnerId, fields: { name: longName } });
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await page.goto(`${baseUrl}/display/outside`);
+  const shownName = page.locator('.outside-band--current .display-runner-name');
+  await shownName.getByText(longName, { exact: true }).waitFor();
+  await page.evaluate(() => document.fonts.ready);
+  // Letters reach a little below a line-height of 1, so a fully shown name still overflows by a few
+  // pixels; a cut-off name hides at least one whole line.
+  const clipped = await shownName.evaluate(
+    (node) => node.scrollHeight - node.clientHeight >= parseFloat(getComputedStyle(node).fontSize) / 2
+  );
+  assert.equal(clipped, false, 'the long name is cut off on the Buitenscherm');
+  console.log('PASS the Buitenscherm shows a long runner name in full at 1920x1080');
 } finally {
   await browser.close();
 }

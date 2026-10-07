@@ -495,11 +495,42 @@ function DisplayBrand() {
   );
 }
 
+// Steps a long name down until every word fits on a line and the name fits in two lines.
+// "Marie-Christine Van den Broeck-Vandevelde" was cut to "Van den…" at full size.
+const RUNNER_NAME_SCALES = [1, 0.85, 0.68, 0.6, 0.5];
+
 function DisplayRunner({ runner, empty }: { runner: Runner | null; empty: string }) {
+  const rowRef = React.useRef<HTMLDivElement>(null);
+  const name = runner?.name;
+  React.useLayoutEffect(() => {
+    const row = rowRef.current;
+    const nameNode = row?.querySelector<HTMLElement>('.display-runner-name');
+    if (!row || !nameNode) return;
+    const fit = () => {
+      // Without breaking inside words, a word that is too wide shows up as horizontal overflow.
+      nameNode.style.overflowWrap = 'normal';
+      for (const scale of RUNNER_NAME_SCALES) {
+        row.style.setProperty('--runner-name-scale', String(scale));
+        const lineHeight = parseFloat(getComputedStyle(nameNode).fontSize);
+        const hiddenHeight = nameNode.scrollHeight - nameNode.clientHeight;
+        if (nameNode.scrollWidth <= nameNode.clientWidth && hiddenHeight < lineHeight / 2) break;
+      }
+      nameNode.style.overflowWrap = '';
+    };
+    fit();
+    let mounted = true;
+    // Geist swaps in after the first paint and is wider than the fallback font.
+    void document.fonts.ready.then(() => mounted && fit());
+    window.addEventListener('resize', fit);
+    return () => {
+      mounted = false;
+      window.removeEventListener('resize', fit);
+    };
+  }, [name]);
   if (!runner) return <strong className="display-runner-name display-runner-name--empty">{empty}</strong>;
   return (
     <>
-      <div className="display-runner">
+      <div ref={rowRef} className="display-runner">
         {runner.runnerNumber && <span className="display-bib">{runner.runnerNumber}</span>}
         <strong className="display-runner-name">{runner.name}</strong>
       </div>
