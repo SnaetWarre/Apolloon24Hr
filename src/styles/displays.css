@@ -193,13 +193,14 @@ html[data-display-tone="light"] body {
   animation: display-rise var(--dur-3) var(--ease-out) backwards;
 }
 
+/* DisplayRunner lowers --runner-name-scale for a name that would not fit at full size. */
 .display-runner {
   display: flex;
   align-items: baseline;
   gap: 0.35em;
   min-width: 0;
   padding-right: 12vw;
-  font-size: clamp(64px, 8.4vw, max(176px, min(9.1667vw, 16.2963vh)));
+  font-size: calc(var(--runner-name-scale, 1) * clamp(64px, 8.4vw, max(176px, min(9.1667vw, 16.2963vh))));
 }
 
 .display-bib {
@@ -213,7 +214,7 @@ html[data-display-tone="light"] body {
 
 .display-runner-name {
   min-width: 0;
-  font-size: clamp(64px, 8.4vw, max(176px, min(9.1667vw, 16.2963vh)));
+  font-size: calc(var(--runner-name-scale, 1) * clamp(64px, 8.4vw, max(176px, min(9.1667vw, 16.2963vh))));
   font-weight: 650;
   line-height: 1;
   letter-spacing: -0.035em;
