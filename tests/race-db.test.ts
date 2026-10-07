@@ -224,6 +224,33 @@ test('undo is refused after a finish without its own undo step, and keeps the la
   }
 });
 
+test('a finished race cannot be finished again, so its finish time stays', async () => {
+  fs.rmSync(dataPath, { recursive: true, force: true });
+  const db = await import('../server/db.ts');
+  const { appRouter } = await import('../server/router.ts');
+
+  try {
+    await db.initDb();
+    const first = db.insertRunner({ name: 'First runner', runnerNumber: '1' });
+    db.updateRunnerStatus({ id: first.id, status: 'waiting', statusSince: 900, queueIndex: 0 });
+    db.performHandoff(1_000);
+    db.finishRace(90_000);
+    const finished = db.getRaceState();
+
+    await assert.rejects(
+      appRouter.createCaller({}).race.finish({ activeRunnerId: null, activeStartedAt: null }),
+      /De race is al afgesloten/
+    );
+    assert.deepEqual(db.getRaceState(), finished);
+    // One undo still reopens the race, because the refused finish left no undo step.
+    assert.equal(db.canUndoFinish(), true);
+  } finally {
+    // Windows cannot delete a database file that is still open.
+    db.closeDb();
+    fs.rmSync(dataPath, { recursive: true, force: true });
+  }
+});
+
 test('only one runner can be marked as running', async () => {
   fs.rmSync(dataPath, { recursive: true, force: true });
   const db = await import('../server/db.ts');
