@@ -10,6 +10,7 @@ Wachtrij (Telsysteem 1) is the queue desk. Imported runners stay `Ingeschreven` 
 - `queue-move` moves a runner with `Naar wachtrij` (to Klaar om te lopen) and `Opwarmen` (back).
 - `queue-filter` filters the board with `Filter dit bord` and clears it with `Filter wissen`.
 - `queue-profile` opens a runner's profile by clicking their name on the board.
+- `queue-scroll` scrolls the page with the mouse wheel over a lane once that lane is at the end of its list, down to `Nu beschikbaar, nog niet opgeroepen`.
 
 ## How to get to it (user POV)
 
@@ -31,6 +32,7 @@ Preconditions:
 - **Move to the queue.** Find the row: `page.locator('.queue-runner').filter({ has: page.locator('button.queue-identity').filter({ hasText: name }) })`. Click its `Naar wachtrij` button. The row appears in `Klaar om te lopen` and the status becomes `waiting`. Its `Opwarmen` button moves it back.
 - **Filter.** Fill `page.getByRole('searchbox', { name: 'Filter dit bord' })` with part of a name; only matching rows stay. Click `Filter wissen`; the searchbox is empty.
 - **Profile.** Click `button.queue-identity` with the runner's name. The profile dialog shows textboxes `Naam` and `Notities` and a `Opslaan` button.
+- **Scroll.** Move the mouse to the middle of a lane's region and call `page.mouse.wheel(0, 400)` about 20 times with a short `waitForTimeout(120)` between them, so each turn is a new gesture. `window.scrollY` grows past 0 and the summary `.available-now > summary` comes on screen. Do it over both lanes.
 - **Proof.** `run.proof(page, 'queue-…')` before and after each move, and quote the runner's `status` from `/api/state`.
 
 ## Gotchas
