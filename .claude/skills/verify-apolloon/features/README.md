@@ -37,10 +37,11 @@ Each feature file starts with an H1 title and one paragraph describing the user-
 
 - [Timing](./timing.md) covers the spacebar handoff, the short-lap question, undo, and ending and resuming the race.
 - [Wachtrij](./queue.md) covers checking runners in, adding a new runner, moving runners between Opwarming and Klaar om te lopen, and the board filter.
+- [Beheer › Lopers](./runners-admin.md) covers the runner list, its search and hour filter, and adding a runner by hand.
 - [Registration import](./registration-import.md) covers importing the form's CSV or Excel file in Beheer › Voorbereiding.
 - [Public displays](./public-displays.md) covers the Binnenscherm and Buitenscherm TV pages.
 - [Linked laptops](./linked-laptops.md) covers linking three laptops and carrying on when one disappears.
 - [Desktop window](./desktop-window.md) covers what only the Electron window adds: the title bar and the preload bridge.
 - [Activiteit](./activity.md) covers the change log in Beheer › Activiteit and the lines a runner profile save adds.
 
-Not mapped yet: Analyse (charts and the export links to `/api/export/*`), Tactiek, Beheer › Lopers, Ploegen & labels (night teams), Publiek, backup and restore in Systeem & herstel, the welcome screen on an `empty` laptop.
+Not mapped yet: Analyse (charts and the export links to `/api/export/*`), Tactiek, Ploegen & labels (night teams), Publiek, backup and restore in Systeem & herstel, the welcome screen on an `empty` laptop.
