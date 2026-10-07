@@ -2,6 +2,9 @@
 // APOLLOON_TEST_URL=http://127.0.0.1:3187 PLAYWRIGHT_MODULE=/path/to/playwright/index.mjs
 // CHROMIUM_EXECUTABLE=/path/to/chrome node scripts/validation/workflow-ui.mjs
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { createTRPCClient, httpBatchLink } from '@trpc/client';
 
 const baseUrl = process.env.APOLLOON_TEST_URL;
@@ -242,6 +245,26 @@ try {
   await page.getByRole('button', { name: 'Opnieuw proberen', exact: true }).click();
   await refreshRow.getByRole('button', { name: 'Opwarmen', exact: true }).waitFor();
   console.log('PASS a failed queue refresh keeps the connection error visible and recovers on retry');
+
+  // An operator fixes the sheet, saves it under the same name, and picks it again: the new rows must import.
+  const importFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'apolloon-import-')), 'runners.csv');
+  const pickImportFile = async () => {
+    const chooser = page.waitForEvent('filechooser');
+    await page.locator('label.file-picker').click();
+    await (await chooser).setFiles(importFile);
+  };
+  await page.goto(`${baseUrl}/admin?section=preparation`);
+  fs.writeFileSync(importFile, 'runner_number,name\n9901,Eerste Versie\n');
+  await pickImportFile();
+  await page.getByRole('button', { name: 'Importeren', exact: true }).click();
+  await page.getByText('1 aangemaakt, 0 bijgewerkt, 0 overgeslagen', { exact: true }).waitFor();
+  fs.writeFileSync(importFile, 'runner_number,name\n9901,Eerste Versie\n9902,Tweede Loper\n');
+  await pickImportFile();
+  await page.getByRole('button', { name: 'Importeren', exact: true }).click();
+  await page.getByText('1 aangemaakt, 1 bijgewerkt, 0 overgeslagen', { exact: true }).waitFor();
+  assert.ok((await snapshot()).runners.some((runner) => runner.runnerNumber === '9902'));
+  fs.rmSync(path.dirname(importFile), { recursive: true, force: true });
+  console.log('PASS picking the same file again after editing it imports the new rows');
 } finally {
   await browser.close();
 }
