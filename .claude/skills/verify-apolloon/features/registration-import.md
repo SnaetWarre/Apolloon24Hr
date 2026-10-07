@@ -8,6 +8,7 @@ An operator imports the registration form's file (Excel `.xlsx` from Google Shee
 - `import-form` imports the Google Form export, recognised by its e-mail column; row number becomes runner number.
 - `import-xlsx` reads the first sheet of an `.xlsx` and imports it like a CSV.
 - `import-repeat` updates instead of duplicating, and keeps live statuses such as warm-up.
+- `import-repick` picks the same file again after it changed on disk and imports the new contents.
 - `import-welcome` the same import from the welcome screen on a laptop without runners.
 
 ## How to get to it (user POV)
@@ -27,11 +28,12 @@ Preconditions:
 - **Import.** Click `page.getByRole('button', { name: 'Importeren', exact: true })`. A notice reads `<n> aangemaakt, <n> bijgewerkt, <n> overgeslagen`, followed by any row errors.
 - **Side effect.** `/api/state` `runners` contains runner `901` with status `registered`; `/api/registrations` holds the form answers for a form export. Wachtrij does not show the runner on the board until it is checked in (see `queue.md`).
 - **Repeat.** Import the same file again. The notice shows `0 aangemaakt` and the runner count in `/api/state` is unchanged.
+- **Re-pick after editing.** Rewrite the file under the same name with an extra row (`902,Tweede Loper`), pick it again through the file chooser (see Gotchas), and click `Importeren`. The notice reads `1 aangemaakt, 1 bijgewerkt, 0 overgeslagen` and `/api/state` has runner `902`. The browser fires no `change` for the same path unless the input was cleared, so `setInputFiles` on the input is not enough to test this.
 - **Proof.** `run.proof(page, 'import-…')` after picking the file and after the notice appears.
 
 ## Gotchas
 
-- The file input is hidden behind the `Bestand kiezen` label. Use `setInputFiles` on the input; clicking the label opens a native file chooser.
+- The file input is hidden behind the `Bestand kiezen` label. Use `setInputFiles` on the input; clicking the label opens a native file chooser. For the re-pick step, use the chooser the way an operator does: `const chooser = page.waitForEvent('filechooser')`, click `label.file-picker`, then `(await chooser).setFiles(file)`.
 - The `ready` scenario already has runners 101 and up. Use numbers that do not collide unless you are testing an update.
 - Answers are stored as typed, including junk such as `///` in the e-mail field. Do not treat odd text in the profile as a bug.
 - The `empty` scenario shows the welcome screen on Overzicht; it disappears once the laptop has runners.

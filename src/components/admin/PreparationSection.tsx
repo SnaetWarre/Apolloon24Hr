@@ -94,6 +94,8 @@ function ImportPanel() {
 
   async function onFileChange(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
+    // Clear the input so picking the same file again after editing it fires `change` and is read fresh.
+    event.target.value = '';
     if (!file) return;
     setNotice(null);
     setFileName(file.name);
