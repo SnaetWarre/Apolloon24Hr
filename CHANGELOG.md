@@ -4,6 +4,10 @@ All notable changes to Apolloon Telsysteem will be documented in this file.
 
 ## [Unreleased]
 
+## [4.3.0] - 2026-10-07
+
+Laptops koppelen alleen met dezelfde versie: zet 4.3.0 op alle laptops.
+
 ### Added
 
 - Inschrijvingen importeren kan nu ook rechtstreeks uit het Excel-bestand
@@ -27,6 +31,10 @@ All notable changes to Apolloon Telsysteem will be documented in this file.
 - Gepubliceerde versies staan ook in de publieke repository
   `SnaetWarre/apolloon-releases`, zodat iedereen ze kan downloaden
 - Beheer opent op het gekozen onderdeel via het adres (`/admin?section=system`)
+- Timing vraagt "Toch afklokken?" bij een druk minder dan 20 seconden na de
+  vorige, zodat een dubbele druk geen ronde van een halve seconde bewaart
+- "Laatste wissel ongedaan maken" na "Race beëindigen" heropent de race, met
+  de loper die op de piste was en dezelfde starttijd
 
 ### Changed
 
@@ -58,6 +66,20 @@ All notable changes to Apolloon Telsysteem will be documented in this file.
   ook waarom een rij overgeslagen werd
 - De doelen (rondes) van ploegen, labels en lopers zijn weg. Competities op het
   Binnenscherm vergelijken de ploegen op hun rondes
+- Tv's en browsers op een laptop die uitvalt, ook door een stroomonderbreking
+  of een losgetrokken kabel, gaan binnen enkele seconden naar een andere laptop
+- De desktop-app start sneller
+- De tv-schermen worden groter op 4K, en Competities toont de volledige
+  ploegnamen
+- Lange namen op het Buitenscherm worden kleiner in plaats van afgeknipt
+- De Wachtrij blijft leesbaar in een smal venster
+- Backups gaan terug tot het begin van een race van 24 uur, en handmatige
+  backups worden niet meer verdrongen door automatische veiligheidskopieën
+- Beheer › Activiteit noemt bij een aangepast lopersprofiel alleen wat echt
+  veranderde
+- Zoeken op een naam zonder accenten vindt de loper ("zoe" vindt Zoë); in
+  Beheer › Lopers kan je ook zoeken op de status en bron zoals de tabel ze toont
+- Laptops koppelen kan ook met alleen het IP-adres
 
 ### Fixed
 
@@ -74,6 +96,36 @@ All notable changes to Apolloon Telsysteem will be documented in this file.
   door de grafische kaart getekend in plaats van de hele pagina elke frame
   opnieuw. Op een trage laptop zakt de Wachtrij van ongeveer 50% naar 4%
   processorgebruik en het Binnenscherm van 16% naar 2%
+- Opnieuw importeren behoudt wat in de app verbeterd werd: de naam, het
+  e-mailadres, de telefoon en de uren bij hetzelfde formulierantwoord, en de
+  labels en historische tijden bij een gewone lijst zonder die kolommen.
+  Lopers die één e-mailadres delen, blijven apart, en een gewone lijst hernoemt
+  geen lopers uit het formulier meer
+- Hetzelfde bestand opnieuw kiezen nadat het aangepast werd, importeert de
+  nieuwe inhoud in plaats van de oude
+- CSV-bestanden van Excel op Windows (Windows-1252) en lijsten zonder lege
+  laatste kolommen worden correct ingelezen
+- CSV-exports tonen accenten correct in Excel en worden nooit als formule
+  uitgevoerd
+- Een afgesloten race kan niet nog eens beëindigd worden; dat verschoof de
+  eindtijd
+- Ongedaan maken neemt de laatste wissel terug, ook als twee wissels op
+  hetzelfde moment vielen, en elk scherm toont daarna dezelfde volgende loper
+- Een verouderde klik in de Wachtrij haalt de loper die net gestart is niet
+  meer van de piste
+- Het filter "Beschikbaar tijdens" vindt lopers ook als hun uren anders
+  geschreven zijn (een blok van twee uur of losse uren)
+- Vergeten wissels (rondes langer dan tien minuten) tellen niet meer mee in de
+  gemiddelden op het Binnenscherm
+- Analyse toont de rondes zonder label weer nadat een label uit en aan gezet
+  werd
+- Lijsten die per uur wisselen, zoals "Nu beschikbaar", wisselen op het uur van
+  de groepsklok
+- Een herstart voegt de ingebouwde labels niet opnieuw toe, en een label dat
+  op een andere laptop verwijderd werd, komt niet terug als nieuw label
+- Een laptop die veel logo's gemist had, haalt ze in in plaats van vast te
+  lopen, en een gewiste laptop die opnieuw gekoppeld wordt, neemt de plaats van
+  zijn oude versie in
 
 ## [4.2.0] - 2026-10-01
 
