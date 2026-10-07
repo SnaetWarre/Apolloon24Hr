@@ -1,0 +1,4 @@
+interface:
+  display_name: 'Ship Apolloon PR'
+  short_description: 'Finish an Apolloon change as a PR with proof from the running app'
+  default_prompt: 'Use $ship-apolloon-pr to finish this change and open or update its PR.'
