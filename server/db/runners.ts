@@ -294,18 +294,11 @@ function sameSubmissionTime(stored: string, incoming: string): boolean {
   return sameDay && a.slice(2).join() === b.slice(2).join();
 }
 
-/**
- * Importing the same form answer again keeps the e-mail, phone, and hours
- * operators corrected since; a newer answer from the runner replaces them.
- */
-function registrationKeepingCorrections(runnerId: string, incoming: RunnerRegistration): RunnerRegistration {
+function storedRegistration(runnerId: string): RunnerRegistration | null {
   const storedJson = one<{ registration_json: string | null }>('SELECT registration_json FROM runners WHERE id = ?', [
     runnerId,
   ])?.registration_json;
-  if (!storedJson) return incoming;
-  const stored = runnerRegistrationSchema.parse(JSON.parse(storedJson));
-  if (!sameSubmissionTime(stored.submittedAt, incoming.submittedAt)) return incoming;
-  return { ...incoming, email: stored.email, phone: stored.phone, availableHours: stored.availableHours };
+  return storedJson ? runnerRegistrationSchema.parse(JSON.parse(storedJson)) : null;
 }
 
 /**
@@ -316,7 +309,8 @@ function registrationKeepingCorrections(runnerId: string, incoming: RunnerRegist
 /**
  * A form answer updates the runner it was imported as before and keeps what
  * operators changed since (number, notes, labels, and for the same answer
- * the e-mail, phone, and hours). A new runner whose number
+ * the name, e-mail, phone, and hours; a newer answer from the runner
+ * replaces those). A new runner whose number
  * is already taken is imported without one, so `numberTaken` asks the
  * operator to pick one.
  */
@@ -328,12 +322,22 @@ export function upsertRunnerFromImport(input: RunnerInput): {
   const runnerNumber = input.runnerNumber?.trim();
   const existingId = findImportedRunnerId(input, runnerNumber);
   if (existingId) {
-    const { status: _status, statusSince: _statusSince, ...profileFields } = input;
+    const { status: _status, statusSince: _statusSince, ...rowFields } = input;
+    const profileFields: RunnerPatch = rowFields;
     if (input.registration) {
       delete profileFields.runnerNumber;
       delete profileFields.notes;
       delete profileFields.labels;
-      profileFields.registration = registrationKeepingCorrections(existingId, input.registration);
+      const stored = storedRegistration(existingId);
+      if (stored && sameSubmissionTime(stored.submittedAt, input.registration.submittedAt)) {
+        delete profileFields.name;
+        profileFields.registration = {
+          ...input.registration,
+          email: stored.email,
+          phone: stored.phone,
+          availableHours: stored.availableHours,
+        };
+      }
     }
     // A plain-list runner found by name keeps their number when the row's number belongs to someone else.
     const numberHolder = !input.registration && runnerNumber ? findRunnerIdByNumber(runnerNumber) : null;
