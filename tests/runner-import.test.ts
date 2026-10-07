@@ -313,6 +313,34 @@ test('a hand-made list imports rows that leave off empty trailing columns', asyn
   }
 });
 
+test('re-importing a plain list without labels keeps the labels and times set in the app', async () => {
+  fs.rmSync(dataPath, { recursive: true, force: true });
+  const db = await import('../server/db.ts');
+  const { appRouter } = await import('../server/router.ts');
+  try {
+    await db.initDb();
+    const caller = appRouter.createCaller({});
+    const list = 'runner_number,name\n901,Lien Claes\n';
+    assert.equal((await caller.runners.importCsv({ csvText: list })).created, 1);
+    const lien = db.getAllRunners()[0];
+    db.updateRunner(lien.id, { labels: ['Speedteam Blue'], historicalAvgMs: 85_000, historicalBestMs: 80_000 });
+
+    const repeat = await caller.runners.importCsv({ csvText: `${list}902,Late Loper\n` });
+    assert.equal(repeat.created, 1);
+    assert.equal(repeat.updated, 1);
+    const updated = db.getRunnerById(lien.id);
+    assert.deepEqual(
+      updated?.labels.map((label) => label.name),
+      ['Speedteam Blue']
+    );
+    assert.equal(updated?.historicalAvgMs, 85_000);
+    assert.equal(updated?.historicalBestMs, 80_000);
+  } finally {
+    db.closeDb();
+    fs.rmSync(dataPath, { recursive: true, force: true });
+  }
+});
+
 test('runners who share one e-mail address stay separate runners', async () => {
   fs.rmSync(dataPath, { recursive: true, force: true });
   const db = await import('../server/db.ts');

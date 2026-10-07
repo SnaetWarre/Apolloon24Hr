@@ -102,16 +102,20 @@ function runnerInputFromRow(
   if (registration) {
     return { ...base, labels: labelsFromFormCategories(registration.categories), registration };
   }
+  const labels = splitLabels([
+    columnValue(row, ['labels', 'label', 'categorie', 'categories', 'type']),
+    columnValue(row, ['zustervereniging', 'vereniging', 'club']),
+    columnValue(row, ['team', 'speedteam']),
+    columnValue(row, ['jaar', 'groep']),
+  ]);
+  const historicalAvgMs = parseDurationMs(columnValue(row, ['historical_avg', 'gemiddelde', 'avg', 'average']));
+  const historicalBestMs = parseDurationMs(columnValue(row, ['historical_best', 'snelste', 'best', 'fastest']));
+  // On a re-import, what the row leaves empty keeps what the operators set in the app.
   return {
     ...base,
-    labels: splitLabels([
-      columnValue(row, ['labels', 'label', 'categorie', 'categories', 'type']),
-      columnValue(row, ['zustervereniging', 'vereniging', 'club']),
-      columnValue(row, ['team', 'speedteam']),
-      columnValue(row, ['jaar', 'groep']),
-    ]),
-    historicalAvgMs: parseDurationMs(columnValue(row, ['historical_avg', 'gemiddelde', 'avg', 'average'])),
-    historicalBestMs: parseDurationMs(columnValue(row, ['historical_best', 'snelste', 'best', 'fastest'])),
+    ...(labels.length ? { labels } : {}),
+    ...(historicalAvgMs !== null ? { historicalAvgMs } : {}),
+    ...(historicalBestMs !== null ? { historicalBestMs } : {}),
   };
 }
 
