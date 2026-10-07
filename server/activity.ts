@@ -1,5 +1,5 @@
 import type { PublicRecordMode, Runner, RunnerStatus } from '../shared/schemas.js';
-import { getLabels, getRaceState, getRunnerById } from './db.js';
+import { getLabels, getRaceState, getRunnerById, getRunnerRegistrations } from './db.js';
 
 /**
  * Says in words what a write does, for Beheer › Activiteit. Called before the write, so
@@ -29,8 +29,14 @@ export function describeWrite(path: string, input: unknown): ((result: unknown) 
     case 'runners.create':
       return (result) => `${runnerText(result as Runner | null) || String(value.name ?? 'Loper')} toegevoegd`;
     case 'runners.update': {
+      // The profile sends every field on each save, so list only what the write really changed.
       const runner = runnerName(id);
-      return () => `${runner} aangepast (${fieldNames(value.fields)})`;
+      const before = profileValues(id);
+      return () => {
+        const after = profileValues(id);
+        const changed = Object.keys(before).filter((field) => before[field] !== after[field]);
+        return `${runner} aangepast (${changed.length ? changed.join(', ') : 'niets gewijzigd'})`;
+      };
     }
     case 'runners.delete': {
       const runner = runnerName(id);
@@ -114,12 +120,6 @@ const RECORD_MODE_TEXT: Record<PublicRecordMode, string> = {
 
 const FIELD_TEXT: Record<string, string> = {
   name: 'naam',
-  runnerNumber: 'nummer',
-  targetLaps: 'doel',
-  historicalAvgMs: 'gemiddelde',
-  historicalBestMs: 'beste tijd',
-  notes: 'notities',
-  labels: 'labels',
   color: 'kleur',
   icon: 'icoon',
   kind: 'soort',
@@ -130,6 +130,28 @@ const FIELD_TEXT: Record<string, string> = {
 function fieldNames(fields: unknown): string {
   const names = Object.keys((fields ?? {}) as object).map((key) => FIELD_TEXT[key] ?? key);
   return names.length ? names.join(', ') : 'niets';
+}
+
+/** What an operator can edit on a runner, by its Dutch name, as text to compare. */
+function profileValues(id: string): Record<string, string> {
+  const runner = id ? getRunnerById(id) : null;
+  if (!runner) return {};
+  const registration = getRunnerRegistrations()[id];
+  return {
+    naam: runner.name,
+    nummer: runner.runnerNumber ?? '',
+    doel: String(runner.targetLaps),
+    gemiddelde: String(runner.historicalAvgMs),
+    'beste tijd': String(runner.historicalBestMs),
+    notities: runner.notes,
+    telefoon: registration?.phone ?? '',
+    'e-mail': registration?.email ?? '',
+    uren: (registration?.availableHours ?? []).join('\n'),
+    labels: runner.labels
+      .map((label) => label.id)
+      .sort()
+      .join(),
+  };
 }
 
 function runnerName(id: string): string {
