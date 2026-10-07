@@ -30,22 +30,19 @@ test('clock ticks fall on the group clock hour, not on this laptop clock hour', 
 
   // This laptop runs 5 s ahead: at its 11:00:00 the group clock still reads 10:59:55.
   assert.equal(msUntilNextTick(laptopElevenMs - 5_000, hourMs), 5_000);
-  // This laptop runs 5 s behind: at its 10:59:50 the group clock reads 10:59:55, five seconds from the hour.
-  assert.equal(msUntilNextTick(laptopElevenMs - 10_000 + 5_000, hourMs), 5_000);
+  // This laptop runs 5 s behind: at its 11:00:00 the group clock already reads 11:00:05.
+  assert.equal(msUntilNextTick(laptopElevenMs + 5_000, hourMs), hourMs - 5_000);
   assert.equal(msUntilNextTick(laptopElevenMs, hourMs), hourMs);
 
-  // The sync lands after the hour clock was scheduled on the laptop clock: running clocks hear of it and reschedule.
+  // A sync that moves the group clock tells running clocks to reschedule; measurement noise does not.
   let syncs = 0;
   const stop = onServerClockSync(() => (syncs += 1));
   try {
-    const laptopNowMs = Date.now();
     await syncServerClock(1, async () => Date.now() - 5_000);
     assert.equal(syncs, 1);
-    const groupNowMs = nowMs();
-    assert.ok(Math.abs(groupNowMs - (Date.now() - 5_000)) < 50);
-    // The tick that was due at the laptop's next hour now waits five seconds longer, for the group clock to get there.
-    const shiftMs = (msUntilNextTick(groupNowMs, hourMs) - msUntilNextTick(laptopNowMs, hourMs) + hourMs) % hourMs;
-    assert.ok(Math.abs(shiftMs - 5_000) < 50);
+    assert.ok(Math.abs(nowMs() - (Date.now() - 5_000)) < 50);
+    await syncServerClock(1, async () => Date.now() - 5_000);
+    assert.equal(syncs, 1);
   } finally {
     stop();
     await syncServerClock(1, async () => Date.now());

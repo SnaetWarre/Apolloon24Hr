@@ -1,3 +1,5 @@
+/** Corrections smaller than this move no tick on screen, so they are kept back as measurement noise. */
+const CLOCK_STEP_MS = 16;
 let serverTimeOffsetMs = 0;
 const syncListeners = new Set<() => void>();
 
@@ -24,6 +26,7 @@ export async function syncServerClock(
     if (!best || roundTripMs < best.roundTripMs) best = { offsetMs, roundTripMs };
   }
   if (!best) throw new Error('server clock sync failed');
+  if (Math.abs(best.offsetMs - serverTimeOffsetMs) < CLOCK_STEP_MS) return best;
   serverTimeOffsetMs = best.offsetMs;
   for (const listener of syncListeners) listener();
   return best;
@@ -34,7 +37,7 @@ export function nowMs(): number {
   return Date.now() + serverTimeOffsetMs;
 }
 
-/** Calls `listener` after every sync, which can move nowMs() against this laptop's clock. */
+/** Calls `listener` after a sync moves nowMs() against this laptop's clock. */
 export function onServerClockSync(listener: () => void): () => void {
   syncListeners.add(listener);
   return () => syncListeners.delete(listener);

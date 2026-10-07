@@ -78,13 +78,7 @@ function scheduleClock(clock: Clock): void {
 }
 
 // A sync after a clock was scheduled moves its next boundary, and may already have passed one: tick now and reschedule.
-onServerClockSync(() => {
-  for (const clock of clocks.values()) {
-    notify(clock);
-    clearClock(clock);
-    scheduleClock(clock);
-  }
-});
+onServerClockSync(restartClocks);
 
 function clearClock(clock: Clock): void {
   if (clock.timeoutId === null) return;
@@ -92,12 +86,10 @@ function clearClock(clock: Clock): void {
   clock.timeoutId = null;
 }
 
-function handleVisibilityChange(): void {
+function restartClocks(): void {
   for (const clock of clocks.values()) {
-    if (document.hidden) {
-      clearClock(clock);
-      continue;
-    }
+    clearClock(clock);
+    if (document.hidden) continue;
     notify(clock);
     scheduleClock(clock);
   }
@@ -105,12 +97,12 @@ function handleVisibilityChange(): void {
 
 function ensureVisibilityListener(): void {
   if (visibilityListenerActive) return;
-  document.addEventListener('visibilitychange', handleVisibilityChange);
+  document.addEventListener('visibilitychange', restartClocks);
   visibilityListenerActive = true;
 }
 
 function removeVisibilityListenerIfIdle(): void {
   if (!visibilityListenerActive || clocks.size > 0) return;
-  document.removeEventListener('visibilitychange', handleVisibilityChange);
+  document.removeEventListener('visibilitychange', restartClocks);
   visibilityListenerActive = false;
 }
