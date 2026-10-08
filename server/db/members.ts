@@ -41,6 +41,27 @@ export function removeClusterMember(hostId: string): void {
 export function keepOnlyClusterMember(hostId: string): void {
   run('DELETE FROM cluster_members WHERE host_id <> ?', [hostId]);
   run('DELETE FROM cluster_member_names WHERE host_id <> ?', [hostId]);
+  setUnreachableMembers([]);
+}
+
+/**
+ * The laptops Beheer › Activiteit last listed as unreachable; a replicated setting, so a
+ * laptop that takes over goes on from the same list instead of listing them again.
+ */
+export function getUnreachableMembers(): string[] {
+  try {
+    const parsed = z.array(z.string()).safeParse(JSON.parse(getSetting('cluster_unreachable_json') || '[]'));
+    return parsed.success ? parsed.data : [];
+  } catch {
+    return [];
+  }
+}
+
+export function setUnreachableMembers(hostIds: string[]): void {
+  run('INSERT OR REPLACE INTO settings(key, value) VALUES(?, ?)', [
+    'cluster_unreachable_json',
+    JSON.stringify(hostIds),
+  ]);
 }
 
 /** A laptop that linked with the group by itself, and the laptop it linked with. */

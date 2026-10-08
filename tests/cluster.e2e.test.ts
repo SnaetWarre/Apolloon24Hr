@@ -566,6 +566,58 @@ test(
       assert.deepEqual((await fetchState(servers[2])).runners.map((runner) => runner.name).sort(), ['Alone', 'Before']);
       await waitFor(async () => (await fetchStatus(last)).state === 'healthy', 15_000);
       assert.equal((await fetchStatus(last)).members.length, 3);
+      const activity = await client(servers[2]).activity.list.query({ limit: 100, before: null });
+      const alone = activity.find((entry) => entry.action === 'cluster.continueAlone');
+      assert.equal(alone?.summary, 'Alleen verder gewerkt op LAPTOP-A; LAPTOP-B en LAPTOP-C zijn uit de groep gehaald');
+    } catch (error) {
+      throw withServerOutput(error, ...servers);
+    } finally {
+      await Promise.all(servers.map(stopServer));
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
+);
+
+test(
+  'Activiteit lists each laptop that links, drops out and comes back, once, on every laptop',
+  { timeout: 60_000 },
+  async () => {
+    const root = testRoot('activity-laptops');
+    const servers: RunningServer[] = [];
+    try {
+      await startGroup(root, servers);
+      const summaries = async (server: RunningServer) =>
+        (await client(server).activity.list.query({ limit: 100, before: null })).map((entry) => entry.summary);
+      // Which of two empty laptops moves is up to the group ids; either way two of the three came over.
+      const linked = async () =>
+        (await summaries(servers[2])).filter((summary) => /^LAPTOP-[ABC] gekoppeld met Koppelen$/.test(summary));
+      await waitFor(async () => (await linked()).length === 2);
+
+      // The laptop that leads dies: the one that takes over lists it, from a list it never kept itself.
+      const gone = await leaderOf(servers);
+      assert.ok(gone);
+      const index = servers.indexOf(gone);
+      await killServer(gone);
+      const others = servers.filter((server) => server !== gone);
+      await waitFor(async () => (await summaries(others[0])).includes(`${gone.name} is niet bereikbaar`), 20_000, 200);
+      const leader = await leaderOf(others);
+      assert.ok(leader);
+
+      servers[index] = await startServer({ port: gone.port, dataPath: gone.dataPath, name: gone.name });
+      // Read on the laptop that came back: the entries reached it with the rest of the data.
+      await waitFor(
+        async () => (await summaries(servers[index])).includes(`${gone.name} is weer bereikbaar`),
+        20_000,
+        200
+      );
+      const listed = await summaries(servers[index]);
+      assert.equal(listed.filter((summary) => summary === `${gone.name} is niet bereikbaar`).length, 1);
+      assert.equal(listed.filter((summary) => summary === `${gone.name} is weer bereikbaar`).length, 1);
+      // Written by whichever laptop led when it came back, which may be the returning laptop itself.
+      const entry = (await client(leader).activity.list.query({ limit: 100, before: null })).find(
+        (item) => item.summary === `${gone.name} is weer bereikbaar`
+      );
+      assert.match(entry?.origin ?? '', /^Vanzelf · laptop LAPTOP-[ABC] /);
     } catch (error) {
       throw withServerOutput(error, ...servers);
     } finally {
