@@ -16,6 +16,8 @@ import { relativeFileWithinRoot } from '../server/static-files.ts';
 import { formatClockTimeMs } from '../shared/time.ts';
 import { parseTeamWindow, toLocalDateTime } from '../src/components/admin/temporaryTeamTime.ts';
 import path from 'node:path';
+import { trpc } from '../src/api.ts';
+import { CHANGE_NOT_SAVED, CONNECTION_LOST, fetchFromLaptop, isConnectionError } from '../src/lib/connectionError.ts';
 
 test('live clocks are cadence-limited instead of driving full-frame renders', () => {
   assert.equal(normalizeClockInterval(0), 16);
@@ -153,4 +155,32 @@ test('screens and night-team fields use Brussels time, even on a TV left on UTC'
     startsAt: Date.UTC(2026, 9, 24, 20),
     endsAt: Date.UTC(2026, 9, 25, 5),
   });
+});
+
+test("a change that cannot reach the laptop fails in Dutch; the server's own messages pass through", async (t) => {
+  const realFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = realFetch;
+    delete (globalThis as { window?: unknown }).window;
+  });
+  (globalThis as { window?: unknown }).window = { location: { pathname: '/admin' } };
+  // What the browser does when the server is restarting or the cable is out.
+  globalThis.fetch = async () => {
+    throw new TypeError('Failed to fetch');
+  };
+  const offline = await trpc.laps.delete.mutate({ lapId: 'lap-1' }).catch((error: unknown) => error);
+  assert.equal((offline as Error).message, CHANGE_NOT_SAVED);
+  assert.equal(isConnectionError(offline), true);
+  await assert.rejects(fetchFromLaptop('/api/state'), { message: CONNECTION_LOST });
+
+  globalThis.fetch = async () =>
+    Response.json(
+      [{ error: { message: 'Ronde niet gevonden.', code: -32004, data: { code: 'NOT_FOUND', httpStatus: 404 } } }],
+      {
+        status: 404,
+      }
+    );
+  const refused = await trpc.laps.delete.mutate({ lapId: 'lap-1' }).catch((error: unknown) => error);
+  assert.equal((refused as Error).message, 'Ronde niet gevonden.');
+  assert.equal(isConnectionError(refused), false);
 });

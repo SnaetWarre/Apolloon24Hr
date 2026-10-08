@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import type { AppSettings, HostInfo, Label, LiveAppSnapshot, RaceState, Runner, TemporaryTeam } from '../types';
+import { connectionLostError } from '../lib/connectionError';
 import { fetchSinceBase } from './deltaFetch';
 import { confirmedSnapshot, withPendingChanges } from './optimistic';
 import { defaultSettings, emptyRace, snapshotKey } from './snapshot';
@@ -45,7 +46,9 @@ async function fetchServerSnapshot(): Promise<LiveAppSnapshot> {
   const prefetched = window.__APOLLOON_STATE_PROMISE__;
   if (prefetched) {
     delete window.__APOLLOON_STATE_PROMISE__;
-    return prefetched;
+    return prefetched.catch((error: unknown) => {
+      throw connectionLostError(error);
+    });
   }
   // Only what changed since the snapshot this screen holds, without its own unconfirmed changes.
   return fetchSinceBase<LiveAppSnapshot>('/api/state', confirmedSnapshot(), async (response) => {

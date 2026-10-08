@@ -1,6 +1,7 @@
 import { queryOptions, useQuery } from '@tanstack/react-query';
 import type { RunnerRegistration } from '../types';
 import { registrationsKey } from './snapshot';
+import { fetchFromLaptop } from '../lib/connectionError';
 
 const noRegistrations: Record<string, RunnerRegistration> = {};
 
@@ -8,7 +9,7 @@ const noRegistrations: Record<string, RunnerRegistration> = {};
 export const registrationsQuery = queryOptions({
   queryKey: registrationsKey,
   queryFn: async () => {
-    const response = await fetch('/api/registrations');
+    const response = await fetchFromLaptop('/api/registrations');
     if (!response.ok) throw new Error(`Inschrijvingen laden mislukt (${response.status})`);
     return (await response.json()) as Record<string, RunnerRegistration>;
   },

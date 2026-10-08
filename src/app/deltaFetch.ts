@@ -1,4 +1,5 @@
 import { applyDelta, isDelta, type Delta } from '../../shared/delta';
+import { fetchFromLaptop } from '../lib/connectionError';
 
 /**
  * Fetches `url`, sending the revision this screen already holds so the server
@@ -11,7 +12,9 @@ export async function fetchSinceBase<T extends { revision: number }>(
   describe: (response: Response) => Promise<Error>
 ): Promise<T> {
   for (const since of base ? [base.revision, null] : [null]) {
-    const response = await fetch(since === null ? url : `${url}${url.includes('?') ? '&' : '?'}since=${since}`);
+    const response = await fetchFromLaptop(
+      since === null ? url : `${url}${url.includes('?') ? '&' : '?'}since=${since}`
+    );
     if (!response.ok) throw await describe(response);
     const body = (await response.json()) as T | Delta<T>;
     if (!isDelta(body)) return body;

@@ -13,6 +13,7 @@ import { PageHeader } from './PageHeader';
 import { useArrivals, usePulse } from '../lib/motion';
 import { forgetLapStart, rememberLapStart, timePress, tooShortLapMs, type PressTime } from '../lib/pressTiming';
 import { LIVE_MILLISECOND_INTERVAL_MS, useClockTick } from '../lib/useClockTick';
+import { isConnectionError } from '../lib/connectionError';
 
 const selectTimingData = ({ runners, race }: LiveAppSnapshot) => ({ runners, race });
 
@@ -67,7 +68,13 @@ export function TimingView() {
         return true;
       } catch (err) {
         setLastAction(null);
-        setActionError(err instanceof Error ? err.message : 'Timing actie mislukt');
+        setActionError(
+          isConnectionError(err)
+            ? 'Niet opgeslagen: geen verbinding met de laptop. Druk opnieuw.'
+            : err instanceof Error
+              ? err.message
+              : 'Timing actie mislukt'
+        );
         return false;
       } finally {
         handoffBusyRef.current = false;
