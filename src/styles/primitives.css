@@ -531,6 +531,7 @@ details[open] > .disclosure ~ * {
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  min-width: 0;
   max-width: 100%;
   min-height: 20px;
   padding-block: 0;
@@ -573,11 +574,13 @@ details[open] > .disclosure ~ * {
   border-radius: 2px;
 }
 
+/* min-width: 0 lets a row of pills shrink, so a long label name gets its ellipsis. */
 .label-list,
 .label-row,
 .display-labels {
   display: inline-flex;
   flex-wrap: wrap;
+  min-width: 0;
   gap: 4px;
   align-items: center;
 }
