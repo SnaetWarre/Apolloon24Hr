@@ -24,13 +24,13 @@ export function useJoinGroup(runnerCount: number) {
       found?.link === 'invite'
         ? {
             title: 'Laptops koppelen?',
-            message: `Op ${shortUrl(found.url)} staan nog geen lopers. ${found.laptops > 1 ? 'Die laptops nemen' : 'Die laptop neemt'} alle gegevens van deze laptop over en ${found.laptops > 1 ? 'werken' : 'werkt'} daarna mee. Op deze laptop verandert niets.`,
+            message: `Op ${laptopLabel(found)} staan nog geen lopers. ${found.laptops > 1 ? 'Die laptops nemen' : 'Die laptop neemt'} alle gegevens van deze laptop over en ${found.laptops > 1 ? 'werken' : 'werkt'} daarna mee. Op deze laptop verandert niets.`,
             confirmLabel: 'Koppelen',
           }
         : {
             title: 'Deze laptop koppelen?',
             message: found
-              ? `Deze laptop neemt alle gegevens van ${shortUrl(found.url)} (${countLabel(found.runners, 'loper', 'lopers')}) over en werkt daarna mee. ${own}`
+              ? `Deze laptop neemt alle gegevens van ${laptopLabel(found)} (${countLabel(found.runners, 'loper', 'lopers')}) over en werkt daarna mee. ${own}`
               : `De laptop met de minste lopers neemt alle gegevens van de andere over en werkt daarna mee. Wat daar stond, wordt eerst als backup bewaard.`,
             confirmLabel: 'Koppelen',
             tone: runnerCount === 0 ? 'default' : 'danger',
@@ -50,6 +50,16 @@ export function useJoinGroup(runnerCount: number) {
 
 export function shortUrl(url: string): string {
   return url.replace(/^https?:\/\//, '');
+}
+
+/** A laptop as the operator knows it: its computer name, or its address when it never told its name. */
+export function laptopLabel(laptop: { name: string | null; url: string }): string {
+  return laptop.name ?? shortUrl(laptop.url);
+}
+
+/** The name with the address behind it, for a message that may send someone to that laptop. */
+export function laptopWithAddress(laptop: { name: string | null; url: string }): string {
+  return laptop.name ? `${laptop.name} (${shortUrl(laptop.url)})` : shortUrl(laptop.url);
 }
 
 export function countLabel(count: number, one: string, many: string): string {

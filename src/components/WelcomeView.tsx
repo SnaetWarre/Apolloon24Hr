@@ -2,7 +2,7 @@ import { useAppData, useClusterStatus } from '../app/index';
 import { useCopyText } from '../lib/clipboard';
 import type { ClusterStatus, LiveAppSnapshot } from '../types';
 import { AdminNoticeBanner } from './admin/AdminNotice';
-import { countLabel, shortUrl, useJoinGroup } from './admin/useJoinGroup';
+import { countLabel, laptopLabel, shortUrl, useJoinGroup } from './admin/useJoinGroup';
 import { Icon } from './Icon';
 import { PageHeader } from './PageHeader';
 
@@ -75,6 +75,12 @@ export function WelcomeView({
               <li>
                 Start Apolloon op de andere laptops, aan dezelfde switch, en kies daar{' '}
                 <strong>Een andere laptop is al ingesteld</strong>.
+                {cluster?.hostName && (
+                  <>
+                    {' '}
+                    Deze laptop staat daar als <strong>{cluster.hostName}</strong>.
+                  </>
+                )}
               </li>
             )}
             <li>
@@ -124,9 +130,10 @@ function JoinChoice({ cluster, onOpenAdmin }: { cluster: ClusterStatus; onOpenAd
           {setUp.map((found) => (
             <li className="host-hint cluster-peer-row" key={found.url}>
               <span>
-                <strong>{shortUrl(found.url)}</strong>
+                <strong>{laptopLabel(found)}</strong>
                 <small>
                   {countLabel(found.laptops, 'laptop', 'laptops')} · {countLabel(found.runners, 'loper', 'lopers')}
+                  {found.name && ` · ${shortUrl(found.url)}`}
                 </small>
               </span>
               {found.compatible ? (

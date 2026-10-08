@@ -88,6 +88,8 @@ async function up() {
         CLUSTER_SELF_URL: url,
         CLUSTER_DISCOVERY_ADDRESS: '127.255.255.255',
         CLUSTER_DISCOVERY_PORT: String(discoveryPort),
+        // Every laptop of a run shares this machine's name; give each its own, as at the event.
+        CLUSTER_LAPTOP_NAME: `LAPTOP-${index}`,
         BACKUP_ENABLED: 'false',
         APOLLOON_UPDATE_CHECK: '0',
       },

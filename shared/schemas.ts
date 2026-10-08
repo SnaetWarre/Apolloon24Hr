@@ -218,6 +218,8 @@ export type GroupState = 'solo' | 'healthy' | 'degraded' | 'electing' | 'no-majo
 export type ClusterMemberStatus = {
   hostId: string;
   url: string;
+  /** The computer name, or null when that laptop never told it. */
+  name: string | null;
   self: boolean;
   leader: boolean;
   reachable: boolean;
@@ -227,8 +229,9 @@ export type ClusterMemberStatus = {
 
 /** Laptops heard on the network that belong to another group, so a laptop on its own can join them in one click. */
 export type NearbyGroup = {
-  /** A laptop of that group to join through. */
+  /** A laptop of that group to join through, and its computer name. */
   url: string;
+  name: string | null;
   laptops: number;
   runners: number;
   appVersion: string;
@@ -245,6 +248,8 @@ export type NearbyGroup = {
 export type ClusterStatus = {
   enabled: boolean;
   hostId: string;
+  /** This laptop's computer name. */
+  hostName: string | null;
   clusterId: string;
   appVersion: string;
   schemaVersion: number;

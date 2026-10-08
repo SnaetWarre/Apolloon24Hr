@@ -48,6 +48,7 @@ import {
 } from './db.js';
 import { currentUrl, heardLaptops, startDiscovery, stopDiscovery } from './discovery.js';
 import { APP_VERSION, isClusterEnabled, readPositiveInt } from './env.js';
+import { LAPTOP_NAME, laptopName } from './host.js';
 import { acceptPeerSocket, closePeerSockets, refusal, refuseUpgrade, type PeerAnswer } from './peer-socket.js';
 import {
   isIsolated,
@@ -85,7 +86,7 @@ let startedAt = performance.now();
 let maintenanceTimer: NodeJS.Timeout | null = null;
 
 function selfMember(): ClusterMember {
-  return { hostId: hostIdentity().hostId, url: selfUrl() };
+  return { hostId: hostIdentity().hostId, url: selfUrl(), name: LAPTOP_NAME };
 }
 
 function busy(): ClusterStatus['busy'] {
@@ -98,6 +99,7 @@ export function clusterStatus(): ClusterStatus {
   const writable = !busy() && leaderAlive();
   const view = new Map(leaderGroupView().map((member) => [member.hostId, member]));
   const group = members();
+  const names = heardNames();
   const memberStatuses: ClusterMemberStatus[] = group.map((member) => {
     const isSelf = member.hostId === identity.hostId;
     const isLeader = leader?.hostId === member.hostId;
@@ -105,6 +107,7 @@ export function clusterStatus(): ClusterStatus {
     return {
       hostId: member.hostId,
       url: isSelf ? selfUrl() : member.url,
+      name: isSelf ? LAPTOP_NAME : (names.get(member.hostId) ?? member.name ?? null),
       self: isSelf,
       leader: isLeader && writable,
       reachable: isSelf || (isLeader ? writable : Boolean(seen?.reachable)),
@@ -114,6 +117,7 @@ export function clusterStatus(): ClusterStatus {
   return {
     enabled,
     hostId: identity.hostId,
+    hostName: LAPTOP_NAME,
     clusterId: identity.clusterId,
     appVersion: APP_VERSION,
     schemaVersion: DATABASE_SCHEMA_VERSION,
@@ -135,6 +139,13 @@ export function clusterStatus(): ClusterStatus {
   };
 }
 
+/** The computer names laptops announce now, by host id. */
+function heardNames(): Map<string, string> {
+  const names = new Map<string, string>();
+  for (const beacon of heardLaptops()) if (beacon.name) names.set(beacon.hostId, beacon.name);
+  return names;
+}
+
 /** Other groups heard on the network, one entry each; laptops of this group's own lineage rejoin by themselves. */
 function nearbyGroups(ownMembers: Set<string>): NearbyGroup[] {
   const clusterId = hostIdentity().clusterId;
@@ -144,8 +155,10 @@ function nearbyGroups(ownMembers: Set<string>): NearbyGroup[] {
     if (ownMembers.has(beacon.hostId) || beacon.clusterId === clusterId) continue;
     const known = groups.get(beacon.clusterId);
     const compatible = beacon.appVersion === APP_VERSION && beacon.schemaVersion === DATABASE_SCHEMA_VERSION;
+    const through = known && (known.throughLeader || !beacon.leader) ? known : { url: beacon.url, name: beacon.name };
     groups.set(beacon.clusterId, {
-      url: known && (known.throughLeader || !beacon.leader) ? known.url : beacon.url,
+      url: through.url,
+      name: through.name,
       throughLeader: Boolean(known?.throughLeader || beacon.leader),
       laptops: Math.max(known?.laptops ?? 0, beacon.groupSize),
       runners: Math.max(known?.runners ?? 0, beacon.runners),
@@ -346,7 +359,11 @@ export function registerClusterRoutes(app: Express): void {
 
   app.post('/api/cluster/members', (req, res) => {
     const request = z
-      .object({ hostId: z.string().min(1).max(128), url: z.string().min(1).max(2_048) })
+      .object({
+        hostId: z.string().min(1).max(128),
+        url: z.string().min(1).max(2_048),
+        name: z.string().max(256).nullish(),
+      })
       .safeParse(req.body);
     const url = request.success ? normalizeUrl(request.data.url) : '';
     if (!request.success || !url) {
@@ -357,7 +374,7 @@ export function registerClusterRoutes(app: Express): void {
       sendPeerError(res, 409, 'not_leader', 'Deze laptop is niet de hoofdlaptop.');
       return;
     }
-    addMember({ hostId: request.data.hostId, url });
+    addMember({ hostId: request.data.hostId, url, name: laptopName(request.data.name) });
     res.json({ ok: true, term: currentTerm() });
   });
 
@@ -425,7 +442,7 @@ function addMember(member: ClusterMember): void {
   recordWrite('cluster.addMember', () => {
     const self = selfMember();
     const stored = getClusterMembers().find((existing) => existing.hostId === self.hostId);
-    if (stored?.url !== self.url) saveClusterMember(self);
+    if (stored?.url !== self.url || stored.name !== self.name) saveClusterMember(self);
     for (const old of members()) {
       if (old.url === member.url && old.hostId !== member.hostId && old.hostId !== self.hostId) {
         removeClusterMember(old.hostId);
@@ -620,12 +637,16 @@ async function maintain(): Promise<void> {
   if (!isLeader() || busy()) return;
   const self = selfMember();
   const stored = getClusterMembers();
-  // The leader's address changed (a new DHCP lease): tell the group.
-  if (stored.length && stored.find((member) => member.hostId === self.hostId)?.url !== self.url) addMember(self);
-  // Another laptop announces a new address: store it, so it also holds when announcements stop.
+  // The leader's address or name changed (a new DHCP lease): tell the group.
+  const storedSelf = stored.find((member) => member.hostId === self.hostId);
+  if (stored.length && (storedSelf?.url !== self.url || storedSelf.name !== self.name)) addMember(self);
+  // Another laptop announces a new address or name: store it, so it also holds when announcements stop.
+  const names = heardNames();
   for (const member of stored) {
-    const announced = currentUrl(member.hostId, member.url);
-    if (member.hostId !== self.hostId && announced !== member.url) addMember({ hostId: member.hostId, url: announced });
+    if (member.hostId === self.hostId) continue;
+    const url = currentUrl(member.hostId, member.url);
+    const name = names.get(member.hostId) ?? member.name;
+    if (url !== member.url || name !== member.name) addMember({ hostId: member.hostId, url, name });
   }
 
   const group = new Set(members().map((member) => member.hostId));
@@ -637,7 +658,7 @@ async function maintain(): Promise<void> {
     if (!isLeader() || !otherGroupWins(status)) continue;
     try {
       await joinGroup(url);
-      lastError = `Deze laptop werkte even apart en volgt nu weer de groep van ${url}. Wat ze apart bewaarde, staat in een backup.`;
+      lastError = `Deze laptop werkte even apart en volgt nu weer de groep van ${status.hostName ?? url}. Wat ze apart bewaarde, staat in een backup.`;
     } catch (error) {
       lastError = error instanceof Error ? error.message : String(error);
     }
@@ -669,6 +690,7 @@ export function startClusterService(): void {
     const identity = hostIdentity();
     return {
       hostId: identity.hostId,
+      name: LAPTOP_NAME,
       clusterId: identity.clusterId,
       appVersion: APP_VERSION,
       schemaVersion: DATABASE_SCHEMA_VERSION,

@@ -126,6 +126,11 @@ export const SCHEMA_SQL = `
       added_at INTEGER NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS cluster_member_names (
+      host_id TEXT PRIMARY KEY,
+      name TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS forwarded_writes (
       request_id TEXT PRIMARY KEY,
       result_json TEXT NOT NULL,

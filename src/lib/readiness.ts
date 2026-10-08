@@ -77,6 +77,7 @@ export function buildEventReadiness(cluster: ClusterStatus | null, now = Date.no
 function groupCheck(cluster: ClusterStatus): ReadinessCheck {
   const total = cluster.members.length;
   const reachable = cluster.members.filter((member) => member.reachable).length;
+  const offline = cluster.members.filter((member) => !member.reachable).map((member) => member.name);
   const check = (level: ReadinessLevel, detail: string): ReadinessCheck => ({
     id: 'replica',
     label: 'Gekoppelde laptops',
@@ -100,7 +101,7 @@ function groupCheck(cluster: ClusterStatus): ReadinessCheck {
       return check(
         'warning',
         reachable < total
-          ? `${reachable} van de ${total} laptops zijn bereikbaar. Alles werkt nog; zet de andere laptop weer aan.`
+          ? `${reachable} van de ${total} laptops zijn bereikbaar. Alles werkt nog; zet ${offline.every(Boolean) ? offline.join(' en ') : 'de andere laptop'} weer aan.`
           : 'Een laptop haalt de laatste wijzigingen op.'
       );
     case 'healthy':

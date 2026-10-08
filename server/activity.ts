@@ -189,17 +189,19 @@ const SCREEN_NAMES: Array<[RegExp, string]> = [
 ];
 
 /**
- * Where a change was made: the screen, and the laptop itself or the address of the
- * browser that sent it. Written from this laptop's point of view, because the entry
+ * Where a change was made: the screen, and the laptop itself (its name and address) or
+ * the address of the browser that sent it. Written from this laptop's point of view, because the entry
  * is read on every laptop.
  */
 export function describeOrigin(
   screenPath: string | undefined,
   remoteAddress: string | undefined,
-  selfAddress: string
+  selfAddress: string,
+  selfName: string | null = null
 ): string {
   const screen = SCREEN_NAMES.find(([pattern]) => pattern.test(screenPath ?? ''))?.[1] ?? 'Ander scherm';
   const address = (remoteAddress ?? '').replace(/^::ffff:/, '');
   const local = !address || address === '::1' || address.startsWith('127.');
-  return `${screen} · ${local ? `laptop ${selfAddress}` : `browser ${address}`}`;
+  const self = selfName ? `${selfName} (${selfAddress})` : selfAddress;
+  return `${screen} · ${local ? `laptop ${self}` : `browser ${address}`}`;
 }

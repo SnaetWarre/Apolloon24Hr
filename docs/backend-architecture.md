@@ -118,8 +118,8 @@ runner_labels           race_state
 laps                    handoff_history
 race_events             temporary_teams
 temporary_team_members  settings
-cluster_members         forwarded_writes
-replication_log
+cluster_members         cluster_member_names
+forwarded_writes        replication_log
 ```
 
 ### `server/raft.ts` and `server/consensus.ts`
@@ -186,10 +186,11 @@ and real timers; the simulation tests pass fakes.
 - `server/clock.ts`: the group clock, the leader's time as every laptop
   estimates it; data timestamps and timing use it.
 - `server/peers.ts`: requests between laptops and their addresses.
-- `server/discovery.ts`: every laptop broadcasts who it is (host, group,
-  address, version, leader, group size, runner count) every two seconds on UDP
-  45737. Group members use the announced addresses when theirs changed (the
-  leader stores them); a laptop on its own lists other groups to join. An
+- `server/discovery.ts`: every laptop broadcasts who it is (host, computer
+  name, group, address, version, leader, group size, runner count) every two
+  seconds on UDP 45737. Group members use the announced addresses and names
+  when theirs changed (the leader stores them); a laptop on its own lists other
+  groups to join. An
   announcement never joins or changes anything by itself.
 - Koppelen (`linkWith` in `server/cluster.ts`) links two groups the same way
   whichever side it is pressed on: the group with fewer runners takes the

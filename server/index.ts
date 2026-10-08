@@ -22,7 +22,7 @@ import {
 } from './db.js';
 import { RELEASE_ID } from './env.js';
 import { registerExportRoutes } from './exports.js';
-import { hostInfo, SERVER_PORT } from './host.js';
+import { hostInfo, LAPTOP_NAME, SERVER_PORT } from './host.js';
 import { sendJson } from './http-json.js';
 import { getNetProfile, isLoopbackAddress, requestMakeStatic, requestRevertDhcp } from './net-setup.js';
 import { PEER_SOCKET_PATH } from './peer-socket.js';
@@ -89,7 +89,12 @@ app.use(
         reportLogSeq: (seq: number) => res.setHeader('x-apolloon-log-seq', String(seq)),
         origin: forwarded
           ? forwardedOrigin(req.header('x-apolloon-origin'))
-          : describeOrigin(req.header('x-apolloon-screen'), req.socket.remoteAddress, hostInfo().hostIpHint),
+          : describeOrigin(
+              req.header('x-apolloon-screen'),
+              req.socket.remoteAddress,
+              hostInfo().hostIpHint,
+              LAPTOP_NAME
+            ),
       };
     },
   })

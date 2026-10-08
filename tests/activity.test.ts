@@ -9,6 +9,10 @@ test('the activity log names the screen, and the laptop itself or the browser th
   const { describeOrigin } = await import('../server/activity.ts');
   assert.equal(describeOrigin('/timing', '127.0.0.1', '192.168.1.10'), 'Timing · laptop 192.168.1.10');
   assert.equal(describeOrigin('/admin', '::1', '192.168.1.10'), 'Beheer · laptop 192.168.1.10');
+  assert.equal(
+    describeOrigin('/timing', '127.0.0.1', '192.168.1.10', 'LAPTOP-TIJD'),
+    'Timing · laptop LAPTOP-TIJD (192.168.1.10)'
+  );
   assert.equal(describeOrigin('/queue', '::ffff:192.168.1.40', '192.168.1.10'), 'Wachtrij · browser 192.168.1.40');
   assert.equal(describeOrigin(undefined, '192.168.1.41', '192.168.1.10'), 'Ander scherm · browser 192.168.1.41');
 });

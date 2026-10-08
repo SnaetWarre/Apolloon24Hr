@@ -9,7 +9,7 @@ import { AboutPanel } from './AboutPanel';
 import { AdminNoticeBanner, useAdminAction } from './AdminNotice';
 import { RestorePanel } from './RestorePanel';
 import { formatFileSize, formatRelativeAge } from './adminFormat';
-import { countLabel, shortUrl, useJoinGroup } from './useJoinGroup';
+import { countLabel, laptopLabel, shortUrl, useJoinGroup } from './useJoinGroup';
 
 export function SystemSection({
   cluster,
@@ -106,9 +106,10 @@ function ClusterPanel({
         cluster.members.map((member) => (
           <div className="host-hint cluster-peer-row" key={member.hostId}>
             <strong>
-              {shortUrl(member.url)}
+              {laptopLabel(member)}
               {member.self && ' (deze laptop)'}
             </strong>
+            {member.name && <small className="cluster-peer-row__address">{shortUrl(member.url)}</small>}
             <span>
               {!member.reachable
                 ? 'niet bereikbaar'
@@ -154,7 +155,14 @@ function ClusterPanel({
           <details className="host-hint cluster-manual-join">
             <summary className="disclosure">Laptop niet in de lijst? Vul het adres in</summary>
             <p className="panel-copy">
-              Het adres staat onderaan de zijbalk van die laptop. Deze laptop heeft adres <strong>{hostUrl}</strong>.
+              Het adres staat onderaan de zijbalk van die laptop. Deze laptop
+              {cluster.hostName && (
+                <>
+                  {' '}
+                  heet <strong>{cluster.hostName}</strong> en
+                </>
+              )}{' '}
+              heeft adres <strong>{hostUrl}</strong>.
             </p>
             <div className="form-row">
               <input
@@ -217,9 +225,10 @@ function NearbyRow({
 }) {
   return (
     <div className="host-hint cluster-peer-row">
-      <strong>{shortUrl(found.url)}</strong>
+      <strong>{laptopLabel(found)}</strong>
       <span>
         {countLabel(found.laptops, 'laptop', 'laptops')} · {countLabel(found.runners, 'loper', 'lopers')}
+        {found.name && <small className="cluster-peer-row__address"> · {shortUrl(found.url)}</small>}
       </span>
       {!found.compatible ? (
         <span>andere versie ({found.appVersion}): installeer overal dezelfde versie</span>

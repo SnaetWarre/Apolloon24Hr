@@ -10,6 +10,7 @@ const now = Date.UTC(2026, 9, 5, 18, 0, 0);
 const cluster: ClusterStatus = {
   enabled: true,
   hostId: 'host-a',
+  hostName: 'LAPTOP-TIJD',
   clusterId: 'cluster',
   appVersion: '4.2.0',
   schemaVersion: 13,
@@ -18,8 +19,24 @@ const cluster: ClusterStatus = {
   state: 'healthy',
   leader: { hostId: 'host-a', url: 'http://10.0.0.1:5173' },
   members: [
-    { hostId: 'host-a', url: 'http://10.0.0.1:5173', self: true, leader: true, reachable: true, caughtUp: true },
-    { hostId: 'host-b', url: 'http://10.0.0.2:5173', self: false, leader: false, reachable: false, caughtUp: false },
+    {
+      hostId: 'host-a',
+      url: 'http://10.0.0.1:5173',
+      name: 'LAPTOP-TIJD',
+      self: true,
+      leader: true,
+      reachable: true,
+      caughtUp: true,
+    },
+    {
+      hostId: 'host-b',
+      url: 'http://10.0.0.2:5173',
+      name: null,
+      self: false,
+      leader: false,
+      reachable: false,
+      caughtUp: false,
+    },
   ],
   majority: 2,
   writable: true,
@@ -29,7 +46,15 @@ const cluster: ClusterStatus = {
   runners: 40,
   memberUrls: ['http://10.0.0.2:5173'],
   nearby: [
-    { url: 'http://10.0.0.9:5173', laptops: 1, runners: 0, appVersion: '4.1.0', compatible: false, link: 'invite' },
+    {
+      url: 'http://10.0.0.9:5173',
+      name: 'LAPTOP-NIEUW',
+      laptops: 1,
+      runners: 0,
+      appVersion: '4.1.0',
+      compatible: false,
+      link: 'invite',
+    },
   ],
   lastError: 'Laptop 10.0.0.2 antwoordt niet',
   backup: {
@@ -73,8 +98,9 @@ test('the copied diagnosis names the version, every laptop, the backup and the l
   assert.match(text, /Versie: 4\.2\.0 · schema 13/);
   assert.match(text, /desktop-app \(Electron 44\.5\.1/);
   assert.match(text, /Gegevensmap: C:\\Users/);
-  assert.match(text, /http:\/\/10\.0\.0\.2:5173 \(niet bereikbaar\)/);
-  assert.match(text, /gevonden: http:\/\/10\.0\.0\.9:5173 \(versie 4\.1\.0, niet compatibel\)/);
+  assert.match(text, /LAPTOP-TIJD http:\/\/10\.0\.0\.1:5173 \(deze laptop/);
+  assert.match(text, / {2}http:\/\/10\.0\.0\.2:5173 \(niet bereikbaar\)/);
+  assert.match(text, /gevonden: LAPTOP-NIEUW http:\/\/10\.0\.0\.9:5173 \(versie 4\.1\.0, niet compatibel\)/);
   assert.match(text, /Laatste fout: Laptop 10\.0\.0\.2 antwoordt niet/);
   assert.match(text, /vrij 512 MB/);
   assert.match(text, /--- laatste regels van server\.log ---\nServer listening/);

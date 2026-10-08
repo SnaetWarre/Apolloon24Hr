@@ -40,6 +40,7 @@ import {
 } from './cluster.js';
 import { clusterStatusUpdates } from './cluster-feed.js';
 import { currentTerm, waitForCommit } from './consensus.js';
+import { LAPTOP_NAME } from './host.js';
 import { selfUrl } from './peers.js';
 import {
   createBurgieGepaktEvent,
@@ -278,7 +279,7 @@ const applyRestore = write(
     const term = currentTerm();
     const safety = await createVerifiedBackup('pre-restore');
     return {
-      value: { safetyBackup: safety.fileName, safetyHostUrl: selfUrl() },
+      value: { safetyBackup: safety.fileName, safetyHostUrl: selfUrl(), safetyHostName: LAPTOP_NAME },
       isCurrent: () => currentTerm() === term && getLogHead().id === head.id,
     };
   }

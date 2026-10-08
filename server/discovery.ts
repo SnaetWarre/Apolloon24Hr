@@ -1,7 +1,7 @@
 import dgram from 'node:dgram';
 import { z } from 'zod';
 import { isClusterEnabled, readPositiveInt } from './env.js';
-import { DISCOVERY_PORT, PUBLIC_APP_PORT, lanNetworks } from './host.js';
+import { DISCOVERY_PORT, PUBLIC_APP_PORT, lanNetworks, laptopName } from './host.js';
 import { isIsolated, normalizeUrl, selfUrl } from './peers.js';
 
 /*
@@ -22,6 +22,8 @@ const BROADCAST_ALL = '255.255.255.255';
 const beaconSchema = z.object({
   app: z.literal('apolloon'),
   hostId: z.string().min(1).max(128),
+  /** The computer name; older versions do not send it. */
+  name: z.string().max(256).nullish().transform(laptopName),
   clusterId: z.string().min(1).max(128),
   url: z.string().min(1).max(2_048),
   appVersion: z.string().max(64),
