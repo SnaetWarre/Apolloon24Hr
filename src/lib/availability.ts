@@ -156,6 +156,14 @@ export function coveredHourSlots(hourLists: string[][]): HourSlot[] {
   );
 }
 
+/**
+ * The hour texts as typed, plus the one-hour slot of every event hour they cover,
+ * so a search for `13-14u` finds the form's `12-14u (woensdag)` like the hour filter does.
+ */
+export function searchableHourTexts(hourTexts: string[]): string[] {
+  return [...hourTexts, ...coveredHourSlots([hourTexts]).map((slot) => slot.label)];
+}
+
 /** Adds or removes the one-hour block, keeping the list in event order. */
 export function toggleHourBlock(hourTexts: string[], weekday: string, hour: number): string[] {
   return setHourBlock(hourTexts, weekday, hour, !hasHourBlock(hourTexts, weekday, hour));
