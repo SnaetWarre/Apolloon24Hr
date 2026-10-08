@@ -1,6 +1,7 @@
 import React from 'react';
 import { useAppActions, useAppData, useRaceHistory } from '../../app/index';
 import { reviewLaps, type LapFlag } from '../../lib/lapReview';
+import { runnerMatchesSearch } from '../../lib/runners';
 import { formatDurationMs } from '../../lib/time';
 import type { LapRecord, LiveAppSnapshot, Runner } from '../../types';
 import { useConfirm } from '../ConfirmDialog';
@@ -69,13 +70,10 @@ function LapsPanel() {
   };
 
   const review = reviewLaps(history.laps);
-  const needle = search.trim().toLowerCase();
   const matching = history.laps.filter(
     (lap) =>
       (!flaggedOnly || review.flags.has(lap.id)) &&
-      (!needle ||
-        lap.runnerName.toLowerCase().includes(needle) ||
-        (lap.runnerNumber ?? '').toLowerCase().includes(needle))
+      runnerMatchesSearch({ runnerNumber: lap.runnerNumber, name: lap.runnerName, labels: [] }, search)
   );
   const visible = matching.slice(0, shown);
 
@@ -206,15 +204,9 @@ function LapRunnerDialog({
 
   const title = kind === 'move' ? 'Ronde naar andere loper' : 'Ronde splitsen';
   const suggestions = nearbyRunnerIds(laps, lap);
-  const needle = query.trim().toLowerCase();
   const candidates = runners
     .filter((runner) => kind === 'split' || runner.id !== lap.runnerId)
-    .filter(
-      (runner) =>
-        !needle ||
-        runner.name.toLowerCase().includes(needle) ||
-        (runner.runnerNumber ?? '').toLowerCase().includes(needle)
-    )
+    .filter((runner) => runnerMatchesSearch(runner, query))
     .sort((a, b) => rank(suggestions, a.id) - rank(suggestions, b.id) || compareNumbers(a, b))
     .slice(0, PICKER_SIZE);
   const selected = runners.find((runner) => runner.id === selectedId) ?? null;
