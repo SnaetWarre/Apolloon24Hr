@@ -71,16 +71,20 @@ function findRunnerIdByNumberAndName(runnerNumber: string, name: string): string
  * the form import already gave to someone else. The number's runner is only
  * this row when it came from a plain list too or carries the same name; else
  * the row is the runner imported before under that name without the number.
+ * A runner an earlier row of the same file imported is only this row again
+ * with the same name: two people typed with one number are two runners.
  */
-function findPlainListRunnerId(runnerNumber: string, name: string): string | null {
+function findPlainListRunnerId(runnerNumber: string, name: string, earlierRows: ReadonlySet<string>): string | null {
   const numbered = one<{ id: string; name: string; registration_json: string | null }>(
     'SELECT id, name, registration_json FROM runners WHERE runner_number = ?',
     [runnerNumber]
   );
-  if (numbered && (!numbered.registration_json || numbered.name === name.trim())) return numbered.id;
+  if (numbered?.name === name.trim()) return numbered.id;
+  if (numbered && !numbered.registration_json && !earlierRows.has(numbered.id)) return numbered.id;
   return (
-    one<{ id: string }>('SELECT id FROM runners WHERE name = ? AND registration_json IS NULL LIMIT 1', [name.trim()])
-      ?.id ?? null
+    all<{ id: string }>('SELECT id FROM runners WHERE name = ? AND registration_json IS NULL', [name.trim()]).find(
+      (runner) => !earlierRows.has(runner.id)
+    )?.id ?? null
   );
 }
 
@@ -90,9 +94,13 @@ function findPlainListRunnerId(runnerNumber: string, name: string): string | nul
  * write that time differently, so last comes the same sheet row and name.
  * A plain runner list is known by its runner number, see `findPlainListRunnerId`.
  */
-function findImportedRunnerId(input: RunnerInput, runnerNumber: string | undefined): string | null {
+function findImportedRunnerId(
+  input: RunnerInput,
+  runnerNumber: string | undefined,
+  earlierRows: ReadonlySet<string>
+): string | null {
   const registration = input.registration;
-  if (!registration) return runnerNumber ? findPlainListRunnerId(runnerNumber, input.name) : null;
+  if (!registration) return runnerNumber ? findPlainListRunnerId(runnerNumber, input.name, earlierRows) : null;
   const email = usableEmail(registration.email);
   const submittedAt = registration.submittedAt.trim();
   return (
@@ -312,15 +320,19 @@ function storedRegistration(runnerId: string): RunnerRegistration | null {
  * the name, e-mail, phone, and hours; a newer answer from the runner
  * replaces those). A new runner whose number
  * is already taken is imported without one, so `numberTaken` asks the
- * operator to pick one.
+ * operator to pick one. `earlierRows` holds the runners earlier rows of the
+ * same file imported.
  */
-export function upsertRunnerFromImport(input: RunnerInput): {
+export function upsertRunnerFromImport(
+  input: RunnerInput,
+  earlierRows: ReadonlySet<string> = new Set()
+): {
   action: 'created' | 'updated';
   runner: Runner;
   numberTaken: boolean;
 } {
   const runnerNumber = input.runnerNumber?.trim();
-  const existingId = findImportedRunnerId(input, runnerNumber);
+  const existingId = findImportedRunnerId(input, runnerNumber, earlierRows);
   if (existingId) {
     const { status: _status, statusSince: _statusSince, ...rowFields } = input;
     const profileFields: RunnerPatch = rowFields;

@@ -499,3 +499,56 @@ test('a separate plain list never renames form runners that hold its numbers', a
     fs.rmSync(dataPath, { recursive: true, force: true });
   }
 });
+
+test('two rows of one plain list with the same number both import', async () => {
+  fs.rmSync(dataPath, { recursive: true, force: true });
+  const db = await import('../server/db.ts');
+  const { appRouter } = await import('../server/router.ts');
+  try {
+    await db.initDb();
+    const caller = appRouter.createCaller({});
+    const csvText = [
+      'runner_number,name,labels',
+      '204,Anna Peeters,HILOK',
+      '205,Bram Claes,Kinesia',
+      '205,Chloé Martens,Mesacosa',
+      '206,Dries Wouters,HILOK',
+      '206,Dries Wouters,HILOK',
+    ].join('\n');
+    const byName = () => new Map(db.getAllRunners().map((runner) => [runner.name, runner]));
+
+    const first = await caller.runners.importCsv({ csvText });
+    assert.deepEqual(first, {
+      created: 4,
+      updated: 1,
+      skipped: 0,
+      errors: ['Rij 4: nummer 205 staat ook op rij 3, Chloé Martens kreeg geen nummer'],
+    });
+    const runners = byName();
+    assert.equal(runners.size, 4);
+    assert.equal(runners.get('Bram Claes')?.runnerNumber, '205');
+    assert.deepEqual(
+      runners.get('Bram Claes')?.labels.map((label) => label.name),
+      ['Kinesia']
+    );
+    assert.equal(runners.get('Chloé Martens')?.runnerNumber, null);
+    assert.deepEqual(
+      runners.get('Chloé Martens')?.labels.map((label) => label.name),
+      ['Mesacosa']
+    );
+    assert.equal(runners.get('Dries Wouters')?.runnerNumber, '206');
+
+    const repeat = await caller.runners.importCsv({ csvText });
+    assert.deepEqual(repeat, {
+      created: 0,
+      updated: 5,
+      skipped: 0,
+      errors: ['Rij 4: nummer 205 staat ook op rij 3, Chloé Martens kreeg geen nummer'],
+    });
+    assert.equal(db.getAllRunners().length, 4);
+    assert.equal(byName().get('Bram Claes')?.runnerNumber, '205');
+  } finally {
+    db.closeDb();
+    fs.rmSync(dataPath, { recursive: true, force: true });
+  }
+});
