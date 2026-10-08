@@ -5,7 +5,7 @@ import { one, run, runUncaptured } from './connection.js';
 const DEFAULT_PUBLIC_RECORD_MODE: PublicRecordMode = 'day';
 
 /** Settings that are part of the event data and travel to the other laptops. Everything else is host-local. */
-export const REPLICATED_SETTING_KEYS: readonly string[] = ['public_record_mode'];
+export const REPLICATED_SETTING_KEYS: readonly string[] = ['public_record_mode', 'cluster_auto_links_json'];
 
 export function getSetting(key: string): string | null {
   return one<{ value: string }>('SELECT value FROM settings WHERE key = ?', [key])?.value ?? null;

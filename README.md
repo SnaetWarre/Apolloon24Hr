@@ -22,13 +22,15 @@ Normal event setup:
 ```text
 1. Plug the three Electron laptops into the same wired switch.
 2. Start Apolloon on the first laptop and import the registrations there.
-3. On the second and third laptop, open Beheer › Systeem & herstel.
-   The first laptop is listed by itself, under its computer name; click "Koppelen" next to it.
+3. Start Apolloon on the second and third laptop. While they hold no runners,
+   they link with the first laptop by themselves within a few seconds.
 4. Check Beheer › Voorbereiding: all three laptops must be reachable.
 5. Open any laptop's Event URL on the TVs and other screens.
 ```
 
-Koppelen works from either laptop: the side with fewer runners always takes the other's data, so pressing it on the laptop with the registrations brings an empty laptop over instead of emptying the registrations. The laptop that takes the data keeps a backup of its old database first.
+A laptop whose group holds no runners links by itself with the other laptops it finds on the network: with the group that holds runners, or with another empty laptop (then the registrations can be imported on any of them). A laptop or group that holds runners never links by itself. An empty laptop that finds two groups with runners does not guess; it says so and waits for someone to press Koppelen. Beheer › Systeem & herstel and the overview show "Automatisch gekoppeld met LAPTOP-TIJD, 3 minuten geleden" on the laptop that linked by itself, and "LAPTOP-X is automatisch bijgekomen" on the others.
+
+Koppelen still works by hand: open Beheer › Systeem & herstel, where the other laptops are listed under their computer names. It works from either laptop: the side with fewer runners always takes the other's data, so pressing it on the laptop with the registrations brings an empty laptop over instead of emptying the registrations. The laptop that takes the data keeps a backup of its old database first.
 
 When a laptop dies or loses its cable, the other two notice within a second or two, choose a new leader if needed, and carry on. A timing key press during those seconds waits and then counts with the time of the press. The laptop catches up by itself when it returns. Browsers remember the laptops and reopen the same page on another one when theirs disappears; the Electron app always stays on its own laptop.
 
@@ -43,6 +45,7 @@ CLUSTER_ENABLED=true             # enable linking laptops in development
 CLUSTER_DISCOVERY=false          # do not announce or listen on UDP 45737
 CLUSTER_SELF_URL=http://host:port  # address announced to other laptops (tests)
 CLUSTER_LAPTOP_NAME=LAPTOP-TIJD   # name shown to other laptops instead of the computer name (tests)
+CLUSTER_AUTO_LINK=false          # empty laptops wait for Koppelen instead of linking by themselves
 ```
 
 Beheer › Voorbereiding has a wedstrijdgereedheid checklist for backup freshness, free disk space, and the linked laptops.
@@ -59,7 +62,7 @@ Every host creates a verified SQLite backup every five minutes and keeps the lat
 
 The desktop app shows a small window as soon as it is opened, while the local server opens the database. If it cannot start, it says why in Dutch (port already in use, disk full, damaged database, …) and offers **Opnieuw proberen** and **Logmap openen**.
 
-A laptop without runners opens on a welcome screen with the two ways to begin: import the registrations on this laptop, or link to a laptop the app found on the network. It goes away by itself once the laptop has runners.
+A laptop without runners opens on a welcome screen with the two ways to begin: import the registrations on this laptop, or link to a laptop the app found on the network. Linking happens by itself; the screen says with which laptop, or why it waits. It goes away by itself once the laptop has runners.
 
 ### Desktop app on race day
 

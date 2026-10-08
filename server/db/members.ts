@@ -1,4 +1,6 @@
+import { z } from 'zod';
 import { all, run } from './connection.js';
+import { getSetting } from './settings.js';
 import { clusterNow } from '../clock.js';
 
 /**
@@ -39,4 +41,29 @@ export function removeClusterMember(hostId: string): void {
 export function keepOnlyClusterMember(hostId: string): void {
   run('DELETE FROM cluster_members WHERE host_id <> ?', [hostId]);
   run('DELETE FROM cluster_member_names WHERE host_id <> ?', [hostId]);
+}
+
+/** A laptop that linked with the group by itself, and the laptop it linked with. */
+export type AutoLink = { hostId: string; with: string; at: number };
+
+const AUTO_LINKS_KEPT = 16;
+const autoLinksSchema = z.array(z.object({ hostId: z.string(), with: z.string(), at: z.number() }));
+
+/** The laptops that linked by themselves, newest first; a replicated setting, so every laptop of the group can say so. */
+export function getAutoLinks(): AutoLink[] {
+  try {
+    const parsed = autoLinksSchema.safeParse(JSON.parse(getSetting('cluster_auto_links_json') || '[]'));
+    return parsed.success ? parsed.data : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Records that `hostId` linked by itself with the laptop named `with`; part of the write that adds it. */
+export function saveAutoLink(hostId: string, linkedWith: string): void {
+  const links = [
+    { hostId, with: linkedWith, at: clusterNow() },
+    ...getAutoLinks().filter((link) => link.hostId !== hostId),
+  ].slice(0, AUTO_LINKS_KEPT);
+  run('INSERT OR REPLACE INTO settings(key, value) VALUES(?, ?)', ['cluster_auto_links_json', JSON.stringify(links)]);
 }

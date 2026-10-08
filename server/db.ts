@@ -76,6 +76,9 @@ export {
   saveClusterMember,
   removeClusterMember,
   keepOnlyClusterMember,
+  getAutoLinks,
+  saveAutoLink,
+  type AutoLink,
   type ClusterMember,
 } from './db/members.js';
 export { findForwardedWrite, saveForwardedWrite, touchForwardedWrite } from './db/forwarded-writes.js';

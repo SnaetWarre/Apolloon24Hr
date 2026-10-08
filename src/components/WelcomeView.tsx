@@ -3,6 +3,7 @@ import { useCopyText } from '../lib/clipboard';
 import type { ClusterStatus, LiveAppSnapshot } from '../types';
 import { AdminNoticeBanner } from './admin/AdminNotice';
 import { countLabel, laptopLabel, shortUrl, useJoinGroup } from './admin/useJoinGroup';
+import { describeAutoLinks } from '../lib/systemStatus';
 import { Icon } from './Icon';
 import { PageHeader } from './PageHeader';
 
@@ -25,6 +26,7 @@ export function WelcomeView({
   const { cluster } = useClusterStatus();
   const [copied, copyHostUrl] = useCopyText(host?.url ?? null);
   const linking = cluster?.enabled ?? false;
+  const autoLink = cluster?.autoLink.enabled ?? false;
 
   return (
     <>
@@ -43,7 +45,7 @@ export function WelcomeView({
             <h3>Dit is de eerste laptop</h3>
             <p>
               Importeer hier de inschrijvingen: het Excel-bestand of de CSV-export van het inschrijvingsformulier. De
-              andere laptops koppel je daarna aan deze.
+              andere laptops {autoLink ? 'koppelen daarna vanzelf met deze.' : 'koppel je daarna aan deze.'}
             </p>
             <div className="welcome-choice__actions">
               <button type="button" className="btn btn--primary" onClick={() => onOpenAdmin('preparation')}>
@@ -60,8 +62,11 @@ export function WelcomeView({
               </span>
               <h3>Een andere laptop is al ingesteld</h3>
               <p>
-                Koppel deze laptop aan die groep. Ze neemt alle gegevens over en werkt mee; valt er later een laptop
-                uit, dan werken de andere gewoon verder.
+                {autoLink
+                  ? 'Deze laptop koppelt vanzelf met die groep zodra ze die vindt.'
+                  : 'Koppel deze laptop aan die groep.'}{' '}
+                Ze neemt alle gegevens over en werkt mee; valt er later een laptop uit, dan werken de andere gewoon
+                verder.
               </p>
               <JoinChoice cluster={cluster} onOpenAdmin={onOpenAdmin} />
             </section>
@@ -73,8 +78,14 @@ export function WelcomeView({
           <ol>
             {linking && (
               <li>
-                Start Apolloon op de andere laptops, aan dezelfde switch, en kies daar{' '}
-                <strong>Een andere laptop is al ingesteld</strong>.
+                {autoLink ? (
+                  'Start Apolloon op de andere laptops, aan dezelfde switch. Ze koppelen vanzelf met deze laptop.'
+                ) : (
+                  <>
+                    Start Apolloon op de andere laptops, aan dezelfde switch, en kies daar{' '}
+                    <strong>Een andere laptop is al ingesteld</strong>.
+                  </>
+                )}
                 {cluster?.hostName && (
                   <>
                     {' '}
@@ -115,17 +126,19 @@ function JoinChoice({ cluster, onOpenAdmin }: { cluster: ClusterStatus; onOpenAd
   const setUp = cluster.nearby.filter((found) => found.runners > 0);
 
   if (cluster.members.length > 1) {
+    const autoLinked = describeAutoLinks(cluster).find((link) => link.hostId === cluster.hostId);
     return (
       <div className="success-banner" role="status">
-        Gekoppeld met {countLabel(cluster.members.length - 1, 'andere laptop', 'andere laptops')}. Importeer de
-        inschrijvingen op één van de laptops; ze verschijnen dan overal.
+        {autoLinked ? `${autoLinked.text}.` : 'Gekoppeld.'} Deze laptop werkt samen met{' '}
+        {countLabel(cluster.members.length - 1, 'andere laptop', 'andere laptops')}. Importeer de inschrijvingen op één
+        van de laptops; ze verschijnen dan overal.
       </div>
     );
   }
 
   return (
     <>
-      {setUp.length ? (
+      {setUp.length > 0 && (
         <ul className="welcome-nearby">
           {setUp.map((found) => (
             <li className="host-hint cluster-peer-row" key={found.url}>
@@ -153,7 +166,13 @@ function JoinChoice({ cluster, onOpenAdmin }: { cluster: ClusterStatus; onOpenAd
             </li>
           ))}
         </ul>
-      ) : (
+      )}
+      {cluster.autoLink.waiting && (
+        <div className="host-hint cluster-auto-link" role="status">
+          {cluster.autoLink.waiting}
+        </div>
+      )}
+      {setUp.length === 0 && (
         <div className="welcome-searching" role="status">
           <span className="welcome-searching__dot" aria-hidden="true" />
           <span>

@@ -190,8 +190,7 @@ and real timers; the simulation tests pass fakes.
   name, group, address, version, leader, group size, runner count) every two
   seconds on UDP 45737. Group members use the announced addresses and names
   when theirs changed (the leader stores them); a laptop on its own lists other
-  groups to join. An
-  announcement never joins or changes anything by itself.
+  groups to join. An announcement changes nothing by itself.
 - Koppelen (`linkWith` in `server/cluster.ts`) links two groups the same way
   whichever side it is pressed on: the group with fewer runners takes the
   other's data (then the smaller group, then the group id). An empty laptop is
@@ -199,6 +198,19 @@ and real timers; the simulation tests pass fakes.
   runners, the one that keeps its data refuses and names the other laptop.
   `joinGroup` refuses the wrong way too, except when a laptop rejoins its own
   group.
+- Linking by itself (`autoLink` in `server/cluster.ts`, from `maintain` every
+  five seconds): the leader of a group that holds no runners joins the group
+  `autoLinkPlan` picks from the announcements, and the rest of its group
+  follows through `/api/cluster/invite`. A group with runners comes first;
+  between empty groups `linkDirection` picks the same one on both sides, so
+  only one moves. It never runs while this laptop is joining or has no
+  majority, nor towards a laptop that is joining, has no leader, or runs
+  another version. Two groups with runners are left to a press, and
+  `clusterStatus().autoLink.waiting` says why. The join itself checks again,
+  as it starts, that this laptop holds no runners. The leader records each
+  such join in the replicated setting `cluster_auto_links_json`, so every
+  laptop of the group can name the laptops that came over by themselves.
+  `CLUSTER_AUTO_LINK=false` turns it off.
 - `server/static-files.ts`: packaged frontend, never outside the build root.
 - `shared/schemas.ts`: client/server contracts.
 

@@ -3,7 +3,7 @@ import { LiveDot } from './LiveDot';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { useAppData, useClusterStatus, useRaceHistory } from '../app/index';
 import { getNextWaitingRunner } from '../lib/runners';
-import { deriveSystemStatus } from '../lib/systemStatus';
+import { describeAutoLinks, deriveSystemStatus } from '../lib/systemStatus';
 import { useCopyText } from '../lib/clipboard';
 import { useArrivals } from '../lib/motion';
 import { shouldShowWelcome, useWelcomeSkipped } from '../lib/welcome';
@@ -27,6 +27,7 @@ export function RolePicker() {
   const { laps: recentLaps, loading: lapsLoading } = useRaceHistory({ scope: 'recent', limit: 8 });
   const { cluster, error: clusterError } = useClusterStatus();
   const systemStatus = deriveSystemStatus(cluster, clusterError);
+  const autoLinked = cluster ? describeAutoLinks(cluster)[0] : undefined;
   const [copied, copyHostUrl] = useCopyText(host?.url ?? null);
 
   const activeRunner = runners.find((runner) => runner.id === race.activeRunnerId) || null;
@@ -280,6 +281,12 @@ export function RolePicker() {
                 <dt>Lopers in de databank</dt>
                 <dd>{runners.length}</dd>
               </div>
+              {autoLinked && (
+                <div>
+                  <dt>Laptops</dt>
+                  <dd>{autoLinked.text}</dd>
+                </div>
+              )}
             </dl>
           </section>
         </div>

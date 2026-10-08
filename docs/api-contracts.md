@@ -52,7 +52,7 @@ Machine-to-machine endpoints between Electron laptops, refused with HTTP 426 whe
   - `vote`: a (pre-)vote request during an election.
   A request without an answer within `CLUSTER_REQUEST_TIMEOUT_MS` counts as unreachable; if nothing at all came back on the socket meanwhile, it is dropped and the next request opens a new one.
 - `GET /api/cluster/snapshot`: a full database image for a joining or diverged laptop.
-- `POST /api/cluster/members`: a laptop asks the leader to join the group, with its host id, address, and computer name (`name`, optional).
-- `POST /api/cluster/invite`: Koppelen pressed on a laptop with more runners asks an empty laptop to join its group; the empty laptop joins, then asks the other laptops of its old group to follow. A laptop with runners refuses.
-- UDP 45737 (`server/discovery.ts`): a JSON announcement broadcast every two seconds, used to find laptops; it never changes data.
+- `POST /api/cluster/members`: a laptop asks the leader to join the group, with its host id, address, and computer name (`name`, optional). A laptop that links by itself also sends `autoLinkedWith`, the name of the laptop it linked with; the leader records it.
+- `POST /api/cluster/invite`: Koppelen pressed on a laptop with more runners asks an empty laptop to join its group; the empty laptop joins, then asks the other laptops of its old group to follow. A laptop with runners refuses. An empty group that links by itself sends the same request to its own other laptops, with `autoLinkedWith`.
+- UDP 45737 (`server/discovery.ts`): a JSON announcement broadcast every two seconds, used to find laptops; it changes nothing by itself, but a group without runners links by itself with the laptops it announces (`autoLink`).
 - Forwarded writes are ordinary tRPC calls with `x-apolloon-forwarded: 1` and `x-apolloon-request-id`; the leader answers with `x-apolloon-log-seq`, the entry to wait for.

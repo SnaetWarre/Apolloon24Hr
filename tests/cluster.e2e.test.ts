@@ -690,6 +690,118 @@ test('laptops with different app versions refuse to couple', { timeout: 20_000 }
   }
 });
 
+test(
+  'empty laptops link by themselves, once, and then take the data of a laptop that holds runners',
+  { timeout: 60_000 },
+  async () => {
+    const root = testRoot('auto-link');
+    const servers: RunningServer[] = [];
+    try {
+      // Two empty laptops started at the same moment: one of them joins the other, not both.
+      const ports = [await freePort(), await freePort()];
+      servers.push(
+        ...(await Promise.all(
+          ['A', 'B'].map((name, index) =>
+            startServer({
+              port: ports[index],
+              dataPath: path.join(root, name),
+              name: `LAPTOP-${name}`,
+              autoLink: true,
+            })
+          )
+        ))
+      );
+      const [a, b] = servers;
+      const oneGroup = async (group: RunningServer[], size: number) => {
+        const statuses = await Promise.all(group.map(fetchStatus));
+        return statuses.every(
+          (status) => status.clusterId === statuses[0].clusterId && status.members.length === size && status.writable
+        );
+      };
+      await waitFor(() => oneGroup([a, b], 2), 20_000, 200);
+      assert.equal((await fetchStatus(a)).autoLink.linked.length, 1);
+
+      // A laptop with runners shows up later. It never links by itself; the empty pair takes its data.
+      const seeded = await startServer({
+        port: await freePort(),
+        dataPath: path.join(root, 'seeded'),
+        name: 'LAPTOP-TIJD',
+      });
+      servers.push(seeded);
+      await client(seeded).runners.create.mutate({ name: 'Ingeschreven', runnerNumber: 'T-1' });
+      await waitFor(() => oneGroup([seeded, a, b], 3), 30_000, 200);
+      assert.equal((await fetchStatus(a)).clusterId, (await fetchStatus(seeded)).clusterId);
+      await waitForSameState(seeded, a);
+      await waitForSameState(seeded, b);
+      // Every laptop of the group can say which laptops came over by themselves, and to which laptop.
+      const linked = (await fetchStatus(seeded)).autoLink.linked;
+      assert.deepEqual(linked.map((link) => `${link.name} > ${link.with}`).sort(), [
+        'LAPTOP-A > LAPTOP-TIJD',
+        'LAPTOP-B > LAPTOP-TIJD',
+      ]);
+      assert.equal((await fetchStatus(b)).autoLink.linked.find((link) => link.self)?.with, 'LAPTOP-TIJD');
+    } catch (error) {
+      throw withServerOutput(error, ...servers);
+    } finally {
+      await Promise.all(servers.map(stopServer));
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
+);
+
+test(
+  'laptops with runners never link by themselves, and an empty laptop that hears two of them waits for a press',
+  { timeout: 60_000 },
+  async () => {
+    const root = testRoot('auto-link-runners');
+    const servers: RunningServer[] = [];
+    try {
+      // Each gets its runners before linking by itself is on, so it was never an empty laptop with it on.
+      for (const name of ['P', 'Q']) {
+        const options = { port: await freePort(), dataPath: path.join(root, name), name: `LAPTOP-${name}` };
+        const setup = await startServer(options);
+        servers.push(setup);
+        await client(setup).runners.create.mutate({ name: `Loper ${name}`, runnerNumber: `${name}-1` });
+        await stopServer(setup);
+        servers.splice(servers.indexOf(setup), 1, await startServer({ ...options, autoLink: true }));
+      }
+      const empty = await startServer({
+        port: await freePort(),
+        dataPath: path.join(root, 'empty'),
+        name: 'LAPTOP-LEEG',
+        autoLink: true,
+      });
+      servers.push(empty);
+      await waitFor(
+        async () =>
+          /LAPTOP-P en LAPTOP-Q hebben elk lopers|LAPTOP-Q en LAPTOP-P hebben elk lopers/.test(
+            (await fetchStatus(empty)).autoLink.waiting ?? ''
+          ),
+        15_000,
+        200
+      );
+      // Two rounds of the five-second check later, nobody moved.
+      await new Promise((resolve) => setTimeout(resolve, 11_000));
+      const statuses = await Promise.all(servers.map(fetchStatus));
+      assert.equal(new Set(statuses.map((status) => status.clusterId)).size, 3);
+      assert.deepEqual(
+        statuses.map((status) => status.members.length),
+        [1, 1, 1]
+      );
+      assert.deepEqual(
+        statuses.map((status) => status.runners),
+        [1, 1, 0]
+      );
+      assert.ok(statuses[2].autoLink.waiting);
+    } catch (error) {
+      throw withServerOutput(error, ...servers);
+    } finally {
+      await Promise.all(servers.map(stopServer));
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
+);
+
 /** The HTTP status another laptop gets when it opens the socket for appends and votes; 101 when accepted. */
 function peerSocketStatus(server: RunningServer, headers: Record<string, string>): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -764,6 +876,8 @@ async function startServer(options: {
   clusterEnabled?: boolean;
   appVersion?: string;
   name?: string;
+  /** Linking by itself; off in the other tests, which link with Koppelen. */
+  autoLink?: boolean;
 }): Promise<RunningServer> {
   fs.mkdirSync(options.dataPath, { recursive: true });
   const chunks: string[] = [];
@@ -787,6 +901,7 @@ async function startServer(options: {
       CLUSTER_DISCOVERY_PORT: String(discoveryPort),
       CLUSTER_DISCOVERY_INTERVAL_MS: '200',
       CLUSTER_LAPTOP_NAME: options.name ?? '',
+      CLUSTER_AUTO_LINK: String(options.autoLink === true),
       BACKUP_ENABLED: 'false',
       APOLLOON_RELEASE_ID: 'e2e-test-release',
       APOLLOON_APP_VERSION: options.appVersion || '1.0.0',

@@ -84,6 +84,18 @@ export function describeGroup(cluster: ClusterStatus): SystemStatus {
   }
 }
 
+/** Laptops of the group that linked by themselves, this laptop first, in words for Systeem and Overzicht. */
+export function describeAutoLinks(cluster: ClusterStatus, now = Date.now()): Array<{ hostId: string; text: string }> {
+  return [...cluster.autoLink.linked]
+    .sort((a, b) => Number(b.self) - Number(a.self))
+    .map((link) => ({
+      hostId: link.hostId,
+      text: link.self
+        ? `Automatisch gekoppeld met ${link.with}, ${formatAge(link.at, now)}`
+        : `${link.name} is automatisch bijgekomen, ${formatAge(link.at, now)}`,
+    }));
+}
+
 function formatAge(createdAt: number, now: number): string {
   const minutes = Math.max(0, Math.floor((now - createdAt) / 60_000));
   if (minutes < 1) return 'minder dan een minuut geleden';

@@ -3,7 +3,7 @@ import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
 import type { Express, NextFunction, Request, Response } from 'express';
 import { z } from 'zod';
-import type { ClusterMemberStatus, ClusterStatus, GroupState, NearbyGroup } from '../shared/schemas.js';
+import type { AutoLinkNote, ClusterMemberStatus, ClusterStatus, GroupState, NearbyGroup } from '../shared/schemas.js';
 import { backupStatus } from './backups.js';
 import { setClusterClockOffset } from './clock.js';
 import {
@@ -34,6 +34,7 @@ import {
 import {
   DATABASE_SCHEMA_VERSION,
   countRunners,
+  getAutoLinks,
   getClusterMembers,
   getLogHead,
   getSetting,
@@ -41,6 +42,7 @@ import {
   keepOnlyClusterMember,
   recordWrite,
   removeClusterMember,
+  saveAutoLink,
   saveClusterMember,
   serializeDatabase,
   setLocalSetting,
@@ -70,6 +72,8 @@ import {
  */
 
 const enabled = isClusterEnabled();
+/** A group without runners links with the others on the network by itself; `CLUSTER_AUTO_LINK=false` leaves it to Koppelen. */
+const autoLinkEnabled = enabled && process.env.CLUSTER_AUTO_LINK !== 'false';
 /** How long a write may take while the laptops choose a new leader. */
 const WRITE_DEADLINE_MS = readPositiveInt(process.env.CLUSTER_WRITE_DEADLINE_MS, 12_000);
 const MAINTENANCE_MS = 5_000;
@@ -100,6 +104,7 @@ export function clusterStatus(): ClusterStatus {
   const view = new Map(leaderGroupView().map((member) => [member.hostId, member]));
   const group = members();
   const names = heardNames();
+  const nearby = enabled ? nearbyGroups(new Set(group.map((member) => member.hostId))) : [];
   const memberStatuses: ClusterMemberStatus[] = group.map((member) => {
     const isSelf = member.hostId === identity.hostId;
     const isLeader = leader?.hostId === member.hostId;
@@ -133,7 +138,12 @@ export function clusterStatus(): ClusterStatus {
     logHead: getLogHead().seq,
     runners: countRunners(),
     memberUrls: [...new Set(memberStatuses.filter((member) => !member.self).map((member) => member.url))],
-    nearby: enabled ? nearbyGroups(new Set(group.map((member) => member.hostId))) : [],
+    nearby,
+    autoLink: {
+      enabled: autoLinkEnabled,
+      waiting: autoLinkPlan(nearby).waiting,
+      linked: autoLinkNotes(memberStatuses),
+    },
     lastError: lastError ?? lastResyncProblem(),
     backup: backupStatus(),
   };
@@ -198,9 +208,43 @@ function linkDirection(own: GroupData, other: GroupData): NearbyGroup['link'] {
   return other.runners === 0 ? 'invite' : 'there';
 }
 
+/**
+ * Which group this laptop links with by itself: none while its group holds
+ * runners. A group that holds runners comes first; between empty groups,
+ * linkDirection picks the same one on both sides, so only one of them moves.
+ * Two groups that hold runners are left to a person.
+ */
+function autoLinkPlan(nearby: NearbyGroup[]): { target: NearbyGroup | null; waiting: string | null } {
+  if (!autoLinkEnabled || countRunners() > 0) return { target: null, waiting: null };
+  const candidates = nearby.filter((group) => group.compatible && group.link === 'join');
+  const withRunners = candidates.filter((group) => group.runners > 0);
+  if (withRunners.length > 1) {
+    const names = withRunners.map((group) => group.name ?? shortUrl(group.url));
+    return {
+      target: null,
+      waiting: `Niet vanzelf gekoppeld: ${names.slice(0, -1).join(', ')} en ${names.at(-1)} hebben elk lopers. Druk zelf op Koppelen naast de juiste laptop.`,
+    };
+  }
+  return { target: withRunners[0] ?? candidates[0] ?? null, waiting: null };
+}
+
+/** The laptops of this group that linked by themselves, by name. */
+function autoLinkNotes(statuses: ClusterMemberStatus[]): AutoLinkNote[] {
+  const byId = new Map(statuses.map((member) => [member.hostId, member]));
+  return getAutoLinks().flatMap((link) => {
+    const member = byId.get(link.hostId);
+    return member ? [{ ...link, name: member.name ?? shortUrl(member.url), self: member.self }] : [];
+  });
+}
+
 function pressThereMessage(url: string, otherRunners: number): string {
-  const other = url.replace(/^https?:\/\//, '');
+  const other = shortUrl(url);
   return `Op deze laptop staan ${runnerLabel(countRunners())}, op ${other} ${runnerLabel(otherRunners)}. Druk op Koppelen op ${other}: die neemt dan de gegevens van deze laptop over.`;
+}
+
+/** A laptop's address without `http://`, as the screens show it. */
+function shortUrl(url: string): string {
+  return url.replace(/^https?:\/\//, '');
 }
 
 function runnerLabel(count: number): string {
@@ -363,6 +407,8 @@ export function registerClusterRoutes(app: Express): void {
         hostId: z.string().min(1).max(128),
         url: z.string().min(1).max(2_048),
         name: z.string().max(256).nullish(),
+        /** Set when the laptop links by itself: the laptop it linked with. */
+        autoLinkedWith: z.string().max(256).optional(),
       })
       .safeParse(req.body);
     const url = request.success ? normalizeUrl(request.data.url) : '';
@@ -374,19 +420,23 @@ export function registerClusterRoutes(app: Express): void {
       sendPeerError(res, 409, 'not_leader', 'Deze laptop is niet de hoofdlaptop.');
       return;
     }
-    addMember({ hostId: request.data.hostId, url, name: laptopName(request.data.name) });
+    addMember({ hostId: request.data.hostId, url, name: laptopName(request.data.name) }, request.data.autoLinkedWith);
     res.json({ ok: true, term: currentTerm() });
   });
 
   app.post('/api/cluster/invite', (req, res) => {
     const request = z
-      .object({ url: z.string().min(1).max(2_048), clusterId: z.string().min(1).max(128) })
+      .object({
+        url: z.string().min(1).max(2_048),
+        clusterId: z.string().min(1).max(128),
+        autoLinkedWith: z.string().max(256).optional(),
+      })
       .safeParse(req.body);
     if (!request.success) {
       sendPeerError(res, 400, 'invalid_request', 'Ongeldige koppelaanvraag.');
       return;
     }
-    acceptInvite(request.data.url, request.data.clusterId).then(
+    acceptInvite(request.data.url, request.data.clusterId, request.data.autoLinkedWith).then(
       () => res.json({ ok: true }),
       (error: unknown) => sendPeerError(res, 409, 'refused', error instanceof Error ? error.message : String(error))
     );
@@ -438,7 +488,7 @@ function sendPeerError(res: Response, status: number, code: string, error: strin
  * three for a majority. An old id that still announces itself elsewhere (its
  * address went to another laptop) is a live laptop and stays.
  */
-function addMember(member: ClusterMember): void {
+function addMember(member: ClusterMember, autoLinkedWith?: string): void {
   recordWrite('cluster.addMember', () => {
     const self = selfMember();
     const stored = getClusterMembers().find((existing) => existing.hostId === self.hostId);
@@ -449,6 +499,7 @@ function addMember(member: ClusterMember): void {
       }
     }
     saveClusterMember(member);
+    if (autoLinkedWith !== undefined) saveAutoLink(member.hostId, autoLinkedWith);
   });
 }
 
@@ -491,24 +542,14 @@ export async function linkWith(rawUrl: string): Promise<{ backupFile: string | n
 }
 
 /**
- * Another laptop pressed Koppelen next to this one and holds more runners:
- * this laptop joins it, and asks the laptops of its own group to follow. Only
- * a laptop without runners can be asked.
+ * Another laptop pressed Koppelen next to this one and holds more runners, or
+ * this laptop's group links by itself: this laptop joins that group, and its
+ * own group follows. Only a laptop without runners can be asked.
  */
-async function acceptInvite(url: string, clusterId: string): Promise<void> {
+async function acceptInvite(url: string, clusterId: string, autoLinkedWith?: string): Promise<void> {
   await waitWhileJoining();
   if (hostIdentity().clusterId === clusterId) return;
-  if (countRunners() > 0) throw new Error('Op die laptop staan intussen lopers. Druk daar op Koppelen.');
-  const self = hostIdentity().hostId;
-  const others = members().filter((member) => member.hostId !== self);
-  await joinOnce(url, clusterId);
-  for (const member of others) {
-    void peerFetch(`${member.url}/api/cluster/invite`, {
-      method: 'POST',
-      body: { url, clusterId },
-      timeoutMs: INVITE_TIMEOUT_MS,
-    }).catch(() => undefined);
-  }
+  await joinOnce(url, clusterId, { emptyGroup: true, autoLinkedWith });
 }
 
 /**
@@ -516,9 +557,9 @@ async function acceptInvite(url: string, clusterId: string): Promise<void> {
  * once starts two joins here (one through acceptInvite); the second one waits
  * for the first instead of failing.
  */
-async function joinOnce(url: string, clusterId: string): Promise<{ backupFile: string | null }> {
+async function joinOnce(url: string, clusterId: string, options?: JoinOptions): Promise<{ backupFile: string | null }> {
   try {
-    return await joinGroup(url);
+    return await joinGroup(url, options);
   } catch (error) {
     await waitWhileJoining();
     if (hostIdentity().clusterId === clusterId) return { backupFile: null };
@@ -547,12 +588,19 @@ async function otherLaptop(rawUrl: string): Promise<{ url: string; status: Clust
   return { url, status };
 }
 
+type JoinOptions = {
+  /** Only while this laptop holds no runners, checked as the join starts; the rest of its group follows. */
+  emptyGroup?: boolean;
+  /** Set when the laptop links by itself: the laptop it linked with, which the group records. */
+  autoLinkedWith?: string;
+};
+
 /**
  * Joins the group of the laptop at `rawUrl`, replacing this laptop's data
  * with the group's. A group this laptop never belonged to is only joined the
  * way linkDirection allows; rejoining its own group (maintain) is not limited.
  */
-export async function joinGroup(rawUrl: string): Promise<{ backupFile: string | null }> {
+export async function joinGroup(rawUrl: string, options: JoinOptions = {}): Promise<{ backupFile: string | null }> {
   const { url, status } = await otherLaptop(rawUrl);
   if (
     status.clusterId !== hostIdentity().clusterId &&
@@ -565,6 +613,12 @@ export async function joinGroup(rawUrl: string): Promise<{ backupFile: string | 
     throw new Error(pressThereMessage(url, status.runners));
   }
   if (busy()) throw new Error('Deze laptop wordt al gekoppeld of bijgewerkt.');
+  if (options.emptyGroup && countRunners() > 0) {
+    throw new Error('Op die laptop staan intussen lopers. Druk daar op Koppelen.');
+  }
+  // Nothing joins this laptop's group from here on (busy), so these are all the laptops that follow.
+  const self = hostIdentity().hostId;
+  const followers = options.emptyGroup ? members().filter((member) => member.hostId !== self) : [];
   joining = true;
   startJoining();
   let joined: Parameters<typeof finishJoining>[0] = null;
@@ -574,7 +628,7 @@ export async function joinGroup(rawUrl: string): Promise<{ backupFile: string | 
     const leaderUrl = leader.hostId === status.hostId ? url : leader.url;
     const response = await peerFetch(`${leaderUrl}/api/cluster/members`, {
       method: 'POST',
-      body: selfMember(),
+      body: { ...selfMember(), autoLinkedWith: options.autoLinkedWith },
       timeoutMs: 10_000,
     });
     if (!response.ok) throw new Error((await readPeerError(response)).error || 'Koppelen mislukt.');
@@ -586,6 +640,15 @@ export async function joinGroup(rawUrl: string): Promise<{ backupFile: string | 
   } finally {
     finishJoining(joined);
     joining = false;
+    if (joined) {
+      for (const member of followers) {
+        void peerFetch(`${member.url}/api/cluster/invite`, {
+          method: 'POST',
+          body: { url, clusterId: status.clusterId, autoLinkedWith: options.autoLinkedWith },
+          timeoutMs: INVITE_TIMEOUT_MS,
+        }).catch(() => undefined);
+      }
+    }
   }
 }
 
@@ -664,6 +727,23 @@ async function maintain(): Promise<void> {
     }
     return;
   }
+  await autoLink(group);
+}
+
+/**
+ * The leader of a group without runners links it with the group autoLinkPlan
+ * picks, the way Koppelen would, and the rest of its group follows. A laptop
+ * that is busy or has no leader is tried again next round.
+ */
+async function autoLink(group: Set<string>): Promise<void> {
+  const { target } = autoLinkPlan(nearbyGroups(group));
+  if (!target) return;
+  const status = await fetchStatus(target.url).catch(() => null);
+  if (!status?.leader || status.busy || !isLeader() || busy()) return;
+  await joinOnce(target.url, status.clusterId, {
+    emptyGroup: true,
+    autoLinkedWith: status.hostName ?? shortUrl(target.url),
+  }).catch(() => undefined);
 }
 
 /** Of two groups that went on separately, the one with more laptops, then the later term, carries on. */

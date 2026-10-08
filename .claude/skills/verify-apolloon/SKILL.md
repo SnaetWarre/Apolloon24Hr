@@ -31,13 +31,14 @@ All commands below run from the repo root. The UI text is Dutch; the handles in 
    node .claude/skills/verify-apolloon/scripts/verify.mjs up --run=my-check                      # one laptop, scenario "ready"
    node .claude/skills/verify-apolloon/scripts/verify.mjs up --run=race --scenario=live          # a race in progress
    node .claude/skills/verify-apolloon/scripts/verify.mjs up --run=group --laptops=3              # three laptops, not yet linked
+   node .claude/skills/verify-apolloon/scripts/verify.mjs up --run=auto --laptops=3 --auto-link  # empty laptops link by themselves
    ```
 
    Scenarios (from `scripts/seed-test-db.mjs`): `empty` (labels only, shows the welcome screen), `ready` (40 runners spread over Ingeschreven, Opwarming, and Klaar; race not started), `live` (60 runners, race running, lap history), `large` (120 runners, about 250 laps).
 
    It is ready when it prints `UP run=<name>` with one `laptop-N http://127.0.0.1:<port> pid=<pid>` line per laptop. It waits for `/api/host-info` to answer before printing. If a laptop does not start, the message names its log file in `.tmp-verify/<run>/laptop-N.log`.
 
-   The servers run as `NODE_ENV=production` with automatic backups and the update check off. In a group, only laptop 0 is seeded; laptops 1 and 2 are empty until you link them (see `features/linked-laptops.md`). Each run announces itself on loopback on its own discovery port, so two groups never find each other.
+   The servers run as `NODE_ENV=production` with automatic backups and the update check off. In a group, only laptop 0 is seeded (`--seeded=2` seeds laptops 0 and 1); laptops 1 and 2 are empty until you link them (see `features/linked-laptops.md`). Linking by itself (`CLUSTER_AUTO_LINK`) is off unless you pass `--auto-link`, so the empty laptops wait for `Koppelen`. Each run announces itself on loopback on its own discovery port, so two groups never find each other.
 
 3. Only for the desktop window (title bar, `window.apolloonDesktop`, close question): unpackaged Electron always loads `http://127.0.0.1:5173`, so start the run on that port, compile Electron, and start the headless window:
 
