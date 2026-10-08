@@ -131,14 +131,24 @@ export function performHandoff(
   return { ok: true, lapId, startedRunnerId: nextRunner?.id ?? null };
 }
 
-export function undoLastHandoff(): { ok: true; deletedLapIds: string[] } | { ok: false; error: 'nothing_to_undo' } {
-  const row = one<{ id: string; payloadJson: string }>(
-    `SELECT id, payload_json AS payloadJson
+function lastHandoff() {
+  return one<{ id: string; createdAt: number; payloadJson: string }>(
+    `SELECT id, created_at AS createdAt, payload_json AS payloadJson
      FROM handoff_history
      WHERE undone = 0
      ORDER BY created_at DESC, rowid DESC
      LIMIT 1`
   );
+}
+
+/** The laps the next undo removes, including halves a split added. */
+export function lapsToUndo(): string[] {
+  const row = lastHandoff();
+  return row ? ((JSON.parse(row.payloadJson) as Partial<HandoffSnapshot>).lapIds ?? []) : [];
+}
+
+export function undoLastHandoff(): { ok: true; deletedLapIds: string[] } | { ok: false; error: 'nothing_to_undo' } {
+  const row = lastHandoff();
   if (!row) {
     return { ok: false, error: 'nothing_to_undo' };
   }
@@ -209,12 +219,6 @@ export function finishRace(nowMs = clusterNow()): void {
 /** Whether the last undo step is this finish. Races finished before finishing stored one have none. */
 export function canUndoFinish(): boolean {
   const { raceFinishedAt } = getRaceState();
-  const row = one<{ createdAt: number }>(
-    `SELECT created_at AS createdAt
-     FROM handoff_history
-     WHERE undone = 0
-     ORDER BY created_at DESC, rowid DESC
-     LIMIT 1`
-  );
+  const row = lastHandoff();
   return raceFinishedAt !== null && row?.createdAt === raceFinishedAt;
 }

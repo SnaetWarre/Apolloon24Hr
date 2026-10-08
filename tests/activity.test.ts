@@ -67,3 +67,37 @@ test('a profile save that only changes the notes names only the notes', async ()
     db.closeDb();
   }
 });
+
+test('undoing a handoff names the lap it removes, on the runner the lap was moved to', async () => {
+  const db = await import('../server/db.ts');
+  const { describeWrite } = await import('../server/activity.ts');
+  try {
+    await db.initDb();
+    const [anna, bert] = ['Anna', 'Bert'].map((name, index) => {
+      const runner = db.insertRunner({ name, runnerNumber: String(21 + index) });
+      db.updateRunnerStatus({ id: runner.id, status: 'waiting', statusSince: index, queueIndex: index });
+      return runner;
+    });
+    db.performHandoff(1_000);
+    db.performHandoff(81_000);
+    const [lap] = db.getAllLaps();
+    assert.equal(lap.runnerId, anna.id);
+    db.moveLap(lap.id, bert.id);
+
+    const describe = describeWrite('race.undoLastHandoff', {});
+    assert.ok(db.undoLastHandoff().ok);
+    assert.match(
+      describe?.(null) ?? '',
+      /^Laatste wissel ongedaan gemaakt \(Ronde 1 van #22 Bert \(1:20\.000, .+\) verwijderd\)$/
+    );
+
+    // A lap already deleted in Beheer › Rondes is not named again.
+    db.performHandoff(81_000);
+    db.deleteLap(db.getAllLaps()[0].id);
+    const afterDelete = describeWrite('race.undoLastHandoff', {});
+    assert.ok(db.undoLastHandoff().ok);
+    assert.equal(afterDelete?.(null), 'Laatste wissel ongedaan gemaakt');
+  } finally {
+    db.closeDb();
+  }
+});

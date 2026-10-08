@@ -1,6 +1,6 @@
 import type { PublicRecordMode, Runner, RunnerStatus } from '../shared/schemas.js';
 import { formatDurationMs } from '../shared/time.js';
-import { getLabels, getLapById, getRaceState, getRunnerById, getRunnerRegistrations } from './db.js';
+import { getLabels, getLapById, getRaceState, getRunnerById, getRunnerRegistrations, lapsToUndo } from './db.js';
 
 /**
  * Says in words what a write does, for Beheer › Activiteit. Called before the write, so
@@ -21,7 +21,16 @@ export function describeWrite(path: string, input: unknown): ((result: unknown) 
     case 'race.undoLastHandoff': {
       // Undo after a finish takes back the finish itself.
       const finished = getRaceState().raceFinishedAt !== null;
-      return () => (finished ? 'Wedstrijd heropend (beëindigen ongedaan gemaakt)' : 'Laatste wissel ongedaan gemaakt');
+      // Names the lap as it stands now: Beheer › Rondes may have moved it to another runner since.
+      const laps = lapsToUndo()
+        .filter((lapId) => getLapById(lapId))
+        .map(lapText);
+      return () =>
+        finished
+          ? 'Wedstrijd heropend (beëindigen ongedaan gemaakt)'
+          : laps.length
+            ? `Laatste wissel ongedaan gemaakt (${laps.join(' en ')} verwijderd)`
+            : 'Laatste wissel ongedaan gemaakt';
     }
     case 'race.finish':
       return () => 'Wedstrijd beëindigd';
