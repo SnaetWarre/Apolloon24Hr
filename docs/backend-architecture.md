@@ -191,6 +191,13 @@ and real timers; the simulation tests pass fakes.
   45737. Group members use the announced addresses when theirs changed (the
   leader stores them); a laptop on its own lists other groups to join. An
   announcement never joins or changes anything by itself.
+- Koppelen (`linkWith` in `server/cluster.ts`) links two groups the same way
+  whichever side it is pressed on: the group with fewer runners takes the
+  other's data (then the smaller group, then the group id). An empty laptop is
+  asked over (`/api/cluster/invite`); between two groups that both hold
+  runners, the one that keeps its data refuses and names the other laptop.
+  `joinGroup` refuses the wrong way too, except when a laptop rejoins its own
+  group.
 - `server/static-files.ts`: packaged frontend, never outside the build root.
 - `shared/schemas.ts`: client/server contracts.
 

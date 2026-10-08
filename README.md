@@ -28,7 +28,7 @@ Normal event setup:
 5. Open any laptop's Event URL on the TVs and other screens.
 ```
 
-Linking replaces that laptop's database with the group's; a backup of the old database is kept first.
+Koppelen works from either laptop: the side with fewer runners always takes the other's data, so pressing it on the laptop with the registrations brings an empty laptop over instead of emptying the registrations. The laptop that takes the data keeps a backup of its old database first.
 
 When a laptop dies or loses its cable, the other two notice within a second or two, choose a new leader if needed, and carry on. A timing key press during those seconds waits and then counts with the time of the press. The laptop catches up by itself when it returns. Browsers remember the laptops and reopen the same page on another one when theirs disappears; the Electron app always stays on its own laptop.
 

@@ -143,19 +143,7 @@ function ClusterPanel({
           <p className="panel-copy">Laptops op dit netwerk waarmee deze laptop kan samenwerken:</p>
           {cluster.nearby.length ? (
             cluster.nearby.map((found) => (
-              <div className="host-hint cluster-peer-row" key={found.url}>
-                <strong>{shortUrl(found.url)}</strong>
-                <span>
-                  {countLabel(found.laptops, 'laptop', 'laptops')} · {countLabel(found.runners, 'loper', 'lopers')}
-                </span>
-                {found.compatible ? (
-                  <button className="btn btn--primary" onClick={() => void join(found.url, found)} disabled={busy}>
-                    {busy ? 'Bezig...' : 'Koppelen'}
-                  </button>
-                ) : (
-                  <span>andere versie ({found.appVersion}): installeer overal dezelfde versie</span>
-                )}
-              </div>
+              <NearbyRow key={found.url} found={found} canJoin busy={busy} onJoin={() => void join(found.url, found)} />
             ))
           ) : (
             <div className="host-hint">
@@ -189,13 +177,15 @@ function ClusterPanel({
         </>
       ) : (
         <>
+          {cluster.nearby.length > 0 && <p className="panel-copy">Andere laptops op dit netwerk:</p>}
           {cluster.nearby.map((found) => (
-            <div className="host-hint" key={found.url}>
-              <span>
-                Nieuwe laptop gevonden: <strong>{shortUrl(found.url)}</strong>. Open daar Beheer › Systeem & herstel en
-                klik op Koppelen naast deze groep.
-              </span>
-            </div>
+            <NearbyRow
+              key={found.url}
+              found={found}
+              canJoin={false}
+              busy={busy}
+              onJoin={() => void join(found.url, found)}
+            />
           ))}
           <p className="panel-copy">
             Nog een laptop toevoegen? Open op die laptop Beheer › Systeem & herstel en klik op Koppelen naast deze groep
@@ -206,6 +196,41 @@ function ClusterPanel({
       <AdminNoticeBanner notice={joinNotice} />
       <AdminNoticeBanner notice={aloneNotice} />
     </section>
+  );
+}
+
+/**
+ * A laptop or group heard on the network, with Koppelen when pressing it here goes the right way:
+ * the side with fewer runners takes the other's data. A laptop in a group only takes in empty
+ * laptops (`canJoin` false); it never leaves its group from this list.
+ */
+function NearbyRow({
+  found,
+  canJoin,
+  busy,
+  onJoin,
+}: {
+  found: NearbyGroup;
+  canJoin: boolean;
+  busy: boolean;
+  onJoin: () => void;
+}) {
+  return (
+    <div className="host-hint cluster-peer-row">
+      <strong>{shortUrl(found.url)}</strong>
+      <span>
+        {countLabel(found.laptops, 'laptop', 'laptops')} · {countLabel(found.runners, 'loper', 'lopers')}
+      </span>
+      {!found.compatible ? (
+        <span>andere versie ({found.appVersion}): installeer overal dezelfde versie</span>
+      ) : found.link === 'invite' || (found.link === 'join' && canJoin) ? (
+        <button className="btn btn--primary" onClick={onJoin} disabled={busy}>
+          {busy ? 'Bezig...' : 'Koppelen'}
+        </button>
+      ) : (
+        <span>Druk op Koppelen op die laptop.</span>
+      )}
+    </div>
   );
 }
 
