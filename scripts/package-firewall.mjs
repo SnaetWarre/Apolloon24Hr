@@ -10,7 +10,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 
-const { name, version, build } = JSON.parse(readFileSync('package.json', 'utf8'));
+const { version, build } = JSON.parse(readFileSync('package.json', 'utf8'));
 const RULES = ['Apolloon TCP 5173', 'Apolloon UDP 45737'];
 const BLOCK_RULE = 'Apolloon test: Windows blocks the app on public networks';
 
@@ -19,7 +19,7 @@ const setups = readdirSync('release').filter((file) => file.includes(version) &&
 assert.equal(setups.length, 1, 'Expected exactly one Windows setup');
 const setup = path.resolve('release', setups[0]);
 // The per-user install folder; Windows' own rules spell the path in lower case.
-const installDir = path.join(process.env.LOCALAPPDATA, 'Programs', name);
+const installDir = path.join(process.env.LOCALAPPDATA, 'Programs', build.productName);
 const executable = path.join(installDir, `${build.productName}.exe`);
 
 // Exits with 0 itself where a missing rule is an expected, non-terminating error.
