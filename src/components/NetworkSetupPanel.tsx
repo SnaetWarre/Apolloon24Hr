@@ -91,11 +91,17 @@ export function NetworkSetupPanel() {
       onTimeout: () => void
     ) => {
       stopPolling();
-      let tries = 0;
-      pollTimer.current = window.setInterval(() => {
-        tries += 1;
+      let ticks = 0;
+      // Only answers that name the address source count towards "nothing changed": a slow or
+      // failed read (dhcp null) means still checking, not that the change did not happen.
+      let answers = 0;
+      const timer = window.setInterval(() => {
+        ticks += 1;
         void (async () => {
           const next = await refresh();
+          // A read can outlast the 2 s interval; one that ends after the poll stopped decides nothing.
+          if (pollTimer.current !== timer) return;
+          if (next?.primary && next.primary.dhcp !== null) answers += 1;
           const elevation = next?.lastElevation;
           if (next && done(next)) {
             stopPolling();
@@ -104,12 +110,18 @@ export function NetworkSetupPanel() {
             // The password prompt was refused or could not open; stop waiting right away.
             stopPolling();
             onFailed(elevation.message || 'De netwerkwijziging is mislukt. Er is niets veranderd.');
-          } else if (tries >= 45) {
+          } else if (answers >= 45) {
             stopPolling();
             onTimeout();
+          } else if (ticks >= 90) {
+            stopPolling();
+            onFailed(
+              'Dit toestel liet niet zien of het adres vast of automatisch is, dus het is niet zeker of het gelukt is. Herlaad deze pagina over een minuut om het na te kijken.'
+            );
           }
         })();
       }, 2000);
+      pollTimer.current = timer;
     },
     [refresh]
   );

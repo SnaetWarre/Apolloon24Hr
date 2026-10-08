@@ -28,6 +28,8 @@ import {
   isWirelessWindowsAdapter,
   isWiredNmConnectionType,
   isWirelessMacService,
+  createWindowsNetReader,
+  parseWindowsNetReadout,
 } from '../server/net-setup.ts';
 
 test('only real loopback callers may change host networking', () => {
@@ -248,3 +250,75 @@ test(
     }
   }
 );
+
+const WINDOWS_READOUT = [
+  'dhcp\tEthernet 3\tEnabled',
+  'dhcp\tWi-Fi\tDisabled',
+  'dhcp\tLoopback Pseudo-Interface 1\tDisabled',
+  'prefix\tEthernet 3\t10.1.0.113\t20',
+  'prefix\tWi-Fi\t192.168.1.211\t24',
+  'prefix\tLoopback Pseudo-Interface 1\t127.0.0.1\t8',
+  '',
+].join('\r\n');
+
+test('one Windows read gives both the DHCP state and the prefix length per adapter', () => {
+  const readout = parseWindowsNetReadout(WINDOWS_READOUT);
+  assert.deepEqual(
+    [...readout.dhcpByAlias],
+    [
+      ['ethernet 3', true],
+      ['wi-fi', false],
+      ['loopback pseudo-interface 1', false],
+    ]
+  );
+  assert.equal(readout.prefixByAliasIp.get('ethernet 3|10.1.0.113'), 20);
+  assert.equal(readout.prefixByAliasIp.get('wi-fi|192.168.1.211'), 24);
+  // Stray output (a warning, a half line) is ignored.
+  const noisy = parseWindowsNetReadout('WARNING: slow\r\ndhcp\tEthernet\r\nprefix\tEthernet\t10.0.0.5\tabc\r\n');
+  assert.equal(noisy.dhcpByAlias.size, 0);
+  assert.equal(noisy.prefixByAliasIp.size, 0);
+});
+
+test('a slow or failed Windows read keeps the last good state instead of unknown', async () => {
+  const warnings: string[] = [];
+  const outcomes: Array<() => Promise<string>> = [
+    async () => WINDOWS_READOUT,
+    async () => {
+      throw Object.assign(new Error('Command failed: powershell.exe'), { killed: true });
+    },
+    async () => '',
+    async () => WINDOWS_READOUT.replace('Ethernet 3\tEnabled', 'Ethernet 3\tDisabled'),
+  ];
+  const read = createWindowsNetReader(
+    () => outcomes.shift()!(),
+    (message) => warnings.push(message)
+  );
+
+  assert.equal((await read()).dhcpByAlias.get('ethernet 3'), true);
+  const afterTimeout = await read();
+  assert.equal(afterTimeout.dhcpByAlias.get('ethernet 3'), true);
+  assert.equal(afterTimeout.prefixByAliasIp.get('ethernet 3|10.1.0.113'), 20);
+  assert.match(warnings[0], /^Windows network read failed after \d+ ms \(timed out\)/);
+  assert.equal((await read()).dhcpByAlias.get('ethernet 3'), true, 'empty output is not a good read');
+  assert.match(warnings[1], /no network interfaces/);
+  assert.equal((await read()).dhcpByAlias.get('ethernet 3'), false, 'the next good read replaces the old state');
+  assert.equal(warnings.length, 2);
+});
+
+test('calls during a Windows read share it instead of starting more PowerShell processes', async () => {
+  let starts = 0;
+  let finish: (output: string) => void = () => undefined;
+  const read = createWindowsNetReader(() => {
+    starts += 1;
+    return new Promise((resolve) => (finish = resolve));
+  });
+  const first = read();
+  const second = read();
+  finish(WINDOWS_READOUT);
+  assert.equal(await first, await second);
+  assert.equal(starts, 1);
+  const third = read();
+  finish(WINDOWS_READOUT);
+  await third;
+  assert.equal(starts, 2, 'a read after the shared one finished starts a new process');
+});

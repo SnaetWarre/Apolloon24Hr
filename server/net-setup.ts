@@ -308,57 +308,94 @@ function trackElevation(outcome: ElevationOutcome, launcher: ReturnType<typeof s
  * can take seconds to start, and the server must keep sending heartbeats and
  * answering presses meanwhile.
  */
-function execFileQuiet(file: string, args: string[]): Promise<string> {
+function execFileQuiet(file: string, args: string[], timeout = 8_000): Promise<string> {
   return new Promise((resolve, reject) => {
-    const child = execFile(file, args, { encoding: 'utf8', timeout: 8_000, windowsHide: true }, (error, stdout) =>
+    const child = execFile(file, args, { encoding: 'utf8', timeout, windowsHide: true }, (error, stdout) =>
       error ? reject(error) : resolve(stdout)
     );
     child.stdin?.end();
   });
 }
 
-async function readPowerShellCsv(command: string): Promise<string[]> {
-  if (process.platform !== 'win32') return [];
-  try {
-    return (
-      await execFileQuiet('powershell.exe', [
-        '-NoProfile',
-        '-NonInteractive',
-        '-Command',
-        `${command} | ConvertTo-Csv -NoTypeInformation`,
-      ])
-    )
-      .split(/\r?\n/)
-      .slice(1);
-  } catch {
-    return [];
+/** A cold PowerShell start on a slow laptop or a busy virus scanner can take well over 8 s. */
+const WINDOWS_NET_READ_TIMEOUT_MS = 20_000;
+
+/** One PowerShell start for both values: one tab-separated line per interface and per address. */
+const WINDOWS_NET_READ_COMMAND =
+  'Get-NetIPInterface -AddressFamily IPv4 -ErrorAction SilentlyContinue | ' +
+  'ForEach-Object { "dhcp`t$($_.InterfaceAlias)`t$($_.Dhcp)" }; ' +
+  'Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | ' +
+  'ForEach-Object { "prefix`t$($_.InterfaceAlias)`t$($_.IPAddress)`t$($_.PrefixLength)" }';
+
+export type WindowsNetReadout = {
+  /** DHCP enabled per lowercased interface alias. */
+  dhcpByAlias: Map<string, boolean>;
+  /** Prefix length per `lowercased alias|address`. */
+  prefixByAliasIp: Map<string, number>;
+};
+
+export function parseWindowsNetReadout(output: string): WindowsNetReadout {
+  const readout: WindowsNetReadout = { dhcpByAlias: new Map(), prefixByAliasIp: new Map() };
+  for (const line of output.split(/\r?\n/)) {
+    const [kind, alias, ...rest] = line.split('\t');
+    if (!alias) continue;
+    if (kind === 'dhcp' && rest.length === 1) {
+      readout.dhcpByAlias.set(alias.toLowerCase(), rest[0].trim().toLowerCase() === 'enabled');
+    } else if (kind === 'prefix' && rest.length === 2) {
+      const prefix = Number(rest[1].trim());
+      if (Number.isInteger(prefix)) readout.prefixByAliasIp.set(`${alias.toLowerCase()}|${rest[0].trim()}`, prefix);
+    }
   }
+  return readout;
 }
 
-/** DHCP enabled per lowercased interface alias. */
-async function readWindowsDhcpState(): Promise<Map<string, boolean>> {
-  const states = new Map<string, boolean>();
-  for (const line of await readPowerShellCsv(
-    'Get-NetIPInterface -AddressFamily IPv4 | Select-Object InterfaceAlias, Dhcp'
-  )) {
-    const match = line.match(/^"([^"]+)","([^"]+)"$/);
-    if (match) states.set(match[1].toLowerCase(), match[2].toLowerCase() === 'enabled');
-  }
-  return states;
+/**
+ * Reads through `run` and keeps the last good readout, so a slow or failed read
+ * shows the previous state instead of "unknown". Calls during a read share it.
+ */
+export function createWindowsNetReader(
+  run: () => Promise<string>,
+  warn: (message: string) => void = console.warn
+): () => Promise<WindowsNetReadout> {
+  let lastGood: WindowsNetReadout = { dhcpByAlias: new Map(), prefixByAliasIp: new Map() };
+  let inFlight: Promise<WindowsNetReadout> | null = null;
+  const read = async () => {
+    const startedAt = Date.now();
+    try {
+      const readout = parseWindowsNetReadout(await run());
+      if (readout.dhcpByAlias.size === 0) throw new Error('no network interfaces in the output');
+      lastGood = readout;
+    } catch (error) {
+      warn(
+        `Windows network read failed after ${Date.now() - startedAt} ms (${describeReadFailure(error)}); ` +
+          'Beheer › Systeem shows the last known state'
+      );
+    }
+    return lastGood;
+  };
+  return () => {
+    inFlight ??= read().finally(() => {
+      inFlight = null;
+    });
+    return inFlight;
+  };
 }
 
-/** Prefix length per `lowercased alias|address`. */
-async function readWindowsPrefixLengths(): Promise<Map<string, number>> {
-  const lengths = new Map<string, number>();
-  for (const line of await readPowerShellCsv(
-    'Get-NetIPAddress -AddressFamily IPv4 | Select-Object InterfaceAlias, IPAddress, PrefixLength'
-  )) {
-    const match = line.match(/^"([^"]+)","([^"]+)","([^"]+)"$/);
-    const prefix = Number(match?.[3]);
-    if (match && Number.isInteger(prefix)) lengths.set(`${match[1].toLowerCase()}|${match[2]}`, prefix);
-  }
-  return lengths;
+function describeReadFailure(error: unknown): string {
+  if ((error as { killed?: boolean } | null)?.killed) return 'timed out';
+  if (!(error instanceof Error)) return String(error);
+  // execFile puts the command line first and stderr after it; stderr says more.
+  const [commandLine, ...stderr] = error.message.split(/\r?\n/);
+  return stderr.join(' ').trim().slice(0, 300) || commandLine;
 }
+
+const readWindowsNetState = createWindowsNetReader(() =>
+  execFileQuiet(
+    'powershell.exe',
+    ['-NoProfile', '-NonInteractive', '-EncodedCommand', toEncodedCommand(WINDOWS_NET_READ_COMMAND)],
+    WINDOWS_NET_READ_TIMEOUT_MS
+  )
+);
 
 const TOOL_PROBE_ARGS: Record<string, string[]> = {
   nmcli: ['--version'],
@@ -498,7 +535,9 @@ async function elevationSupport(platform: NodeJS.Platform): Promise<{ method: El
 export async function getNetProfile(): Promise<NetProfile> {
   const platform = process.platform;
   const windows = platform === 'win32';
-  const [dhcpByAlias, prefixByAliasIp] = await Promise.all([readWindowsDhcpState(), readWindowsPrefixLengths()]);
+  const { dhcpByAlias, prefixByAliasIp } = windows
+    ? await readWindowsNetState()
+    : { dhcpByAlias: new Map<string, boolean>(), prefixByAliasIp: new Map<string, number>() };
   const aliasByAddress = interfaceNamesByAddress();
   const linuxStates = new Map<string, Promise<LinuxNetState>>();
   const linuxState = (iface: string, address: string) => {
