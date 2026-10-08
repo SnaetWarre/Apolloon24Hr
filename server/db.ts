@@ -114,6 +114,13 @@ export {
   getRecentRaceEvents,
 } from './db/history.js';
 export { deleteLap, moveLap, splitLap } from './db/lap-corrections.js';
-export { createBurgieGepaktEvent, performHandoff, undoLastHandoff, finishRace, canUndoFinish } from './db/timing.js';
+export {
+  createBurgieGepaktEvent,
+  performHandoff,
+  lapsToUndo,
+  undoLastHandoff,
+  finishRace,
+  canUndoFinish,
+} from './db/timing.js';
 export { getActivity, logActivity } from './db/activity.js';
 export { previewBackup, readRestoreData, replaceEventData, restoreDataSchema } from './db/restore.js';

@@ -26,7 +26,7 @@ Preconditions:
 - **Delete.** In that row click `Verwijderen`, then `Verwijderen` in dialog `Ronde verwijderen?`. Text `… is verwijderd.` appears; the lap is gone from `run.api('/api/history?scope=full')`.
 - **Move.** In a row click `Andere loper`. In dialog `Ronde naar andere loper` pick a runner (`getByRole('radio')`) and click `Verplaatsen`. Text `… staat nu op …` appears; the lap's `runnerId` changed in `/api/history?scope=full`.
 - **Split.** In a row click `Splitsen`. Dialog `Ronde splitsen` starts with the same runner selected; click `Splitsen`. Text `… is gesplitst in twee rondes van …` appears; `/api/history?scope=full` holds two laps of that runner within the old lap's start and end, their times adding up to the old one.
-- **Activiteit.** `/admin?section=activity` lists `Ronde N van #… verwijderd`, `… naar #… verplaatst` and `… gesplitst in twee rondes van …`.
+- **Activiteit.** `/admin?section=activity` lists `Ronde N van #… verwijderd`, `… naar #… verplaatst` and `… gesplitst in twee rondes van …`. An undo on Timing after a move lists `Laatste wissel ongedaan gemaakt (Ronde N van #… verwijderd)` with the runner the lap was moved to; after a delete it has nothing to name and reads `Laatste wissel ongedaan gemaakt`.
 
 ## Gotchas
 
