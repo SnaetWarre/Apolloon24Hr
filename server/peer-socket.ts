@@ -15,6 +15,11 @@ import { isIsolated, PEER_REQUEST_TIMEOUT_MS, versionHeaders } from './peers.js'
 export const PEER_SOCKET_PATH = '/api/cluster/peer';
 /** As much as an HTTP request between laptops could carry. */
 const MAX_MESSAGE_BYTES = 20 * 1024 * 1024;
+/**
+ * A large message gets this much longer to be answered: a 4 MB batch of logos takes about 3.5 s
+ * over a cable that fell back to 10 Mbit. Heartbeats and votes are small and keep the short timeout.
+ */
+const SLOWEST_LINK_BYTES_PER_MS = 1_000;
 /** A socket nothing was sent over for this long is closed, so old addresses do not linger. */
 const IDLE_CLOSE_MS = 30_000;
 
@@ -49,14 +54,15 @@ export function peerRequest(url: string, type: PeerRequestType, body: unknown): 
   link.idleTimer.refresh();
   const id = (nextId += 1);
   const message = JSON.stringify({ id, type, body });
+  const timeoutMs = PEER_REQUEST_TIMEOUT_MS + Math.round(message.length / SLOWEST_LINK_BYTES_PER_MS);
   return new Promise((resolve, reject) => {
     const sentAt = performance.now();
     const timer = setTimeout(() => {
       link.pending.delete(id);
-      reject(new Error(`no answer within ${PEER_REQUEST_TIMEOUT_MS} ms`));
+      reject(new Error(`no answer within ${timeoutMs} ms`));
       // Nothing heard since this request went out: the laptop is gone or asleep, so start over on a fresh socket.
       if (link.lastHeardAt < sentAt) link.socket.terminate();
-    }, PEER_REQUEST_TIMEOUT_MS);
+    }, timeoutMs);
     timer.unref();
     link.pending.set(id, { resolve, reject, timer });
     if (link.socket.readyState === WebSocket.OPEN) link.socket.send(message);

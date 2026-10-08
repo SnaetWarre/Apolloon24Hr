@@ -96,3 +96,19 @@ test('a laptop that stops answering rejects in time, and is reached again on a f
     await laptop.close();
   }
 });
+
+test('a large message gets longer to be answered than a heartbeat, for a slow cable', async () => {
+  const laptop = await fakeLaptop({ sleeping: () => true });
+  try {
+    const startedAt = performance.now();
+    // 1 MB: the 1 s answer time plus about 1 s for the bytes.
+    await assert.rejects(
+      peerRequest(laptop.url, 'append', { logo: 'x'.repeat(1_000_000) }),
+      /no answer within 2000 ms/
+    );
+    assert.ok(performance.now() - startedAt >= 1_900);
+  } finally {
+    closePeerSockets();
+    await laptop.close();
+  }
+});
