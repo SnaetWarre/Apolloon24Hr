@@ -205,3 +205,8 @@ export function describeOrigin(
   const self = selfName ? `${selfName} (${selfAddress})` : selfAddress;
   return `${screen} · ${local ? `laptop ${self}` : `browser ${address}`}`;
 }
+
+/** Where a change the laptops made by themselves comes from: the laptop that noticed it. */
+export function describeAutomaticOrigin(selfAddress: string, selfName: string | null = null): string {
+  return `Vanzelf · laptop ${selfName ? `${selfName} (${selfAddress})` : selfAddress}`;
+}

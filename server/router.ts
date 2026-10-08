@@ -311,7 +311,7 @@ export const appRouter = t.router({
     join: t.procedure
       .input(z.object({ url: z.string().trim().min(1).max(2_048) }))
       .mutation(({ input }) => linkWith(input.url)),
-    continueAlone: t.procedure.mutation(() => continueAlone()),
+    continueAlone: t.procedure.mutation(({ ctx }) => continueAlone(ctx.origin)),
   }),
 
   backups: t.router({

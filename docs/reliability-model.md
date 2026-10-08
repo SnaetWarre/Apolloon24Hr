@@ -158,7 +158,13 @@ or a wrong import.
 Beheer › Activiteit shows what changed, when, and from which screen and
 address, so the moment before the mistake is easy to find. Each entry is saved
 in the same write as the change, so every laptop lists the same activity.
-Handoffs are not listed: they are the laps.
+Handoffs are not listed: they are the laps. The laptops list their own changes
+too, with `Vanzelf · laptop <name>` as where: a laptop that links (with
+Koppelen or by itself), a laptop with a new address, "Alleen verder werken",
+and a laptop that stopped answering for five seconds and the moment it is back.
+The laptop that leads writes those last two; a laptop that takes over goes on
+from the same list (`cluster_unreachable_json`), so a laptop that stays away is
+listed once.
 
 Restoring a backup, from any linked laptop:
 

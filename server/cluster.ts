@@ -4,8 +4,9 @@ import type { Duplex } from 'node:stream';
 import type { Express, NextFunction, Request, Response } from 'express';
 import { z } from 'zod';
 import type { AutoLinkNote, ClusterMemberStatus, ClusterStatus, GroupState, NearbyGroup } from '../shared/schemas.js';
+import { describeAutomaticOrigin } from './activity.js';
 import { backupStatus } from './backups.js';
-import { setClusterClockOffset } from './clock.js';
+import { clusterNow, setClusterClockOffset } from './clock.js';
 import {
   appendRequestSchema,
   currentLeader,
@@ -38,19 +39,22 @@ import {
   getClusterMembers,
   getLogHead,
   getSetting,
+  getUnreachableMembers,
   hostIdentity,
   keepOnlyClusterMember,
+  logActivity,
   recordWrite,
   removeClusterMember,
   saveAutoLink,
   saveClusterMember,
   serializeDatabase,
   setLocalSetting,
+  setUnreachableMembers,
   type ClusterMember,
 } from './db.js';
 import { currentUrl, heardLaptops, startDiscovery, stopDiscovery } from './discovery.js';
 import { APP_VERSION, isClusterEnabled, readPositiveInt } from './env.js';
-import { LAPTOP_NAME, laptopName } from './host.js';
+import { hostInfo, LAPTOP_NAME, laptopName } from './host.js';
 import { acceptPeerSocket, closePeerSockets, refusal, refuseUpgrade, type PeerAnswer } from './peer-socket.js';
 import {
   isIsolated,
@@ -82,6 +86,8 @@ const MAX_KNOWN_PEERS = 16;
 const ELECTING_GRACE_MS = ELECTION_TIMEOUT_MS * 5;
 /** How long a laptop asked to join may take: its own join, a full copy of the data included. */
 const INVITE_TIMEOUT_MS = 30_000;
+/** A laptop silent this long is listed in Beheer › Activiteit, so a short hiccup stays out of it. */
+const UNREACHABLE_LISTED_AFTER_MS = 5_000;
 
 let joining = false;
 let lastError: string | null = null;
@@ -95,6 +101,8 @@ const AUTO_LINK_FAILED_ROUNDS_SHOWN = 3;
 /** Durations here run on the monotonic clock, like consensus, so a clock correction cannot stretch or skip them. */
 let startedAt = performance.now();
 let maintenanceTimer: NodeJS.Timeout | null = null;
+/** Since when (monotonic) this laptop, leading, has not heard from each other laptop. */
+const silentSince = new Map<string, number>();
 
 function selfMember(): ClusterMember {
   return { hostId: hostIdentity().hostId, url: selfUrl(), name: LAPTOP_NAME };
@@ -229,7 +237,7 @@ function autoLinkPlan(nearby: NearbyGroup[]): { target: NearbyGroup | null; wait
     const names = withRunners.map((group) => group.name ?? shortUrl(group.url));
     return {
       target: null,
-      waiting: `Niet vanzelf gekoppeld: ${names.slice(0, -1).join(', ')} en ${names.at(-1)} hebben elk lopers. Druk zelf op Koppelen naast de juiste laptop.`,
+      waiting: `Niet vanzelf gekoppeld: ${listNames(names)} hebben elk lopers. Druk zelf op Koppelen naast de juiste laptop.`,
     };
   }
   return { target: withRunners[0] ?? candidates[0] ?? null, waiting: null };
@@ -260,6 +268,11 @@ function pressThereMessage(url: string, otherRunners: number): string {
 /** A laptop's address without `http://`, as the screens show it. */
 function shortUrl(url: string): string {
   return url.replace(/^https?:\/\//, '');
+}
+
+/** "A", "A en B", "A, B en C". */
+function listNames(names: string[]): string {
+  return names.length > 1 ? `${names.slice(0, -1).join(', ')} en ${names.at(-1)}` : (names[0] ?? '');
 }
 
 function runnerLabel(count: number): string {
@@ -506,7 +519,9 @@ function sendPeerError(res: Response, status: number, code: string, error: strin
 function addMember(member: ClusterMember, autoLinkedWith?: string): void {
   recordWrite('cluster.addMember', () => {
     const self = selfMember();
-    const stored = getClusterMembers().find((existing) => existing.hostId === self.hostId);
+    const storedMembers = getClusterMembers();
+    const stored = storedMembers.find((existing) => existing.hostId === self.hostId);
+    const known = storedMembers.find((existing) => existing.hostId === member.hostId);
     if (stored?.url !== self.url || stored.name !== self.name) saveClusterMember(self);
     for (const old of members()) {
       if (old.url === member.url && old.hostId !== member.hostId && old.hostId !== self.hostId) {
@@ -515,6 +530,64 @@ function addMember(member: ClusterMember, autoLinkedWith?: string): void {
     }
     saveClusterMember(member);
     if (autoLinkedWith !== undefined) saveAutoLink(member.hostId, autoLinkedWith);
+    const name = member.name ?? shortUrl(member.url);
+    if (!known) {
+      logLaptopActivity(
+        'cluster.addMember',
+        autoLinkedWith === undefined
+          ? `${name} gekoppeld met Koppelen`
+          : `${name} vanzelf gekoppeld met ${autoLinkedWith}`
+      );
+    } else if (known.url !== member.url) {
+      logLaptopActivity('cluster.address', `${name} heeft een nieuw adres: ${shortUrl(member.url)}`);
+    }
+  });
+}
+
+/** Lists a change in the group in Beheer › Activiteit, inside the write that makes it. */
+function logLaptopActivity(action: string, summary: string, origin?: string): void {
+  logActivity({
+    occurredAt: clusterNow(),
+    action,
+    summary,
+    origin: origin ?? describeAutomaticOrigin(hostInfo().hostIpHint, LAPTOP_NAME),
+  });
+}
+
+/**
+ * Lists the laptops this laptop, leading, stopped hearing from for five seconds, and the
+ * ones that came back. Only with a majority, when the entry can be saved.
+ */
+function logReachability(): void {
+  if (!leaderAlive()) return;
+  const now = performance.now();
+  const selfId = hostIdentity().hostId;
+  const reachable = new Map(leaderGroupView().map((member) => [member.hostId, member.reachable]));
+  const listed = getUnreachableMembers();
+  const next: string[] = [];
+  const changes: string[] = [];
+  const group = members();
+  for (const member of group) {
+    const name = member.hostId === selfId ? LAPTOP_NAME : (member.name ?? shortUrl(member.url));
+    if (member.hostId === selfId || reachable.get(member.hostId)) {
+      silentSince.delete(member.hostId);
+      if (listed.includes(member.hostId)) changes.push(`${name} is weer bereikbaar`);
+      continue;
+    }
+    const since = silentSince.get(member.hostId) ?? now;
+    silentSince.set(member.hostId, since);
+    if (listed.includes(member.hostId)) next.push(member.hostId);
+    else if (now - since >= UNREACHABLE_LISTED_AFTER_MS) {
+      next.push(member.hostId);
+      changes.push(`${name} is niet bereikbaar`);
+    }
+  }
+  for (const hostId of silentSince.keys())
+    if (!group.some((member) => member.hostId === hostId)) silentSince.delete(hostId);
+  if (!changes.length && next.length === listed.length) return;
+  recordWrite('cluster.reachability', () => {
+    setUnreachableMembers(next);
+    for (const summary of changes) logLaptopActivity('cluster.reachability', summary);
   });
 }
 
@@ -673,13 +746,23 @@ export async function joinGroup(rawUrl: string, options: JoinOptions = {}): Prom
  * taken in again by themselves; what they had that this one lacks stays in
  * their backup.
  */
-export function continueAlone(): { ok: true } {
+export function continueAlone(origin?: string): { ok: true } {
   if (!enabled || isLeader()) throw new Error('Deze laptop werkt al.');
   if (clusterStatus().state !== 'no-majority') {
     throw new Error('Er zijn nog genoeg laptops bereikbaar; die kiezen zelf een hoofdlaptop.');
   }
+  const selfId = hostIdentity().hostId;
+  const others = members()
+    .filter((member) => member.hostId !== selfId)
+    .map((member) => member.name ?? shortUrl(member.url));
   takeOverAlone();
-  recordWrite('cluster.continueAlone', () => keepOnlyClusterMember(hostIdentity().hostId));
+  recordWrite('cluster.continueAlone', () => {
+    keepOnlyClusterMember(selfId);
+    const left = others.length
+      ? `; ${listNames(others)} ${others.length === 1 ? 'is' : 'zijn'} uit de groep gehaald`
+      : '';
+    logLaptopActivity('cluster.continueAlone', `Alleen verder gewerkt op ${LAPTOP_NAME}${left}`, origin);
+  });
   lastError = null;
   return { ok: true };
 }
@@ -726,6 +809,7 @@ async function maintain(): Promise<void> {
     const name = names.get(member.hostId) ?? member.name;
     if (url !== member.url || name !== member.name) addMember({ hostId: member.hostId, url, name });
   }
+  logReachability();
 
   const group = new Set(members().map((member) => member.hostId));
   const identity = hostIdentity();

@@ -8,6 +8,7 @@ Beheer › Activiteit lists every change to the event data, newest first, with t
 - `activity-profile-fields` names only the profile fields a save really changed (`naam`, `nummer`, `notities`, `telefoon`, `e-mail`, `uren`, `labels`), or `niets gewijzigd`.
 - `activity-search` filters the list on runner, label, or address.
 - `activity-queue-moves` hides warm-up and queue moves until `Wachtrij-bewegingen tonen` is checked.
+- `activity-laptops` lists the group's own changes with `Vanzelf · laptop <name>`: `LAPTOP-1 gekoppeld met Koppelen`, `LAPTOP-1 vanzelf gekoppeld met LAPTOP-0`, `LAPTOP-1 heeft een nieuw adres: …`, `Alleen verder gewerkt op …`, `LAPTOP-2 is niet bereikbaar` (after 5 s without an answer) and `LAPTOP-2 is weer bereikbaar`.
 
 ## How to get to it (user POV)
 
@@ -23,6 +24,7 @@ Preconditions:
 - **Open.** `await page.goto(run.url('/admin?section=activity'))`. Heading `Activiteit` and searchbox `Activiteit doorzoeken` are visible; an empty list reads `Nog geen activiteit.`
 - **Profile from Beheer › Lopers.** On `/admin?section=runners`, click `page.getByRole('row').filter({ hasText: name }).getByRole('button', { name: 'Profiel' })`. In `page.getByRole('dialog', { name: 'Lopersprofiel' })` change only `getByLabel('Notities')` and click `Opslaan`. The newest line reads `#<nummer> <naam> aangepast (notities)` with `Beheer · laptop …`.
 - **Profile from Wachtrij.** On `/queue`, click `button.queue-identity` with the runner's name, change only `getByLabel('Telefoon')`, and click `Opslaan`. The newest line reads `… aangepast (telefoon)` with `Wachtrij · laptop …`; `/api/registrations` holds the new phone.
+- **Laptops.** Start with `up --laptops=3 --auto-link` and wait for `cluster=healthy`. On laptop 1's `/admin?section=activity` the lines `LAPTOP-1 vanzelf gekoppeld met LAPTOP-0` and `LAPTOP-2 vanzelf gekoppeld met LAPTOP-0` appear. Freeze laptop 2 (`SIGSTOP`, see `linked-laptops.md`): within 15 s `LAPTOP-2 is niet bereikbaar` appears; `SIGCONT` adds `LAPTOP-2 is weer bereikbaar`. Read the list on laptop 2 too (`run.rpc(2).activity.list.query({ limit: 50, before: null })`): each line is there once.
 - **Read a line.** `page.locator('.activity-table tbody tr').first().locator('td').nth(1)` is the newest summary.
 - **Proof.** `run.proof(page, 'activity-…')` after editing the profile and after opening Activiteit.
 
