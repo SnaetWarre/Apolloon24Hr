@@ -24,7 +24,7 @@ At the event three laptops run the app as one group. Each holds the full databas
 Preconditions:
 
 - A fresh run with `--laptops=3`. Laptop 0 is seeded; 1 and 2 are empty. `verify.mjs doctor` shows `cluster=solo` on all three.
-- Pages that link must be `run.newPage({ laptop, electron: true })`: the `Koppelen` button only shows in the desktop app.
+- `Koppelen` shows in any browser, so a plain `run.newPage({ laptop })` can link. `electron: true` only matters for `group-browser-moves`.
 
 - **Link.** For laptop 1 and then 2: `await page.goto(run.url('/admin?section=system', i))`. In `page.locator('.cluster-peer-row', { hasText: new URL(run.url('/', 0)).host })` click `Koppelen` (allow 15 s for discovery), then click `Koppelen` in the dialog. Text `Gekoppeld.` appears. Afterwards `run.api('/api/cluster/status', 0)` has `state: 'healthy'` and `doctor` shows `cluster=healthy` and `runners=40` on all three.
 - **Link by itself.** Start with `up --laptops=3 --auto-link`. Within 15 s, with no click, `run.api('/api/cluster/status', 0)` lists three members and `autoLink.linked` names `LAPTOP-1` and `LAPTOP-2` with `with: 'LAPTOP-0'`. On laptop 1's Systeem tab `.cluster-auto-link` reads `Automatisch gekoppeld met LAPTOP-0, …`; on laptop 0 it reads `LAPTOP-1 is automatisch bijgekomen, …`. Read the group on a laptop other than the one in the screenshot.

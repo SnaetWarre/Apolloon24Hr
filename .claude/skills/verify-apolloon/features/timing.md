@@ -7,9 +7,9 @@ Timing (Telsysteem 2) is the screen where one operator presses Space or Enter ea
 - `timing-start` starts the race and the first waiting runner on the first press.
 - `timing-handoff` saves the running lap and starts the next waiting runner.
 - `timing-short-lap` asks `Toch afklokken?` when a press comes less than 20 s after the last one, and records nothing when cancelled.
-- `timing-empty-queue` keeps the button disabled as `Geen loper klaar` when nobody is waiting.
+- `timing-empty-queue` keeps the button disabled as `Geen loper klaar` when nobody is on the track and nobody is waiting. With a runner on the track and an empty queue the button still reads `Klok …`.
 - `timing-undo` removes the last handoff after `Laatste wissel ongedaan maken` is confirmed.
-- `timing-finish` stops the race through `Race beëindigen`, `Verder`, and `Race definitief beeindigen`; a later press asks `Race hervatten?`.
+- `timing-finish` stops the race through `Race beëindigen`, `Verder`, and `Race definitief beeindigen`. After that Space and Enter do nothing; only the button `Race hervatten met …` reopens the race, after the question `Race hervatten?`.
 
 ## How to get to it (user POV)
 
@@ -31,7 +31,8 @@ Preconditions:
 - **Short lap, confirm.** Press Space, then click the dialog's `Toch afklokken` button. `Ronde opgeslagen. Volgende loper gestart.` appears and `/api/history?scope=full` has one lap for the runner who was on the track.
 - **Handoff.** After 20 s or more, press Space. No question appears; the lap is saved directly and the table `Laatste 10 rondes` gains a row.
 - **Undo.** Click `Laatste wissel ongedaan maken`, then `Ongedaan maken` in the dialog `Laatste wissel ongedaan maken?`. `Laatste wissel ongedaan gemaakt.` appears; the previous runner is active again and their last lap is gone from `/api/history?scope=full`.
-- **Finish.** Click `Race beëindigen`, then `Verder`, then `Race definitief beeindigen`. The button `Race hervatten` appears and `race.raceFinishedAt` is set. Space now opens `Race hervatten?` instead of recording.
+- **Finish.** Click `Race beëindigen`, then `Verder`, then `Race definitief beeindigen`. The button `getByRole('button', { name: /^Race hervatten met / })` appears and `race.raceFinishedAt` is set. Space now opens nothing and leaves `/api/state` `race` unchanged.
+- **Resume.** Click `Race hervatten met …`, then `Race hervatten` in dialog `Race hervatten?`. The button becomes `Klok …` again and `race.raceFinishedAt` is `null`.
 - **Empty queue.** On a run where nobody waits (use `run.rpc().runners.setStatus.mutate({ id, status: 'warming_up' })` for each waiting runner as setup), the button reads `Geen loper klaar` and is disabled, and Space changes nothing.
 - **Proof.** `run.proof(page, 'timing-…')` before and after each press. The lap's `durationMs` in `/api/history?scope=full` is the side effect to quote.
 

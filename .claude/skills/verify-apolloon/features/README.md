@@ -14,7 +14,7 @@ This folder is the maintained source for verifying what operators and spectators
 - Drive scripts import `openRun` from `scripts/drive.mjs` and run with `APOLLOON_VERIFY_RUN=<run>`.
 - Use `getByRole` with the exact Dutch accessible name. Fall back to the CSS classes named here only where the app has no accessible name (queue rows, display bands).
 - `run.rpc()` is for setup only. The action under test is a click or key press on the page.
-- Pages that link laptops or behave differently on the desktop need `run.newPage({ electron: true })`; the feature file says when.
+- Only failover behaves differently for the desktop app: a page that should stay on its own laptop needs `run.newPage({ electron: true })`. Linking works from any page.
 - Wait for a role or text to appear. Do not sleep, except for the app's own time rules (the 20 s short-lap question).
 
 ## Proof and skip reporting

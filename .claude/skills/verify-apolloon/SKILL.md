@@ -88,8 +88,8 @@ APOLLOON_VERIFY_RUN=my-check node /path/to/your-drive.mjs
 
 What the library gives you:
 
-- `run.newPage({ laptop, electron, viewport })` opens a page. Pass `electron: true` to send the Electron user agent: linking laptops (`Koppelen`) and some Beheer controls only appear for it, and the failover behavior differs (browsers move to another laptop, the Electron app stays on its own).
-- `run.electronPage()` returns the page inside the real desktop window started by `verify.mjs electron`. `window.apolloonDesktop.window.*` can be called through `page.evaluate`. `maximize()` never fires its event on this Hyprland desktop; fullscreen does.
+- `run.newPage({ laptop, electron, viewport })` opens a page. Pass `electron: true` to send the Electron user agent. Only failover reads it: a browser moves to another laptop, the Electron app stays on its own. Desktop-only panels need the real bridge from `run.electronPage()`, not the user agent.
+- `run.electronPage()` returns the page inside the real desktop window started by `verify.mjs electron`. `window.apolloonDesktop.window.*` can be called through `page.evaluate`. `maximize()` never fires its event on this Hyprland desktop, and fullscreen only follows a real F11 key, which the headless window never gets (see `features/desktop-window.md`).
 - `run.api(route, laptop)` reads `/api/state`, `/api/history?scope=full`, `/api/cluster/status`, `/api/health`, `/api/registrations`, or `/api/export/*`.
 - `run.rpc(laptop)` is a tRPC client. Use it only to put the app into the state a check needs (for example moving runners to `waiting`), never for the action you are proving.
 - `run.note(text)` appends a line to the evidence folder's `actions.log`.
