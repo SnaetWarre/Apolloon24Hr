@@ -84,7 +84,7 @@ For hosting the app directly on the VPS without a laptop tunnel, see `docs/vps-d
 
 1. Connect the three Electron laptops to the event router by Ethernet.
 2. Start Apolloon Telsysteem on all three and link them (see [Linked laptops](#linked-laptops)).
-3. Allow the firewall prompt for port `5173` if Windows asks.
+3. On Windows, the installer asks once for permission to open the firewall (TCP `5173`, UDP `45737`). If someone said no, use **Vast netwerkadres** in Beheer › Systeem, which opens the same rules.
 4. Copy the Event URL with **Adres voor andere laptop kopiëren** on Overzicht, or from the bottom of the sidebar.
 5. Open that Event URL on the TVs and any other screen. Do not use `localhost` on those.
 6. Pick a page from the sidebar:

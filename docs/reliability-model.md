@@ -108,7 +108,9 @@ reservation on the event router, or, when the router cannot be configured,
 Beheer › Systeem & herstel › Vast netwerkadres on each laptop. That panel pins
 the wired adapter through the operating system's permission prompt, opens TCP
 5173 and UDP 45737 in the firewall, and switches the adapter back to DHCP
-after the event; its scripts are also downloadable for manual use.
+after the event; its scripts are also downloadable for manual use. On
+Windows the installer already opens the same two firewall rules (it asks for
+permission once, only when a rule is missing) and removes them on uninstall.
 
 ## Backup Policy
 

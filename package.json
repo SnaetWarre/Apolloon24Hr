@@ -118,7 +118,13 @@
     "win": {
       "target": "nsis",
       "icon": "build/icon.ico",
-      "artifactName": "Apolloon-Telsysteem-${version}-windows-${arch}-setup.${ext}"
+      "artifactName": "Apolloon-Telsysteem-${version}-windows-${arch}-setup.${ext}",
+      "extraResources": [
+        {
+          "from": "build/apolloon-firewall.ps1",
+          "to": "apolloon-firewall.ps1"
+        }
+      ]
     },
     "linux": {
       "target": [
@@ -140,7 +146,8 @@
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "include": "build/installer.nsh"
     }
   },
   "allowScripts": {

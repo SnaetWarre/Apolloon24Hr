@@ -64,6 +64,9 @@ jobs:
       - name: Smoke test Windows package
         run: node scripts/package-smoke.mjs
 
+      - name: Check the installer opens and closes the firewall
+        run: node scripts/package-firewall.mjs
+
       - name: Keep the unpacked app for the Windows system check
         uses: actions/upload-artifact@v7
         with:
