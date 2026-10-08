@@ -1,6 +1,6 @@
 import type { Label, LapRecord, PublicRecordMode, RaceState, Runner } from '../types';
 import { compareLabels } from '../../shared/labelOrder';
-import { MIN_LAP_MS } from './pressTiming';
+import { MAX_PLAUSIBLE_LAP_MS, MIN_LAP_MS } from '../../shared/lapTimes';
 
 export type AnalysisFilters = {
   enabledLabelIds: string[] | null;
@@ -60,12 +60,6 @@ export type FastestLapWindow = {
   lap: LapRecord;
   windowIndex: number;
 };
-
-/**
- * A lap this long means nobody handed off (the race sat idle or someone forgot
- * the button). It still counts as a lap, but its time would wreck every average.
- */
-export const MAX_PLAUSIBLE_LAP_MS = 10 * 60_000;
 
 // A lap under MIN_LAP_MS is a double press. Like a forgotten handoff it counts as a lap, but not as a lap time.
 export function hasPlausibleDuration(lap: Pick<LapRecord, 'durationMs'>): boolean {

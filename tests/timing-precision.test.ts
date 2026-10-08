@@ -35,7 +35,8 @@ test('a press is timed from its input event and measures the lap on one monotoni
 });
 
 test('a press soon after the start is a too-short lap, by the monotonic lap when there is one', async () => {
-  const { MIN_LAP_MS, tooShortLapMs } = await import('../src/lib/pressTiming.ts');
+  const { MIN_LAP_MS } = await import('../shared/lapTimes.ts');
+  const { tooShortLapMs } = await import('../src/lib/pressTiming.ts');
   const startedAt = 1_000_000;
   assert.equal(tooShortLapMs({ pressedAt: startedAt + 377 }, startedAt), 377, 'a double tap');
   assert.equal(tooShortLapMs({ pressedAt: startedAt + MIN_LAP_MS }, startedAt), null, 'long enough');

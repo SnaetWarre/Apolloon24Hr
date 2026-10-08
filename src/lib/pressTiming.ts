@@ -1,3 +1,4 @@
+import { MIN_LAP_MS } from '../../shared/lapTimes';
 import { nowMs } from './time';
 
 /** When a timing press happened, independent of how long the request takes. */
@@ -30,9 +31,6 @@ export function rememberLapStart(press: PressTime, eventTime: number): void {
 export function forgetLapStart(): void {
   previousPress = null;
 }
-
-/** Real laps take minutes; a lap shorter than this is a double press, so Timing asks before it counts. */
-export const MIN_LAP_MS = 20_000;
 
 /** How long the running lap lasted at `press`, if that is too short to be a real lap. */
 export function tooShortLapMs(press: PressTime, activeStartedAt: number | null): number | null {

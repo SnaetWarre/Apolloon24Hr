@@ -90,6 +90,45 @@ test('undo after finishing reopens the race and keeps the laps', async () => {
   }
 });
 
+test('a double press or a forgotten handoff counts as a lap but not as a lap time', async () => {
+  fs.rmSync(dataPath, { recursive: true, force: true });
+  const db = await import('../server/db.ts');
+
+  try {
+    await db.initDb();
+    const [tuur, lien] = ['Tuur', 'Lien'].map((name, index) =>
+      db.insertRunner({ name, runnerNumber: String(index + 1) })
+    );
+    const handoffTo = (waitingId: string, nowMs: number) => {
+      db.updateRunnerStatus({ id: waitingId, status: 'waiting', statusSince: nowMs - 1 });
+      db.performHandoff(nowMs);
+    };
+    handoffTo(tuur.id, 1_000);
+    handoffTo(lien.id, 1_095); // Tuur: a double press counted with Toch afklokken
+    handoffTo(tuur.id, 91_095); // Lien: 90 s
+    handoffTo(lien.id, 181_095); // Tuur: 90 s
+    handoffTo(tuur.id, 181_200); // Lien: 105 ms, another double press
+    handoffTo(lien.id, 901_200); // Tuur: 12 min, nobody pressed
+
+    const tuurStats = db.getRunnerById(tuur.id);
+    assert.equal(tuurStats?.lapCount, 3);
+    assert.equal(tuurStats?.bestLapMs, 90_000);
+    assert.equal(tuurStats?.averageLapMs, 90_000);
+    assert.equal(tuurStats?.slowestLapMs, 90_000);
+    assert.equal(tuurStats?.lastLapMs, 720_000);
+    assert.equal(tuurStats?.totalTimeMs, 95 + 90_000 + 720_000);
+
+    const lienStats = db.getAllRunners().find((runner) => runner.id === lien.id);
+    assert.equal(lienStats?.lapCount, 2);
+    assert.equal(lienStats?.bestLapMs, 90_000);
+    assert.equal(lienStats?.averageLapMs, 90_000);
+  } finally {
+    // Windows cannot delete a database file that is still open.
+    db.closeDb();
+    fs.rmSync(dataPath, { recursive: true, force: true });
+  }
+});
+
 test('undo reverts the latest handoff when two share the same moment', async () => {
   fs.rmSync(dataPath, { recursive: true, force: true });
   const db = await import('../server/db.ts');
