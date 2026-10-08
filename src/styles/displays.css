@@ -362,8 +362,8 @@ html[data-display-tone="light"] body {
 /* ---------- Binnenscherm ---------- */
 .display-root--inside {
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
-  gap: 2vh;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  gap: 1.6vh;
   height: calc(100vh - var(--titlebar-h));
   padding: 2.6vh 2.4vw;
   overflow: hidden;
@@ -401,66 +401,48 @@ html[data-display-tone="light"] body {
   letter-spacing: -0.02em;
 }
 
-.inside-live {
-  display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(0, 2fr);
-  gap: 1.2vw;
-}
-
 .inside-now {
-  display: grid;
-  align-content: start;
-  gap: 0.8vh;
-  padding: 2.2vh 1.6vw;
-  border-radius: 0.7vw;
-  background: var(--apolloon-blue);
-  color: #FFFFFF;
+  display: flex;
+  align-items: baseline;
+  gap: 0.6vw;
+  min-width: 0;
+  color: var(--d-ink-2);
+  font-size: clamp(16px, 1.25vw, max(26px, min(1.3542vw, 2.4074vh)));
 }
 
 .inside-now__label {
   display: inline-flex;
   align-items: center;
-  gap: 0.5em;
-  color: rgb(255 255 255 / 0.85);
-  font-size: clamp(14px, 1.05vw, max(22px, min(1.1458vw, 2.037vh)));
+  gap: 0.6em;
+  color: var(--d-ink-3);
   font-weight: 500;
 }
 
 /* 0.5em dot + 0.6em ring each side. */
 .inside-now__label .live-dot {
   --live-dot-size: 0.5em;
-  --live-ring: #FFFFFF;
+  --live-ring: var(--d-accent);
   --live-ring-scale: 3.4;
 }
 
 .inside-now__runner {
-  display: block;
-  font-size: clamp(28px, 2.5vw, max(54px, min(2.8125vw, 5vh)));
+  display: inline-block;
+  color: var(--d-ink);
   font-weight: 650;
-  line-height: 1.1;
-  letter-spacing: -0.03em;
+  letter-spacing: -0.02em;
   overflow-wrap: anywhere;
 }
 
-.inside-now__time {
-  font-size: clamp(56px, 5vw, max(108px, min(5.625vw, 10vh)));
-  font-weight: 650;
-  line-height: 1;
-  letter-spacing: -0.05em;
-}
-
 .inside-now__next {
-  margin-top: 0.4vh;
-  padding-top: 1.2vh;
-  border-top: 1px solid rgb(255 255 255 / 0.3);
-  color: rgb(255 255 255 / 0.8);
-  font-size: clamp(15px, 1.15vw, max(24px, min(1.25vw, 2.2222vh)));
+  margin-left: 0.6vw;
+  padding-left: 1.2vw;
+  border-left: 1px solid var(--d-line);
 }
 
 .inside-now__next strong {
   display: inline-block;
-  color: #FFFFFF;
-  font-weight: 550;
+  color: var(--d-ink);
+  font-weight: 600;
 }
 
 .inside-totals dd.value-tick {
@@ -468,28 +450,103 @@ html[data-display-tone="light"] body {
 }
 
 .inside-recent-laps {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 1.2vw;
-}
-
-.recent-lap-row {
-  display: flex;
-  flex-direction: column;
-  gap: 0.8vh;
   min-width: 0;
-  padding: 2vh 1.2vw;
+  padding: 0.4vh 1.4vw;
   border: 1px solid var(--d-line);
   border-radius: 0.7vw;
   background: var(--d-surface);
 }
 
-.recent-lap-row.is-latest {
-  border-color: var(--apolloon-blue);
-  box-shadow: inset 0 0 0 1px var(--apolloon-blue);
+.recent-lap-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: inherit;
 }
 
-/* The lap that just landed slides in from the track side; the older cards shift over. */
+.recent-lap-table th,
+.recent-lap-table td {
+  padding: 0.45vh 0.6vw;
+  border: 0;
+  background: transparent;
+  line-height: 1.15;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: none;
+}
+
+.recent-lap-table th {
+  position: static;
+  color: var(--d-ink-3);
+  font-size: clamp(12px, 0.85vw, max(17px, min(0.8854vw, 1.5741vh)));
+  font-weight: 500;
+}
+
+.recent-lap-table th:nth-child(1) { width: 11%; }
+.recent-lap-table th:nth-child(3),
+.recent-lap-table th:nth-child(4),
+.recent-lap-table th:nth-child(5) { width: 14%; }
+
+.recent-lap-row td {
+  border-top: 1px solid var(--d-line);
+}
+
+.recent-lap-row:hover td {
+  background: transparent;
+}
+
+.recent-lap-when {
+  color: var(--d-ink-3);
+  font-size: clamp(14px, 1.05vw, max(22px, min(1.1458vw, 2.037vh)));
+}
+
+.recent-lap-badge {
+  display: inline-block;
+  padding: 0.2em 0.55em;
+  border-radius: 0.3em;
+  background: var(--apolloon-blue);
+  color: #FFFFFF;
+  font-size: clamp(11px, 0.75vw, max(15px, min(0.7813vw, 1.3889vh)));
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  vertical-align: middle;
+}
+
+.recent-lap-runner {
+  font-size: clamp(18px, 1.35vw, max(28px, min(1.4583vw, 2.5926vh)));
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.recent-lap-number {
+  margin-left: 0.8em;
+  color: var(--d-ink-3);
+  font-size: 0.6em;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+.recent-lap-time {
+  color: var(--d-ink-2);
+  font-size: clamp(16px, 1.15vw, max(24px, min(1.25vw, 2.2222vh)));
+  font-weight: 500;
+}
+
+.recent-lap-time--current {
+  color: var(--d-ink);
+  font-size: clamp(20px, 1.6vw, max(32px, min(1.6667vw, 2.963vh)));
+  font-weight: 650;
+  letter-spacing: -0.04em;
+}
+
+.recent-lap-row.is-latest .recent-lap-time--current {
+  color: var(--d-accent);
+}
+
+/* The lap that just landed slides in from the track side; the older rows shift down. */
 .recent-lap-row.is-new {
   animation: display-slide-in var(--dur-3) var(--ease-out) backwards;
 }
@@ -503,53 +560,6 @@ html[data-display-tone="light"] body {
     opacity: 1;
     transform: none;
   }
-}
-
-.recent-lap-card-header {
-  color: var(--d-ink-3);
-  font-size: clamp(13px, 0.95vw, max(20px, min(1.0417vw, 1.8519vh)));
-}
-
-.recent-lap-runner {
-  font-size: clamp(20px, 1.6vw, max(34px, min(1.7708vw, 3.1481vh)));
-  font-weight: 600;
-  line-height: 1.15;
-  letter-spacing: -0.02em;
-  overflow-wrap: anywhere;
-}
-
-.recent-lap-times {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 1vh 1vw;
-  margin-top: auto;
-  padding-top: 1vh;
-}
-
-.recent-lap-time--current {
-  grid-column: 1 / -1;
-}
-
-.recent-lap-time span {
-  display: block;
-  color: var(--d-ink-3);
-  font-size: clamp(12px, 0.85vw, max(17px, min(0.8854vw, 1.5741vh)));
-}
-
-.recent-lap-time strong {
-  font-size: clamp(18px, 1.4vw, max(30px, min(1.5625vw, 2.7778vh)));
-  font-weight: 600;
-  letter-spacing: -0.02em;
-}
-
-.recent-lap-time--current strong {
-  font-size: clamp(34px, 3.1vw, max(66px, min(3.4375vw, 6.1111vh)));
-  line-height: 1;
-  letter-spacing: -0.045em;
-}
-
-.recent-lap-row.is-latest .recent-lap-time--current strong {
-  color: var(--d-accent);
 }
 
 .inside-board {
@@ -885,10 +895,6 @@ html[data-display-tone="light"] body {
   text-align: center;
 }
 
-.inside-recent-laps > .inside-empty {
-  grid-column: 1 / -1;
-}
-
 @media (prefers-reduced-motion: reduce) {
   .outside-record-flash,
   .record-flash-content span,
@@ -903,7 +909,6 @@ html[data-display-tone="light"] body {
 }
 
 @media (max-aspect-ratio: 4 / 3) {
-  .inside-live,
   .inside-board {
     grid-template-columns: minmax(0, 1fr);
   }

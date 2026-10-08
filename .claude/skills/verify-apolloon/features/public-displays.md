@@ -5,7 +5,7 @@ Binnenscherm (inside) and Buitenscherm (outside) are full-screen pages for the T
 ## Sub-features
 
 - `display-inside-now` shows the runner on the track and the next one (`Nu op de piste`, `Volgende:`).
-- `display-inside-recent` lists the last three runners (`Laatste 3 lopers`).
+- `display-inside-recent` lists the last six runners in a table (`Laatste 6 lopers`), newest on top with a `Net binnen` badge. The runner on the track has no live timer here: the inside screen shows the laps that are done.
 - `display-inside-ranking` ranks runners and compares label groups (`Ranking`, `Competities`).
 - `display-outside-bands` shows the current runner (`Nu op de piste`) and the next one (`Volgende loper`) in large bands.
 - `display-outside-flash` shows a new fastest lap large for 8 seconds.
@@ -24,7 +24,7 @@ Preconditions:
 - A large viewport, since these are TV pages: `run.newPage({ viewport: { width: 1920, height: 1080 } })`.
 
 - **Inside.** `await page.goto(run.url('/display/inside'))`. Wait for `page.getByRole('region', { name: 'Nu op de piste' })`. The runner name in it matches `race.activeRunnerId` in `/api/state`.
-- **Live update.** Open `/timing` in a second page and press Space (see `timing.md`). Without reloading, `.inside-now__runner` on the display changes to the new runner and `Laatste 3 lopers` gains a row.
+- **Live update.** Open `/timing` in a second page and press Space (see `timing.md`). Without reloading, `.inside-now__runner` on the display changes to the new runner and `Laatste 6 lopers` gains a row at the top.
 - **Outside.** `await page.goto(run.url('/display/outside'))`. The bands `.outside-band--current` and `.outside-band--next` show the active and next runner.
 - **Fastest-lap flash.** Make a handoff whose lap is faster than every earlier lap. `.outside-record-flash` appears and is gone about 8 s later.
 - **Proof.** Take `run.proof(page, 'display-…')` on the display page itself, before and after the action on Timing.
