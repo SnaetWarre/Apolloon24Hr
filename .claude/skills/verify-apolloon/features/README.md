@@ -44,5 +44,6 @@ Each feature file starts with an H1 title and one paragraph describing the user-
 - [Desktop window](./desktop-window.md) covers what only the Electron window adds: the title bar and the preload bridge.
 - [Beheer › Rondes](./laps-admin.md) covers fixing laps after the fact: moving one to another runner, splitting one, deleting one, and the marked laps.
 - [Activiteit](./activity.md) covers the change log in Beheer › Activiteit and the lines a runner profile save adds.
+- [Analyse › Exporteren](./analysis-export.md) covers the six export downloads in Analyse and checking them without a save dialog in the desktop window.
 
-Not mapped yet: Analyse (charts and the export links to `/api/export/*`), Tactiek, Ploegen & labels (night teams), Publiek, backup and restore in Systeem & herstel, the welcome screen on an `empty` laptop.
+Not mapped yet: the Analyse charts, Tactiek, Ploegen & labels (night teams), Publiek, backup and restore in Systeem & herstel, the welcome screen on an `empty` laptop.
