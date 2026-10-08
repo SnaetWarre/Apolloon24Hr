@@ -121,6 +121,9 @@ backup retention, and the event-day recovery runbook.
 
 - `scripts/seed-test-db.mjs`: deterministic and stress-test development data.
 - `scripts/ensure-lan-dev-firewall.mjs`: development firewall helper.
+- `build/installer.nsh` and `build/apolloon-firewall.ps1`: the Windows installer opens TCP 5173 and
+  UDP 45737 for the installed app (and removes Windows' own block rule for it), and the uninstaller
+  closes them again. `scripts/package-firewall.mjs` checks this on the CI's Windows runner.
 - `scripts/rehearse.mjs` (`npm run rehearse`) and `scripts/rehearse-hardware.mjs`: the chaos
   rehearsal, on this machine or on the three event laptops over SSH (`docs/rehearse-hardware.md`).
 - `scripts/validation/`: Playwright browser checks; `run.mjs` runs each against its own seeded server.

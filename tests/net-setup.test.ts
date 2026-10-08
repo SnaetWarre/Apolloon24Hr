@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import {
   buildLinuxRevertDhcpScript,
@@ -205,15 +206,24 @@ test('Windows waits for the UAC prompt and reports a refusal or a missing cable'
   assert.equal(isWirelessWindowsAdapter('Ethernet 2'), false);
 });
 
+test('the installer opens the same firewall rules as Vast netwerkadres, so either finds and removes them', () => {
+  const ruleNames = (script: string) => [...script.matchAll(/'(Apolloon (?:TCP|UDP) \d+)'/g)].map((match) => match[1]);
+  const installer = ruleNames(readFileSync('build/apolloon-firewall.ps1', 'utf8'));
+  assert.deepEqual(installer, [...new Set(ruleNames(buildWindowsSetStaticScript('192.168.1.211', 24, null)))]);
+  assert.deepEqual(installer, ['Apolloon TCP 5173', 'Apolloon UDP 45737']);
+});
+
 // The elevated scripts cannot run in CI (they would repoint the runner's own adapter), so
-// PowerShell parses them and looks up every cmdlet they call, firewall rules included.
+// PowerShell parses them and looks up every cmdlet they call, firewall rules included,
+// apart from functions the script defines itself.
 const CHECK_POWERSHELL = [
   '$errors = $null',
   '$ast = [System.Management.Automation.Language.Parser]::ParseInput($env:APOLLOON_SCRIPT, [ref]$null, [ref]$errors)',
   '$errors | ForEach-Object { "parse error: $($_.Message)" }',
+  '$own = $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true) | ForEach-Object { $_.Name }',
   '$ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.CommandAst] }, $true) |',
   '  ForEach-Object { $_.GetCommandName() } | Sort-Object -Unique |',
-  '  Where-Object { $_ -and -not (Get-Command $_ -ErrorAction SilentlyContinue) } |',
+  '  Where-Object { $_ -and $_ -notin $own -and -not (Get-Command $_ -ErrorAction SilentlyContinue) } |',
   '  ForEach-Object { "unknown command: $_" }',
 ].join('\n');
 
@@ -226,6 +236,7 @@ test(
       buildWindowsSetStaticScript('192.168.1.211', 24, '192.168.1.1'),
       buildWindowsRevertDhcpScript(),
       buildWindowsLauncherCommand('QUJD'),
+      readFileSync('build/apolloon-firewall.ps1', 'utf8'),
     ];
     for (const script of scripts) {
       const problems = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', CHECK_POWERSHELL], {
