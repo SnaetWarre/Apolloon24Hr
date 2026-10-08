@@ -1,13 +1,16 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  buildFastestLapWindows,
+  buildKpis,
   buildRollingLapTrend,
+  buildRunnerInsights,
   buildTimeBuckets,
   filterLaps,
   isFastestLapForRecordMode,
   toggleLabelFilter,
 } from '../src/lib/analysis.ts';
-import type { Label, LapRecord, RaceState } from '../src/types.ts';
+import type { Label, LapRecord, RaceState, Runner } from '../src/types.ts';
 
 test('analysis hour buckets use Brussels clock hours from the race start', () => {
   const raceStartedAt = Date.parse('2026-10-20T20:00:00+02:00');
@@ -175,5 +178,57 @@ test('a double press under 20 s never flashes as a record and is no record to be
   for (const mode of ['day', 'hour', 'two_hour'] as const) {
     assert.equal(isFastestLapForRecordMode(doublePress, realLaps, race, mode), false, mode);
     assert.equal(isFastestLapForRecordMode(nextLap, [doublePress, ...realLaps], race, mode), true, mode);
+  }
+});
+
+test('a double press under 20 s stays out of the Analyse lap times', () => {
+  const raceStartedAt = 1_000_000;
+  const race = {
+    id: 1,
+    activeRunnerId: null,
+    activeStartedAt: null,
+    raceStartedAt,
+    raceFinishedAt: null,
+    activeLabels: [],
+  } satisfies RaceState;
+  let finishedAt = raceStartedAt;
+  const lap = (id: string, durationMs: number): LapRecord => {
+    finishedAt += durationMs;
+    return {
+      id,
+      runnerId: 'runner-1',
+      runnerName: 'Runner',
+      runnerNumber: '1',
+      startedAt: finishedAt - durationMs,
+      finishedAt,
+      durationMs,
+      source: 'handoff',
+      createdAt: finishedAt,
+      labels: [],
+      lapNumber: 1,
+    };
+  };
+  const laps = [lap('lap-1', 70_000), lap('lap-2', 90_000), lap('double', 87), lap('lap-4', 80_000)];
+
+  const kpis = buildKpis(laps, race);
+  assert.equal(kpis.count, 4);
+  assert.equal(kpis.bestMs, 70_000);
+  assert.equal(kpis.averageMs, 80_000);
+  assert.equal(kpis.medianMs, 80_000);
+
+  const [insight] = buildRunnerInsights([{ id: 'runner-1', name: 'Runner', runnerNumber: '1' }] as Runner[], laps);
+  assert.equal(insight?.count, 3);
+  assert.equal(insight?.bestMs, 70_000);
+
+  assert.deepEqual(
+    buildTimeBuckets(laps, race).map((bucket) => [bucket.count, bucket.averageMs]),
+    [[4, 80_000]]
+  );
+  for (const mode of ['day', 'hour', 'two_hour'] as const) {
+    assert.deepEqual(
+      buildFastestLapWindows(laps, race, mode).map((window) => window.lap.id),
+      ['lap-1'],
+      mode
+    );
   }
 });
