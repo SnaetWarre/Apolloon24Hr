@@ -154,6 +154,28 @@ try {
     'PASS Space inside a timing confirmation cancels it without recording a handoff, and Enter clocks after it'
   );
 
+  // A clicked sidebar control keeps focus, but Enter still clocks; only a control reached with Tab takes Enter.
+  const themeSwitch = page.getByRole('radiogroup', { name: 'Thema', exact: true });
+  const themeBefore = themeSwitch.getByRole('radio', { checked: true });
+  const themeBeforeName = await themeBefore.getAttribute('aria-label');
+  await themeSwitch.getByRole('radio', { name: 'Donker', exact: true }).click();
+  await page.keyboard.press('Enter');
+  await quickPrompt.waitFor();
+  await page.keyboard.press('Space');
+  await quickPrompt.waitFor({ state: 'detached' });
+  assert.deepEqual((await snapshot()).race, raceAfterUndoPrompt);
+  await themeSwitch.getByRole('radio', { name: themeBeforeName, exact: true }).click();
+  const adminLink = page
+    .getByRole('navigation', { name: 'Hoofdnavigatie' })
+    .getByRole('link', { name: 'Beheer', exact: true });
+  for (let step = 0; step < 10 && !(await adminLink.evaluate((link) => link === document.activeElement)); step++) {
+    await page.keyboard.press('Shift+Tab');
+  }
+  await page.keyboard.press('Enter');
+  await page.waitForURL(/\/admin/);
+  assert.deepEqual((await snapshot()).race, raceAfterUndoPrompt, 'Enter on a link reached with Tab follows it');
+  console.log('PASS Enter clocks after a click in the sidebar, and still presses a control reached with Tab');
+
   await rpc.runners.setStatus.mutate({ id: firstRunner.id, status: 'warming_up' });
   await page.goto(`${baseUrl}/queue`);
   await page.locator('button.queue-identity').filter({ hasText: firstRunner.name }).click();
