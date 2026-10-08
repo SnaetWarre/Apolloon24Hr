@@ -48,11 +48,11 @@ export function buildDiagnosticsText({
         ]
           .filter(Boolean)
           .join(', ');
-        lines.push(`  ${member.url} (${state})`);
+        lines.push(`  ${member.name ? `${member.name} ` : ''}${member.url} (${state})`);
       }
       for (const found of cluster.nearby) {
         lines.push(
-          `  gevonden: ${found.url} (versie ${found.appVersion}${found.compatible ? '' : ', niet compatibel'})`
+          `  gevonden: ${found.name ? `${found.name} ` : ''}${found.url} (versie ${found.appVersion}${found.compatible ? '' : ', niet compatibel'})`
         );
       }
     } else {

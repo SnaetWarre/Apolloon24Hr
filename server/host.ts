@@ -8,6 +8,8 @@ export const PUBLIC_APP_PORT = readPort(process.env.PUBLIC_APP_PORT, SERVER_PORT
 export const DISCOVERY_PORT = readPort(process.env.CLUSTER_DISCOVERY_PORT, 45737);
 const EXPLICIT_PUBLIC_HOST = process.env.PUBLIC_HOST?.trim() || null;
 const HOST_CACHE_MS = 1_000;
+/** This computer's name, which the screens show for a laptop instead of its address. Tests on one machine set their own. */
+export const LAPTOP_NAME = laptopName(process.env.CLUSTER_LAPTOP_NAME || os.hostname());
 
 let cachedLanHost: string | null = null;
 let cachedLanHostAt = 0;
@@ -19,6 +21,11 @@ export function hostInfo(): HostInfo {
     port: PUBLIC_APP_PORT,
     url: `http://${publicHost}:${PUBLIC_APP_PORT}`,
   };
+}
+
+/** A computer name as the screens show it: without its network domain, and short enough for a row. */
+export function laptopName(raw: string | null | undefined): string | null {
+  return raw?.trim().split('.')[0]?.trim().slice(0, 64) || null;
 }
 
 function resolvePublicHost(): string {

@@ -7,6 +7,7 @@ import { useConfirm } from '../ConfirmDialog';
 import type { BackupRecord } from '../../types';
 import { AdminNoticeBanner, useAdminAction } from './AdminNotice';
 import { formatFileSize, formatRelativeAge } from './adminFormat';
+import { laptopWithAddress } from './useJoinGroup';
 
 const SHOWN_AT_FIRST = 8;
 
@@ -61,7 +62,7 @@ export function RestorePanel({ runnerCount }: { runnerCount: number }) {
     await run(
       () => restoreBackup(record.fileName),
       (result) =>
-        `Teruggezet naar ${formatMoment(record.createdAt)}: ${result.runners} lopers, ${result.laps} rondes. De toestand van daarvoor staat op laptop ${result.safetyHostUrl}, in ${result.safetyBackup}. Open daar Systeem & herstel om dit ongedaan te maken.`,
+        `Teruggezet naar ${formatMoment(record.createdAt)}: ${result.runners} lopers, ${result.laps} rondes. De toestand van daarvoor staat op laptop ${laptopWithAddress({ name: result.safetyHostName, url: result.safetyHostUrl })}, in ${result.safetyBackup}. Open daar Systeem & herstel om dit ongedaan te maken.`,
       'Terugzetten mislukt'
     );
   }

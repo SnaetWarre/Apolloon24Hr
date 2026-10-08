@@ -10,6 +10,7 @@ function member(hostId: string, overrides: Partial<ClusterMemberStatus> = {}): C
   return {
     hostId,
     url: `http://${hostId}:5173`,
+    name: hostId.toUpperCase(),
     self: hostId === 'host-a',
     leader: hostId === 'host-a',
     reachable: true,
@@ -22,6 +23,7 @@ function threeLaptops(overrides: Partial<ClusterStatus> = {}): ClusterStatus {
   return {
     enabled: true,
     hostId: 'host-a',
+    hostName: 'HOST-A',
     clusterId: 'cluster',
     appVersion: '4.0.0',
     schemaVersion: 13,
@@ -83,6 +85,10 @@ test('a missing laptop warns while the others carry on, and too few laptops bloc
     members: [member('host-a'), member('host-b'), member('host-c', { reachable: false, caughtUp: false })],
   });
   assert.equal(readinessSummary(buildEventReadiness(degraded, now)), 'warning');
+  assert.match(
+    buildEventReadiness(degraded, now).find((check) => check.id === 'replica')?.detail ?? '',
+    /zet HOST-C weer aan/
+  );
   assert.equal(deriveSystemStatus(degraded, null, now)?.title, 'Eén laptop onbereikbaar');
 
   const twoLaptops = threeLaptops({ members: [member('host-a'), member('host-b')] });

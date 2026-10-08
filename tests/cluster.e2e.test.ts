@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
 import crypto from 'node:crypto';
+import dgram from 'node:dgram';
 import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
@@ -20,6 +21,7 @@ type RunningServer = {
   port: number;
   baseUrl: string;
   dataPath: string;
+  name?: string;
   output: () => string;
   /** Set when the test stops it; any other exit is reported with the server's output. */
   stopping: boolean;
@@ -229,27 +231,46 @@ test('three laptops form one group, every laptop writes, and each holds everythi
   const root = testRoot('group');
   const servers: RunningServer[] = [];
   try {
-    const first = await startServer({ port: await freePort(), dataPath: path.join(root, 'first') });
+    const first = await startServer({ port: await freePort(), dataPath: path.join(root, 'first'), name: 'LAPTOP-EEN' });
     servers.push(first);
     await client(first).runners.create.mutate({ name: 'Before the group', runnerNumber: 'A-1' });
     await client(first).runners.create.mutate({ name: 'Also before the group', runnerNumber: 'A-2' });
-    const second = await startServer({ port: await freePort(), dataPath: path.join(root, 'second') });
+    const second = await startServer({
+      port: await freePort(),
+      dataPath: path.join(root, 'second'),
+      name: 'LAPTOP-TWEE',
+    });
     servers.push(second);
     await client(second).runners.create.mutate({ name: 'Replaced by the join', runnerNumber: 'B-1' });
-    // A laptop on its own lists the laptops it could join, without anyone typing an address.
+    // A laptop on its own lists the laptops it could join by their computer name, without anyone typing an address.
     await waitFor(async () =>
       (await fetchStatus(second)).nearby.some(
-        (group) => group.url === first.baseUrl && group.runners === 2 && group.link === 'join'
+        (group) =>
+          group.url === first.baseUrl && group.name === 'LAPTOP-EEN' && group.runners === 2 && group.link === 'join'
       )
     );
     // The laptop with more runners keeps them: Koppelen there sends the operator to the other laptop.
     await assert.rejects(client(first).cluster.join.mutate({ url: second.baseUrl }), /Druk op Koppelen op/);
+    // A laptop of an older version announces itself without a name; it is still listed, by its address.
+    const oldLaptop = 'http://127.0.0.1:1';
+    await waitFor(async () => {
+      await announceWithoutName(oldLaptop);
+      return (await fetchStatus(second)).nearby.some((group) => group.url === oldLaptop && group.name === null);
+    });
     const joined = await join(second, first);
     assert.match(joined.backupFile ?? '', /pre-join/);
-    const third = await startServer({ port: await freePort(), dataPath: path.join(root, 'third') });
+    const third = await startServer({
+      port: await freePort(),
+      dataPath: path.join(root, 'third'),
+      name: 'LAPTOP-DRIE',
+    });
     servers.push(third);
     await waitFor(async () => (await fetchStatus(third)).nearby.some((group) => group.laptops === 2));
-    assert.equal((await fetchStatus(third)).nearby.length, 1, 'the two linked laptops are listed as one group');
+    assert.equal(
+      (await fetchStatus(third)).nearby.filter((group) => group.url !== oldLaptop).length,
+      1,
+      'the two linked laptops are listed as one group'
+    );
     // Joining through a laptop that does not lead works too.
     await join(third, second);
     await waitFor(async () => (await fetchStatus(first)).state === 'healthy', 10_000);
@@ -278,6 +299,12 @@ test('three laptops form one group, every laptop writes, and each holds everythi
     assert.equal(status.members.length, 3);
     assert.equal(status.majority, 2);
     assert.deepEqual(status.memberUrls.sort(), [first.baseUrl, second.baseUrl].sort());
+    assert.equal(status.hostName, 'LAPTOP-DRIE');
+    assert.deepEqual(Object.fromEntries(status.members.map((member) => [member.url, member.name])), {
+      [first.baseUrl]: 'LAPTOP-EEN',
+      [second.baseUrl]: 'LAPTOP-TWEE',
+      [third.baseUrl]: 'LAPTOP-DRIE',
+    });
   } catch (error) {
     throw withServerOutput(error, ...servers);
   } finally {
@@ -357,7 +384,11 @@ test('a laptop that was off catches up by itself, also across many batches', { t
         )
       );
     }
-    const restarted = await startServer({ port: offline.port, dataPath: offline.dataPath });
+    // Its announcements stopped long ago; the group still knows its name.
+    const offlineStatus = (await fetchStatus(leader)).members.find((member) => member.url === offline.baseUrl);
+    assert.equal(offlineStatus?.reachable, false);
+    assert.equal(offlineStatus?.name, offline.name);
+    const restarted = await startServer({ port: offline.port, dataPath: offline.dataPath, name: offline.name });
     servers[servers.indexOf(offline)] = restarted;
     await waitForSameState(leader, restarted, 20_000);
     assert.equal((await fetchStatus(restarted)).role, 'follower');
@@ -682,7 +713,13 @@ function client(server: RunningServer) {
 /** Three laptops in one group, like at the event; pushed onto `servers` as they start so they are always stopped. */
 async function startGroup(root: string, servers: RunningServer[]): Promise<void> {
   for (const name of ['a', 'b', 'c']) {
-    servers.push(await startServer({ port: await freePort(), dataPath: path.join(root, name) }));
+    servers.push(
+      await startServer({
+        port: await freePort(),
+        dataPath: path.join(root, name),
+        name: `LAPTOP-${name.toUpperCase()}`,
+      })
+    );
   }
   for (const server of servers.slice(1)) await join(server, servers[0]);
   await waitFor(async () => (await fetchStatus(servers[0])).state === 'healthy', 10_000);
@@ -726,6 +763,7 @@ async function startServer(options: {
   dataPath: string;
   clusterEnabled?: boolean;
   appVersion?: string;
+  name?: string;
 }): Promise<RunningServer> {
   fs.mkdirSync(options.dataPath, { recursive: true });
   const chunks: string[] = [];
@@ -748,6 +786,7 @@ async function startServer(options: {
       CLUSTER_DISCOVERY_ADDRESS: '127.255.255.255',
       CLUSTER_DISCOVERY_PORT: String(discoveryPort),
       CLUSTER_DISCOVERY_INTERVAL_MS: '200',
+      CLUSTER_LAPTOP_NAME: options.name ?? '',
       BACKUP_ENABLED: 'false',
       APOLLOON_RELEASE_ID: 'e2e-test-release',
       APOLLOON_APP_VERSION: options.appVersion || '1.0.0',
@@ -761,6 +800,7 @@ async function startServer(options: {
     port: options.port,
     baseUrl: `http://127.0.0.1:${options.port}`,
     dataPath: options.dataPath,
+    name: options.name,
     output: () => chunks.join(''),
     stopping: false,
   };
@@ -775,6 +815,29 @@ async function startServer(options: {
     return (await fetch(`${server.baseUrl}/api/host-info`).catch(() => null))?.ok === true;
   });
   return server;
+}
+
+/** One announcement as a laptop of an older version sends it, without a computer name. */
+async function announceWithoutName(url: string): Promise<void> {
+  const beacon = {
+    app: 'apolloon',
+    hostId: 'old-laptop',
+    clusterId: 'old-group',
+    url,
+    appVersion: '0.9.0',
+    schemaVersion: 1,
+    leader: true,
+    groupSize: 1,
+    runners: 0,
+  };
+  const socket = dgram.createSocket('udp4');
+  try {
+    await new Promise<void>((resolve) => socket.bind(0, '127.0.0.1', resolve));
+    socket.setBroadcast(true);
+    await new Promise((resolve) => socket.send(JSON.stringify(beacon), discoveryPort, '127.255.255.255', resolve));
+  } finally {
+    socket.close();
+  }
 }
 
 async function stopServer(server: RunningServer | null): Promise<void> {

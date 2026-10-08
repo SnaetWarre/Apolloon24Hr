@@ -33,6 +33,7 @@ Preconditions:
 
 ## Gotchas
 
+- Every laptop of a run is named `LAPTOP-<index>` (`CLUSTER_LAPTOP_NAME`), so the rows show `LAPTOP-0`, not this machine's name.
 - Use `SIGSTOP`, not `SIGTERM`: a stopped server announces it is leaving, which is not what a dead laptop does. `verify.mjs down` sends `SIGCONT` before stopping, so frozen laptops still exit.
 - Koppelen works from either side: the laptop with fewer runners takes the other's data. On laptop 0 (40 runners) the empty laptops have a `Koppelen` button that brings them over; next to a laptop that holds fewer runners of its own it reads `Druk op Koppelen op die laptop.` instead. Laptop 1's welcome screen lists only laptops with runners.
 - With only one laptop left nothing saves until a second returns. That is correct, not a bug.

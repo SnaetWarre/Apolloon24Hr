@@ -23,7 +23,7 @@ Normal event setup:
 1. Plug the three Electron laptops into the same wired switch.
 2. Start Apolloon on the first laptop and import the registrations there.
 3. On the second and third laptop, open Beheer › Systeem & herstel.
-   The first laptop is listed by itself; click "Koppelen" next to it.
+   The first laptop is listed by itself, under its computer name; click "Koppelen" next to it.
 4. Check Beheer › Voorbereiding: all three laptops must be reachable.
 5. Open any laptop's Event URL on the TVs and other screens.
 ```
@@ -42,6 +42,7 @@ Developer overrides:
 CLUSTER_ENABLED=true             # enable linking laptops in development
 CLUSTER_DISCOVERY=false          # do not announce or listen on UDP 45737
 CLUSTER_SELF_URL=http://host:port  # address announced to other laptops (tests)
+CLUSTER_LAPTOP_NAME=LAPTOP-TIJD   # name shown to other laptops instead of the computer name (tests)
 ```
 
 Beheer › Voorbereiding has a wedstrijdgereedheid checklist for backup freshness, free disk space, and the linked laptops.

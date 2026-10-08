@@ -52,6 +52,7 @@ const REPLICATED_TABLES = [
   'temporary_team_members',
   'activity_log',
   'cluster_members',
+  'cluster_member_names',
   'forwarded_writes',
   'replication_log',
 ] as const;
