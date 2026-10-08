@@ -98,7 +98,7 @@ function ClusterPanel({
     const left = cluster.members.length - 1;
     const confirmed = await confirm({
       title: `${name} uit de groep halen?`,
-      message: `Doe dit alleen als deze laptop kapot of weg is. Staat hij nog aan, controleer dan de netwerkkabel: dan werkt hij vanzelf weer mee. Daarna is de groep ${countLabel(left, 'laptop', 'laptops')}, en is een wijziging bewaard zodra ${Math.floor(left / 2) + 1} laptops ze hebben. Koppel daarna een reservelaptop, zodat er weer één mag uitvallen. Komt ${name} later toch terug, dan werkt hij pas weer mee als je daar op Opnieuw koppelen drukt.`,
+      message: `Doe dit alleen als deze laptop kapot of weg is. Staat hij nog aan, controleer dan de netwerkkabel: dan werkt hij vanzelf weer mee. Daarna bestaat de groep uit ${countLabel(left, 'laptop', 'laptops')}, en is een wijziging bewaard zodra ${Math.floor(left / 2) + 1} laptops ze hebben. Koppel daarna een reservelaptop, zodat er weer één mag uitvallen. Komt ${name} later toch terug, dan werkt hij pas weer mee als je daar op Opnieuw koppelen drukt.`,
       confirmLabel: 'Uit de groep halen',
       tone: 'danger',
     });
@@ -260,20 +260,22 @@ function ClusterPanel({
               onJoin={() => void join(found.url, found)}
             />
           ))}
-          <p className="panel-copy">
-            {cluster.autoLink.enabled ? (
-              <>
-                Nog een laptop toevoegen? Start Apolloon op een lege laptop aan hetzelfde netwerk: die koppelt vanzelf.
-                Lukt dat niet, open dan op die laptop Beheer › Systeem & herstel en klik op Koppelen naast deze groep
-                (adres <strong>{hostUrl}</strong>).
-              </>
-            ) : (
-              <>
-                Nog een laptop toevoegen? Open op die laptop Beheer › Systeem & herstel en klik op Koppelen naast deze
-                groep (adres <strong>{hostUrl}</strong>).
-              </>
-            )}
-          </p>
+          {!cluster.removedFrom && (
+            <p className="panel-copy">
+              {cluster.autoLink.enabled ? (
+                <>
+                  Nog een laptop toevoegen? Start Apolloon op een lege laptop aan hetzelfde netwerk: die koppelt
+                  vanzelf. Lukt dat niet, open dan op die laptop Beheer › Systeem & herstel en klik op Koppelen naast
+                  deze groep (adres <strong>{hostUrl}</strong>).
+                </>
+              ) : (
+                <>
+                  Nog een laptop toevoegen? Open op die laptop Beheer › Systeem & herstel en klik op Koppelen naast deze
+                  groep (adres <strong>{hostUrl}</strong>).
+                </>
+              )}
+            </p>
+          )}
         </>
       )}
       <AdminNoticeBanner notice={joinNotice} />
