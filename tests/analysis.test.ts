@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildRollingLapTrend, buildTimeBuckets, filterLaps, toggleLabelFilter } from '../src/lib/analysis.ts';
+import {
+  buildRollingLapTrend,
+  buildTimeBuckets,
+  filterLaps,
+  isFastestLapForRecordMode,
+  toggleLabelFilter,
+} from '../src/lib/analysis.ts';
 import type { Label, LapRecord, RaceState } from '../src/types.ts';
 
 test('analysis hour buckets use Brussels clock hours from the race start', () => {
@@ -133,4 +139,41 @@ test('turning a label off and on again keeps laps without labels', () => {
     allLabelIds
   );
   assert.deepEqual(fromNone, { enabledLabelIds: null });
+});
+
+test('a double press under 20 s never flashes as a record and is no record to beat', () => {
+  const raceStartedAt = 1_000_000;
+  const race = {
+    id: 1,
+    activeRunnerId: null,
+    activeStartedAt: null,
+    raceStartedAt,
+    raceFinishedAt: null,
+    activeLabels: [],
+  } satisfies RaceState;
+  let finishedAt = raceStartedAt;
+  const lap = (id: string, durationMs: number): LapRecord => {
+    finishedAt += durationMs;
+    return {
+      id,
+      runnerId: 'runner-1',
+      runnerName: 'Runner',
+      runnerNumber: '1',
+      startedAt: finishedAt - durationMs,
+      finishedAt,
+      durationMs,
+      source: 'handoff',
+      createdAt: finishedAt,
+      labels: [],
+      lapNumber: 1,
+    };
+  };
+  const realLaps = [lap('lap-1', 75_000), lap('lap-2', 62_000)];
+  const doublePress = lap('lap-3', 9_000);
+  const nextLap = lap('lap-4', 50_000);
+
+  for (const mode of ['day', 'hour', 'two_hour'] as const) {
+    assert.equal(isFastestLapForRecordMode(doublePress, realLaps, race, mode), false, mode);
+    assert.equal(isFastestLapForRecordMode(nextLap, [doublePress, ...realLaps], race, mode), true, mode);
+  }
 });

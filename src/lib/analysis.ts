@@ -1,5 +1,6 @@
 import type { Label, LapRecord, PublicRecordMode, RaceState, Runner } from '../types';
 import { compareLabels } from '../../shared/labelOrder';
+import { MIN_LAP_MS } from './pressTiming';
 
 export type AnalysisFilters = {
   enabledLabelIds: string[] | null;
@@ -326,14 +327,16 @@ export function isFastestLapForRecordMode(
   race: RaceState,
   mode: PublicRecordMode
 ): boolean {
-  if (mode === 'off') return false;
-  if (mode === 'day') return previousLaps.every((lap) => latestLap.durationMs < lap.durationMs);
+  // A lap under MIN_LAP_MS is a double press: it never flashes and is no record to beat.
+  if (mode === 'off' || latestLap.durationMs < MIN_LAP_MS) return false;
+  const realLaps = previousLaps.filter((lap) => lap.durationMs >= MIN_LAP_MS);
+  if (mode === 'day') return realLaps.every((lap) => latestLap.durationMs < lap.durationMs);
 
   const startedAt = race.raceStartedAt ?? oldestLapTimestamp([latestLap, ...previousLaps]);
   if (startedAt == null) return false;
   const windowMs = recordWindowMs(mode);
   const latestWindow = recordWindowIndex(latestLap.finishedAt, startedAt, windowMs);
-  return previousLaps
+  return realLaps
     .filter((lap) => recordWindowIndex(lap.finishedAt, startedAt, windowMs) === latestWindow)
     .every((lap) => latestLap.durationMs < lap.durationMs);
 }
