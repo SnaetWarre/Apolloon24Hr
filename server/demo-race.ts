@@ -5,6 +5,7 @@ import { insertRunner } from './db/runners.js';
 import { getNextWaitingRunner, getMaxQueueIndex } from './db/queue.js';
 import { performHandoff } from './db/timing.js';
 import { isClusterEnabled } from './env.js';
+import { brusselsOffsetMs } from '../shared/time.js';
 
 /**
  * A race that runs itself, for the public test server (`DEMO_RACE=true`).
@@ -89,23 +90,6 @@ function plannedLapMs(runnerId: string, startedAt: number): number {
   const pace = MIN_LAP_MS + 2_000 + unit(`pace:${runnerId}`) * (MAX_LAP_MS - MIN_LAP_MS - 4_000);
   const noise = (unit(`lap:${runnerId}:${startedAt}`) - 0.5) * 8_000;
   return Math.round(Math.min(MAX_LAP_MS, Math.max(MIN_LAP_MS, pace + noise)));
-}
-
-const BRUSSELS_PARTS = new Intl.DateTimeFormat('en-GB', {
-  timeZone: 'Europe/Brussels',
-  hourCycle: 'h23',
-  year: 'numeric',
-  month: '2-digit',
-  day: '2-digit',
-  hour: '2-digit',
-  minute: '2-digit',
-  second: '2-digit',
-});
-
-function brusselsOffsetMs(atMs: number): number {
-  const parts = Object.fromEntries(BRUSSELS_PARTS.formatToParts(atMs).map((part) => [part.type, part.value]));
-  const asUtc = Date.UTC(+parts.year, +parts.month - 1, +parts.day, +parts.hour, +parts.minute, +parts.second);
-  return asUtc - Math.floor(atMs / 1000) * 1000;
 }
 
 /** The most recent 20:00 in Brussels at or before `nowMs`. */

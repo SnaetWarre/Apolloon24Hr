@@ -1,5 +1,6 @@
 import writeXlsxFile, { type Cell, type Sheet } from 'write-excel-file/node';
 import type { LapRecord, RaceEvent, Runner } from '../shared/schemas.js';
+import { brusselsOffsetMs } from '../shared/time.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const EXCEL_DATE_FORMAT = 'dd/mm/yyyy hh:mm:ss';
@@ -7,10 +8,10 @@ const EXCEL_DURATION_FORMAT = '[m]:ss.000';
 
 /**
  * Excel stores a moment without a time zone and this library reads a Date as UTC, so shift it
- * to show the laptop's own clock time.
+ * to show Brussels clock time, like the screens, whatever zone the server runs in.
  */
 function excelLocalTime(ms: number): Date {
-  return new Date(ms - new Date(ms).getTimezoneOffset() * 60_000);
+  return new Date(ms + brusselsOffsetMs(ms));
 }
 
 /** A duration as an Excel time value, so sums, averages and sorting work on it. */

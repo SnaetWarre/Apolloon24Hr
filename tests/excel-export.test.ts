@@ -1,4 +1,5 @@
-process.env.TZ = 'Europe/Brussels';
+// A server on UTC, like the VPS: the workbook must still show Brussels clock time.
+process.env.TZ = 'UTC';
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -53,6 +54,17 @@ test('the Excel export lists laps oldest first in Belgian time, with lap times E
   assert.equal(events.sheet, 'Gebeurtenissen');
   assert.equal((events.data[1][0] as Date).getUTCHours(), 21);
   assert.equal(events.data[1][1], 'Burgie gepakt');
+});
+
+test('the Excel export shows Brussels clock time in winter and across the change to winter time', () => {
+  const winter = lap('lap-1', Date.UTC(2026, 0, 15, 19, 30, 5), 80_000);
+  // Clocks go back at 01:00 UTC on 25 October 2026: 00:59 UTC is 02:59 summer time, 01:00 UTC is 02:00 winter time.
+  const lastSummer = lap('lap-2', Date.UTC(2026, 9, 25, 0, 59, 0), 80_000);
+  const firstWinter = lap('lap-3', Date.UTC(2026, 9, 25, 1, 0, 0), 80_000);
+  const [laps] = excelSheets([winter, lastSummer, firstWinter], [runner], []);
+
+  const shown = laps.data.slice(1).map((row) => (row[0] as Date).toISOString().slice(11, 19));
+  assert.deepEqual(shown, ['20:30:05', '02:59:00', '02:00:00']);
 });
 
 test('the Excel export is an .xlsx file, also before the first lap', async () => {
