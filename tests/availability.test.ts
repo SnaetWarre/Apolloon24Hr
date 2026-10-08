@@ -10,6 +10,7 @@ import {
   hasHourBlock,
   isAvailableAtMoment,
   parseHourBlock,
+  searchableHourTexts,
   setHourBlock,
   toggleHourBlock,
 } from '../src/lib/availability.ts';
@@ -178,4 +179,14 @@ test('the hour filter finds a runner whether the hours came from the form or the
     coveredHourSlots([['08-09u (woensdag)'], ['23-00u (dinsdag)', 'flexibel']]).map((slot) => slot.label),
     ['23-00u (dinsdag)', '08-09u (woensdag)']
   );
+});
+
+test('search finds a runner by every hour their form block covers, and keeps the text as typed', () => {
+  assert.deepEqual(searchableHourTexts(['12-14u (woensdag)', 'flexibel']), [
+    '12-14u (woensdag)',
+    'flexibel',
+    '12-13u (woensdag)',
+    '13-14u (woensdag)',
+  ]);
+  assert.deepEqual(searchableHourTexts([]), []);
 });
