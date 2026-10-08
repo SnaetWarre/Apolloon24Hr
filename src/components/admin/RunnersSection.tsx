@@ -6,9 +6,9 @@ import { RunnerAddModal } from '../RunnerEntryModals';
 import type { Runner } from '../../types';
 import { AdminNoticeBanner, useAdminAction } from './AdminNotice';
 import { AdminRunnerTable } from './AdminRunnerTable';
-import { foldSearchText, statusLabel } from '../../lib/runners';
+import { adminStatusText, foldSearchText, statusLabel } from '../../lib/runners';
 import { statusOrder } from './adminFormat';
-import { coveredHourSlots, hasHourBlock } from '../../lib/availability';
+import { coveredHourSlots, hasHourBlock, searchableHourTexts } from '../../lib/availability';
 
 const MAX_VISIBLE_RUNNERS = 150;
 
@@ -36,10 +36,10 @@ export function RunnersSection({ runners }: { runners: Runner[] }) {
       const searchable = [
         runner.name,
         runner.runnerNumber || '',
-        statusLabel(runner.status),
+        adminStatusText(runner),
         runner.registrationSource === 'import' ? 'Import' : 'Manueel',
         ...runner.labels.map((label) => label.name),
-        ...(registrations[runner.id]?.availableHours ?? []),
+        ...searchableHourTexts(registrations[runner.id]?.availableHours ?? []),
       ];
       return searchable.some((text) => foldSearchText(text).includes(q));
     })

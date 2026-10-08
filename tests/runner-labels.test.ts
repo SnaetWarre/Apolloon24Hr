@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { toggleRunnerLabel } from '../src/lib/labels.ts';
-import { foldSearchText, runnerMatchesSearch } from '../src/lib/runners.ts';
+import { adminStatusText, foldSearchText, runnerMatchesSearch } from '../src/lib/runners.ts';
 import type { Label } from '../src/types.ts';
 import { temporaryDataPath } from './temporary-data.ts';
 
@@ -56,6 +56,11 @@ test('runner search ignores accents both ways', () => {
 
 test('search text folds case and accents', () => {
   assert.equal(foldSearchText('Hélène ANAÏS Zoë'), 'helene anais zoe');
+});
+
+test('Beheer › Lopers marks a runner hidden from the queue as verborgen', () => {
+  assert.equal(adminStatusText({ status: 'ran', hiddenFromQueue: true }), 'Heeft gelopen · verborgen');
+  assert.equal(adminStatusText({ status: 'ran', hiddenFromQueue: false }), 'Heeft gelopen');
 });
 
 test('a label deleted on another laptop is skipped, not recreated under its id', async () => {
