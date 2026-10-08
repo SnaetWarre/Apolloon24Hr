@@ -1,6 +1,6 @@
 import { LabelBadge } from '../LabelBadge';
 import { SourceBadge } from '../RunnerEntryModals';
-import { statusLabel } from '../../lib/runners';
+import { adminStatusText } from '../../lib/runners';
 import type { Runner, RunnerRegistration } from '../../types';
 
 export function AdminRunnerTable({
@@ -37,10 +37,7 @@ export function AdminRunnerTable({
             <tr key={runner.id}>
               <td>{runner.runnerNumber || '-'}</td>
               <td>{runner.name}</td>
-              <td>
-                {statusLabel(runner.status)}
-                {runner.hiddenFromQueue ? ' · verborgen' : ''}
-              </td>
+              <td>{adminStatusText(runner)}</td>
               <td>{hours.length ? hours.join(', ') : 'Niet opgegeven'}</td>
               <td>
                 <SourceBadge source={runner.registrationSource} />

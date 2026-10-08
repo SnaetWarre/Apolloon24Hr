@@ -47,6 +47,11 @@ export function statusLabel(status: RunnerStatus): string {
   }
 }
 
+/** The status Beheer › Lopers shows, with "· verborgen" for a runner hidden from the queue. */
+export function adminStatusText(runner: Pick<Runner, 'status' | 'hiddenFromQueue'>): string {
+  return runner.hiddenFromQueue ? `${statusLabel(runner.status)} · verborgen` : statusLabel(runner.status);
+}
+
 /** Lowercase without accents, so "zoe" finds Zoë and "celine" finds Céline. */
 export function foldSearchText(text: string): string {
   return text
