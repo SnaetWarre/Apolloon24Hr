@@ -179,6 +179,9 @@ export function importRunnersFromCsv(csvText: string): ImportSummary {
   const formExport = parsed.data.some((row) =>
     Object.keys(row).some((key) => key.trim().toLowerCase().startsWith('e-mailadres'))
   );
+  // The runners earlier rows imported, and the row that gave each runner number.
+  const earlierRows = new Set<string>();
+  const rowByNumber = new Map<string, number>();
 
   for (const [index, row] of parsed.data.entries()) {
     // Spreadsheet row number: the header is row 1.
@@ -204,10 +207,18 @@ export function importRunnersFromCsv(csvText: string): ImportSummary {
     }
 
     try {
-      const result = upsertRunnerFromImport(runnerInputFromRow(fields, runnerNumber, name, registration));
+      const result = upsertRunnerFromImport(runnerInputFromRow(fields, runnerNumber, name, registration), earlierRows);
       summary[result.action] += 1;
+      earlierRows.add(result.runner.id);
+      const numberRow = rowByNumber.get(runnerNumber);
       if (result.numberTaken) {
-        summary.errors.push(`Rij ${rowNumber}: nummer ${runnerNumber} is al in gebruik, ${name} kreeg geen nummer`);
+        summary.errors.push(
+          numberRow
+            ? `Rij ${rowNumber}: nummer ${runnerNumber} staat ook op rij ${numberRow}, ${name} kreeg geen nummer`
+            : `Rij ${rowNumber}: nummer ${runnerNumber} is al in gebruik, ${name} kreeg geen nummer`
+        );
+      } else if (!numberRow) {
+        rowByNumber.set(runnerNumber, rowNumber);
       }
     } catch (error) {
       summary.skipped += 1;
