@@ -25,8 +25,9 @@ const selectInsideDisplayData = ({ runners, labels, race }: LiveAppSnapshot) => 
 export function OutsideDisplay() {
   const { runners, race, settings } = useAppData(selectOutsideDisplayData);
   const { laps, events, initialized: historyIsInitialized } = useRaceHistory({ scope: 'full' });
-  const activeRunner = runners.find((runner) => runner.id === race.activeRunnerId) || null;
-  const nextRunner = getNextWaitingRunner(runners);
+  const finished = Boolean(race.raceFinishedAt);
+  const activeRunner = finished ? null : runners.find((runner) => runner.id === race.activeRunnerId) || null;
+  const nextRunner = finished ? null : getNextWaitingRunner(runners);
   const [recordLap, setRecordLap] = React.useState<LapRecord | null>(null);
   const [burgieEvent, setBurgieEvent] = React.useState<RaceEvent | null>(null);
   const knownLapIdsRef = React.useRef<Set<string> | null>(null);
@@ -120,21 +121,30 @@ export function OutsideDisplay() {
     <main className={`display-root display-root--outside display-root--${presentation}`}>
       <DisplayBrand />
       <section className="outside-band outside-band--current">
-        <span className="display-kicker">
-          <LiveDot />
-          Nu op de piste
-        </span>
+        {!finished && (
+          <span className="display-kicker">
+            <LiveDot />
+            Nu op de piste
+          </span>
+        )}
         <div
           key={activeKey}
           className={`outside-runner${changed.has(`active:${activeKey}`) ? ' outside-runner--in' : ''}`}
         >
-          <DisplayRunner runner={activeRunner} empty="Nog niemand gestart" />
+          {finished ? (
+            <strong className="display-runner-name">Race afgelopen</strong>
+          ) : (
+            <DisplayRunner runner={activeRunner} empty="Nog niemand gestart" />
+          )}
         </div>
       </section>
       <section className="outside-band outside-band--next">
-        <span className="display-kicker">Volgende loper</span>
+        {!finished && <span className="display-kicker">Volgende loper</span>}
         <div key={nextKey} className={`outside-runner${changed.has(`next:${nextKey}`) ? ' outside-runner--in' : ''}`}>
-          <DisplayRunner runner={nextRunner} empty="Geen loper in de wachtrij" />
+          <DisplayRunner
+            runner={nextRunner}
+            empty={finished ? 'Bedankt aan alle lopers' : 'Geen loper in de wachtrij'}
+          />
         </div>
       </section>
       {burgieEvent ? (
@@ -149,8 +159,9 @@ export function OutsideDisplay() {
 export function InsideDisplay() {
   const { runners, labels, race } = useAppData(selectInsideDisplayData);
   const [presentation, setPresentation] = useDisplayPresentation('inside', 'dark');
-  const activeRunner = runners.find((runner) => runner.id === race.activeRunnerId) || null;
-  const nextRunner = getNextWaitingRunner(runners);
+  const finished = Boolean(race.raceFinishedAt);
+  const activeRunner = finished ? null : runners.find((runner) => runner.id === race.activeRunnerId) || null;
+  const nextRunner = finished ? null : getNextWaitingRunner(runners);
   const { laps, initialized: historyIsInitialized } = useRaceHistory({ scope: 'full' });
   const [rankingMode, setRankingMode] = React.useState<RankingMode>('laps');
   const [rankingLabelId, setRankingLabelId] = React.useState<string | null>(null);
@@ -235,21 +246,23 @@ export function InsideDisplay() {
 
       <section className="inside-now" aria-label="Nu op de piste">
         <span className="inside-now__label">
-          <LiveDot />
-          Nu op de piste
+          {!finished && <LiveDot />}
+          {finished ? 'Race afgelopen' : 'Nu op de piste'}
         </span>
         <strong
           key={activeKey}
           className={`inside-now__runner${changed.has(`active:${activeKey}`) ? ' display-rise' : ''}`}
         >
-          {activeRunner ? runnerLabel(activeRunner) : 'Nog niemand gestart'}
+          {activeRunner ? runnerLabel(activeRunner) : finished ? 'Bedankt aan alle lopers' : 'Nog niemand gestart'}
         </strong>
-        <span className="inside-now__next">
-          Volgende{' '}
-          <strong key={nextKey} className={changed.has(`next:${nextKey}`) ? 'display-rise' : undefined}>
-            {nextRunner ? runnerLabel(nextRunner) : 'niemand klaar'}
-          </strong>
-        </span>
+        {!finished && (
+          <span className="inside-now__next">
+            Volgende{' '}
+            <strong key={nextKey} className={changed.has(`next:${nextKey}`) ? 'display-rise' : undefined}>
+              {nextRunner ? runnerLabel(nextRunner) : 'niemand klaar'}
+            </strong>
+          </span>
+        )}
       </section>
 
       <section className="inside-recent-laps" aria-label={`Laatste ${INSIDE_RECENT_LAP_COUNT} lopers`}>
