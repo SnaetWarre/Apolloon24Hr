@@ -1,6 +1,6 @@
 ---
 name: ship-apolloon-pr
-description: Finish an authorized change in the Apolloon repo as a reviewable pull request, with proof from the running app gathered through the verify-apolloon skill. Use it instead of a generic ship-pr skill whenever you create, update, or check a PR in this repository, including UI screenshots, performance numbers, and CI status.
+description: Finish an authorized change in the Apolloon repo as a reviewable pull request, with proof from the running app gathered through the verify-apolloon skill, and merge it once CI is green. Use it instead of a generic ship-pr skill whenever you create, update, check, or merge a PR in this repository, including UI screenshots, performance numbers, and CI status.
 ---
 
 # Ship an Apolloon PR
@@ -83,4 +83,14 @@ Then open the PR and check its title, body, base and head branches, and that eve
 
 ## CI
 
-`gh pr checks <n>` first lists `Typecheck, lint, unit, integration and browser tests`, `build-linux`, and `build-windows`. When `build-windows` passes, `Windows Beheer › Systeem` and then `Required CI` appear. The PR is green only when `Required CI` passes and `gh pr view <n> --json mergeStateStatus` says `CLEAN`; a loop that waits for "nothing pending" can stop in the gap before the late checks appear. If a check fails, read its log (`gh run view --log-failed`), fix failures that belong to the task, push, and check again. Report the PR link and the real status, including checks still running. Merge only when the user asks; the repo squash-merges.
+`gh pr checks <n>` first lists `Typecheck, lint, unit, integration and browser tests`, `build-linux`, and `build-windows`. When `build-windows` passes, `Windows Beheer › Systeem` and then `Required CI` appear. The PR is green only when `Required CI` passes and `gh pr view <n> --json mergeStateStatus` says `CLEAN`; a loop that waits for "nothing pending" can stop in the gap before the late checks appear. If a check fails, read its log (`gh run view --log-failed`), fix failures that belong to the task, push, and check again. Report the PR link and the real status, including checks still running.
+
+## Merge
+
+Merge the PR yourself once it is green; the user does not approve each one.
+
+- Wait until `Required CI` passes and `gh pr view <n> --json mergeStateStatus` says `CLEAN`, then run `gh pr merge <n> --squash --delete-branch`. The repo squash-merges.
+- If `main` moved and the branch is behind or conflicts, update it from `origin/main`, run the checks again, push, and wait for CI again.
+- Do not merge when a check fails for a reason outside the task, when the proof from the running app is missing, or when the user said to hold the PR. Say why in your report instead.
+- In a T3 worktree, `gh` can fail to delete the local branch after merging. Check `gh pr view <n> --json state,mergeCommit` before you call it merged or try again.
+- Report the merge commit you saw on `main`. Never claim a merge you did not see.
