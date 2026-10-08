@@ -121,6 +121,13 @@ try {
   await page.getByRole('button', { name: 'Race hervatten' }).waitFor();
   assert.ok((await snapshot()).race.raceFinishedAt < beforeFinishClick + 900, 'The race ends at the first click');
   console.log('PASS the first finish click stops the clock and cancelling resumes it');
+  const tv = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
+  for (const route of ['/display/outside', '/display/inside']) {
+    await tv.goto(`${baseUrl}${route}`);
+    await tv.getByText('Race afgelopen', { exact: true }).waitFor();
+    const text = await tv.locator('main').innerText();
+    assert.doesNotMatch(text, /Nog niemand gestart|Volgende/, `${route} announces runners after the race ended`);
+  }
   await page.locator('h1').click();
   await page.keyboard.press('Space');
   await page.keyboard.press('Enter');
@@ -133,7 +140,11 @@ try {
   await page.getByRole('button', { name: 'Race hervatten' }).click();
   await resumePrompt.getByRole('button', { name: 'Race hervatten', exact: true }).click();
   await waitUntil(async () => (await snapshot()).race.activeRunnerId === secondRunner.id);
+  await tv.getByRole('region', { name: 'Nu op de piste' }).getByText(secondRunner.name).waitFor();
+  assert.doesNotMatch(await tv.locator('main').innerText(), /Race afgelopen/);
+  await tv.close();
   console.log('PASS finished race ignores timing shortcuts and requires confirmed resumption');
+  console.log('PASS public screens say the race is over and go back to runners after resuming');
 
   const raceBeforeUndoPrompt = (await snapshot()).race;
   const undoPrompt = page.getByRole('dialog', { name: 'Laatste wissel ongedaan maken?', exact: true });
