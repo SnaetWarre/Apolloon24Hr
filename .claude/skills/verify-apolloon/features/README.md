@@ -56,6 +56,7 @@ Each feature file starts with an H1 title and one paragraph describing the user-
 - [Activiteit](./activity.md) covers the change log in Beheer › Activiteit and the lines a runner profile save adds.
 - [Analyse › Exporteren](./analysis-export.md) covers the six export downloads in Analyse and checking them without a save dialog in the desktop window.
 - [Analyse › Grafieken](./analysis-charts.md) covers what the Analyse charts say when they have no laps to draw.
+- [Beheer › Vast netwerkadres](./network-setup.md) covers pinning the laptop's address in Systeem & herstel, with the network's own prefix length.
 - [Tijdelijke nachtploegen](./night-teams.md) covers creating night teams, editing their members and times, and switching them on by hand.
 
 Not mapped yet: the rest of the Analyse charts, Tactiek, the rest of Ploegen & labels, Publiek, backup and restore in Systeem & herstel, the welcome screen on an `empty` laptop.

@@ -46,12 +46,21 @@ export function isPrivateLanAddress(ip: string): boolean {
   return (a === 192 && b === 168) || a === 10 || (a === 172 && b >= 16 && b <= 31);
 }
 
-/** True when both addresses share the first `octets` octets (default /24). */
-export function sameSubnet(a: string, b: string, octets = 3): boolean {
+function ipv4ToNumber(octets: number[]): number {
+  return ((octets[0] << 24) | (octets[1] << 16) | (octets[2] << 8) | octets[3]) >>> 0;
+}
+
+function prefixMask(prefixLength: number): number {
+  return (0xffffffff << (32 - prefixLength)) >>> 0;
+}
+
+/** True when both addresses are in the same network for `prefixLength` (default /24). */
+export function sameSubnet(a: string, b: string, prefixLength = 24): boolean {
   const left = parseIpv4(a);
   const right = parseIpv4(b);
   if (!left || !right) return false;
-  return left.slice(0, octets).join('.') === right.slice(0, octets).join('.');
+  const mask = prefixMask(prefixLength);
+  return (ipv4ToNumber(left) & mask) === (ipv4ToNumber(right) & mask);
 }
 
 export function prefixLengthToMask(prefixLength: number): string | null {
@@ -207,28 +216,32 @@ export function validateStaticRequest(input: {
       error: '169.254.x.x is een noodadres, geen vast adres. Kies een adres in je eigen netwerk (bijv. 192.168.1.211).',
     };
   }
-  if (octets[3] === 0 || octets[3] === 255) {
-    return { ok: false, error: 'Adressen die eindigen op .0 of .255 werken niet. Kies bijv. .211.' };
-  }
+  // Keep the network's own prefix, so pinning leaves the laptop in exactly the network it is in now.
+  let prefixLength = 24;
   if (input.prefixLength !== undefined && input.prefixLength !== null && input.prefixLength !== '') {
-    const parsed = Number(input.prefixLength);
-    if (!Number.isInteger(parsed) || parsed < 8 || parsed > 30) {
+    prefixLength = Number(input.prefixLength);
+    if (!Number.isInteger(prefixLength) || prefixLength < 8 || prefixLength > 30) {
       return { ok: false, error: 'Gebruik een normaal subnetmasker (aanbevolen: 24).' };
     }
-    if (parsed !== 24) {
-      return { ok: false, error: 'Alleen /24 wordt ondersteund. Houd alle laptops in hetzelfde 192.168.N.x-netwerk.' };
-    }
+  }
+  const hostMask = ~prefixMask(prefixLength) >>> 0;
+  const hostBits = ipv4ToNumber(octets) & hostMask;
+  if (hostBits === 0 || hostBits === hostMask) {
+    return {
+      ok: false,
+      error: `${ip} is het eerste of laatste adres van dit netwerk (/${prefixLength}) en werkt niet. Kies bijv. .211.`,
+    };
   }
   let gateway: string | null = null;
   if (typeof input.gateway === 'string' && input.gateway.trim()) {
     const gatewayOctets = parseIpv4(input.gateway);
     if (!gatewayOctets) return { ok: false, error: 'De gateway is geen geldig IPv4-adres.' };
     gateway = gatewayOctets.join('.');
-    if (!sameSubnet(ip, gateway, 3)) {
+    if (!sameSubnet(ip, gateway, prefixLength)) {
       return { ok: false, error: 'De gateway moet in hetzelfde netwerk zitten als het vaste adres.' };
     }
   }
-  return { ok: true, ip, prefixLength: 24, gateway };
+  return { ok: true, ip, prefixLength, gateway };
 }
 
 // Live profile (best effort; never throws).

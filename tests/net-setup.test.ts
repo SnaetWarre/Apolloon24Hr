@@ -64,10 +64,14 @@ test('APIPA and private ranges are classified correctly', () => {
   assert.equal(isPrivateLanAddress('169.254.10.20'), false);
 });
 
-test('same-subnet check catches third-octet mismatches', () => {
+test('same-subnet check follows the prefix length', () => {
   assert.equal(sameSubnet('192.168.1.211', '192.168.1.1'), true);
   assert.equal(sameSubnet('192.168.1.211', '192.168.10.1'), false);
   assert.equal(sameSubnet('192.168.1.211', 'not-an-ip'), false);
+  assert.equal(sameSubnet('10.20.5.17', '10.20.0.1', 16), true);
+  assert.equal(sameSubnet('10.20.5.17', '10.21.0.1', 16), false);
+  assert.equal(sameSubnet('10.1.0.113', '10.1.15.254', 20), true);
+  assert.equal(sameSubnet('10.1.0.113', '10.1.16.1', 20), false);
 });
 
 test('prefix length helper only allows sane masks', () => {
@@ -94,9 +98,27 @@ test('static-IP requests refuse APIPA, broadcast and cross-subnet gateways', () 
   assert.equal(validateStaticRequest({ ip: '192.168.1.0' }).ok, false);
   assert.equal(validateStaticRequest({ ip: '192.168.1.255' }).ok, false);
   assert.equal(validateStaticRequest({ ip: 'telsysteem1' }).ok, false);
-  assert.equal(validateStaticRequest({ ip: '192.168.1.211', prefixLength: 12 }).ok, false);
+  assert.equal(validateStaticRequest({ ip: '192.168.1.211', prefixLength: 7 }).ok, false);
+  assert.equal(validateStaticRequest({ ip: '192.168.1.211', prefixLength: 31 }).ok, false);
+  assert.equal(validateStaticRequest({ ip: '192.168.1.211', prefixLength: 'abc' }).ok, false);
   const crossGateway = validateStaticRequest({ ip: '192.168.1.211', gateway: '192.168.10.1' });
   assert.equal(crossGateway.ok, false);
+});
+
+test('static-IP requests keep the network prefix the laptop has now', () => {
+  const school = validateStaticRequest({ ip: '10.20.5.17', prefixLength: 16, gateway: '10.20.0.1' });
+  assert.deepEqual(school, { ok: true, ip: '10.20.5.17', prefixLength: 16, gateway: '10.20.0.1' });
+  const unknown = validateStaticRequest({ ip: '192.168.1.211', prefixLength: null });
+  assert.equal(unknown.ok && unknown.prefixLength, 24);
+  // .0 and .255 are ordinary addresses inside a /16; only the network's first and last address are refused.
+  assert.equal(validateStaticRequest({ ip: '10.20.5.0', prefixLength: 16 }).ok, true);
+  assert.equal(validateStaticRequest({ ip: '10.20.0.0', prefixLength: 16 }).ok, false);
+  assert.equal(validateStaticRequest({ ip: '10.20.255.255', prefixLength: 16 }).ok, false);
+  assert.equal(validateStaticRequest({ ip: '192.168.1.16', prefixLength: 28 }).ok, false);
+  assert.equal(validateStaticRequest({ ip: '192.168.1.17', prefixLength: 28 }).ok, true);
+  // The gateway must be in the same network for that prefix.
+  assert.equal(validateStaticRequest({ ip: '10.20.5.17', prefixLength: 16, gateway: '10.21.0.1' }).ok, false);
+  assert.equal(validateStaticRequest({ ip: '10.20.5.17', prefixLength: 24, gateway: '10.20.0.1' }).ok, false);
 });
 
 test('mask round-trips between prefix length and dotted form', () => {
