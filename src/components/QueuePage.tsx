@@ -40,7 +40,15 @@ export function QueuePage() {
             Nu op de piste
           </span>
           <span key={activeKey} className={`race-strip__runner${moved(`active:${activeKey}`)}`}>
-            {activeRunner ? <RunnerName runner={activeRunner} /> : 'Nog niemand gestart'}
+            {activeRunner ? (
+              <RunnerName runner={activeRunner} />
+            ) : race.raceFinishedAt ? (
+              'Race afgelopen'
+            ) : race.raceStartedAt ? (
+              'Nog niemand op de piste'
+            ) : (
+              'Nog niemand gestart'
+            )}
           </span>
           {race.activeStartedAt && activeRunner && (
             <LiveDuration

@@ -134,7 +134,10 @@ export function OutsideDisplay() {
           {finished ? (
             <strong className="display-runner-name">Race afgelopen</strong>
           ) : (
-            <DisplayRunner runner={activeRunner} empty="Nog niemand gestart" />
+            <DisplayRunner
+              runner={activeRunner}
+              empty={race.raceStartedAt ? 'Even niemand op de piste' : 'Nog niemand gestart'}
+            />
           )}
         </div>
       </section>
@@ -253,7 +256,13 @@ export function InsideDisplay() {
           key={activeKey}
           className={`inside-now__runner${changed.has(`active:${activeKey}`) ? ' display-rise' : ''}`}
         >
-          {activeRunner ? runnerLabel(activeRunner) : finished ? 'Bedankt aan alle lopers' : 'Nog niemand gestart'}
+          {activeRunner
+            ? runnerLabel(activeRunner)
+            : finished
+              ? 'Bedankt aan alle lopers'
+              : race.raceStartedAt
+                ? 'Even niemand op de piste'
+                : 'Nog niemand gestart'}
         </strong>
         {!finished && (
           <span className="inside-now__next">
