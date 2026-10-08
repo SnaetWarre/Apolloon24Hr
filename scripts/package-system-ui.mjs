@@ -73,6 +73,13 @@ try {
 
   await waitUntil(async () => (await getJson(`${leaderUrl}/api/health`)).ok, 60_000, 'the packaged app starts');
   await waitUntil(async () => (await getJson(`${followerUrl}/api/health`)).ok, 30_000, 'the other laptop starts');
+  // Like at the event, the laptop with the window holds the runners, so the other laptop is the one that takes its data.
+  const created = await fetch(`${leaderUrl}/trpc/runners.create`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name: 'Eerste loper', runnerNumber: '1' }),
+  });
+  assert.ok(created.ok, `Adding a runner failed: ${await created.text()}`);
   await join(followerUrl, leaderUrl);
   const leader = await getJson(`${leaderUrl}/api/cluster/status`);
   await waitUntil(
