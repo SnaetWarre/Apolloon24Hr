@@ -251,3 +251,40 @@ test('a double press under 20 s stays out of the Analyse lap times', () => {
     );
   }
 });
+
+test('the guessed second half of a split lap never flashes as a record and is no record to beat', () => {
+  const raceStartedAt = 1_000_000;
+  const race = {
+    id: 1,
+    activeRunnerId: null,
+    activeStartedAt: null,
+    raceStartedAt,
+    raceFinishedAt: null,
+    activeLabels: [],
+  } satisfies RaceState;
+  let finishedAt = raceStartedAt;
+  const lap = (id: string, durationMs: number, source = 'handoff'): LapRecord => {
+    finishedAt += durationMs;
+    return {
+      id,
+      runnerId: 'runner-1',
+      runnerName: 'Runner',
+      runnerNumber: '1',
+      startedAt: finishedAt - durationMs,
+      finishedAt,
+      durationMs,
+      source,
+      createdAt: finishedAt,
+      labels: [],
+      lapNumber: 1,
+    };
+  };
+  const realLaps = [lap('lap-1', 75_000), lap('lap-2', 63_000)];
+  const splitHalf = lap('lap-3', 41_674, 'split');
+  const nextLap = lap('lap-4', 50_000);
+
+  for (const mode of ['day', 'hour', 'two_hour'] as const) {
+    assert.equal(isFastestLapForRecordMode(splitHalf, realLaps, race, mode), false, mode);
+    assert.equal(isFastestLapForRecordMode(nextLap, [splitHalf, ...realLaps], race, mode), true, mode);
+  }
+});
