@@ -367,6 +367,54 @@ test(
   }
 );
 
+test('a lap fixed in Beheer › Rondes on any laptop is fixed on every laptop', { timeout: 40_000 }, async () => {
+  const root = testRoot('lap-fixes');
+  const servers: RunningServer[] = [];
+  try {
+    await startGroup(root, servers);
+    const [a, b, c] = servers;
+    const first = await client(a).runners.create.mutate({ name: 'First', runnerNumber: 'R-1', status: 'waiting' });
+    const second = await client(a).runners.create.mutate({ name: 'Second', runnerNumber: 'R-2', status: 'waiting' });
+    const startedAt = Date.now() - 6_000;
+    await client(a).race.startNext.mutate({ activeRunnerId: null, activeStartedAt: null, pressedAt: startedAt });
+    const handoffAt = startedAt + 2_000;
+    await client(a).race.handoff.mutate({ activeRunnerId: first.id, activeStartedAt: startedAt, pressedAt: handoffAt });
+    await client(a).race.handoff.mutate({
+      activeRunnerId: second.id,
+      activeStartedAt: handoffAt,
+      pressedAt: handoffAt + 3_000,
+    });
+    const [secondLap, firstLap] = (await fetchState(a)).laps;
+    assert.equal(secondLap.runnerId, second.id);
+
+    // Each fix is made on another laptop; every laptop ends up with the same laps.
+    await client(b).laps.move.mutate({ lapId: secondLap.id, runnerId: first.id });
+    await client(c).laps.split.mutate({ lapId: firstLap.id, runnerId: second.id });
+    const split = (await fetchState(c)).laps.find((lap) => lap.runnerId === second.id);
+    assert.ok(split);
+    await client(a).laps.delete.mutate({ lapId: split.id });
+    for (const copy of [b, c]) await waitForSameState(a, copy);
+
+    const laps = (await fetchState(b)).laps;
+    assert.deepEqual(
+      laps.map((lap) => [lap.runnerId, lap.lapNumber, lap.durationMs]),
+      [
+        [first.id, 2, 3_000],
+        [first.id, 1, 1_000],
+      ]
+    );
+    const summaries = (await client(c).activity.list.query({ limit: 20, before: null })).map((entry) => entry.summary);
+    assert.ok(summaries.some((summary) => /^Ronde 1 van #R-2 Second .* naar #R-1 First verplaatst$/.test(summary)));
+    assert.ok(summaries.some((summary) => /gesplitst: de tweede helft is voor #R-2 Second$/.test(summary)));
+    assert.ok(summaries.some((summary) => /^Ronde 1 van #R-2 Second .* verwijderd$/.test(summary)));
+  } catch (error) {
+    throw withServerOutput(error, ...servers);
+  } finally {
+    await Promise.all(servers.map(stopServer));
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('a laptop that was off catches up by itself, also across many batches', { timeout: 60_000 }, async () => {
   const root = testRoot('follower-off');
   const servers: RunningServer[] = [];

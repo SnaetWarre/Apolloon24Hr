@@ -189,6 +189,52 @@
   white-space: nowrap;
 }
 
+.laps-table td {
+  vertical-align: middle;
+}
+
+.laps-table__time,
+.laps-table__number {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.laps-table__row--flagged td {
+  background: var(--warn-wash);
+}
+
+.laps-table__flag {
+  color: var(--warn-ink);
+}
+
+.laps-table__actions {
+  white-space: nowrap;
+  text-align: right;
+}
+
+.laps-picker {
+  display: grid;
+  gap: var(--space-1);
+  margin: var(--space-3) 0;
+}
+
+.laps-picker__option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.laps-picker__option:hover {
+  background: var(--surface-2);
+}
+
+.laps-picker__option small {
+  color: var(--ink-3);
+}
+
 .activity-toolbar {
   display: flex;
   flex-wrap: wrap;

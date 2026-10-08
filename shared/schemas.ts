@@ -405,6 +405,11 @@ export const runnerIdSchema = z.object({
   id: z.string().min(1),
 });
 
+export const lapIdSchema = z.object({ lapId: z.string().min(1) });
+
+/** Moving a lap to another runner, or giving the second half of a split lap to `runnerId`. */
+export const lapRunnerSchema = lapIdSchema.extend({ runnerId: z.string().min(1) });
+
 export const runnerStatusUpdateSchema = runnerIdSchema.extend({
   status: runnerStatusSchema,
   statusSince: z.number().int().nonnegative().optional(),

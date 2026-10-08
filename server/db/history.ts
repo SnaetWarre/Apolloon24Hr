@@ -54,6 +54,11 @@ export function getRecentLaps(limit = 100): LapRecord[] {
   );
 }
 
+export function getLapById(lapId: string): LapRecord | null {
+  const row = one<LapRow>(`${LAP_SELECT_SQL} WHERE l.id = ?`, [lapId]);
+  return row ? lapFromRow(row) : null;
+}
+
 export function getLapsForRunner(runnerId: string): LapRecord[] {
   return all<LapRow>(`${LAP_SELECT_SQL} WHERE l.runner_id = ? ORDER BY l.finished_at DESC`, [runnerId]).map(lapFromRow);
 }

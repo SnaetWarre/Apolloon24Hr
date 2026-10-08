@@ -7,6 +7,8 @@ import {
   labelImageUploadSchema,
   labelInputSchema,
   labelPatchSchema,
+  lapIdSchema,
+  lapRunnerSchema,
   publicRecordModeUpdateSchema,
   queueReorderSchema,
   raceStateExpectationSchema,
@@ -46,6 +48,7 @@ import {
   createBurgieGepaktEvent,
   createLabel,
   deleteLabel,
+  deleteLap,
   deleteRunner,
   canUndoFinish,
   finishRace,
@@ -60,6 +63,7 @@ import {
   hideRunnerInQueue,
   insertRunner,
   logActivity,
+  moveLap,
   onAppDataChanged,
   performHandoff,
   previewBackup,
@@ -73,6 +77,7 @@ import {
   setTemporaryTeamActive,
   setTemporaryTeamMembers,
   setTemporaryTeamSchedule,
+  splitLap,
   touchForwardedWrite,
   undoLastHandoff,
   unhideRunnerInQueue,
@@ -472,6 +477,12 @@ export const appRouter = t.router({
         return { ok: true };
       })
     ),
+  }),
+
+  laps: t.router({
+    move: t.procedure.input(lapRunnerSchema).mutation(write((input) => moveLap(input.lapId, input.runnerId))),
+    split: t.procedure.input(lapRunnerSchema).mutation(write((input) => splitLap(input.lapId, input.runnerId))),
+    delete: t.procedure.input(lapIdSchema).mutation(write((input) => deleteLap(input.lapId))),
   }),
 
   events: t.router({
