@@ -19,7 +19,10 @@ export function buildDiagnosticsText({
   userAgent: string;
   now?: number;
 }): string {
-  const lines = [`Apolloon Telsysteem — diagnose van ${new Date(now).toLocaleString('nl-BE')}`, ''];
+  const lines = [
+    `Apolloon Telsysteem — diagnose van ${new Date(now).toLocaleString('nl-BE', { timeZone: 'Europe/Brussels' })}`,
+    '',
+  ];
   const version = desktop?.appVersion ?? cluster?.appVersion;
   lines.push(`Versie: ${version ?? 'onbekend'}${cluster ? ` · schema ${cluster.schemaVersion}` : ''}`);
   if (desktop) {
@@ -61,7 +64,7 @@ export function buildDiagnosticsText({
     if (cluster.lastError) lines.push(`Laatste fout: ${cluster.lastError}`);
     const backup = cluster.backup;
     lines.push(
-      `Backup: ${backup.latest ? `laatste ${new Date(backup.latest.createdAt).toLocaleString('nl-BE')}` : 'nog geen'}` +
+      `Backup: ${backup.latest ? `laatste ${new Date(backup.latest.createdAt).toLocaleString('nl-BE', { timeZone: 'Europe/Brussels' })}` : 'nog geen'}` +
         `${backup.lastError ? ` · mislukt: ${backup.lastError}` : ''}` +
         ` · vrij ${backup.diskFreeBytes === null ? 'onbekend' : `${Math.round(backup.diskFreeBytes / 1024 / 1024)} MB`}`
     );

@@ -114,5 +114,6 @@ function formatMoment(ms: number): string {
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
+    timeZone: 'Europe/Brussels',
   });
 }

@@ -20,17 +20,20 @@ export function formatDurationMs(ms: number | undefined | null): string {
   return formatSecondsAsMmSs(ms / 1000);
 }
 
+const BRUSSELS_CLOCK_FORMATTER = new Intl.DateTimeFormat('nl-BE', {
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hourCycle: 'h23',
+  timeZone: 'Europe/Brussels',
+});
+
+/** Brussels clock time with milliseconds, e.g. "20:35:10.123", whatever zone this screen is set to. */
 export function formatClockTimeMs(ms: number | undefined | null): string {
   if (ms == null || Number.isNaN(ms)) return '—';
   const date = new Date(ms);
   if (Number.isNaN(date.getTime())) return '—';
-  return (
-    [
-      date.getHours().toString().padStart(2, '0'),
-      date.getMinutes().toString().padStart(2, '0'),
-      date.getSeconds().toString().padStart(2, '0'),
-    ].join(':') + `.${date.getMilliseconds().toString().padStart(3, '0')}`
-  );
+  return `${BRUSSELS_CLOCK_FORMATTER.format(date)}.${date.getMilliseconds().toString().padStart(3, '0')}`;
 }
 
 export function formatElapsedSeconds(ms: number | undefined | null): string {
