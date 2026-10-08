@@ -405,7 +405,7 @@ test('a lap fixed in Beheer › Rondes on any laptop is fixed on every laptop', 
     );
     const summaries = (await client(c).activity.list.query({ limit: 20, before: null })).map((entry) => entry.summary);
     assert.ok(summaries.some((summary) => /^Ronde 1 van #R-2 Second .* naar #R-1 First verplaatst$/.test(summary)));
-    assert.ok(summaries.some((summary) => /gesplitst: de tweede helft is voor #R-2 Second$/.test(summary)));
+    assert.ok(summaries.some((summary) => summary.endsWith('gesplitst: de tweede helft is voor #R-2 Second')));
     assert.ok(summaries.some((summary) => /^Ronde 1 van #R-2 Second .* verwijderd$/.test(summary)));
   } catch (error) {
     throw withServerOutput(error, ...servers);
