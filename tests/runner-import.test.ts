@@ -303,6 +303,46 @@ test('the form’s Excel file imports like its CSV export, without doubling runn
   }
 });
 
+test('lap times typed in Excel as 1:20 import as 1 minute 20, like the CSV of that sheet', async () => {
+  fs.rmSync(dataPath, { recursive: true, force: true });
+  const db = await import('../server/db.ts');
+  const { appRouter } = await import('../server/router.ts');
+  const { default: writeXlsxFile } = await import('write-excel-file/node');
+  // Excel keeps a cell typed as 1:20 as the time of day 01:20 (h:mm); one typed as 0:01:20 as h:mm:ss.
+  const excelTime = (hours: number, minutes: number, seconds: number, format: string) => ({
+    value: new Date(Date.UTC(1899, 11, 30, hours, minutes, seconds)),
+    format,
+  });
+  try {
+    await db.initDb();
+    const caller = appRouter.createCaller({});
+    const plainList = await writeXlsxFile([
+      ['runner_number', 'name', 'historical_avg', 'historical_best'].map((value) => ({ value })),
+      [{ value: 1 }, { value: 'Anna Peeters' }, excelTime(1, 20, 0, 'h:mm'), excelTime(1, 15, 0, 'h:mm')],
+      [{ value: 2 }, { value: 'Bert Claes' }, excelTime(0, 1, 20, 'h:mm:ss'), excelTime(0, 1, 15, 'h:mm:ss')],
+    ]).toBuffer();
+
+    await caller.runners.importXlsx({ dataBase64: plainList.toString('base64') });
+    const runners = new Map(db.getAllRunners().map((runner) => [runner.name, runner]));
+    assert.equal(runners.get('Anna Peeters')?.historicalAvgMs, 80_000);
+    assert.equal(runners.get('Anna Peeters')?.historicalBestMs, 75_000);
+    assert.equal(runners.get('Bert Claes')?.historicalAvgMs, 80_000);
+    assert.equal(runners.get('Bert Claes')?.historicalBestMs, 75_000);
+
+    // A form answer that the sheet turned into a time still reads as it was typed.
+    const formSheet = await writeXlsxFile([
+      ['E-mailadres', 'Voornaam + naam', 'Wat was de tijd van jouw snelste ronde?'].map((value) => ({ value })),
+      [{ value: 'cas@example.org' }, { value: 'Cas Jacobs' }, excelTime(1, 20, 0, 'h:mm')],
+    ]).toBuffer();
+    await caller.runners.importXlsx({ dataBase64: formSheet.toString('base64') });
+    const cas = db.getAllRunners().find((runner) => runner.name === 'Cas Jacobs');
+    assert.equal((await caller.runners.registrations())[cas!.id]?.fastestLap, '1:20');
+  } finally {
+    db.closeDb();
+    fs.rmSync(dataPath, { recursive: true, force: true });
+  }
+});
+
 test('a hand-made list imports rows that leave off empty trailing columns', async () => {
   fs.rmSync(dataPath, { recursive: true, force: true });
   const db = await import('../server/db.ts');

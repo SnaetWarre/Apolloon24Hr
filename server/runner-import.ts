@@ -123,8 +123,13 @@ function runnerInputFromRow(
 function excelDateText(date: Date): string {
   const pad = (value: number) => String(value).padStart(2, '0');
   const time = `${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())}`;
-  // A cell holding only a time, such as a lap time typed as 1:20.
-  if (date.getUTCFullYear() < 1900) return time;
+  if (date.getUTCFullYear() < 1900) {
+    // Excel stores a lap time typed as 1:20 as the time 1:20 (h:mm). A lap never takes an hour,
+    // so without seconds it was typed as m:ss: write it back the way it was typed, as its CSV does.
+    if (date.getUTCSeconds() === 0) return `${date.getUTCHours()}:${pad(date.getUTCMinutes())}`;
+    // Typed with seconds, such as 0:01:20.
+    return time;
+  }
   return `${pad(date.getUTCDate())}/${pad(date.getUTCMonth() + 1)}/${date.getUTCFullYear()} ${time}`;
 }
 
