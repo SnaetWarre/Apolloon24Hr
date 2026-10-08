@@ -136,7 +136,7 @@ export function TimingView() {
     releaseFocus();
   }, []);
 
-  const onHandoffKey = React.useEffectEvent((event: KeyboardEvent) => {
+  const onHandoffKey = React.useEffectEvent((event: KeyboardEvent, focusedByClick: boolean) => {
     const target = event.target as HTMLElement | null;
     if (
       event.defaultPrevented ||
@@ -153,8 +153,9 @@ export function TimingView() {
     )
       return;
     // Space is the dedicated timing control on this screen, even if a button
-    // still has focus. Keep Enter's normal button/link behaviour intact.
-    if (event.key === 'Enter' && isInteractiveTarget(target)) return;
+    // still has focus. Enter still presses a button or link reached with the
+    // keyboard, but not one that only has focus because it was clicked.
+    if (event.key === 'Enter' && isInteractiveTarget(target) && !focusedByClick) return;
     event.preventDefault();
     if (event.repeat || handoffBusyRef.current || handoffDisabled) return;
     flashPress();
@@ -162,9 +163,20 @@ export function TimingView() {
   });
 
   React.useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => onHandoffKey(event);
+    // Chromium marks the focused control :focus-visible on any key press, so
+    // remember when focus arrives whether a click put it there.
+    let clickFocused: EventTarget | null = null;
+    const onFocusIn = (event: FocusEvent) => {
+      const target = event.target;
+      clickFocused = target instanceof Element && !target.matches(':focus-visible') ? target : null;
+    };
+    const onKeyDown = (event: KeyboardEvent) => onHandoffKey(event, event.target === clickFocused);
+    window.addEventListener('focusin', onFocusIn);
     window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('focusin', onFocusIn);
+      window.removeEventListener('keydown', onKeyDown);
+    };
   }, []);
 
   async function undo() {

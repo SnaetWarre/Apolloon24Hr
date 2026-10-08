@@ -41,5 +41,6 @@ Preconditions:
 - Presses inside a dialog never count: Space in a confirmation dialog cancels it. Close every dialog before proving a handoff.
 - The 20 s short-lap rule means a fast scripted second press always asks. Either confirm `Toch afklokken` or wait 20 s with `page.waitForTimeout(20_000)`; this is the one place a fixed wait is correct.
 - Ctrl/Alt/Meta+Space and Ctrl+Enter are ignored on purpose. Use plain `Space`.
+- Enter clocks even when a clicked button or link still has focus, such as `Donker` in the sidebar theme switch. Enter only presses a button or link that was reached with the keyboard (Tab or arrow keys). Chromium marks every focused control `:focus-visible` once a key is pressed, so Timing decides this when focus arrives, not when Enter is pressed. To prove the keyboard case, reach the control with `page.keyboard.press('Tab')` or `Shift+Tab`, not with `locator.focus()`.
 - Starting the race consumes the `ready` run. Start a fresh run for the next recipe.
 - The yellow `Backup controleren` notice in the sidebar comes from the helper turning backups off. It is expected here.
