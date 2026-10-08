@@ -19,6 +19,7 @@ export function RunnersSection({ runners }: { runners: Runner[] }) {
   const { notice, setNotice, run } = useAdminAction();
   const [query, setQuery] = React.useState('');
   const [hour, setHour] = React.useState('');
+  const [shown, setShown] = React.useState(MAX_VISIBLE_RUNNERS);
   const [profileRunnerId, setProfileRunnerId] = React.useState<string | null>(null);
   const [addOpen, setAddOpen] = React.useState(false);
 
@@ -92,14 +93,20 @@ export function RunnersSection({ runners }: { runners: Runner[] }) {
           className="input input--stretch"
           aria-label="Lopers zoeken"
           value={query}
-          onChange={(event) => setQuery(event.target.value)}
+          onChange={(event) => {
+            setQuery(event.target.value);
+            setShown(MAX_VISIBLE_RUNNERS);
+          }}
           placeholder="Zoek op nummer, naam, label, status, bron of uur..."
         />
         <select
           className="input"
           aria-label="Beschikbaar tijdens"
           value={hour}
-          onChange={(event) => setHour(event.target.value)}
+          onChange={(event) => {
+            setHour(event.target.value);
+            setShown(MAX_VISIBLE_RUNNERS);
+          }}
         >
           <option value="">Alle beschikbare uren</option>
           {hourSlots.map((slot) => (
@@ -112,7 +119,7 @@ export function RunnersSection({ runners }: { runners: Runner[] }) {
       <p className="panel-copy" role="status">
         {matchingRunners.length} {matchingRunners.length === 1 ? 'loper' : 'lopers'} gevonden
         {hourSlot ? ` voor ${hourSlot.label}` : ''}
-        {matchingRunners.length > MAX_VISIBLE_RUNNERS ? ` · eerste ${MAX_VISIBLE_RUNNERS} getoond` : ''}
+        {matchingRunners.length > shown ? ` · eerste ${shown} getoond` : ''}
         {statusCounts ? ` · ${statusCounts}` : ''}
       </p>
       {hourSlot && (
@@ -123,13 +130,18 @@ export function RunnersSection({ runners }: { runners: Runner[] }) {
       <AdminNoticeBanner notice={notice} />
       <div className="table-wrap">
         <AdminRunnerTable
-          runners={matchingRunners.slice(0, MAX_VISIBLE_RUNNERS)}
+          runners={matchingRunners.slice(0, shown)}
           registrations={registrations}
           onOpenProfile={setProfileRunnerId}
           onRestore={restoreRunner}
           onRemove={removeRunner}
         />
       </div>
+      {matchingRunners.length > shown && (
+        <button className="btn btn--ghost" onClick={() => setShown((count) => count + MAX_VISIBLE_RUNNERS)}>
+          Toon de volgende {Math.min(MAX_VISIBLE_RUNNERS, matchingRunners.length - shown)} lopers
+        </button>
+      )}
       {profileRunnerId && <RunnerProfileModal runnerId={profileRunnerId} onClose={() => setProfileRunnerId(null)} />}
       {addOpen && (
         <RunnerAddModal
