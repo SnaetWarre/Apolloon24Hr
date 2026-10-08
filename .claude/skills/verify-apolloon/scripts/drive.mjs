@@ -16,7 +16,7 @@ import { chromium } from 'playwright';
 const repoRoot = path.resolve(path.dirname(fs.realpathSync(fileURLToPath(import.meta.url))), '../../../..');
 const scratchRoot = path.join(repoRoot, '.tmp-verify');
 
-/** The user agent the Electron app sends. Linking laptops and some Beheer controls only show for it. */
+/** The user agent the Electron app sends. Failover reads it: the Electron app stays on its own laptop. */
 export const ELECTRON_USER_AGENT = 'Mozilla/5.0 Chrome/140.0 Electron/44.3.0 Safari/537.36';
 
 export async function openRun(runName = process.env.APOLLOON_VERIFY_RUN) {
