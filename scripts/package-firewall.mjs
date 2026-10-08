@@ -22,6 +22,7 @@ const setup = path.resolve('release', setups[0]);
 const installDir = path.join(process.env.LOCALAPPDATA, 'Programs', name);
 const executable = path.join(installDir, `${build.productName}.exe`);
 
+// Exits with 0 itself where a missing rule is an expected, non-terminating error.
 function powershell(command) {
   return execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', command], {
     encoding: 'utf8',
@@ -45,7 +46,7 @@ function readRules() {
         protocol = ($_ | Get-NetFirewallPortFilter).Protocol
         port = [string]($_ | Get-NetFirewallPortFilter).LocalPort
       }
-    }) | ConvertTo-Json -Compress`
+    }) | ConvertTo-Json -Compress; exit 0`
   );
   return json ? [JSON.parse(json)].flat() : [];
 }
@@ -91,7 +92,7 @@ function assertAppRules(rules) {
 }
 
 powershell(
-  `Remove-NetFirewallRule -DisplayName ${[...RULES, BLOCK_RULE].map(quote).join(',')} -ErrorAction SilentlyContinue`
+  `Remove-NetFirewallRule -DisplayName ${[...RULES, BLOCK_RULE].map(quote).join(',')} -ErrorAction SilentlyContinue; exit 0`
 );
 // What Windows leaves when its "Allow access?" question is answered with the default tick.
 powershell(
