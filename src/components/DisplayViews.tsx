@@ -134,10 +134,7 @@ export function OutsideDisplay() {
           {finished ? (
             <strong className="display-runner-name">Race afgelopen</strong>
           ) : (
-            <DisplayRunner
-              runner={activeRunner}
-              empty={race.raceStartedAt ? 'Even niemand op de piste' : 'Nog niemand gestart'}
-            />
+            <DisplayRunner runner={activeRunner} empty={race.raceStartedAt ? 'Even niemand' : 'Nog niemand gestart'} />
           )}
         </div>
       </section>
@@ -261,7 +258,7 @@ export function InsideDisplay() {
             : finished
               ? 'Bedankt aan alle lopers'
               : race.raceStartedAt
-                ? 'Even niemand op de piste'
+                ? 'Even niemand'
                 : 'Nog niemand gestart'}
         </strong>
         {!finished && (

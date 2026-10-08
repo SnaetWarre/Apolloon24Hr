@@ -4,6 +4,7 @@ Wachtrij (Telsysteem 1) is the queue desk. Imported runners stay `Ingeschreven` 
 
 ## Sub-features
 
+- `queue-strip` is the `Wisselzone` strip on top: `Nu op de piste`, `Volgende`, and `Klaar om te lopen`. With nobody on the track it shows `Nog niemand gestart` before the start, `Even niemand` mid-race, and `Race afgelopen` after the finish (see `public-displays.md`, Empty track mid-race).
 - `queue-checkin` finds an imported runner with `Loper zoeken` and moves them to Opwarming.
 - `queue-checkin-many` keeps the search open for several check-ins with `Meerdere lopers aanmelden`.
 - `queue-new-runner` creates a runner on the spot with `Nieuwe loper`, straight into Opwarming.

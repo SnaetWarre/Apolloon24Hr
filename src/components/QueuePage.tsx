@@ -45,7 +45,7 @@ export function QueuePage() {
             ) : race.raceFinishedAt ? (
               'Race afgelopen'
             ) : race.raceStartedAt ? (
-              'Nog niemand op de piste'
+              'Even niemand'
             ) : (
               'Nog niemand gestart'
             )}
