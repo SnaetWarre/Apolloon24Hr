@@ -2,7 +2,7 @@ import React from 'react';
 import type { Runner, TemporaryTeam } from '../../types';
 import { runnerMatchesSearch } from '../../lib/runners';
 import { compareRunnerIdentity, currentTeamName } from './adminFormat';
-import { formatTeamWindow, parseTeamWindow, toLocalDateTime } from './temporaryTeamTime';
+import { formatTeamWindow, parseBrusselsDateTime, parseTeamWindow, toLocalDateTime } from './temporaryTeamTime';
 
 export function TemporaryTeamCreateForm({
   runners,
@@ -29,8 +29,8 @@ export function TemporaryTeamCreateForm({
   const [message, setMessage] = React.useState<string | null>(null);
   const assignedIds = new Set(allTeams.flatMap((team) => team.memberRunnerIds));
   const visibleRunners = runners.filter((runner) => runnerMatchesSearch(runner, query)).sort(compareRunnerIdentity);
-  const startMs = new Date(start).getTime();
-  const endMs = new Date(end).getTime();
+  const startMs = parseBrusselsDateTime(start);
+  const endMs = parseBrusselsDateTime(end);
 
   async function create(event: React.FormEvent) {
     event.preventDefault();

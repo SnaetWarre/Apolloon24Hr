@@ -37,6 +37,7 @@ Preconditions:
 ## Gotchas
 
 - The flash is meant to stay loud (blue and night pulse, a frame, a yellow slab). A flat yellow screen is a regression, not a style choice.
+- Every clock time on the screens (`Binnen om` in `Laatste 6 lopers`, for example) is Brussels time, even on a TV or TV stick left on UTC. To check, open the page in a second context with Chrome's time zone set to UTC (CDP `Emulation.setTimezoneOverride` with `timezoneId: 'UTC'`); both pages must show the same times.
 - Only laptops and very large TVs matter. Phone-sized layouts are out of scope.
 - Display pages hide the sidebar. Use the region names and classes above, not navigation links.
 - In a linked group a browser display moves to another laptop when its own laptop disappears; see `linked-laptops.md`.

@@ -286,7 +286,8 @@ function BackupPanel({ backup }: { backup: BackupStatus }) {
       )}
       {backup.latest ? (
         <div className="backup-summary">
-          <strong>Laatste backup:</strong> {new Date(backup.latest.createdAt).toLocaleString('nl-BE')} ·{' '}
+          <strong>Laatste backup:</strong>{' '}
+          {new Date(backup.latest.createdAt).toLocaleString('nl-BE', { timeZone: 'Europe/Brussels' })} ·{' '}
           {formatRelativeAge(backup.latest.createdAt)} · {formatFileSize(backup.latest.sizeBytes)} · gecontroleerd ·{' '}
           {backup.retainedCount} bewaard
         </div>
@@ -310,7 +311,7 @@ function BackupPanel({ backup }: { backup: BackupStatus }) {
         <span>
           <strong>Volgende automatische backup</strong>
           {backup.enabled && backup.nextScheduledAt
-            ? new Date(backup.nextScheduledAt).toLocaleTimeString('nl-BE')
+            ? new Date(backup.nextScheduledAt).toLocaleTimeString('nl-BE', { timeZone: 'Europe/Brussels' })
             : 'niet gepland'}
         </span>
         <span>

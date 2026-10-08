@@ -134,5 +134,10 @@ function backupKind(record: BackupRecord): string {
 }
 
 function formatMoment(ms: number): string {
-  return new Date(ms).toLocaleString('nl-BE', { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+  return new Date(ms).toLocaleString('nl-BE', {
+    weekday: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: 'Europe/Brussels',
+  });
 }
