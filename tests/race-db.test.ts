@@ -131,6 +131,40 @@ test('undo reverts the latest handoff when two share the same moment', async () 
   }
 });
 
+test('undo still works after the runner who ran the last lap was deleted', async () => {
+  fs.rmSync(dataPath, { recursive: true, force: true });
+  const db = await import('../server/db.ts');
+
+  try {
+    await db.initDb();
+    const [wrong, next] = ['Wrong', 'Next'].map((name, index) => {
+      const runner = db.insertRunner({ name, runnerNumber: String(index + 1) });
+      db.updateRunnerStatus({ id: runner.id, status: 'waiting', statusSince: 900, queueIndex: index });
+      return runner;
+    });
+    db.performHandoff(1_000);
+    // A quick second press: the wrong runner gets a 2 s lap.
+    const handoff = db.performHandoff(3_000);
+    const lapId = handoff.ok ? handoff.lapId : null;
+    assert.ok(lapId);
+    db.deleteLap(lapId);
+    db.deleteRunner(wrong.id);
+
+    assert.deepEqual(db.undoLastHandoff(), { ok: true, deletedLapIds: [lapId] });
+
+    assert.equal(db.getAllLaps().length, 0);
+    assert.equal(db.getRunnerById(next.id)?.status, 'waiting');
+    assert.equal(db.getRaceState().activeRunnerId, null);
+    assert.equal(db.getRaceState().activeStartedAt, null);
+    assert.deepEqual(db.getRaceState().activeLabels, []);
+    assert.equal(db.getRaceState().raceStartedAt, 1_000);
+  } finally {
+    // Windows cannot delete a database file that is still open.
+    db.closeDb();
+    fs.rmSync(dataPath, { recursive: true, force: true });
+  }
+});
+
 test('reordering requires each waiting runner exactly once', async () => {
   fs.rmSync(dataPath, { recursive: true, force: true });
   const db = await import('../server/db.ts');

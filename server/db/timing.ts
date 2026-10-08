@@ -155,13 +155,20 @@ export function undoLastHandoff(): { ok: true; deletedLapIds: string[] } | { ok:
 
   const payload = JSON.parse(row.payloadJson) as Partial<HandoffSnapshot>;
   const deletedLapIds = payload.lapIds ?? [];
-  const raceState: Partial<RaceState> = payload.raceState ?? {};
+  const snapshotState: Partial<RaceState> = payload.raceState ?? {};
+  // Beheer › Lopers may have deleted that runner since; then nobody goes back on the track.
+  const raceState =
+    snapshotState.activeRunnerId && !getRunnerById(snapshotState.activeRunnerId)
+      ? { ...snapshotState, activeRunnerId: null, activeStartedAt: null, activeLabels: [] }
+      : snapshotState;
   transaction(() => {
     for (const lapId of deletedLapIds) {
       run('DELETE FROM laps WHERE id = ?', [lapId]);
     }
 
-    for (const state of payload.queueEntries ?? []) restoreQueueState(state);
+    for (const state of payload.queueEntries ?? []) {
+      if (getRunnerById(state.runnerId)) restoreQueueState(state);
+    }
 
     run(
       `UPDATE race_state
