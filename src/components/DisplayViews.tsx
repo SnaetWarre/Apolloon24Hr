@@ -431,12 +431,15 @@ type DisplayPresentation = 'light' | 'dark';
  * Displays keep their own presentation, independent of the operator theme.
  * Order: `?thema=licht|donker` in the URL, then the choice made on this display
  * (remembered by this browser), then the default for the screen.
+ * A choice also goes into the URL: failover reopens the same address on another
+ * laptop, whose browser storage is empty.
  */
 function useDisplayPresentation(
   display: 'inside' | 'outside',
   defaultPresentation: DisplayPresentation
 ): [DisplayPresentation, (next: DisplayPresentation) => void] {
   const storageKey = `apolloon.display.${display}`;
+  const navigate = useNavigate();
   const searchString = useRouterState({ select: (state) => state.location.searchStr });
   const requested = new URLSearchParams(searchString).get('thema');
   const [stored, setStored] = React.useState<DisplayPresentation | null>(() => {
@@ -455,8 +458,13 @@ function useDisplayPresentation(
         // Keep the choice for this session only.
       }
       setStored(next);
+      void navigate({
+        to: '.',
+        search: (previous: Record<string, unknown>) => ({ ...previous, thema: next === 'light' ? 'licht' : 'donker' }),
+        replace: true,
+      });
     },
-    [storageKey]
+    [navigate, storageKey]
   );
   const presentation =
     requested === 'licht' ? 'light' : requested === 'donker' ? 'dark' : (stored ?? defaultPresentation);

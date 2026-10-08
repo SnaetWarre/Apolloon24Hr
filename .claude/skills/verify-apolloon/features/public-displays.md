@@ -9,6 +9,7 @@ Binnenscherm (inside) and Buitenscherm (outside) are full-screen pages for the T
 - `display-inside-ranking` ranks runners and compares label groups (`Ranking`, `Competities`).
 - `display-outside-bands` shows the current runner (`Nu op de piste`) and the next one (`Volgende loper`) in large bands.
 - `display-outside-flash` shows a new fastest lap large for 8 seconds, titled by the `Recordflits` setting in Beheer › Publiek (`Nieuw dagrecord` by default; `Uit` turns it off). A lap under 20 s (a double press counted with `Toch afklokken`) never flashes, and the next real lap only has to beat the laps of 20 s or more.
+- `display-look` sets the look of one screen. `Licht` and `Donker` on the Binnenscherm write `?thema=licht|donker` into the address (and this browser's storage), so the look survives a move to another laptop. A `?thema=` already in the address wins over the stored choice, which wins over the default (dark inside, light outside).
 - `display-outside-burgie` shows `Burgie gepakt` and `ZINGEN` with the runner on the track for 8 seconds after `Burgie gepakt` is pressed in Beheer › Publiek.
 
 ## How to get to it (user POV)
@@ -29,6 +30,7 @@ Preconditions:
 - **Outside.** `await page.goto(run.url('/display/outside'))`. The bands `.outside-band--current` and `.outside-band--next` show the active and next runner.
 - **Fastest-lap flash.** Make a handoff whose lap is faster than every earlier lap. The `live` laps are all over a minute, so a press 20 to 60 s after the last handoff is a record and gets no short-lap question. `.outside-record-flash` appears with `Nieuw dagrecord`, the lap time and the runner, and is gone about 8 s later. Laps already there when the page loaded never flash. A double press counted with `Toch afklokken` (under 20 s) must not flash either, and a 25 s lap right after it still flashes `Nieuw dagrecord`.
 - **Burgie.** On `/admin?section=public` click `Burgie gepakt`. On the outside page `.outside-record-flash` shows `Burgie gepakt`, `ZINGEN`, and the runner on the track.
+- **Look survives failover.** In a linked group of three, open `/display/inside` on laptop 0 and click `Licht`. The address gains `?thema=licht` and `document.documentElement.dataset.displayTone` is `light`. Freeze laptop 0 (`process.kill(pid, 'SIGSTOP')`) and wait for the page URL to move to another laptop. The tone must still be `light`.
 - **Proof.** Take `run.proof(page, 'display-…')` on the display page itself, before and after the action on Timing.
 
 ## Gotchas
