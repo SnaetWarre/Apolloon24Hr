@@ -49,3 +49,21 @@ export function formatElapsedSeconds(ms: number | undefined | null): string {
 
   return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 }
+
+const BRUSSELS_PARTS = new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'Europe/Brussels',
+  hourCycle: 'h23',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+});
+
+/** How far Brussels clock time is ahead of UTC at that moment: 1 h in winter, 2 h in summer. */
+export function brusselsOffsetMs(atMs: number): number {
+  const parts = Object.fromEntries(BRUSSELS_PARTS.formatToParts(atMs).map((part) => [part.type, part.value]));
+  const asUtc = Date.UTC(+parts.year, +parts.month - 1, +parts.day, +parts.hour, +parts.minute, +parts.second);
+  return asUtc - Math.floor(atMs / 1000) * 1000;
+}

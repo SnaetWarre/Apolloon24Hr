@@ -32,3 +32,4 @@ Preconditions:
 - In the desktop window, never click a link without the CDP `deny` above: Electron would open a save dialog on the user's real screen. Check the Excel and CSV links in a headless browser page or with curl instead.
 - The desktop window opens DevTools beside the page, so its screenshots are only about 160 px wide. Use the browser page for a full-size screenshot.
 - The exports always hold the full race; turning labels off on Analyse does not change the files.
+- The Excel file shows `Binnen` and `Tijdstip` in Brussels clock time, like the screens, whatever time zone the server runs in (summer or winter time as on that date). The CSV and JSON files keep ISO times in UTC with a `Z`. To check the Excel times, start the run with `TZ=UTC node .claude/skills/verify-apolloon/scripts/verify.mjs up …` (the servers inherit `TZ`) and compare the first `Binnen` cell, read as UTC, with the lap's `finishedAt` formatted in `Europe/Brussels`.
