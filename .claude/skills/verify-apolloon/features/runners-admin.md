@@ -4,7 +4,7 @@ Beheer › Lopers lists every runner with their status, registration hours, sour
 
 ## Sub-features
 
-- `runners-search` filters the list with the `Lopers zoeken` textbox, on number, name, labels, and the Dutch status and source shown in the table (`Ingeschreven`, `Manueel`).
+- `runners-search` filters the list with the `Lopers zoeken` textbox, on number, name, labels, the Dutch status and source shown in the table (`Ingeschreven`, `Manueel`, `verborgen`), and the hours, including each one-hour slot inside a form block (`13-14u` finds `12-14u (woensdag)`).
 - `runners-hour-filter` keeps the runners free during one event hour, picked in the `Beschikbaar tijdens` select. A form block like `12-14u (woensdag)` counts for both `12-13u` and `13-14u`.
 - `runners-new` adds a runner with `Nieuwe loper`, including hours from the hours picker.
 - `runners-profile` opens a runner's profile with `Profiel`.
