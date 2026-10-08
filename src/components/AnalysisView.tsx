@@ -157,23 +157,23 @@ export function AnalysisView() {
             </summary>
             <div className="analysis-export__menu">
               <p>Exports bevatten altijd de volledige wedstrijd. De labelfilters op dit scherm tellen niet mee.</p>
-              <a className="btn btn--sm" href="/api/export/race.xlsx">
+              <a className="btn btn--sm" href="/api/export/race.xlsx" download>
                 Excel: rondes en gebeurtenissen
               </a>
               <p className="analysis-export__group">Voor MATLAB, R of andere scripts</p>
-              <a className="btn btn--quiet btn--sm" href="/api/export/laps.csv">
+              <a className="btn btn--quiet btn--sm" href="/api/export/laps.csv" download>
                 Rondes (CSV)
               </a>
-              <a className="btn btn--quiet btn--sm" href="/api/export/laps.json">
+              <a className="btn btn--quiet btn--sm" href="/api/export/laps.json" download>
                 Rondes (JSON)
               </a>
-              <a className="btn btn--quiet btn--sm" href="/api/export/current-state.json">
+              <a className="btn btn--quiet btn--sm" href="/api/export/current-state.json" download>
                 Volledige toestand (JSON)
               </a>
-              <a className="btn btn--quiet btn--sm" href="/api/export/events.csv">
+              <a className="btn btn--quiet btn--sm" href="/api/export/events.csv" download>
                 Gebeurtenissen (CSV)
               </a>
-              <a className="btn btn--quiet btn--sm" href="/api/export/events.json">
+              <a className="btn btn--quiet btn--sm" href="/api/export/events.json" download>
                 Gebeurtenissen (JSON)
               </a>
             </div>

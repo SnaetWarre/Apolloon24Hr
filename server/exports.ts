@@ -30,6 +30,12 @@ function sendCsv(res: Response, fileName: string, columns: string[], rows: CsvRo
   res.send(csvText(columns, rows));
 }
 
+/** A download, not a page: the desktop window has no back button to leave raw JSON again. */
+function sendJson(res: Response, fileName: string, body: unknown): void {
+  res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+  res.json(body);
+}
+
 export const LAP_COLUMNS = [
   'timestamp',
   'runner_number',
@@ -94,15 +100,15 @@ export function registerExportRoutes(app: Express): void {
     sendCsv(res, 'apolloon-laps.csv', LAP_COLUMNS, lapRows(getAllLaps(), getAllRunners()));
   });
   app.get('/api/export/laps.json', (_req, res) => {
-    res.json({ laps: getAllLaps() });
+    sendJson(res, 'apolloon-laps.json', { laps: getAllLaps() });
   });
   app.get('/api/export/events.csv', (_req, res) => {
     sendCsv(res, 'apolloon-events.csv', EVENT_COLUMNS, eventRows());
   });
   app.get('/api/export/events.json', (_req, res) => {
-    res.json({ events: getAllRaceEvents() });
+    sendJson(res, 'apolloon-events.json', { events: getAllRaceEvents() });
   });
   app.get('/api/export/current-state.json', (_req, res) => {
-    res.json(appSnapshot());
+    sendJson(res, 'apolloon-current-state.json', appSnapshot());
   });
 }
