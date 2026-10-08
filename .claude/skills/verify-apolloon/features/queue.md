@@ -7,6 +7,7 @@ Wachtrij (Telsysteem 1) is the queue desk. Imported runners stay `Ingeschreven` 
 - `queue-checkin` finds an imported runner with `Loper zoeken` and moves them to Opwarming.
 - `queue-checkin-many` keeps the search open for several check-ins with `Meerdere lopers aanmelden`.
 - `queue-new-runner` creates a runner on the spot with `Nieuwe loper`, straight into Opwarming.
+- `queue-autofocus`: `Loper zoeken` opens with the cursor in its search box and `Nieuwe loper` in `Lopersnummer`. Opening `Contact en beschikbaarheid` moves it to `Telefoon`, and `Extra gegevens` to the minutes of `Historisch gemiddelde`. See Autofocus in `README.md`.
 - `queue-move` moves a runner with `Naar wachtrij` (to Klaar om te lopen) and `Opwarmen` (back).
 - `queue-filter` filters the board with `Filter dit bord` and clears it with `Filter wissen`.
 - `queue-profile` opens a runner's profile by clicking their name on the board.

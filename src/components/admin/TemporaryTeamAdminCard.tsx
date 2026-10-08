@@ -30,6 +30,7 @@ export function TemporaryTeamAdminCard({
   const [selectedIds, setSelectedIds] = React.useState<string[]>(team.memberRunnerIds);
   const [query, setQuery] = React.useState('');
   const [membersOpen, setMembersOpen] = React.useState(false);
+  const memberSearchRef = React.useRef<HTMLInputElement>(null);
   const [busy, setBusy] = React.useState(false);
   const [feedback, setFeedback] = React.useState<string | null>(null);
   const [editingSchedule, setEditingSchedule] = React.useState(false);
@@ -189,6 +190,7 @@ export function TemporaryTeamAdminCard({
             <label className="stacked-label">
               Begin
               <input
+                autoFocus
                 className="input"
                 type="datetime-local"
                 value={start}
@@ -244,7 +246,11 @@ export function TemporaryTeamAdminCard({
       </article>
 
       {membersOpen && (
-        <ModalDialog label={`Ledenlijst ${label.name}`} onRequestClose={() => void closeMembers()}>
+        <ModalDialog
+          label={`Ledenlijst ${label.name}`}
+          onRequestClose={() => void closeMembers()}
+          initialFocusRef={memberSearchRef}
+        >
           <div className="modal temporary-team-modal">
             <div className="modal-header">
               <div>
@@ -296,7 +302,7 @@ export function TemporaryTeamAdminCard({
                   <strong>{availableRunners.length}</strong>
                 </div>
                 <input
-                  autoFocus
+                  ref={memberSearchRef}
                   className="input input--search"
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}

@@ -1,5 +1,6 @@
 import React from 'react';
 import { useAppActions } from '../../app/index';
+import { focusFirstInputOnOpen } from '../../lib/focus';
 import { describeAutoLinks, describeGroup } from '../../lib/systemStatus';
 import { formatClockTimeMs } from '../../lib/time';
 import { useConfirm } from '../ConfirmDialog';
@@ -165,7 +166,7 @@ function ClusterPanel({
               netwerk?
             </div>
           )}
-          <details className="host-hint cluster-manual-join">
+          <details className="host-hint cluster-manual-join" onToggle={focusFirstInputOnOpen}>
             <summary className="disclosure">Laptop niet in de lijst? Vul het adres in</summary>
             <p className="panel-copy">
               Het adres staat onderaan de zijbalk van die laptop. Deze laptop

@@ -2,6 +2,7 @@ import React from 'react';
 import { ModalDialog } from './ModalDialog';
 import { useConfirm } from './ConfirmDialog';
 import { AvailableHoursPicker } from './AvailableHoursPicker';
+import { focusFirstInputOnOpen } from '../lib/focus';
 import { groupLabels, toggleRunnerLabel } from '../lib/labels';
 import { foldSearchText, runnerMatchesSearch, statusLabel } from '../lib/runners';
 import { runnerFormError } from '../lib/runnerForm';
@@ -357,7 +358,7 @@ export function RunnerAddModal({
           ))}
         </div>
 
-        <details className="runner-extra-details">
+        <details className="runner-extra-details" onToggle={focusFirstInputOnOpen}>
           <summary className="disclosure">
             Contact en beschikbaarheid <span>Telefoon, e-mail en beschikbare uren</span>
           </summary>
@@ -386,7 +387,7 @@ export function RunnerAddModal({
           <AvailableHoursPicker value={availableHours} onChange={setAvailableHours} />
         </details>
 
-        <details className="runner-extra-details">
+        <details className="runner-extra-details" onToggle={focusFirstInputOnOpen}>
           <summary className="disclosure">
             Extra gegevens <span>Historische tijden en notities</span>
           </summary>
