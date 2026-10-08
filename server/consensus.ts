@@ -46,7 +46,9 @@ const MAX_ENTRIES_PER_APPEND = 500;
 const SNAPSHOT_ANSWER_TIMEOUT_MS = 10_000;
 const SNAPSHOT_TIMEOUT_MS = 60_000;
 
-const groupViewSchema = z.array(z.object({ hostId: z.string(), reachable: z.boolean(), caughtUp: z.boolean() }));
+const groupViewSchema = z.array(
+  z.object({ hostId: z.string(), reachable: z.boolean(), caughtUp: z.boolean(), silentMs: z.number().nonnegative() })
+);
 
 export const appendRequestSchema = z.object({
   clusterId: z.string(),
@@ -83,6 +85,7 @@ const voteResponseSchema = z.object({
   term: z.number().int().nonnegative(),
   granted: z.boolean(),
   leader: memberSchema.optional(),
+  removed: z.boolean().optional(),
 }) satisfies z.ZodType<VoteResponse>;
 
 function self(): ClusterMember {
@@ -97,6 +100,9 @@ export function members(): ClusterMember[] {
   const stored = getClusterMembers().map((member) => ({ ...member, url: currentUrl(member.hostId, member.url) }));
   return stored.some((member) => member.hostId === self().hostId) ? stored : [self(), ...stored];
 }
+
+/** The last laptop that told this one it was taken out of the group, and when (monotonic). */
+let lastRemovedAnswer: { member: ClusterMember; at: number } | null = null;
 
 async function send<T>(member: ClusterMember, type: PeerRequestType, body: unknown, schema: z.ZodType<T>) {
   const answer = await peerRequest(member.url, type, body);
@@ -122,7 +128,11 @@ const raft = createRaft({
     appendFromLeader,
   },
   sendAppend: (member, request) => send(member, 'append', request, appendResponseSchema),
-  sendVote: (member, request) => send(member, 'vote', request, voteResponseSchema),
+  async sendVote(member, request) {
+    const answer = await send(member, 'vote', request, voteResponseSchema);
+    if (answer?.removed) lastRemovedAnswer = { member, at: performance.now() };
+    return answer;
+  },
   async installCopyFrom(url, backupReason, signal) {
     // A leader answers at once; only the download itself may take a while.
     const answered = new AbortController();
@@ -185,6 +195,12 @@ export const currentLeader = raft.leader;
 export const isResyncing = raft.isResyncing;
 export const lastResyncProblem = raft.resyncProblem;
 export const lastLeaderContact = raft.lastLeaderContact;
+export const logSettled = raft.logSettled;
+
+/** The laptop that last said this one was taken out of the group, if one did within `withinMs`. */
+export function removedBy(withinMs: number): ClusterMember | null {
+  return lastRemovedAnswer && performance.now() - lastRemovedAnswer.at < withinMs ? lastRemovedAnswer.member : null;
+}
 
 export function isLeader(): boolean {
   return !enabled || raft.role() === 'leader';

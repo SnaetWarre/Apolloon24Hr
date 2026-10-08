@@ -35,8 +35,10 @@ import {
   assertWritable,
   continueAlone,
   forwardWrite,
+  groupSettled,
   linkWith,
   newRequestId,
+  removeLaptop,
   writeDeadline,
   writeTarget,
 } from './cluster.js';
@@ -290,6 +292,15 @@ const applyRestore = write(
   }
 );
 
+/** One laptop out of the group at a time: it waits until everything written before it is on a majority. */
+const removeMember = write(
+  (input: { hostId: string }) => removeLaptop(input.hostId),
+  async () => {
+    await groupSettled();
+    return { value: undefined, isCurrent: () => true };
+  }
+);
+
 const importCsv = write((input: z.infer<typeof importCsvSchema>) => {
   try {
     return importRunnersFromCsv(input.csvText);
@@ -317,6 +328,7 @@ export const appRouter = t.router({
       .input(z.object({ url: z.string().trim().min(1).max(2_048) }))
       .mutation(({ input }) => linkWith(input.url)),
     continueAlone: t.procedure.mutation(({ ctx }) => continueAlone(ctx.origin)),
+    removeMember: t.procedure.input(z.object({ hostId: z.string().min(1).max(128) })).mutation(removeMember),
   }),
 
   backups: t.router({

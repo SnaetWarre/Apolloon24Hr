@@ -28,6 +28,14 @@ import { createRaft, type Raft } from '../server/raft.ts';
  * The heal phase then restores everything and checks that the group
  * recovers by itself: one leader, a press goes through, and every laptop
  * holds the same log and every confirmed lap.
+ *
+ * With `replaceGone`, a fourth laptop breaks for good during the chaos and
+ * is taken out of the group ("Uit de groep halen", a replicated write as in
+ * router.ts), so the group shrinks from four to three while laptops crash
+ * and cables break. Each laptop reads the group from its own data, as
+ * consensus.ts does. During healing the broken laptop comes back with its
+ * old data; it must not be able to lead, and the three must carry on
+ * without it.
  */
 
 export type SimOptions = {
@@ -37,6 +45,8 @@ export type SimOptions = {
   healMs?: number;
   /** Keep the whole trace instead of only its tail. */
   fullTrace?: boolean;
+  /** A fourth laptop breaks for good, is taken out of the group, and comes back while healing. */
+  replaceGone?: boolean;
 };
 
 export type SimResult = {
@@ -173,7 +183,9 @@ type AppState = {
   laps: Lap[];
   notes: string[];
   /** Results of forwarded writes by request id, like the forwarded_writes table. */
-  requests: Record<string, { kind: 'lap'; lapNumber: number } | { kind: 'note'; noteId: string }>;
+  requests: Record<string, WriteResult>;
+  /** Laptops taken out of the group, like the rows deleted from cluster_members. */
+  removed: string[];
 };
 
 /** What survives a crash: the SQLite file. */
@@ -185,10 +197,18 @@ type Disk = {
   state: AppState;
 };
 
-type WriteOp = { kind: 'lap'; pressId: string; expectedLaps: number } | { kind: 'note'; noteId: string };
+type WriteOp =
+  | { kind: 'lap'; pressId: string; expectedLaps: number }
+  | { kind: 'note'; noteId: string }
+  | { kind: 'remove'; hostId: string };
+
+type WriteResult =
+  | { kind: 'lap'; lapNumber: number }
+  | { kind: 'note'; noteId: string }
+  | { kind: 'remove'; hostId: string };
 
 type WriteOutcome =
-  | { ok: true; result: { kind: 'lap'; lapNumber: number } | { kind: 'note'; noteId: string } }
+  | { ok: true; result: WriteResult }
   | { ok: false; code: 'CONFLICT' | 'SERVICE_UNAVAILABLE'; retry: boolean };
 
 type Incarnation = {
@@ -256,10 +276,10 @@ export async function simulate(options: SimOptions): Promise<SimResult> {
   const linkCut = (from: number, to: number) => cut.has(`${from}>${to}`);
   const delay = () => (random.chance(network.slow) ? random.between(50, 2_500) : random.between(0.2, 6));
 
-  const nodes: SimNode[] = Array.from({ length: NODE_COUNT }, (_, index) => ({
+  const nodes: SimNode[] = Array.from({ length: NODE_COUNT + (options.replaceGone ? 1 : 0) }, (_, index) => ({
     index,
     member: { hostId: `n${index}`, url: `sim://n${index}` },
-    disk: { term: 0, votedFor: null, log: [], state: { laps: [], notes: [], requests: {} } },
+    disk: { term: 0, votedFor: null, log: [], state: { laps: [], notes: [], requests: {}, removed: [] } },
     rate: 1 + random.between(-0.02, 0.02),
     monotonicAtZero: random.between(0, 1e6),
     wallOffset: random.between(1.7e12, 1.8e12),
@@ -268,6 +288,17 @@ export async function simulate(options: SimOptions): Promise<SimResult> {
   }));
   const members = nodes.map((node) => node.member);
   const byUrl = new Map(nodes.map((node) => [node.member.url, node]));
+  /** The laptop that breaks for good, while it is broken; and whether it was taken out of the group. */
+  const goneNode = options.replaceGone ? nodes[NODE_COUNT] : null;
+  let gone = false;
+  let goneRemoved = false;
+  const core = nodes.filter((node) => node !== goneNode);
+
+  /** The group as this laptop's data has it, itself always included (consensus.ts `members`). */
+  function groupOf(node: SimNode): ClusterMember[] {
+    const kept = members.filter((member) => !node.disk.state.removed.includes(member.hostId));
+    return kept.includes(node.member) ? kept : [node.member, ...kept];
+  }
 
   const monotonic = (node: SimNode) => node.monotonicAtZero + now * node.rate;
   const wall = (node: SimNode) => monotonic(node) + node.wallOffset;
@@ -328,6 +359,10 @@ export async function simulate(options: SimOptions): Promise<SimResult> {
         if (state.notes.includes(noteId)) fail(`${node.member.hostId} applies change ${noteId} twice`);
         state.notes.push(noteId);
         if (requestId) state.requests[requestId] = { kind: 'note', noteId };
+      } else if (sql === 'remove') {
+        const [hostId, requestId] = params as [string, string | null];
+        if (!state.removed.includes(hostId)) state.removed.push(hostId);
+        if (requestId) state.requests[requestId] = { kind: 'remove', hostId };
       }
     }
     node.disk.log.push(entry);
@@ -441,6 +476,10 @@ export async function simulate(options: SimOptions): Promise<SimResult> {
       case 'append':
         return raft.handleAppend(message.body);
       case 'vote':
+        // cluster.ts answers a laptop taken out of the group before consensus sees the request.
+        if (node.disk.state.removed.includes(message.body.candidateId)) {
+          return { term: raft.currentTerm(), granted: false, removed: true };
+        }
         return raft.handleVoteRequest(message.body);
       case 'snapshot':
         if (raft.role() !== 'leader' || raft.isResyncing()) return null;
@@ -483,6 +522,16 @@ export async function simulate(options: SimOptions): Promise<SimResult> {
       if (state.laps.length !== op.expectedLaps) return { ok: false, code: 'CONFLICT', retry: false };
       result = { kind: 'lap', lapNumber: state.laps.length + 1 };
       newEntry(node, 'lap', [{ sql: 'lap', params: [op.pressId, result.lapNumber, requestId ?? null] }]);
+    } else if (op.kind === 'remove') {
+      result = { kind: 'remove', hostId: op.hostId };
+      // Taken out already: the earlier attempt went through after all.
+      if (state.removed.includes(op.hostId)) return { ok: true, result };
+      // As cluster.ts removeLaptop: never a laptop that answers, and one change to the group at a time.
+      if (raft.leaderGroupView().find((seen) => seen.hostId === op.hostId)?.reachable !== false) {
+        return { ok: false, code: 'CONFLICT', retry: false };
+      }
+      if (!raft.logSettled()) return { ok: false, code: 'SERVICE_UNAVAILABLE', retry: true };
+      newEntry(node, 'remove', [{ sql: 'remove', params: [op.hostId, requestId ?? null] }]);
     } else {
       result = { kind: 'note', noteId: op.noteId };
       newEntry(node, 'note', [{ sql: 'note', params: [op.noteId, requestId ?? null] }]);
@@ -494,9 +543,13 @@ export async function simulate(options: SimOptions): Promise<SimResult> {
     if (node.disk.log.at(-1)!.seq < seq || logView(node.disk).idAt(seq) !== id)
       fail(`${node.member.hostId} lost ${seq}`);
     for (const entry of node.disk.log) if (entry.seq <= seq) recordCommitted(entry, node.disk.term);
-    log(
-      `${node.member.hostId} committed ${seq} (${result.kind === 'lap' ? `lap ${result.lapNumber}` : result.noteId})`
-    );
+    const what =
+      result.kind === 'lap'
+        ? `lap ${result.lapNumber}`
+        : result.kind === 'note'
+          ? result.noteId
+          : `${result.hostId} out of the group`;
+    log(`${node.member.hostId} committed ${seq} (${what})`);
     return { ok: true, result };
   }
 
@@ -569,7 +622,7 @@ export async function simulate(options: SimOptions): Promise<SimResult> {
     incarnation.raft = createRaft({
       self: () => node.member,
       clusterId: () => 'sim',
-      members: () => members,
+      members: () => groupOf(node),
       storage: storage(node),
       sendAppend: (member, body) =>
         request(node, incarnation, member.url, { kind: 'append', body }, REQUEST_TIMEOUT_MS),
@@ -703,7 +756,7 @@ export async function simulate(options: SimOptions): Promise<SimResult> {
       if (!botsRunning) return;
       at(random.between(minMs, maxMs), step);
       if (pending && nodes.some((node) => node.running === pending)) return;
-      const running = nodes.filter((node) => node.running);
+      const running = core.filter((node) => node.running);
       if (!running.length) return;
       const node = random.pick(running);
       const owner = node.running!;
@@ -724,6 +777,7 @@ export async function simulate(options: SimOptions): Promise<SimResult> {
   }
 
   function record(op: WriteOp, outcome: WriteOutcome): void {
+    if (op.kind === 'remove') return;
     const name = op.kind === 'lap' ? op.pressId : op.noteId;
     if (outcome.ok) {
       stats.acked += 1;
@@ -747,8 +801,8 @@ export async function simulate(options: SimOptions): Promise<SimResult> {
   function scheduleChaos(): void {
     at(random.between(100, 2_000), () => {
       if (now >= chaosMs) return;
-      const node = random.pick(nodes);
-      const other = random.pick(nodes.filter((candidate) => candidate !== node));
+      const node = random.pick(core);
+      const other = random.pick(core.filter((candidate) => candidate !== node));
       switch (random.int(0, 9)) {
         case 0:
         case 1:
@@ -809,11 +863,12 @@ export async function simulate(options: SimOptions): Promise<SimResult> {
     botsRunning = false;
     cut.clear();
     Object.assign(network, { drop: 0, duplicate: 0, slow: 0 });
-    for (const node of nodes) if (!node.running) boot(node);
+    for (const node of core) if (!node.running) boot(node);
     log('HEAL: everything back, bots stop');
+    bringBackGone();
     // Once the dust settles, one more press must go through.
     at(20_000, () => {
-      const node = random.pick(nodes);
+      const node = random.pick(core);
       const owner = node.running!;
       log(`${node.member.hostId}: final Space`);
       const op = timingPress(node);
@@ -824,11 +879,60 @@ export async function simulate(options: SimOptions): Promise<SimResult> {
     });
   }
 
+  // The fourth laptop breaks for good; the crew takes it out on one of the others, as often as it takes.
+
+  function breakForGood(): void {
+    at(random.between(1_000, chaosMs / 2), () => {
+      gone = true;
+      crash(goneNode!);
+      log(`${goneNode!.member.hostId} breaks for good`);
+      at(random.between(500, 5_000), removeGone);
+    });
+  }
+
+  let removing: Incarnation | null = null;
+
+  /** Tries again every few seconds; a try on a laptop that loses power never answers. */
+  function removeGone(): void {
+    if (goneRemoved) return;
+    at(random.between(500, 3_000), removeGone);
+    if (removing && nodes.some((node) => node.running === removing)) return;
+    const running = core.filter((node) => node.running);
+    if (!running.length) return;
+    const node = random.pick(running);
+    const owner = node.running!;
+    removing = owner;
+    log(`${node.member.hostId}: Uit de groep halen (${goneNode!.member.hostId})`);
+    void write(node, owner, { kind: 'remove', hostId: goneNode!.member.hostId }).then((outcome) => {
+      if (removing === owner) removing = null;
+      if (!outcome.ok || goneRemoved) return;
+      goneRemoved = true;
+      log(`${goneNode!.member.hostId} is out of the group`);
+      bringBackGone();
+    });
+  }
+
+  /** Once healing and taken out, the broken laptop starts again with its old data. */
+  function bringBackGone(): void {
+    if (!goneNode || !gone || !goneRemoved || botsRunning) return;
+    gone = false;
+    boot(goneNode);
+  }
+
   function checkRecovered(): void {
     const leaders = nodes.filter((node) => node.running?.raft.role() === 'leader');
     if (leaders.length !== 1) return fail(`after healing, ${leaders.length} leaders`);
     const [leader] = leaders;
-    for (const node of nodes) {
+    if (goneNode) {
+      if (!goneRemoved || gone) return fail(`after healing, ${goneNode.member.hostId} was not taken out and back`);
+      if (leader === goneNode) return fail(`${goneNode.member.hostId} leads after it was taken out`);
+      for (const node of core) {
+        if (node.running!.raft.majority() !== 2) {
+          return fail(`after healing, ${node.member.hostId} still counts ${goneNode.member.hostId} in the group`);
+        }
+      }
+    }
+    for (const node of core) {
       const raft = node.running!.raft;
       if (node !== leader && (raft.leader()?.hostId !== leader.member.hostId || !raft.leaderAlive())) {
         return fail(`after healing, ${node.member.hostId} does not follow ${leader.member.hostId}`);
@@ -862,6 +966,7 @@ export async function simulate(options: SimOptions): Promise<SimResult> {
     return { kind: 'note', noteId: `${kind}${nextId++}` };
   });
   scheduleChaos();
+  if (goneNode) breakForGood();
   at(chaosMs, heal);
   const end = chaosMs + healMs;
   at(end, checkRecovered);

@@ -24,8 +24,11 @@ import type { ReplicationLogEntry } from './db/types.js';
 
 export type Role = 'leader' | 'follower' | 'candidate';
 
-/** What a leader tells its followers about the group, so every laptop can show it. */
-export type GroupView = Array<{ hostId: string; reachable: boolean; caughtUp: boolean }>;
+/**
+ * What a leader tells its followers about the group, so every laptop can show it. `silentMs`
+ * is how long the leader has not heard from that laptop (0 while it answers).
+ */
+export type GroupView = Array<{ hostId: string; reachable: boolean; caughtUp: boolean; silentMs: number }>;
 
 export type AppendRequest = {
   clusterId: string;
@@ -56,11 +59,15 @@ export type VoteRequest = {
   lastTerm: number;
 };
 
-/** A refusal names the laptop that leads, so a laptop coming back follows it instead of starting an election. */
+/**
+ * A refusal names the laptop that leads, so a laptop coming back follows it instead of starting an
+ * election. `removed` tells a laptop that the group took it out on purpose (cluster.ts).
+ */
 export type VoteResponse = {
   term: number;
   granted: boolean;
   leader?: ClusterMember;
+  removed?: boolean;
 };
 
 export type RaftStorage = {
@@ -111,6 +118,8 @@ type FollowerProgress = {
   /** Last entry the follower confirmed; null until it has answered a probe. */
   matchSeq: number | null;
   lastAckAt: number | null;
+  /** When this leader started sending to it, for how long a follower that never answered has been silent. */
+  since: number;
   inFlight: boolean;
   needsResync: boolean;
 };
@@ -126,6 +135,8 @@ export function createRaft(deps: RaftDeps) {
   let electionDeadline = 0;
   let electing = false;
   let lastQuorumAt = deps.now();
+  /** The last entry this leader knows a majority holds. */
+  let committedSeq = 0;
   let lastClockSyncAt = Number.NEGATIVE_INFINITY;
   let resyncing = false;
   /** The laptop a re-sync copies from, and how to give up on it. */
@@ -166,7 +177,13 @@ export function createRaft(deps: RaftDeps) {
     return otherMembers().map((member) => {
       const follower = progress.get(member.hostId);
       const reachable = follower?.lastAckAt != null && now - follower.lastAckAt < electionTimeoutMs;
-      return { hostId: member.hostId, reachable, caughtUp: reachable && (follower?.matchSeq ?? -1) >= head };
+      const silentMs = !follower || reachable ? 0 : now - (follower.lastAckAt ?? follower.since);
+      return {
+        hostId: member.hostId,
+        reachable,
+        caughtUp: reachable && (follower?.matchSeq ?? -1) >= head,
+        silentMs,
+      };
     });
   }
 
@@ -197,6 +214,7 @@ export function createRaft(deps: RaftDeps) {
     leader = deps.self();
     lastLeaderContactAt = deps.now();
     lastQuorumAt = deps.now();
+    committedSeq = 0;
     progress.clear();
     groupView = [];
     replicateToAll();
@@ -320,13 +338,18 @@ export function createRaft(deps: RaftDeps) {
   // Leader side: send each follower what it is missing, and learn how far it got.
 
   function replicateToAll(): void {
-    for (const member of otherMembers()) void replicateTo(member);
+    const others = otherMembers();
+    // A laptop taken out of the group gets nothing more; were it added again, it starts afresh.
+    for (const hostId of progress.keys()) {
+      if (!others.some((member) => member.hostId === hostId)) progress.delete(hostId);
+    }
+    for (const member of others) void replicateTo(member);
   }
 
   async function replicateTo(member: ClusterMember): Promise<void> {
     let follower = progress.get(member.hostId);
     if (!follower) {
-      follower = { member, matchSeq: null, lastAckAt: null, inFlight: false, needsResync: false };
+      follower = { member, matchSeq: null, lastAckAt: null, since: deps.now(), inFlight: false, needsResync: false };
       progress.set(member.hostId, follower);
     }
     follower.member = member;
@@ -387,6 +410,7 @@ export function createRaft(deps: RaftDeps) {
     const matched = [storage.head().seq, ...otherMembers().map((member) => progress.get(member.hostId)?.matchSeq ?? 0)];
     matched.sort((a, b) => b - a);
     const committed = matched[majority() - 1] ?? 0;
+    committedSeq = Math.max(committedSeq, committed);
     for (const waiter of commitWaiters) {
       if (waiter.seq <= committed) {
         commitWaiters.delete(waiter);
@@ -517,5 +541,7 @@ export function createRaft(deps: RaftDeps) {
     isResyncing: () => resyncing,
     /** Why the last re-sync failed, until one succeeds. */
     resyncProblem: () => resyncProblem,
+    /** True while this laptop leads and a majority holds its whole log, so a change to the group can follow. */
+    logSettled: () => role === 'leader' && (deps.members().length === 1 || committedSeq >= storage.head().seq),
   };
 }

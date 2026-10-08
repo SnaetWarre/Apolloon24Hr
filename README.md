@@ -34,7 +34,9 @@ Koppelen still works by hand: open Beheer › Systeem & herstel, where the other
 
 When a laptop dies or loses its cable, the other two notice within a second or two, choose a new leader if needed, and carry on. A timing key press during those seconds waits and then counts with the time of the press. The laptop catches up by itself when it returns. Browsers remember the laptops and reopen the same page on another one when theirs disappears; the Electron app always stays on its own laptop.
 
-With only one laptop left, nothing is saved until a second one is back, because one laptop cannot know whether the others are gone or still working behind a broken cable. If the others are truly gone, Beheer › Systeem offers **Alleen verder werken**. See `docs/reliability-model.md` for the details and a rehearsal checklist.
+With only one laptop left, nothing is saved until a second one is back, because one laptop cannot know whether the others are gone or still working behind a broken cable. If the others are truly gone, Beheer › Systeem offers **Alleen verder werken**.
+
+A laptop that is gone for good still counts as one of the group, so linking a spare next to it makes four laptops that need three for a majority: the next failure would stop all saving. Once a laptop has not answered for 30 seconds, Beheer › Systeem shows **Uit de groep halen** next to it. Click it first, then link the spare, and the group is three laptops again. A laptop taken out is not taken back in by itself; if it works again, click **Opnieuw koppelen** on it. See `docs/reliability-model.md` for the details and a rehearsal checklist.
 
 Laptops only link with the same Apolloon version and database schema; otherwise Beheer shows an "Upgrade vereist" error.
 
@@ -46,6 +48,7 @@ CLUSTER_DISCOVERY=false          # do not announce or listen on UDP 45737
 CLUSTER_SELF_URL=http://host:port  # address announced to other laptops (tests)
 CLUSTER_LAPTOP_NAME=LAPTOP-TIJD   # name shown to other laptops instead of the computer name (tests)
 CLUSTER_AUTO_LINK=false          # empty laptops wait for Koppelen instead of linking by themselves
+CLUSTER_REMOVABLE_AFTER_MS=30000 # how long a laptop is silent before "Uit de groep halen" is offered
 ```
 
 Beheer › Voorbereiding has a wedstrijdgereedheid checklist for backup freshness, free disk space, and the linked laptops.
