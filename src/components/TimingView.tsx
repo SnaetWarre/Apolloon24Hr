@@ -514,7 +514,7 @@ export function TimingView() {
                     Annuleer
                   </button>
                   <button className="btn btn--danger" onClick={() => void finish()} disabled={handoffBusy}>
-                    Race definitief beeindigen
+                    Race definitief beëindigen
                   </button>
                 </div>
               </>
