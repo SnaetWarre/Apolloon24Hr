@@ -126,6 +126,9 @@ export function NetworkSetupPanel() {
     [refresh]
   );
 
+  // Pin the network the laptop is in now; a /24 pinned on a bigger network cuts off part of it.
+  const pinPrefixLength = profile?.suggestion?.prefixLength ?? profile?.primary?.prefixLength ?? 24;
+
   const startMakeStatic = async () => {
     setMessage(null);
     setError(null);
@@ -135,7 +138,7 @@ export function NetworkSetupPanel() {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           ip: ipInput.trim(),
-          prefixLength: 24,
+          prefixLength: pinPrefixLength,
           gateway: gatewayInput.trim() || null,
         }),
       });
@@ -344,7 +347,7 @@ export function NetworkSetupPanel() {
                 onClick={() => void startMakeStatic()}
                 disabled={busy || !ipInput.trim()}
               >
-                Ja, maak {ipInput.trim() || 'dit adres'} nu vast
+                Ja, maak {ipInput.trim() ? `${ipInput.trim()}/${pinPrefixLength}` : 'dit adres'} nu vast
               </button>
               <button className="btn btn--secondary" onClick={() => setPhase('idle')} disabled={busy}>
                 Toch niet
