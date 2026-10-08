@@ -72,7 +72,8 @@ try {
   assert.equal((await theme(page)).stored, 'dark', 'Space must not change the theme');
   console.log('PASS theme control supports arrow keys and never captures the timing key');
 
-  // Record a few laps so Analyse has chart data. Laps this short need a confirmation.
+  // Record a few laps so Analyse has chart data. Laps this short need a confirmation, and as double
+  // presses they only count as laps: the hourly chart shows them, the lap-time charts do not.
   for (let lap = 1; lap <= 3; lap++) {
     await page.waitForTimeout(400);
     await page.keyboard.press('Space');
@@ -82,14 +83,14 @@ try {
 
   // Charts redraw with new colours; the data stays the same.
   await page.goto(`${baseUrl}/analysis`);
-  const trendCanvas = page.locator('.analysis-trend-panel canvas');
-  await trendCanvas.waitFor();
+  const paceCanvas = page.locator('.analysis-pace-panel canvas');
+  await paceCanvas.waitFor();
   await page.waitForTimeout(300);
   const kpisBefore = await page.locator('.stats-grid--analysis').innerText();
-  const pixelsBefore = await trendCanvas.evaluate((canvas) => canvas.toDataURL());
+  const pixelsBefore = await paceCanvas.evaluate((canvas) => canvas.toDataURL());
   await page.getByRole('radiogroup', { name: 'Thema' }).getByRole('radio', { name: 'Licht' }).click();
   await page.waitForTimeout(300);
-  assert.notEqual(await trendCanvas.evaluate((canvas) => canvas.toDataURL()), pixelsBefore);
+  assert.notEqual(await paceCanvas.evaluate((canvas) => canvas.toDataURL()), pixelsBefore);
   assert.equal(await page.locator('.stats-grid--analysis').innerText(), kpisBefore);
   console.log('PASS charts redraw in the new theme without changing figures');
 

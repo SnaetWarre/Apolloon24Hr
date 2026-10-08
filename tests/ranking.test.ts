@@ -203,3 +203,48 @@ test('a lap where nobody handed off still counts but stays out of the averages',
   assert.equal(casSummary?.bestLapMs, null);
   assert.equal(casSummary?.averageLapMs, null);
 });
+
+test('a double press still counts as a lap but not as a lap time', () => {
+  const runners = [
+    { id: 'anna', name: 'Anna', runnerNumber: '1' },
+    { id: 'bert', name: 'Bert', runnerNumber: '2' },
+  ] as Runner[];
+  const lap = (id: string, runnerId: string, durationMs: number, finishedAt: number): LapRecord => ({
+    id,
+    runnerId,
+    runnerName: runnerId,
+    runnerNumber: null,
+    lapNumber: 1,
+    startedAt: finishedAt - durationMs,
+    finishedAt,
+    durationMs,
+    source: 'handoff',
+    createdAt: finishedAt,
+    labels: [],
+  });
+  const laps = [
+    lap('anna-1', 'anna', 90_000, 1_000),
+    lap('anna-2', 'anna', 80_000, 2_000),
+    lap('anna-double', 'anna', 87, 3_000),
+    lap('bert-double', 'bert', 19_999, 4_000),
+  ];
+
+  assert.deepEqual(
+    buildRunnerRanking(runners, laps, 'laps', null).map((entry) => [
+      entry.runnerId,
+      entry.lapCount,
+      entry.averageLapMs,
+    ]),
+    [
+      ['anna', 3, 85_000],
+      ['bert', 1, null],
+    ]
+  );
+
+  const [bertSummary, annaSummary] = buildRecentLapSummaries(laps, 2);
+  assert.equal(annaSummary?.lap.id, 'anna-double');
+  assert.equal(annaSummary?.bestLapMs, 80_000);
+  assert.equal(annaSummary?.averageLapMs, 85_000);
+  assert.equal(bertSummary?.bestLapMs, null);
+  assert.equal(bertSummary?.averageLapMs, null);
+});

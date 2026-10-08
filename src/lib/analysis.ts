@@ -67,8 +67,9 @@ export type FastestLapWindow = {
  */
 export const MAX_PLAUSIBLE_LAP_MS = 10 * 60_000;
 
+// A lap under MIN_LAP_MS is a double press. Like a forgotten handoff it counts as a lap, but not as a lap time.
 export function hasPlausibleDuration(lap: Pick<LapRecord, 'durationMs'>): boolean {
-  return Number.isFinite(lap.durationMs) && lap.durationMs >= 0 && lap.durationMs <= MAX_PLAUSIBLE_LAP_MS;
+  return Number.isFinite(lap.durationMs) && lap.durationMs >= MIN_LAP_MS && lap.durationMs <= MAX_PLAUSIBLE_LAP_MS;
 }
 
 const BRUSSELS_HOUR_FORMATTER = new Intl.DateTimeFormat('nl-BE', {
@@ -227,10 +228,10 @@ export function buildLabelComparisons(labels: Label[], laps: LapRecord[]): Label
   }
 
   return labels
-    .map((label) => ({
-      label,
-      ...calculateDurationStats(lapsByLabel.get(label.id) ?? []),
-    }))
+    .map((label) => {
+      const labelLaps = lapsByLabel.get(label.id) ?? [];
+      return { label, ...calculateDurationStats(labelLaps), count: labelLaps.length };
+    })
     .filter((comparison) => comparison.count > 0)
     .sort((a, b) => compareLabels(a.label, b.label));
 }
@@ -281,6 +282,7 @@ export function buildRunnerInsights(runners: Runner[], laps: LapRecord[]): Runne
         runnerNumber: runner?.runnerNumber ?? firstLap?.runnerNumber ?? null,
         runnerName: runner?.name ?? firstLap?.runnerName ?? 'Onbekende loper',
         ...calculateDurationStats(runnerLaps),
+        count: runnerLaps.length,
       };
     })
     .sort(
@@ -293,10 +295,11 @@ export function buildFastestLapWindows(
   race: RaceState,
   mode: Exclude<PublicRecordMode, 'off'>
 ): FastestLapWindow[] {
-  if (!laps.length) return [];
+  const timedLaps = laps.filter(hasPlausibleDuration);
+  if (!timedLaps.length) return [];
 
   if (mode === 'day') {
-    const bestLap = fastestLap(laps);
+    const bestLap = fastestLap(timedLaps);
     return bestLap ? [{ key: 'day', label: 'Dagrecord', lap: bestLap, windowIndex: 0 }] : [];
   }
 
@@ -305,7 +308,7 @@ export function buildFastestLapWindows(
 
   const windowMs = recordWindowMs(mode);
   const fastestByWindow = new Map<number, LapRecord>();
-  for (const lap of laps) {
+  for (const lap of timedLaps) {
     const index = recordWindowIndex(lap.finishedAt, startedAt, windowMs);
     const fastest = fastestByWindow.get(index);
     if (!fastest || compareLapSpeed(lap, fastest) < 0) fastestByWindow.set(index, lap);
