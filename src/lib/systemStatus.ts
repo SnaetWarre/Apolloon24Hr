@@ -58,6 +58,9 @@ export function deriveSystemStatus(
 export function describeGroup(cluster: ClusterStatus): SystemStatus {
   const total = cluster.members.length;
   const unreachable = cluster.members.filter((member) => !member.reachable).length;
+  if (cluster.removedFrom) {
+    return { tone: 'error', title: 'Uit de groep gehaald', detail: 'Niets wordt bewaard; koppel opnieuw in Beheer' };
+  }
   switch (cluster.state) {
     case 'solo':
       return { tone: 'warning', title: 'Alleen deze laptop', detail: 'Koppel de andere laptops in Beheer' };

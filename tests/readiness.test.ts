@@ -15,6 +15,7 @@ function member(hostId: string, overrides: Partial<ClusterMemberStatus> = {}): C
     leader: hostId === 'host-a',
     reachable: true,
     caughtUp: true,
+    removable: false,
     ...overrides,
   };
 }
@@ -42,6 +43,7 @@ function threeLaptops(overrides: Partial<ClusterStatus> = {}): ClusterStatus {
     memberUrls: ['http://host-b:5173', 'http://host-c:5173'],
     nearby: [],
     autoLink: { enabled: true, waiting: null, linked: [] },
+    removedFrom: null,
     lastError: null,
     backup: {
       enabled: true,

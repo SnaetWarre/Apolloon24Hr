@@ -81,6 +81,8 @@ export {
   saveAutoLink,
   getUnreachableMembers,
   setUnreachableMembers,
+  getRemovedMembers,
+  setRemovedMembers,
   type AutoLink,
   type ClusterMember,
 } from './db/members.js';

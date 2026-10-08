@@ -5,7 +5,7 @@ import { describeAutoLinks, describeGroup } from '../../lib/systemStatus';
 import { formatClockTimeMs } from '../../lib/time';
 import { useConfirm } from '../ConfirmDialog';
 import { NetworkSetupPanel } from '../NetworkSetupPanel';
-import type { BackupStatus, ClusterStatus, NearbyGroup, Runner } from '../../types';
+import type { BackupStatus, ClusterMemberStatus, ClusterStatus, NearbyGroup, Runner } from '../../types';
 import { AboutPanel } from './AboutPanel';
 import { AdminNoticeBanner, useAdminAction } from './AdminNotice';
 import { RestorePanel } from './RestorePanel';
@@ -63,7 +63,7 @@ function ClusterPanel({
   runnerCount: number;
 }) {
   const confirm = useConfirm();
-  const { continueAlone } = useAppActions();
+  const { continueAlone, removeLaptop, joinGroup: rejoinGroup } = useAppActions();
   const { pending: alonePending, notice: aloneNotice, run } = useAdminAction();
   const { join: joinGroup, pending: joinPending, notice: joinNotice } = useJoinGroup(runnerCount, cluster.changed);
   const [otherUrl, setOtherUrl] = React.useState('');
@@ -89,6 +89,41 @@ function ClusterPanel({
       continueAlone,
       'Deze laptop werkt alleen verder. Koppel de andere laptops opnieuw zodra dat kan.',
       'Mislukt'
+    );
+  }
+
+  async function takeOut(member: ClusterMemberStatus) {
+    if (pending) return;
+    const name = laptopLabel(member);
+    const left = cluster.members.length - 1;
+    const confirmed = await confirm({
+      title: `${name} uit de groep halen?`,
+      message: `Doe dit alleen als deze laptop kapot of weg is. Staat hij nog aan, controleer dan de netwerkkabel: dan werkt hij vanzelf weer mee. Daarna is de groep ${countLabel(left, 'laptop', 'laptops')}, en is een wijziging bewaard zodra ${Math.floor(left / 2) + 1} laptops ze hebben. Koppel daarna een reservelaptop, zodat er weer één mag uitvallen. Komt ${name} later toch terug, dan werkt hij pas weer mee als je daar op Opnieuw koppelen drukt.`,
+      confirmLabel: 'Uit de groep halen',
+      tone: 'danger',
+    });
+    if (!confirmed) return;
+    await run(
+      () => removeLaptop(member.hostId),
+      `${name} is uit de groep gehaald. Koppel een reservelaptop om weer een laptop te mogen verliezen.`,
+      'Uit de groep halen mislukt'
+    );
+  }
+
+  async function rejoin(from: { url: string; name: string | null }) {
+    if (pending) return;
+    const confirmed = await confirm({
+      title: 'Opnieuw koppelen?',
+      message: `Deze laptop neemt alle gegevens van ${laptopLabel(from)} over en werkt daarna weer mee. Wat nu op deze laptop staat, wordt eerst als backup bewaard.`,
+      confirmLabel: 'Opnieuw koppelen',
+      tone: 'danger',
+    });
+    if (!confirmed) return;
+    await run(
+      () => rejoinGroup(from.url),
+      ({ backupFile }) =>
+        backupFile ? `Opnieuw gekoppeld. De vorige gegevens staan in de backup ${backupFile}.` : 'Opnieuw gekoppeld.',
+      'Opnieuw koppelen mislukt'
     );
   }
 
@@ -135,18 +170,34 @@ function ClusterPanel({
                       ? 'heeft alles'
                       : 'haalt wijzigingen op'}
             </span>
+            {member.removable && (
+              <button className="btn btn--secondary" onClick={() => void takeOut(member)} disabled={busy}>
+                Uit de groep halen
+              </button>
+            )}
           </div>
         ))}
-      {cluster.state === 'no-majority' && (
+      {cluster.removedFrom ? (
         <div className="warning-banner" role="alert">
           <span>
-            Er zijn te weinig laptops bereikbaar om iets te bewaren. Zet de andere laptops aan of controleer de kabel.
-            Zijn ze echt kapot?{' '}
-            <button className="btn btn--secondary" onClick={() => void goOnAlone()} disabled={pending}>
-              Alleen verder werken
+            Deze laptop is uit de groep gehaald. Wat je hier doet, wordt niet bewaard. Werkt hij weer?{' '}
+            <button className="btn btn--secondary" onClick={() => void rejoin(cluster.removedFrom!)} disabled={pending}>
+              Opnieuw koppelen
             </button>
           </span>
         </div>
+      ) : (
+        cluster.state === 'no-majority' && (
+          <div className="warning-banner" role="alert">
+            <span>
+              Er zijn te weinig laptops bereikbaar om iets te bewaren. Zet de andere laptops aan of controleer de kabel.
+              Zijn ze echt kapot?{' '}
+              <button className="btn btn--secondary" onClick={() => void goOnAlone()} disabled={pending}>
+                Alleen verder werken
+              </button>
+            </span>
+          </div>
+        )
       )}
       {cluster.lastError && (
         <div className="warning-banner" role="alert">

@@ -119,6 +119,8 @@ export function describeWrite(path: string, input: unknown): ((result: unknown) 
     case 'settings.updatePublicRecordMode':
       return () =>
         `Records op de publieke schermen: ${RECORD_MODE_TEXT[value.publicRecordMode as PublicRecordMode] ?? ''}`;
+    case 'cluster.removeMember':
+      return (result) => `${(result as { name?: string } | null)?.name ?? 'Laptop'} uit de groep gehaald`;
     case 'backups.applyRestore': {
       const at = typeof value.backupCreatedAt === 'number' ? value.backupCreatedAt : null;
       return (result) => {

@@ -21,8 +21,10 @@ import {
   lastResyncProblem,
   leaderAlive,
   leaderGroupView,
+  logSettled,
   majority,
   members,
+  removedBy,
   resyncFrom,
   startConsensus,
   startJoining,
@@ -31,6 +33,8 @@ import {
   voteRequestSchema,
   COMMIT_TIMEOUT_MS,
   ELECTION_TIMEOUT_MS,
+  type GroupView,
+  type VoteResponse,
 } from './consensus.js';
 import {
   DATABASE_SCHEMA_VERSION,
@@ -38,6 +42,7 @@ import {
   getAutoLinks,
   getClusterMembers,
   getLogHead,
+  getRemovedMembers,
   getSetting,
   hasEventChanges,
   getUnreachableMembers,
@@ -50,6 +55,7 @@ import {
   saveClusterMember,
   serializeDatabase,
   setLocalSetting,
+  setRemovedMembers,
   setUnreachableMembers,
   type ClusterMember,
 } from './db.js';
@@ -89,6 +95,10 @@ const ELECTING_GRACE_MS = ELECTION_TIMEOUT_MS * 5;
 const INVITE_TIMEOUT_MS = 30_000;
 /** A laptop silent this long is listed in Beheer › Activiteit, so a short hiccup stays out of it. */
 const UNREACHABLE_LISTED_AFTER_MS = 5_000;
+/** A laptop silent this long can be taken out of the group in Beheer › Systeem; a restart or a cable takes less. */
+const REMOVABLE_AFTER_MS = readPositiveInt(process.env.CLUSTER_REMOVABLE_AFTER_MS, 30_000);
+/** How long to wait for the group to settle before a laptop is taken out of it. */
+const SETTLE_TIMEOUT_MS = 3_000;
 
 let joining = false;
 let lastError: string | null = null;
@@ -133,8 +143,10 @@ export function clusterStatus(): ClusterStatus {
       leader: isLeader && writable,
       reachable: isSelf || (isLeader ? writable : Boolean(seen?.reachable)),
       caughtUp: (isLeader && writable) || Boolean(seen?.caughtUp) || group.length === 1,
+      removable: writable && !isSelf && !isLeader && isRemovable(seen),
     };
   });
+  const removedFrom = !writable ? removedBy(ELECTING_GRACE_MS) : null;
   return {
     enabled,
     hostId: identity.hostId,
@@ -161,9 +173,18 @@ export function clusterStatus(): ClusterStatus {
       waiting: autoLinkWaiting(autoLinkPlan(nearby)),
       linked: autoLinkNotes(memberStatuses),
     },
+    removedFrom: removedFrom && {
+      url: removedFrom.url,
+      name: names.get(removedFrom.hostId) ?? group.find((member) => member.hostId === removedFrom.hostId)?.name ?? null,
+    },
     lastError: lastError ?? lastResyncProblem(),
     backup: backupStatus(),
   };
+}
+
+/** A laptop the leader has not heard from for a while, which may be taken out of the group. */
+function isRemovable(seen: GroupView[number] | undefined): boolean {
+  return Boolean(seen && !seen.reachable && seen.silentMs >= REMOVABLE_AFTER_MS);
 }
 
 /** The computer names laptops announce now, by host id. */
@@ -508,7 +529,11 @@ function answerPeer(type: unknown, body: unknown): PeerAnswer {
   if (type === 'vote') {
     const request = voteRequestSchema.safeParse(body);
     if (!request.success) return refusal('invalid_request', 'Ongeldige stemaanvraag.');
-    welcomeBack(request.data.candidateId, request.data.candidateUrl, request.data.clusterId);
+    const { candidateId, candidateUrl, clusterId } = request.data;
+    if (clusterId === hostIdentity().clusterId && wasRemoved(candidateId)) {
+      return { body: { term: currentTerm(), granted: false, removed: true } satisfies VoteResponse };
+    }
+    welcomeBack(candidateId, candidateUrl, clusterId);
     return { body: handleVoteRequest(request.data) };
   }
   return refusal('invalid_request', 'Onbekende aanvraag.');
@@ -545,6 +570,8 @@ function addMember(member: ClusterMember, autoLinkedWith?: string): void {
       }
     }
     saveClusterMember(member);
+    const removed = getRemovedMembers();
+    if (removed.includes(member.hostId)) setRemovedMembers(removed.filter((hostId) => hostId !== member.hostId));
     if (autoLinkedWith !== undefined) saveAutoLink(member.hostId, autoLinkedWith);
     const name = member.name ?? shortUrl(member.url);
     if (!known) {
@@ -610,13 +637,51 @@ function logReachability(): void {
 /**
  * A laptop asking for votes while this one leads is either back after being
  * left out (for example after "continue alone") or has a new address. The
- * leader takes it (back) in; it then catches up or re-syncs by itself.
+ * leader takes it (back) in; it then catches up or re-syncs by itself. A
+ * laptop the crew took out of the group on purpose never gets here
+ * (answerPeer): it was broken, and taking it back in by itself would make the
+ * group bigger again, so the next failure could stop all saving.
  */
 function welcomeBack(hostId: string, url: string, clusterId: string): void {
   if (!isLeader() || busy() || clusterId !== hostIdentity().clusterId || hostId === hostIdentity().hostId) return;
   const address = normalizeUrl(url);
   const known = members().find((member) => member.hostId === hostId);
   if (address && known?.url !== address) addMember({ hostId, url: address });
+}
+
+/** Taken out of the group with "Uit de groep halen", and not linked again since. */
+function wasRemoved(hostId: string): boolean {
+  return getRemovedMembers().includes(hostId) && !members().some((member) => member.hostId === hostId);
+}
+
+/**
+ * Waits until a majority holds everything this laptop, leading, has written, so a change to
+ * the group never starts while an earlier one is still on its way. True once that holds.
+ */
+export async function groupSettled(): Promise<boolean> {
+  const deadline = performance.now() + SETTLE_TIMEOUT_MS;
+  while (!logSettled() && performance.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
+  return logSettled();
+}
+
+/**
+ * "Uit de groep halen" in Beheer › Systeem: takes a laptop that is gone for good out of the
+ * group, so the group needs fewer laptops for a majority and a spare laptop linked in its
+ * place adds safety again. Runs inside the leader's replicated write (router.ts), one laptop
+ * at a time, and only for a laptop the leader has not heard from for REMOVABLE_AFTER_MS: never
+ * the leader itself. The removed laptop is not taken back in when it returns (welcomeBack).
+ */
+export function removeLaptop(hostId: string): { name: string } {
+  const member = members().find((candidate) => candidate.hostId === hostId);
+  if (!member) throw new Error('Deze laptop hoort al niet meer bij de groep.');
+  if (!logSettled()) throw new Error('De laptops zijn nog bezig met een vorige wijziging. Probeer het zo opnieuw.');
+  if (!isRemovable(leaderGroupView().find((seen) => seen.hostId === hostId))) {
+    throw new Error('Deze laptop is niet lang genoeg onbereikbaar om uit de groep te halen.');
+  }
+  removeClusterMember(hostId);
+  setRemovedMembers([hostId, ...getRemovedMembers().filter((removed) => removed !== hostId)]);
+  setUnreachableMembers(getUnreachableMembers().filter((unreachable) => unreachable !== hostId));
+  return { name: heardNames().get(hostId) ?? member.name ?? shortUrl(member.url) };
 }
 
 /**
@@ -627,8 +692,12 @@ function welcomeBack(hostId: string, url: string, clusterId: string): void {
 export async function linkWith(rawUrl: string): Promise<{ backupFile: string | null }> {
   await waitWhileJoining();
   const { url, status } = await otherLaptop(rawUrl);
-  // Already linked, for example because Koppelen was pressed on the other laptop too.
-  if (status.clusterId === hostIdentity().clusterId) return { backupFile: null };
+  if (status.clusterId === hostIdentity().clusterId) {
+    // Already linked, for example because Koppelen was pressed on the other laptop too.
+    if (status.members.some((member) => member.hostId === hostIdentity().hostId)) return { backupFile: null };
+    // Taken out of that group: it takes this laptop back in, with the group's data.
+    return joinGroup(url);
+  }
   const direction = linkDirection(ownGroup(), {
     clusterId: status.clusterId,
     runners: status.runners,

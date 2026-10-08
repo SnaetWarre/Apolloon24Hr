@@ -225,6 +225,8 @@ export type ClusterMemberStatus = {
   reachable: boolean;
   /** Holds every change the main laptop has. */
   caughtUp: boolean;
+  /** Silent long enough that Beheer › Systeem offers "Uit de groep halen". */
+  removable: boolean;
 };
 
 /** Laptops heard on the network that belong to another group, so a laptop on its own can join them in one click. */
@@ -281,6 +283,8 @@ export type ClusterStatus = {
     /** Laptops of this group that linked by themselves, newest first. */
     linked: AutoLinkNote[];
   };
+  /** Set on a laptop the group took out with "Uit de groep halen": a laptop of that group, to link with again. */
+  removedFrom: { url: string; name: string | null } | null;
   lastError: string | null;
   backup: BackupStatus;
 };

@@ -64,6 +64,29 @@ export function setUnreachableMembers(hostIds: string[]): void {
   ]);
 }
 
+const REMOVED_KEPT = 16;
+
+/**
+ * The laptops the crew took out of the group with "Uit de groep halen", newest first; a
+ * replicated setting. Such a laptop is not taken back in when it asks for votes again;
+ * only Koppelen on that laptop brings it back.
+ */
+export function getRemovedMembers(): string[] {
+  try {
+    const parsed = z.array(z.string()).safeParse(JSON.parse(getSetting('cluster_removed_json') || '[]'));
+    return parsed.success ? parsed.data : [];
+  } catch {
+    return [];
+  }
+}
+
+export function setRemovedMembers(hostIds: string[]): void {
+  run('INSERT OR REPLACE INTO settings(key, value) VALUES(?, ?)', [
+    'cluster_removed_json',
+    JSON.stringify(hostIds.slice(0, REMOVED_KEPT)),
+  ]);
+}
+
 /** A laptop that linked with the group by itself, and the laptop it linked with. */
 export type AutoLink = { hostId: string; with: string; at: number };
 

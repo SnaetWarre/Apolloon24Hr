@@ -9,6 +9,7 @@ At the event three laptops run the app as one group. Each holds the full databas
 - `group-status` shows `Alles veilig` when all three are linked and `Eén laptop onbereikbaar` when one is gone.
 - `group-write-anywhere` saves a change made on any laptop's screen, and shows it on the others.
 - `group-failover` keeps saving with two laptops after the third freezes.
+- `group-replace` takes a laptop that is gone for good out of the group with `Uit de groep halen` (offered next to it after 30 s of silence, only while the group still saves), so a spare linked in its place makes three laptops again and one more may fail. The removed laptop is not taken back in by itself; on it, `Opnieuw koppelen` brings it back.
 - `group-browser-moves` moves a browser display to another laptop when its own one disappears; the Electron app stays.
 
 ## How to get to it (user POV)
@@ -33,6 +34,7 @@ Preconditions:
 - **Status.** On laptop 1's Systeem tab, `.cluster-state` reads `Alles veilig`.
 - **Write anywhere.** Make a change through laptop 2's UI (for example check a runner in on `/queue`, see `queue.md`). Read `/api/state` on laptop 0: the runner's status changed there.
 - **Failover.** Freeze laptop 0 like a pulled cable: `process.kill(run.state.laptops[0].pid, 'SIGSTOP')`. Within 15 s laptop 1's `.cluster-state` reads `Eén laptop onbereikbaar`. A change made through laptop 2's UI still saves.
+- **Replace a dead laptop.** Needs a second run for the spare: `up --run=spare --laptops=3 --scenario=empty` (its laptop 0 is the spare; a one-laptop run has linking off). Link the group, then freeze laptop 2 with `SIGSTOP`. After 30 s, on laptop 0's Systeem tab, its row (`.cluster-peer-row` with `LAPTOP-2`) has a `Uit de groep halen` button; click it, then `Uit de groep halen` in the danger dialog. `LAPTOP-2 is uit de groep gehaald.` appears and `/api/cluster/status` lists two members with `majority: 2`. Link the spare (`cluster.join` with laptop 0's address, or Koppelen on the spare's Systeem tab): three members, `majority: 2`. Freeze laptop 1 too: a change through laptop 0 still saves. Beheer › Activiteit lists `LAPTOP-2 uit de groep gehaald`. `SIGCONT` on laptop 2: within 15 s its Systeem tab says `Deze laptop is uit de groep gehaald` with `Opnieuw koppelen`, and the group still has three members.
 - **Browser moves.** A plain `run.newPage()` on laptop 0's `/display/outside`, opened before the freeze, reopens on laptop 1 or 2 (`page.waitForURL` to another laptop's origin, 10 s). An `electron: true` page stays on laptop 0.
 - **Proof.** `run.proof(page, 'group-…', { laptop: 1 })` so the saved state comes from a laptop that is still up.
 
@@ -43,5 +45,6 @@ Preconditions:
 - Use `SIGSTOP`, not `SIGTERM`: a stopped server announces it is leaving, which is not what a dead laptop does. `verify.mjs down` sends `SIGCONT` before stopping, so frozen laptops still exit.
 - Koppelen works from either side: the laptop with fewer runners takes the other's data. On laptop 0 (40 runners) the empty laptops have a `Koppelen` button that brings them over; next to a laptop that holds fewer runners of its own it reads `Druk op Koppelen op die laptop.` instead. Laptop 1's welcome screen lists only laptops with runners.
 - With only one laptop left nothing saves until a second returns. That is correct, not a bug.
+- A dead laptop that is not taken out still counts: linking a spare next to it makes four laptops that need three. `Uit de groep halen` is the fix, not a bug in linking. The button needs 30 s of silence counted by the current leader, so it shows later after a takeover.
 - The group check needs real ms timing. Avoid running a 3-laptop run while the machine is under heavy load (another build, `npm run rehearse`), or elections can flap.
 - `node scripts/validation/run.mjs failover-ui` and `race-day-ui` are the repo's regression checks for this; run them when you change cluster code.

@@ -628,6 +628,86 @@ test(
 );
 
 test(
+  'a laptop gone for good is taken out, a spare takes its place, and the group survives one more failure',
+  { timeout: 90_000 },
+  async () => {
+    const root = testRoot('replace');
+    const servers: RunningServer[] = [];
+    try {
+      await startGroup(root, servers);
+      const leader = (await leaderOf(servers))!;
+      const [follower, dead] = servers.filter((server) => server !== leader);
+      const hostIdOf = async (server: RunningServer) => (await fetchStatus(server)).hostId;
+      const deadId = await hostIdOf(dead);
+      const followerId = await hostIdOf(follower);
+      const leaderId = await hostIdOf(leader);
+      await client(leader).runners.create.mutate({ name: 'Before', runnerNumber: 'P-1' });
+      await waitForSameState(leader, dead);
+      await killServer(dead);
+
+      // A laptop that answers cannot be taken out, and the one that broke only after a while.
+      await assert.rejects(
+        client(follower).cluster.removeMember.mutate({ hostId: followerId }),
+        /niet lang genoeg onbereikbaar/
+      );
+      await waitFor(async () =>
+        Boolean((await fetchStatus(follower)).members.find((member) => member.hostId === deadId)?.removable)
+      );
+      // Taken out on a laptop that does not lead: the leader makes the change.
+      assert.deepEqual(await client(follower).cluster.removeMember.mutate({ hostId: deadId }), { name: 'LAPTOP-C' });
+      for (const server of [leader, follower]) {
+        await waitFor(async () => {
+          const status = await fetchStatus(server);
+          return status.members.length === 2 && status.majority === 2 && status.state === 'healthy';
+        });
+      }
+      const activity = await client(leader).activity.list.query({ limit: 50, before: null });
+      const removal = activity.find((entry) => entry.action === 'cluster.removeMember');
+      assert.equal(removal?.summary, 'LAPTOP-C uit de groep gehaald');
+
+      // The spare links in its place: three laptops again, so one more may fail.
+      const spare = await startServer({ port: await freePort(), dataPath: path.join(root, 'd'), name: 'LAPTOP-D' });
+      servers.push(spare);
+      await join(spare, leader);
+      await waitFor(async () => {
+        const status = await fetchStatus(leader);
+        return status.state === 'healthy' && status.members.length === 3;
+      }, 15_000);
+      assert.equal((await fetchStatus(leader)).majority, 2);
+      await waitForSameState(leader, spare);
+
+      await killServer(leader);
+      const after = await client(follower).runners.create.mutate({ name: 'After two failures', runnerNumber: 'P-2' });
+      assert.equal(after.runnerNumber, 'P-2');
+      await waitForSameState(follower, spare);
+
+      // The broken laptop comes back: it is not taken in by itself and saves nothing, but says why.
+      const returned = await startServer({ port: dead.port, dataPath: dead.dataPath, name: 'LAPTOP-C' });
+      servers[servers.indexOf(dead)] = returned;
+      await waitFor(async () => (await fetchStatus(returned)).removedFrom !== null, 15_000);
+      assert.equal((await fetchStatus(returned)).writable, false);
+      const group = (await fetchStatus(follower)).members.map((member) => member.hostId);
+      assert.deepEqual(group.sort(), [leaderId, followerId, await hostIdOf(spare)].sort());
+
+      // Koppelen on it takes it back in, with the group's data.
+      await join(returned, follower);
+      await waitForSameState(follower, returned, 15_000);
+      assert.deepEqual((await fetchState(returned)).runners.map((runner) => runner.name).sort(), [
+        'After two failures',
+        'Before',
+      ]);
+      assert.ok((await fetchStatus(follower)).members.some((member) => member.hostId === deadId));
+      assert.equal((await fetchStatus(returned)).removedFrom, null);
+    } catch (error) {
+      throw withServerOutput(error, ...servers);
+    } finally {
+      await Promise.all(servers.map(stopServer));
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
+);
+
+test(
   'Activiteit lists each laptop that links, drops out and comes back, once, on every laptop',
   { timeout: 60_000 },
   async () => {
@@ -1131,6 +1211,7 @@ async function startServer(options: {
       CLUSTER_ELECTION_TIMEOUT_MS: '400',
       CLUSTER_COMMIT_TIMEOUT_MS: '3000',
       CLUSTER_WRITE_DEADLINE_MS: '6000',
+      CLUSTER_REMOVABLE_AFTER_MS: '1500',
       CLUSTER_REQUEST_TIMEOUT_MS: '300',
       CLUSTER_TEST_FAULTS: 'true',
       CLUSTER_DISCOVERY_ADDRESS: '127.255.255.255',
