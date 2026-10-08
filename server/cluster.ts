@@ -85,6 +85,13 @@ const INVITE_TIMEOUT_MS = 30_000;
 
 let joining = false;
 let lastError: string | null = null;
+/** Rounds in a row that linking by itself through the laptop at `url` failed, and why the last one did. */
+let autoLinkFailure: { url: string; rounds: number; message: string } | null = null;
+/**
+ * A laptop that is starting or shutting down can fail two rounds (it is forgotten ten seconds
+ * after its last announcement); the screens say why from the third one on, after 15 s.
+ */
+const AUTO_LINK_FAILED_ROUNDS_SHOWN = 3;
 /** Durations here run on the monotonic clock, like consensus, so a clock correction cannot stretch or skip them. */
 let startedAt = performance.now();
 let maintenanceTimer: NodeJS.Timeout | null = null;
@@ -141,7 +148,7 @@ export function clusterStatus(): ClusterStatus {
     nearby,
     autoLink: {
       enabled: autoLinkEnabled,
-      waiting: autoLinkPlan(nearby).waiting,
+      waiting: autoLinkWaiting(autoLinkPlan(nearby)),
       linked: autoLinkNotes(memberStatuses),
     },
     lastError: lastError ?? lastResyncProblem(),
@@ -226,6 +233,14 @@ function autoLinkPlan(nearby: NearbyGroup[]): { target: NearbyGroup | null; wait
     };
   }
   return { target: withRunners[0] ?? candidates[0] ?? null, waiting: null };
+}
+
+/** Why this laptop does not link by itself now: two groups with runners, or the last rounds failed. */
+function autoLinkWaiting({ target, waiting }: ReturnType<typeof autoLinkPlan>): string | null {
+  if (waiting) return waiting;
+  const failure = autoLinkFailure;
+  if (!target || failure?.url !== target.url || failure.rounds < AUTO_LINK_FAILED_ROUNDS_SHOWN) return null;
+  return failure.message;
 }
 
 /** The laptops of this group that linked by themselves, by name. */
@@ -737,13 +752,36 @@ async function maintain(): Promise<void> {
  */
 async function autoLink(group: Set<string>): Promise<void> {
   const { target } = autoLinkPlan(nearbyGroups(group));
-  if (!target) return;
+  if (!target) {
+    autoLinkFailure = null;
+    return;
+  }
+  const name = target.name ?? shortUrl(target.url);
   const status = await fetchStatus(target.url).catch(() => null);
-  if (!status?.leader || status.busy || !isLeader() || busy()) return;
-  await joinOnce(target.url, status.clusterId, {
-    emptyGroup: true,
-    autoLinkedWith: status.hostName ?? shortUrl(target.url),
-  }).catch(() => undefined);
+  if (!status) {
+    // Its announcements arrive but its address does not answer: most often a firewall that lets one through.
+    noteAutoLinkFailure(
+      target.url,
+      `Niet vanzelf gekoppeld: ${name} is te zien op het netwerk, maar ${shortUrl(target.url)} antwoordt niet. Staat Apolloon op die laptop toegelaten in de firewall? Op Windows doet Beheer › Systeem & herstel › Vast netwerkadres dat.`
+    );
+    return;
+  }
+  if (!status.leader || status.busy || !isLeader() || busy()) return;
+  try {
+    await joinOnce(target.url, status.clusterId, {
+      emptyGroup: true,
+      autoLinkedWith: status.hostName ?? shortUrl(target.url),
+    });
+    autoLinkFailure = null;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    noteAutoLinkFailure(target.url, `Vanzelf koppelen met ${name} lukt niet: ${reason}`);
+  }
+}
+
+function noteAutoLinkFailure(url: string, message: string): void {
+  const rounds = autoLinkFailure?.url === url ? autoLinkFailure.rounds + 1 : 1;
+  autoLinkFailure = { url, rounds, message };
 }
 
 /** Of two groups that went on separately, the one with more laptops, then the later term, carries on. */

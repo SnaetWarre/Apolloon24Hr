@@ -206,7 +206,10 @@ and real timers; the simulation tests pass fakes.
   only one moves. It never runs while this laptop is joining or has no
   majority, nor towards a laptop that is joining, has no leader, or runs
   another version. Two groups with runners are left to a press, and
-  `clusterStatus().autoLink.waiting` says why. The join itself checks again,
+  `clusterStatus().autoLink.waiting` says why. It also says why from the
+  third failed round in a row through the same laptop: its address does
+  not answer (a firewall that lets the announcements through), or the join
+  failed, with its error. The join itself checks again,
   as it starts, that this laptop holds no runners. The leader records each
   such join in the replicated setting `cluster_auto_links_json`, so every
   laptop of the group can name the laptops that came over by themselves.

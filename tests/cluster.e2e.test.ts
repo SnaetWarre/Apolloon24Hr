@@ -3,6 +3,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import crypto from 'node:crypto';
 import dgram from 'node:dgram';
 import fs from 'node:fs';
+import http from 'node:http';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -802,6 +803,94 @@ test(
   }
 );
 
+test(
+  'an empty laptop whose link by itself keeps failing says why: an address that does not answer, then the error',
+  { timeout: 90_000 },
+  async () => {
+    const root = testRoot('auto-link-fails');
+    const servers: RunningServer[] = [];
+    // A laptop with runners as the empty one sees it: its announcements, and its address.
+    const otherPort = await freePort();
+    let otherAnswers = false;
+    const other = http.createServer((req, res) => {
+      if (!otherAnswers) return req.socket.destroy();
+      res.setHeader('content-type', 'application/json');
+      if (req.method === 'POST' && req.url === '/api/cluster/members') {
+        res.statusCode = 503;
+        return res.end(JSON.stringify({ code: 'no_majority', error: 'Te weinig laptops bereikbaar.' }));
+      }
+      res.end(JSON.stringify(otherStatus));
+    });
+    await new Promise<void>((resolve) => other.listen(otherPort, '127.0.0.1', resolve));
+    const otherUrl = `http://127.0.0.1:${otherPort}`;
+    let otherStatus: Partial<ClusterStatus> = {};
+    const announcing = setInterval(
+      () =>
+        void announce({
+          hostId: 'other-laptop',
+          name: 'LAPTOP-TIJD',
+          clusterId: 'other-group',
+          url: otherUrl,
+          appVersion: '1.0.0',
+          schemaVersion: otherStatus.schemaVersion ?? 0,
+          leader: true,
+          groupSize: 1,
+          runners: 40,
+        }),
+      200
+    );
+    try {
+      const empty = await startServer({
+        port: await freePort(),
+        dataPath: path.join(root, 'empty'),
+        name: 'LAPTOP-LEEG',
+        autoLink: true,
+      });
+      servers.push(empty);
+      const own = await fetchStatus(empty);
+      const leader = { hostId: 'other-laptop', url: otherUrl, name: 'LAPTOP-TIJD' };
+      otherStatus = {
+        enabled: true,
+        hostId: 'other-laptop',
+        hostName: 'LAPTOP-TIJD',
+        clusterId: 'other-group',
+        appVersion: own.appVersion,
+        schemaVersion: own.schemaVersion,
+        leader,
+        members: [],
+        runners: 40,
+        busy: null,
+      };
+      const waiting = async (pattern: RegExp) => pattern.test((await fetchStatus(empty)).autoLink.waiting ?? '');
+
+      // Heard but not answering, as behind a firewall that lets the announcements through.
+      await waitFor(
+        () => waiting(/LAPTOP-TIJD is te zien op het netwerk, maar 127\.0\.0\.1:\d+ antwoordt niet/),
+        30_000,
+        200
+      );
+
+      // Answering, but the join itself fails: the screen gets that laptop's own words.
+      otherAnswers = true;
+      await waitFor(
+        () => waiting(/Vanzelf koppelen met LAPTOP-TIJD lukt niet: Te weinig laptops bereikbaar\./),
+        30_000,
+        200
+      );
+      const status = await fetchStatus(empty);
+      assert.equal(status.clusterId, own.clusterId);
+      assert.equal(status.members.length, 1);
+    } catch (error) {
+      throw withServerOutput(error, ...servers);
+    } finally {
+      clearInterval(announcing);
+      await Promise.all(servers.map(stopServer));
+      await new Promise((resolve) => other.close(resolve));
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
+);
+
 /** The HTTP status another laptop gets when it opens the socket for appends and votes; 101 when accepted. */
 function peerSocketStatus(server: RunningServer, headers: Record<string, string>): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -934,8 +1023,7 @@ async function startServer(options: {
 
 /** One announcement as a laptop of an older version sends it, without a computer name. */
 async function announceWithoutName(url: string): Promise<void> {
-  const beacon = {
-    app: 'apolloon',
+  await announce({
     hostId: 'old-laptop',
     clusterId: 'old-group',
     url,
@@ -944,7 +1032,12 @@ async function announceWithoutName(url: string): Promise<void> {
     leader: true,
     groupSize: 1,
     runners: 0,
-  };
+  });
+}
+
+/** One announcement on the test network, as a laptop sends it (`server/discovery.ts`). */
+async function announce(fields: Record<string, unknown>): Promise<void> {
+  const beacon = { app: 'apolloon', ...fields };
   const socket = dgram.createSocket('udp4');
   try {
     await new Promise<void>((resolve) => socket.bind(0, '127.0.0.1', resolve));
