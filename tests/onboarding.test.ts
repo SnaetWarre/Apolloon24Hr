@@ -56,6 +56,7 @@ const cluster: ClusterStatus = {
       link: 'invite',
     },
   ],
+  autoLink: { enabled: true, waiting: null, linked: [] },
   lastError: 'Laptop 10.0.0.2 antwoordt niet',
   backup: {
     enabled: true,

@@ -116,6 +116,7 @@ function launch(laptop) {
       CLUSTER_TEST_FAULTS: 'true',
       CLUSTER_DISCOVERY_ADDRESS: '127.255.255.255',
       CLUSTER_DISCOVERY_PORT: String(discoveryPort),
+      CLUSTER_AUTO_LINK: 'false',
       BACKUP_ENABLED: 'false',
       APOLLOON_APP_VERSION: '0.0.0-rehearse',
     },

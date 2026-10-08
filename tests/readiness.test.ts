@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { buildEventReadiness, readinessSummary } from '../src/lib/readiness.ts';
-import { deriveSystemStatus } from '../src/lib/systemStatus.ts';
+import { describeAutoLinks, deriveSystemStatus } from '../src/lib/systemStatus.ts';
 import type { ClusterMemberStatus, ClusterStatus } from '../src/types.ts';
 
 const now = Date.UTC(2026, 7, 3, 20, 0, 0);
@@ -40,6 +40,7 @@ function threeLaptops(overrides: Partial<ClusterStatus> = {}): ClusterStatus {
     runners: 40,
     memberUrls: ['http://host-b:5173', 'http://host-c:5173'],
     nearby: [],
+    autoLink: { enabled: true, waiting: null, linked: [] },
     lastError: null,
     backup: {
       enabled: true,
@@ -97,4 +98,21 @@ test('a missing laptop warns while the others carry on, and too few laptops bloc
   const stuck = threeLaptops({ state: 'no-majority', role: 'follower', writable: false, leader: null });
   assert.equal(readinessSummary(buildEventReadiness(stuck, now)), 'blocked');
   assert.equal(deriveSystemStatus(stuck, null, now)?.tone, 'error');
+});
+
+test('laptops that linked by themselves are named, this laptop first', () => {
+  const cluster = threeLaptops({
+    autoLink: {
+      enabled: true,
+      waiting: null,
+      linked: [
+        { hostId: 'host-c', name: 'HOST-C', self: false, with: 'HOST-A', at: now - 60_000 },
+        { hostId: 'host-a', name: 'HOST-A', self: true, with: 'LAPTOP-TIJD', at: now - 3 * 60_000 },
+      ],
+    },
+  });
+  assert.deepEqual(
+    describeAutoLinks(cluster, now).map((link) => link.text),
+    ['Automatisch gekoppeld met LAPTOP-TIJD, 3 minuten geleden', 'HOST-C is automatisch bijgekomen, 1 minuut geleden']
+  );
 });

@@ -73,6 +73,7 @@ function launch(laptop) {
       CLUSTER_SELF_URL: laptop.url,
       CLUSTER_DISCOVERY_ADDRESS: '127.255.255.255',
       CLUSTER_DISCOVERY_PORT: String(discoveryPort),
+      CLUSTER_AUTO_LINK: 'false',
       BACKUP_ENABLED: 'false',
     },
     stdio: ['ignore', log, log],

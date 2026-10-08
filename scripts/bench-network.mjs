@@ -416,6 +416,7 @@ async function benchRaft() {
         CLUSTER_SELF_URL: url,
         CLUSTER_DISCOVERY_ADDRESS: '127.255.255.255',
         CLUSTER_DISCOVERY_PORT: String(discoveryPort),
+        CLUSTER_AUTO_LINK: 'false',
         APOLLOON_APP_VERSION: '0.0.0-bench',
       });
       laptops.push({ url, link, child, direct: `http://127.0.0.1:${port}` });

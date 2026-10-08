@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Starts, checks, and stops throwaway Apolloon servers for verification.
-//   verify.mjs up [--run=NAME] [--scenario=ready|empty|live|large] [--laptops=1|3] [--port=N] [--evidence-dir=DIR]
+//   verify.mjs up [--run=NAME] [--scenario=ready|empty|live|large] [--laptops=1|3] [--seeded=N] [--auto-link] [--port=N] [--evidence-dir=DIR]
 //   verify.mjs doctor [--run=NAME]
 //   verify.mjs electron [--run=NAME]   (desktop window, headless, for a run started with --port=5173)
 //   verify.mjs down [--run=NAME]
@@ -30,7 +30,7 @@ const options = Object.fromEntries(
 const commands = { up, doctor, electron, down, list };
 if (!commands[command]) {
   console.error(
-    'Usage: verify.mjs <up|doctor|electron|down|list> [--run=NAME] [--scenario=ready] [--laptops=1|3] [--port=N] [--evidence-dir=DIR]'
+    'Usage: verify.mjs <up|doctor|electron|down|list> [--run=NAME] [--scenario=ready] [--laptops=1|3] [--seeded=N] [--auto-link] [--port=N] [--evidence-dir=DIR]'
   );
   process.exit(2);
 }
@@ -41,6 +41,10 @@ async function up() {
   const scenario = options.scenario || 'ready';
   const laptopCount = Number(options.laptops || 1);
   if (![1, 3].includes(laptopCount)) return fail('--laptops must be 1 or 3');
+  const seeded = Number(options.seeded || 1);
+  if (!(seeded >= 1 && seeded <= laptopCount)) return fail(`--seeded must be 1 to ${laptopCount}`);
+  // Off unless asked: the usual group check links laptops 1 and 2 with Koppelen.
+  const autoLink = options['auto-link'] === 'true';
   if (options.port && laptopCount !== 1) return fail('--port only works with one laptop');
   const existing = readState(run, { quiet: true });
   if (existing?.laptops.some((laptop) => alive(laptop.pid))) {
@@ -59,8 +63,8 @@ async function up() {
   const laptops = [];
   for (let index = 0; index < laptopCount; index++) {
     const dataPath = path.join(runDir, `laptop-${index}`);
-    // Like `npm run test:ui`: in a group only the first laptop gets data; the others link to it.
-    if (index === 0) {
+    // Like `npm run test:ui`: in a group only the first laptop gets data (or the first `--seeded`); the others link to it.
+    if (index < seeded) {
       execFileSync(
         process.execPath,
         ['--import', 'tsx', 'scripts/seed-test-db.mjs', `--scenario=${scenario}`, `--data-path=${dataPath}`],
@@ -88,6 +92,7 @@ async function up() {
         CLUSTER_SELF_URL: url,
         CLUSTER_DISCOVERY_ADDRESS: '127.255.255.255',
         CLUSTER_DISCOVERY_PORT: String(discoveryPort),
+        CLUSTER_AUTO_LINK: String(autoLink),
         // Every laptop of a run shares this machine's name; give each its own, as at the event.
         CLUSTER_LAPTOP_NAME: `LAPTOP-${index}`,
         BACKUP_ENABLED: 'false',
@@ -100,6 +105,8 @@ async function up() {
   const state = {
     run,
     scenario,
+    seeded,
+    autoLink,
     startedAt: new Date().toISOString(),
     commit: git('rev-parse', 'HEAD'),
     discoveryPort,
@@ -114,7 +121,9 @@ async function up() {
       );
     }
   }
-  console.log(`UP run=${run} scenario=${scenario} laptops=${laptopCount}`);
+  console.log(
+    `UP run=${run} scenario=${scenario} laptops=${laptopCount}${laptopCount > 1 ? ` seeded=${seeded} auto-link=${autoLink}` : ''}`
+  );
   for (const laptop of laptops) console.log(`  laptop-${laptop.index} ${laptop.url} pid=${laptop.pid}`);
   console.log(`  evidence: ${evidenceDir}`);
   console.log(`  drive with: APOLLOON_VERIFY_RUN=${run} node <your-drive-script>.mjs`);

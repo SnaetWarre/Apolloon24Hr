@@ -15,6 +15,8 @@ export async function startServer({ dataPath, port, cluster, discoveryPort }) {
       // Laptops on one machine announce themselves on loopback.
       CLUSTER_DISCOVERY_ADDRESS: '127.255.255.255',
       CLUSTER_DISCOVERY_PORT: String(discoveryPort),
+      // The checks link the laptops with Koppelen themselves.
+      CLUSTER_AUTO_LINK: 'false',
       BACKUP_ENABLED: 'false',
     },
     stdio: ['ignore', 'ignore', 'inherit'],

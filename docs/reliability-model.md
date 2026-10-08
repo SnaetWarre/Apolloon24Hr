@@ -59,10 +59,18 @@ are therefore not enough: then losing either one stops saving.
   say (too few laptops left, or they still reach it), the browser moves after
   eight seconds. The Electron app always stays on its own laptop.
 - Every laptop announces itself on the LAN every two seconds (UDP broadcast,
-  port 45737). A laptop on its own lists the laptops it can join, so linking
-  is one click. Laptops of a group use the announcements to find each other
-  again when their addresses change; an announcement never joins or changes
-  data by itself.
+  port 45737). Laptops of a group use the announcements to find each other
+  again when their addresses change. A laptop on its own lists the laptops it
+  can join, so linking is one click.
+- A laptop whose group holds no runners links by itself, within about five
+  seconds, with the other laptops it hears: with the group that holds runners,
+  or between empty groups the way Koppelen would link them, so only one side
+  moves. A group that holds runners never links by itself; that stays a press
+  on Koppelen. An empty laptop that hears two groups with runners does not
+  guess: it says so and waits for a press. Beheer › Systeem & herstel and the
+  overview name the laptops that linked by themselves ("Automatisch gekoppeld
+  met LAPTOP-TIJD, 3 minuten geleden"). `CLUSTER_AUTO_LINK=false` turns it
+  off.
 - Laptops only link when app version and database schema are identical.
 
 ```text
@@ -194,10 +202,12 @@ start Apolloon, and restore it there.
 Do this once with the three event laptops on the event router, with the
 people who will sit at them watching.
 
-1. Link the laptops: on the second and third laptop, open Beheer › Systeem ›
-   Laptops koppelen and click Koppelen next to the first laptop, which is
-   listed by itself. Beheer › Voorbereiding shows "Alle 3 laptops zijn
-   bereikbaar en hebben alle gegevens."
+1. Link the laptops: start the app on the second and third laptop while they
+   are still empty. They link with the first laptop by themselves within a few
+   seconds; Beheer › Systeem › Laptops koppelen says "Automatisch gekoppeld
+   met" and the first laptop's name. A laptop that already holds runners does
+   not link by itself; on it, click Koppelen next to the first laptop. Beheer › Voorbereiding
+   shows "Alle 3 laptops zijn bereikbaar en hebben alle gegevens."
 2. Open a TV page (`/display/outside`) in a browser on a fourth device.
 3. Start a practice race on the timing laptop and time a few laps.
 4. Pull the power (or battery) of the laptop that leads, unless that is the

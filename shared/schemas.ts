@@ -269,9 +269,20 @@ export type ClusterStatus = {
   /** Other laptops in the group, so browsers can switch when this one goes away. */
   memberUrls: string[];
   nearby: NearbyGroup[];
+  /** A group without runners links with the others on the network by itself. */
+  autoLink: {
+    enabled: boolean;
+    /** Why this empty laptop does not link by itself now, in words for the screen. */
+    waiting: string | null;
+    /** Laptops of this group that linked by themselves, newest first. */
+    linked: AutoLinkNote[];
+  };
   lastError: string | null;
   backup: BackupStatus;
 };
+
+/** A laptop of the group that linked by itself, and the laptop (`with`) it linked with. */
+export type AutoLinkNote = { hostId: string; name: string; self: boolean; with: string; at: number };
 
 export type LiveAppSnapshot = {
   runners: Runner[];

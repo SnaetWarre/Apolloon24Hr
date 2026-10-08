@@ -1,6 +1,6 @@
 import React from 'react';
 import { useAppActions } from '../../app/index';
-import { describeGroup } from '../../lib/systemStatus';
+import { describeAutoLinks, describeGroup } from '../../lib/systemStatus';
 import { formatClockTimeMs } from '../../lib/time';
 import { useConfirm } from '../ConfirmDialog';
 import { NetworkSetupPanel } from '../NetworkSetupPanel';
@@ -98,10 +98,23 @@ function ClusterPanel({
         {cluster.members.length === 1
           ? 'Koppel deze laptop met de andere: dan heeft elke laptop alle gegevens, kan je op elke laptop werken, en werken de andere vanzelf verder als er één uitvalt.'
           : `Gekoppelde laptops hebben elk alle gegevens, en op elke laptop kan je werken. Een wijziging is pas bewaard als minstens ${cluster.majority} laptops ze hebben. Valt een laptop uit, dan werken de andere vanzelf verder.`}
+        {cluster.autoLink.enabled &&
+          runnerCount === 0 &&
+          ' Zolang hier geen lopers staan, koppelt deze laptop vanzelf met de laptops die ze op het netwerk vindt.'}
       </p>
       <div className={`host-hint cluster-state cluster-state--${group.tone}`} role="status">
         <strong>{group.title}</strong> · {group.detail}
       </div>
+      {describeAutoLinks(cluster).map((link) => (
+        <div className="host-hint cluster-auto-link" key={link.hostId}>
+          {link.text}
+        </div>
+      ))}
+      {cluster.autoLink.waiting && (
+        <div className="host-hint cluster-auto-link" role="status">
+          {cluster.autoLink.waiting}
+        </div>
+      )}
       {cluster.members.length > 1 &&
         cluster.members.map((member) => (
           <div className="host-hint cluster-peer-row" key={member.hostId}>
@@ -196,8 +209,18 @@ function ClusterPanel({
             />
           ))}
           <p className="panel-copy">
-            Nog een laptop toevoegen? Open op die laptop Beheer › Systeem & herstel en klik op Koppelen naast deze groep
-            (adres <strong>{hostUrl}</strong>).
+            {cluster.autoLink.enabled ? (
+              <>
+                Nog een laptop toevoegen? Start Apolloon op een lege laptop aan hetzelfde netwerk: die koppelt vanzelf.
+                Lukt dat niet, open dan op die laptop Beheer › Systeem & herstel en klik op Koppelen naast deze groep
+                (adres <strong>{hostUrl}</strong>).
+              </>
+            ) : (
+              <>
+                Nog een laptop toevoegen? Open op die laptop Beheer › Systeem & herstel en klik op Koppelen naast deze
+                groep (adres <strong>{hostUrl}</strong>).
+              </>
+            )}
           </p>
         </>
       )}

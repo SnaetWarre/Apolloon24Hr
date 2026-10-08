@@ -8,8 +8,9 @@ import { isIsolated, normalizeUrl, selfUrl } from './peers.js';
  * Every laptop announces itself on the LAN every two seconds with a small UDP
  * broadcast. Laptops of one group use it to find each other again when their
  * addresses change (a new DHCP lease, another router), and a laptop on its
- * own lists the laptops it could join. A broadcast never joins or changes
- * anything by itself.
+ * own lists the laptops it could join. A broadcast changes nothing by itself;
+ * cluster.ts decides from it whether a group without runners links with
+ * another one (autoLink).
  */
 
 const enabled = isClusterEnabled() && process.env.CLUSTER_DISCOVERY !== 'false';
