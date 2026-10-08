@@ -17,6 +17,16 @@ This folder is the maintained source for verifying what operators and spectators
 - Only failover behaves differently for the desktop app: a page that should stay on its own laptop needs `run.newPage({ electron: true })`. Linking works from any page.
 - Wait for a role or text to appear. Do not sleep, except for the app's own time rules (the 20 s short-lap question).
 
+## Autofocus
+
+Every button or fold-out that opens text fields puts the cursor in the first field, so the operator clicks once and types. Treat a missing cursor as a bug, not a test detail.
+
+- When a feature opens text fields, type with `page.keyboard.type(...)` right after the click, without clicking or filling the field first. Then read the field's value. `fill()` hides a lost cursor because it focuses the field itself.
+- A fold-out (`<details>`) moves the cursor on its toggle event, one task after the click. Wait for `document.activeElement` to be the field before typing.
+- Inside a dialog, React's `autoFocus` runs before the dialog opens and silently loses the cursor to the first button. Dialogs take `initialFocusRef` on `ModalDialog` instead.
+- `scripts/validation/autofocus-ui.mjs` (part of `npm run test:ui`, so CI runs it) lists every place that must do this. When a change adds a button or fold-out with text fields, add it there and to the feature file.
+- Left out on purpose: the runner profile (opened to read), tabs that show a page with a search box, fields that already hold a number (typing would add to it), and the fold-out that undoes the fixed network address (its extra step is deliberate).
+
 ## Proof and skip reporting
 
 - Call `run.proof(page, name)` before and after each action. It saves a screenshot, an ARIA snapshot, and `/api/state`.

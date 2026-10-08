@@ -16,6 +16,7 @@ All commands below run from the repo root. The UI text is Dutch; the handles in 
 - Never use `pkill -f` or `pgrep -f`. The pattern matches your own shell command and kills it (exit 144). Stop processes by the PID the helper recorded, which `verify.mjs down` does.
 - Do not touch the user's own data: `data/app.db`, `.dev-data/`, and anything on ports 3000, 5173 (their `npm run dev`), or 9333. The helper uses free ports and `.tmp-verify/<run>/` for data.
 - `git fetch` first when hunting a bug: local `main` often lags merged PRs.
+- After a click that opens text fields, type with `page.keyboard.type` instead of `fill()`. Every such button must put the cursor in its first field, and `fill()` hides it when one stops doing that (see Autofocus in `features/README.md`).
 
 ## Launch
 

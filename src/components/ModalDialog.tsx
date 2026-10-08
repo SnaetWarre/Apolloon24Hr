@@ -15,6 +15,7 @@ export function ModalDialog({
 }: {
   label: string;
   onRequestClose: () => void;
+  /** Point this at the first text field. React's autoFocus inside the dialog runs before it opens and loses the cursor. */
   initialFocusRef?: React.RefObject<HTMLElement | null>;
   closeOnBackdrop?: boolean;
   children: React.ReactNode;

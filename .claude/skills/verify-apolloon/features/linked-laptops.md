@@ -13,7 +13,7 @@ At the event three laptops run the app as one group. Each holds the full databas
 
 ## How to get to it (user POV)
 
-- Beheer › Systeem & herstel (`/admin?section=system`) on any laptop: the others are listed, with a `Koppelen` button where pressing it there goes the right way. `Laptop niet in de lijst? Vul het adres in` links by typed address under the same rule.
+- Beheer › Systeem & herstel (`/admin?section=system`) on any laptop: the others are listed, with a `Koppelen` button where pressing it there goes the right way. `Laptop niet in de lijst? Vul het adres in` links by typed address under the same rule. Opening it puts the cursor in the address box.
 - The welcome screen (`/`) of an empty laptop lists the laptops that hold runners, each with `Koppelen`.
 - Beheer › Voorbereiding shows whether all laptops are reachable.
 - The system notice at the bottom of the sidebar on every screen.

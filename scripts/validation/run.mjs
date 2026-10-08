@@ -8,6 +8,8 @@ import { freePort, startServer } from './laptop.mjs';
 const CHECKS = [
   { name: 'workflow-ui', laptops: 1 },
   { name: 'dialog-ui', laptops: 1 },
+  // Linking on, so Systeem & herstel shows its address field.
+  { name: 'autofocus-ui', laptops: 1, cluster: true },
   { name: 'theme-ui', laptops: 1 },
   { name: 'recovery-ui', laptops: 1 },
   { name: 'failover-ui', laptops: 3 },
@@ -21,7 +23,9 @@ for (const check of CHECKS.filter((candidate) => !selected.length || selected.in
   const laptops = [];
   try {
     for (let index = 0; index < check.laptops; index += 1) {
-      laptops.push(await startLaptop(`${check.name}-${index}`, { seed: index === 0, cluster: check.laptops > 1 }));
+      laptops.push(
+        await startLaptop(`${check.name}-${index}`, { seed: index === 0, cluster: check.cluster ?? check.laptops > 1 })
+      );
     }
     console.log(`\n${check.name}`);
     execFileSync(process.execPath, [path.join('scripts', 'validation', `${check.name}.mjs`)], {
