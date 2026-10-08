@@ -235,7 +235,10 @@ export function AnalysisView() {
                     title="Rondes en tempo per uur"
                     text="Balken: aantal rondes per uur. Lijn: gemiddelde rondetijd in dat uur."
                   />
-                  <RacePaceChart buckets={timeBuckets} />
+                  <RacePaceChart
+                    buckets={timeBuckets}
+                    noLabelsOn={analysisLabels.length > 0 && !enabledLabels.length}
+                  />
                 </section>
 
                 <section className="panel analysis-trend-panel">
@@ -576,7 +579,7 @@ function RollingLapTrendChart({ points }: { points: ReturnType<typeof buildRolli
   );
 }
 
-function RacePaceChart({ buckets }: { buckets: ReturnType<typeof buildTimeBuckets> }) {
+function RacePaceChart({ buckets, noLabelsOn }: { buckets: ReturnType<typeof buildTimeBuckets>; noLabelsOn: boolean }) {
   const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
   const chartTheme = useChartTheme();
 
@@ -699,7 +702,15 @@ function RacePaceChart({ buckets }: { buckets: ReturnType<typeof buildTimeBucket
     return () => chart.destroy();
   }, [buckets, chartTheme]);
 
-  if (!buckets.length) return <EmptyAnalyticsState message="Zet minstens een ploeg aan om de grafiek te tonen." />;
+  if (!buckets.length) {
+    return (
+      <EmptyAnalyticsState
+        message={
+          noLabelsOn ? 'Zet minstens een ploeg aan om de grafiek te tonen.' : 'Geen rondes binnen deze selectie.'
+        }
+      />
+    );
+  }
   return (
     <>
       <div className="analysis-chart-card">
