@@ -10,10 +10,11 @@ import { useArrivals } from '../lib/motion';
 import { buildRecentLapSummaries, buildRunnerRanking, collectRankingLabels, type RankingMode } from '../lib/ranking';
 import type { Label, LapRecord, LiveAppSnapshot, PublicRecordMode, RaceEvent, Runner } from '../types';
 import { compareLabels, LabelBadge, labelKindOrder, labelKindTitle } from './LabelBadge';
-import { LiveDuration, LiveElapsed } from './LiveTime';
+import { LiveElapsed } from './LiveTime';
 
 const OUTSIDE_ALERT_VISIBLE_MS = 8_000;
 const INSIDE_RANKING_ROTATION_MS = 15_000;
+const INSIDE_RECENT_LAP_COUNT = 6;
 const selectOutsideDisplayData = ({ runners, race, settings }: LiveAppSnapshot) => ({
   runners,
   race,
@@ -155,7 +156,7 @@ export function InsideDisplay() {
   const [rankingLabelId, setRankingLabelId] = React.useState<string | null>(null);
   const [rotationPaused, setRotationPaused] = React.useState(false);
   const [prefersReducedMotion, setPrefersReducedMotion] = React.useState(false);
-  const recentLapSummaries = buildRecentLapSummaries(laps);
+  const recentLapSummaries = buildRecentLapSummaries(laps, INSIDE_RECENT_LAP_COUNT);
   const rankingLabels = collectRankingLabels(labels, laps);
   const ranking = buildRunnerRanking(runners, laps, rankingMode, rankingLabelId).slice(0, 10);
   const competitions = groupCompetitions(buildLabelStats(labels, runners, laps));
@@ -232,67 +233,66 @@ export function InsideDisplay() {
         </dl>
       </header>
 
-      <div className="inside-live">
-        <section className="inside-now" aria-label="Nu op de piste">
-          <span className="inside-now__label">
-            <LiveDot />
-            Nu op de piste
-          </span>
-          <strong
-            key={activeKey}
-            className={`inside-now__runner${changed.has(`active:${activeKey}`) ? ' display-rise' : ''}`}
-          >
-            {activeRunner ? runnerLabel(activeRunner) : 'Nog niemand gestart'}
+      <section className="inside-now" aria-label="Nu op de piste">
+        <span className="inside-now__label">
+          <LiveDot />
+          Nu op de piste
+        </span>
+        <strong
+          key={activeKey}
+          className={`inside-now__runner${changed.has(`active:${activeKey}`) ? ' display-rise' : ''}`}
+        >
+          {activeRunner ? runnerLabel(activeRunner) : 'Nog niemand gestart'}
+        </strong>
+        <span className="inside-now__next">
+          Volgende{' '}
+          <strong key={nextKey} className={changed.has(`next:${nextKey}`) ? 'display-rise' : undefined}>
+            {nextRunner ? runnerLabel(nextRunner) : 'niemand klaar'}
           </strong>
-          {activeRunner && race.activeStartedAt && (
-            <LiveDuration
-              startedAt={race.activeStartedAt}
-              className="inside-now__time"
-              refreshMs={1_000}
-              format="seconds"
-            />
-          )}
-          <span className="inside-now__next">
-            Volgende:{' '}
-            <strong key={nextKey} className={changed.has(`next:${nextKey}`) ? 'display-rise' : undefined}>
-              {nextRunner ? runnerLabel(nextRunner) : 'niemand klaar'}
-            </strong>
-          </span>
-        </section>
-        <section className="inside-recent-laps" aria-label="Laatste 3 lopers">
-          <h2 className="visually-hidden">Laatste 3 lopers</h2>
-          {recentLapSummaries.length ? (
-            recentLapSummaries.map(({ lap, bestLapMs, averageLapMs }, index) => (
-              <article
-                key={lap.id}
-                className={`recent-lap-row${index === 0 ? ' is-latest' : ''}${newLapIds.has(lap.id) ? ' is-new' : ''}`}
-              >
-                <span className="recent-lap-card-header">
-                  {index === 0 ? 'Net binnen' : `Binnen om ${formatDisplayClockTime(lap.finishedAt)}`}, ronde{' '}
-                  {lap.lapNumber}
-                </span>
-                <strong className="recent-lap-runner">{lapRunnerLabel(lap)}</strong>
-                <div className="recent-lap-times">
-                  <div className="recent-lap-time recent-lap-time--current">
-                    <span>Deze ronde</span>
-                    <strong>{formatDurationMs(lap.durationMs)}</strong>
-                  </div>
-                  <div className="recent-lap-time">
-                    <span>Snelste ronde</span>
-                    <strong>{formatDurationMs(bestLapMs)}</strong>
-                  </div>
-                  <div className="recent-lap-time">
-                    <span>Gem. ronde</span>
-                    <strong>{formatDurationMs(averageLapMs)}</strong>
-                  </div>
-                </div>
-              </article>
-            ))
-          ) : (
-            <div className="inside-empty">De eerste rondes verschijnen hier zodra de timing start.</div>
-          )}
-        </section>
-      </div>
+        </span>
+      </section>
+
+      <section className="inside-recent-laps" aria-label={`Laatste ${INSIDE_RECENT_LAP_COUNT} lopers`}>
+        <h2 className="visually-hidden">Laatste {INSIDE_RECENT_LAP_COUNT} lopers</h2>
+        {recentLapSummaries.length ? (
+          <table className="recent-lap-table">
+            <thead>
+              <tr>
+                <th scope="col">Binnen om</th>
+                <th scope="col">Loper</th>
+                <th scope="col">Deze ronde</th>
+                <th scope="col">Snelste ronde</th>
+                <th scope="col">Gem. ronde</th>
+              </tr>
+            </thead>
+            <tbody>
+              {recentLapSummaries.map(({ lap, bestLapMs, averageLapMs }, index) => (
+                <tr
+                  key={lap.id}
+                  className={`recent-lap-row${index === 0 ? ' is-latest' : ''}${newLapIds.has(lap.id) ? ' is-new' : ''}`}
+                >
+                  <td className="recent-lap-when">
+                    {index === 0 ? (
+                      <span className="recent-lap-badge">Net binnen</span>
+                    ) : (
+                      formatDisplayClockTime(lap.finishedAt)
+                    )}
+                  </td>
+                  <td className="recent-lap-runner">
+                    {lapRunnerLabel(lap)}
+                    <span className="recent-lap-number">ronde {lap.lapNumber}</span>
+                  </td>
+                  <td className="recent-lap-time recent-lap-time--current">{formatDurationMs(lap.durationMs)}</td>
+                  <td className="recent-lap-time">{formatDurationMs(bestLapMs)}</td>
+                  <td className="recent-lap-time">{formatDurationMs(averageLapMs)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <div className="inside-empty">De eerste rondes verschijnen hier zodra de timing start.</div>
+        )}
+      </section>
 
       <div className="inside-board">
         <section className="display-panel inside-ranking-panel">
