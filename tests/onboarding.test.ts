@@ -26,8 +26,11 @@ const cluster: ClusterStatus = {
   busy: null,
   selfUrl: 'http://10.0.0.1:5173',
   logHead: 42,
+  runners: 40,
   memberUrls: ['http://10.0.0.2:5173'],
-  nearby: [{ url: 'http://10.0.0.9:5173', laptops: 1, runners: 0, appVersion: '4.1.0', compatible: false }],
+  nearby: [
+    { url: 'http://10.0.0.9:5173', laptops: 1, runners: 0, appVersion: '4.1.0', compatible: false, link: 'invite' },
+  ],
   lastError: 'Laptop 10.0.0.2 antwoordt niet',
   backup: {
     enabled: true,

@@ -75,6 +75,8 @@ const MAINTENANCE_MS = 5_000;
 const MAX_KNOWN_PEERS = 16;
 /** A laptop without a leader this long says so plainly instead of "taking over". */
 const ELECTING_GRACE_MS = ELECTION_TIMEOUT_MS * 5;
+/** How long a laptop asked to join may take: its own join, a full copy of the data included. */
+const INVITE_TIMEOUT_MS = 30_000;
 
 let joining = false;
 let lastError: string | null = null;
@@ -125,6 +127,7 @@ export function clusterStatus(): ClusterStatus {
     busy: busy(),
     selfUrl: selfUrl(),
     logHead: getLogHead().seq,
+    runners: countRunners(),
     memberUrls: [...new Set(memberStatuses.filter((member) => !member.self).map((member) => member.url))],
     nearby: enabled ? nearbyGroups(new Set(group.map((member) => member.hostId))) : [],
     lastError: lastError ?? lastResyncProblem(),
@@ -135,7 +138,8 @@ export function clusterStatus(): ClusterStatus {
 /** Other groups heard on the network, one entry each; laptops of this group's own lineage rejoin by themselves. */
 function nearbyGroups(ownMembers: Set<string>): NearbyGroup[] {
   const clusterId = hostIdentity().clusterId;
-  const groups = new Map<string, NearbyGroup & { throughLeader: boolean }>();
+  const own = ownGroup();
+  const groups = new Map<string, Omit<NearbyGroup, 'link'> & { throughLeader: boolean }>();
   for (const beacon of heardLaptops()) {
     if (ownMembers.has(beacon.hostId) || beacon.clusterId === clusterId) continue;
     const known = groups.get(beacon.clusterId);
@@ -149,9 +153,45 @@ function nearbyGroups(ownMembers: Set<string>): NearbyGroup[] {
       compatible: (known?.compatible ?? true) && compatible,
     });
   }
-  return [...groups.values()]
-    .map(({ throughLeader: _throughLeader, ...group }) => group)
+  return [...groups]
+    .map(([otherClusterId, { throughLeader: _throughLeader, ...group }]) => ({
+      ...group,
+      link: linkDirection(own, { clusterId: otherClusterId, runners: group.runners, laptops: group.laptops }),
+    }))
     .sort((a, b) => b.runners - a.runners || a.url.localeCompare(b.url));
+}
+
+type GroupData = { clusterId: string; runners: number; laptops: number };
+
+function ownGroup(): GroupData {
+  return { clusterId: hostIdentity().clusterId, runners: countRunners(), laptops: members().length };
+}
+
+/**
+ * Which way Koppelen links two groups. The one with fewer runners takes the
+ * other's data; with as many runners, the smaller group does, and then the
+ * group id decides. Both sides work this out alike, so a press on both at once
+ * links them one way. The other side is only asked to come over (`invite`)
+ * while it holds no runners.
+ */
+function linkDirection(own: GroupData, other: GroupData): NearbyGroup['link'] {
+  const otherKeeps =
+    other.runners !== own.runners
+      ? other.runners > own.runners
+      : other.laptops !== own.laptops
+        ? other.laptops > own.laptops
+        : other.clusterId < own.clusterId;
+  if (otherKeeps) return 'join';
+  return other.runners === 0 ? 'invite' : 'there';
+}
+
+function pressThereMessage(url: string, otherRunners: number): string {
+  const other = url.replace(/^https?:\/\//, '');
+  return `Op deze laptop staan ${runnerLabel(countRunners())}, op ${other} ${runnerLabel(otherRunners)}. Druk op Koppelen op ${other}: die neemt dan de gegevens van deze laptop over.`;
+}
+
+function runnerLabel(count: number): string {
+  return `${count} ${count === 1 ? 'loper' : 'lopers'}`;
 }
 
 function groupState(writable: boolean, statuses: ClusterMemberStatus[]): GroupState {
@@ -285,7 +325,7 @@ export function registerClusterRoutes(app: Express): void {
     });
   }
 
-  app.use(['/api/cluster/snapshot', '/api/cluster/members'], requireSameVersion);
+  app.use(['/api/cluster/snapshot', '/api/cluster/members', '/api/cluster/invite'], requireSameVersion);
   // A forwarded write that reaches a laptop that no longer leads is refused before anything runs, so it can be repeated.
   app.use('/trpc', (req, res, next) => {
     if (req.header('x-apolloon-forwarded') === '1' && (!isLeader() || busy())) {
@@ -319,6 +359,20 @@ export function registerClusterRoutes(app: Express): void {
     }
     addMember({ hostId: request.data.hostId, url });
     res.json({ ok: true, term: currentTerm() });
+  });
+
+  app.post('/api/cluster/invite', (req, res) => {
+    const request = z
+      .object({ url: z.string().min(1).max(2_048), clusterId: z.string().min(1).max(128) })
+      .safeParse(req.body);
+    if (!request.success) {
+      sendPeerError(res, 400, 'invalid_request', 'Ongeldige koppelaanvraag.');
+      return;
+    }
+    acceptInvite(request.data.url, request.data.clusterId).then(
+      () => res.json({ ok: true }),
+      (error: unknown) => sendPeerError(res, 409, 'refused', error instanceof Error ? error.message : String(error))
+    );
   });
 }
 
@@ -393,24 +447,111 @@ function welcomeBack(hostId: string, url: string, clusterId: string): void {
   if (address && known?.url !== address) addMember({ hostId, url: address });
 }
 
-/** Joins the group of the laptop at `rawUrl`, replacing this laptop's data with the group's. */
-export async function joinGroup(rawUrl: string): Promise<{ backupFile: string | null }> {
+/**
+ * Koppelen, pressed on this laptop next to the laptop at `rawUrl`: the side
+ * with fewer runners takes the other's data (linkDirection), so pressing it on
+ * the laptop with the registrations never empties that laptop.
+ */
+export async function linkWith(rawUrl: string): Promise<{ backupFile: string | null }> {
+  await waitWhileJoining();
+  const { url, status } = await otherLaptop(rawUrl);
+  // Already linked, for example because Koppelen was pressed on the other laptop too.
+  if (status.clusterId === hostIdentity().clusterId) return { backupFile: null };
+  const direction = linkDirection(ownGroup(), {
+    clusterId: status.clusterId,
+    runners: status.runners,
+    laptops: status.members.length,
+  });
+  if (direction === 'join') return joinOnce(url, status.clusterId);
+  if (direction === 'there') throw new Error(pressThereMessage(url, status.runners));
+  const response = await peerFetch(`${url}/api/cluster/invite`, {
+    method: 'POST',
+    body: { url: selfUrl(), clusterId: hostIdentity().clusterId },
+    timeoutMs: INVITE_TIMEOUT_MS,
+  });
+  if (!response.ok) throw new Error((await readPeerError(response)).error || 'Koppelen mislukt.');
+  return { backupFile: null };
+}
+
+/**
+ * Another laptop pressed Koppelen next to this one and holds more runners:
+ * this laptop joins it, and asks the laptops of its own group to follow. Only
+ * a laptop without runners can be asked.
+ */
+async function acceptInvite(url: string, clusterId: string): Promise<void> {
+  await waitWhileJoining();
+  if (hostIdentity().clusterId === clusterId) return;
+  if (countRunners() > 0) throw new Error('Op die laptop staan intussen lopers. Druk daar op Koppelen.');
+  const self = hostIdentity().hostId;
+  const others = members().filter((member) => member.hostId !== self);
+  await joinOnce(url, clusterId);
+  for (const member of others) {
+    void peerFetch(`${member.url}/api/cluster/invite`, {
+      method: 'POST',
+      body: { url, clusterId },
+      timeoutMs: INVITE_TIMEOUT_MS,
+    }).catch(() => undefined);
+  }
+}
+
+/**
+ * Joins group `clusterId` through `url`. Koppelen pressed on both laptops at
+ * once starts two joins here (one through acceptInvite); the second one waits
+ * for the first instead of failing.
+ */
+async function joinOnce(url: string, clusterId: string): Promise<{ backupFile: string | null }> {
+  try {
+    return await joinGroup(url);
+  } catch (error) {
+    await waitWhileJoining();
+    if (hostIdentity().clusterId === clusterId) return { backupFile: null };
+    throw error;
+  }
+}
+
+async function waitWhileJoining(): Promise<void> {
+  const deadline = performance.now() + INVITE_TIMEOUT_MS / 2;
+  while (busy() && performance.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 100));
+}
+
+/** The laptop at `rawUrl`, checked to be another laptop that can be linked with this one. */
+async function otherLaptop(rawUrl: string): Promise<{ url: string; status: ClusterStatus }> {
   if (!enabled) throw new Error('Laptops koppelen staat uit op deze installatie.');
   const url = joinUrl(rawUrl);
   if (!url || url === selfUrl()) throw new Error('Vul het adres van een andere laptop in.');
+  const status = await fetchStatus(url).catch(() => {
+    throw new Error(`${url} is niet bereikbaar. Controleer het adres en de kabel.`);
+  });
+  if (!status.enabled) throw new Error('Op die laptop staat laptops koppelen uit.');
+  if (status.hostId === hostIdentity().hostId) throw new Error('Dat adres is deze laptop zelf.');
+  if (status.appVersion !== APP_VERSION || status.schemaVersion !== DATABASE_SCHEMA_VERSION) {
+    throw new Error(versionMismatchMessage(status.appVersion));
+  }
+  return { url, status };
+}
+
+/**
+ * Joins the group of the laptop at `rawUrl`, replacing this laptop's data
+ * with the group's. A group this laptop never belonged to is only joined the
+ * way linkDirection allows; rejoining its own group (maintain) is not limited.
+ */
+export async function joinGroup(rawUrl: string): Promise<{ backupFile: string | null }> {
+  const { url, status } = await otherLaptop(rawUrl);
+  if (
+    status.clusterId !== hostIdentity().clusterId &&
+    linkDirection(ownGroup(), {
+      clusterId: status.clusterId,
+      runners: status.runners,
+      laptops: status.members.length,
+    }) !== 'join'
+  ) {
+    throw new Error(pressThereMessage(url, status.runners));
+  }
   if (busy()) throw new Error('Deze laptop wordt al gekoppeld of bijgewerkt.');
   joining = true;
   startJoining();
   let joined: Parameters<typeof finishJoining>[0] = null;
   try {
-    const status = await fetchStatus(url).catch(() => {
-      throw new Error(`${url} is niet bereikbaar. Controleer het adres en de kabel.`);
-    });
-    if (!status.enabled) throw new Error('Op die laptop staat laptops koppelen uit.');
-    if (status.hostId === hostIdentity().hostId) throw new Error('Dat adres is deze laptop zelf.');
-    if (status.appVersion !== APP_VERSION || status.schemaVersion !== DATABASE_SCHEMA_VERSION) {
-      throw new Error(versionMismatchMessage(status.appVersion));
-    }
     const leader = status.leader;
     if (!leader) throw new Error('Die laptops kiezen net een hoofdlaptop. Probeer het zo opnieuw.');
     const leaderUrl = leader.hostId === status.hostId ? url : leader.url;

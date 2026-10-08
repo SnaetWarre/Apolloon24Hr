@@ -4,7 +4,7 @@ At the event three laptops run the app as one group. Each holds the full databas
 
 ## Sub-features
 
-- `group-link` lists the other laptop under Beheer › Systeem & herstel and links with `Koppelen`.
+- `group-link` lists the other laptops under Beheer › Systeem & herstel and links with `Koppelen`, whichever side it is pressed on; the side with fewer runners takes the other's data.
 - `group-status` shows `Alles veilig` when all three are linked and `Eén laptop onbereikbaar` when one is gone.
 - `group-write-anywhere` saves a change made on any laptop's screen, and shows it on the others.
 - `group-failover` keeps saving with two laptops after the third freezes.
@@ -12,7 +12,8 @@ At the event three laptops run the app as one group. Each holds the full databas
 
 ## How to get to it (user POV)
 
-- Beheer › Systeem & herstel (`/admin?section=system`) on the second and third laptop: the first laptop is listed with a `Koppelen` button.
+- Beheer › Systeem & herstel (`/admin?section=system`) on any laptop: the others are listed, with a `Koppelen` button where pressing it there goes the right way. `Laptop niet in de lijst? Vul het adres in` links by typed address under the same rule.
+- The welcome screen (`/`) of an empty laptop lists the laptops that hold runners, each with `Koppelen`.
 - Beheer › Voorbereiding shows whether all laptops are reachable.
 - The system notice at the bottom of the sidebar on every screen.
 
@@ -33,7 +34,7 @@ Preconditions:
 ## Gotchas
 
 - Use `SIGSTOP`, not `SIGTERM`: a stopped server announces it is leaving, which is not what a dead laptop does. `verify.mjs down` sends `SIGCONT` before stopping, so frozen laptops still exit.
-- Linking replaces the linking laptop's database with the group's. Laptops 1 and 2 must be the ones that click `Koppelen`.
+- Koppelen works from either side: the laptop with fewer runners takes the other's data. On laptop 0 (40 runners) the empty laptops have a `Koppelen` button that brings them over; next to a laptop that holds fewer runners of its own it reads `Druk op Koppelen op die laptop.` instead. Laptop 1's welcome screen lists only laptops with runners.
 - With only one laptop left nothing saves until a second returns. That is correct, not a bug.
 - The group check needs real ms timing. Avoid running a 3-laptop run while the machine is under heavy load (another build, `npm run rehearse`), or elections can flap.
 - `node scripts/validation/run.mjs failover-ui` and `race-day-ui` are the repo's regression checks for this; run them when you change cluster code.

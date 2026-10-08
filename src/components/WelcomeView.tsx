@@ -105,6 +105,8 @@ export function WelcomeView({
 function JoinChoice({ cluster, onOpenAdmin }: { cluster: ClusterStatus; onOpenAdmin: (section: 'system') => void }) {
   const { join, pending, notice } = useJoinGroup(0);
   const busy = pending || Boolean(cluster.busy);
+  // Only laptops that hold runners are "already set up"; an empty one is pulled in from the laptop with the runners.
+  const setUp = cluster.nearby.filter((found) => found.runners > 0);
 
   if (cluster.members.length > 1) {
     return (
@@ -117,9 +119,9 @@ function JoinChoice({ cluster, onOpenAdmin }: { cluster: ClusterStatus; onOpenAd
 
   return (
     <>
-      {cluster.nearby.length ? (
+      {setUp.length ? (
         <ul className="welcome-nearby">
-          {cluster.nearby.map((found) => (
+          {setUp.map((found) => (
             <li className="host-hint cluster-peer-row" key={found.url}>
               <span>
                 <strong>{shortUrl(found.url)}</strong>

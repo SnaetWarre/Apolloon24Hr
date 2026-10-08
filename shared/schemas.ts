@@ -233,6 +233,13 @@ export type NearbyGroup = {
   runners: number;
   appVersion: string;
   compatible: boolean;
+  /**
+   * What Koppelen does with it, so the laptop with the most runners keeps them:
+   * `join` makes this laptop take that group's data, `invite` makes that empty
+   * group take this laptop's data, and `there` means Koppelen must be pressed on
+   * that laptop, because both hold runners and this one keeps its own.
+   */
+  link: 'join' | 'invite' | 'there';
 };
 
 export type ClusterStatus = {
@@ -253,6 +260,7 @@ export type ClusterStatus = {
   busy: 'joining' | 'resyncing' | null;
   selfUrl: string;
   logHead: number;
+  runners: number;
   /** Other laptops in the group, so browsers can switch when this one goes away. */
   memberUrls: string[];
   nearby: NearbyGroup[];

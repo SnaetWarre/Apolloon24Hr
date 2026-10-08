@@ -232,13 +232,18 @@ test('three laptops form one group, every laptop writes, and each holds everythi
     const first = await startServer({ port: await freePort(), dataPath: path.join(root, 'first') });
     servers.push(first);
     await client(first).runners.create.mutate({ name: 'Before the group', runnerNumber: 'A-1' });
+    await client(first).runners.create.mutate({ name: 'Also before the group', runnerNumber: 'A-2' });
     const second = await startServer({ port: await freePort(), dataPath: path.join(root, 'second') });
     servers.push(second);
     await client(second).runners.create.mutate({ name: 'Replaced by the join', runnerNumber: 'B-1' });
     // A laptop on its own lists the laptops it could join, without anyone typing an address.
     await waitFor(async () =>
-      (await fetchStatus(second)).nearby.some((group) => group.url === first.baseUrl && group.runners === 1)
+      (await fetchStatus(second)).nearby.some(
+        (group) => group.url === first.baseUrl && group.runners === 2 && group.link === 'join'
+      )
     );
+    // The laptop with more runners keeps them: Koppelen there sends the operator to the other laptop.
+    await assert.rejects(client(first).cluster.join.mutate({ url: second.baseUrl }), /Druk op Koppelen op/);
     const joined = await join(second, first);
     assert.match(joined.backupFile ?? '', /pre-join/);
     const third = await startServer({ port: await freePort(), dataPath: path.join(root, 'third') });
@@ -263,6 +268,7 @@ test('three laptops form one group, every laptop writes, and each holds everythi
     await waitForSameState(first, second);
     await waitForSameState(first, third);
     assert.deepEqual((await fetchState(third)).runners.map((runner) => runner.name).sort(), [
+      'Also before the group',
       'Before the group',
       'Written on laptop 0',
       'Written on laptop 1',
@@ -429,6 +435,66 @@ test(
         backups.some((file) => file.includes('pre-resync')),
         backups.join(', ')
       );
+    } catch (error) {
+      throw withServerOutput(error, ...servers);
+    } finally {
+      await Promise.all(servers.map(stopServer));
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
+);
+
+test(
+  'Koppelen on the laptop with the runners brings the empty laptops over instead of emptying it',
+  { timeout: 60_000 },
+  async () => {
+    const root = testRoot('direction');
+    const servers: RunningServer[] = [];
+    try {
+      const full = await startServer({ port: await freePort(), dataPath: path.join(root, 'full') });
+      servers.push(full);
+      await client(full).runners.create.mutate({ name: 'Imported', runnerNumber: 'I-1' });
+      const empties: RunningServer[] = [];
+      for (const name of ['a', 'b']) {
+        const empty = await startServer({ port: await freePort(), dataPath: path.join(root, name) });
+        servers.push(empty);
+        empties.push(empty);
+      }
+      const [a, b] = empties;
+
+      // Two empty laptops pressed at the same moment end up as one group of two.
+      await Promise.all([join(a, b), join(b, a)]);
+      await waitFor(async () => (await fetchStatus(a)).state === 'healthy', 10_000);
+      assert.equal((await fetchStatus(a)).clusterId, (await fetchStatus(b)).clusterId);
+      assert.equal((await fetchStatus(b)).members.length, 2);
+
+      // Another laptop cannot make the laptop with the runners take an empty group's data.
+      const pair = await fetchStatus(a);
+      const refused = await fetch(`${full.baseUrl}/api/cluster/invite`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-apolloon-app-version': '1.0.0',
+          'x-apolloon-schema-version': String(pair.schemaVersion),
+        },
+        body: JSON.stringify({ url: a.baseUrl, clusterId: pair.clusterId }),
+      });
+      assert.equal(refused.status, 409);
+      await waitFor(async () =>
+        (await fetchStatus(full)).nearby.some((group) => group.laptops === 2 && group.link === 'invite')
+      );
+      await waitFor(async () => (await fetchStatus(a)).nearby.some((group) => group.link === 'join'));
+
+      // Koppelen on the laptop with the runners: both empty laptops take its data.
+      await join(full, a);
+      await waitForSameState(full, a, 15_000);
+      await waitForSameState(full, b, 15_000);
+      assert.deepEqual(
+        (await fetchState(b)).runners.map((runner) => runner.name),
+        ['Imported']
+      );
+      await waitFor(async () => (await fetchStatus(full)).state === 'healthy', 15_000);
+      assert.equal((await fetchStatus(full)).members.length, 3);
     } catch (error) {
       throw withServerOutput(error, ...servers);
     } finally {

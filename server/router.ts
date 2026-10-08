@@ -33,7 +33,7 @@ import {
   assertWritable,
   continueAlone,
   forwardWrite,
-  joinGroup,
+  linkWith,
   newRequestId,
   writeDeadline,
   writeTarget,
@@ -309,7 +309,7 @@ export const appRouter = t.router({
   cluster: t.router({
     join: t.procedure
       .input(z.object({ url: z.string().trim().min(1).max(2_048) }))
-      .mutation(({ input }) => joinGroup(input.url)),
+      .mutation(({ input }) => linkWith(input.url)),
     continueAlone: t.procedure.mutation(() => continueAlone()),
   }),
 
