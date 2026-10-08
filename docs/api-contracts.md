@@ -7,6 +7,7 @@ Three transports, three jobs. New features must follow these ownership rules so 
 Owns every validated write, plus queries that need input validation or should stay off the live snapshot.
 
 - Runner, label, queue, timing, night-team, settings, backup, and laptop-linking commands.
+- `laps.move`, `laps.split`, `laps.delete` (Beheer › Rondes): a lap to another runner, one lap into two halves (the second half to `runnerId`, `source: 'split'`), or a lap removed. Each runner's laps are numbered again by start time. A split lap's second half joins the handoff that recorded it, so undoing that handoff removes both halves.
 - `runners.registrations`: registration answers with contact details. Screens read the same answers from `GET /api/registrations`, which can answer `304`.
 - Payloads are validated with Zod. Every laptop accepts writes; the leader commits them once a majority stored them, and the other laptops pass them on to it.
 - Timing commands carry the race state the operator saw.

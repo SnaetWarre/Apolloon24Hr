@@ -5,6 +5,7 @@ import { buildEventReadiness, readinessSummary } from '../lib/readiness';
 import type { LiveAppSnapshot } from '../types';
 import { ActivitySection } from './admin/ActivitySection';
 import { LabelsSection } from './admin/LabelsSection';
+import { LapsSection } from './admin/LapsSection';
 import { PreparationSection } from './admin/PreparationSection';
 import { PublicSection } from './admin/PublicSection';
 import { RunnersSection } from './admin/RunnersSection';
@@ -61,6 +62,9 @@ export function AdminView() {
         </div>
         <div className={contentClass('runners')} hidden={activeSection !== 'runners'}>
           <RunnersSection runners={runners} />
+        </div>
+        <div className={contentClass('laps')} hidden={activeSection !== 'laps'}>
+          <LapsSection active={activeSection === 'laps'} />
         </div>
         <div className={contentClass('labels')} hidden={activeSection !== 'labels'}>
           <LabelsSection labels={labels} runners={runners} temporaryTeams={temporaryTeams} />

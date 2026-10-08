@@ -143,6 +143,7 @@ Wachtrij (Telsysteem 1) controls the queue with two entry actions: **Loper zoeke
 - If a runner is active, a press saves that runner's lap and immediately starts the next runner in the queue.
 - A lap runs from one press to the next as the timing screen recorded them from the key events, not from when the request reached the server. The lap time is measured on the browser's monotonic clock between the two presses, so network delay, a busy server, and clock corrections never change it.
 - **Laatste wissel ongedaan maken** restores the previous runner on the track and the queue, and removes the lap that handoff recorded.
+- Older laps are fixed in **Beheer › Rondes**: give a lap to the runner who really ran it, split a lap in two halves when a press was missed, or delete a press too many. Laps far shorter or longer than the race's usual lap are marked there. Each fix is listed in Beheer › Activiteit.
 - **Race beëindigen** stops the race after a second confirmation. A press after that asks whether to resume the race.
 
 There is no automatic 24-hour cutoff in the software.

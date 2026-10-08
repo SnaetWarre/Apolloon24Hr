@@ -1,5 +1,6 @@
 import type { PublicRecordMode, Runner, RunnerStatus } from '../shared/schemas.js';
-import { getLabels, getRaceState, getRunnerById, getRunnerRegistrations } from './db.js';
+import { formatDurationMs } from '../shared/time.js';
+import { getLabels, getLapById, getRaceState, getRunnerById, getRunnerRegistrations } from './db.js';
 
 /**
  * Says in words what a write does, for Beheer › Activiteit. Called before the write, so
@@ -24,6 +25,25 @@ export function describeWrite(path: string, input: unknown): ((result: unknown) 
     }
     case 'race.finish':
       return () => 'Wedstrijd beëindigd';
+    case 'laps.move': {
+      const lap = lapText(value.lapId);
+      const runner = runnerName(String(value.runnerId ?? ''));
+      return () => `${lap} naar ${runner} verplaatst`;
+    }
+    case 'laps.split': {
+      const lap = lapText(value.lapId);
+      const first = getLapById(String(value.lapId ?? ''))?.runnerId;
+      const second = String(value.runnerId ?? '');
+      const runner = runnerName(second);
+      return () =>
+        second === first
+          ? `${lap} gesplitst in twee rondes van ${runner}`
+          : `${lap} gesplitst: de tweede helft is voor ${runner}`;
+    }
+    case 'laps.delete': {
+      const lap = lapText(value.lapId);
+      return () => `${lap} verwijderd`;
+    }
     case 'events.burgieGepakt':
       return () => 'Burgie gepakt';
     case 'runners.create':
@@ -161,6 +181,14 @@ function runnerName(id: string): string {
 function runnerText(runner: Pick<Runner, 'name' | 'runnerNumber'> | null): string {
   if (!runner?.name) return '';
   return runner.runnerNumber ? `#${runner.runnerNumber} ${runner.name}` : runner.name;
+}
+
+/** "Ronde 3 van #12 Jan (1:14.320, do 21:05)", read before the write changes it. */
+function lapText(lapId: unknown): string {
+  const lap = typeof lapId === 'string' ? getLapById(lapId) : null;
+  if (!lap) return 'Ronde';
+  const runner = runnerText({ name: lap.runnerName, runnerNumber: lap.runnerNumber }) || 'Loper';
+  return `Ronde ${lap.lapNumber} van ${runner} (${formatDurationMs(lap.durationMs)}, ${formatMoment(lap.finishedAt)})`;
 }
 
 function labelName(id: string): string {
