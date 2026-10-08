@@ -4,7 +4,7 @@
  * alone on a second install (an update), and that uninstalling removes them. The CI runner is
  * an administrator without a UAC prompt, so a person saying no to that prompt is not covered.
  */
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { setTimeout as sleep } from 'node:timers/promises';
 import path from 'node:path';
@@ -56,6 +56,18 @@ async function waitFor(label, check) {
     const rules = readRules();
     if (check(rules)) return rules;
     await sleep(1_000);
+  }
+  // The installer hides the script's window; run it here so its errors land in the log.
+  const script = path.join(installDir, 'resources', 'apolloon-firewall.ps1');
+  if (existsSync(script)) {
+    for (const action of ['check', 'add']) {
+      const run = spawnSync(
+        'powershell.exe',
+        ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script, action, executable],
+        { encoding: 'utf8', timeout: 120_000 }
+      );
+      console.error(`apolloon-firewall.ps1 ${action}: exit ${run.status}\n${run.stdout}${run.stderr}`);
+    }
   }
   throw new Error(`${label}: ${JSON.stringify(readRules())}`);
 }

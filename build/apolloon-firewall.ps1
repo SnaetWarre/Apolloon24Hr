@@ -20,12 +20,14 @@ $rules = @(
 )
 
 # Windows' own "Allow access?" question blocks the app on every network type left unticked
-# (public, by default), and a block rule wins over every allow rule.
+# (public, by default), and a block rule wins over every allow rule. Windows writes that path in
+# lower case, so compare with -eq, which ignores case.
 function Get-AppBlockRules {
-  $filters = @(Get-NetFirewallApplicationFilter -Program $Program -ErrorAction SilentlyContinue)
+  $filters = @(Get-NetFirewallApplicationFilter | Where-Object {
+      [Environment]::ExpandEnvironmentVariables($_.Program) -eq $Program
+    })
   if ($filters.Count -eq 0) { return }
-  Get-NetFirewallRule -AssociatedNetFirewallApplicationFilter $filters |
-    Where-Object { $_.Direction -eq 'Inbound' -and $_.Action -eq 'Block' }
+  $filters | Get-NetFirewallRule | Where-Object { $_.Direction -eq 'Inbound' -and $_.Action -eq 'Block' }
 }
 
 switch ($Action) {
