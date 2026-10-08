@@ -471,7 +471,9 @@ export const appRouter = t.router({
     ),
     finish: t.procedure.input(timingPressSchema).mutation(
       write((input) => {
-        if (getRaceState().raceFinishedAt) fail('CONFLICT', 'De race is al afgesloten.');
+        const race = getRaceState();
+        if (!race.raceStartedAt) fail('CONFLICT', 'De race is nog niet gestart.');
+        if (race.raceFinishedAt) fail('CONFLICT', 'De race is al afgesloten.');
         assertExpectedRaceState(input);
         finishRace(pressMoment(input, FINISH_PRESS_MAX_AGE_MS));
         return { ok: true };
