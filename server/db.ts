@@ -59,6 +59,7 @@ export {
   recordWrite,
   getClusterEpoch,
   getLogHead,
+  hasEventChanges,
   getLogEntryId,
   getLogEntriesAfter,
   canContinueFrom,

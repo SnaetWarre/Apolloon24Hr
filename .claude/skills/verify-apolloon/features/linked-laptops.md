@@ -4,7 +4,7 @@ At the event three laptops run the app as one group. Each holds the full databas
 
 ## Sub-features
 
-- `group-link` lists the other laptops under Beheer › Systeem & herstel and links with `Koppelen`, whichever side it is pressed on; the side with fewer runners takes the other's data.
+- `group-link` lists the other laptops under Beheer › Systeem & herstel and links with `Koppelen`, whichever side it is pressed on; the side with fewer runners takes the other's data. With as many runners, a laptop nobody changed yet takes the data of one where someone prepared labels, logos, or settings (`changed` in `/api/cluster/status`).
 - `group-auto-link` links a group without runners with the others by itself (about 5 s), the same way round as `Koppelen`. A laptop with runners never does. An empty laptop that hears two groups with runners waits and says so, and so does one whose link fails three rounds in a row (about 15 s), with the reason.
 - `group-status` shows `Alles veilig` when all three are linked and `Eén laptop onbereikbaar` when one is gone.
 - `group-write-anywhere` saves a change made on any laptop's screen, and shows it on the others.
@@ -29,6 +29,7 @@ Preconditions:
 - **Link.** For laptop 1 and then 2: `await page.goto(run.url('/admin?section=system', i))`. In `page.locator('.cluster-peer-row', { hasText: new URL(run.url('/', 0)).host })` click `Koppelen` (allow 15 s for discovery), then click `Koppelen` in the dialog. Text `Gekoppeld.` appears. Afterwards `run.api('/api/cluster/status', 0)` has `state: 'healthy'` and `doctor` shows `cluster=healthy` and `runners=40` on all three.
 - **Link by itself.** Start with `up --laptops=3 --auto-link`. Within 15 s, with no click, `run.api('/api/cluster/status', 0)` lists three members and `autoLink.linked` names `LAPTOP-1` and `LAPTOP-2` with `with: 'LAPTOP-0'`. On laptop 1's Systeem tab `.cluster-auto-link` reads `Automatisch gekoppeld met LAPTOP-0, …`; on laptop 0 it reads `LAPTOP-1 is automatisch bijgekomen, …`. Read the group on a laptop other than the one in the screenshot.
 - **Never with runners.** Start with `up --laptops=3 --seeded=2 --auto-link`. After 15 s laptops 0 and 1 still each show `cluster=solo` in `doctor`, and laptop 2's welcome screen and Systeem tab show `Niet vanzelf gekoppeld: LAPTOP-0 en LAPTOP-1 hebben elk lopers.` (either order).
+- **Prepared laptop keeps its data.** Start with `up --laptops=3 --scenario=empty`. On laptop 0 add a label under `/admin?section=labels` (`Naam van het nieuwe label`, then `Label toevoegen`); `run.api('/api/cluster/status', 0).changed` turns `true`, laptop 1 stays `false`. On laptop 0's Systeem tab press `Koppelen` next to laptop 1: the dialog reads `Op LAPTOP-1 staan nog geen lopers. Die laptop neemt alle gegevens van deze laptop over … Op deze laptop verandert niets.` After `Gekoppeld.` the label is in `/api/state` on both laptops.
 - **Status.** On laptop 1's Systeem tab, `.cluster-state` reads `Alles veilig`.
 - **Write anywhere.** Make a change through laptop 2's UI (for example check a runner in on `/queue`, see `queue.md`). Read `/api/state` on laptop 0: the runner's status changed there.
 - **Failover.** Freeze laptop 0 like a pulled cable: `process.kill(run.state.laptops[0].pid, 'SIGSTOP')`. Within 15 s laptop 1's `.cluster-state` reads `Eén laptop onbereikbaar`. A change made through laptop 2's UI still saves.

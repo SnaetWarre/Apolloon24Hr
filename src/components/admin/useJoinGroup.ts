@@ -5,11 +5,12 @@ import { useAdminAction } from './AdminNotice';
 
 /**
  * Koppelen: links this laptop with another one, after saying which laptop takes whose data.
- * The laptop with fewer runners always takes the other's (the server decides; `found.link`
- * says which way for a laptop from the list). Used by Beheer › Systeem and by the welcome
- * screen of a laptop that is still empty.
+ * The laptop with fewer runners always takes the other's, and with as many, a laptop nobody
+ * changed yet (`changed`) takes the data of one that someone prepared (the server decides;
+ * `found.link` says which way for a laptop from the list). Used by Beheer › Systeem and by
+ * the welcome screen of a laptop that is still empty.
  */
-export function useJoinGroup(runnerCount: number) {
+export function useJoinGroup(runnerCount: number, changed: boolean) {
   const confirm = useConfirm();
   const { joinGroup } = useAppActions();
   const { pending, notice, run } = useAdminAction();
@@ -17,9 +18,11 @@ export function useJoinGroup(runnerCount: number) {
   async function join(url: string, found?: NearbyGroup) {
     if (!url || pending) return null;
     const own =
-      runnerCount === 0
-        ? 'Op deze laptop staat nog niets, dus er gaat niets verloren.'
-        : `Wat nu op deze laptop staat (${countLabel(runnerCount, 'loper', 'lopers')}), wordt eerst als backup bewaard.`;
+      runnerCount > 0
+        ? `Wat nu op deze laptop staat (${countLabel(runnerCount, 'loper', 'lopers')}), wordt eerst als backup bewaard.`
+        : changed
+          ? 'Wat al op deze laptop is ingesteld, wordt eerst als backup bewaard.'
+          : 'Op deze laptop staat nog niets, dus er gaat niets verloren.';
     const confirmed = await confirm(
       found?.link === 'invite'
         ? {
@@ -33,7 +36,7 @@ export function useJoinGroup(runnerCount: number) {
               ? `Deze laptop neemt alle gegevens van ${laptopLabel(found)} (${countLabel(found.runners, 'loper', 'lopers')}) over en werkt daarna mee. ${own}`
               : `De laptop met de minste lopers neemt alle gegevens van de andere over en werkt daarna mee. Wat daar stond, wordt eerst als backup bewaard.`,
             confirmLabel: 'Koppelen',
-            tone: runnerCount === 0 ? 'default' : 'danger',
+            tone: runnerCount === 0 && !changed ? 'default' : 'danger',
           }
     );
     if (!confirmed) return null;

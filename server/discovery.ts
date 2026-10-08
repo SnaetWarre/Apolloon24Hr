@@ -32,6 +32,8 @@ const beaconSchema = z.object({
   leader: z.boolean(),
   groupSize: z.number().int().positive(),
   runners: z.number().int().nonnegative(),
+  /** Someone changed the event data in that group (hasEventChanges); older versions do not send it. */
+  changed: z.boolean().default(false),
 });
 export type Beacon = z.infer<typeof beaconSchema>;
 export type OwnBeacon = Omit<Beacon, 'app' | 'url'>;

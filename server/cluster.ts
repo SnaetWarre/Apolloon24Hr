@@ -39,6 +39,7 @@ import {
   getClusterMembers,
   getLogHead,
   getSetting,
+  hasEventChanges,
   getUnreachableMembers,
   hostIdentity,
   keepOnlyClusterMember,
@@ -152,6 +153,7 @@ export function clusterStatus(): ClusterStatus {
     selfUrl: selfUrl(),
     logHead: getLogHead().seq,
     runners: countRunners(),
+    changed: hasEventChanges(),
     memberUrls: [...new Set(memberStatuses.filter((member) => !member.self).map((member) => member.url))],
     nearby,
     autoLink: {
@@ -187,6 +189,7 @@ function nearbyGroups(ownMembers: Set<string>): NearbyGroup[] {
       throughLeader: Boolean(known?.throughLeader || beacon.leader),
       laptops: Math.max(known?.laptops ?? 0, beacon.groupSize),
       runners: Math.max(known?.runners ?? 0, beacon.runners),
+      changed: Boolean(known?.changed) || beacon.changed,
       appVersion: beacon.appVersion,
       compatible: (known?.compatible ?? true) && compatible,
     });
@@ -194,31 +197,44 @@ function nearbyGroups(ownMembers: Set<string>): NearbyGroup[] {
   return [...groups]
     .map(([otherClusterId, { throughLeader: _throughLeader, ...group }]) => ({
       ...group,
-      link: linkDirection(own, { clusterId: otherClusterId, runners: group.runners, laptops: group.laptops }),
+      link: linkDirection(own, {
+        clusterId: otherClusterId,
+        runners: group.runners,
+        changed: group.changed,
+        laptops: group.laptops,
+      }),
     }))
     .sort((a, b) => b.runners - a.runners || a.url.localeCompare(b.url));
 }
 
-type GroupData = { clusterId: string; runners: number; laptops: number };
+type GroupData = { clusterId: string; runners: number; changed: boolean; laptops: number };
 
 function ownGroup(): GroupData {
-  return { clusterId: hostIdentity().clusterId, runners: countRunners(), laptops: members().length };
+  return {
+    clusterId: hostIdentity().clusterId,
+    runners: countRunners(),
+    changed: hasEventChanges(),
+    laptops: members().length,
+  };
 }
 
 /**
  * Which way Koppelen links two groups. The one with fewer runners takes the
- * other's data; with as many runners, the smaller group does, and then the
- * group id decides. Both sides work this out alike, so a press on both at once
- * links them one way. The other side is only asked to come over (`invite`)
- * while it holds no runners.
+ * other's data; with as many runners, a group nobody changed yet takes the
+ * data of one that someone prepared (labels, logos, settings); then the
+ * smaller group does, and then the group id decides. Both sides work this out
+ * alike, so a press on both at once links them one way. The other side is
+ * only asked to come over (`invite`) while it holds no runners.
  */
-function linkDirection(own: GroupData, other: GroupData): NearbyGroup['link'] {
+export function linkDirection(own: GroupData, other: GroupData): NearbyGroup['link'] {
   const otherKeeps =
     other.runners !== own.runners
       ? other.runners > own.runners
-      : other.laptops !== own.laptops
-        ? other.laptops > own.laptops
-        : other.clusterId < own.clusterId;
+      : other.changed !== own.changed
+        ? other.changed
+        : other.laptops !== own.laptops
+          ? other.laptops > own.laptops
+          : other.clusterId < own.clusterId;
   if (otherKeeps) return 'join';
   return other.runners === 0 ? 'invite' : 'there';
 }
@@ -616,6 +632,7 @@ export async function linkWith(rawUrl: string): Promise<{ backupFile: string | n
   const direction = linkDirection(ownGroup(), {
     clusterId: status.clusterId,
     runners: status.runners,
+    changed: status.changed,
     laptops: status.members.length,
   });
   if (direction === 'join') return joinOnce(url, status.clusterId);
@@ -695,6 +712,7 @@ export async function joinGroup(rawUrl: string, options: JoinOptions = {}): Prom
     linkDirection(ownGroup(), {
       clusterId: status.clusterId,
       runners: status.runners,
+      changed: status.changed,
       laptops: status.members.length,
     }) !== 'join'
   ) {
@@ -899,6 +917,7 @@ export function startClusterService(): void {
       leader: isLeader() && leaderAlive(),
       groupSize: members().length,
       runners: countRunners(),
+      changed: hasEventChanges(),
     };
   });
   maintenanceTimer = setInterval(() => void maintain().catch(() => undefined), MAINTENANCE_MS);

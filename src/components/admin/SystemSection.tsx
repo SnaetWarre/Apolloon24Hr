@@ -64,7 +64,7 @@ function ClusterPanel({
   const confirm = useConfirm();
   const { continueAlone } = useAppActions();
   const { pending: alonePending, notice: aloneNotice, run } = useAdminAction();
-  const { join: joinGroup, pending: joinPending, notice: joinNotice } = useJoinGroup(runnerCount);
+  const { join: joinGroup, pending: joinPending, notice: joinNotice } = useJoinGroup(runnerCount, cluster.changed);
   const [otherUrl, setOtherUrl] = React.useState('');
   const group = describeGroup(cluster);
   const pending = alonePending || joinPending;
