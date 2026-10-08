@@ -1,4 +1,5 @@
 import { runnerRegistrationSchema, type Label, type Runner, type RunnerRegistration } from '../../shared/schemas.js';
+import { MAX_PLAUSIBLE_LAP_MS, MIN_LAP_MS } from '../../shared/lapTimes.js';
 import { all, one } from './connection.js';
 import { getRunnerLabels, getRunnerLabelsMap } from './labels.js';
 
@@ -6,6 +7,9 @@ type RunnerRow = Omit<Runner, 'labels' | 'hiddenFromQueue' | 'notes' | 'estimate
   notes: string | null;
   estimatedPace: string | null;
 };
+
+// Double presses and forgotten handoffs count as laps, but not as lap times (same rule as hasPlausibleDuration).
+const LAP_TIME_SQL = `CASE WHEN l.duration_ms BETWEEN ${MIN_LAP_MS} AND ${MAX_PLAUSIBLE_LAP_MS} THEN l.duration_ms END`;
 
 const RUNNER_SELECT_SQL = `
   SELECT
@@ -25,9 +29,9 @@ const RUNNER_SELECT_SQL = `
     r.queue_index AS queueIndex,
     r.hidden_at AS queueHiddenAt,
     COUNT(l.id) AS lapCount,
-    MAX(l.duration_ms) AS slowestLapMs,
-    MIN(l.duration_ms) AS bestLapMs,
-    CASE WHEN COUNT(l.id) = 0 THEN NULL ELSE ROUND(AVG(l.duration_ms)) END AS averageLapMs,
+    MAX(${LAP_TIME_SQL}) AS slowestLapMs,
+    MIN(${LAP_TIME_SQL}) AS bestLapMs,
+    ROUND(AVG(${LAP_TIME_SQL})) AS averageLapMs,
     COALESCE(SUM(l.duration_ms), 0) AS totalTimeMs,
     (
       SELECT duration_ms
