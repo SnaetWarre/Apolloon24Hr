@@ -16,15 +16,15 @@
 }
 
 .tactics-live-stats .stat-panel:nth-child(4n) {
-  border-right: 1px solid var(--line);
+  border-inline-end: 1px solid var(--line);
 }
 
 .tactics-live-stats .stat-panel:nth-child(6n) {
-  border-right: 0;
+  border-inline-end: 0;
 }
 
 .tactics-live-stats .stat-panel {
-  border-bottom: 0;
+  border-block-end: 0;
 }
 
 .tactics-stat {
@@ -53,7 +53,7 @@
 }
 
 .tactics-stat-unit {
-  margin-left: 5px;
+  margin-inline-start: 5px;
   color: var(--ink-3);
   font: 500 14px var(--font-body);
 }
@@ -73,7 +73,7 @@
   display: grid;
   grid-template-columns: repeat(4, minmax(170px, 1fr));
   gap: var(--space-3);
-  margin-bottom: var(--space-4);
+  margin-block-end: var(--space-4);
 }
 
 .tactics-planning-layout .tactics-control-grid {
@@ -96,7 +96,7 @@
 }
 
 .tactics-group-label {
-  margin-top: var(--space-2);
+  margin-block-start: var(--space-2);
   color: var(--ink-3);
   font-size: 13px;
   font-weight: 600;
@@ -113,8 +113,8 @@
 }
 
 .tactics-analysis-details {
-  border-top: 1px solid var(--line);
-  padding-top: var(--space-3);
+  border-block-start: 1px solid var(--line);
+  padding-block-start: var(--space-3);
 }
 
 .tactics-hour-editor {
@@ -122,7 +122,7 @@
 }
 
 .tactics-hour-editor[open] {
-  padding-bottom: var(--space-4);
+  padding-block-end: var(--space-4);
 }
 
 .tactics-hour-editor .tactics-hourly-grid {
@@ -149,11 +149,11 @@
 }
 
 .tactics-analysis-details {
-  margin-top: var(--space-2);
+  margin-block-start: var(--space-2);
 }
 
 .tactics-analysis-details > summary {
-  padding-bottom: var(--space-3);
+  padding-block-end: var(--space-3);
 }
 
 .tactics-hourly-header,
@@ -231,7 +231,7 @@
   min-width: 0;
   padding: 3px 0;
   border: 0;
-  border-bottom: 1px solid var(--line-2);
+  border-block-end: 1px solid var(--line-2);
   background: transparent;
   color: var(--ink);
   font: 600 17px var(--font-display);
@@ -239,8 +239,8 @@
 }
 
 .tactics-hourly-grid input:focus {
-  outline: none;
-  border-bottom-color: var(--brand);
+  outline: 2px solid transparent;
+  border-block-end-color: var(--brand);
 }
 
 .tactics-hourly-grid em {
@@ -279,7 +279,7 @@
 }
 
 .race-timeline-presets {
-  margin-left: auto !important;
+  margin-inline-start: auto !important;
 }
 
 .race-timeline-baseline {
@@ -326,9 +326,15 @@
     opacity var(--dur-1) var(--ease-out);
 }
 
-.race-timeline-legend-item:hover {
-  background: var(--surface-2);
-  color: var(--ink);
+@media (hover: hover) and (pointer: fine) {
+  .race-timeline-legend-item:hover {
+    background: var(--surface-2);
+    color: var(--ink);
+  }
+}
+
+.race-timeline-legend-item:active {
+  background: var(--surface-3);
 }
 
 .race-timeline-legend-item[aria-pressed="false"] {
@@ -364,7 +370,7 @@
 
 .race-timeline-selection {
   position: absolute;
-  top: var(--plot-top);
+  inset-block-start: var(--plot-top);
   height: var(--plot-height);
   border-inline: 1px solid var(--brand);
   background: var(--brand-wash);
@@ -382,7 +388,7 @@
 .race-timeline-brush-track {
   position: relative;
   height: 44px;
-  overflow: hidden;
+  overflow: clip;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   background: var(--surface);
@@ -431,8 +437,8 @@
 
 .race-timeline-brush-window.is-zoomed {
   border-color: var(--brand);
-  background: color-mix(in srgb, var(--brand) 10%, transparent);
-  box-shadow: 0 0 0 9999px color-mix(in srgb, var(--surface) 55%, transparent);
+  background: color-mix(in oklch, var(--brand) 10%, transparent);
+  box-shadow: 0 0 0 9999px color-mix(in oklch, var(--surface) 55%, transparent);
 }
 
 .race-timeline-brush-window:active {
@@ -461,8 +467,8 @@
 
 .race-timeline-brush-window.is-zoomed .race-timeline-brush-handle::after {
   position: absolute;
-  top: 50%;
-  left: 50%;
+  inset-block-start: 50%;
+  inset-inline-start: 50%;
   width: 4px;
   height: 16px;
   border-radius: 2px;
@@ -482,7 +488,7 @@
 }
 
 .race-timeline-brush-caption small {
-  margin-left: 6px;
+  margin-inline-start: 6px;
   color: var(--ink-3);
   font-size: 12px;
 }
@@ -521,14 +527,14 @@
 }
 
 .tactics-dataset-manager h2 {
-  overflow: hidden;
+  overflow: clip;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .tactics-control-grid--historical {
   grid-template-columns: minmax(180px, 0.6fr) minmax(180px, 0.6fr) minmax(260px, 1.4fr);
-  margin-bottom: 0;
+  margin-block-end: 0;
 }
 
 .tactics-control-grid--drafting {
@@ -536,7 +542,7 @@
 }
 
 .tactics-inline-controls .tactics-control-grid {
-  margin-bottom: 0;
+  margin-block-end: 0;
 }
 
 .tactics-dataset-summary {
@@ -544,12 +550,13 @@
   align-content: center;
   gap: 2px;
   min-width: 0;
-  padding-left: var(--space-4);
-  border-left: 1px solid var(--line);
+  padding-inline-start: var(--space-4);
+  border-inline-start: 1px solid var(--line);
 }
 
 .tactics-dataset-summary strong {
-  overflow: hidden;
+  min-width: 0;
+  overflow: clip;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -567,12 +574,12 @@
 }
 
 .tactics-empty-state > .icon {
-  margin-bottom: var(--space-3);
+  margin-block-end: var(--space-3);
   color: var(--ink-3);
 }
 
 .tactics-panel-heading .analysis-section-header {
-  margin-bottom: var(--space-3);
+  margin-block-end: var(--space-3);
 }
 
 .tactics-lap-status,
@@ -616,20 +623,26 @@
   min-width: 150px;
   padding: 11px var(--space-3);
   border: 0;
-  border-right: 1px solid var(--line);
+  border-inline-end: 1px solid var(--line);
   background: transparent;
   color: var(--ink);
-  text-align: left;
+  text-align: start;
   cursor: pointer;
   transition: background-color var(--dur-1) var(--ease-out), box-shadow var(--dur-2) var(--ease-out);
 }
 
 .tactics-deep-nav button:last-child {
-  border-right: 0;
+  border-inline-end: 0;
 }
 
-.tactics-deep-nav button:hover {
-  background: var(--surface-2);
+@media (hover: hover) and (pointer: fine) {
+  .tactics-deep-nav button:hover {
+    background: var(--surface-2);
+  }
+}
+
+.tactics-deep-nav button:active {
+  background: var(--surface-3);
 }
 
 .tactics-deep-nav button.is-active {
@@ -642,7 +655,8 @@
 }
 
 .tactics-deep-nav small {
-  overflow: hidden;
+  min-width: 0;
+  overflow: clip;
   color: var(--ink-3);
   font-size: 12px;
   text-overflow: ellipsis;
@@ -669,7 +683,7 @@
 }
 
 .tactics-summary-table {
-  margin-bottom: var(--space-3);
+  margin-block-end: var(--space-3);
 }
 
 .tactics-number-control {
@@ -677,13 +691,13 @@
 }
 
 .tactics-number-control .input {
-  padding-right: 34px;
+  padding-inline-end: 34px;
 }
 
 .tactics-number-control em {
   position: absolute;
-  top: 50%;
-  right: 12px;
+  inset-block-start: 50%;
+  inset-inline-end: 12px;
   color: var(--ink-3);
   font-size: 12px;
   font-style: normal;
@@ -694,7 +708,7 @@
   width: 100%;
   padding: 3px 0;
   border: 0;
-  border-bottom: 1px solid var(--line-2);
+  border-block-end: 1px solid var(--line-2);
   background: transparent;
   color: var(--ink);
   font: 600 24px var(--font-display);
@@ -707,7 +721,7 @@
 }
 
 .tactics-diagnostic-grid h3 {
-  margin-bottom: var(--space-2);
+  margin-block-end: var(--space-2);
 }
 
 .tactics-break-even-controls {
@@ -718,8 +732,8 @@
 .tactics-break-even-result {
   display: grid;
   gap: 2px;
-  padding-left: var(--space-4);
-  border-left: 1px solid var(--line);
+  padding-inline-start: var(--space-4);
+  border-inline-start: 1px solid var(--line);
 }
 
 .tactics-break-even-result span,
@@ -751,7 +765,7 @@
 }
 
 .tactics-suspicious-details[open] summary {
-  margin-bottom: var(--space-2);
+  margin-block-end: var(--space-2);
 }
 
 @media (max-width: 1200px) {
@@ -760,11 +774,11 @@
   }
 
   .tactics-live-stats .stat-panel:nth-child(3n) {
-    border-right: 0;
+    border-inline-end: 0;
   }
 
   .tactics-live-stats .stat-panel:nth-child(-n + 3) {
-    border-bottom: 1px solid var(--line);
+    border-block-end: 1px solid var(--line);
   }
 }
 

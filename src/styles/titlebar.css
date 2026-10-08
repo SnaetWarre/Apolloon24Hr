@@ -44,8 +44,8 @@ html[data-desktop] .sidebar__brand {
   display: flex;
   align-items: center;
   height: var(--titlebar-h);
-  padding-left: var(--space-2);
-  border-bottom: 1px solid var(--line);
+  padding-inline-start: var(--space-2);
+  border-block-end: 1px solid var(--line);
   background: var(--sidebar);
   color: var(--ink);
   user-select: none;
@@ -60,7 +60,7 @@ html[data-desktop-fullscreen] .titlebar {
 
 /* macOS draws its traffic lights in this corner. */
 .titlebar--mac {
-  padding-left: 78px;
+  padding-inline-start: 78px;
 }
 
 .titlebar__brand {
@@ -82,8 +82,10 @@ html[data-desktop-fullscreen] .titlebar {
   height: 18px;
 }
 
-.titlebar__brand:hover {
-  background: var(--surface-3);
+@media (hover: hover) and (pointer: fine) {
+  .titlebar__brand:hover {
+    background: var(--surface-3);
+  }
 }
 
 .titlebar__brand:focus-visible,
@@ -94,7 +96,7 @@ html[data-desktop-fullscreen] .titlebar {
 .titlebar__controls {
   display: flex;
   align-self: stretch;
-  margin-left: auto;
+  margin-inline-start: auto;
   -webkit-app-region: no-drag;
 }
 
@@ -119,23 +121,28 @@ html[data-desktop-fullscreen] .titlebar {
   shape-rendering: geometricPrecision;
 }
 
-.titlebar__control:hover {
-  background: var(--surface-3);
-  color: var(--ink);
+@media (hover: hover) and (pointer: fine) {
+  .titlebar__control:hover {
+    background: var(--surface-3);
+    color: var(--ink);
+  }
 }
 
+.titlebar__brand:active,
 .titlebar__control:active {
   background: var(--line-2);
 }
 
-.titlebar__control--close:hover {
-  background: #C42B1C;
-  color: #FFFFFF;
+@media (hover: hover) and (pointer: fine) {
+  .titlebar__control--close:hover {
+    background: oklch(53.6% 0.191 30.1);
+    color: oklch(100% 0 none);
+  }
 }
 
 .titlebar__control--close:active {
-  background: #B1281A;
-  color: #FFFFFF;
+  background: oklch(49.9% 0.175 30.1);
+  color: oklch(100% 0 none);
 }
 
 /* Another window has focus: the bar steps back, as native frames do. */
@@ -146,46 +153,54 @@ html[data-desktop-fullscreen] .titlebar {
 
 /* Public displays own their look; the bar follows their tone instead of the operator theme. */
 html[data-surface="display"] .titlebar {
-  border-color: #262626;
-  background: #111111;
-  color: #D4D4D4;
+  border-color: oklch(26.9% 0 none);
+  background: oklch(17.8% 0 none);
+  color: oklch(87% 0 none);
 }
 
 html[data-surface="display"] .titlebar__control {
-  color: #9A9A9A;
+  color: oklch(68.6% 0 none);
 }
 
-html[data-surface="display"] .titlebar__brand:hover,
-html[data-surface="display"] .titlebar__control:hover {
-  background: #262626;
-  color: #FFFFFF;
+@media (hover: hover) and (pointer: fine) {
+  html[data-surface="display"] .titlebar__brand:hover,
+  html[data-surface="display"] .titlebar__control:hover {
+    background: oklch(26.9% 0 none);
+    color: oklch(100% 0 none);
+  }
 }
 
+html[data-surface="display"] .titlebar__brand:active,
 html[data-surface="display"] .titlebar__control:active {
-  background: #333333;
+  background: oklch(32.1% 0 none);
 }
 
 html[data-surface="display"][data-display-tone="light"] .titlebar {
-  border-color: #E4E4E7;
-  background: #FFFFFF;
-  color: #18181B;
+  border-color: oklch(92% 0.004 286.3);
+  background: oklch(100% 0 none);
+  color: oklch(21% 0.006 285.9);
 }
 
 html[data-surface="display"][data-display-tone="light"] .titlebar__control {
-  color: #52525B;
+  color: oklch(44.2% 0.015 285.8);
 }
 
-html[data-surface="display"][data-display-tone="light"] .titlebar__brand:hover,
-html[data-surface="display"][data-display-tone="light"] .titlebar__control:hover {
-  background: #EDEDEF;
-  color: #18181B;
+@media (hover: hover) and (pointer: fine) {
+  html[data-surface="display"][data-display-tone="light"] .titlebar__brand:hover,
+  html[data-surface="display"][data-display-tone="light"] .titlebar__control:hover {
+    background: oklch(94.7% 0.003 286.3);
+    color: oklch(21% 0.006 285.9);
+  }
 }
 
+html[data-surface="display"][data-display-tone="light"] .titlebar__brand:active,
 html[data-surface="display"][data-display-tone="light"] .titlebar__control:active {
-  background: #E0E0E3;
+  background: oklch(90.8% 0.004 286.3);
 }
 
-html[data-surface="display"] .titlebar__control--close:hover {
-  background: #C42B1C;
-  color: #FFFFFF;
+@media (hover: hover) and (pointer: fine) {
+  html[data-surface="display"] .titlebar__control--close:hover {
+    background: oklch(53.6% 0.191 30.1);
+    color: oklch(100% 0 none);
+  }
 }

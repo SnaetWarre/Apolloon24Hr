@@ -91,7 +91,7 @@
 .timing-clock-stats {
   display: flex;
   gap: var(--space-6);
-  padding-bottom: 8px;
+  padding-block-end: 8px;
 }
 
 .timing-clock-stats .stat-panel strong {
@@ -101,7 +101,7 @@
 .timing-actions .btn--xl {
   justify-content: space-between;
   width: 100%;
-  text-align: left;
+  text-align: start;
   white-space: normal;
 }
 
@@ -118,7 +118,7 @@
 
 @keyframes press-ring {
   from {
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--brand) 45%, transparent);
+    box-shadow: 0 0 0 0 color-mix(in oklch, var(--brand) 45%, transparent);
   }
   to {
     box-shadow: 0 0 0 10px transparent;
@@ -156,8 +156,8 @@
   flex-wrap: wrap;
   align-items: flex-end;
   gap: var(--space-4) var(--space-8);
-  padding-top: var(--space-4);
-  border-top: 1px solid var(--line);
+  padding-block-start: var(--space-4);
+  border-block-start: 1px solid var(--line);
 }
 
 .timing-footer .stat-panel strong {
@@ -166,7 +166,7 @@
 }
 
 .timing-undo {
-  margin-left: auto;
+  margin-inline-start: auto;
 }
 
 .timing-sidebar {
@@ -188,13 +188,13 @@
   align-items: baseline;
   gap: var(--space-2);
   padding: 7px 0;
-  border-bottom: 1px solid var(--line);
+  border-block-end: 1px solid var(--line);
   font-size: 13.5px;
   font-weight: 500;
 }
 
 .timing-upcoming li:last-child {
-  border-bottom: 0;
+  border-block-end: 0;
 }
 
 .timing-upcoming li.is-new {
@@ -208,7 +208,7 @@
 
 .timing-upcoming .queue-position {
   min-width: 0;
-  text-align: left;
+  text-align: start;
 }
 
 .timing-upcoming .empty-inline,
@@ -217,7 +217,7 @@
 }
 
 .timing-log {
-  padding-bottom: var(--space-2);
+  padding-block-end: var(--space-2);
 }
 
 /* Bleeds to the panel edges; max-width would keep it one padding short on the right. */
@@ -235,18 +235,18 @@
 
 .timing-log table th:first-child,
 .timing-log table td:first-child {
-  padding-left: var(--space-4);
+  padding-inline-start: var(--space-4);
 }
 
 .timing-log table th:last-child,
 .timing-log table td:last-child {
-  padding-right: var(--space-4);
+  padding-inline-end: var(--space-4);
 }
 
 .timing-log td.cell-runner {
   width: 100%;
   max-width: 0;
-  overflow: hidden;
+  overflow: clip;
   text-overflow: ellipsis;
 }
 
@@ -256,7 +256,7 @@
 }
 
 .timing-log .warning-banner {
-  margin-bottom: var(--space-3);
+  margin-block-end: var(--space-3);
 }
 
 .danger-zone {

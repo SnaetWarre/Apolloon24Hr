@@ -2,13 +2,17 @@ import type { Label } from '../types';
 
 export function LabelBadge({ label, compact = false }: { label: Label; compact?: boolean }) {
   return (
-    <span className={`label-pill${compact ? ' label-pill--compact' : ''}`} style={{ borderColor: label.color }}>
+    <span
+      className={`label-pill${compact ? ' label-pill--compact' : ''}`}
+      style={{ borderColor: label.color }}
+      title={label.name}
+    >
       {label.imageUrl ? (
         <img src={label.imageUrl} alt="" className="label-image" />
       ) : (
         <span className="label-dot" style={{ background: label.color }} />
       )}
-      {label.name}
+      <span className="label-pill__name">{label.name}</span>
     </span>
   );
 }
