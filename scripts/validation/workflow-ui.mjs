@@ -143,7 +143,16 @@ try {
   const raceAfterUndoPrompt = (await snapshot()).race;
   assert.equal(raceAfterUndoPrompt.activeRunnerId, raceBeforeUndoPrompt.activeRunnerId);
   assert.equal(raceAfterUndoPrompt.activeStartedAt, raceBeforeUndoPrompt.activeStartedAt);
-  console.log('PASS Space inside a timing confirmation cancels it without recording a handoff');
+  // The closed question must not hand focus back to the undo button: Enter clocks again, it does not reopen it.
+  await page.keyboard.press('Enter');
+  await quickPrompt.waitFor();
+  assert.equal(await undoPrompt.count(), 0, 'Enter after the undo question clocks instead of asking again');
+  await page.keyboard.press('Space');
+  await quickPrompt.waitFor({ state: 'detached' });
+  assert.deepEqual((await snapshot()).race, raceAfterUndoPrompt);
+  console.log(
+    'PASS Space inside a timing confirmation cancels it without recording a handoff, and Enter clocks after it'
+  );
 
   await rpc.runners.setStatus.mutate({ id: firstRunner.id, status: 'warming_up' });
   await page.goto(`${baseUrl}/queue`);

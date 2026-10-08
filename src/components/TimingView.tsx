@@ -133,8 +133,7 @@ export function TimingView() {
   React.useEffect(() => {
     // Navigation buttons can stay focused when this route opens. In that case,
     // the browser consumes Space as a button press instead of a timing action.
-    const activeElement = document.activeElement;
-    if (activeElement instanceof HTMLElement) activeElement.blur();
+    releaseFocus();
   }, []);
 
   const onHandoffKey = React.useEffectEvent((event: KeyboardEvent) => {
@@ -170,6 +169,8 @@ export function TimingView() {
 
   async function undo() {
     if (handoffBusyRef.current) return;
+    // The dialog hands focus back to its opener; a focused undo button would take the next Enter.
+    releaseFocus();
     // After "Race beëindigen" the last step is the finish itself: undoing it reopens the race.
     const reopen = Boolean(race.raceFinishedAt);
     if (
@@ -200,6 +201,7 @@ export function TimingView() {
 
   function startFinish(eventTime: number) {
     if (handoffBusyRef.current) return;
+    releaseFocus();
     setFinishStop({ press: timePress(eventTime, race.activeStartedAt), activeStartedAt: race.activeStartedAt });
     setFinishConfirmStep(1);
   }
@@ -545,6 +547,11 @@ function TimingClock({
       <small>.{fraction.slice(0, 1)}</small>
     </span>
   );
+}
+
+function releaseFocus() {
+  const activeElement = document.activeElement;
+  if (activeElement instanceof HTMLElement) activeElement.blur();
 }
 
 function isHandoffKey(event: KeyboardEvent) {
