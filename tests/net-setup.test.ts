@@ -214,14 +214,16 @@ test('the installer opens the same firewall rules as Vast netwerkadres, so eithe
 });
 
 // The elevated scripts cannot run in CI (they would repoint the runner's own adapter), so
-// PowerShell parses them and looks up every cmdlet they call, firewall rules included.
+// PowerShell parses them and looks up every cmdlet they call, firewall rules included,
+// apart from functions the script defines itself.
 const CHECK_POWERSHELL = [
   '$errors = $null',
   '$ast = [System.Management.Automation.Language.Parser]::ParseInput($env:APOLLOON_SCRIPT, [ref]$null, [ref]$errors)',
   '$errors | ForEach-Object { "parse error: $($_.Message)" }',
+  '$own = $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true) | ForEach-Object { $_.Name }',
   '$ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.CommandAst] }, $true) |',
   '  ForEach-Object { $_.GetCommandName() } | Sort-Object -Unique |',
-  '  Where-Object { $_ -and -not (Get-Command $_ -ErrorAction SilentlyContinue) } |',
+  '  Where-Object { $_ -and $_ -notin $own -and -not (Get-Command $_ -ErrorAction SilentlyContinue) } |',
   '  ForEach-Object { "unknown command: $_" }',
 ].join('\n');
 
