@@ -234,6 +234,8 @@ export type NearbyGroup = {
   name: string | null;
   laptops: number;
   runners: number;
+  /** Someone changed the event data there (labels, logos, settings); a fresh laptop says false. */
+  changed: boolean;
   appVersion: string;
   compatible: boolean;
   /**
@@ -266,6 +268,8 @@ export type ClusterStatus = {
   selfUrl: string;
   logHead: number;
   runners: number;
+  /** Someone changed the event data in this group; a laptop untouched since its first start says false. */
+  changed: boolean;
   /** Other laptops in the group, so browsers can switch when this one goes away. */
   memberUrls: string[];
   nearby: NearbyGroup[];

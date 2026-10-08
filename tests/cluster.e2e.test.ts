@@ -851,6 +851,53 @@ test(
 );
 
 test(
+  'a fresh laptop takes the data of a laptop someone prepared, not the other way round',
+  { timeout: 60_000 },
+  async () => {
+    const root = testRoot('auto-link-prepared');
+    const servers: RunningServer[] = [];
+    try {
+      // A teacher prepares the event on the first laptop before any runner is imported.
+      const prepared = await startServer({
+        port: await freePort(),
+        dataPath: path.join(root, 'prepared'),
+        name: 'LAPTOP-KLAAR',
+        autoLink: true,
+      });
+      servers.push(prepared);
+      await client(prepared).labels.create.mutate({ name: 'Trojan Horse', kind: 'temporary_team' });
+      assert.equal((await fetchStatus(prepared)).changed, true);
+
+      const fresh = await startServer({
+        port: await freePort(),
+        dataPath: path.join(root, 'fresh'),
+        name: 'LAPTOP-NIEUW',
+        autoLink: true,
+      });
+      servers.push(fresh);
+      await waitFor(
+        async () => {
+          const [a, b] = await Promise.all([fetchStatus(prepared), fetchStatus(fresh)]);
+          return a.clusterId === b.clusterId && a.members.length === 2 && a.writable;
+        },
+        20_000,
+        200
+      );
+      await waitForSameState(prepared, fresh);
+      for (const server of [prepared, fresh]) {
+        assert.ok((await fetchState(server)).labels.some((label) => label.name === 'Trojan Horse'));
+      }
+      assert.equal((await fetchStatus(prepared)).autoLink.linked[0]?.with, 'LAPTOP-KLAAR');
+    } catch (error) {
+      throw withServerOutput(error, ...servers);
+    } finally {
+      await Promise.all(servers.map(stopServer));
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
+);
+
+test(
   'laptops with runners never link by themselves, and an empty laptop that hears two of them waits for a press',
   { timeout: 60_000 },
   async () => {

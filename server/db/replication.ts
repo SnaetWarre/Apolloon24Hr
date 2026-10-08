@@ -109,6 +109,21 @@ export function getLogHead(): LogHead {
   );
 }
 
+/**
+ * True once someone changed the event data: the log holds a write other than
+ * the laptops' own bookkeeping (`cluster.*`), or older entries were trimmed
+ * away. Default labels are seeded outside the log, so a laptop untouched
+ * since its first start says false, also after linking with another one.
+ */
+export function hasEventChanges(): boolean {
+  return Boolean(
+    one<{ changed: number }>(
+      `SELECT EXISTS (SELECT 1 FROM replication_log WHERE type NOT LIKE 'cluster.%')
+         OR COALESCE((SELECT MIN(seq) FROM replication_log), 1) > 1 AS changed`
+    )?.changed
+  );
+}
+
 export function getLogEntryId(seq: number): string | null {
   return one<{ id: string }>('SELECT id FROM replication_log WHERE seq = ?', [seq])?.id ?? null;
 }

@@ -46,6 +46,21 @@ test('each committed write is logged once; reads and rolled-back writes are not'
   }
 });
 
+test('a laptop counts as changed after an event write, not after linking with another laptop', async () => {
+  const db = await freshDatabase();
+  try {
+    assert.equal(db.hasEventChanges(), false, 'default labels are seeded outside the log');
+    db.recordWrite('cluster.addMember', () =>
+      db.saveClusterMember({ hostId: 'other', url: 'http://10.0.0.2:3000', name: 'LAPTOP-2' })
+    );
+    assert.equal(db.hasEventChanges(), false, 'linking is bookkeeping, not a change to the event');
+    db.recordWrite('labels.create', () => db.createLabel({ name: 'Trojan Horse', kind: 'temporary_team' }));
+    assert.equal(db.hasEventChanges(), true);
+  } finally {
+    db.closeDb();
+  }
+});
+
 test('replaying the log on another database reproduces the leader exactly', async () => {
   const db = await freshDatabase();
   const { appSnapshot } = await import('../server/app-state.ts');

@@ -187,17 +187,18 @@ and real timers; the simulation tests pass fakes.
   estimates it; data timestamps and timing use it.
 - `server/peers.ts`: requests between laptops and their addresses.
 - `server/discovery.ts`: every laptop broadcasts who it is (host, computer
-  name, group, address, version, leader, group size, runner count) every two
-  seconds on UDP 45737. Group members use the announced addresses and names
-  when theirs changed (the leader stores them); a laptop on its own lists other
-  groups to join. An announcement changes nothing by itself.
+  name, group, address, version, leader, group size, runner count, whether
+  someone changed the event data) every two seconds on UDP 45737. Group
+  members use the announced addresses and names when theirs changed (the
+  leader stores them); a laptop on its own lists other groups to join. An announcement changes nothing by itself.
 - Koppelen (`linkWith` in `server/cluster.ts`) links two groups the same way
   whichever side it is pressed on: the group with fewer runners takes the
-  other's data (then the smaller group, then the group id). An empty laptop is
-  asked over (`/api/cluster/invite`); between two groups that both hold
-  runners, the one that keeps its data refuses and names the other laptop.
-  `joinGroup` refuses the wrong way too, except when a laptop rejoins its own
-  group.
+  other's data (then a group nobody changed yet, `hasEventChanges` in
+  `server/db/replication.ts`, then the smaller group, then the group id). An
+  empty laptop is asked over (`/api/cluster/invite`); between two groups that
+  both hold runners, the one that keeps its data refuses and names the other
+  laptop. `joinGroup` refuses the wrong way too, except when a laptop rejoins
+  its own group.
 - Linking by itself (`autoLink` in `server/cluster.ts`, from `maintain` every
   five seconds): the leader of a group that holds no runners joins the group
   `autoLinkPlan` picks from the announcements, and the rest of its group
