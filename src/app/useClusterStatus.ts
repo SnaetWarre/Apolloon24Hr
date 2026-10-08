@@ -1,6 +1,7 @@
 import React from 'react';
 import { queryOptions, useQuery } from '@tanstack/react-query';
 import type { ClusterStatus } from '../types';
+import { fetchFromLaptop } from '../lib/connectionError';
 import { watchClusterStatus } from './realtimeConnection';
 import { clusterStatusKey } from './snapshot';
 import { useDisconnected } from './useRealtimeBridge';
@@ -8,7 +9,7 @@ import { useDisconnected } from './useRealtimeBridge';
 export const clusterStatusQuery = queryOptions({
   queryKey: clusterStatusKey,
   queryFn: async () => {
-    const response = await fetch('/api/cluster/status');
+    const response = await fetchFromLaptop('/api/cluster/status');
     if (!response.ok) throw new Error(`Systeemstatus laden mislukt (${response.status})`);
     return response.json() as Promise<ClusterStatus>;
   },

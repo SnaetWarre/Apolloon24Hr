@@ -85,8 +85,13 @@ try {
   await savePrompt.getByRole('button', { name: 'Opslaan', exact: true }).click();
   await savePrompt.getByRole('alert').waitFor();
   assert.equal(await savePrompt.getByRole('alert').isVisible(), true);
+  // The save never reached the laptop: say so in Dutch, not with the browser's "Failed to fetch".
+  assert.equal(
+    await savePrompt.getByRole('alert').innerText(),
+    'Niet opgeslagen: geen verbinding met de laptop. Probeer opnieuw.'
+  );
   console.log(
-    'PASS nested prompt stays on-screen, Escape closes only top dialog, validation is readable, and failed saves remain visible'
+    'PASS nested prompt stays on-screen, Escape closes only top dialog, validation is readable, and failed saves remain visible in Dutch'
   );
 } finally {
   await browser.close();
