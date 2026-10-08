@@ -6,6 +6,7 @@ Beheer › Lopers lists every runner with their status, registration hours, sour
 
 - `runners-search` filters the list with the `Lopers zoeken` textbox, on number, name, labels, the Dutch status and source shown in the table (`Ingeschreven`, `Manueel`, `verborgen`), and the hours, including each one-hour slot inside a form block (`13-14u` finds `12-14u (woensdag)`).
 - `runners-hour-filter` keeps the runners free during one event hour, picked in the `Beschikbaar tijdens` select. A form block like `12-14u (woensdag)` counts for both `12-13u` and `13-14u`.
+- `runners-show-more` lists the first 150 matching runners, with `· eerste 150 getoond` in the count line. The `Toon de volgende N lopers` button under the table adds the next 150 each time. A new search or hour filter goes back to the first 150.
 - `runners-new` adds a runner with `Nieuwe loper`, including hours from the hours picker. It is the same dialog as in Wachtrij, so the cursor starts in `Lopersnummer` and follows each fold-out opened (see `queue-autofocus`).
 - `runners-profile` opens a runner's profile with `Profiel`.
 - `runners-delete` removes a runner without laps with `Verwijder` and `Definitief verwijderen`.
@@ -26,6 +27,7 @@ Preconditions:
 - **New runner.** Click `page.getByRole('button', { name: 'Nieuwe loper', exact: true })`. In `page.getByRole('dialog', { name: 'Nieuwe loper' })` fill `getByLabel('Naam')`, open `getByText('Contact en beschikbaarheid')`, and click hour buttons such as `getByRole('button', { name: '12-13u (woensdag)', exact: true })`. Click `Loper toevoegen`; the dialog closes and `Loper toegevoegd.` appears. The runner is in `/api/state` with `registrationSource: 'manual'` and `status: 'registered'`. Its hours are not in `/api/state`; read them in `/api/registrations[<id>].availableHours`.
 - **Hour filter.** `page.getByRole('combobox', { name: 'Beschikbaar tijdens', exact: true }).selectOption('12-13u (woensdag)')`. Wait for `page.getByRole('status').filter({ hasText: 'voor 12-13u (woensdag)' })`, then read `page.getByRole('row').allInnerTexts()`.
 - **Search.** Fill `page.getByRole('textbox', { name: 'Lopers zoeken' })`; only matching rows stay. `Manueel` keeps only runners added by hand; `Ingeschreven` makes the count line read `N lopers gevonden · Ingeschreven: N`.
+- **Show more.** With more than 150 runners (import them in setup with `run.rpc().runners.importCsv.mutate({ csvText: 'runner_number,name\n1,Loper 001\n…' })`), click `page.getByRole('button', { name: 'Toon de volgende 70 lopers', exact: true })` for 220 runners. All 220 rows are listed and the count line no longer says `getoond`.
 - **Profile.** In a row click `Profiel`; dialog `Lopersprofiel` opens.
 - **Delete.** In the row of a runner without laps click `Verwijder`, then `Definitief verwijderen`. The text `<naam> is definitief verwijderd.` appears and the runner is gone from `/api/state`.
 - **Proof.** `run.proof(page, 'runners-…')` after each filter change.
