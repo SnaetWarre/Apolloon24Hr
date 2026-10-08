@@ -1,6 +1,6 @@
 # Analyse › Grafieken
 
-The Race tab in Analyse shows charts of the laps in the current label selection. When a chart has nothing to draw, it says why: `Geen rondes binnen deze selectie.` while at least one label is on, and `Zet minstens een ploeg aan om de grafiek te tonen.` only on `Rondes en tempo per uur` when every label is off.
+The `Wedstrijd` tab in Analyse shows charts of the laps in the current label selection. When a chart has nothing to draw, it says why: `Geen rondes binnen deze selectie.` while at least one label is on, and `Zet minstens een ploeg aan om de grafiek te tonen.` only on `Rondes en tempo per uur` when every label is off.
 
 ## Sub-features
 
@@ -8,7 +8,7 @@ The Race tab in Analyse shows charts of the laps in the current label selection.
 
 ## How to get to it (user POV)
 
-- Sidebar `Analyse` (`/analysis`). The Race tab is open by default; the charts sit below the eight stat tiles.
+- Sidebar `Analyse` (`/analysis`). The `Wedstrijd` tab is open by default; the charts sit below the eight stat tiles.
 - The `Labels` panel on the left, with `Alles aan`, `Alles uit`, and one switch per label.
 
 ## Driving it with drive.mjs
