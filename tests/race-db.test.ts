@@ -285,6 +285,33 @@ test('a finished race cannot be finished again, so its finish time stays', async
   }
 });
 
+test('a race that has not started cannot be finished, so the first start still works', async () => {
+  fs.rmSync(dataPath, { recursive: true, force: true });
+  const db = await import('../server/db.ts');
+  const { appRouter } = await import('../server/router.ts');
+
+  try {
+    await db.initDb();
+    const first = db.insertRunner({ name: 'First runner', runnerNumber: '1' });
+    db.updateRunnerStatus({ id: first.id, status: 'waiting', statusSince: 900, queueIndex: 0 });
+    const notStarted = db.getRaceState();
+    const caller = appRouter.createCaller({});
+
+    await assert.rejects(
+      caller.race.finish({ activeRunnerId: null, activeStartedAt: null }),
+      /De race is nog niet gestart/
+    );
+    assert.deepEqual(db.getRaceState(), notStarted);
+    await caller.race.startNext({ activeRunnerId: null, activeStartedAt: null });
+    assert.equal(db.getRaceState().activeRunnerId, first.id);
+    assert.notEqual(db.getRaceState().raceStartedAt, null);
+  } finally {
+    // Windows cannot delete a database file that is still open.
+    db.closeDb();
+    fs.rmSync(dataPath, { recursive: true, force: true });
+  }
+});
+
 test('only one runner can be marked as running', async () => {
   fs.rmSync(dataPath, { recursive: true, force: true });
   const db = await import('../server/db.ts');

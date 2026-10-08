@@ -466,7 +466,7 @@ export function TimingView() {
             <button
               className="btn btn--danger-outline btn--sm"
               onClick={(event) => startFinish(event.timeStamp)}
-              disabled={timingBlocked || Boolean(race.raceFinishedAt)}
+              disabled={timingBlocked || !race.raceStartedAt || Boolean(race.raceFinishedAt)}
             >
               Race beëindigen
             </button>
