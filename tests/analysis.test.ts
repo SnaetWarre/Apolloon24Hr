@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   buildFastestLapWindows,
   buildKpis,
+  buildLabelComparisons,
   buildRollingLapTrend,
   buildRunnerInsights,
   buildTimeBuckets,
@@ -217,8 +218,26 @@ test('a double press under 20 s stays out of the Analyse lap times', () => {
   assert.equal(kpis.medianMs, 80_000);
 
   const [insight] = buildRunnerInsights([{ id: 'runner-1', name: 'Runner', runnerNumber: '1' }] as Runner[], laps);
-  assert.equal(insight?.count, 3);
+  assert.equal(insight?.count, 4);
   assert.equal(insight?.bestMs, 70_000);
+  assert.equal(insight?.averageMs, 80_000);
+
+  const label: Label = {
+    id: 'ploeg',
+    name: 'Ploeg',
+    color: '#000000',
+    icon: 'tag',
+    kind: 'team',
+    imageUrl: null,
+    targetLaps: null,
+    sortOrder: null,
+  };
+  const [comparison] = buildLabelComparisons(
+    [label],
+    laps.map((lap) => ({ ...lap, labels: [label] }))
+  );
+  assert.equal(comparison?.count, 4);
+  assert.equal(comparison?.bestMs, 70_000);
 
   assert.deepEqual(
     buildTimeBuckets(laps, race).map((bucket) => [bucket.count, bucket.averageMs]),

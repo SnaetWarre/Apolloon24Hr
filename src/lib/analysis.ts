@@ -228,10 +228,10 @@ export function buildLabelComparisons(labels: Label[], laps: LapRecord[]): Label
   }
 
   return labels
-    .map((label) => ({
-      label,
-      ...calculateDurationStats(lapsByLabel.get(label.id) ?? []),
-    }))
+    .map((label) => {
+      const labelLaps = lapsByLabel.get(label.id) ?? [];
+      return { label, ...calculateDurationStats(labelLaps), count: labelLaps.length };
+    })
     .filter((comparison) => comparison.count > 0)
     .sort((a, b) => compareLabels(a.label, b.label));
 }
@@ -282,6 +282,7 @@ export function buildRunnerInsights(runners: Runner[], laps: LapRecord[]): Runne
         runnerNumber: runner?.runnerNumber ?? firstLap?.runnerNumber ?? null,
         runnerName: runner?.name ?? firstLap?.runnerName ?? 'Onbekende loper',
         ...calculateDurationStats(runnerLaps),
+        count: runnerLaps.length,
       };
     })
     .sort(
