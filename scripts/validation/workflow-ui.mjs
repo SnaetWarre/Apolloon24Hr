@@ -117,7 +117,7 @@ try {
   await page.getByRole('button', { name: 'Race beëindigen', exact: true }).click();
   await page.waitForTimeout(1_000);
   await page.getByRole('button', { name: 'Verder', exact: true }).click();
-  await page.getByRole('button', { name: 'Race definitief beeindigen' }).click();
+  await page.getByRole('button', { name: 'Race definitief beëindigen' }).click();
   await page.getByRole('button', { name: 'Race hervatten' }).waitFor();
   assert.ok((await snapshot()).race.raceFinishedAt < beforeFinishClick + 900, 'The race ends at the first click');
   console.log('PASS the first finish click stops the clock and cancelling resumes it');
