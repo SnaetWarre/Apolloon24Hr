@@ -74,4 +74,12 @@ if (replaySeed) {
       assert.ok(acked > seedCount * 5, `only ${acked} confirmed writes`);
     }
   );
+
+  test('seeds beyond the usual run that once failed still pass', async () => {
+    // 2699: a removal written on a cut-off leader counted as done. 3676: two followers kept a gone leader alive.
+    for (const seed of [2699, 3676]) {
+      const result = await simulate({ seed, replaceGone: true });
+      assert.equal(result.violation, null, report(result, true));
+    }
+  });
 }

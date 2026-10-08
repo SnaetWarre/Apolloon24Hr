@@ -301,15 +301,19 @@ export function createRaft(deps: RaftDeps) {
   async function askForVotes(request: VoteRequest): Promise<number> {
     const answers = await Promise.all(otherMembers().map((member) => deps.sendVote(member, request).catch(() => null)));
     let granted = 0;
+    let someoneLeads = false;
     for (const answer of answers) {
       if (!answer) continue;
       if (answer.leader && answer.term >= currentTerm() && answer.leader.hostId !== deps.self().hostId) {
-        // Someone leads already: wait for it to get in touch rather than compete.
-        becomeFollower(answer.term, answer.leader);
+        // Someone leads already: stop this election and wait for it to get in touch rather than
+        // compete. Only word from the leader itself counts as contact; two followers that passed
+        // on each other's word would keep a leader that is gone alive and refuse every vote.
+        becomeFollower(answer.term, null);
+        someoneLeads = true;
       } else if (answer.term > currentTerm()) becomeFollower(answer.term, null);
       else if (answer.granted) granted += 1;
     }
-    return granted;
+    return someoneLeads ? 0 : granted;
   }
 
   /** Answers another laptop's (pre-)vote request. */

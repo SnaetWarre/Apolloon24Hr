@@ -524,13 +524,15 @@ export async function simulate(options: SimOptions): Promise<SimResult> {
       newEntry(node, 'lap', [{ sql: 'lap', params: [op.pressId, result.lapNumber, requestId ?? null] }]);
     } else if (op.kind === 'remove') {
       result = { kind: 'remove', hostId: op.hostId };
-      // Taken out already: the earlier attempt went through after all.
+      // As cluster.ts removeLaptop: one change to the group at a time, so an earlier removal that is
+      // still on its way (written here, not yet on a majority) never counts as done.
+      if (!raft.logSettled()) return { ok: false, code: 'SERVICE_UNAVAILABLE', retry: true };
+      // Taken out already, and committed: the earlier attempt went through after all.
       if (state.removed.includes(op.hostId)) return { ok: true, result };
-      // As cluster.ts removeLaptop: never a laptop that answers, and one change to the group at a time.
+      // Never a laptop that answers.
       if (raft.leaderGroupView().find((seen) => seen.hostId === op.hostId)?.reachable !== false) {
         return { ok: false, code: 'CONFLICT', retry: false };
       }
-      if (!raft.logSettled()) return { ok: false, code: 'SERVICE_UNAVAILABLE', retry: true };
       newEntry(node, 'remove', [{ sql: 'remove', params: [op.hostId, requestId ?? null] }]);
     } else {
       result = { kind: 'note', noteId: op.noteId };
