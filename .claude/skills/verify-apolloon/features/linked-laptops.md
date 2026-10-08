@@ -5,7 +5,7 @@ At the event three laptops run the app as one group. Each holds the full databas
 ## Sub-features
 
 - `group-link` lists the other laptops under Beheer › Systeem & herstel and links with `Koppelen`, whichever side it is pressed on; the side with fewer runners takes the other's data.
-- `group-auto-link` links a group without runners with the others by itself (about 5 s), the same way round as `Koppelen`. A laptop with runners never does. An empty laptop that hears two groups with runners waits and says so.
+- `group-auto-link` links a group without runners with the others by itself (about 5 s), the same way round as `Koppelen`. A laptop with runners never does. An empty laptop that hears two groups with runners waits and says so, and so does one whose link fails three rounds in a row (about 15 s), with the reason.
 - `group-status` shows `Alles veilig` when all three are linked and `Eén laptop onbereikbaar` when one is gone.
 - `group-write-anywhere` saves a change made on any laptop's screen, and shows it on the others.
 - `group-failover` keeps saving with two laptops after the third freezes.
