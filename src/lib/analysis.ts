@@ -324,9 +324,8 @@ export function isFastestLapForRecordMode(
   race: RaceState,
   mode: PublicRecordMode
 ): boolean {
-  // A lap under MIN_LAP_MS is a double press: it never flashes and is no record to beat.
-  if (mode === 'off' || latestLap.durationMs < MIN_LAP_MS) return false;
-  const realLaps = previousLaps.filter((lap) => lap.durationMs >= MIN_LAP_MS);
+  if (mode === 'off' || !isMeasuredLap(latestLap)) return false;
+  const realLaps = previousLaps.filter(isMeasuredLap);
   if (mode === 'day') return realLaps.every((lap) => latestLap.durationMs < lap.durationMs);
 
   const startedAt = race.raceStartedAt ?? oldestLapTimestamp([latestLap, ...previousLaps]);
@@ -336,6 +335,12 @@ export function isFastestLapForRecordMode(
   return realLaps
     .filter((lap) => recordWindowIndex(lap.finishedAt, startedAt, windowMs) === latestWindow)
     .every((lap) => latestLap.durationMs < lap.durationMs);
+}
+
+// A lap under MIN_LAP_MS is a double press, and the second half of a split lap is a guess,
+// so neither flashes nor is a record to beat.
+function isMeasuredLap(lap: LapRecord): boolean {
+  return lap.durationMs >= MIN_LAP_MS && lap.source !== 'split';
 }
 
 export function publicRecordModeTitle(mode: PublicRecordMode): string {
