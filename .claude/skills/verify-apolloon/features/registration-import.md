@@ -35,5 +35,6 @@ Preconditions:
 
 - The file input is hidden behind the `Bestand kiezen` label. Use `setInputFiles` on the input; clicking the label opens a native file chooser. For the re-pick step, use the chooser the way an operator does: `const chooser = page.waitForEvent('filechooser')`, click `label.file-picker`, then `(await chooser).setFiles(file)`.
 - The `ready` scenario already has runners 101 to 140, all from the form. A plain-list row with one of those numbers only updates that runner when the name matches exactly. With another name it creates a new runner without a number, and the notice adds `Rij N: nummer … is al in gebruik, … kreeg geen nummer.` Use free numbers unless you are testing an update.
+- In an `.xlsx` plain list, a lap time typed as `1:20` is a time cell (`h:mm`, 01:20:00). It imports as 1 min 20 s, the same as the CSV of that sheet: `historicalAvgMs` 80000 in `/api/state`. Build such a file with `write-excel-file` and `{ value: new Date(Date.UTC(1899, 11, 30, 1, 20)), format: 'h:mm' }`. The profile does not show historical times; read them in `/api/state` or the lap exports.
 - Answers are stored as typed, including junk such as `///` in the e-mail field. Do not treat odd text in the profile as a bug.
 - The `empty` scenario shows the welcome screen on Overzicht; it disappears once the laptop has runners.
