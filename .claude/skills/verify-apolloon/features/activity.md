@@ -6,7 +6,7 @@ Beheer › Activiteit lists every change to the event data, newest first, with t
 
 - `activity-list` shows each change with its time, a Dutch summary, and where it came from.
 - `activity-profile-fields` names only the profile fields a save really changed (`naam`, `nummer`, `notities`, `telefoon`, `e-mail`, `uren`, `labels`), or `niets gewijzigd`.
-- `activity-search` filters the list on any text in the summary or the origin, such as a runner, a screen name, or an address.
+- `activity-search` filters the list on any text in the summary or the origin, such as a runner, a screen name, or an address. It ignores accents: `zoe` finds `Zoë`.
 - `activity-queue-moves` hides warm-up and queue moves until `Wachtrij-bewegingen tonen` is checked.
 - `activity-laptops` lists the group's own changes with `Vanzelf · laptop <name>`: `LAPTOP-1 gekoppeld met Koppelen`, `LAPTOP-1 vanzelf gekoppeld met LAPTOP-0`, `LAPTOP-1 heeft een nieuw adres: …`, `Alleen verder gewerkt op …`, `LAPTOP-2 is niet bereikbaar` (after 5 s without an answer) and `LAPTOP-2 is weer bereikbaar`. The `Alleen verder gewerkt op …` line carries the screen it was pressed on instead of `Vanzelf`.
 - `activity-laps` lists each lap fix from Beheer › Rondes: `Ronde N van #… (…) verwijderd`, `… naar #… verplaatst`, and `… gesplitst in twee rondes van …` (see `laps-admin.md`).

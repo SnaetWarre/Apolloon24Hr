@@ -2,6 +2,7 @@ import React from 'react';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { trpc } from '../../api';
 import { activityKey } from '../../app/snapshot';
+import { foldSearchText } from '../../lib/runners';
 import type { ActivityCursor, ActivityEntry } from '../../types';
 
 const PAGE_SIZE = 200;
@@ -29,11 +30,11 @@ export function ActivitySection({ active }: { active: boolean }) {
     enabled: active,
   });
 
-  const needle = search.trim().toLowerCase();
+  const needle = foldSearchText(search.trim());
   const entries = (query.data?.pages.flat() ?? []).filter(
     (entry) =>
       (showQueue || !QUEUE_ACTIONS.has(entry.action)) &&
-      (!needle || entry.summary.toLowerCase().includes(needle) || entry.origin.toLowerCase().includes(needle))
+      (!needle || foldSearchText(entry.summary).includes(needle) || foldSearchText(entry.origin).includes(needle))
   );
 
   return (
