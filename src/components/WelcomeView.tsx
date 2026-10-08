@@ -78,7 +78,7 @@ export function WelcomeView({
                 {cluster?.hostName && (
                   <>
                     {' '}
-                    Deze laptop heet daar <strong>{cluster.hostName}</strong>.
+                    Deze laptop staat daar als <strong>{cluster.hostName}</strong>.
                   </>
                 )}
               </li>
