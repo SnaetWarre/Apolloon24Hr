@@ -39,21 +39,37 @@ test('lap points use the finishing time in Brussels across all six four-hour blo
   ] as const;
 
   for (const [finishedAt, expectedPoints] of examples) {
-    assert.equal(calculateLapPoints({ durationMs: 85_000, finishedAt: Date.parse(finishedAt) }), expectedPoints);
+    assert.equal(
+      calculateLapPoints({ source: 'handoff', durationMs: 85_000, finishedAt: Date.parse(finishedAt) }),
+      expectedPoints
+    );
   }
-  assert.equal(calculateLapPoints({ durationMs: 80_000, finishedAt: Date.parse(examples[0][0]) }), 1.71875);
-  assert.equal(calculateLapPoints({ durationMs: 85_000, finishedAt: Number.NaN }), 0);
-  assert.equal(calculateLapPoints({ durationMs: 100_000, finishedAt: Date.parse(examples[0][0]) }), 1.25);
+  assert.equal(
+    calculateLapPoints({ source: 'handoff', durationMs: 80_000, finishedAt: Date.parse(examples[0][0]) }),
+    1.71875
+  );
+  assert.equal(calculateLapPoints({ source: 'handoff', durationMs: 85_000, finishedAt: Number.NaN }), 0);
+  assert.equal(
+    calculateLapPoints({ source: 'handoff', durationMs: 100_000, finishedAt: Date.parse(examples[0][0]) }),
+    1.25
+  );
 });
 
 test('lap points follow Brussels daylight saving time', () => {
-  assert.equal(calculateLapPoints({ durationMs: 85_000, finishedAt: Date.parse('2026-10-25T02:00:00Z') }), 1.25);
-  assert.equal(calculateLapPoints({ durationMs: 85_000, finishedAt: Date.parse('2026-10-25T03:00:00Z') }), 1.5);
+  assert.equal(
+    calculateLapPoints({ source: 'handoff', durationMs: 85_000, finishedAt: Date.parse('2026-10-25T02:00:00Z') }),
+    1.25
+  );
+  assert.equal(
+    calculateLapPoints({ source: 'handoff', durationMs: 85_000, finishedAt: Date.parse('2026-10-25T03:00:00Z') }),
+    1.5
+  );
 });
 
 test('lap points match the example totals in coeff_berekeningen.xlsx', () => {
   const points = (finishedAt: string) =>
     calculateLapPoints({
+      source: 'handoff',
       durationMs: 80_000,
       finishedAt: Date.parse(finishedAt),
     });
@@ -110,6 +126,36 @@ test('inside rankings switch metric and filter laps by their historical label', 
     ['fast', 'steady']
   );
   assert.equal(buildRunnerRanking(runners, laps, 'coefficient', null)[0]?.coefficientTotal, 6.25);
+});
+
+test('a double press and a split half earn the base point but no speed bonus', () => {
+  const finishedAt = Date.parse('2026-09-24T14:00:00Z'); // 16:00 in Brussels, factor 1
+  const lap = (id: string, durationMs: number, source: LapRecord['source']): LapRecord => ({
+    id,
+    runnerId: 'runner',
+    runnerName: 'Runner',
+    runnerNumber: '1',
+    lapNumber: 1,
+    startedAt: finishedAt - durationMs,
+    finishedAt,
+    durationMs,
+    source,
+    createdAt: finishedAt,
+    labels: [],
+  });
+
+  assert.equal(calculateLapPoints(lap('double-press', 1_300, 'handoff')), 1);
+  assert.equal(calculateLapPoints(lap('split-half', 40_000, 'split')), 1);
+  assert.equal(calculateLapPoints(lap('real', 60_000, 'handoff')), 2.875);
+  assert.equal(
+    buildRunnerRanking(
+      [],
+      [lap('double-press', 1_300, 'handoff'), lap('split-half', 40_000, 'split')],
+      'coefficient',
+      null
+    )[0]?.coefficientTotal,
+    2
+  );
 });
 
 test('the three recent laps show each runners all-time best and average', () => {

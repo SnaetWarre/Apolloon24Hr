@@ -338,8 +338,8 @@ export function isFastestLapForRecordMode(
 }
 
 // A lap under MIN_LAP_MS is a double press, and the second half of a split lap is a guess,
-// so neither flashes nor is a record to beat.
-function isMeasuredLap(lap: LapRecord): boolean {
+// so neither flashes, is a record to beat, nor earns a speed bonus.
+export function isMeasuredLap(lap: Pick<LapRecord, 'durationMs' | 'source'>): boolean {
   return lap.durationMs >= MIN_LAP_MS && lap.source !== 'split';
 }
 
