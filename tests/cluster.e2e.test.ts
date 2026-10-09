@@ -469,7 +469,8 @@ test(
       const restarted = await startServer({ port: offline.port, dataPath: offline.dataPath });
       servers[servers.indexOf(offline)] = restarted;
       const { logHead } = await fetchStatus(leader);
-      await waitFor(async () => (await fetchStatus(restarted)).logHead === logHead, 30_000, 200);
+      // At least that far: the leader may write more meanwhile, such as this laptop's new name.
+      await waitFor(async () => (await fetchStatus(restarted)).logHead >= logHead, 30_000, 200);
       const { hostId } = (await fetchStatus(restarted)).members.find((member) => member.self)!;
       await waitFor(async () => {
         const member = (await fetchStatus(leader)).members.find((entry) => entry.hostId === hostId);

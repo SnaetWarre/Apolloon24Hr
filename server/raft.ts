@@ -404,7 +404,9 @@ export function createRaft(deps: RaftDeps) {
         return;
       }
     } catch {
-      // Unreachable; the next heartbeat tries again.
+      // Unreachable; the next heartbeat tries again. It asks where the follower stands before sending
+      // entries, so a laptop that is off costs a small message per heartbeat, not a batch of logos.
+      follower.matchSeq = null;
     } finally {
       follower.inFlight = false;
     }
