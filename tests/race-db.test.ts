@@ -351,6 +351,38 @@ test('a race that has not started cannot be finished, so the first start still w
   }
 });
 
+test('a double click or two laptops at once save one Burgie gepakt moment', async () => {
+  fs.rmSync(dataPath, { recursive: true, force: true });
+  const db = await import('../server/db.ts');
+  const { describeWrite } = await import('../server/activity.ts');
+
+  try {
+    await db.initDb();
+    // The activity log describes a write before it runs, as in the router.
+    const describeFirst = describeWrite('events.burgieGepakt', {});
+    const first = db.createBurgieGepaktEvent(10_000);
+    assert.equal(describeFirst?.(first), 'Burgie gepakt');
+
+    const describeRepeat = describeWrite('events.burgieGepakt', {});
+    const repeat = db.createBurgieGepaktEvent(10_150);
+    assert.deepEqual(repeat, first);
+    assert.equal(describeRepeat?.(repeat), 'Burgie gepakt opnieuw gedrukt, telt één keer');
+    // A press that reaches the leader late still carries its earlier time.
+    assert.deepEqual(db.createBurgieGepaktEvent(9_900), first);
+
+    const next = db.createBurgieGepaktEvent(15_000);
+    assert.notEqual(next.id, first.id);
+    assert.deepEqual(
+      db.getAllRaceEvents().map((event) => event.occurredAt),
+      [15_000, 10_000]
+    );
+  } finally {
+    // Windows cannot delete a database file that is still open.
+    db.closeDb();
+    fs.rmSync(dataPath, { recursive: true, force: true });
+  }
+});
+
 test('only one runner can be marked as running', async () => {
   fs.rmSync(dataPath, { recursive: true, force: true });
   const db = await import('../server/db.ts');

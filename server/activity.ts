@@ -1,6 +1,14 @@
-import type { PublicRecordMode, Runner, RunnerStatus } from '../shared/schemas.js';
+import type { PublicRecordMode, RaceEvent, Runner, RunnerStatus } from '../shared/schemas.js';
 import { formatDurationMs } from '../shared/time.js';
-import { getLabels, getLapById, getRaceState, getRunnerById, getRunnerRegistrations, lapsToUndo } from './db.js';
+import {
+  getLabels,
+  getLapById,
+  getRaceState,
+  getRecentRaceEvents,
+  getRunnerById,
+  getRunnerRegistrations,
+  lapsToUndo,
+} from './db.js';
 
 /**
  * Says in words what a write does, for Beheer › Activiteit. Called before the write, so
@@ -53,8 +61,11 @@ export function describeWrite(path: string, input: unknown): ((result: unknown) 
       const lap = lapText(value.lapId);
       return () => `${lap} verwijderd`;
     }
-    case 'events.burgieGepakt':
-      return () => 'Burgie gepakt';
+    case 'events.burgieGepakt': {
+      const newest = getRecentRaceEvents(1)[0]?.id;
+      return (result) =>
+        (result as RaceEvent).id === newest ? 'Burgie gepakt opnieuw gedrukt, telt één keer' : 'Burgie gepakt';
+    }
     case 'runners.create':
       return (result) => `${runnerText(result as Runner | null) || String(value.name ?? 'Loper')} toegevoegd`;
     case 'runners.update': {
