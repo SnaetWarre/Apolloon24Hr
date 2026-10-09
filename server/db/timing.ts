@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { type RaceEvent, type RaceState } from '../../shared/schemas.js';
 import { one, run, transaction } from './connection.js';
-import { getLapCount, getRaceEventById } from './history.js';
+import { getLapCount, getRaceEventById, getRecentRaceEvents } from './history.js';
 import { getRunnerLabels } from './labels.js';
 import { type QueueState, getNextWaitingRunner, getQueueStates, restoreQueueState, setRaceStatus } from './queue.js';
 import { clearActiveRunner, getRaceState, startActiveRunner } from './race-state.js';
@@ -16,7 +16,12 @@ type HandoffSnapshot = {
   lapIds: string[];
 };
 
+/** A press this close to the last Burgie is the same Burgie: a double click, or two laptops at once. */
+const BURGIE_REPEAT_MS = 5_000;
+
 export function createBurgieGepaktEvent(nowMs = clusterNow()): RaceEvent {
+  const [newest] = getRecentRaceEvents(1);
+  if (newest?.type === 'burgie_gepakt' && Math.abs(nowMs - newest.occurredAt) < BURGIE_REPEAT_MS) return newest;
   const activeRunnerId = getRaceState().activeRunnerId;
   const activeRunner = activeRunnerId ? getRunnerById(activeRunnerId) : null;
   const id = randomUUID();
