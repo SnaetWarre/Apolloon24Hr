@@ -360,7 +360,7 @@ export const appRouter = t.router({
   }),
 
   activity: t.router({
-    list: t.procedure.input(activityPageSchema).query(({ input }) => getActivity(input.limit, input.before)),
+    list: t.procedure.input(activityPageSchema).query(({ input }) => getActivity(input.limit, input.before, input)),
   }),
 
   runners: t.router({
