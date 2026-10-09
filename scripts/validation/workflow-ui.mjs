@@ -288,6 +288,36 @@ try {
   await refreshRow.getByRole('button', { name: 'Opwarmen', exact: true }).waitFor();
   console.log('PASS a failed queue refresh keeps the connection error visible and recovers on retry');
 
+  // Teachers double-click out of habit. The first click moves the row out of its lane, so the second
+  // must not land on the next runner's button that slid up under the mouse.
+  const spare = (await snapshot()).runners.filter((runner) => runner.status === 'registered');
+  assert.ok(spare.length >= 6, 'Requires six registered runners');
+  for (const [index, runner] of spare.slice(0, 6).entries()) {
+    await rpc.runners.setStatus.mutate({ id: runner.id, status: ['warming_up', 'waiting', 'ran'][index % 3] });
+  }
+  await page.goto(`${baseUrl}/queue`);
+  await page.locator('.queue-completed > summary').click();
+  for (const [lane, button, changed] of [
+    ['Opwarming', 'Naar wachtrij', (runner) => runner.status],
+    ['Klaar om te lopen', 'Opwarmen', (runner) => runner.status],
+    ['Heeft gelopen', 'Verberg', (runner) => runner.hiddenFromQueue],
+  ]) {
+    const before = new Map((await snapshot()).runners.map((runner) => [runner.id, changed(runner)]));
+    const rows = lane === 'Heeft gelopen' ? page.locator('.queue-completed') : page.getByRole('region', { name: lane });
+    const target = rows.locator('.queue-runner').first().getByRole('button', { name: button, exact: true });
+    await target.scrollIntoViewIfNeeded();
+    const box = await target.boundingBox();
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    await page.waitForTimeout(150);
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    const movedRunners = async () =>
+      (await snapshot()).runners.filter((runner) => changed(runner) !== before.get(runner.id));
+    await waitUntil(async () => (await movedRunners()).length > 0);
+    await page.waitForTimeout(500);
+    assert.equal((await movedRunners()).length, 1, `a double click on ${button} changed more than one runner`);
+  }
+  console.log('PASS a double click on a queue row button moves only that runner');
+
   // An operator fixes the sheet, saves it under the same name, and picks it again: the new rows must import.
   const importFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'apolloon-import-')), 'runners.csv');
   const pickImportFile = async () => {

@@ -32,6 +32,10 @@ const COLUMNS: { key: RunnerStatus; title: string }[] = [
 // Warming up this long is worth a glance; it never blocks anything.
 const LONG_WARM_UP_MS = 10 * 60_000;
 
+// Windows counts two clicks up to 500 ms apart and 4 px from each other as a double click.
+const DOUBLE_CLICK_MS = 500;
+const DOUBLE_CLICK_SLOP_PX = 8;
+
 function TimerBadge({ runner }: { runner: Runner }) {
   const running = Boolean(runner.statusSince && runner.status !== 'ran');
   const now = useSecondTick(running);
@@ -85,6 +89,20 @@ export const KanbanBoard: React.FC<{ onOpenProfile: (runnerId: string) => void }
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Wachtrijactie mislukt');
     }
+  }, []);
+  // A row leaves its lane on the first click, so the second click of a double click would land
+  // on the button of the runner who slid up under the mouse.
+  const lastRowClick = React.useRef({ at: Number.NEGATIVE_INFINITY, x: 0, y: 0 });
+  const isSecondClick = React.useCallback((event: React.MouseEvent) => {
+    // Enter and Space click with detail 0.
+    if (event.detail === 0) return false;
+    const last = lastRowClick.current;
+    lastRowClick.current = { at: event.timeStamp, x: event.clientX, y: event.clientY };
+    return (
+      event.timeStamp - last.at < DOUBLE_CLICK_MS &&
+      Math.abs(event.clientX - last.x) <= DOUBLE_CLICK_SLOP_PX &&
+      Math.abs(event.clientY - last.y) <= DOUBLE_CLICK_SLOP_PX
+    );
   }, []);
   const handleHide = React.useCallback(
     (id: string) => runQueueAction(() => hideRunner(id)),
@@ -177,10 +195,14 @@ export const KanbanBoard: React.FC<{ onOpenProfile: (runnerId: string) => void }
         arrived={arrivedIds.has(`${runner.status}:${runner.id}`)}
         insertionEdge={insertionEdge}
         onOpenProfile={onOpenProfile}
-        onAdvance={() =>
-          void runQueueAction(() => setStatus(runner.id, runner.status === 'warming_up' ? 'waiting' : 'warming_up'))
-        }
-        onToggleHidden={() => void (runner.hiddenFromQueue ? handleUnhide(runner.id) : handleHide(runner.id))}
+        onAdvance={(event) => {
+          if (isSecondClick(event)) return;
+          void runQueueAction(() => setStatus(runner.id, runner.status === 'warming_up' ? 'waiting' : 'warming_up'));
+        }}
+        onToggleHidden={(event) => {
+          if (isSecondClick(event)) return;
+          void (runner.hiddenFromQueue ? handleUnhide(runner.id) : handleHide(runner.id));
+        }}
       />
     );
   }
@@ -332,9 +354,9 @@ function QueueRunnerRow({
   queuePosition: number;
   arrived: boolean;
   onOpenProfile: (runnerId: string) => void;
-  onAdvance: () => void;
+  onAdvance: (event: React.MouseEvent) => void;
   insertionEdge?: 'before' | 'after';
-  onToggleHidden: () => void;
+  onToggleHidden: (event: React.MouseEvent) => void;
 }) {
   const { attributes, listeners, setNodeRef: setDragRef, isDragging } = useDraggable({ id: runner.id });
   const { setNodeRef: setDropRef } = useDroppable({ id: runner.id, disabled: isDragging });

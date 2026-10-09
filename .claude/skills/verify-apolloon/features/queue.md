@@ -40,6 +40,7 @@ Preconditions:
 ## Gotchas
 
 - Queue moves show at once and reach the server in click order. The board is not proof; wait until `/api/state` shows the new status.
+- A row leaves its lane on the first click of `Naar wachtrij`, `Opwarmen`, or `Verberg`, and the next runner's row slides up under the mouse. The board ignores a second click on these buttons at the same spot (8 px) within 500 ms, so a double click moves one runner. To move two runners from the same spot, wait more than 500 ms between clicks. Playwright's `dblclick()` sends both clicks before React redraws, so to test a double click use `page.mouse.click` twice with a 150 ms gap.
 - Each runner row is a drag button named `Verplaats <name>`. To reach the buttons inside a row, scope with `.queue-runner` and `button.queue-identity` as above.
 - Escape closes the search dialog; the check-in still counts.
 - For one frame after the profile opens, its fields are still empty and the form counts as changed. An Escape in that frame asks `Wijzigingen opslaan?` instead of closing. A person never presses that fast, but a script does.
