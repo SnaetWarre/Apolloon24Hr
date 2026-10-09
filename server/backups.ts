@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Worker } from 'node:worker_threads';
 import type { BackupRecord, BackupStatus } from '../shared/schemas.js';
-import { backupDatabase, databaseFileBytes } from './db.js';
+import { backupDatabase, damagedDatabase, databaseFileBytes } from './db.js';
 import { DATA_ROOT, readPositiveInt } from './env.js';
 
 const backupDirectory = path.join(DATA_ROOT, 'backups');
@@ -51,6 +51,7 @@ export function backupStatus(): BackupStatus {
     minimumFreeBytes,
     diskLow: diskFreeBytes !== null && diskFreeBytes < minimumFreeBytes,
     databaseBytes: databaseFileBytes(),
+    damagedDatabase: damagedDatabase(),
   };
 }
 

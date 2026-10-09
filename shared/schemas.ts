@@ -162,7 +162,11 @@ export type BackupStatus = {
   minimumFreeBytes: number;
   diskLow: boolean;
   databaseBytes: number;
+  /** The damaged database this laptop put aside when it started, so the operator knows why it is empty. */
+  damagedDatabase: DamagedDatabase | null;
 };
+
+export type DamagedDatabase = { fileName: string; putAsideAt: number };
 
 /** What a backup holds, so the operator knows what restoring it brings back. */
 export type BackupPreview = {

@@ -59,6 +59,7 @@ function threeLaptops(overrides: Partial<ClusterStatus> = {}): ClusterStatus {
       minimumFreeBytes: 2 * 1_024 ** 3,
       diskLow: false,
       databaseBytes: 2_048,
+      damagedDatabase: null,
     },
     ...overrides,
   };

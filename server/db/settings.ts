@@ -1,5 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { publicRecordModeSchema, type AppSettings, type PublicRecordMode } from '../../shared/schemas.js';
+import {
+  publicRecordModeSchema,
+  type AppSettings,
+  type DamagedDatabase,
+  type PublicRecordMode,
+} from '../../shared/schemas.js';
 import { one, run, runUncaptured } from './connection.js';
 
 const DEFAULT_PUBLIC_RECORD_MODE: PublicRecordMode = 'day';
@@ -30,6 +35,14 @@ function setSetting(key: string, value: string): void {
 /** Host-local setting (identity, cluster role, schema version): never replicated. */
 export function setLocalSetting(key: string, value: string): void {
   runUncaptured('INSERT OR REPLACE INTO settings(key, value) VALUES(?, ?)', [key, value]);
+}
+
+/** Host-local: the damaged database this laptop put aside when it started, if any. */
+export const DAMAGED_DATABASE_SETTING = 'damaged_database_json';
+
+export function damagedDatabase(): DamagedDatabase | null {
+  const stored = getSetting(DAMAGED_DATABASE_SETTING);
+  return stored ? (JSON.parse(stored) as DamagedDatabase) : null;
 }
 
 export function getAppSettings(): AppSettings {
