@@ -51,6 +51,7 @@ import {
   signedNumber,
   teamColor,
 } from './deepdiveCharts';
+import { NumberInput } from './NumberInput';
 
 type DeepDiveSection = 'overview' | 'tempo' | 'race' | 'diagnostics' | 'drafting';
 
@@ -373,13 +374,7 @@ function RaceSection({ firstTeam, secondTeam }: { firstTeam: HistoricalTeam; sec
         />
         <label className="stat-panel tactics-stat tactics-stat--control">
           <span className="muted-label">Rondelengte</span>
-          <input
-            type="number"
-            min={1}
-            step={10}
-            value={lapLengthMeters}
-            onChange={(event) => setLapLengthMeters(Math.max(1, Number(event.target.value) || 1))}
-          />
+          <NumberInput min={1} step={10} value={lapLengthMeters} onChange={setLapLengthMeters} />
           <small>meter</small>
         </label>
       </section>

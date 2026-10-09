@@ -32,6 +32,7 @@ import {
   type PacePoint,
 } from '../../lib/tacticsDeepDive';
 import { formatDurationMs } from '../../lib/time';
+import { NumberInput } from './NumberInput';
 
 Chart.register(
   BarController,
@@ -860,15 +861,7 @@ export function NumberControl({
     <label>
       <span>{label}</span>
       <div className="tactics-number-control">
-        <input
-          className="input"
-          type="number"
-          value={value}
-          min={min}
-          max={max}
-          step={step}
-          onChange={(event) => onChange(clamp(Number(event.target.value) || min, min, max))}
-        />
+        <NumberInput className="input" value={value} min={min} max={max} step={step} onChange={onChange} />
         {suffix && <em>{suffix}</em>}
       </div>
     </label>
