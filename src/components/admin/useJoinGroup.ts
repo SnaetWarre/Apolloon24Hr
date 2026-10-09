@@ -5,12 +5,13 @@ import { useAdminAction } from './AdminNotice';
 
 /**
  * Koppelen: links this laptop with another one, after saying which laptop takes whose data.
- * The laptop with fewer runners always takes the other's, and with as many, a laptop nobody
- * changed yet (`changed`) takes the data of one that someone prepared (the server decides;
- * `found.link` says which way for a laptop from the list). Used by Beheer › Systeem and by
- * the welcome screen of a laptop that is still empty.
+ * A laptop where the race has not started takes the data of one where it has. Otherwise the
+ * laptop with fewer runners takes the other's, and with as many, a laptop nobody changed yet
+ * (`changed`) takes the data of one that someone prepared (the server decides; `found.link`
+ * says which way for a laptop from the list). Used by Beheer › Systeem and by the welcome
+ * screen of a laptop that is still empty.
  */
-export function useJoinGroup(runnerCount: number, changed: boolean) {
+export function useJoinGroup(runnerCount: number, changed: boolean, raceStarted: boolean) {
   const confirm = useConfirm();
   const { joinGroup } = useAppActions();
   const { pending, notice, run } = useAdminAction();
@@ -23,6 +24,7 @@ export function useJoinGroup(runnerCount: number, changed: boolean) {
         : changed
           ? 'Wat al op deze laptop is ingesteld, wordt eerst als backup bewaard.'
           : 'Op deze laptop staat nog niets, dus er gaat niets verloren.';
+    const raceThere = found?.raceStarted && !raceStarted ? `Op ${laptopLabel(found)} is de race al gestart. ` : '';
     const confirmed = await confirm(
       found?.link === 'invite'
         ? {
@@ -33,8 +35,8 @@ export function useJoinGroup(runnerCount: number, changed: boolean) {
         : {
             title: 'Deze laptop koppelen?',
             message: found
-              ? `Deze laptop neemt alle gegevens van ${laptopLabel(found)} (${countLabel(found.runners, 'loper', 'lopers')}) over en werkt daarna mee. ${own}`
-              : `De laptop met de minste lopers neemt alle gegevens van de andere over en werkt daarna mee. Wat daar stond, wordt eerst als backup bewaard.`,
+              ? `${raceThere}Deze laptop neemt alle gegevens van ${laptopLabel(found)} (${countLabel(found.runners, 'loper', 'lopers')}) over en werkt daarna mee. ${own}`
+              : `Is de race maar op één laptop gestart, dan houdt die zijn gegevens. Anders houdt de laptop met de meeste lopers ze. De andere laptop neemt alle gegevens over en werkt daarna mee. Wat daar stond, wordt eerst als backup bewaard.`,
             confirmLabel: 'Koppelen',
             tone: runnerCount === 0 && !changed ? 'default' : 'danger',
           }

@@ -40,6 +40,7 @@ function threeLaptops(overrides: Partial<ClusterStatus> = {}): ClusterStatus {
     logHead: 12,
     runners: 40,
     changed: true,
+    raceStarted: false,
     memberUrls: ['http://host-b:5173', 'http://host-c:5173'],
     nearby: [],
     autoLink: { enabled: true, waiting: null, linked: [] },

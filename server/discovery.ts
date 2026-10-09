@@ -34,6 +34,8 @@ const beaconSchema = z.object({
   runners: z.number().int().nonnegative(),
   /** Someone changed the event data in that group (hasEventChanges); older versions do not send it. */
   changed: z.boolean().default(false),
+  /** The race started or a lap was counted in that group (hasRaceStarted); older versions do not send it. */
+  raceStarted: z.boolean().default(false),
 });
 export type Beacon = z.infer<typeof beaconSchema>;
 export type OwnBeacon = Omit<Beacon, 'app' | 'url'>;

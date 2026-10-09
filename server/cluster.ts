@@ -45,6 +45,7 @@ import {
   getRemovedMembers,
   getSetting,
   hasEventChanges,
+  hasRaceStarted,
   getUnreachableMembers,
   hostIdentity,
   keepOnlyClusterMember,
@@ -166,6 +167,7 @@ export function clusterStatus(): ClusterStatus {
     logHead: getLogHead().seq,
     runners: countRunners(),
     changed: hasEventChanges(),
+    raceStarted: hasRaceStarted(),
     memberUrls: [...new Set(memberStatuses.filter((member) => !member.self).map((member) => member.url))],
     nearby,
     autoLink: {
@@ -211,6 +213,7 @@ function nearbyGroups(ownMembers: Set<string>): NearbyGroup[] {
       laptops: Math.max(known?.laptops ?? 0, beacon.groupSize),
       runners: Math.max(known?.runners ?? 0, beacon.runners),
       changed: Boolean(known?.changed) || beacon.changed,
+      raceStarted: Boolean(known?.raceStarted) || beacon.raceStarted,
       appVersion: beacon.appVersion,
       compatible: (known?.compatible ?? true) && compatible,
     });
@@ -220,6 +223,7 @@ function nearbyGroups(ownMembers: Set<string>): NearbyGroup[] {
       ...group,
       link: linkDirection(own, {
         clusterId: otherClusterId,
+        raceStarted: group.raceStarted,
         runners: group.runners,
         changed: group.changed,
         laptops: group.laptops,
@@ -228,34 +232,52 @@ function nearbyGroups(ownMembers: Set<string>): NearbyGroup[] {
     .sort((a, b) => b.runners - a.runners || a.url.localeCompare(b.url));
 }
 
-type GroupData = { clusterId: string; runners: number; changed: boolean; laptops: number };
+type GroupData = { clusterId: string; raceStarted: boolean; runners: number; changed: boolean; laptops: number };
 
 function ownGroup(): GroupData {
   return {
     clusterId: hostIdentity().clusterId,
+    raceStarted: hasRaceStarted(),
     runners: countRunners(),
     changed: hasEventChanges(),
     laptops: members().length,
   };
 }
 
+/** The group of the laptop that answered with `status`. */
+function otherGroup(status: ClusterStatus): GroupData {
+  return {
+    clusterId: status.clusterId,
+    // An older version does not send it. It then counts as no race, so this laptop never gives up its own race for it.
+    raceStarted: status.raceStarted === true,
+    runners: status.runners,
+    changed: status.changed,
+    laptops: status.members.length,
+  };
+}
+
 /**
- * Which way Koppelen links two groups. The one with fewer runners takes the
- * other's data; with as many runners, a group nobody changed yet takes the
- * data of one that someone prepared (labels, logos, settings); then the
- * smaller group does, and then the group id decides. Both sides work this out
- * alike, so a press on both at once links them one way. The other side is
- * only asked to come over (`invite`) while it holds no runners.
+ * Which way Koppelen links two groups. A group where the race started (or a
+ * lap was counted) keeps its data against one where it did not, so a spare
+ * laptop with the registration list never replaces a running race. Otherwise
+ * the one with fewer runners takes the other's data; with as many runners, a
+ * group nobody changed yet takes the data of one that someone prepared
+ * (labels, logos, settings); then the smaller group does, and then the group
+ * id decides. Both sides work this out alike, so a press on both at once
+ * links them one way. The other side is only asked to come over (`invite`)
+ * while it holds no runners.
  */
 export function linkDirection(own: GroupData, other: GroupData): NearbyGroup['link'] {
   const otherKeeps =
-    other.runners !== own.runners
-      ? other.runners > own.runners
-      : other.changed !== own.changed
-        ? other.changed
-        : other.laptops !== own.laptops
-          ? other.laptops > own.laptops
-          : other.clusterId < own.clusterId;
+    other.raceStarted !== own.raceStarted
+      ? other.raceStarted
+      : other.runners !== own.runners
+        ? other.runners > own.runners
+        : other.changed !== own.changed
+          ? other.changed
+          : other.laptops !== own.laptops
+            ? other.laptops > own.laptops
+            : other.clusterId < own.clusterId;
   if (otherKeeps) return 'join';
   return other.runners === 0 ? 'invite' : 'there';
 }
@@ -297,9 +319,13 @@ function autoLinkNotes(statuses: ClusterMemberStatus[]): AutoLinkNote[] {
   });
 }
 
-function pressThereMessage(url: string, otherRunners: number): string {
+function pressThereMessage(url: string, status: ClusterStatus): string {
   const other = shortUrl(url);
-  return `Op deze laptop staan ${runnerLabel(countRunners())}, op ${other} ${runnerLabel(otherRunners)}. Druk op Koppelen op ${other}: die neemt dan de gegevens van deze laptop over.`;
+  const why =
+    hasRaceStarted() && !otherGroup(status).raceStarted
+      ? `Op deze laptop is de race al gestart, op ${other} nog niet.`
+      : `Op deze laptop staan ${runnerLabel(countRunners())}, op ${other} ${runnerLabel(status.runners)}.`;
+  return `${why} Druk op Koppelen op ${other}: die neemt dan de gegevens van deze laptop over.`;
 }
 
 /** A laptop's address without `http://`, as the screens show it. */
@@ -686,8 +712,9 @@ export function removeLaptop(hostId: string): { name: string } {
 
 /**
  * Koppelen, pressed on this laptop next to the laptop at `rawUrl`: the side
- * with fewer runners takes the other's data (linkDirection), so pressing it on
- * the laptop with the registrations never empties that laptop.
+ * without the race, else the one with fewer runners, takes the other's data
+ * (linkDirection), so pressing it never empties the laptop with the race or
+ * the registrations.
  */
 export async function linkWith(rawUrl: string): Promise<{ backupFile: string | null }> {
   await waitWhileJoining();
@@ -698,14 +725,9 @@ export async function linkWith(rawUrl: string): Promise<{ backupFile: string | n
     // Taken out of that group: it takes this laptop back in, with the group's data.
     return joinGroup(url);
   }
-  const direction = linkDirection(ownGroup(), {
-    clusterId: status.clusterId,
-    runners: status.runners,
-    changed: status.changed,
-    laptops: status.members.length,
-  });
+  const direction = linkDirection(ownGroup(), otherGroup(status));
   if (direction === 'join') return joinOnce(url, status.clusterId);
-  if (direction === 'there') throw new Error(pressThereMessage(url, status.runners));
+  if (direction === 'there') throw new Error(pressThereMessage(url, status));
   const response = await peerFetch(`${url}/api/cluster/invite`, {
     method: 'POST',
     body: { url: selfUrl(), clusterId: hostIdentity().clusterId },
@@ -776,16 +798,8 @@ type JoinOptions = {
  */
 export async function joinGroup(rawUrl: string, options: JoinOptions = {}): Promise<{ backupFile: string | null }> {
   const { url, status } = await otherLaptop(rawUrl);
-  if (
-    status.clusterId !== hostIdentity().clusterId &&
-    linkDirection(ownGroup(), {
-      clusterId: status.clusterId,
-      runners: status.runners,
-      changed: status.changed,
-      laptops: status.members.length,
-    }) !== 'join'
-  ) {
-    throw new Error(pressThereMessage(url, status.runners));
+  if (status.clusterId !== hostIdentity().clusterId && linkDirection(ownGroup(), otherGroup(status)) !== 'join') {
+    throw new Error(pressThereMessage(url, status));
   }
   if (busy()) throw new Error('Deze laptop wordt al gekoppeld of bijgewerkt.');
   if (options.emptyGroup && countRunners() > 0) {
@@ -1034,6 +1048,7 @@ export function startClusterService(): void {
       groupSize: members().length,
       runners: countRunners(),
       changed: hasEventChanges(),
+      raceStarted: hasRaceStarted(),
     };
   });
   maintenanceTimer = setInterval(() => void maintain().catch(() => undefined), MAINTENANCE_MS);
