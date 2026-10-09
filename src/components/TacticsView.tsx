@@ -30,6 +30,7 @@ import {
 import { buildLiveQuarterHourTrend, buildLiveRivalTimeGap, projectScenarioRange } from '../lib/tacticsDeepDive';
 import { useClockTick } from '../lib/useClockTick';
 import type { LapRecord, LiveAppSnapshot } from '../types';
+import { NumberInput } from './tactics/NumberInput';
 import { HistoricalAnalysisSection, HistoricalDataNotice, HistoricalDatasetManager } from './tactics/HistoricalPanels';
 import {
   APOLLOON_TEAM_ID,
@@ -39,7 +40,6 @@ import {
   HISTORICAL_RACE_STORAGE_KEY,
   TACTICS_SCENARIO_STORAGE_KEY,
   VTK_TEAM_ID,
-  clamp,
   formatPaceSeconds,
   formatRaceHour,
   formatRaceHourWindow,
@@ -375,16 +375,15 @@ function LiveTacticsSection({
             <p className="tactics-group-label">Doelstelling</p>
             <label>
               <span>Rondes na 24 uur, gemiddeld {formatPaceSeconds(86_400 / targetLaps)}</span>
-              <input
+              <NumberInput
                 className="input tactics-goal-input"
-                type="number"
                 min={1}
                 step={5}
                 value={targetLaps}
-                onChange={(event) => {
+                onChange={(laps) => {
                   scenarioWasEdited.current = true;
                   targetPacesWereEdited.current = false;
-                  setTargetLaps(Math.max(1, Number(event.target.value) || 1));
+                  setTargetLaps(laps);
                 }}
               />
             </label>
@@ -411,41 +410,34 @@ function LiveTacticsSection({
             <p className="tactics-group-label">Geldige rondes</p>
             <label>
               <span>Rondes voor huidig tempo</span>
-              <input
+              <NumberInput
                 className="input"
-                type="number"
                 min={5}
                 max={100}
                 step={5}
                 value={recentLapCount}
-                onChange={(event) => setRecentLapCount(clamp(Number(event.target.value) || 5, 5, 100))}
+                onChange={setRecentLapCount}
               />
             </label>
             <div className="tactics-filter-pair">
               <label>
                 <span>Kortste (s)</span>
-                <input
+                <NumberInput
                   className="input"
-                  type="number"
                   min={10}
                   max={maximumLapSeconds}
                   value={minimumLapSeconds}
-                  onChange={(event) =>
-                    setMinimumLapSeconds(clamp(Number(event.target.value) || 10, 10, maximumLapSeconds))
-                  }
+                  onChange={setMinimumLapSeconds}
                 />
               </label>
               <label>
                 <span>Langste (s)</span>
-                <input
+                <NumberInput
                   className="input"
-                  type="number"
                   min={minimumLapSeconds}
                   max={300}
                   value={maximumLapSeconds}
-                  onChange={(event) =>
-                    setMaximumLapSeconds(clamp(Number(event.target.value) || 300, minimumLapSeconds, 300))
-                  }
+                  onChange={setMaximumLapSeconds}
                 />
               </label>
             </div>
@@ -475,17 +467,16 @@ function LiveTacticsSection({
             <label key={raceHour} className={raceHour + 1 <= elapsedHours ? 'is-past' : ''}>
               <span>{formatRaceHourWindow(raceStartedAt, raceHour)}</span>
               <div>
-                <input
-                  type="number"
+                <NumberInput
                   min={30}
                   max={300}
                   step={1}
                   value={Math.round(paceSeconds)}
-                  onChange={(event) => {
+                  onChange={(pace) => {
                     scenarioWasEdited.current = true;
                     targetPacesWereEdited.current = true;
                     const nextPaces = [...targetPaces];
-                    nextPaces[raceHour] = clamp(Number(event.target.value) || 30, 30, 300);
+                    nextPaces[raceHour] = pace;
                     setTargetPaces(nextPaces);
                   }}
                 />

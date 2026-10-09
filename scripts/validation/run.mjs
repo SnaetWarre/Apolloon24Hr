@@ -12,6 +12,8 @@ const CHECKS = [
   { name: 'autofocus-ui', laptops: 1, cluster: true },
   { name: 'theme-ui', laptops: 1 },
   { name: 'recovery-ui', laptops: 1 },
+  // Tactiek only shows its live section once a race runs.
+  { name: 'tactics-ui', laptops: 1, scenario: 'live' },
   { name: 'failover-ui', laptops: 3 },
   { name: 'race-day-ui', laptops: 3 },
 ];
@@ -24,7 +26,11 @@ for (const check of CHECKS.filter((candidate) => !selected.length || selected.in
   try {
     for (let index = 0; index < check.laptops; index += 1) {
       laptops.push(
-        await startLaptop(`${check.name}-${index}`, { seed: index === 0, cluster: check.cluster ?? check.laptops > 1 })
+        await startLaptop(`${check.name}-${index}`, {
+          seed: index === 0,
+          cluster: check.cluster ?? check.laptops > 1,
+          scenario: check.scenario,
+        })
       );
     }
     console.log(`\n${check.name}`);
@@ -53,13 +59,13 @@ for (const check of CHECKS.filter((candidate) => !selected.length || selected.in
   }
 }
 
-async function startLaptop(name, { seed, cluster }) {
+async function startLaptop(name, { seed, cluster, scenario = 'ready' }) {
   const dataPath = path.resolve('.test-data', `ui-${name}`);
   fs.rmSync(dataPath, { recursive: true, force: true });
   if (seed) {
     execFileSync(
       process.execPath,
-      ['--import', 'tsx', 'scripts/seed-test-db.mjs', '--scenario=ready', `--data-path=${dataPath}`],
+      ['--import', 'tsx', 'scripts/seed-test-db.mjs', `--scenario=${scenario}`, `--data-path=${dataPath}`],
       { stdio: 'ignore' }
     );
   }
