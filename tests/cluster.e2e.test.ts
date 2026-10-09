@@ -687,6 +687,10 @@ test(
       servers[servers.indexOf(dead)] = returned;
       await waitFor(async () => (await fetchStatus(returned)).removedFrom !== null, 15_000);
       assert.equal((await fetchStatus(returned)).writable, false);
+      await assert.rejects(
+        client(returned).runners.create.mutate({ name: 'Not saved', runnerNumber: 'P-9' }),
+        /deze laptop is uit de groep gehaald/
+      );
       const group = (await fetchStatus(follower)).members.map((member) => member.hostId);
       assert.deepEqual(group.sort(), [leaderId, followerId, await hostIdOf(spare)].sort());
 

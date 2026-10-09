@@ -379,6 +379,14 @@ export function assertWritable(): void {
 export const NO_LEADER_MESSAGE =
   'Niet opgeslagen: er zijn te weinig laptops bereikbaar. Controleer of de andere laptops aan staan en aan het netwerk hangen.';
 
+export const REMOVED_MESSAGE =
+  'Niet opgeslagen: deze laptop is uit de groep gehaald. Klik in Beheer › Systeem & herstel op Opnieuw koppelen.';
+
+/** Why a write found no leader: this laptop was taken out of the group, or too few laptops answer. */
+export function noLeaderMessage(): string {
+  return removedBy(ELECTING_GRACE_MS) ? REMOVED_MESSAGE : NO_LEADER_MESSAGE;
+}
+
 export const NOT_CONFIRMED_MESSAGE =
   'Niet bevestigd: deze wijziging staat nog niet op een tweede laptop. Controleer of de andere laptops aan staan en probeer opnieuw.';
 
