@@ -1,14 +1,10 @@
 import React from 'react';
-import { useInfiniteQuery } from '@tanstack/react-query';
+import { keepPreviousData, useInfiniteQuery } from '@tanstack/react-query';
 import { trpc } from '../../api';
 import { activityKey } from '../../app/snapshot';
-import { foldSearchText } from '../../lib/runners';
 import type { ActivityCursor, ActivityEntry } from '../../types';
 
 const PAGE_SIZE = 200;
-
-/** Moving runners through warm-up and the queue happens all the time; shown on request. */
-const QUEUE_ACTIONS = new Set(['runners.setStatus', 'runners.reorder']);
 
 /**
  * Every change to the event data, newest first, with the screen and address it came from.
@@ -17,9 +13,11 @@ const QUEUE_ACTIONS = new Set(['runners.setStatus', 'runners.reorder']);
 export function ActivitySection({ active }: { active: boolean }) {
   const [search, setSearch] = React.useState('');
   const [showQueue, setShowQueue] = React.useState(false);
+  // The server filters, so every page holds PAGE_SIZE matching entries however many queue moves sit between them.
+  const filters = { queueMoves: showQueue, search: search.trim() };
   const query = useInfiniteQuery({
-    queryKey: activityKey,
-    queryFn: ({ pageParam }) => trpc.activity.list.query({ limit: PAGE_SIZE, before: pageParam }),
+    queryKey: [...activityKey, filters],
+    queryFn: ({ pageParam }) => trpc.activity.list.query({ limit: PAGE_SIZE, before: pageParam, ...filters }),
     initialPageParam: null as ActivityCursor | null,
     getNextPageParam: (lastPage) => {
       if (lastPage.length < PAGE_SIZE) return undefined;
@@ -28,14 +26,16 @@ export function ActivitySection({ active }: { active: boolean }) {
     },
     // Only while the section is open: every change refreshes it.
     enabled: active,
+    // Typing a search keeps the old list on screen until the new one arrives.
+    placeholderData: keepPreviousData,
   });
 
-  const needle = foldSearchText(search.trim());
-  const entries = (query.data?.pages.flat() ?? []).filter(
-    (entry) =>
-      (showQueue || !QUEUE_ACTIONS.has(entry.action)) &&
-      (!needle || foldSearchText(entry.summary).includes(needle) || foldSearchText(entry.origin).includes(needle))
-  );
+  const entries = query.data?.pages.flat() ?? [];
+  const emptyText = query.isLoading
+    ? 'Activiteit laden…'
+    : filters.search
+      ? 'Geen activiteit gevonden.'
+      : 'Nog geen activiteit.';
 
   return (
     <section className="panel">
@@ -78,7 +78,7 @@ export function ActivitySection({ active }: { active: boolean }) {
               ))}
               {entries.length === 0 && (
                 <tr>
-                  <td colSpan={3}>{query.isLoading ? 'Activiteit laden…' : 'Nog geen activiteit.'}</td>
+                  <td colSpan={3}>{emptyText}</td>
                 </tr>
               )}
             </tbody>

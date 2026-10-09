@@ -38,6 +38,61 @@ test('activity pages include every entry when their boundary shares a timestamp'
   }
 });
 
+test('activity pages filter queue moves and the search before they are cut', async () => {
+  const db = await import('../server/db.ts');
+  const { getDb } = await import('../server/db/connection.ts');
+  try {
+    await db.initDb();
+    getDb().exec('DELETE FROM activity_log');
+    let at = 1_000;
+    const log = (action: string, summary: string) =>
+      db.logActivity({ occurredAt: at++, action, summary, origin: 'Beheer · laptop LAPTOP-0' });
+    log('runners.delete', '#3 Zoë Peeters verwijderd');
+    log('runners.update', '#4 Bram aangepast (notities)');
+    log('runners.delete', '#5 Céline Maes verwijderd');
+    // A long stretch of racing logs nothing but queue moves.
+    for (let index = 0; index < 300; index++) {
+      log(index % 3 ? 'runners.setStatus' : 'runners.reorder', `#${index} naar de wachtrij`);
+    }
+
+    // Without queue moves, the first page reaches back past all of them.
+    const first = db.getActivity(2, null, { queueMoves: false });
+    assert.deepEqual(
+      first.map((entry) => entry.summary),
+      ['#5 Céline Maes verwijderd', '#4 Bram aangepast (notities)']
+    );
+    const last = first[first.length - 1];
+    const second = db.getActivity(2, { occurredAt: last.occurredAt, id: last.id }, { queueMoves: false });
+    assert.deepEqual(
+      second.map((entry) => entry.summary),
+      ['#3 Zoë Peeters verwijderd']
+    );
+
+    // The search ignores case and accents, and also looks at the origin.
+    assert.deepEqual(
+      db.getActivity(200, null, { search: ' ZOE ' }).map((entry) => entry.summary),
+      ['#3 Zoë Peeters verwijderd']
+    );
+    const verwijderd = db.getActivity(1, null, { search: 'verwijderd' });
+    assert.deepEqual(
+      verwijderd.map((entry) => entry.summary),
+      ['#5 Céline Maes verwijderd']
+    );
+    const cursor = { occurredAt: verwijderd[0].occurredAt, id: verwijderd[0].id };
+    assert.deepEqual(
+      db.getActivity(1, cursor, { search: 'verwijderd' }).map((entry) => entry.summary),
+      ['#3 Zoë Peeters verwijderd']
+    );
+    assert.equal(db.getActivity(500, null, { search: 'laptop-0' }).length, 303);
+    assert.equal(db.getActivity(200, null, { search: 'niemand' }).length, 0);
+
+    // Queue moves stay in the list when asked for.
+    assert.equal(db.getActivity(500, null, { queueMoves: true }).length, 303);
+  } finally {
+    db.closeDb();
+  }
+});
+
 test('a profile save that only changes the notes names only the notes', async () => {
   const db = await import('../server/db.ts');
   const { describeWrite } = await import('../server/activity.ts');

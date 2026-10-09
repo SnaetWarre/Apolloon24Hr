@@ -1,4 +1,7 @@
+import { foldSearchText } from '../../shared/search';
 import type { LapRecord, Runner, RunnerStatus } from '../types';
+
+export { foldSearchText };
 
 /** The server's queue order: place in line, then who joined first when two share a place. */
 export function compareWaitingOrder(
@@ -50,14 +53,6 @@ export function statusLabel(status: RunnerStatus): string {
 /** The status Beheer › Lopers shows, with "· verborgen" for a runner hidden from the queue. */
 export function adminStatusText(runner: Pick<Runner, 'status' | 'hiddenFromQueue'>): string {
   return runner.hiddenFromQueue ? `${statusLabel(runner.status)} · verborgen` : statusLabel(runner.status);
-}
-
-/** Lowercase without accents, so "zoe" finds Zoë and "celine" finds Céline. */
-export function foldSearchText(text: string): string {
-  return text
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase();
 }
 
 /** Whether a runner matches a search: number, name, and labels together, so "149 bram" finds Bram with 149. */

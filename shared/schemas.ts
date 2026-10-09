@@ -203,6 +203,10 @@ export type ActivityCursor = z.infer<typeof activityCursorSchema>;
 export const activityPageSchema = z.object({
   limit: z.number().int().positive().max(500).default(200),
   before: activityCursorSchema.nullable().default(null),
+  /** Warm-up and queue moves (`runners.setStatus`, `runners.reorder`), which Activiteit hides unless asked. */
+  queueMoves: z.boolean().default(true),
+  /** Only entries whose summary or origin contains this, ignoring case and accents. */
+  search: z.string().max(200).default(''),
 });
 
 export type ClusterRole = 'leader' | 'follower' | 'candidate';
