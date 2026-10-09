@@ -48,6 +48,7 @@ const cluster: ClusterStatus = {
   runners: 40,
   changed: true,
   raceStarted: false,
+  raceRunning: false,
   memberUrls: ['http://10.0.0.2:5173'],
   nearby: [
     {
@@ -57,6 +58,7 @@ const cluster: ClusterStatus = {
       runners: 0,
       changed: false,
       raceStarted: false,
+      raceRunning: false,
       appVersion: '4.1.0',
       compatible: false,
       link: 'invite',

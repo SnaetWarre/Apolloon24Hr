@@ -24,14 +24,19 @@ export function getRaceState(): RaceState {
   };
 }
 
-/** True once the race started or a lap was counted here; a laptop that holds it keeps its data on Koppelen. */
-export function hasRaceStarted(): boolean {
-  return Boolean(
-    one<{ started: number }>(
-      `SELECT (SELECT race_started_at FROM race_state WHERE id = 1) IS NOT NULL
-         OR EXISTS (SELECT 1 FROM laps) AS started`
-    )?.started
+/**
+ * Whether the race started (or a lap was counted) here, and whether it still
+ * runs: started and not finished. Koppelen keeps the data of a laptop with the
+ * running race, then of one with a started race.
+ */
+export function raceProgress(): { raceStarted: boolean; raceRunning: boolean } {
+  const row = one<{ started: number; finished: number }>(
+    `SELECT (SELECT race_started_at FROM race_state WHERE id = 1) IS NOT NULL
+         OR EXISTS (SELECT 1 FROM laps) AS started,
+       (SELECT race_finished_at FROM race_state WHERE id = 1) IS NOT NULL AS finished`
   );
+  const raceStarted = Boolean(row?.started);
+  return { raceStarted, raceRunning: raceStarted && !row?.finished };
 }
 
 /** Starts the runner's live lap, starting (or reopening) the race if needed. The lap keeps the labels of this moment. */

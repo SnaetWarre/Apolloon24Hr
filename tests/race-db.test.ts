@@ -58,12 +58,16 @@ test('undo after finishing reopens the race and keeps the laps', async () => {
     );
     db.updateRunnerStatus({ id: zoe.id, status: 'waiting', statusSince: 1 });
     db.updateRunnerStatus({ id: arne.id, status: 'waiting', statusSince: 2 });
+    assert.deepEqual(db.raceProgress(), { raceStarted: false, raceRunning: false });
     db.performHandoff(1_000);
     const handoff = db.performHandoff(90_000);
     assert.equal(handoff.ok && handoff.startedRunnerId, arne.id);
+    assert.deepEqual(db.raceProgress(), { raceStarted: true, raceRunning: true });
 
     db.finishRace(120_000);
+    assert.deepEqual(db.raceProgress(), { raceStarted: true, raceRunning: false });
     assert.deepEqual(db.undoLastHandoff(), { ok: true, deletedLapIds: [] });
+    assert.deepEqual(db.raceProgress(), { raceStarted: true, raceRunning: true });
 
     assert.deepEqual(db.getRaceState(), {
       id: 1,

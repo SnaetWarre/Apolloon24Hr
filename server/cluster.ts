@@ -45,11 +45,11 @@ import {
   getRemovedMembers,
   getSetting,
   hasEventChanges,
-  hasRaceStarted,
   getUnreachableMembers,
   hostIdentity,
   keepOnlyClusterMember,
   logActivity,
+  raceProgress,
   recordWrite,
   removeClusterMember,
   saveAutoLink,
@@ -167,7 +167,7 @@ export function clusterStatus(): ClusterStatus {
     logHead: getLogHead().seq,
     runners: countRunners(),
     changed: hasEventChanges(),
-    raceStarted: hasRaceStarted(),
+    ...raceProgress(),
     memberUrls: [...new Set(memberStatuses.filter((member) => !member.self).map((member) => member.url))],
     nearby,
     autoLink: {
@@ -214,6 +214,7 @@ function nearbyGroups(ownMembers: Set<string>): NearbyGroup[] {
       runners: Math.max(known?.runners ?? 0, beacon.runners),
       changed: Boolean(known?.changed) || beacon.changed,
       raceStarted: Boolean(known?.raceStarted) || beacon.raceStarted,
+      raceRunning: Boolean(known?.raceRunning) || beacon.raceRunning,
       appVersion: beacon.appVersion,
       compatible: (known?.compatible ?? true) && compatible,
     });
@@ -224,6 +225,7 @@ function nearbyGroups(ownMembers: Set<string>): NearbyGroup[] {
       link: linkDirection(own, {
         clusterId: otherClusterId,
         raceStarted: group.raceStarted,
+        raceRunning: group.raceRunning,
         runners: group.runners,
         changed: group.changed,
         laptops: group.laptops,
@@ -232,12 +234,19 @@ function nearbyGroups(ownMembers: Set<string>): NearbyGroup[] {
     .sort((a, b) => b.runners - a.runners || a.url.localeCompare(b.url));
 }
 
-type GroupData = { clusterId: string; raceStarted: boolean; runners: number; changed: boolean; laptops: number };
+type GroupData = {
+  clusterId: string;
+  raceStarted: boolean;
+  raceRunning: boolean;
+  runners: number;
+  changed: boolean;
+  laptops: number;
+};
 
 function ownGroup(): GroupData {
   return {
     clusterId: hostIdentity().clusterId,
-    raceStarted: hasRaceStarted(),
+    ...raceProgress(),
     runners: countRunners(),
     changed: hasEventChanges(),
     laptops: members().length,
@@ -248,8 +257,9 @@ function ownGroup(): GroupData {
 function otherGroup(status: ClusterStatus): GroupData {
   return {
     clusterId: status.clusterId,
-    // An older version does not send it. It then counts as no race, so this laptop never gives up its own race for it.
+    // An older version does not send these. It then counts as no race, so this laptop never gives up its own race for it.
     raceStarted: status.raceStarted === true,
+    raceRunning: status.raceRunning === true,
     runners: status.runners,
     changed: status.changed,
     laptops: status.members.length,
@@ -257,9 +267,12 @@ function otherGroup(status: ClusterStatus): GroupData {
 }
 
 /**
- * Which way Koppelen links two groups. A group where the race started (or a
- * lap was counted) keeps its data against one where it did not, so a spare
- * laptop with the registration list never replaces a running race. Otherwise
+ * Which way Koppelen links two groups. A group where the race runs (started,
+ * not finished) keeps its data against one where it does not, so a spare
+ * laptop with the registration list, or with a practice race that was
+ * finished, never replaces a running race. Then a group where the race
+ * started (or a lap was counted) keeps its data against one where it did
+ * not. Otherwise
  * the one with fewer runners takes the other's data; with as many runners, a
  * group nobody changed yet takes the data of one that someone prepared
  * (labels, logos, settings); then the smaller group does, and then the group
@@ -269,15 +282,17 @@ function otherGroup(status: ClusterStatus): GroupData {
  */
 export function linkDirection(own: GroupData, other: GroupData): NearbyGroup['link'] {
   const otherKeeps =
-    other.raceStarted !== own.raceStarted
-      ? other.raceStarted
-      : other.runners !== own.runners
-        ? other.runners > own.runners
-        : other.changed !== own.changed
-          ? other.changed
-          : other.laptops !== own.laptops
-            ? other.laptops > own.laptops
-            : other.clusterId < own.clusterId;
+    other.raceRunning !== own.raceRunning
+      ? other.raceRunning
+      : other.raceStarted !== own.raceStarted
+        ? other.raceStarted
+        : other.runners !== own.runners
+          ? other.runners > own.runners
+          : other.changed !== own.changed
+            ? other.changed
+            : other.laptops !== own.laptops
+              ? other.laptops > own.laptops
+              : other.clusterId < own.clusterId;
   if (otherKeeps) return 'join';
   return other.runners === 0 ? 'invite' : 'there';
 }
@@ -321,10 +336,14 @@ function autoLinkNotes(statuses: ClusterMemberStatus[]): AutoLinkNote[] {
 
 function pressThereMessage(url: string, status: ClusterStatus): string {
   const other = shortUrl(url);
+  const own = raceProgress();
+  const there = otherGroup(status);
   const why =
-    hasRaceStarted() && !otherGroup(status).raceStarted
-      ? `Op deze laptop is de race al gestart, op ${other} nog niet.`
-      : `Op deze laptop staan ${runnerLabel(countRunners())}, op ${other} ${runnerLabel(status.runners)}.`;
+    own.raceRunning && !there.raceRunning
+      ? `Op deze laptop loopt de race, op ${other} niet.`
+      : own.raceStarted && !there.raceStarted
+        ? `Op deze laptop is de race al gestart, op ${other} nog niet.`
+        : `Op deze laptop staan ${runnerLabel(countRunners())}, op ${other} ${runnerLabel(status.runners)}.`;
   return `${why} Druk op Koppelen op ${other}: die neemt dan de gegevens van deze laptop over.`;
 }
 
@@ -712,9 +731,9 @@ export function removeLaptop(hostId: string): { name: string } {
 
 /**
  * Koppelen, pressed on this laptop next to the laptop at `rawUrl`: the side
- * without the race, else the one with fewer runners, takes the other's data
- * (linkDirection), so pressing it never empties the laptop with the race or
- * the registrations.
+ * without the running race, else without a started race, else the one with
+ * fewer runners, takes the other's data (linkDirection), so pressing it never
+ * empties the laptop with the race or the registrations.
  */
 export async function linkWith(rawUrl: string): Promise<{ backupFile: string | null }> {
   await waitWhileJoining();
@@ -1048,7 +1067,7 @@ export function startClusterService(): void {
       groupSize: members().length,
       runners: countRunners(),
       changed: hasEventChanges(),
-      raceStarted: hasRaceStarted(),
+      ...raceProgress(),
     };
   });
   maintenanceTimer = setInterval(() => void maintain().catch(() => undefined), MAINTENANCE_MS);
