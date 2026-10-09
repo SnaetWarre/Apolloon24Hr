@@ -31,13 +31,13 @@ import { backupFile, createVerifiedBackup, listBackups } from './backups.js';
 import { clusterNow } from './clock.js';
 import {
   NOT_CONFIRMED_MESSAGE,
-  NO_LEADER_MESSAGE,
   assertWritable,
   continueAlone,
   forwardWrite,
   groupSettled,
   linkWith,
   newRequestId,
+  noLeaderMessage,
   removeLaptop,
   writeDeadline,
   writeTarget,
@@ -148,7 +148,7 @@ function write<I, T, P = undefined>(action: (input: I, prepared: P) => T, prepar
     let requestId: string | undefined;
     for (;;) {
       const target = await writeTarget(deadline);
-      if (target === null) unavailable(NO_LEADER_MESSAGE);
+      if (target === null) unavailable(noLeaderMessage());
       if (target === 'self') return commitHere(change, requestId);
       requestId ??= newRequestId();
       const outcome = await forwardWrite<T>(target, path, input, requestId, origin);

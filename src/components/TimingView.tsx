@@ -61,7 +61,8 @@ export function TimingView() {
   // A press flashes the key, also when it came from the keyboard.
   const [pressed, flashPress] = usePulse(240);
   // While the laptops choose who orders the changes a press waits and then counts; without a majority nothing is saved.
-  const timingBlocked = cluster?.state === 'no-majority';
+  const removedFromGroup = Boolean(cluster?.removedFrom);
+  const timingBlocked = cluster?.state === 'no-majority' || removedFromGroup;
 
   const activeRunner = runners.find((runner) => runner.id === race.activeRunnerId) || null;
   const waitingRunners = runners.filter((runner) => runner.status === 'waiting').sort(compareWaitingOrder);
@@ -376,10 +377,20 @@ export function TimingView() {
           <div className="timing-feedback">
             {timingBlocked && (
               <div className="warning-banner warning-banner--blocking">
-                <span>
-                  <strong>Timing staat stil.</strong> Klokken lukt weer zodra een tweede laptop terug is. Zijn de andere
-                  laptops echt kapot, ga dan alleen verder in <Link to="/admin">Beheer</Link>.
-                </span>
+                {removedFromGroup ? (
+                  <span>
+                    <strong>Deze laptop is uit de groep gehaald.</strong> Niets wordt hier bewaard. Klik in{' '}
+                    <Link to="/admin" search={{ section: 'system' }}>
+                      Beheer › Systeem &amp; herstel
+                    </Link>{' '}
+                    op Opnieuw koppelen.
+                  </span>
+                ) : (
+                  <span>
+                    <strong>Timing staat stil.</strong> Klokken lukt weer zodra een tweede laptop terug is. Zijn de
+                    andere laptops echt kapot, ga dan alleen verder in <Link to="/admin">Beheer</Link>.
+                  </span>
+                )}
               </div>
             )}
 
