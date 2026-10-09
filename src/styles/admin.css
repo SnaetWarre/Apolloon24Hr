@@ -729,6 +729,7 @@
 /* Runner search and entry dialogs. */
 .runner-search-list {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   margin-block-start: var(--space-3);
   border-block-start: 1px solid var(--line);
 }
@@ -748,6 +749,10 @@
   min-height: 58px;
   padding: 8px 2px;
   border-block-end: 1px solid var(--line);
+}
+
+.runner-search-row > :first-child {
+  min-width: 0;
 }
 
 .runner-search-row .runner-title {

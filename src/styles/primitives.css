@@ -552,6 +552,10 @@ details[open] > .disclosure ~ * {
   text-overflow: ellipsis;
 }
 
+td .label-pill {
+  max-width: 20em;
+}
+
 .label-pill--compact {
   min-height: 18px;
   font-size: 11.5px;
