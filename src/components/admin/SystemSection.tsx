@@ -65,7 +65,11 @@ function ClusterPanel({
   const confirm = useConfirm();
   const { continueAlone, removeLaptop, joinGroup: rejoinGroup } = useAppActions();
   const { pending: alonePending, notice: aloneNotice, run } = useAdminAction();
-  const { join: joinGroup, pending: joinPending, notice: joinNotice } = useJoinGroup(runnerCount, cluster.changed);
+  const {
+    join: joinGroup,
+    pending: joinPending,
+    notice: joinNotice,
+  } = useJoinGroup(runnerCount, cluster.changed, cluster.raceStarted);
   const [otherUrl, setOtherUrl] = React.useState('');
   const group = describeGroup(cluster);
   const pending = alonePending || joinPending;
@@ -286,8 +290,9 @@ function ClusterPanel({
 
 /**
  * A laptop or group heard on the network, with Koppelen when pressing it here goes the right way:
- * the side with fewer runners takes the other's data. A laptop in a group only takes in empty
- * laptops (`canJoin` false); it never leaves its group from this list.
+ * the side without the race, else the one with fewer runners, takes the other's data. A laptop
+ * in a group only takes in empty laptops (`canJoin` false); it never leaves its group from this
+ * list.
  */
 function NearbyRow({
   found,

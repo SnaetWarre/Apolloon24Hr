@@ -71,6 +71,12 @@ are therefore not enough: then losing either one stops saving.
   overview name the laptops that linked by themselves ("Automatisch gekoppeld
   met LAPTOP-TIJD, 3 minuten geleden"). `CLUSTER_AUTO_LINK=false` turns it
   off.
+- Koppelen links the same way whichever laptop it is pressed on. A group
+  where the race started (or a lap was counted) keeps its data against one
+  where it did not, whatever the runner counts, so a spare laptop with the
+  registration list takes the running race instead of replacing it. Between
+  two groups alike in that, the side with fewer runners takes the other's
+  data. The laptop that takes the data keeps a backup of its old database.
 - Laptops only link when app version and database schema are identical.
 
 ```text
@@ -99,7 +105,7 @@ screen ──► own laptop ──► leader ──► other laptops
 | A laptop comes back | It catches up, or re-syncs after a backup of its own data. | Nothing. |
 | Two laptops are down | The last one shows "Te weinig laptops bereikbaar" and saves nothing. | Turn a second laptop on or fix the cable. Only if both others are truly gone: Beheer › Systeem › "Alleen verder werken". |
 | After "Alleen verder werken" the others return | They follow the laptop that went on alone and keep their own data in a `pre-resync` backup. | Nothing. |
-| One laptop is gone for good (broken, stolen, dropped) | The other two carry on, but a laptop that will never come back still counts. A spare linked next to it makes four laptops that need three for a majority, so it adds no safety. After 30 s without an answer, Beheer › Systeem offers "Uit de groep halen" next to it. | Click "Uit de groep halen" next to the dead laptop, then link a spare (an empty laptop links by itself). The group is three laptops again and one more may fail. |
+| One laptop is gone for good (broken, stolen, dropped) | The other two carry on, but a laptop that will never come back still counts. A spare linked next to it makes four laptops that need three for a majority, so it adds no safety. After 30 s without an answer, Beheer › Systeem offers "Uit de groep halen" next to it. | Click "Uit de groep halen" next to the dead laptop, then link a spare (an empty laptop links by itself; on a spare that holds runners, press Koppelen, and it takes the group's race). The group is three laptops again and one more may fail. |
 | A laptop taken out of the group comes back | It is not taken back in by itself. It saves nothing and Beheer › Systeem on it says "Deze laptop is uit de groep gehaald". | Only if it works again: click "Opnieuw koppelen" on it. It takes the group's data and keeps its own in a `pre-join` backup. |
 
 "Alleen verder werken" is the one decision left to a person, because only a

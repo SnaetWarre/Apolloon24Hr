@@ -188,11 +188,13 @@ and real timers; the simulation tests pass fakes.
 - `server/peers.ts`: requests between laptops and their addresses.
 - `server/discovery.ts`: every laptop broadcasts who it is (host, computer
   name, group, address, version, leader, group size, runner count, whether
-  someone changed the event data) every two seconds on UDP 45737. Group
+  someone changed the event data, whether the race started) every two seconds on UDP 45737. Group
   members use the announced addresses and names when theirs changed (the
   leader stores them); a laptop on its own lists other groups to join. An announcement changes nothing by itself.
 - Koppelen (`linkWith` in `server/cluster.ts`) links two groups the same way
-  whichever side it is pressed on: the group with fewer runners takes the
+  whichever side it is pressed on: a group where the race has not started
+  takes the data of one where it has (`raceStarted`, from `hasRaceStarted`
+  in `server/db/race-state.ts`), then the group with fewer runners takes the
   other's data (then a group nobody changed yet, `hasEventChanges` in
   `server/db/replication.ts`, then the smaller group, then the group id). An
   empty laptop is asked over (`/api/cluster/invite`); between two groups that
