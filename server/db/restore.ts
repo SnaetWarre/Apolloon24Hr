@@ -3,7 +3,7 @@ import { z } from 'zod';
 import type { BackupPreview } from '../../shared/schemas.js';
 import { all, run } from './connection.js';
 import { schemaProblems } from './schema-check.js';
-import { REPLICATED_SETTING_KEYS } from './settings.js';
+import { EVENT_SETTING_KEYS } from './settings.js';
 import { quickCheck } from './sqlite-file.js';
 
 /**
@@ -86,10 +86,10 @@ export function readRestoreData(filePath: string, fileName: string, backupCreate
     const tables = Object.fromEntries(
       RESTORED_TABLES.map((table) => [table, backup.prepare(`SELECT * FROM "${table}"`).all()])
     ) as RestoreData['tables'];
-    const keys = REPLICATED_SETTING_KEYS.map(() => '?').join(', ');
+    const keys = EVENT_SETTING_KEYS.map(() => '?').join(', ');
     const settings = backup
       .prepare(`SELECT key, value FROM settings WHERE key IN (${keys})`)
-      .all(...REPLICATED_SETTING_KEYS) as Array<{ key: string; value: string }>;
+      .all(...EVENT_SETTING_KEYS) as Array<{ key: string; value: string }>;
     return { fileName, backupCreatedAt, tables, settings };
   } finally {
     backup.close();
@@ -112,10 +112,9 @@ export function replaceEventData(data: RestoreData): { runners: number; laps: nu
         columns.map((name) => row[name] ?? null)
       );
   }
-  for (const key of REPLICATED_SETTING_KEYS) run('DELETE FROM settings WHERE key = ?', [key]);
+  for (const key of EVENT_SETTING_KEYS) run('DELETE FROM settings WHERE key = ?', [key]);
   for (const { key, value } of data.settings) {
-    if (REPLICATED_SETTING_KEYS.includes(key))
-      run('INSERT OR REPLACE INTO settings(key, value) VALUES(?, ?)', [key, value]);
+    if (EVENT_SETTING_KEYS.includes(key)) run('INSERT OR REPLACE INTO settings(key, value) VALUES(?, ?)', [key, value]);
   }
   return { runners: data.tables.runners.length, laps: data.tables.laps.length };
 }

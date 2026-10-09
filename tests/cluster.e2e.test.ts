@@ -708,6 +708,73 @@ test(
   }
 );
 
+test(
+  'a spare linked in after a removal keeps the removed laptop out, also when the spare leads',
+  { timeout: 120_000 },
+  async () => {
+    const root = testRoot('spare-leads');
+    const servers: RunningServer[] = [];
+    try {
+      await startGroup(root, servers);
+      const first = (await leaderOf(servers))!;
+      const [other, broken] = servers.filter((server) => server !== first);
+      const brokenId = (await fetchStatus(broken)).hostId;
+      const firstId = (await fetchStatus(first)).hostId;
+      await killServer(broken);
+      await waitFor(async () =>
+        Boolean((await fetchStatus(other)).members.find((member) => member.hostId === brokenId)?.removable)
+      );
+      await client(other).cluster.removeMember.mutate({ hostId: brokenId });
+
+      // The spare takes a full copy of the group, made after the removal.
+      const spare = await startServer({ port: await freePort(), dataPath: path.join(root, 'd'), name: 'LAPTOP-D' });
+      servers.push(spare);
+      await join(spare, first);
+      await waitFor(async () => {
+        const status = await fetchStatus(first);
+        return status.state === 'healthy' && status.members.length === 3;
+      }, 15_000);
+      await waitForSameState(first, spare);
+
+      // The leader breaks too, and the spare takes the lead: the other laptop restarts until it does.
+      await killServer(first);
+      let follower = other;
+      for (let attempt = 0; ; attempt += 1) {
+        await waitFor(async () => (await leaderOf([follower, spare])) !== null, 15_000);
+        if ((await leaderOf([follower, spare])) === spare) break;
+        assert.ok(attempt < 5, 'the spare never took the lead');
+        await killServer(follower);
+        follower = await startServer({ port: follower.port, dataPath: follower.dataPath, name: follower.name });
+        servers.push(follower);
+      }
+
+      // The spare, leading, takes the broken leader out; the first removal must survive that write.
+      await waitFor(async () =>
+        Boolean((await fetchStatus(spare)).members.find((member) => member.hostId === firstId)?.removable)
+      );
+      await client(spare).cluster.removeMember.mutate({ hostId: firstId });
+      await waitFor(async () => (await fetchStatus(follower)).members.length === 2);
+
+      // The laptop taken out first comes back: it is still refused, and says why.
+      const returned = await startServer({ port: broken.port, dataPath: broken.dataPath, name: 'LAPTOP-C' });
+      servers.push(returned);
+      await waitFor(async () => (await fetchStatus(returned)).removedFrom !== null, 15_000);
+      assert.equal((await fetchStatus(returned)).writable, false);
+      for (const server of [spare, follower]) {
+        assert.equal(
+          (await fetchStatus(server)).members.some((member) => member.hostId === brokenId),
+          false
+        );
+      }
+    } catch (error) {
+      throw withServerOutput(error, ...servers);
+    } finally {
+      await Promise.all(servers.map(stopServer));
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
+);
+
 test('Koppelen right after the leader died waits for the new leader and links', { timeout: 60_000 }, async () => {
   const root = testRoot('join-takeover');
   const servers: RunningServer[] = [];

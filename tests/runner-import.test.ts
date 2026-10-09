@@ -320,6 +320,7 @@ test('lap times typed in Excel as 1:20 import as 1 minute 20, like the CSV of th
       ['runner_number', 'name', 'historical_avg', 'historical_best'].map((value) => ({ value })),
       [{ value: 1 }, { value: 'Anna Peeters' }, excelTime(1, 20, 0, 'h:mm'), excelTime(1, 15, 0, 'h:mm')],
       [{ value: 2 }, { value: 'Bert Claes' }, excelTime(0, 1, 20, 'h:mm:ss'), excelTime(0, 1, 15, 'h:mm:ss')],
+      [{ value: 3 }, { value: 'Cas Jacobs' }, excelTime(0, 1, 0, 'h:mm:ss'), excelTime(0, 2, 0, 'h:mm:ss')],
     ]).toBuffer();
 
     await caller.runners.importXlsx({ dataBase64: plainList.toString('base64') });
@@ -328,15 +329,18 @@ test('lap times typed in Excel as 1:20 import as 1 minute 20, like the CSV of th
     assert.equal(runners.get('Anna Peeters')?.historicalBestMs, 75_000);
     assert.equal(runners.get('Bert Claes')?.historicalAvgMs, 80_000);
     assert.equal(runners.get('Bert Claes')?.historicalBestMs, 75_000);
+    // Typed as 0:01:00, a whole minute stays a minute.
+    assert.equal(runners.get('Cas Jacobs')?.historicalAvgMs, 60_000);
+    assert.equal(runners.get('Cas Jacobs')?.historicalBestMs, 120_000);
 
     // A form answer that the sheet turned into a time still reads as it was typed.
     const formSheet = await writeXlsxFile([
       ['E-mailadres', 'Voornaam + naam', 'Wat was de tijd van jouw snelste ronde?'].map((value) => ({ value })),
-      [{ value: 'cas@example.org' }, { value: 'Cas Jacobs' }, excelTime(1, 20, 0, 'h:mm')],
+      [{ value: 'dirk@example.org' }, { value: 'Dirk Maes' }, excelTime(1, 20, 0, 'h:mm')],
     ]).toBuffer();
     await caller.runners.importXlsx({ dataBase64: formSheet.toString('base64') });
-    const cas = db.getAllRunners().find((runner) => runner.name === 'Cas Jacobs');
-    assert.equal((await caller.runners.registrations())[cas!.id]?.fastestLap, '1:20');
+    const dirk = db.getAllRunners().find((runner) => runner.name === 'Dirk Maes');
+    assert.equal((await caller.runners.registrations())[dirk!.id]?.fastestLap, '1:20');
   } finally {
     db.closeDb();
     fs.rmSync(dataPath, { recursive: true, force: true });

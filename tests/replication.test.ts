@@ -208,10 +208,11 @@ test('a follower stores what continues its log and reports a gap or a different 
   db.closeDb();
 });
 
-test('installing a leader image replaces the event data but keeps this laptop identity', async () => {
+test('installing a leader image replaces the event data and the removed laptops but keeps this laptop identity', async () => {
   const db = await freshDatabase();
   const leader = db.hostIdentity();
   db.recordWrite('test.create', () => db.insertRunner({ name: 'From leader', runnerNumber: '1' }));
+  db.recordWrite('cluster.removeMember', () => db.setRemovedMembers(['broken-laptop']));
   const image = db.serializeDatabase();
   const imageHead = db.getLogHead();
 
@@ -219,6 +220,7 @@ test('installing a leader image replaces the event data but keeps this laptop id
   db.setLocalSetting('host_id', 'follower-host');
   db.recordWrite('test.create', () => db.insertRunner({ name: 'Local only', runnerNumber: '2' }));
   db.recordWrite('test.create', () => db.insertRunner({ name: 'Local only too', runnerNumber: '3' }));
+  db.recordWrite('cluster.removeMember', () => db.setRemovedMembers(['stale-laptop']));
 
   const installed = db.installDatabaseImage(image, db.DATABASE_SCHEMA_VERSION);
   assert.equal(installed.clusterId, leader.clusterId);
@@ -228,6 +230,8 @@ test('installing a leader image replaces the event data but keeps this laptop id
     ['From leader']
   );
   assert.deepEqual(db.getLogHead(), imageHead);
+  // A laptop taken out of the group before this one joined stays out when this one leads.
+  assert.deepEqual(db.getRemovedMembers(), ['broken-laptop']);
   assert.throws(() => db.installDatabaseImage(image, db.DATABASE_SCHEMA_VERSION + 1), /schema/);
 
   // The right schema version on an outdated runners table is refused too.

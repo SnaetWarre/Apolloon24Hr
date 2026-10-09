@@ -7,7 +7,7 @@ Beheer › Rondes lists every lap run, newest first, so an operator can fix what
 - `laps-list` shows each lap with its time, runner, lap number and lap time, and a search on number and name that ignores accents, like Wachtrij's: `zoe` finds Zoë and `149 bram` finds Bram with number 149.
 - `laps-flagged` marks laps far from the median (`Veel korter dan gewoonlijk (…). Eén keer te veel gedrukt?`, `Veel langer dan gewoonlijk (…). Wissel gemist?`); `Alleen opvallende rondes (N)` shows only those. With fewer than 5 laps nothing is marked.
 - `laps-move` gives a lap to another runner, with that runner's labels at the lap's start. The dialog's `Loper zoeken` box uses the same search, labels included, and has the cursor when the dialog opens. The split dialog's box has it too.
-- `laps-split` splits a lap in two halves; the first stays with its runner, the second goes to the runner picked (the same one by default). The second half is a guess, so it never flashes as a record on the Buitenscherm.
+- `laps-split` splits a lap in two halves; the first stays with its runner, the second goes to the runner picked (the same one by default). Both halves are a guess (`source: 'split'`), so neither flashes as a record on the Buitenscherm or counts as a record to beat. Split for the same runner, the second half keeps the labels the lap was recorded with, even after the runner's labels changed; only a night team that starts or ends before the middle swaps the speedteam.
 - `laps-delete` removes a lap after a confirmation.
 
 ## How to get to it (user POV)
