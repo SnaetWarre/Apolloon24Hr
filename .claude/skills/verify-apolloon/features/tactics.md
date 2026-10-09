@@ -7,6 +7,7 @@ Tactiek (`/tactics`) plans the race against a lap target. The `Live race & doelv
 - `tactics-goal` sets `Rondes na 24 uur` (at least 1) and stores it in localStorage under `apolloon.kobe-tactics.scenario.v1` as `targetLaps`.
 - `tactics-valid-laps` sets `Rondes voor huidig tempo` (5 to 100), `Kortste (s)` (10 to `Langste`), and `Langste (s)` (`Kortste` to 300).
 - `tactics-hourly-pace` sets the target pace per race hour (30 to 300 s) under the `Doeltempo per uur aanpassen` fold-out, stored as `targetPaces`.
+- `tactics-historical-charts` covers the two scatter charts in `Analyse vorig jaar` that draw a line over their dots. On `Alle teams`, the panel `Alle passages van <team>` shows a dark line for `Lopende mediaan (20)` that follows the blue dots. On `Volgeffect`, the panel `Rondetijd volgens positie tegenover de andere ploeg` shows two straight lines across the chart, `Trend Apolloon` in blue and `Trend VTK` in orange. A legend entry without its line is the bug.
 - `tactics-historical-fields` covers the number fields in `Analyse vorig jaar`, such as `Trage ronde vanaf` (10 to 300) under `Diagnostiek` and the `Rondelengte` in meters under `Raceverloop`.
 
 ## How to get to it (user POV)
@@ -27,6 +28,7 @@ Preconditions:
 - **Hourly pace.** Click the text `Doeltempo per uur aanpassen`, then type into `page.locator('.tactics-hourly-grid input').first()`.
 - **Stored scenario.** `JSON.parse(localStorage.getItem('apolloon.kobe-tactics.scenario.v1'))` has the typed `targetLaps` and `targetPaces[0]`.
 - **Analyse vorig jaar.** `page.getByRole('button', { name: 'Analyse vorig jaar', exact: true })`, then `page.getByRole('button', { name: /^Diagnostiek/ })` for `page.getByLabel('Trage ronde vanaf')`, or `/^Raceverloop/` for `page.locator('.tactics-stat--control input')` (the lap length). After typing `400` there, the stat reads `400 meter per ronde`.
+- **Chart lines.** Click `page.getByRole('button', { name: /^Alle teams/ })` or `/^Volgeffect/`, then find the chart with `page.locator('section.panel', { has: page.getByText(<panel title>) }).locator('canvas')`. Chart.js is bundled, so `Chart.getChart` is out of reach. Instead, wrap `CanvasRenderingContext2D.prototype.stroke` in `page.addInitScript` and record the `strokeStyle` of every stroke that gets a `Path2D` whose coordinates are all finite (see `scripts/validation/tactics-ui.mjs`). The median chart has one such color and the Volgeffect chart has two. Take an element screenshot of the panel to show the lines.
 - **Proof.** `run.proof(page, 'tactics-…')` before and after typing. Nothing goes to the server, so `/api/state` does not change; the localStorage scenario is the side effect.
 
 ## Gotchas
@@ -34,4 +36,5 @@ Preconditions:
 - Type with the real keyboard. `fill()` sets the whole value at once and hides a field that changes the value on each key press.
 - The sub-tab buttons in `Analyse vorig jaar` carry a second line of text, so match their names with a regular expression.
 - `getByText('400 meter per ronde')` also matches a chart description; pass `exact: true`.
-- `scripts/validation/tactics-ui.mjs` (part of `npm run test:ui`) covers these fields.
+- In a `type: 'scatter'` chart, `showLine: true` with `tension` draws nothing: the scatter controller never computes the curve points, so every segment gets empty coordinates. A line dataset there needs `type: 'line'`. The stroke still happens, which is why the check above skips paths with missing coordinates.
+- `scripts/validation/tactics-ui.mjs` (part of `npm run test:ui`) covers these fields and the chart lines.

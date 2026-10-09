@@ -7,6 +7,27 @@ assert.ok(baseUrl && ['127.0.0.1', 'localhost'].includes(new URL(baseUrl).hostna
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const browser = await chromium.launch({ headless: true, executablePath: process.env.CHROMIUM_EXECUTABLE });
 const page = await browser.newPage({ viewport: { width: 1366, height: 768 } });
+// Chart.js strokes each dataset line as one Path2D; points and grid lines are stroked without one.
+// A path with a missing coordinate draws nothing, so only paths with finite coordinates count.
+await page.addInitScript(() => {
+  for (const name of ['lineTo', 'bezierCurveTo']) {
+    const original = Path2D.prototype[name];
+    Path2D.prototype[name] = function (...args) {
+      this.drawable = (this.drawable ?? true) && args.every(Number.isFinite);
+      return original.apply(this, args);
+    };
+  }
+  const lineColors = new WeakMap();
+  const stroke = CanvasRenderingContext2D.prototype.stroke;
+  CanvasRenderingContext2D.prototype.stroke = function (...args) {
+    if (args[0] instanceof Path2D && args[0].drawable) {
+      if (!lineColors.has(this.canvas)) lineColors.set(this.canvas, new Set());
+      lineColors.get(this.canvas).add(String(this.strokeStyle));
+    }
+    return stroke.apply(this, args);
+  };
+  window.chartLineColors = (canvas) => [...(lineColors.get(canvas) ?? [])];
+});
 
 async function typeInto(field, text, leaveWith = 'Tab') {
   await field.click();
@@ -14,6 +35,13 @@ async function typeInto(field, text, leaveWith = 'Tab') {
   await page.keyboard.type(text, { delay: 30 });
   await page.keyboard.press(leaveWith);
   return field.inputValue();
+}
+
+async function chartLineColors(panelTitle) {
+  const canvas = page.locator('section.panel', { has: page.getByText(panelTitle) }).locator('canvas');
+  await canvas.waitFor();
+  await page.waitForTimeout(300);
+  return canvas.evaluate((element) => window.chartLineColors(element));
 }
 
 try {
@@ -60,6 +88,13 @@ try {
   assert.equal(await lapLength.inputValue(), '400');
   await page.getByText('400 meter per ronde', { exact: true }).waitFor();
   console.log('PASS Analyse vorig jaar number fields keep the number typed');
+
+  // The scatter charts draw a line over their dots: the rolling median and one trend per team.
+  await page.getByRole('button', { name: /^Alle teams/ }).click();
+  assert.equal((await chartLineColors(/^Alle passages van/)).length, 1);
+  await page.getByRole('button', { name: /^Volgeffect/ }).click();
+  assert.equal((await chartLineColors('Rondetijd volgens positie tegenover de andere ploeg')).length, 2);
+  console.log('PASS Analyse vorig jaar draws the rolling median and the Volgeffect trend lines');
 } finally {
   await browser.close();
 }

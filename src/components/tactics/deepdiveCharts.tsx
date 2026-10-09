@@ -949,6 +949,7 @@ function xySeries(
     backgroundColor: color,
     borderWidth,
     borderDash,
+    type: 'line' as const,
     pointRadius: 0,
     pointHoverRadius: 5,
     tension: 0.2,
