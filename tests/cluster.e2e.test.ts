@@ -707,6 +707,36 @@ test(
   }
 );
 
+test('Koppelen right after the leader died waits for the new leader and links', { timeout: 60_000 }, async () => {
+  const root = testRoot('join-takeover');
+  const servers: RunningServer[] = [];
+  try {
+    await startGroup(root, servers);
+    const spare = await startServer({ port: await freePort(), dataPath: path.join(root, 'd'), name: 'LAPTOP-D' });
+    servers.push(spare);
+    const leader = (await leaderOf(servers))!;
+    const follower = servers.find((server) => server !== leader && server !== spare)!;
+    await client(leader).runners.create.mutate({ name: 'Before', runnerNumber: 'T-1' });
+    await waitForSameState(leader, follower);
+
+    // Pressed once, without trying again: the follower still names the dead laptop as its leader.
+    await killServer(leader);
+    await client(spare).cluster.join.mutate({ url: follower.baseUrl });
+    await waitForSameState(follower, spare, 15_000);
+    assert.deepEqual(
+      (await fetchState(spare)).runners.map((runner) => runner.name),
+      ['Before']
+    );
+    const spareId = (await fetchStatus(spare)).hostId;
+    assert.ok((await fetchStatus(follower)).members.some((member) => member.hostId === spareId));
+  } catch (error) {
+    throw withServerOutput(error, ...servers);
+  } finally {
+    await Promise.all(servers.map(stopServer));
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test(
   'Activiteit lists each laptop that links, drops out and comes back, once, on every laptop',
   { timeout: 60_000 },

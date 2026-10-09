@@ -798,20 +798,26 @@ export async function joinGroup(rawUrl: string, options: JoinOptions = {}): Prom
   startJoining();
   let joined: Parameters<typeof finishJoining>[0] = null;
   try {
-    const leader = status.leader;
-    if (!leader) throw new Error('Die laptops kiezen net een hoofdlaptop. Probeer het zo opnieuw.');
-    const leaderUrl = leader.hostId === status.hostId ? url : leader.url;
-    const response = await peerFetch(`${leaderUrl}/api/cluster/members`, {
-      method: 'POST',
-      body: { ...selfMember(), autoLinkedWith: options.autoLinkedWith },
-      timeoutMs: 10_000,
-    });
-    if (!response.ok) throw new Error((await readPeerError(response)).error || 'Koppelen mislukt.');
-    const { term } = z.object({ term: z.number().int().nonnegative() }).parse(await response.json());
-    await resyncFrom(leaderUrl, 'pre-join');
-    joined = { term, leader: { hostId: leader.hostId, url: leaderUrl } };
-    lastError = null;
-    return { backupFile: backupStatus().latest?.fileName ?? null };
+    // A takeover in that group (a laptop just broke) is waited out like a write, then the join goes to the new leader.
+    const deadline = writeDeadline();
+    let group: { url: string; status: ClusterStatus } | null = { url, status };
+    for (;;) {
+      const leader = group?.status.leader;
+      if (group && leader) {
+        const leaderUrl = leader.hostId === group.status.hostId ? group.url : leader.url;
+        const term = await joinThrough(leaderUrl, options.autoLinkedWith);
+        if (term !== null) {
+          joined = { term, leader: { hostId: leader.hostId, url: leaderUrl } };
+          lastError = null;
+          return { backupFile: backupStatus().latest?.fileName ?? null };
+        }
+      }
+      if (performance.now() >= deadline) {
+        throw new Error('Die laptops kiezen net een hoofdlaptop. Probeer het zo opnieuw.');
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      group = await groupStatus(url, status);
+    }
   } finally {
     finishJoining(joined);
     joining = false;
@@ -825,6 +831,47 @@ export async function joinGroup(rawUrl: string, options: JoinOptions = {}): Prom
       }
     }
   }
+}
+
+/**
+ * Asks the leader at `leaderUrl` to take this laptop in, then copies its data.
+ * Returns the leader's term, or null when that laptop no longer leads or does
+ * not answer, so the join can go to the next leader.
+ */
+async function joinThrough(leaderUrl: string, autoLinkedWith?: string): Promise<number | null> {
+  const response = await peerFetch(`${leaderUrl}/api/cluster/members`, {
+    method: 'POST',
+    body: { ...selfMember(), autoLinkedWith },
+    // A leader answers at once; one that froze or lost power is given up on quickly, as asking twice is harmless.
+    timeoutMs: 3_000,
+  }).catch(() => null);
+  if (!response) return null;
+  if (!response.ok) {
+    const refusal = await readPeerError(response);
+    if (refusal.code === 'not_leader') return null;
+    throw new Error(refusal.error || 'Koppelen mislukt.');
+  }
+  const { term } = z.object({ term: z.number().int().nonnegative() }).parse(await response.json());
+  try {
+    await resyncFrom(leaderUrl, 'pre-join');
+  } catch (error) {
+    // Only a copy that failed because that laptop stopped leading is tried again.
+    const still = await fetchStatus(leaderUrl).catch(() => null);
+    if (still?.role === 'leader' && !still.busy) throw error;
+    return null;
+  }
+  return term;
+}
+
+/** The status of the group `known` belongs to, from the laptop at `url` or else another laptop of that group. */
+async function groupStatus(url: string, known: ClusterStatus): Promise<{ url: string; status: ClusterStatus } | null> {
+  const self = hostIdentity().hostId;
+  const others = known.members.filter((member) => member.hostId !== self && member.url !== url);
+  for (const candidate of [url, ...others.map((member) => member.url)]) {
+    const status = await fetchStatus(candidate).catch(() => null);
+    if (status?.clusterId === known.clusterId && status.leader) return { url: candidate, status };
+  }
+  return null;
 }
 
 /**
