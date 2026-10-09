@@ -116,11 +116,20 @@ try {
   const beforeFinishClick = Date.now();
   await page.getByRole('button', { name: 'Race beëindigen', exact: true }).click();
   await page.waitForTimeout(1_000);
-  await page.getByRole('button', { name: 'Verder', exact: true }).click();
-  await page.getByRole('button', { name: 'Race definitief beëindigen' }).click();
+  // The final confirm appears where "Verder" was; a double click on "Verder" must not end the race.
+  const nextBox = await finishDialog.getByRole('button', { name: 'Verder', exact: true }).boundingBox();
+  await page.mouse.click(nextBox.x + nextBox.width / 2, nextBox.y + nextBox.height / 2);
+  await page.waitForTimeout(150);
+  await page.mouse.click(nextBox.x + nextBox.width / 2, nextBox.y + nextBox.height / 2);
+  await page.waitForTimeout(1_000);
+  assert.equal((await snapshot()).race.raceFinishedAt, null, 'A double click on Verder ends the race');
+  await finishDialog.getByRole('heading', { name: 'Definitief afsluiten', exact: true }).waitFor();
+  await finishDialog.getByRole('button', { name: 'Race definitief beëindigen' }).click();
   await page.getByRole('button', { name: 'Race hervatten' }).waitFor();
   assert.ok((await snapshot()).race.raceFinishedAt < beforeFinishClick + 900, 'The race ends at the first click');
-  console.log('PASS the first finish click stops the clock and cancelling resumes it');
+  console.log(
+    'PASS the first finish click stops the clock, cancelling resumes it, and a double click cannot end the race'
+  );
   const tv = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
   for (const route of ['/display/outside', '/display/inside']) {
     await tv.goto(`${baseUrl}${route}`);

@@ -16,6 +16,8 @@ import { LIVE_MILLISECOND_INTERVAL_MS, useClockTick } from '../lib/useClockTick'
 import { isConnectionError } from '../lib/connectionError';
 
 const selectTimingData = ({ runners, race }: LiveAppSnapshot) => ({ runners, race });
+// Windows counts two clicks up to 500 ms apart as a double click.
+const FINISH_CONFIRM_DELAY_MS = 500;
 
 export function TimingView() {
   const { runners, race } = useAppData(selectTimingData);
@@ -33,6 +35,16 @@ export function TimingView() {
   const [finishConfirmStep, setFinishConfirmStep] = React.useState<0 | 1 | 2>(0);
   // The first "Race beëindigen" click stops the clock; the confirmations only decide whether it counts.
   const [finishStop, setFinishStop] = React.useState<{ press: PressTime; activeStartedAt: number | null } | null>(null);
+  // The final confirm sits where "Verder" was, so it waits out the second click of a double click.
+  const [finishConfirmReady, setFinishConfirmReady] = React.useState(false);
+  React.useEffect(() => {
+    if (finishConfirmStep !== 2) return;
+    const timer = window.setTimeout(() => setFinishConfirmReady(true), FINISH_CONFIRM_DELAY_MS);
+    return () => {
+      window.clearTimeout(timer);
+      setFinishConfirmReady(false);
+    };
+  }, [finishConfirmStep]);
   // The screen shows a handoff the moment it is pressed; the server's answer then confirms it.
   const [pressedHandoff, setPressedHandoff] = React.useState<{
     fromStartedAt: number | null;
@@ -532,7 +544,11 @@ export function TimingView() {
                   <button className="btn" onClick={cancelFinish} disabled={handoffBusy}>
                     Annuleer
                   </button>
-                  <button className="btn btn--danger" onClick={() => void finish()} disabled={handoffBusy}>
+                  <button
+                    className="btn btn--danger"
+                    onClick={() => void finish()}
+                    disabled={handoffBusy || !finishConfirmReady}
+                  >
                     Race definitief beëindigen
                   </button>
                 </div>
