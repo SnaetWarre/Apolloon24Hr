@@ -6,6 +6,7 @@
 
 html {
   -webkit-text-size-adjust: 100%;
+  overflow-wrap: break-word;
 }
 
 body {
@@ -62,7 +63,7 @@ strong, b {
 }
 
 ::selection {
-  background: color-mix(in srgb, var(--brand) 30%, transparent);
+  background: color-mix(in oklch, var(--brand) 30%, transparent);
 }
 
 [hidden] {

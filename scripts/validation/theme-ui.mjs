@@ -14,7 +14,14 @@ const theme = (page) =>
   page.evaluate(() => ({
     theme: document.documentElement.dataset.theme ?? null,
     stored: localStorage.getItem('apolloon.theme'),
-    background: getComputedStyle(document.body).backgroundColor,
+    // The stylesheet writes oklch(); a canvas pixel gives the sRGB colour on screen.
+    background: (() => {
+      const context = document.createElement('canvas').getContext('2d');
+      context.fillStyle = getComputedStyle(document.body).backgroundColor;
+      context.fillRect(0, 0, 1, 1);
+      const [red, green, blue] = context.getImageData(0, 0, 1, 1).data;
+      return `rgb(${red}, ${green}, ${blue})`;
+    })(),
   }));
 
 try {

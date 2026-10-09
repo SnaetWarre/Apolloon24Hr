@@ -3,12 +3,15 @@
  * Light is a neutral daylight theme; dark is a charcoal night theme
  * (no blue tint, no pure black) for long shifts.
  * Public displays define their own fixed palettes in displays.css.
+ * Colours are oklch, except the tokens src/lib/chartPalette.ts hands to Chart.js
+ * (--surface, --surface-2, --ink, --line-2, --chart-*, --series-*): its colour
+ * parser cannot read oklch(), so those stay hex.
  */
 :root {
   --font-body: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-display: var(--font-body);
 
-  --apolloon-blue: #0D78D3;
+  --apolloon-blue: oklch(56.81% 0.1641 251.76);
 
   --space-1: 4px;
   --space-2: 8px;
@@ -42,42 +45,42 @@
 :root,
 :root[data-theme="light"] {
   color-scheme: light;
-  --bg: #F7F7F8;
-  --sidebar: #F0F0F2;
+  --bg: oklch(97.6% 0.001 286.4);
+  --sidebar: oklch(95.6% 0.003 286.3);
   --surface: #FFFFFF;
   --surface-2: #F4F4F5;
-  --surface-3: #E8E8EB;
+  --surface-3: oklch(93.2% 0.004 286.3);
   --ink: #18181B;
-  --ink-2: #52525B;
-  --ink-3: #71717A;
-  --line: #E4E4E7;
+  --ink-2: oklch(44.2% 0.015 285.8);
+  --ink-3: oklch(55.2% 0.014 285.9);
+  --line: oklch(92% 0.004 286.3);
   --line-2: #D4D4D8;
 
   --brand: var(--apolloon-blue);
-  --brand-hover: #0B69B9;
-  --brand-ink: #0A62AE;
-  --brand-wash: #EBF4FD;
-  --on-brand: #FFFFFF;
-  --focus: #0D78D3;
+  --brand-hover: oklch(51.6% 0.148 251.6);
+  --brand-ink: oklch(49.23% 0.1419 251.85);
+  --brand-wash: oklch(96.3% 0.015 248);
+  --on-brand: oklch(100% 0 none);
+  --focus: oklch(56.81% 0.1641 251.76);
 
-  --go: #15803D;
-  --go-ink: #166534;
-  --go-wash: #EEF8F1;
-  --go-line: #BFE3CB;
-  --warn: #C2680B;
-  --warn-ink: #92400E;
-  --warn-wash: #FDF6EA;
-  --warn-line: #F1D5A8;
-  --stop: #DC2626;
-  --stop-ink: #B91C1C;
-  --stop-wash: #FDF0F0;
-  --stop-line: #F4C4C4;
+  --go: oklch(52.7% 0.137 150.1);
+  --go-ink: oklch(44.79% 0.1083 151.33);
+  --go-wash: oklch(97% 0.014 155.6);
+  --go-line: oklch(88.3% 0.05 156.1);
+  --warn: oklch(60.95% 0.1447 56.74);
+  --warn-ink: oklch(47.32% 0.1247 46.2);
+  --warn-wash: oklch(97.5% 0.018 81.3);
+  --warn-line: oklch(88.5% 0.066 79.5);
+  --stop: oklch(57.7% 0.215 27.3);
+  --stop-ink: oklch(50.5% 0.19 27.5);
+  --stop-wash: oklch(96.5% 0.014 17.4);
+  --stop-line: oklch(86.2% 0.055 18.3);
 
-  --overlay: rgb(24 24 27 / 0.4);
-  --shadow-overlay: 0 16px 48px rgb(24 24 27 / 0.16), 0 0 0 1px rgb(24 24 27 / 0.04);
-  --shadow-drag: 0 8px 24px rgb(24 24 27 / 0.14);
-  --shadow-xs: 0 1px 2px rgb(24 24 27 / 0.05);
-  --shadow-header: 0 10px 24px -16px rgb(24 24 27 / 0.35);
+  --overlay: oklch(21% 0.006 285.9 / 0.4);
+  --shadow-overlay: 0 16px 48px oklch(21% 0.006 285.9 / 0.16), 0 0 0 1px oklch(21% 0.006 285.9 / 0.04);
+  --shadow-drag: 0 8px 24px oklch(21% 0.006 285.9 / 0.14);
+  --shadow-xs: 0 1px 2px oklch(21% 0.006 285.9 / 0.05);
+  --shadow-header: 0 10px 24px -16px oklch(21% 0.006 285.9 / 0.35);
 
   --chart-text: #52525B;
   --chart-muted: #71717A;
@@ -94,42 +97,42 @@
 
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --bg: #1A1A1A;
-  --sidebar: #151515;
+  --bg: oklch(21.8% 0 none);
+  --sidebar: oklch(19.6% 0 none);
   --surface: #212121;
   --surface-2: #272727;
-  --surface-3: #303030;
+  --surface-3: oklch(30.9% 0 none);
   --ink: #ECECEC;
-  --ink-2: #A3A3A3;
-  --ink-3: #8C8C8C;
-  --line: #2E2E2E;
+  --ink-2: oklch(71.5% 0 none);
+  --ink-3: oklch(64% 0 none);
+  --line: oklch(30.1% 0 none);
   --line-2: #3D3D3D;
 
   --brand: var(--apolloon-blue);
-  --brand-hover: #1784E0;
-  --brand-ink: #5AA9F0;
-  --brand-wash: #172636;
-  --on-brand: #FFFFFF;
-  --focus: #5AA9F0;
+  --brand-hover: oklch(60.5% 0.166 250.7);
+  --brand-ink: oklch(71.5% 0.13 247.8);
+  --brand-wash: oklch(26.3% 0.036 250.9);
+  --on-brand: oklch(100% 0 none);
+  --focus: oklch(71.5% 0.13 247.8);
 
-  --go: #3FB950;
-  --go-ink: #56D364;
-  --go-wash: #16261B;
-  --go-line: #22462B;
-  --warn: #D29922;
-  --warn-ink: #E3B341;
-  --warn-wash: #2A2314;
-  --warn-line: #574519;
-  --stop: #F85149;
-  --stop-ink: #FF7B72;
-  --stop-wash: #2E1B1B;
-  --stop-line: #5E2A28;
+  --go: oklch(69.5% 0.181 145.6);
+  --go-ink: oklch(77.2% 0.188 145.5);
+  --go-wash: oklch(25% 0.03 153.7);
+  --go-line: oklch(35.9% 0.063 150.3);
+  --warn: oklch(71.96% 0.1401 79.91);
+  --warn-ink: oklch(79.04% 0.1386 85.24);
+  --warn-wash: oklch(26% 0.028 85.5);
+  --warn-line: oklch(40% 0.065 86.6);
+  --stop: oklch(66.5% 0.205 27);
+  --stop-ink: oklch(73.4% 0.163 25.8);
+  --stop-wash: oklch(24.7% 0.03 19.5);
+  --stop-line: oklch(35.6% 0.077 23.9);
 
-  --overlay: rgb(0 0 0 / 0.55);
-  --shadow-overlay: 0 16px 48px rgb(0 0 0 / 0.5), 0 0 0 1px rgb(255 255 255 / 0.04);
-  --shadow-drag: 0 8px 24px rgb(0 0 0 / 0.5);
+  --overlay: oklch(0% 0 none / 0.55);
+  --shadow-overlay: 0 16px 48px oklch(0% 0 none / 0.5), 0 0 0 1px oklch(100% 0 none / 0.04);
+  --shadow-drag: 0 8px 24px oklch(0% 0 none / 0.5);
   --shadow-xs: none;
-  --shadow-header: 0 10px 24px -16px rgb(0 0 0 / 0.9);
+  --shadow-header: 0 10px 24px -16px oklch(0% 0 none / 0.9);
 
   --chart-text: #BDBDBD;
   --chart-muted: #8C8C8C;
