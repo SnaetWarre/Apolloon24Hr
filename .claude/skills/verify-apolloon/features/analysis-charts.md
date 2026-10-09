@@ -1,14 +1,14 @@
 # Analyse › Grafieken
 
-The `Wedstrijd` tab in Analyse shows charts of the laps in the current label selection. When a chart has nothing to draw, it says why: `Geen rondes binnen deze selectie.` while at least one label is on, and `Zet minstens een ploeg aan om de grafiek te tonen.` only on `Rondes en tempo per uur` when every label is off.
+The `Wedstrijd` tab in Analyse shows charts of the laps in the current label selection. When `Rondes en tempo per uur` has nothing to draw, it says why: `Geen rondes binnen deze selectie.` while at least one label is on, and `Zet minstens een ploeg aan om de grafiek te tonen.` when every label is off. `Rondetijd over de race` says `Geen rondes binnen deze selectie.` in both cases.
 
 ## Sub-features
 
-- `analysis-pace-empty` shows `Geen rondes binnen deze selectie.` in `Rondes en tempo per uur` before the first lap or when the labels that are on have no laps, and asks to turn a label on only after `Alles uit`.
+- `analysis-pace-empty` shows `Geen rondes binnen deze selectie.` in `Rondes en tempo per uur` before the first lap or when the labels that are on have no laps, and asks to turn a label on once every label is off, through `Alles uit` or one switch at a time.
 
 ## How to get to it (user POV)
 
-- Sidebar `Analyse` (`/analysis`). The `Wedstrijd` tab is open by default; the charts sit below the eight stat tiles.
+- Sidebar `Analyse` (`/analysis`), or the `Naar Analyse` link on Overzicht. The `Wedstrijd` tab is open by default; the charts sit below the eight stat tiles.
 - The `Labels` panel on the left, with `Alles aan`, `Alles uit`, and one switch per label.
 
 ## Driving it with drive.mjs
@@ -20,7 +20,7 @@ Preconditions:
 - **Open the page.** `await page.goto(run.url('/analysis'))`, then wait for `page.locator('section.analysis-pace-panel').getByRole('heading', { name: 'Rondes en tempo per uur' })`.
 - **Count the labels that are on.** The switches are buttons, not `role=switch`: `page.locator('.label-toggle-row')` and `.label-toggle-row[aria-pressed="true"]`. On a fresh page every one is on.
 - **No laps, labels on.** The pace panel's text includes `Geen rondes binnen deze selectie.` and not `Zet minstens een ploeg aan…`.
-- **Every label off.** `page.getByRole('button', { name: 'Alles uit', exact: true }).click()`. The pace panel then shows `Zet minstens een ploeg aan om de grafiek te tonen.`. `Alles aan` brings back `Geen rondes binnen deze selectie.`.
+- **Every label off.** `page.getByRole('button', { name: 'Alles uit', exact: true }).click()`. The pace panel then shows `Zet minstens een ploeg aan om de grafiek te tonen.`, and `.analysis-trend-panel` still shows `Geen rondes binnen deze selectie.` `Alles aan` brings back `Geen rondes binnen deze selectie.` Clicking every `.label-toggle-row` off by hand gives the same message as `Alles uit`.
 - **Proof.** `run.proof(page, 'analysis-pace-empty-…')` before and after each click.
 
 ## Gotchas

@@ -7,7 +7,7 @@ Beheer › Ploegen & labels plans temporary night teams. The operator creates a 
 - `night-teams-create` creates a team with the form above the cards and `Ploeg aanmaken en plannen`.
 - `night-teams-members` edits who is in a team in the `Ledenlijst beheren` dialog. Its search box has the cursor when the dialog opens.
 - `night-teams-schedule` changes the start and end with `Planning aanpassen`. The `Begin` field has the cursor when the form opens.
-- `night-teams-active` switches a team without a plan with `Activeren` or `Deactiveren`.
+- `night-teams-active` switches a team without a plan with `Activeren` or `Deactiveren`, after the question `<naam> activeren?`. While it is on, the team's label replaces its members' speedteam label. A team with a plan has no such button: its times decide.
 
 ## How to get to it (user POV)
 
@@ -18,13 +18,17 @@ Beheer › Ploegen & labels plans temporary night teams. The operator creates a 
 Preconditions:
 
 - A run with `--scenario=ready`. It has no night team, so create one in setup: `run.rpc().temporaryTeams.create.mutate({ name: 'Testploeg', color: '#7c3aed', startsAt: Date.now() + 3600_000, endsAt: Date.now() + 7200_000, runnerIds: [state.runners[0].id] })`.
+- `temporaryTeams.create` and the form always set a plan, so for `night-teams-active` make a team without one in setup: `const label = await run.rpc().labels.create.mutate({ name: 'Handploeg', color: '#db2777', kind: 'temporary_team' })`, then `run.rpc().temporaryTeams.setMembers.mutate({ labelId: label.id, runnerIds: [id] })` with a runner who has a speedteam label.
 
 - **Open.** `await page.goto(run.url('/admin?section=labels'))`. The team's card shows `Ledenlijst beheren` and `Planning aanpassen`.
-- **Members.** Click `page.getByRole('button', { name: 'Ledenlijst beheren', exact: true })`. Typing with `page.keyboard.type(...)` lands in the `Zoek op nummer, naam of speedteam...` box. Click `Voeg toe` on a runner, then `Ledenlijst opslaan (N)`. The team's `memberRunnerIds` in `/api/state` holds the runner.
-- **Schedule.** Click `Planning aanpassen`. `document.activeElement` is the `Begin` field (`type="datetime-local"`). Change the times and click `Planning opslaan`. The team's `startsAt` and `endsAt` change in `/api/state`.
+- **Members.** Click `page.getByRole('button', { name: 'Ledenlijst beheren', exact: true })`; dialog `Ledenlijst <naam>` opens. Typing with `page.keyboard.type(...)` lands in the `Zoek op nummer, naam of speedteam...` box. Click `Voeg toe` on a runner, then `Ledenlijst opslaan (N)`. The team's `memberRunnerIds` in `/api/state` holds the runner.
+- **Schedule.** Click `Planning aanpassen`. `document.activeElement` is the `Begin` field (`type="datetime-local"`). Change the times with `fill('2026-10-10T01:00')` on `getByLabel('Begin', { exact: true })` and `getByLabel('Einde', { exact: true })`, and click `Planning opslaan`. The team's `startsAt` and `endsAt` change in `/api/state`.
+- **Switch on.** On the `Handploeg` card click `Activeren`, then `Activeren` in dialog `Handploeg activeren?`. The team is `active: true` in `/api/state` and the member's `labels` hold `Handploeg` instead of their speedteam. `Deactiveren` gives the speedteam back.
 - **Proof.** `run.proof(page, 'night-teams-…')` after each step.
 
 ## Gotchas
 
+- `/api/state` `temporaryTeams` entries have a `labelId`, no name. Find the team through `labels` by name.
+- The heading `Tijdelijke nachtploegen` is on the page twice (the panel and a group in the labels list). Use `.first()`.
 - A runner can be in only one night team. Creating a second team with the same runner fails with `Een loper kan maar in een tijdelijke nachtploeg zitten`, and two teams cannot share a name.
 - When the members search finds nobody, the search box stretches to fill the column. That is an old layout problem, not a failed search.

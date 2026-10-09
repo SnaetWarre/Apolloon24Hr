@@ -54,6 +54,7 @@ export async function openRun(runName = process.env.APOLLOON_VERIFY_RUN) {
     async api(route, laptop = 0) {
       const response = await fetch(`${state.laptops[laptop].url}${route}`);
       if (!response.ok) throw new Error(`${route} answered ${response.status}`);
+      if (route.includes('.xlsx')) return Buffer.from(await response.arrayBuffer());
       return route.includes('.csv') ? response.text() : response.json();
     },
     /** tRPC client for SETUP only (moving runners into position). Never use it for the action you prove. */
