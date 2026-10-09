@@ -11,7 +11,7 @@ Wachtrij (Telsysteem 1) is the queue desk. Imported runners stay `Ingeschreven` 
 - `queue-autofocus`: `Loper zoeken` opens with the cursor in its search box and `Nieuwe loper` in `Lopersnummer`. Opening `Contact en beschikbaarheid` moves it to `Telefoon`, and `Extra gegevens` to the minutes of `Historisch gemiddelde`. See Autofocus in `README.md`.
 - `queue-move` moves a runner with `Naar wachtrij` (to Klaar om te lopen) and `Opwarmen` (back).
 - `queue-filter` filters the board with `Filter dit bord` and clears it with `Filter wissen`.
-- `queue-profile` opens a runner's profile by clicking their name on the board.
+- `queue-profile` opens a runner's profile by clicking their name on the board, or with `Profiel` next to a runner in the `Loper zoeken` dialog.
 - `queue-scroll` scrolls the page with the mouse wheel over a lane once that lane is at the end of its list, down to `Nu beschikbaar, nog niet opgeroepen`.
 
 ## How to get to it (user POV)
@@ -33,7 +33,7 @@ Preconditions:
 - **New runner.** Click `Nieuwe loper`. In `page.getByRole('dialog', { name: 'Nieuwe loper' })` fill textboxes `Lopersnummer` and `Naam`, then click `Toevoegen aan opwarmen`. The runner appears in the Opwarming region and in `/api/state` with status `warming_up`.
 - **Move to the queue.** Find the row: `page.locator('.queue-runner').filter({ has: page.locator('button.queue-identity').filter({ hasText: name }) })`. Click its `Naar wachtrij` button. The row appears in `Klaar om te lopen` and the status becomes `waiting`. Its `Opwarmen` button moves it back.
 - **Filter.** Fill `page.getByRole('searchbox', { name: 'Filter dit bord' })` with part of a name; only matching rows stay. Click `Filter wissen`; the searchbox is empty.
-- **Profile.** Click `button.queue-identity` with the runner's name. Dialog `Lopersprofiel` shows textboxes `Naam` and `Notities` and a `Opslaan` button.
+- **Profile.** Click `button.queue-identity` with the runner's name. Dialog `Lopersprofiel` shows textboxes `Naam` and `Notities` and a `Opslaan` button. Wait until `Naam` holds the runner's name before you type or press Escape (see Gotchas).
 - **Scroll.** Move the mouse to the middle of a lane's region and call `page.mouse.wheel(0, 400)` about 20 times with a short `waitForTimeout(120)` between them, so each turn is a new gesture. `window.scrollY` grows past 0 and the summary `.available-now > summary` comes on screen. Do it over both lanes.
 - **Proof.** `run.proof(page, 'queue-…')` before and after each move, and quote the runner's `status` from `/api/state`.
 
@@ -42,4 +42,5 @@ Preconditions:
 - Queue moves show at once and reach the server in click order. The board is not proof; wait until `/api/state` shows the new status.
 - Each runner row is a drag button named `Verplaats <name>`. To reach the buttons inside a row, scope with `.queue-runner` and `button.queue-identity` as above.
 - Escape closes the search dialog; the check-in still counts.
+- For one frame after the profile opens, its fields are still empty and the form counts as changed. An Escape in that frame asks `Wijzigingen opslaan?` instead of closing. A person never presses that fast, but a script does.
 - The `Nu beschikbaar` panel depends on the Brussels clock and the runners' registration hours, so its contents change with the time of day.

@@ -22,7 +22,8 @@ Preconditions:
 - `verify.mjs up --run=desk --port=5173`, `npm run electron:compile`, then `verify.mjs electron --run=desk`, which prints `ELECTRON run=desk … cdp=…`.
 
 - **Attach.** `const page = await run.electronPage()`. `page.url()` is `http://127.0.0.1:5173/` and `await page.evaluate(() => Object.keys(window.apolloonDesktop))` lists the six bridge keys.
-- **Title bar.** `page.locator('.titlebar').getByRole('button')` lists `Apolloon, naar het overzicht`, `Minimaliseren`, `Maximaliseren`, and `Sluiten`. `run.proof(page, 'desktop-titlebar')`; the screenshot shows the logo bar above the sidebar.
+- **Title bar.** `page.locator('.titlebar').getByRole('button')` lists `Apolloon, naar het overzicht`, `Minimaliseren`, `Maximaliseren`, and `Sluiten`. `run.proof(page, 'desktop-titlebar')`; the screenshot shows the logo bar above the sidebar. Clicking the logo opens `/`.
+- **Close question.** Not reachable from this helper. While a race runs, `Sluiten` or closing the window asks `Apolloon afsluiten?` (`Blijven` or `Toch afsluiten`) in a native dialog on the user's real screen. Report it as unreachable with that reason.
 - **Fullscreen.** Not reachable from this helper. Only a real F11 key that reaches the window toggles it. `page.keyboard.press('F11')` and a raw CDP `Input.dispatchKeyEvent` both leave `window.apolloonDesktop.window.getState()` at `fullscreen: false`, and Electron has no CDP `Browser.setWindowBounds`. Report it as unreachable with that reason.
 - **Installation panel.** `await page.goto('http://127.0.0.1:5173/admin?section=system')`. The panel `Over deze installatie` shows `Apolloon 0.0.0-dev` (a verify run sets no app version), the data folder inside `.tmp-verify/<run>/electron-profile`, and `Controleren op een nieuwere versie…` with a disabled `Bezig…` button, because the helper turns the update check off. Do not click `Logmap openen`: it opens a file manager on the user's screen.
 

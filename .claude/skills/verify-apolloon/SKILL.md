@@ -91,11 +91,11 @@ What the library gives you:
 
 - `run.newPage({ laptop, electron, viewport })` opens a page. Pass `electron: true` to send the Electron user agent. Only failover reads it: a browser moves to another laptop, the Electron app stays on its own. Desktop-only panels need the real bridge from `run.electronPage()`, not the user agent.
 - `run.electronPage()` returns the page inside the real desktop window started by `verify.mjs electron`. `window.apolloonDesktop.window.*` can be called through `page.evaluate`. `maximize()` never fires its event on this Hyprland desktop, and fullscreen only follows a real F11 key, which the headless window never gets (see `features/desktop-window.md`).
-- `run.api(route, laptop)` reads `/api/state`, `/api/history?scope=full`, `/api/cluster/status`, `/api/health`, `/api/registrations`, or `/api/export/*`.
+- `run.api(route, laptop)` reads `/api/state`, `/api/history?scope=full`, `/api/cluster/status`, `/api/health`, `/api/registrations`, or `/api/export/*`. It returns JSON, the text of a `.csv`, and a `Buffer` for `race.xlsx`. `/api/state` can lag the screen by about 250 ms, so poll it until the change shows instead of reading it once.
 - `run.rpc(laptop)` is a tRPC client. Use it only to put the app into the state a check needs (for example moving runners to `waiting`), never for the action you are proving.
 - `run.note(text)` appends a line to the evidence folder's `actions.log`.
 
-Handles: prefer `getByRole` with the Dutch accessible name and `exact: true`, as `scripts/validation/*.mjs` do. Main ones: sidebar links `Overzicht`, `Wachtrij`, `Timing`, `Analyse`, `Tactiek`, `Binnenscherm`, `Buitenscherm`, `Beheer` inside navigation `Hoofdnavigatie`; Beheer tabs open directly with `/admin?section=preparation|runners|labels|public|activity|system`. Wait for a role or text, never a fixed sleep, except where the app itself measures time (the 20 s short-lap question in Timing).
+Handles: prefer `getByRole` with the Dutch accessible name and `exact: true`, as `scripts/validation/*.mjs` do. Main ones: sidebar links `Overzicht`, `Wachtrij`, `Timing`, `Analyse`, `Tactiek`, `Binnenscherm`, `Buitenscherm`, `Beheer` inside navigation `Hoofdnavigatie`; Beheer tabs open directly with `/admin?section=preparation|runners|laps|labels|public|activity|system`. Wait for a role or text, never a fixed sleep, except where the app itself measures time (the 20 s short-lap question in Timing).
 
 A complete, working example lives in `scripts/examples/timing-handoff.mjs`. Copy it as a starting point:
 

@@ -16,6 +16,7 @@ This folder is the maintained source for verifying what operators and spectators
 - `run.rpc()` is for setup only. The action under test is a click or key press on the page.
 - Only failover behaves differently for the desktop app: a page that should stay on its own laptop needs `run.newPage({ electron: true })`. Linking works from any page.
 - Wait for a role or text to appear. Do not sleep, except for the app's own time rules (the 20 s short-lap question).
+- `/api/state` can show a change about 250 ms after the screen does. Poll it until the change shows, and let the last request finish before `run.close()`.
 
 ## Autofocus
 
@@ -59,4 +60,4 @@ Each feature file starts with an H1 title and one paragraph describing the user-
 - [Beheer › Vast netwerkadres](./network-setup.md) covers pinning the laptop's address in Systeem & herstel, with the network's own prefix length.
 - [Tijdelijke nachtploegen](./night-teams.md) covers creating night teams, editing their members and times, and switching them on by hand.
 
-Not mapped yet: the rest of the Analyse charts, Tactiek, the rest of Ploegen & labels, Publiek, backup and restore in Systeem & herstel, the welcome screen on an `empty` laptop.
+Not mapped yet: the rest of the Analyse charts, Tactiek, the rest of Ploegen & labels, backup and restore in Systeem & herstel.

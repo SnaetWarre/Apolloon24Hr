@@ -14,7 +14,7 @@ Beheer › Activiteit lists every change to the event data, newest first, with t
 ## How to get to it (user POV)
 
 - Beheer › Activiteit: open `/admin?section=activity`.
-- A runner profile save, which adds a line, starts from Beheer › Lopers (`Profiel` in the runner's row) or from Wachtrij (click the runner's name on the board).
+- A runner profile save, which adds a line, starts from Beheer › Lopers (`Profiel` in the runner's row) or from Wachtrij (click the runner's name on the board, or `Profiel` next to a runner in the `Loper zoeken` dialog).
 
 ## Driving it with drive.mjs
 
@@ -33,4 +33,5 @@ Preconditions:
 
 - The table only loads while the Activiteit tab is open. Navigate to it after the change instead of waiting on an open tab.
 - `runners.setStatus` and `runners.reorder` lines are hidden by default, so check-ins and queue moves do not show without the checkbox.
-- The time column shows weekday and time (`do 15:59:08`) in the browser's time zone. Compare summaries, not times.
+- The time column shows weekday and time (`do 15:59:08`) in Brussels time, also in a browser set to another time zone. Compare summaries, not times.
+- The origin names the laptop with its address: `Beheer · laptop LAPTOP-0 (192.168.…)`, `Vanzelf · laptop LAPTOP-0 (…)`.
