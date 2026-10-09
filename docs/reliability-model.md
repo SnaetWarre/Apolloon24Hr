@@ -260,28 +260,50 @@ people who will sit at them watching.
    not link by itself; on it, click Koppelen next to the first laptop. Beheer › Voorbereiding
    shows "Alle 3 laptops zijn bereikbaar en hebben alle gegevens."
 2. Open a TV page (`/display/outside`) in a browser on a fourth device.
-3. Start a practice race on the timing laptop and time a few laps.
-4. Pull the power (or battery) of the laptop that leads, unless that is the
+3. On the timing laptop, open Beheer › Systeem & herstel and press `Nu backup
+   maken`. Write down the time of that backup. It holds the runners from
+   before the practice race; the last step puts them back.
+4. Start a practice race on the timing laptop and time a few laps.
+5. Pull the power (or battery) of the laptop that leads, unless that is the
    timing laptop; then pick another (Beheer › Systeem shows which one "ordent
    de wijzigingen"). Within a few seconds the others show "Eén laptop
    onbereikbaar". Press the timing key during those seconds: the lap still
    counts, with the time of the press.
-5. Check that the TV reopened on another laptop within about five seconds
+6. Check that the TV reopened on another laptop within about five seconds
    (up to ten when the laptop that leads lost its power or cable).
-6. Keep working on the queue desk and the warm-up post; everything saves.
-7. Start the laptop again. It shows the same runners and laps within seconds,
+7. Keep working on the queue desk and the warm-up post; everything saves.
+8. Start the laptop again. It shows the same runners and laps within seconds,
    and the status returns to "Alles veilig".
-8. Pull the network cable of one laptop for a minute, make changes on the
+9. Pull the network cable of one laptop for a minute, make changes on the
    others, and plug it back in. It catches up by itself.
-9. Download the latest backup to a USB stick.
+10. Download the latest backup to a USB stick.
+11. Remove the practice race. The app has no reset button. Without this step
+    the first press on race day continues the practice race: the race clock
+    counts from the rehearsal and the practice laps count in every ranking.
+    - Wait until all three laptops show "Alles veilig".
+    - On the timing laptop, open Beheer › Systeem & herstel. The list under
+      Backup terugzetten only shows the backups of the laptop you are on, so
+      use the same laptop as in step 3.
+    - Find the backup from step 3: the time you wrote down, with Handmatig in
+      the Soort column. Press `Terugzetten` next to it and confirm with
+      `Terugzetten`. All linked laptops go back together.
+    - Everything changed after step 3 is undone, also changes to runners.
+    - The practice race is not lost: the app keeps it in a backup marked
+      `Vóór terugzetten`. The message after the restore says on which laptop.
+12. On every laptop, check that Overzicht says `Race nog niet gestart`,
+    Analyse shows 0 rondes, and the big button in Timing says `Start` with the
+    first runner's name, not `Race hervatten`.
 
 ## Event-Day Check
 
 Before timing starts:
 
 1. Beheer › Voorbereiding shows all three laptops reachable and up to date.
-2. The last backup is recent; download one to a separate device.
-3. Every laptop is plugged into power and the router by cable. While the race
+2. Overzicht says `Race nog niet gestart`. If it shows a start time or
+   `Race afgesloten`, the practice race is still there: remove it as in the
+   last steps of the rehearsal before the first runner starts.
+3. The last backup is recent; download one to a separate device.
+4. Every laptop is plugged into power and the router by cable. While the race
    runs, the desktop app keeps the screen on and the laptop awake, and asks
    before it closes; check that the operating system does not force sleep or
    updates anyway.
