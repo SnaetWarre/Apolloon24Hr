@@ -78,6 +78,7 @@ const cluster: ClusterStatus = {
     minimumFreeBytes: 2 * 1_024 ** 3,
     diskLow: true,
     databaseBytes: 2_048,
+    damagedDatabase: null,
   },
 };
 

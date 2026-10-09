@@ -210,6 +210,26 @@ named in the restore result. When no laptop survives, copy a backup from USB
 to `<DATA_PATH>/backups/` on a new laptop,
 start Apolloon, and restore it there.
 
+A laptop whose database a power cut or disk error damaged still starts. On
+every start the server runs `PRAGMA quick_check` on a read-only connection
+(about 1.4 ms on the verify skill's `large` scenario, 70 ms on a 54 MB file).
+When SQLite cannot read the file, the server moves `data/app.db` and its
+`-wal` and `-shm` files to `data/app.damaged-<time>.sqlite`, unchanged, and
+starts with an empty database. The `backups/` folder stays as it was. The
+welcome screen and Beheer › Systeem & herstel › Herstelbackups name the file
+it put aside. Then:
+
+1. Link the laptop to the group again. An empty laptop links by itself
+   within a few seconds; otherwise click Koppelen on the welcome screen.
+2. When no other laptop holds the data, restore one of this laptop's own
+   backups in Beheer › Systeem & herstel › Backup terugzetten.
+
+The desktop app says "De databank op deze laptop is beschadigd en kon niet
+opzij gezet worden." only when moving the file failed, for example because a
+virus scanner held it. Close other programs and press Opnieuw proberen. If
+that keeps failing, press Logmap openen, move `app.db` out of the `data`
+folder there, leave `backups` alone, and press Opnieuw proberen.
+
 ## How The Failover Is Tested
 
 - `npm test` runs the consensus code for hundreds of seeded random runs on

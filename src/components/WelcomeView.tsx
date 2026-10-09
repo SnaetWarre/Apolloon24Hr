@@ -27,6 +27,7 @@ export function WelcomeView({
   const [copied, copyHostUrl] = useCopyText(host?.url ?? null);
   const linking = cluster?.enabled ?? false;
   const autoLink = cluster?.autoLink.enabled ?? false;
+  const damaged = cluster?.backup.damagedDatabase ?? null;
 
   return (
     <>
@@ -36,6 +37,18 @@ export function WelcomeView({
           <h2>Welkom bij Apolloon</h2>
           <p>Op deze laptop staan nog geen lopers. Kies hoe ze begint.</p>
         </header>
+
+        {damaged && (
+          <div className="warning-banner" role="status">
+            <span>
+              De databank op deze laptop was beschadigd. Apolloon zette ze opzij als {damaged.fileName} en startte leeg.
+              Koppel deze laptop opnieuw aan de groep, of zet een backup terug.
+            </span>
+            <button type="button" className="btn btn--secondary" onClick={() => onOpenAdmin('system')}>
+              Naar Systeem & herstel
+            </button>
+          </div>
+        )}
 
         <div className={`welcome__choices${linking ? '' : ' welcome__choices--single'}`}>
           <section className="panel welcome-choice">

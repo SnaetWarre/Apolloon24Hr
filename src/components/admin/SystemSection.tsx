@@ -355,6 +355,14 @@ function BackupPanel({ backup }: { backup: BackupStatus }) {
           Er is op deze laptop nog geen herstelbackup.
         </div>
       )}
+      {backup.damagedDatabase && (
+        <div className="host-hint">
+          Bij het opstarten om{' '}
+          {new Date(backup.damagedDatabase.putAsideAt).toLocaleString('nl-BE', { timeZone: 'Europe/Brussels' })} was de
+          databank beschadigd. Ze staat opzij als {backup.damagedDatabase.fileName} in de map data; deze laptop startte
+          leeg.
+        </div>
+      )}
       {backup.lastError && (
         <div className="warning-banner" role="alert">
           Laatste backup mislukt: {backup.lastError}

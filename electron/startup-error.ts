@@ -34,6 +34,17 @@ export function describeStartupFailure(failure: StartupFailure, logPath: string)
             `Sluit dat programma of wacht even, en probeer opnieuw.\n\n${logLine}`,
         };
       }
+      // The server puts a damaged database aside and starts empty; this is when even that failed.
+      if (/could not be put aside|SQLITE_CORRUPT|SQLITE_NOTADB|malformed|not a database/i.test(output)) {
+        return {
+          message: 'De databank op deze laptop is beschadigd en kon niet opzij gezet worden.',
+          detail:
+            'Apolloon zet een beschadigde databank zelf opzij en start dan met een lege. Dat lukte nu niet, ' +
+            "misschien omdat een virusscanner of een ander programma het bestand vasthoudt. Sluit andere programma's en probeer " +
+            'opnieuw. Lukt het niet, open dan de logmap en verplaats app.db uit de map data naar een andere map. ' +
+            `Laat de map backups staan.\n\n${logLine}`,
+        };
+      }
       if (/ENOSPC|SQLITE_FULL|disk is full|database or disk is full/i.test(output)) {
         return {
           message: 'De schijf van deze laptop is vol.',
@@ -52,14 +63,6 @@ export function describeStartupFailure(failure: StartupFailure, logPath: string)
         return {
           message: 'De databank is in gebruik door een ander programma.',
           detail: `Sluit andere vensters van Apolloon en programma's die de databank open hebben.\n\n${RESTART_HINT}\n\n${logLine}`,
-        };
-      }
-      if (/SQLITE_CORRUPT|SQLITE_NOTADB|malformed|not a database/i.test(output)) {
-        return {
-          message: 'De databank op deze laptop is beschadigd.',
-          detail:
-            'Koppel deze laptop opnieuw aan de groep, of zet een backup terug. De automatische backups staan in de ' +
-            `map backups in de logmap.\n\n${logLine}`,
         };
       }
       const reason = output.match(/^\w*Error: .*$/m)?.[0];

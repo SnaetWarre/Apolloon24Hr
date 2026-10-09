@@ -1,17 +1,24 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { type DatabaseSync } from 'node:sqlite';
+import { DatabaseSync } from 'node:sqlite';
+import type { DamagedDatabase } from '../shared/schemas.js';
 import { DATA_DIR, DB_FILE, backupDatabase, closeDb, openDatabase } from './db/connection.js';
 import { DATABASE_SCHEMA_VERSION, createSchema, migrateSchema, seedDefaultLabels } from './db/schema.js';
 import { schemaProblems } from './db/schema-check.js';
-import { getSetting, hostIdentity } from './db/settings.js';
+import { quickCheck } from './db/sqlite-file.js';
+import { DAMAGED_DATABASE_SETTING, getSetting, hostIdentity, setLocalSetting } from './db/settings.js';
 import { syncTemporaryTeamRows } from './db/teams.js';
 
 /** The first 4.0 schema. Older databases hold only earlier years' events and are put aside, not converted. */
 const FIRST_KEPT_SCHEMA_VERSION = 13;
 
+/** SQLite's primary result codes for a damaged file and for a file that is no database at all. */
+const SQLITE_CORRUPT = 11;
+const SQLITE_NOTADB = 26;
+
 export async function initDb(): Promise<void> {
-  let database = openDatabase();
+  const opened = openUndamagedDatabase();
+  let database = opened.database;
   const hasTables = Boolean(database.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table'").get());
   const hasSettingsTable = Boolean(
     database.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'settings'").get()
@@ -23,7 +30,13 @@ export async function initDb(): Promise<void> {
     );
   }
   const retired = hasTables && storedSchemaVersion < FIRST_KEPT_SCHEMA_VERSION;
-  if (retired) database = retireDatabase(storedSchemaVersion);
+  if (retired) {
+    const retiredPath = putDatabaseAside('retired');
+    console.warn(
+      `Put aside a database from before 4.0 (schema ${storedSchemaVersion}) as ${path.basename(retiredPath)}; starting empty.`
+    );
+    database = openDatabase();
+  }
   createSchema();
   // Keep a copy before rebuilding tables of a database whose structure is out of date. A failed
   // repair changes nothing, so the restarts after it keep the first copy of the day.
@@ -34,27 +47,77 @@ export async function initDb(): Promise<void> {
   migrateSchema();
   // Only a new database gets the built-in labels; in an existing one they are event data.
   if (!hasTables || retired) seedDefaultLabels();
+  if (opened.damaged) setLocalSetting(DAMAGED_DATABASE_SETTING, JSON.stringify(opened.damaged));
   syncTemporaryTeamRows();
   hostIdentity();
 }
 
-/** Moves the database file aside, untouched, and opens an empty one in its place. */
-function retireDatabase(schemaVersion: number): DatabaseSync {
-  closeDb();
-  const retiredPath = path.join(DATA_DIR, `app.retired-${new Date().toISOString().replace(/[:.]/g, '-')}.sqlite`);
-  fs.renameSync(DB_FILE, retiredPath);
-  for (const suffix of ['-wal', '-shm']) {
-    if (fs.existsSync(`${DB_FILE}${suffix}`)) fs.renameSync(`${DB_FILE}${suffix}`, `${retiredPath}${suffix}`);
+/**
+ * Opens the database. A file SQLite cannot read (a power cut or disk error damaged it) is put
+ * aside untouched and an empty database opens in its place, so the laptop still starts and can
+ * link to the group again or restore one of its backups.
+ */
+function openUndamagedDatabase(): { database: DatabaseSync; damaged: DamagedDatabase | null } {
+  const problem = damageIn(DB_FILE);
+  if (!problem) return { database: openDatabase(), damaged: null };
+  let damagedPath;
+  try {
+    damagedPath = putDatabaseAside('damaged');
+  } catch (error) {
+    throw new Error(`database is damaged (${problem}) and could not be put aside: ${String(error)}`, {
+      cause: error,
+    });
   }
-  console.warn(
-    `Put aside a database from before 4.0 (schema ${schemaVersion}) as ${path.basename(retiredPath)}; starting empty.`
-  );
-  return openDatabase();
+  console.warn(`Put aside a damaged database (${problem}) as ${path.basename(damagedPath)}; starting empty.`);
+  return { database: openDatabase(), damaged: { fileName: path.basename(damagedPath), putAsideAt: Date.now() } };
+}
+
+/**
+ * What `PRAGMA quick_check` or opening found wrong with the file, or null. Read-only, so a
+ * damaged file and its write-ahead log stay as they are: a normal connection would switch the
+ * journal mode and fold the log into the file when it closes.
+ */
+function damageIn(file: string): string | null {
+  if (!fs.existsSync(file)) return null;
+  let probe: DatabaseSync | undefined;
+  try {
+    probe = new DatabaseSync(file, { readOnly: true });
+    const check = quickCheck(probe);
+    return check === 'ok' ? null : check;
+  } catch (error) {
+    if (!isDamagedDatabaseError(error)) throw error;
+    return error instanceof Error ? error.message : String(error);
+  } finally {
+    probe?.close();
+  }
+}
+
+function isDamagedDatabaseError(error: unknown): boolean {
+  const code = (error as { errcode?: unknown } | null)?.errcode;
+  return typeof code === 'number' && [SQLITE_CORRUPT, SQLITE_NOTADB].includes(code & 0xff);
+}
+
+/** Moves the database file and its write-ahead log aside, untouched; returns the new path. */
+function putDatabaseAside(kind: 'retired' | 'damaged'): string {
+  closeDb();
+  const asidePath = path.join(DATA_DIR, `app.${kind}-${new Date().toISOString().replace(/[:.]/g, '-')}.sqlite`);
+  fs.renameSync(DB_FILE, asidePath);
+  for (const suffix of ['-wal', '-shm']) {
+    if (fs.existsSync(`${DB_FILE}${suffix}`)) fs.renameSync(`${DB_FILE}${suffix}`, `${asidePath}${suffix}`);
+  }
+  return asidePath;
 }
 
 export { getAppDataRevision, markAppDataChanged, onAppDataChanged, closeDb, backupDatabase } from './db/connection.js';
 export { databaseReadiness, databaseFileBytes } from './db/storage.js';
-export { getAppSettings, setPublicRecordMode, hostIdentity, getSetting, setLocalSetting } from './db/settings.js';
+export {
+  getAppSettings,
+  setPublicRecordMode,
+  hostIdentity,
+  getSetting,
+  setLocalSetting,
+  damagedDatabase,
+} from './db/settings.js';
 export {
   recordWrite,
   getClusterEpoch,

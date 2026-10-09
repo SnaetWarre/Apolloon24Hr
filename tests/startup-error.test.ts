@@ -21,6 +21,15 @@ test('common database and disk problems get their own explanation', () => {
   assert.match(exited('Error: file is not a database').message, /beschadigd/);
 });
 
+test('a damaged database the server could not put aside is named before the permission error behind it', () => {
+  const { message, detail } = exited(
+    'Error: database is damaged (file is not a database) and could not be put aside: ' +
+      "Error: EPERM: operation not permitted, rename 'app.db'"
+  );
+  assert.equal(message, 'De databank op deze laptop is beschadigd en kon niet opzij gezet worden.');
+  assert.match(detail, /verplaats app\.db uit de map data/);
+});
+
 test('anything else says the server stopped and quotes the error', () => {
   const { message, detail } = exited('TypeError: Cannot read properties of undefined\n    at initDb', 7);
   assert.equal(message, 'De lokale server stopte tijdens het opstarten.');
