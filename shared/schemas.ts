@@ -244,10 +244,12 @@ export type NearbyGroup = {
   changed: boolean;
   /** The race started or a lap was counted there. */
   raceStarted: boolean;
+  /** The race started there and was not finished. */
+  raceRunning: boolean;
   appVersion: string;
   compatible: boolean;
   /**
-   * What Koppelen does with it, so the race and then the most runners stay:
+   * What Koppelen does with it, so the running race, then a started one, then the most runners stay:
    * `join` makes this laptop take that group's data, `invite` makes that empty
    * group take this laptop's data, and `there` means Koppelen must be pressed on
    * that laptop, because this one keeps its own data and that one holds runners.
@@ -280,6 +282,8 @@ export type ClusterStatus = {
   changed: boolean;
   /** The race started or a lap was counted in this group. */
   raceStarted: boolean;
+  /** The race started in this group and was not finished. */
+  raceRunning: boolean;
   /** Other laptops in the group, so browsers can switch when this one goes away. */
   memberUrls: string[];
   nearby: NearbyGroup[];

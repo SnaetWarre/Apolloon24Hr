@@ -7,8 +7,8 @@ process.env.NODE_ENV = 'test';
 
 const { linkDirection } = await import('../server/cluster.ts');
 
-const fresh = { clusterId: 'b', raceStarted: false, runners: 0, changed: false, laptops: 1 };
-const prepared = { clusterId: 'a', raceStarted: false, runners: 0, changed: true, laptops: 1 };
+const fresh = { clusterId: 'b', raceStarted: false, raceRunning: false, runners: 0, changed: false, laptops: 1 };
+const prepared = { clusterId: 'a', raceStarted: false, raceRunning: false, runners: 0, changed: true, laptops: 1 };
 
 test('with as many runners, the laptop someone prepared keeps its data, whatever the group ids', () => {
   assert.equal(linkDirection(prepared, fresh), 'invite');
@@ -56,4 +56,32 @@ test('with the race started on both sides, runners decide as before', () => {
   assert.equal(linkDirection(more, fewer), 'there');
   assert.equal(linkDirection({ ...more, runners: 60 }, fewer), 'join');
   assert.equal(linkDirection(fewer, { ...more, runners: 60 }), 'there');
+});
+
+test('a running race keeps its data against a spare whose practice race was finished', () => {
+  const race = { ...prepared, clusterId: 'z', raceStarted: true, raceRunning: true, runners: 60, laptops: 3 };
+  const practice = { ...prepared, raceStarted: true, runners: 61 };
+  assert.equal(linkDirection(practice, race), 'join');
+  assert.equal(linkDirection(race, practice), 'there');
+});
+
+test('a running race also wins with more runners than the finished one', () => {
+  const race = { ...prepared, raceStarted: true, raceRunning: true, runners: 61 };
+  const practice = { ...prepared, clusterId: 'z', raceStarted: true, runners: 60, laptops: 3 };
+  assert.equal(linkDirection(practice, race), 'join');
+  assert.equal(linkDirection(race, practice), 'there');
+});
+
+test('a running race keeps its data against a spare where the race never started', () => {
+  const race = { ...prepared, raceStarted: true, raceRunning: true, runners: 60 };
+  const spare = { ...prepared, clusterId: 'z', runners: 61 };
+  assert.equal(linkDirection(spare, race), 'join');
+  assert.equal(linkDirection(race, spare), 'there');
+});
+
+test('with the race running on both sides, runners decide as before', () => {
+  const more = { ...prepared, raceStarted: true, raceRunning: true, runners: 61 };
+  const fewer = { ...prepared, clusterId: 'z', raceStarted: true, raceRunning: true, runners: 60, laptops: 3 };
+  assert.equal(linkDirection(fewer, more), 'join');
+  assert.equal(linkDirection(more, fewer), 'there');
 });

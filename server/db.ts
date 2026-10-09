@@ -107,7 +107,7 @@ export {
 export { countRunners, getAllRunners, getRunnerById, getRunnerRegistrations } from './db/runner-queries.js';
 export { insertRunner, updateRunner, upsertRunnerFromImport, deleteRunner } from './db/runners.js';
 export { hideRunnerInQueue, unhideRunnerInQueue, updateRunnerStatus, updateWaitingOrder } from './db/queue.js';
-export { getRaceState, hasRaceStarted } from './db/race-state.js';
+export { getRaceState, raceProgress } from './db/race-state.js';
 export {
   getAllLaps,
   getLapById,
