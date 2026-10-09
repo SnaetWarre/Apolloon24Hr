@@ -8,7 +8,7 @@ process.env.DATA_PATH = dataPath;
 process.env.NODE_ENV = 'test';
 process.env.CLUSTER_ENABLED = 'false';
 
-test('restore returns missing settings to their defaults and keeps host-local settings', async () => {
+test('restore returns missing settings to their defaults and keeps host-local settings and the group', async () => {
   const db = await import('../server/db.ts');
   try {
     await db.initDb();
@@ -18,8 +18,11 @@ test('restore returns missing settings to their defaults and keeps host-local se
     const data = db.readRestoreData(backupPath, 'apolloon-default.sqlite', Date.now());
     assert.deepEqual(data.settings, []);
     db.recordWrite('settings.updatePublicRecordMode', () => db.setPublicRecordMode('off'));
+    db.recordWrite('cluster.removeMember', () => db.setRemovedMembers(['broken-laptop']));
     db.recordWrite('backups.applyRestore', () => db.replaceEventData(data));
     assert.equal(db.getAppSettings().publicRecordMode, 'day');
+    // A backup holds race data, not the group: a laptop taken out stays out.
+    assert.deepEqual(db.getRemovedMembers(), ['broken-laptop']);
     assert.deepEqual(db.hostIdentity(), identity);
     assert.ok(
       db

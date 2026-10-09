@@ -4,11 +4,18 @@ import { one, run, runUncaptured } from './connection.js';
 
 const DEFAULT_PUBLIC_RECORD_MODE: PublicRecordMode = 'day';
 
-/** Settings that are part of the event data and travel to the other laptops. Everything else is host-local. */
+/** Settings that are part of the event data: a backup restores them. */
+export const EVENT_SETTING_KEYS: readonly string[] = ['public_record_mode'];
+
+/**
+ * Settings that travel to the other laptops, in the log and in the full copy a new laptop
+ * takes: the event data and the group's own bookkeeping. Everything else is host-local.
+ */
 export const REPLICATED_SETTING_KEYS: readonly string[] = [
-  'public_record_mode',
+  ...EVENT_SETTING_KEYS,
   'cluster_auto_links_json',
   'cluster_unreachable_json',
+  'cluster_removed_json',
 ];
 
 export function getSetting(key: string): string | null {

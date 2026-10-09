@@ -2,6 +2,7 @@ import Papa from 'papaparse';
 import { readSheet } from 'read-excel-file/node';
 import { type ImportSummary, type RunnerInput, type RunnerRegistration } from '../shared/schemas.js';
 import { upsertRunnerFromImport } from './db.js';
+import { MAX_PLAUSIBLE_LAP_MS } from '../shared/lapTimes.js';
 
 /** Thrown for a file that cannot be read at all, as opposed to individual bad rows. */
 export class CsvImportError extends Error {}
@@ -124,10 +125,11 @@ function excelDateText(date: Date): string {
   const pad = (value: number) => String(value).padStart(2, '0');
   const time = `${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())}`;
   if (date.getUTCFullYear() < 1900) {
-    // Excel stores a lap time typed as 1:20 as the time 1:20 (h:mm). A lap never takes an hour,
-    // so without seconds it was typed as m:ss: write it back the way it was typed, as its CSV does.
-    if (date.getUTCSeconds() === 0) return `${date.getUTCHours()}:${pad(date.getUTCMinutes())}`;
-    // Typed with seconds, such as 0:01:20.
+    // Excel stores a lap time typed as 1:20 as the time 1:20 (h:mm), 80 minutes. No lap takes
+    // that long, so it was typed as m:ss: write it back the way it was typed, as its CSV does.
+    // read-excel-file does not say which format a cell has, so a time a lap can take, such as 0:01:00, stays as it is.
+    const longerThanALap = date.getUTCHours() * 3_600_000 + date.getUTCMinutes() * 60_000 > MAX_PLAUSIBLE_LAP_MS;
+    if (date.getUTCSeconds() === 0 && longerThanALap) return `${date.getUTCHours()}:${pad(date.getUTCMinutes())}`;
     return time;
   }
   return `${pad(date.getUTCDate())}/${pad(date.getUTCMonth() + 1)}/${date.getUTCFullYear()} ${time}`;

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
+import { isFastestLapForRecordMode } from '../src/lib/analysis.ts';
 import { temporaryDataPath } from './temporary-data.ts';
 
 const dataPath = temporaryDataPath('lap-corrections');
@@ -99,6 +100,56 @@ test('a lap split for a missed press gives each half its own runner, and undo ta
       false
     );
     assert.equal(db.getRaceState().activeRunnerId, bert.id);
+  });
+});
+
+test('a lap split for a runner who ran twice keeps the labels it was recorded with, and neither half is a record', async () => {
+  await withDb((db) => {
+    const dames = db.getLabels().find((label) => label.name === 'Dames');
+    const blue = db.findLabelByName('Speedteam Blue');
+    assert.ok(dames && blue);
+    const anna = db.insertRunner({ name: 'Anna', runnerNumber: '1', labels: [dames.id, blue.id] });
+    const night = db.createLabel({ name: 'Nachtploeg', kind: 'temporary_team', color: '#7c3aed' });
+    db.setTemporaryTeamMembers(night.id, [anna.id]);
+    // The night team starts during Anna's second double lap, before its middle.
+    db.setTemporaryTeamSchedule(night.id, 220_000, 400_000);
+    db.updateRunnerStatus({ id: anna.id, status: 'waiting', statusSince: 0, queueIndex: 0 });
+    db.performHandoff(1_000);
+    db.performHandoff(101_000);
+    db.updateRunnerStatus({ id: anna.id, status: 'waiting', statusSince: 150_000, queueIndex: 0 });
+    db.performHandoff(201_000);
+    db.performHandoff(301_000);
+    const [early, late] = [...db.getAllLaps()].reverse();
+    // Anna stopped counting as a lady after the race; her past laps still do.
+    db.updateRunner(anna.id, { labels: [] });
+
+    const halves = (lapId: string, startedAt: number) => {
+      db.splitLap(lapId, anna.id);
+      return db.getAllLaps().filter((lap) => lap.startedAt === startedAt || lap.startedAt === startedAt + 50_000);
+    };
+    const names = (lap: { labels: Array<{ name: string }> }) => lap.labels.map((label) => label.name).sort();
+    for (const half of halves(early.id, early.startedAt)) {
+      assert.deepEqual(names(half), ['Dames', 'Speedteam Blue']);
+      assert.equal(half.source, 'split');
+    }
+    // The half after the night team started runs for the night team, still as a lady.
+    const [lateFirst, lateSecond] = halves(late.id, late.startedAt).sort((a, b) => a.startedAt - b.startedAt);
+    assert.deepEqual(names(lateFirst), ['Dames', 'Speedteam Blue']);
+    assert.deepEqual(names(lateSecond), ['Dames', 'Nachtploeg']);
+
+    // A measured 60 s lap beats the 50 s guesses: it is still the record of the day, hour and two hours.
+    const race = db.getRaceState();
+    const measured = {
+      ...early,
+      id: 'measured',
+      startedAt: 301_000,
+      finishedAt: 361_000,
+      durationMs: 60_000,
+      source: 'spacebar',
+    };
+    for (const mode of ['day', 'hour', 'two_hour'] as const) {
+      assert.equal(isFastestLapForRecordMode(measured, db.getAllLaps(), race, mode), true, mode);
+    }
   });
 });
 
