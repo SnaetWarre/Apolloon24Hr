@@ -1,6 +1,6 @@
 import type { Label, LapRecord, Runner } from '../types';
 import { compareLabels } from '../../shared/labelOrder';
-import { hasPlausibleDuration } from './analysis';
+import { hasPlausibleDuration, isMeasuredLap } from './analysis';
 
 export type RankingMode = 'laps' | 'coefficient';
 
@@ -36,10 +36,11 @@ export function calculateLapCoefficient(durationMs: number): number {
   return 1 + Math.max(0, BASELINE_LAP_MS - durationMs) * POINTS_PER_MS;
 }
 
-export function calculateLapPoints(lap: Pick<LapRecord, 'durationMs' | 'finishedAt'>): number {
+export function calculateLapPoints(lap: Pick<LapRecord, 'durationMs' | 'finishedAt' | 'source'>): number {
   if (!Number.isFinite(lap.finishedAt)) return 0;
   const hour = Number(BRUSSELS_HOUR_FORMATTER.format(lap.finishedAt));
-  return calculateLapCoefficient(lap.durationMs) * DAYPART_FACTORS[Math.floor(hour / 4)];
+  const coefficient = isMeasuredLap(lap) ? calculateLapCoefficient(lap.durationMs) : 1;
+  return coefficient * DAYPART_FACTORS[Math.floor(hour / 4)];
 }
 
 export function buildRunnerRanking(
