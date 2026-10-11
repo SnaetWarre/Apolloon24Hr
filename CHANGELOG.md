@@ -4,6 +4,15 @@ All notable changes to Apolloon Telsysteem will be documented in this file.
 
 ## [Unreleased]
 
+## [4.4.1] - 2026-10-11
+
+Laptops koppelen alleen met dezelfde versie: zet 4.4.1 op alle laptops.
+
+### Fixed
+
+- De knoppen minimaliseren, maximaliseren en sluiten bovenaan het venster
+  werken weer op Windows en Linux
+
 ## [4.4.0] - 2026-10-11
 
 Laptops koppelen alleen met dezelfde versie: zet 4.4.0 op alle laptops.
