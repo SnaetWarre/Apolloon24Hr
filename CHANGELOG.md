@@ -4,6 +4,82 @@ All notable changes to Apolloon Telsysteem will be documented in this file.
 
 ## [Unreleased]
 
+## [4.4.0] - 2026-10-11
+
+Laptops koppelen alleen met dezelfde versie: zet 4.4.0 op alle laptops.
+
+### Added
+
+- Een laptop zonder lopers koppelt zichzelf binnen enkele seconden met de
+  andere laptops op het netwerk, zonder klik. Beheer › Systeem & herstel toont
+  welke laptops zichzelf koppelden, en zegt waarom als het blijft mislukken
+- Een kapotte laptop kan uit de groep: na 30 seconden zonder antwoord staat
+  **Uit de groep halen** naast hem in Beheer › Systeem. Daarna maakt een
+  reservelaptop er weer drie. Timing zegt wanneer een laptop uit de groep
+  gehaald werd en wanneer een wijziging daar mislukt
+- Beheer › Rondes: een ronde achteraf aan een andere loper geven, splitsen of
+  verwijderen
+- Beheer › Activiteit toont laptops die koppelen, wegvallen en terugkomen, en
+  noemt de ronde die een ongedaan maken weghaalt
+- De Windows-installatie opent de firewall voor gekoppelde laptops
+- Laptops tonen elkaar met hun computernaam in plaats van hun adres
+- Analyse vorig jaar tekent de mediaan en de trendlijn op de
+  spreidingsgrafieken
+- Beheer › Lopers: een knop onder de tabel toont de rest van de lopers. Zoeken
+  op "verborgen" vindt lopers die niet in de wachtrij staan, en zoeken op een
+  uur vindt elke loper wiens formulierblok dat uur dekt
+
+### Changed
+
+- Het Binnenscherm toont de laatste zes rondes als lijst in plaats van de live
+  timer en drie kaarten
+- Koppelen tijdens een overname wacht op de nieuwe hoofdlaptop in plaats van
+  te mislukken
+- Een wijziging die de laptop niet bereikt, geeft een Nederlandse melding
+- Een laptop met een beschadigd databasebestand opent toch: het bestand wordt
+  opzij gezet
+- Lange labelnamen blijven binnen hun label, hoverkleuren blijven niet hangen
+  op aanraakschermen, en elke knop toont dat hij ingedrukt is
+- Zoeken in Beheer › Rondes en Activiteit negeert accenten
+
+### Fixed
+
+- Koppelen maakt nooit de laptop met de lopers leeg. Een lopende race blijft
+  behouden als een reservelaptop met meer lopers of met een afgelopen
+  oefenrace gekoppeld wordt. Twee laptops zonder lopers houden de gegevens van
+  de voorbereide laptop
+- Na een netwerkonderbreking kiest de groep een nieuwe hoofdlaptop. Een laptop
+  die uit de groep gehaald werd, blijft eruit nadat een reserve aansluit
+- Een laptop die uit stond, haalt zijn achterstand in over een trage kabel.
+  Logo's worden niet meer opnieuw verstuurd naar een laptop die uit staat
+- Dubbel klikken verplaatst één loper in de Wachtrij, houdt de race lopend bij
+  Verder en bewaart één Burgie gepakt-moment
+- Dubbele drukken (minder dan 20 seconden) tellen niet meer mee voor snelste
+  en gemiddelde rondetijden op Overzicht, Timing, Binnenscherm en Analyse, voor
+  de recordflits op het Buitenscherm en voor de Punten-rangschikking. Een
+  gesplitste ronde laat geen record oplichten
+- De getalvelden in Tactiek houden wat getypt is
+- De Excel-export toont Brusselse tijd en hele minuten. Tv's en browsers in een
+  andere tijdzone tonen ook Brusselse tijd
+- De publieke schermen tonen dat de race voorbij is na Race beëindigen
+- Timing klokt met Enter na een klik op de zijbalk en na de vraag over ongedaan
+  maken of beëindigen
+- Overzicht toont "Even niemand" als de piste midden in de race leeg is
+- Vast netwerkadres behoudt de prefixlengte van het netwerk en toont de
+  adresbron ook op trage Windows-laptops
+- Een tv houdt zijn lichte of donkere weergave wanneer hij naar een andere
+  laptop verhuist
+- De import neemt beide personen op wanneer twee rijen hetzelfde nummer
+  hebben, en leest een rondetijd die in Excel als 1:20 getypt is als 1 minuut
+  20
+- Een race die nooit startte, kan niet beëindigd worden
+- Ongedaan maken werkt nog nadat de loper van de laatste wissel verwijderd is
+- De JSON-exports in Analyse worden gedownload in plaats van het venster te
+  vervangen
+- De uurgrafiek in Analyse zegt dat er geen rondes zijn als labels aan staan
+- Het muiswiel scrolt de Wachtrij ook boven een baan
+- Een knop die een tekstveld opent, zet de cursor erin
+
 ## [4.3.0] - 2026-10-07
 
 Laptops koppelen alleen met dezelfde versie: zet 4.3.0 op alle laptops.
