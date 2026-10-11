@@ -59,7 +59,8 @@ function TitleBarButton({
     <button
       type="button"
       className={`titlebar__control${close ? ' titlebar__control--close' : ''}`}
-      onClick={onClick}
+      // The bridge functions cross into the preload, which cannot copy the click event: pass nothing.
+      onClick={() => onClick()}
       aria-label={label}
       title={label}
     >

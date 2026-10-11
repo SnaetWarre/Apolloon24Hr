@@ -97,6 +97,7 @@ try {
 
   browser = await connectToWindow(debugPort);
   const page = await waitForWindowPage(browser, leaderUrl);
+  await checkTitleBar(page);
   const reads = [];
   page.on('request', (request) => {
     if (new URL(request.url()).pathname === '/api/net/profile') reads.push({ request, startedAt: performance.now() });
@@ -167,6 +168,31 @@ try {
   await browser?.close().catch(() => undefined);
   for (const child of processes) stop(child);
   rmSync(temporary, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
+}
+
+/**
+ * The window buttons call into the preload. Passing it the click event threw "An object could
+ * not be cloned" and left the buttons dead, so a click must reach the window without an error.
+ */
+async function checkTitleBar(page) {
+  const errors = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  const controls = page.getByRole('group', { name: 'Venster' });
+  await controls.getByRole('button', { name: 'Maximaliseren' }).click();
+  // Some Linux window managers ignore maximize; Windows always maximizes.
+  const restore = controls.getByRole('button', { name: 'Herstellen' });
+  const maximized = await restore.waitFor({ timeout: windows ? 10_000 : 3_000 }).then(
+    () => true,
+    () => false
+  );
+  assert.ok(maximized || !windows, 'The window did not maximize');
+  if (maximized) {
+    // A headless maximized window can leave the button outside the page's viewport.
+    await restore.evaluate((button) => button.click());
+    await controls.getByRole('button', { name: 'Maximaliseren' }).waitFor({ timeout: 10_000 });
+  }
+  assert.deepEqual(errors, [], 'Clicking a window button failed');
+  console.log(`PASS the title bar's window buttons work${maximized ? ' (maximized and restored)' : ''}`);
 }
 
 /**
