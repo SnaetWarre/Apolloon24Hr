@@ -6,7 +6,7 @@ Three transports, three jobs. New features must follow these ownership rules so 
 
 Owns every validated write, plus queries that need input validation or should stay off the live snapshot.
 
-- Runner, label, queue, timing, night-team, settings, backup, and laptop-linking commands.
+- Runner, label, queue, timing, settings, backup, and laptop-linking commands.
 - `laps.move`, `laps.split`, `laps.delete` (Beheer › Rondes): a lap to another runner, one lap into two halves (the second half to `runnerId`, `source: 'split'`), or a lap removed. Each runner's laps are numbered again by start time. A split lap's second half joins the handoff that recorded it, so undoing that handoff removes both halves.
 - `runners.registrations`: registration answers with contact details. Screens read the same answers from `GET /api/registrations`, which can answer `304`.
 - Payloads are validated with Zod. Every laptop accepts writes; the leader commits them once a majority stored them, and the other laptops pass them on to it.
@@ -37,7 +37,7 @@ Owns server push only. Screens subscribe through `src/app/realtimeClient.ts`; qu
 - `live.revision`: the current data revision.
 - `live.cluster`: the laptop status (`/api/cluster/status`) now and whenever it changes, checked once a second while a screen that shows it is open. Free disk space only counts as a change per 64 MB.
 
-- The server sends it after every committed change, after a follower stores new entries, and when a night team starts or stops.
+- The server sends it after every committed change and after a follower stores new entries.
 - A client whose snapshot has another revision refetches everything under the `['app']` query key, sending `since` where it can; unchanged responses come back as `304`.
 - On (re)subscribe the server sends the current revision.
 - Both sides ping: the client reconnects when the server stops answering, and the server drops screens that vanished.

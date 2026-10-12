@@ -42,7 +42,6 @@ function snapshot(runners: Runner[]): LiveAppSnapshot {
   return {
     runners,
     labels: [],
-    temporaryTeams: [],
     race: {
       id: 1,
       activeRunnerId: null,

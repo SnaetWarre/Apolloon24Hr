@@ -14,7 +14,6 @@ import { getNextWaitingRunner } from '../src/lib/runners.ts';
 import type { Runner } from '../src/types.ts';
 import { relativeFileWithinRoot } from '../server/static-files.ts';
 import { formatClockTimeMs } from '../shared/time.ts';
-import { parseTeamWindow, toLocalDateTime } from '../src/components/admin/temporaryTeamTime.ts';
 import path from 'node:path';
 import { trpc } from '../src/api.ts';
 import { CHANGE_NOT_SAVED, CONNECTION_LOST, fetchFromLaptop, isConnectionError } from '../src/lib/connectionError.ts';
@@ -135,7 +134,7 @@ test('the next runner breaks a shared queue place the way the server does', () =
   assert.equal(getNextWaitingRunner([runners[1]]), null);
 });
 
-test('screens and night-team fields use Brussels time, even on a TV left on UTC', (t) => {
+test('screens use Brussels time, even on a TV left on UTC', (t) => {
   // Act like a TV left on UTC, so these fail if anything falls back to this machine's own zone.
   const zone = process.env.TZ;
   process.env.TZ = 'UTC';
@@ -147,14 +146,6 @@ test('screens and night-team fields use Brussels time, even on a TV left on UTC'
   const winterLap = Date.UTC(2026, 0, 8, 23, 5, 1, 7);
   assert.equal(formatClockTimeMs(summerLap), '20:35:10.042');
   assert.equal(formatClockTimeMs(winterLap), '00:05:01.007');
-
-  assert.equal(toLocalDateTime(summerLap), '2026-10-08T20:35');
-  assert.equal(toLocalDateTime(winterLap), '2026-01-09T00:05');
-  // The night of 24 to 25 October 2026 has the 03:00 to 02:00 clock change.
-  assert.deepEqual(parseTeamWindow('2026-10-24T22:00', '2026-10-25T06:00'), {
-    startsAt: Date.UTC(2026, 9, 24, 20),
-    endsAt: Date.UTC(2026, 9, 25, 5),
-  });
 });
 
 test("a change that cannot reach the laptop fails in Dutch; the server's own messages pass through", async (t) => {

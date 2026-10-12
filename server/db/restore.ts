@@ -20,8 +20,6 @@ export const RESTORED_TABLES = [
   'laps',
   'handoff_history',
   'race_events',
-  'temporary_teams',
-  'temporary_team_members',
 ] as const;
 
 const sqlValue = z.union([z.string(), z.number().finite(), z.null()]);

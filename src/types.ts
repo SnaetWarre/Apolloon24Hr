@@ -32,5 +32,4 @@ export type {
   RunnerRegistration,
   RunnerRegistrationDetails,
   RunnerStatus,
-  TemporaryTeam,
 } from '../shared/schemas';

@@ -18,7 +18,6 @@ const label = (id: string, kind: string, name = id): Label => ({
 const labels = [
   label('blue', 'speedteam'),
   label('white', 'speedteam'),
-  label('night', 'temporary_team'),
   label('hilok', 'zustervereniging'),
   label('first-year', 'andere'),
   label('women', 'andere'),
@@ -29,10 +28,6 @@ test('a runner runs for one speedteam but combines other labels', () => {
   assert.deepEqual(toggleRunnerLabel(['first-year'], 'women', labels), ['first-year', 'women']);
   assert.deepEqual(toggleRunnerLabel(['blue', 'hilok'], 'first-year', labels), ['blue', 'hilok', 'first-year']);
   assert.deepEqual(toggleRunnerLabel(['blue', 'women'], 'women', labels), ['blue']);
-});
-
-test('night teams cannot be picked by hand', () => {
-  assert.deepEqual(toggleRunnerLabel(['blue'], 'night', labels), ['blue']);
 });
 
 test('runner search matches number, name, and labels together', () => {

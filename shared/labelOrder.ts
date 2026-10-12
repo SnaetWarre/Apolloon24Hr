@@ -1,10 +1,9 @@
 /** Labels list by kind (speedteams first), then alphabetically. */
 export function labelKindOrder(kind: string) {
   if (kind === 'speedteam') return 0;
-  if (kind === 'temporary_team') return 1;
-  if (kind === 'zustervereniging' || kind === 'association') return 2;
-  if (kind === 'andere' || kind === 'group') return 3;
-  return 4;
+  if (kind === 'zustervereniging' || kind === 'association') return 1;
+  if (kind === 'andere' || kind === 'group') return 2;
+  return 3;
 }
 
 export function compareLabels(a: { kind: string; name: string }, b: { kind: string; name: string }) {
@@ -14,10 +13,9 @@ export function compareLabels(a: { kind: string; name: string }, b: { kind: stri
 /** The same order in SQL, for a labels table aliased `l`. */
 export const LABEL_ORDER_SQL = `CASE l.kind
     WHEN 'speedteam' THEN 0
-    WHEN 'temporary_team' THEN 1
-    WHEN 'zustervereniging' THEN 2
-    WHEN 'association' THEN 2
-    WHEN 'andere' THEN 3
-    WHEN 'group' THEN 3
-    ELSE 4
+    WHEN 'zustervereniging' THEN 1
+    WHEN 'association' THEN 1
+    WHEN 'andere' THEN 2
+    WHEN 'group' THEN 2
+    ELSE 3
   END, l.name COLLATE NOCASE`;

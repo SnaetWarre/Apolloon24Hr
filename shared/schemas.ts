@@ -124,17 +124,6 @@ export const raceStateSchema = z.object({
 });
 export type RaceState = z.infer<typeof raceStateSchema>;
 
-export const temporaryTeamSchema = z.object({
-  labelId: z.string(),
-  /** Evaluated on the server: inside the schedule, or switched on by hand when unscheduled. */
-  active: z.boolean(),
-  activatedAt: z.number().nullable(),
-  startsAt: z.number().nullable(),
-  endsAt: z.number().nullable(),
-  memberRunnerIds: z.array(z.string()),
-});
-export type TemporaryTeam = z.infer<typeof temporaryTeamSchema>;
-
 export const hostInfoSchema = z.object({
   hostIpHint: z.string(),
   port: z.number().int().positive(),
@@ -312,7 +301,6 @@ export type LiveAppSnapshot = {
   runners: Runner[];
   labels: Label[];
   race: RaceState;
-  temporaryTeams: TemporaryTeam[];
   settings: AppSettings;
   revision: number;
   host: HostInfo;
@@ -398,31 +386,6 @@ export type LabelImageUpload = z.infer<typeof labelImageUploadSchema>;
 
 export const queueReorderSchema = z.object({
   ids: z.array(z.string()).min(1),
-});
-
-export const temporaryTeamMembersSchema = z.object({
-  labelId: z.string().min(1),
-  runnerIds: z.array(z.string()),
-});
-
-export const temporaryTeamActiveSchema = z.object({
-  labelId: z.string().min(1),
-  active: z.boolean(),
-});
-
-export const temporaryTeamScheduleSchema = z
-  .object({
-    startsAt: z.number().int().nonnegative(),
-    endsAt: z.number().int().nonnegative(),
-  })
-  .refine((value) => value.endsAt > value.startsAt, {
-    message: 'Het einduur moet na het beginuur liggen',
-  });
-
-export const temporaryTeamCreateSchema = temporaryTeamScheduleSchema.safeExtend({
-  name: z.string().trim().min(1),
-  color: z.string(),
-  runnerIds: z.array(z.string()).min(1),
 });
 
 export const runnerIdSchema = z.object({

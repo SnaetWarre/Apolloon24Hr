@@ -186,7 +186,7 @@ try {
   // 3. A new runner with a speedteam and a second label, entered on the desk.
   const labels = (await snapshot(deskUrl)).labels;
   const speedteam = labels.find((label) => label.kind === 'speedteam');
-  const otherLabel = labels.find((label) => label.kind !== 'speedteam' && label.kind !== 'temporary_team');
+  const otherLabel = labels.find((label) => label.kind !== 'speedteam');
   assert.ok(speedteam && otherLabel, 'the ready seed has labels of two kinds');
   const newcomer = { name: 'Race Dag Nieuwkomer', number: '777' };
   await desk.getByRole('button', { name: 'Nieuwe loper', exact: true }).click();

@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import type { AppSettings, HostInfo, Label, LiveAppSnapshot, RaceState, Runner, TemporaryTeam } from '../types';
+import type { AppSettings, HostInfo, Label, LiveAppSnapshot, RaceState, Runner } from '../types';
 import { connectionLostError } from '../lib/connectionError';
 import { fetchSinceBase } from './deltaFetch';
 import { confirmedSnapshot, withPendingChanges } from './optimistic';
@@ -21,7 +21,6 @@ type AppQueryState = {
 type FullAppData = {
   runners: Runner[];
   labels: Label[];
-  temporaryTeams: TemporaryTeam[];
   race: RaceState;
   settings: AppSettings;
   host: HostInfo | null;
@@ -30,7 +29,6 @@ type FullAppData = {
 const emptySnapshot: LiveAppSnapshot = {
   runners: [],
   labels: [],
-  temporaryTeams: [],
   race: emptyRace,
   settings: defaultSettings,
   revision: 0,

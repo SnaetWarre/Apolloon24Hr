@@ -10,7 +10,6 @@ import { describeOrigin } from './activity.js';
 import { backupStatus, latestBackupPath, startBackupService, stopBackupService } from './backups.js';
 import { handlePeerUpgrade, registerClusterRoutes, startClusterService, stopClusterService } from './cluster.js';
 import {
-  activeTemporaryTeamsKey,
   closeDb,
   databaseReadiness,
   getAppDataRevision,
@@ -18,7 +17,6 @@ import {
   getRaceState,
   getRunnerRegistrations,
   initDb,
-  markAppDataChanged,
 } from './db.js';
 import { RELEASE_ID } from './env.js';
 import { registerExportRoutes } from './exports.js';
@@ -39,7 +37,6 @@ app.set('etag', false);
 const server = http.createServer(app);
 const processStartedAt = Date.now();
 let shuttingDown = false;
-let temporaryTeamTimer: NodeJS.Timeout | null = null;
 let stopDemoRace: (() => void) | null = null;
 
 // Screens subscribe to live changes over a WebSocket on /trpc; queries and writes stay on HTTP.
@@ -258,23 +255,11 @@ app.use((error: unknown, req: Request, res: Response, next: NextFunction) => {
   res.status(500).json({ ok: false, error: error instanceof Error ? error.message : String(error) });
 });
 
-/** Night-team labels are derived from the clock, so clients refresh when a team starts or stops. */
-function watchTemporaryTeams(): void {
-  let activeKey = activeTemporaryTeamsKey();
-  temporaryTeamTimer = setInterval(() => {
-    const nextKey = activeTemporaryTeamsKey();
-    if (nextKey === activeKey) return;
-    activeKey = nextKey;
-    markAppDataChanged();
-  }, 1_000);
-}
-
 function shutdown(reason: string): void {
   if (shuttingDown) return;
   shuttingDown = true;
   console.log(`Stopping server (${reason})`);
   stopClusterService();
-  if (temporaryTeamTimer) clearInterval(temporaryTeamTimer);
   stopDemoRace?.();
 
   const forceExit = setTimeout(() => {
@@ -311,7 +296,6 @@ process.once('disconnect', () => shutdown('parent disconnected'));
 await initDb();
 startBackupService();
 startClusterService();
-watchTemporaryTeams();
 if (isDemoRaceEnabled()) stopDemoRace = startDemoRace();
 
 server.listen(SERVER_PORT, () => {

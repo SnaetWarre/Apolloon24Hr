@@ -16,13 +16,8 @@ import {
   runnerInputSchema,
   runnerPatchSchema,
   runnerStatusUpdateSchema,
-  temporaryTeamActiveSchema,
-  temporaryTeamCreateSchema,
-  temporaryTeamMembersSchema,
-  temporaryTeamScheduleSchema,
   timingPressSchema,
   type RaceStateExpectation,
-  type TemporaryTeam,
   type TimingPress,
 } from '../shared/schemas.js';
 import { activityPageSchema, backupFileSchema } from '../shared/schemas.js';
@@ -61,7 +56,6 @@ import {
   getRaceState,
   getRunnerById,
   getRunnerRegistrations,
-  getTemporaryTeam,
   hideRunnerInQueue,
   insertRunner,
   logActivity,
@@ -76,9 +70,6 @@ import {
   saveForwardedWrite,
   saveLabelImage,
   setPublicRecordMode,
-  setTemporaryTeamActive,
-  setTemporaryTeamMembers,
-  setTemporaryTeamSchedule,
   splitLap,
   touchForwardedWrite,
   undoLastHandoff,
@@ -275,10 +266,6 @@ function pressMoment(press: TimingPress, maxAgeMs = PRESS_MAX_AGE_MS): number {
   return Math.max(plausible ? pressedAt : now, press.activeStartedAt ?? 0);
 }
 
-function requireTemporaryTeam(labelId: string): TemporaryTeam {
-  return getTemporaryTeam(labelId) ?? fail('NOT_FOUND', 'Tijdelijke nachtploeg niet gevonden');
-}
-
 const applyRestore = write(
   (input: z.infer<typeof restoreDataSchema>, safety) => ({ ...replaceEventData(input), ...safety }),
   async () => {
@@ -432,26 +419,6 @@ export const appRouter = t.router({
     uploadImage: t.procedure
       .input(labelImageUploadSchema)
       .mutation(write((input) => ({ imageUrl: saveLabelImage(input) }))),
-  }),
-
-  temporaryTeams: t.router({
-    create: t.procedure.input(temporaryTeamCreateSchema).mutation(
-      write((input) => {
-        const label = createLabel({ name: input.name, color: input.color, kind: 'temporary_team' });
-        setTemporaryTeamMembers(label.id, input.runnerIds);
-        setTemporaryTeamSchedule(label.id, input.startsAt, input.endsAt);
-        return requireTemporaryTeam(label.id);
-      })
-    ),
-    setSchedule: t.procedure
-      .input(temporaryTeamScheduleSchema.safeExtend({ labelId: z.string().min(1) }))
-      .mutation(write((input) => setTemporaryTeamSchedule(input.labelId, input.startsAt, input.endsAt))),
-    setMembers: t.procedure
-      .input(temporaryTeamMembersSchema)
-      .mutation(write((input) => setTemporaryTeamMembers(input.labelId, input.runnerIds))),
-    setActive: t.procedure
-      .input(temporaryTeamActiveSchema)
-      .mutation(write((input) => setTemporaryTeamActive(input.labelId, input.active, clusterNow()))),
   }),
 
   race: t.router({

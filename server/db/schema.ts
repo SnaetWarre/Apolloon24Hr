@@ -5,7 +5,7 @@ import { type SchemaProblem, type TableShape, referenceSchema, schemaProblems } 
 import { RUNNER_QUEUE_INDEX_SQL, SCHEMA_SQL } from './schema-sql.js';
 import { setLocalSetting } from './settings.js';
 
-export const DATABASE_SCHEMA_VERSION = 16;
+export const DATABASE_SCHEMA_VERSION = 17;
 
 type DefaultLabel = Required<LabelInput> & { id: string };
 
@@ -119,6 +119,7 @@ export function migrateSchema(): void {
     transaction(() => {
       run(RUNNER_QUEUE_INDEX_SQL);
       repairSchema(schemaProblems(db));
+      dropNightTeams();
       const remaining = schemaProblems(db);
       if (remaining.length) {
         throw new Error(
@@ -188,6 +189,13 @@ function rebuildTable(table: string, shape: TableShape): void {
     db.exec(shape.sql);
   }
   for (const index of shape.indexes.values()) db.exec(index.sql);
+}
+
+/** Night teams were removed in schema 17. Every laptop drops them the same way when it updates. */
+function dropNightTeams(): void {
+  run("DELETE FROM runner_labels WHERE label_id IN (SELECT id FROM labels WHERE kind = 'temporary_team')");
+  run("DELETE FROM labels WHERE kind = 'temporary_team'");
+  getDb().exec('DROP TABLE IF EXISTS temporary_team_members; DROP TABLE IF EXISTS temporary_teams');
 }
 
 /** Rows that point at a missing parent predate the repair; they are reported, not removed. */

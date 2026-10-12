@@ -49,7 +49,7 @@ export function startActiveRunner(runnerId: string, nowMs: number): void {
          race_finished_at = NULL,
          active_labels_json = ?
      WHERE id = 1`,
-    [runnerId, nowMs, nowMs, JSON.stringify(getRunnerLabels(runnerId, nowMs))]
+    [runnerId, nowMs, nowMs, JSON.stringify(getRunnerLabels(runnerId))]
   );
 }
 

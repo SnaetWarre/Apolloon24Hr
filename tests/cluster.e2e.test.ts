@@ -1047,7 +1047,7 @@ test(
         autoLink: true,
       });
       servers.push(prepared);
-      await client(prepared).labels.create.mutate({ name: 'Trojan Horse', kind: 'temporary_team' });
+      await client(prepared).labels.create.mutate({ name: 'Trojan Horse', kind: 'andere' });
       assert.equal((await fetchStatus(prepared)).changed, true);
 
       const fresh = await startServer({

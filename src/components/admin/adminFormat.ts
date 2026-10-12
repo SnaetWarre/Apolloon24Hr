@@ -50,11 +50,3 @@ export function compareRunnerIdentity(a: Runner, b: Runner) {
     }) || a.name.localeCompare(b.name)
   );
 }
-
-/** The speedteam a runner runs for now, which may be a night team. */
-export function currentTeamName(runner: Runner): string {
-  return (
-    runner.labels.find((label) => label.kind === 'speedteam' || label.kind === 'temporary_team')?.name ??
-    'Geen speedteam'
-  );
-}

@@ -1,9 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { all, one, run } from './connection.js';
-import { compareLabels } from '../../shared/labelOrder.js';
-import { type Label } from '../../shared/schemas.js';
-import { TEMPORARY_TEAM_KIND, getRunnerLabels } from './labels.js';
-import { parseLabelsJson, serializeHistoricalLabels } from './values.js';
+import { getRunnerLabels } from './labels.js';
+import { serializeHistoricalLabels } from './values.js';
 
 /*
  * Fixing a lap after the fact, from Beheer › Rondes: a lap that went to the wrong
@@ -37,9 +35,9 @@ function assertRunner(runnerId: string): void {
   if (!one<{ id: string }>('SELECT id FROM runners WHERE id = ?', [runnerId])) throw new Error('Loper niet gevonden');
 }
 
-/** The labels a lap of `runnerId` started at `startedAt` carries, night teams included. */
-function labelsJson(runnerId: string, startedAt: number): string {
-  return serializeHistoricalLabels(getRunnerLabels(runnerId, startedAt));
+/** The labels a lap of `runnerId` carries. */
+function labelsJson(runnerId: string): string {
+  return serializeHistoricalLabels(getRunnerLabels(runnerId));
 }
 
 function renumberLaps(runnerId: string): void {
@@ -54,39 +52,24 @@ function renumberLaps(runnerId: string): void {
   );
 }
 
-/** Gives a lap to another runner, with that runner's labels at the lap's start. */
+/** Gives a lap to another runner, with that runner's labels. */
 export function moveLap(lapId: string, runnerId: string): { ok: true } {
   const lap = lapRow(lapId);
   assertRunner(runnerId);
   if (lap.runnerId === runnerId) throw new Error('Deze ronde staat al op die loper.');
-  run('UPDATE laps SET runner_id = ?, labels_json = ? WHERE id = ?', [
-    runnerId,
-    labelsJson(runnerId, lap.startedAt),
-    lapId,
-  ]);
+  run('UPDATE laps SET runner_id = ?, labels_json = ? WHERE id = ?', [runnerId, labelsJson(runnerId), lapId]);
   renumberLaps(lap.runnerId);
   renumberLaps(runnerId);
   return { ok: true };
 }
 
 /**
- * The labels of a split lap's second half. Another runner gets their labels at the middle.
- * The same runner keeps the labels the lap was recorded with, so correcting a missed press
- * never moves a past lap to the runner's current category; only a night team that starts
- * or ends between the start and the middle takes or gives back the speedteam's place.
+ * The labels of a split lap's second half. Another runner gets their own labels. The same
+ * runner keeps the labels the lap was recorded with, so correcting a missed press never
+ * moves a past lap to the runner's current category.
  */
-function secondHalfLabels(lap: LapRow, runnerId: string, middle: number): string {
-  if (runnerId !== lap.runnerId) return labelsJson(runnerId, middle);
-  const isTeam = (label: Label) => label.kind === TEMPORARY_TEAM_KIND || label.kind === 'speedteam';
-  const teamIds = (labels: Label[]) =>
-    labels
-      .filter((label) => label.kind === TEMPORARY_TEAM_KIND)
-      .map((label) => label.id)
-      .join();
-  const atMiddle = getRunnerLabels(runnerId, middle);
-  if (teamIds(getRunnerLabels(runnerId, lap.startedAt)) === teamIds(atMiddle)) return lap.labelsJson;
-  const recorded = parseLabelsJson(lap.labelsJson).filter((label) => !isTeam(label));
-  return serializeHistoricalLabels([...recorded, ...atMiddle.filter(isTeam)].sort(compareLabels));
+function secondHalfLabels(lap: LapRow, runnerId: string): string {
+  return runnerId === lap.runnerId ? lap.labelsJson : labelsJson(runnerId);
 }
 
 /**
@@ -114,7 +97,7 @@ export function splitLap(lapId: string, runnerId: string): { ok: true; lapIds: [
       lap.finishedAt,
       lap.durationMs - firstMs,
       lap.createdAt,
-      secondHalfLabels(lap, runnerId, middle),
+      secondHalfLabels(lap, runnerId),
     ]
   );
   for (const handoff of all<{ id: string; payloadJson: string }>(

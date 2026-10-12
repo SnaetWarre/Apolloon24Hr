@@ -104,14 +104,7 @@ export function latestDemoRaceStart(nowMs: number): number {
 }
 
 function resetRace(startedAt: number): void {
-  for (const table of [
-    'laps',
-    'handoff_history',
-    'race_events',
-    'temporary_team_members',
-    'runner_labels',
-    'runners',
-  ]) {
+  for (const table of ['laps', 'handoff_history', 'race_events', 'runner_labels', 'runners']) {
     run(`DELETE FROM ${table}`);
   }
   run(

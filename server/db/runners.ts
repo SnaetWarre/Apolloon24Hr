@@ -8,7 +8,7 @@ import {
   type RunnerRegistrationDetails,
 } from '../../shared/schemas.js';
 import { all, one, run, transaction } from './connection.js';
-import { TEMPORARY_TEAM_KIND, activeTemporaryTeamIdForRunner, ensureLabel } from './labels.js';
+import { ensureLabel } from './labels.js';
 import { getMaxQueueIndex } from './queue.js';
 import { clearActiveRunner } from './race-state.js';
 import { getRunnerById } from './runner-queries.js';
@@ -152,22 +152,15 @@ const LABEL_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a
 /**
  * Replaces the runner's stored labels. Values may be label ids or names;
  * unknown names create a label. An unknown id is a label another laptop
- * deleted meanwhile and is skipped, not turned into a name. Night team
- * labels are derived, never stored, and while a night team is active the
- * runner keeps their speedteam.
+ * deleted meanwhile and is skipped, not turned into a name.
  */
 function setRunnerLabels(runnerId: string, labelNamesOrIds: string[]): void {
-  const keepSpeedteam = Boolean(activeTemporaryTeamIdForRunner(runnerId));
-  run(
-    `DELETE FROM runner_labels WHERE runner_id = ?
-     ${keepSpeedteam ? "AND label_id NOT IN (SELECT id FROM labels WHERE kind = 'speedteam')" : ''}`,
-    [runnerId]
-  );
+  run('DELETE FROM runner_labels WHERE runner_id = ?', [runnerId]);
   for (const value of labelNamesOrIds) {
     const label =
-      one<{ id: string; kind: string }>('SELECT id, kind FROM labels WHERE id = ?', [value]) ??
+      one<{ id: string }>('SELECT id FROM labels WHERE id = ?', [value]) ??
       (LABEL_ID_PATTERN.test(value.trim()) ? null : ensureLabel(value));
-    if (!label || label.kind === TEMPORARY_TEAM_KIND || (keepSpeedteam && label.kind === 'speedteam')) continue;
+    if (!label) continue;
     run('INSERT OR IGNORE INTO runner_labels (runner_id, label_id) VALUES (?, ?)', [runnerId, label.id]);
   }
 }
