@@ -8,12 +8,15 @@ import {
 } from '../src/lib/ranking.ts';
 import type { Label, LapRecord, Runner } from '../src/types.ts';
 
-test('lap coefficients use the 85-second reference and 0.075 points per second', () => {
+const assertClose = (actual: number | undefined, expected: number) =>
+  assert.ok(Math.abs((actual ?? Number.NaN) - expected) < 1e-9, `${actual} is not ${expected}`);
+
+test('lap coefficients use the 85-second reference and 0.125 per second', () => {
   const examples = [
-    [65_000, 2.5],
-    [68_200, 2.26],
-    [78_400, 1.495],
-    [84_300, 1.0525],
+    [65_000, 3.5],
+    [68_200, 3.1],
+    [78_400, 1.825],
+    [84_300, 1.0875],
     [85_000, 1],
     [85_600, 1],
     [87_400, 1],
@@ -23,63 +26,111 @@ test('lap coefficients use the 85-second reference and 0.075 points per second',
   ] as const;
 
   for (const [durationMs, expectedCoefficient] of examples) {
-    assert.ok(Math.abs(calculateLapCoefficient(durationMs) - expectedCoefficient) < 1e-10);
+    assertClose(calculateLapCoefficient(durationMs), expectedCoefficient);
   }
 });
 
 test('lap points use the finishing time in Brussels across all six four-hour blocks', () => {
   const examples = [
-    ['2026-09-23T22:00:00Z', 1.25], // 00:00 in Brussels
-    ['2026-09-24T02:00:00Z', 1.5], // 04:00
-    ['2026-09-24T06:00:00Z', 1.5], // 08:00
-    ['2026-09-24T10:00:00Z', 1.25], // 12:00
-    ['2026-09-24T14:00:00Z', 1], // 16:00
-    ['2026-09-24T18:00:00Z', 1], // 20:00
-    ['2026-09-24T21:59:59Z', 1], // 23:59
+    ['2026-09-23T22:00:00Z', 26], // 00:00 in Brussels
+    ['2026-09-24T02:00:00Z', 36], // 04:00
+    ['2026-09-24T06:00:00Z', 36], // 08:00
+    ['2026-09-24T10:00:00Z', 26], // 12:00
+    ['2026-09-24T14:00:00Z', 20], // 16:00
+    ['2026-09-24T18:00:00Z', 20], // 20:00
+    ['2026-09-24T21:59:59Z', 20], // 23:59
   ] as const;
 
   for (const [finishedAt, expectedPoints] of examples) {
-    assert.equal(
+    assertClose(
       calculateLapPoints({ source: 'handoff', durationMs: 85_000, finishedAt: Date.parse(finishedAt) }),
       expectedPoints
     );
   }
-  assert.equal(
+  assertClose(
     calculateLapPoints({ source: 'handoff', durationMs: 80_000, finishedAt: Date.parse(examples[0][0]) }),
-    1.71875
+    42.25
   );
   assert.equal(calculateLapPoints({ source: 'handoff', durationMs: 85_000, finishedAt: Number.NaN }), 0);
-  assert.equal(
+  assertClose(
     calculateLapPoints({ source: 'handoff', durationMs: 100_000, finishedAt: Date.parse(examples[0][0]) }),
-    1.25
+    26
   );
 });
 
 test('lap points follow Brussels daylight saving time', () => {
-  assert.equal(
+  assertClose(
     calculateLapPoints({ source: 'handoff', durationMs: 85_000, finishedAt: Date.parse('2026-10-25T02:00:00Z') }),
-    1.25
+    26
   );
-  assert.equal(
+  assertClose(
     calculateLapPoints({ source: 'handoff', durationMs: 85_000, finishedAt: Date.parse('2026-10-25T03:00:00Z') }),
-    1.5
+    36
   );
 });
 
-test('lap points match the example totals in coeff_berekeningen.xlsx', () => {
-  const points = (finishedAt: string) =>
-    calculateLapPoints({
-      source: 'handoff',
-      durationMs: 80_000,
-      finishedAt: Date.parse(finishedAt),
-    });
+test('lap points match the example totals in Prijzensysteem 2026.xlsx', () => {
+  // Brussels clock hour in each four-hour block on a summer-time day (UTC+2).
+  const finishedAtByBlock = {
+    '20-24u': '2026-10-13T18:30:00Z',
+    '00-4u': '2026-10-13T23:00:00Z',
+    '4-8u': '2026-10-14T03:00:00Z',
+    '8-12u': '2026-10-14T07:00:00Z',
+    '12-16u': '2026-10-14T11:00:00Z',
+    '16-20u': '2026-10-14T15:00:00Z',
+  } as const;
+  const total = (laps: [seconds: number, block: keyof typeof finishedAtByBlock][]) =>
+    laps.reduce(
+      (sum, [seconds, block]) =>
+        sum +
+        calculateLapPoints({
+          source: 'handoff',
+          durationMs: seconds * 1_000,
+          finishedAt: Date.parse(finishedAtByBlock[block]),
+        }),
+      0
+    );
 
-  assert.equal(points('2026-09-23T18:00:00Z') + points('2026-09-23T22:00:00Z'), 3.09375);
-  assert.equal(
-    points('2026-09-24T02:00:00Z') + points('2026-09-24T06:00:00Z') + points('2026-09-24T10:00:00Z'),
-    5.84375
+  // "10 rondes aan 1:17 (realistische speedteamer)"
+  assertClose(
+    total([
+      [78, '20-24u'],
+      [78, '20-24u'],
+      [78, '20-24u'],
+      [78, '20-24u'],
+      [78, '00-4u'],
+      [78, '8-12u'],
+      [78, '8-12u'],
+      [78, '16-20u'],
+      [78, '16-20u'],
+      [78, '16-20u'],
+    ]),
+    446.25
   );
-  assert.equal(points('2026-09-24T14:00:00Z'), 1.375);
+  // "5 rondes aan 1:20 (nachtloper)"
+  assertClose(
+    total([
+      [80, '00-4u'],
+      [80, '4-8u'],
+      [80, '4-8u'],
+      [80, '4-8u'],
+      [80, '4-8u'],
+    ]),
+    276.25
+  );
+  // "5 rondes met wisselende tijden"
+  assertClose(
+    total([
+      [80, '4-8u'],
+      [80, '8-12u'],
+      [75, '8-12u'],
+      [81, '8-12u'],
+      [82, '8-12u'],
+      [77, '12-16u'],
+      [78, '12-16u'],
+    ]),
+    402.25
+  );
 });
 
 test('inside rankings switch metric and filter laps by their historical label', () => {
@@ -125,10 +176,10 @@ test('inside rankings switch metric and filter laps by their historical label', 
     buildRunnerRanking(runners, laps, 'coefficient', firstYearsLabel.id).map((entry) => entry.runnerId),
     ['fast', 'steady']
   );
-  assert.equal(buildRunnerRanking(runners, laps, 'coefficient', null)[0]?.coefficientTotal, 6.25);
+  assertClose(buildRunnerRanking(runners, laps, 'coefficient', null)[0]?.coefficientTotal, 182);
 });
 
-test('a double press and a split half earn the base point but no speed bonus', () => {
+test('a double press and a split half earn the base points but no speed bonus', () => {
   const finishedAt = Date.parse('2026-09-24T14:00:00Z'); // 16:00 in Brussels, factor 1
   const lap = (id: string, durationMs: number, source: LapRecord['source']): LapRecord => ({
     id,
@@ -144,9 +195,9 @@ test('a double press and a split half earn the base point but no speed bonus', (
     labels: [],
   });
 
-  assert.equal(calculateLapPoints(lap('double-press', 1_300, 'handoff')), 1);
-  assert.equal(calculateLapPoints(lap('split-half', 40_000, 'split')), 1);
-  assert.equal(calculateLapPoints(lap('real', 60_000, 'handoff')), 2.875);
+  assert.equal(calculateLapPoints(lap('double-press', 1_300, 'handoff')), 20);
+  assert.equal(calculateLapPoints(lap('split-half', 40_000, 'split')), 20);
+  assertClose(calculateLapPoints(lap('real', 60_000, 'handoff')), 82.5);
   assert.equal(
     buildRunnerRanking(
       [],
@@ -154,7 +205,7 @@ test('a double press and a split half earn the base point but no speed bonus', (
       'coefficient',
       null
     )[0]?.coefficientTotal,
-    2
+    40
   );
 });
 
