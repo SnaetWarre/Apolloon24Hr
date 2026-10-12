@@ -3,9 +3,7 @@ import { type Label, type LabelImageUpload, type LabelInput, type LabelPatch } f
 import { all, one, run, transaction } from './connection.js';
 import { canonicalLabelName } from './values.js';
 import { clusterNow } from '../clock.js';
-import { compareLabels, LABEL_ORDER_SQL } from '../../shared/labelOrder.js';
-
-export const TEMPORARY_TEAM_KIND = 'temporary_team';
+import { LABEL_ORDER_SQL } from '../../shared/labelOrder.js';
 
 const DEFAULT_LABEL_COLOR = '#3b82f6';
 
@@ -41,10 +39,6 @@ export function ensureLabel(name: string): Label | null {
   const labelName = canonicalLabelName(name);
   if (!labelName) return null;
   return findLabelByName(labelName) ?? createLabel({ name: labelName });
-}
-
-export function ensureTemporaryTeamRow(labelId: string): void {
-  run('INSERT OR IGNORE INTO temporary_teams (label_id, active, activated_at) VALUES (?, 0, NULL)', [labelId]);
 }
 
 export function createLabelRecord(input: LabelInput, id: string, now: number): Label {
@@ -89,7 +83,6 @@ export function createLabelRecord(input: LabelInput, id: string, now: number): L
       now,
     ]
   );
-  if (label.kind === TEMPORARY_TEAM_KIND) ensureTemporaryTeamRow(label.id);
   return { ...label, createdAt: now, updatedAt: now };
 }
 
@@ -129,12 +122,6 @@ export function updateLabel(id: string, fields: LabelPatch): Label | null {
     [next.name, next.color, next.icon, next.kind, next.imageUrl, next.targetLaps, next.sortOrder, clusterNow(), id]
   );
 
-  if (next.kind === TEMPORARY_TEAM_KIND) {
-    ensureTemporaryTeamRow(id);
-  } else {
-    run('DELETE FROM temporary_teams WHERE label_id = ?', [id]);
-  }
-
   return getLabel(id);
 }
 
@@ -168,34 +155,8 @@ export function deleteLabel(id: string): boolean {
   });
 }
 
-/**
- * SQL condition, with one `?` for the current time, under which night team `t`
- * replaces its members' speedteam: inside its schedule, or switched on by hand
- * when it has no schedule.
- */
-export const TEMPORARY_TEAM_ACTIVE_SQL = `(CASE WHEN t.starts_at IS NULL OR t.ends_at IS NULL
-  THEN t.active = 1 ELSE ? BETWEEN t.starts_at AND t.ends_at - 1 END)`;
-
-function activeTemporaryTeamLabels(nowMs: number, runnerId?: string): Array<Label & { runnerId: string }> {
-  return all<Label & { runnerId: string }>(
-    `SELECT m.runner_id AS runnerId, ${LABEL_COLUMNS}
-     FROM temporary_team_members m
-     JOIN temporary_teams t ON t.label_id = m.team_label_id
-     JOIN labels l ON l.id = t.label_id
-     WHERE ${TEMPORARY_TEAM_ACTIVE_SQL} ${runnerId ? 'AND m.runner_id = ?' : ''}`,
-    runnerId ? [nowMs, runnerId] : [nowMs]
-  );
-}
-
-export function activeTemporaryTeamIdForRunner(runnerId: string, nowMs = clusterNow()): string | null {
-  return activeTemporaryTeamLabels(nowMs, runnerId)[0]?.id ?? null;
-}
-
-/**
- * Each runner's labels at `nowMs`: the stored labels, with the speedteam
- * swapped for the night team while that team is active.
- */
-export function getRunnerLabelsMap(runnerId?: string, nowMs = clusterNow()): Map<string, Label[]> {
+/** Each runner's stored labels. */
+export function getRunnerLabelsMap(runnerId?: string): Map<string, Label[]> {
   const rows = all<Label & { runnerId: string }>(
     `SELECT rl.runner_id AS runnerId, ${LABEL_COLUMNS}
      FROM runner_labels rl
@@ -210,13 +171,9 @@ export function getRunnerLabelsMap(runnerId?: string, nowMs = clusterNow()): Map
     if (labels) labels.push(label);
     else map.set(owner, [label]);
   }
-  for (const { runnerId: member, ...team } of activeTemporaryTeamLabels(nowMs, runnerId)) {
-    const labels = (map.get(member) ?? []).filter((label) => label.kind !== 'speedteam');
-    map.set(member, [...labels, team].sort(compareLabels));
-  }
   return map;
 }
 
-export function getRunnerLabels(runnerId: string, nowMs = clusterNow()): Label[] {
-  return getRunnerLabelsMap(runnerId, nowMs).get(runnerId) ?? [];
+export function getRunnerLabels(runnerId: string): Label[] {
+  return getRunnerLabelsMap(runnerId).get(runnerId) ?? [];
 }

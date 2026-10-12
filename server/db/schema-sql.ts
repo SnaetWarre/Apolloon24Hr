@@ -95,23 +95,6 @@ export const SCHEMA_SQL = `
       FOREIGN KEY (runner_id) REFERENCES runners(id) ON DELETE SET NULL
     );
 
-    CREATE TABLE IF NOT EXISTS temporary_teams (
-      label_id TEXT PRIMARY KEY,
-      active INTEGER NOT NULL DEFAULT 0,
-      activated_at INTEGER,
-      starts_at INTEGER,
-      ends_at INTEGER,
-      FOREIGN KEY (label_id) REFERENCES labels(id) ON DELETE CASCADE
-    );
-
-    CREATE TABLE IF NOT EXISTS temporary_team_members (
-      team_label_id TEXT NOT NULL,
-      runner_id TEXT NOT NULL UNIQUE,
-      PRIMARY KEY (team_label_id, runner_id),
-      FOREIGN KEY (team_label_id) REFERENCES temporary_teams(label_id) ON DELETE CASCADE,
-      FOREIGN KEY (runner_id) REFERENCES runners(id) ON DELETE CASCADE
-    );
-
     CREATE TABLE IF NOT EXISTS activity_log (
       id TEXT PRIMARY KEY,
       occurred_at INTEGER NOT NULL,

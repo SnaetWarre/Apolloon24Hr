@@ -137,19 +137,6 @@ export function useAppActions() {
       updateLabel: action((id: string, fields: LabelPatch) => trpc.labels.update.mutate({ id, fields })),
       deleteLabel: action((id: string) => trpc.labels.delete.mutate({ id })),
       uploadLabelImage: action((input: LabelImageUpload) => trpc.labels.uploadImage.mutate(input), []),
-      createTemporaryTeam: action(
-        (input: { name: string; color: string; startsAt: number; endsAt: number; runnerIds: string[] }) =>
-          trpc.temporaryTeams.create.mutate(input)
-      ),
-      setTemporaryTeamMembers: action((labelId: string, runnerIds: string[]) =>
-        trpc.temporaryTeams.setMembers.mutate({ labelId, runnerIds })
-      ),
-      setTemporaryTeamSchedule: action((labelId: string, startsAt: number, endsAt: number) =>
-        trpc.temporaryTeams.setSchedule.mutate({ labelId, startsAt, endsAt })
-      ),
-      setTemporaryTeamActive: action((labelId: string, active: boolean) =>
-        trpc.temporaryTeams.setActive.mutate({ labelId, active })
-      ),
       handoff: action((press: PressTime) => trpc.race.handoff.mutate({ ...raceExpectation(), ...press })),
       startNext: action((press: PressTime) => trpc.race.startNext.mutate({ ...raceExpectation(), ...press })),
       undoLastHandoff: action(() => trpc.race.undoLastHandoff.mutate(raceExpectation())),

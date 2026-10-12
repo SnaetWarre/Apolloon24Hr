@@ -132,3 +132,44 @@ for (const fixture of fixtures) {
     fs.rmSync(dataPath, { recursive: true, force: true });
   });
 }
+
+test('updating drops the night teams: their tables, labels and members', async () => {
+  fs.rmSync(dataPath, { recursive: true, force: true });
+  fs.mkdirSync(dataDir, { recursive: true });
+  fs.copyFileSync(path.join(fixtureDir, LATEST_RELEASE_FIXTURE), databasePath);
+  const old = new DatabaseSync(databasePath);
+  let runnerId: string;
+  let labelCount: number;
+  try {
+    runnerId = (old.prepare('SELECT id FROM runners LIMIT 1').get() as { id: string }).id;
+    labelCount = (old.prepare('SELECT count(*) AS n FROM labels').get() as { n: number }).n;
+    old.exec(`
+      INSERT INTO labels (id, name, color, icon, kind, created_at, updated_at)
+        VALUES ('night', 'Nachtploeg', '#7c3aed', 'NA', 'temporary_team', 1, 1);
+      INSERT INTO temporary_teams (label_id, active, starts_at, ends_at) VALUES ('night', 0, 1, 2);
+      INSERT INTO temporary_team_members (team_label_id, runner_id) VALUES ('night', '${runnerId}');
+      INSERT INTO runner_labels (runner_id, label_id) VALUES ('${runnerId}', 'night');
+    `);
+  } finally {
+    old.close();
+  }
+
+  const db = await import('../server/db.ts');
+  try {
+    await db.initDb();
+    assert.equal(db.getLabels().length, labelCount);
+    assert.equal(
+      db.getRunnerById(runnerId)?.labels.some((label) => label.id === 'night'),
+      false
+    );
+  } finally {
+    db.closeDb();
+  }
+  const updated = new DatabaseSync(databasePath, { readOnly: true });
+  try {
+    assert.deepEqual(updated.prepare("SELECT name FROM sqlite_master WHERE name LIKE 'temporary_team%'").all(), []);
+  } finally {
+    updated.close();
+  }
+  fs.rmSync(dataPath, { recursive: true, force: true });
+});

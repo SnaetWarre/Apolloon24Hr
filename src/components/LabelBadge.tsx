@@ -19,7 +19,6 @@ export function LabelBadge({ label, compact = false }: { label: Label; compact?:
 
 export function labelKindTitle(kind: string) {
   if (kind === 'speedteam') return 'Speedteams';
-  if (kind === 'temporary_team') return 'Tijdelijke nachtploegen';
   if (kind === 'zustervereniging' || kind === 'association') return 'Zusterverenigingen';
   if (kind === 'andere' || kind === 'group') return 'Andere';
   return 'Custom';

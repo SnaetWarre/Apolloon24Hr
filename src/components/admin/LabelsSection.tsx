@@ -2,62 +2,13 @@ import React from 'react';
 import { useAppActions } from '../../app/index';
 import { useConfirm } from '../ConfirmDialog';
 import { labelKindTitle } from '../LabelBadge';
-import type { Label, Runner, TemporaryTeam } from '../../types';
+import type { Label } from '../../types';
 import { AdminNoticeBanner, useAdminAction } from './AdminNotice';
 import { groupLabels } from '../../lib/labels';
 import { LabelAdminRow } from './LabelAdminRow';
 import { LabelImagePicker } from './LabelImagePicker';
-import { TemporaryTeamAdminCard } from './TemporaryTeamAdminCard';
-import { TemporaryTeamCreateForm } from './TemporaryTeamCreateForm';
 
-export function LabelsSection({
-  labels,
-  runners,
-  temporaryTeams,
-}: {
-  labels: Label[];
-  runners: Runner[];
-  temporaryTeams: TemporaryTeam[];
-}) {
-  const { createTemporaryTeam, setTemporaryTeamMembers, setTemporaryTeamActive, setTemporaryTeamSchedule } =
-    useAppActions();
-  return (
-    <>
-      <section className="panel">
-        <h2>Tijdelijke nachtploegen</h2>
-        <p className="panel-copy">
-          Plan wanneer de lopers tijdelijk van hun gewone speedteam naar deze ploeg gaan. Na het einduur keren ze
-          automatisch terug.
-        </p>
-        <TemporaryTeamCreateForm runners={runners} allTeams={temporaryTeams} onCreate={createTemporaryTeam} />
-        {temporaryTeams.length ? (
-          <div className="temporary-team-list">
-            {temporaryTeams.map((team) => {
-              const label = labels.find((item) => item.id === team.labelId);
-              return label ? (
-                <TemporaryTeamAdminCard
-                  key={team.labelId}
-                  label={label}
-                  team={team}
-                  allTeams={temporaryTeams}
-                  runners={runners}
-                  onSaveMembers={setTemporaryTeamMembers}
-                  onSetActive={setTemporaryTeamActive}
-                  onSetSchedule={setTemporaryTeamSchedule}
-                />
-              ) : null;
-            })}
-          </div>
-        ) : (
-          <div className="empty-inline">Nog geen tijdelijke nachtploegen. Maak hierboven de eerste aan.</div>
-        )}
-      </section>
-      <LabelsPanel labels={labels} />
-    </>
-  );
-}
-
-function LabelsPanel({ labels }: { labels: Label[] }) {
+export function LabelsSection({ labels }: { labels: Label[] }) {
   const confirm = useConfirm();
   const { createLabel, updateLabel, deleteLabel } = useAppActions();
   const { pending, notice, run } = useAdminAction();

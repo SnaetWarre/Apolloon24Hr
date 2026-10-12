@@ -14,11 +14,10 @@ import { ADMIN_SECTIONS, isAdminSection, type AdminSection } from './adminSectio
 import { PageHeader } from './PageHeader';
 import { SectionNavigation } from './SectionNavigation';
 
-const selectAdminData = ({ labels, runners, settings, temporaryTeams, host }: LiveAppSnapshot) => ({
+const selectAdminData = ({ labels, runners, settings, host }: LiveAppSnapshot) => ({
   labels,
   runners,
   settings,
-  temporaryTeams,
   host,
 });
 
@@ -30,7 +29,7 @@ export function AdminView() {
   const router = useRouter();
   const setActiveSection = (section: AdminSection) =>
     void router.navigate({ to: '/admin', search: { section }, replace: true });
-  const { labels, runners, settings, temporaryTeams, host } = useAppData(selectAdminData);
+  const { labels, runners, settings, host } = useAppData(selectAdminData);
   const { cluster, error: clusterError } = useClusterStatus();
   const needsAttention = readinessSummary(buildEventReadiness(cluster)) !== 'ready';
   // A section chosen after the page opened rises in; the first one is simply there.
@@ -67,7 +66,7 @@ export function AdminView() {
           <LapsSection active={activeSection === 'laps'} />
         </div>
         <div className={contentClass('labels')} hidden={activeSection !== 'labels'}>
-          <LabelsSection labels={labels} runners={runners} temporaryTeams={temporaryTeams} />
+          <LabelsSection labels={labels} />
         </div>
         <div className={contentClass('public')} hidden={activeSection !== 'public'}>
           <PublicSection publicRecordMode={settings.publicRecordMode} />

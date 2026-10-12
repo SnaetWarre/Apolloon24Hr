@@ -118,7 +118,7 @@ export function performHandoff(
           durationMs,
           nowMs,
           serializeHistoricalLabels(
-            raceState.activeLabels.length ? raceState.activeLabels : getRunnerLabels(activeRunnerId, startedAt)
+            raceState.activeLabels.length ? raceState.activeLabels : getRunnerLabels(activeRunnerId)
           ),
         ]
       );

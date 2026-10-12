@@ -12,15 +12,14 @@ import { labelKindTitle } from './LabelBadge';
 import type { LiveAppSnapshot, Runner, RunnerRegistration, RunnerStatus } from '../types';
 import { LiveElapsed } from './LiveTime';
 
-const selectRunnerProfileData = ({ runners, labels, temporaryTeams }: LiveAppSnapshot) => ({
+const selectRunnerProfileData = ({ runners, labels }: LiveAppSnapshot) => ({
   runners,
   labels,
-  temporaryTeams,
 });
 
 export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; onClose: () => void }) {
   const confirm = useConfirm();
-  const { runners, labels, temporaryTeams } = useAppData(selectRunnerProfileData);
+  const { runners, labels } = useAppData(selectRunnerProfileData);
   const { laps: allLaps } = useRaceHistory({ scope: 'runner', runnerId });
   const { setStatus, updateRunner } = useAppActions();
   const runner = runners.find((item) => item.id === runnerId);
@@ -61,7 +60,6 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
     editableRunnerKey !== getEditableRunnerKey(draftBaseline, registrationBaseline)
   );
   const initializedRunnerId = React.useRef<string | null>(null);
-  const activeTemporaryTeam = temporaryTeams.find((team) => team.active && team.memberRunnerIds.includes(runnerId));
 
   function loadLatestProfile() {
     if (!runner) return;
@@ -263,11 +261,6 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
         </section>
 
         <div className="label-picker-groups">
-          {activeTemporaryTeam && (
-            <div className="host-hint">
-              De speedteamploeg wordt beheerd door de actieve tijdelijke nachtploeg en kan hier niet gewijzigd worden.
-            </div>
-          )}
           {groupLabels(labels).map(([kind, groupedLabels]) => (
             <section key={kind} className="label-picker-group">
               <h3>{labelKindTitle(kind)}</h3>
@@ -277,9 +270,6 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
                     <input
                       type="checkbox"
                       checked={selectedLabels.includes(label.id)}
-                      disabled={
-                        label.kind === 'temporary_team' || (Boolean(activeTemporaryTeam) && label.kind === 'speedteam')
-                      }
                       onChange={() => toggleLabel(label.id)}
                     />
                     <span style={{ borderColor: label.color }}>

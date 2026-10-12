@@ -59,7 +59,7 @@ Each feature file starts with an H1 title and one paragraph describing the user-
 - [Analyse › Grafieken](./analysis-charts.md) covers what the Analyse charts say when they have no laps to draw.
 - [Beheer › Vast netwerkadres](./network-setup.md) covers pinning the laptop's address in Systeem & herstel, with the network's own prefix length.
 - [Beheer › Systeem & herstel › backups](./system-recovery.md) covers making a backup, restoring one, removing the practice race after the rehearsal, and a laptop that starts on a damaged database.
-- [Tijdelijke nachtploegen](./night-teams.md) covers creating night teams, editing their members and times, and switching them on by hand.
+- [Beheer › Labels](./labels.md) covers the Labels tab and adding a label.
 - [Tactiek](./tactics.md) covers the goal, valid-lap, and hourly pace fields in the live section and the number fields in Analyse vorig jaar.
 
-Not mapped yet: the rest of the Analyse charts, the charts in Tactiek, the rest of Ploegen & labels.
+Not mapped yet: the rest of the Analyse charts, the charts in Tactiek.

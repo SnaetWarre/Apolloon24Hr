@@ -101,13 +101,9 @@ For hosting the app directly on the VPS without a laptop tunnel, see `docs/vps-d
    - **Analyse**: figures, charts, and the exports.
    - **Tactiek**: the live race against the target and against last year.
    - **Binnenscherm** and **Buitenscherm**: the public screens for the TVs.
-   - **Beheer**: preparation, runners, teams and labels, public screens, and system and recovery.
+   - **Beheer**: preparation, runners, labels, public screens, and system and recovery.
 
 There is no password login. The event network is wired only, and that physical network is the trust boundary.
-
-## Night Teams
-
-A tijdelijke nachtploeg (Beheer › Ploegen & labels) moves its members from their speedteam to the night team during a planned window. Labels are derived from the schedule: nothing is rewritten, so members are back in their own speedteam as soon as the window ends or the team is removed. Each lap keeps the labels of the moment its runner started.
 
 ## Registration Import
 
@@ -134,7 +130,7 @@ Default labels:
 - Zusterverenigingen: `HILOK`, `Mesacosa`, `Kinesia`, with their logos from `public/labels/`
 - Andere: `1ste jaar`, `Anciens`, `Dames`
 
-Labels are listed by kind, then by name. In Beheer › Ploegen & labels each label can get a logo. The inside screen compares the labels of each kind by their laps; there are no lap goals per team.
+Labels are listed by kind, then by name. In Beheer › Labels each label can get a logo. The inside screen compares the labels of each kind by their laps; there are no lap goals per team.
 
 ## Timing Flow
 
@@ -164,7 +160,7 @@ npm run format          Format with oxfmt (format:check only reports)
 npm run check           Type-check, lint, format check, and build the Vite client
 npm run build           Type-check the client, build Vite, and compile the server
 npm test                Unit tests
-npm run test:e2e        Build, then run real servers (three laptops, failover, night teams)
+npm run test:e2e        Build, then run real servers (three laptops, failover)
 npm run test:ui         Browser checks against the build (npx playwright install chromium once)
 npm run test:sim        Consensus simulation: thousands of seeded crashes and partitions
 npm run rehearse        Three real servers under random failures, then compare the lap logs

@@ -54,7 +54,7 @@ test('a laptop counts as changed after an event write, not after linking with an
       db.saveClusterMember({ hostId: 'other', url: 'http://10.0.0.2:3000', name: 'LAPTOP-2' })
     );
     assert.equal(db.hasEventChanges(), false, 'linking is bookkeeping, not a change to the event');
-    db.recordWrite('labels.create', () => db.createLabel({ name: 'Trojan Horse', kind: 'temporary_team' }));
+    db.recordWrite('labels.create', () => db.createLabel({ name: 'Trojan Horse', kind: 'andere' }));
     assert.equal(db.hasEventChanges(), true);
   } finally {
     db.closeDb();
@@ -75,11 +75,6 @@ test('replaying the log on another database reproduces the leader exactly', asyn
   write(() => db.performHandoff(70_000));
   write(() => db.undoLastHandoff());
   write(() => db.createBurgieGepaktEvent(71_000));
-  write(() => {
-    const team = db.createLabel({ name: 'Nachtploeg', kind: 'temporary_team', color: '#7c3aed' });
-    db.setTemporaryTeamMembers(team.id, [bob.id]);
-    db.setTemporaryTeamSchedule(team.id, 0, Date.now() + 3_600_000);
-  });
   write(() => db.setPublicRecordMode('hour'));
 
   const comparable = () => {
@@ -88,7 +83,7 @@ test('replaying the log on another database reproduces the leader exactly', asyn
   };
   const expected = comparable();
   const entries = db.getLogEntriesAfter(0)!;
-  assert.equal(entries.length, 10);
+  assert.equal(entries.length, 9);
 
   db.closeDb();
   fs.rmSync(dataPath, { recursive: true, force: true });

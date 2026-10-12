@@ -40,16 +40,8 @@ async function typesInto(where, field, text) {
 }
 
 try {
-  // Setup: a night team and two laps, so its card and the lap fixes have something to open.
+  // Setup: two laps, so the lap fixes have something to open.
   const { runners } = await snapshot();
-  const now = Date.now();
-  await rpc.temporaryTeams.create.mutate({
-    name: 'Focusploeg',
-    color: '#7c3aed',
-    startsAt: now + 3_600_000,
-    endsAt: now + 7_200_000,
-    runnerIds: [runners[0].id],
-  });
   for (const runner of runners.slice(1, 4)) await rpc.runners.setStatus.mutate({ id: runner.id, status: 'waiting' });
   await rpc.race.startNext.mutate(await expectation());
   await rpc.race.handoff.mutate(await expectation());
@@ -86,22 +78,6 @@ try {
   await page.getByRole('button', { name: 'Nieuwe loper', exact: true }).click();
   newRunner = page.getByRole('dialog', { name: 'Nieuwe loper', exact: true });
   await typesInto('Beheer › Lopers › Nieuwe loper', newRunner.getByRole('textbox', { name: 'Lopersnummer' }), '8');
-
-  await page.goto(`${baseUrl}/admin?section=labels`);
-  await page.getByRole('button', { name: 'Ledenlijst beheren', exact: true }).click();
-  const members = page.getByRole('dialog', { name: 'Ledenlijst Focusploeg', exact: true });
-  await typesInto(
-    'Ploegen & labels › Ledenlijst beheren',
-    members.getByPlaceholder('Zoek op nummer, naam of speedteam'),
-    'xy'
-  );
-  await page.keyboard.press('Escape');
-  await members.waitFor({ state: 'detached' });
-  await page.getByRole('button', { name: 'Planning aanpassen', exact: true }).click();
-  await typesInto(
-    'Ploegen & labels › Planning aanpassen',
-    page.locator('.temporary-team-schedule-edit').getByLabel('Begin')
-  );
 
   await page.goto(`${baseUrl}/admin?section=laps`);
   for (const [button, dialogName] of [

@@ -7,7 +7,6 @@ import { DATABASE_SCHEMA_VERSION, createSchema, migrateSchema, seedDefaultLabels
 import { schemaProblems } from './db/schema-check.js';
 import { quickCheck } from './db/sqlite-file.js';
 import { DAMAGED_DATABASE_SETTING, getSetting, hostIdentity, setLocalSetting } from './db/settings.js';
-import { syncTemporaryTeamRows } from './db/teams.js';
 
 /** The first 4.0 schema. Older databases hold only earlier years' events and are put aside, not converted. */
 const FIRST_KEPT_SCHEMA_VERSION = 13;
@@ -48,7 +47,6 @@ export async function initDb(): Promise<void> {
   // Only a new database gets the built-in labels; in an existing one they are event data.
   if (!hasTables || retired) seedDefaultLabels();
   if (opened.damaged) setLocalSetting(DAMAGED_DATABASE_SETTING, JSON.stringify(opened.damaged));
-  syncTemporaryTeamRows();
   hostIdentity();
 }
 
@@ -159,14 +157,6 @@ export {
   saveLabelImage,
   getLabelImage,
 } from './db/labels.js';
-export {
-  getTemporaryTeams,
-  getTemporaryTeam,
-  setTemporaryTeamMembers,
-  setTemporaryTeamActive,
-  setTemporaryTeamSchedule,
-  activeTemporaryTeamsKey,
-} from './db/teams.js';
 export { countRunners, getAllRunners, getRunnerById, getRunnerRegistrations } from './db/runner-queries.js';
 export { insertRunner, updateRunner, upsertRunnerFromImport, deleteRunner } from './db/runners.js';
 export { hideRunnerInQueue, unhideRunnerInQueue, updateRunnerStatus, updateWaitingOrder } from './db/queue.js';

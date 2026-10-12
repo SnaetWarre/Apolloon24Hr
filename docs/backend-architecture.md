@@ -67,8 +67,6 @@ server/index.ts
   only the changes since the revision they hold (`server/deltas.ts`).
 - Pushes the laptop status over `live.cluster` when it changes, so screens do
   not poll it.
-- Re-announces the revision when a night team starts or stops, since their
-  labels follow the clock rather than a write.
 - Initializes SQLite before listening and shuts down gracefully.
 
 ### `server/router.ts`
@@ -94,8 +92,8 @@ server/index.ts
 - `sqlite-file.ts`: opens a standalone database file (a backup or a received
   image) and runs `PRAGMA quick_check`; also used by the backup worker.
 - `schema.ts`: tables and migrations. Schema 13 dropped the multi-master
-  replication tables, moved the queue state onto `runners`, and derives
-  night-team labels.
+  replication tables and moved the queue state onto `runners`. Schema 17
+  dropped the night teams.
 - `replication.ts`: the replication log. `recordWrite` captures the SQL a
   command executes and appends it as one log entry in the same transaction.
   `appendFromLeader` stores a leader's entries after checking that they
@@ -108,7 +106,7 @@ server/index.ts
   settings (identity, term, vote, clock offset, schema version), which never
   replicate.
 - Domain modules: `runners`, `runner-queries`, `queue`, `race-state`, `timing`,
-  `labels`, `teams`, `history`, `storage`, `values`.
+  `labels`, `history`, `storage`, `values`.
 
 Application tables:
 
@@ -116,8 +114,7 @@ Application tables:
 runners (incl. queue)   labels
 runner_labels           race_state
 laps                    handoff_history
-race_events             temporary_teams
-temporary_team_members  settings
+race_events             settings
 cluster_members         cluster_member_names
 forwarded_writes        replication_log
 ```
@@ -266,7 +263,7 @@ three laptops forming a group and writing everywhere, the leader dying during
 a timed lap, a follower catching up after being off, a laptop cut off from
 the others, continuing alone after two laptops fail, finding each other
 again after every address changed, exactly-once repeats,
-version mismatches, backups, and night teams across a restart.
+version mismatches, and backups.
 
 `npm test` also runs the consensus simulation (`tests/raft-sim.test.ts`), and
 `npm run rehearse` puts three real servers through random failures; see

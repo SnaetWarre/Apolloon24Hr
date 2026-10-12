@@ -113,20 +113,6 @@ export function describeWrite(path: string, input: unknown): ((result: unknown) 
     }
     case 'labels.uploadImage':
       return () => 'Logo opgeladen';
-    case 'temporaryTeams.create':
-      return () => `Nachtploeg ${String(value.name ?? '')} aangemaakt`;
-    case 'temporaryTeams.setSchedule': {
-      const label = labelName(id);
-      return () => `Uren van nachtploeg ${label} aangepast`;
-    }
-    case 'temporaryTeams.setMembers': {
-      const label = labelName(id);
-      return () => `Leden van nachtploeg ${label} aangepast`;
-    }
-    case 'temporaryTeams.setActive': {
-      const label = labelName(id);
-      return () => `Nachtploeg ${label} ${value.active ? 'gestart' : 'gestopt'}`;
-    }
     case 'settings.updatePublicRecordMode':
       return () =>
         `Records op de publieke schermen: ${RECORD_MODE_TEXT[value.publicRecordMode as PublicRecordMode] ?? ''}`;

@@ -48,8 +48,6 @@ const REPLICATED_TABLES = [
   'laps',
   'handoff_history',
   'race_events',
-  'temporary_teams',
-  'temporary_team_members',
   'activity_log',
   'cluster_members',
   'cluster_member_names',

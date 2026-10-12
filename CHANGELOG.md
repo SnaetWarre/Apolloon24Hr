@@ -4,6 +4,12 @@ All notable changes to Apolloon Telsysteem will be documented in this file.
 
 ## [Unreleased]
 
+### Removed
+
+- De tijdelijke nachtploegen. Beheer › Ploegen & labels heet nu Beheer ›
+  Labels. Bij het updaten verdwijnen de nachtploegen en hun leden ook uit de
+  database; rondes die al gelopen werden houden hun labels
+
 ## [4.4.1] - 2026-10-11
 
 Laptops koppelen alleen met dezelfde versie: zet 4.4.1 op alle laptops.

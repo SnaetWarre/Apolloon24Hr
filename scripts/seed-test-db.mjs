@@ -119,7 +119,6 @@ const state = {
   labels: db.getLabels(),
   race: db.getRaceState(),
   laps: db.getAllLaps(),
-  temporaryTeams: db.getTemporaryTeams(),
 };
 const activeRunner = state.runners.find((runner) => runner.id === state.race.activeRunnerId);
 
@@ -129,7 +128,6 @@ console.log(`Database: ${path.join(dataPath, 'data', 'app.db')}`);
 console.log(`Runners: ${state.runners.length}`);
 console.log(`Labels: ${state.labels.length}`);
 console.log(`Laps: ${state.laps.length}`);
-console.log(`Temporary teams: ${state.temporaryTeams.length}`);
 console.log(`Active runner: ${activeRunner ? runnerLabel(activeRunner) : 'none'}`);
 console.log(`Race started: ${state.race.raceStartedAt ? new Date(state.race.raceStartedAt).toISOString() : 'no'}`);
 console.log('');
@@ -297,37 +295,10 @@ function seedLiveRace(runners, nowMs) {
 }
 
 function seedLargeRace(runners, nowMs) {
-  const nightTeams = seedTemporaryTeams(runners);
-  seedRandomLapHistory({
-    runners,
-    nowMs,
-    nightTeams,
-  });
+  seedRandomLapHistory({ runners, nowMs });
 }
 
-function seedTemporaryTeams(runners) {
-  const eligible = runners.filter((runner) => runner.labels.some((label) => label.kind === 'speedteam'));
-  const definitions = [
-    { name: 'Trojan', color: '#7c3aed', icon: 'TR', members: eligible.slice(0, 6) },
-    { name: 'Trojan V2', color: '#db2777', icon: 'T2', members: eligible.slice(6, 12) },
-  ];
-  return definitions.map((definition, index) => {
-    const label = db.createLabel({
-      name: definition.name,
-      color: definition.color,
-      icon: definition.icon,
-      kind: 'temporary_team',
-      sortOrder: 25 + index,
-    });
-    db.setTemporaryTeamMembers(
-      label.id,
-      definition.members.map((runner) => runner.id)
-    );
-    return label.id;
-  });
-}
-
-function seedRandomLapHistory({ runners, nowMs, nightTeams = [] }) {
+function seedRandomLapHistory({ runners, nowMs }) {
   const lapTargets = largeLapTargets(runners);
   const lapSchedule = buildLargeLapSchedule(runners, lapTargets);
   if (!lapSchedule.length) return;
@@ -338,17 +309,6 @@ function seedRandomLapHistory({ runners, nowMs, nightTeams = [] }) {
   const activeElapsedMs = randomInt(minutes(2), minutes(18));
   const startedAt = nowMs - totalDurationMs - activeElapsedMs - randomInt(101, 999);
   let currentStartedAt = startedAt;
-
-  // Night teams cover the middle third of the history.
-  const lapStart = (lapIndex) =>
-    startedAt + lapDurations.slice(0, lapIndex).reduce((sum, duration) => sum + duration, 0);
-  for (const labelId of nightTeams) {
-    db.setTemporaryTeamSchedule(
-      labelId,
-      lapStart(Math.floor(lapSchedule.length / 3)),
-      lapStart(Math.floor((lapSchedule.length * 2) / 3))
-    );
-  }
 
   db.updateRunnerStatus({
     id: lapSchedule[0].id,
