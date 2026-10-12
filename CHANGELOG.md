@@ -4,8 +4,15 @@ All notable changes to Apolloon Telsysteem will be documented in this file.
 
 ## [Unreleased]
 
+## [4.5.0] - 2026-10-12
+
+Laptops koppelen alleen met dezelfde versie: zet 4.5.0 op alle laptops. Deze
+versie bevat ook de herstelde vensterknoppen uit 4.4.1.
+
 ### Changed
 
+- Het Buitenscherm toont de loper op de piste op een blauwe band, met de
+  volgende loper eronder als Volgende racer
 - Het Binnenscherm rekent punten volgens het prijzensysteem van 2026. Een
   ronde is 20 punten × de tijdcoëfficiënt × de factor van het dagdeel. De
   tijdcoëfficiënt is 1, plus 0,125 per seconde onder 1:25. Het dagdeel telt
