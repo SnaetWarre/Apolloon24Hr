@@ -350,7 +350,7 @@ export function InsideDisplay() {
                 <strong>{lapRunnerLabel(runner)}</strong>
                 <em>
                   {rankingMode === 'coefficient'
-                    ? `${formatCoefficient(runner.coefficientTotal)} ptn · ${runner.lapCount} rondes`
+                    ? `${formatPoints(runner.coefficientTotal)} ptn · ${runner.lapCount} rondes`
                     : `${runner.lapCount} rondes · gem. ${formatDurationMs(runner.averageLapMs)}`}
                 </em>
               </li>
@@ -493,11 +493,8 @@ function useDisplayPresentation(
   return [presentation, choose];
 }
 
-function formatCoefficient(coefficient: number) {
-  return coefficient.toLocaleString('nl-BE', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 4,
-  });
+function formatPoints(points: number) {
+  return points.toLocaleString('nl-BE', { maximumFractionDigits: 1 });
 }
 
 function formatDisplayClockTime(finishedAt: number) {

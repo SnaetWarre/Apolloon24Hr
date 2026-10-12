@@ -4,6 +4,14 @@ All notable changes to Apolloon Telsysteem will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- Het Binnenscherm rekent punten volgens het prijzensysteem van 2026. Een
+  ronde is 20 punten × de tijdcoëfficiënt × de factor van het dagdeel. De
+  tijdcoëfficiënt is 1, plus 0,125 per seconde onder 1:25. Het dagdeel telt
+  ×1,3 van 0 tot 4 uur, ×1,8 van 4 tot 12 uur, ×1,3 van 12 tot 16 uur en ×1
+  van 16 tot 24 uur. Punten staan met hoogstens één cijfer na de komma
+
 ### Removed
 
 - De tijdelijke nachtploegen. Beheer › Ploegen & labels heet nu Beheer ›
