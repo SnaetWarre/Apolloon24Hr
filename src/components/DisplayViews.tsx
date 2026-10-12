@@ -139,7 +139,7 @@ export function OutsideDisplay() {
         </div>
       </section>
       <section className="outside-band outside-band--next">
-        {!finished && <span className="display-kicker">Volgende loper</span>}
+        {!finished && <span className="display-kicker">Volgende racer</span>}
         <div key={nextKey} className={`outside-runner${changed.has(`next:${nextKey}`) ? ' outside-runner--in' : ''}`}>
           <DisplayRunner
             runner={nextRunner}

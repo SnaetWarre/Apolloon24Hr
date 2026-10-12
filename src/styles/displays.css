@@ -146,7 +146,6 @@ html[data-display-tone="light"] body {
   height: calc(100vh - var(--titlebar-h));
   min-height: 0;
   overflow: clip;
-  border-block-start: 0.6vh solid var(--apolloon-blue);
 }
 
 .display-root--outside > .display-brand {
@@ -154,6 +153,7 @@ html[data-display-tone="light"] body {
   inset-block-start: 4vh;
   inset-inline-end: 4vw;
   z-index: 2;
+  color: oklch(100% 0 none);
 }
 
 .outside-band {
@@ -165,6 +165,16 @@ html[data-display-tone="light"] body {
   min-height: 0;
   padding: 3vh 5vw;
   overflow: clip;
+}
+
+/* The racer on the track sits on a block of Apolloon blue, so the street sees at once who runs now and who is next. */
+.outside-band--current {
+  --d-ink: oklch(100% 0 none);
+  --d-ink-2: oklch(100% 0 none / 0.88);
+  --d-ink-3: oklch(100% 0 none / 0.8);
+  --d-line: oklch(100% 0 none / 0.4);
+  background: var(--apolloon-blue);
+  color: var(--d-ink);
 }
 
 .outside-band--next {
@@ -183,7 +193,7 @@ html[data-display-tone="light"] body {
 /* 0.45em dot + 0.6em ring each side. */
 .display-kicker .live-dot {
   --live-dot-size: 0.45em;
-  --live-ring: var(--apolloon-blue);
+  --live-ring: var(--d-ink);
   --live-ring-scale: 3.667;
 }
 
