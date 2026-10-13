@@ -12,6 +12,7 @@ Wachtrij (Telsysteem 1) is the queue desk. Imported runners stay `Ingeschreven` 
 - `queue-move` moves a runner with `Naar wachtrij` (to Klaar om te lopen) and `Opwarmen` (back).
 - `queue-filter` filters the board with `Filter dit bord` and clears it with `Filter wissen`.
 - `queue-profile` opens a runner's profile by clicking their name on the board, or with `Profiel` next to a runner in the `Loper zoeken` dialog.
+- `queue-profile-warmup` moves an `Ingeschreven` or `Gelopen` runner to Opwarming with `Opwarmen` in the profile's `Wachtrij` block. The profile stays open, shows `<name> staat bij opwarming.`, and the button turns into `Uit opwarmen halen`. Beheer › Lopers opens the same profile.
 - `queue-scroll` scrolls the page with the mouse wheel over a lane once that lane is at the end of its list, down to `Nu beschikbaar, nog niet opgeroepen`.
 
 ## How to get to it (user POV)
@@ -34,6 +35,7 @@ Preconditions:
 - **Move to the queue.** Find the row: `page.locator('.queue-runner').filter({ has: page.locator('button.queue-identity').filter({ hasText: name }) })`. Click its `Naar wachtrij` button. The row appears in `Klaar om te lopen` and the status becomes `waiting`. Its `Opwarmen` button moves it back.
 - **Filter.** Fill `page.getByRole('searchbox', { name: 'Filter dit bord' })` with part of a name; only matching rows stay. Click `Filter wissen`; the searchbox is empty.
 - **Profile.** Click `button.queue-identity` with the runner's name. Dialog `Lopersprofiel` shows textboxes `Naam` and `Notities` and a `Opslaan` button. Wait until `Naam` holds the runner's name before you type or press Escape (see Gotchas).
+- **Warm up from the profile.** Open `Loper zoeken`, type a `registered` runner's number, click `Profiel` in their row, and wait until `Naam` holds their name. In dialog `Lopersprofiel` click `page.getByRole('button', { name: 'Opwarmen', exact: true })`. The text `<name> staat bij opwarming.` appears, the button reads `Uit opwarmen halen`, and the runner's `status` in `/api/state` becomes `warming_up`.
 - **Scroll.** Move the mouse to the middle of a lane's region and call `page.mouse.wheel(0, 400)` about 20 times with a short `waitForTimeout(120)` between them, so each turn is a new gesture. `window.scrollY` grows past 0 and the summary `.available-now > summary` comes on screen. Do it over both lanes.
 - **Proof.** `run.proof(page, 'queue-…')` before and after each move, and quote the runner's `status` from `/api/state`.
 

@@ -154,6 +154,22 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
     }
   }
 
+  async function startWarmup() {
+    if (!runner || !canStartWarmup(runner.status)) return;
+    const runnerName = runner.name;
+    setQueueActionBusy(true);
+    setQueueActionMessage(null);
+    setQueueActionError(null);
+    try {
+      await setStatus(runner.id, 'warming_up');
+      setQueueActionMessage(`${runnerName} staat bij opwarming.`);
+    } catch (err) {
+      setQueueActionError(err instanceof Error ? err.message : 'Loper activeren mislukt');
+    } finally {
+      setQueueActionBusy(false);
+    }
+  }
+
   if (!runner) return null;
 
   const latestLap = laps[0] || null;
@@ -211,6 +227,33 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
             <strong>{runner.bestLapMs ? formatDurationMs(runner.bestLapMs) : '—'}</strong>
           </div>
         </div>
+
+        {queueRemovalLabel ? (
+          <section className="profile-queue-action">
+            <div>
+              <h3>Wachtrij</h3>
+              <p>Haal deze loper uit de actieve lijst zonder profiel of rondedata te verwijderen.</p>
+            </div>
+            <button className="btn btn--ghost" onClick={removeFromQueueFlow} disabled={queueActionBusy}>
+              {queueActionBusy ? 'Bezig...' : queueRemovalLabel}
+            </button>
+          </section>
+        ) : (
+          canStartWarmup(runner.status) && (
+            <section className="profile-queue-action">
+              <div>
+                <h3>Wachtrij</h3>
+                <p>Zet deze loper bij opwarming.</p>
+              </div>
+              <button className="btn btn--primary" onClick={startWarmup} disabled={queueActionBusy}>
+                {queueActionBusy ? 'Bezig...' : 'Opwarmen'}
+              </button>
+            </section>
+          )
+        )}
+
+        {queueActionMessage && <div className="success-banner">{queueActionMessage}</div>}
+        {queueActionError && <div className="warning-banner">{queueActionError}</div>}
 
         <section className="profile-essentials" aria-label="Contact en beschikbaarheid">
           <h3>Contact en beschikbaarheid</h3>
@@ -338,20 +381,6 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
           )}
         </section>
 
-        {queueRemovalLabel && (
-          <section className="profile-queue-action">
-            <div>
-              <h3>Wachtrij</h3>
-              <p>Haal deze loper uit de actieve lijst zonder profiel of rondedata te verwijderen.</p>
-            </div>
-            <button className="btn btn--ghost" onClick={removeFromQueueFlow} disabled={queueActionBusy}>
-              {queueActionBusy ? 'Bezig...' : queueRemovalLabel}
-            </button>
-          </section>
-        )}
-
-        {queueActionMessage && <div className="success-banner">{queueActionMessage}</div>}
-        {queueActionError && <div className="warning-banner">{queueActionError}</div>}
         {profileChangedElsewhere && (
           <div className="warning-banner" role="alert">
             Dit profiel is intussen elders gewijzigd. Je invoer is bewaard. Kopieer je aanpassingen voordat je de
@@ -463,6 +492,10 @@ function RegistrationField({ label, value }: { label: string; value: string }) {
 
 function isQueueRemovalStatus(status: RunnerStatus) {
   return status === 'warming_up' || status === 'waiting';
+}
+
+function canStartWarmup(status: RunnerStatus) {
+  return status === 'registered' || status === 'ran';
 }
 
 function queueRemovalButtonLabel(status: RunnerStatus) {
