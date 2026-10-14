@@ -1,5 +1,6 @@
 import React from 'react';
 import { ModalDialog } from './ModalDialog';
+import { CallQrDialog } from './CallQrDialog';
 import { useConfirm } from './ConfirmDialog';
 import { AvailableHoursPicker } from './AvailableHoursPicker';
 import { groupLabels, toggleRunnerLabel } from '../lib/labels';
@@ -33,6 +34,7 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
   const [availableHours, setAvailableHours] = React.useState<string[]>([]);
   const [selectedLabels, setSelectedLabels] = React.useState<string[]>([]);
   const [closePromptOpen, setClosePromptOpen] = React.useState(false);
+  const [calling, setCalling] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
   const [saveError, setSaveError] = React.useState<string | null>(null);
   const [queueActionBusy, setQueueActionBusy] = React.useState(false);
@@ -287,9 +289,9 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
                   onChange={(event) => setPhone(event.target.value)}
                 />
                 {phoneLink && (
-                  <a className="btn btn--ghost" href={phoneLink}>
+                  <button type="button" className="btn btn--ghost" onClick={() => setCalling(true)}>
                     Bellen
-                  </a>
+                  </button>
                 )}
               </div>
             </label>
@@ -437,6 +439,10 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
             {saving ? 'Opslaan...' : 'Opslaan'}
           </button>
         </div>
+
+        {calling && phoneLink && (
+          <CallQrDialog name={runnerLabel(runner)} phone={phone} href={phoneLink} onClose={() => setCalling(false)} />
+        )}
 
         {closePromptOpen && (
           <ModalDialog

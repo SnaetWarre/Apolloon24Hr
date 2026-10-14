@@ -61,6 +61,7 @@
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "read-excel-file": "^9.3.10",
+    "uqr": "^0.1.3",
     "write-excel-file": "^4.1.1",
     "ws": "^8.22.0",
     "zod": "^4.6.5"

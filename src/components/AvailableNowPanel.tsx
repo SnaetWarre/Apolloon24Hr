@@ -2,9 +2,10 @@ import React from 'react';
 import { useRegistrations } from '../app/index';
 import { brusselsMoment, findAvailableUncalledRunners, formatMomentBlock } from '../lib/availability';
 import { phoneHref } from '../lib/contact';
-import { foldSearchText } from '../lib/runners';
+import { foldSearchText, runnerLabel } from '../lib/runners';
 import { useClockTick } from '../lib/useClockTick';
 import type { Runner } from '../types';
+import { CallQrDialog } from './CallQrDialog';
 import { Icon } from './Icon';
 import { LabelBadge } from './LabelBadge';
 import { RunnerName } from './RunnerName';
@@ -99,6 +100,7 @@ function AvailableRunnerRow({
   onOpenProfile: (runnerId: string) => void;
 }) {
   const phoneLink = phoneHref(phone);
+  const [calling, setCalling] = React.useState(false);
   return (
     <div className="available-now__row">
       <button type="button" className="queue-identity" onClick={() => onOpenProfile(runner.id)}>
@@ -114,12 +116,15 @@ function AvailableRunnerRow({
         </span>
       </button>
       {phoneLink ? (
-        <a className="btn btn--sm available-now__phone" href={phoneLink}>
+        <button type="button" className="btn btn--sm available-now__phone" onClick={() => setCalling(true)}>
           <Icon name="phone" size={14} />
           {phone}
-        </a>
+        </button>
       ) : (
         <span className="available-now__phone available-now__phone--none">{phone || 'Geen nummer'}</span>
+      )}
+      {calling && phoneLink && (
+        <CallQrDialog name={runnerLabel(runner)} phone={phone} href={phoneLink} onClose={() => setCalling(false)} />
       )}
     </div>
   );

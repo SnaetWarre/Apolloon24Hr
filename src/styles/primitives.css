@@ -1076,6 +1076,44 @@ dialog.modal-backdrop::backdrop {
   border-block-start: 0;
 }
 
+/* Call QR: big enough to scan from a phone held at arm's length. */
+.modal--call-qr {
+  display: grid;
+  justify-items: center;
+  width: min(460px, 100%);
+  text-align: center;
+}
+
+.modal--call-qr .modal-header {
+  justify-self: stretch;
+  text-align: start;
+}
+
+.modal--call-qr .modal-header h2 {
+  font-size: 22px;
+  letter-spacing: -0.02em;
+}
+
+.call-qr__code {
+  display: block;
+  width: min(340px, 100%);
+  aspect-ratio: 1;
+  border-radius: var(--radius-sm);
+}
+
+.call-qr__phone {
+  margin-block-start: var(--space-4);
+  font-size: 32px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+}
+
+.call-qr__hint {
+  margin-block-start: var(--space-2);
+  color: var(--ink-2);
+  font-size: 13.5px;
+}
+
 /* File inputs look like a regular secondary button. */
 .file-picker {
   display: inline-flex;
