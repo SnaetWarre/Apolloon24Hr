@@ -1,6 +1,7 @@
 import React from 'react';
 import { useAppActions, useAppData, useRaceHistory } from '../../app/index';
 import { reviewLaps, type LapFlag } from '../../lib/lapReview';
+import { useArrivals } from '../../lib/motion';
 import { runnerMatchesSearch } from '../../lib/runners';
 import { formatDurationMs } from '../../lib/time';
 import type { LapRecord, LiveAppSnapshot, Runner } from '../../types';
@@ -39,14 +40,26 @@ function LapsPanel() {
   const [flaggedOnly, setFlaggedOnly] = React.useState(false);
   const [shown, setShown] = React.useState(PAGE_SIZE);
   const [fix, setFix] = React.useState<Fix | null>(null);
+  const [confirming, setConfirming] = React.useState(false);
+  const [pointerInside, setPointerInside] = React.useState(false);
+  // While the operator works on the table, laps that finish later wait, so no row moves under the mouse.
+  const [holdAfter, setHoldAfter] = React.useState(Number.POSITIVE_INFINITY);
+  const holding = pointerInside || fix !== null || confirming;
+
+  const enterTable = () => {
+    if (!holding) setHoldAfter(history.laps.reduce((newest, lap) => Math.max(newest, lap.finishedAt), 0));
+    setPointerInside(true);
+  };
 
   const removeLap = async (lap: LapRecord) => {
+    setConfirming(true);
     const confirmed = await confirm({
       title: 'Ronde verwijderen?',
       message: `${lapText(lap)} telt dan niet meer mee. Terugkrijgen kan alleen met een backup.`,
       confirmLabel: 'Verwijderen',
       tone: 'danger',
     });
+    setConfirming(false);
     if (!confirmed) return;
     await run(() => actions.deleteLap(lap.id), `${lapText(lap)} is verwijderd.`, 'Verwijderen mislukt.');
   };
@@ -70,7 +83,14 @@ function LapsPanel() {
   };
 
   const review = reviewLaps(history.laps);
-  const matching = history.laps.filter(
+  // Split halves and moved laps finish no later than the lap they came from, so the operator's own fixes still show.
+  const laps = holding ? history.laps.filter((lap) => lap.finishedAt <= holdAfter) : history.laps;
+  const heldCount = history.laps.length - laps.length;
+  const newLapIds = useArrivals(
+    laps.map((lap) => lap.id),
+    history.initialized
+  );
+  const matching = laps.filter(
     (lap) =>
       (!flaggedOnly || review.flags.has(lap.id)) &&
       runnerMatchesSearch({ runnerNumber: lap.runnerNumber, name: lap.runnerName, labels: [] }, search)
@@ -97,6 +117,9 @@ function LapsPanel() {
           <input type="checkbox" checked={flaggedOnly} onChange={(event) => setFlaggedOnly(event.target.checked)} />
           Alleen opvallende rondes ({review.flags.size})
         </label>
+        <span className="laps-held" role="status">
+          {heldCount > 0 && `${heldCount} ${heldCount === 1 ? 'nieuwe ronde' : 'nieuwe rondes'}`}
+        </span>
       </div>
       <AdminNoticeBanner notice={notice} />
       {history.error ? (
@@ -104,7 +127,7 @@ function LapsPanel() {
           De rondes konden niet geladen worden.
         </div>
       ) : (
-        <div className="table-wrap">
+        <div className="table-wrap" onPointerEnter={enterTable} onPointerLeave={() => setPointerInside(false)}>
           <table className="laps-table">
             <thead>
               <tr>
@@ -120,7 +143,14 @@ function LapsPanel() {
             </thead>
             <tbody>
               {visible.map((lap) => (
-                <tr key={lap.id} className={review.flags.has(lap.id) ? 'laps-table__row--flagged' : undefined}>
+                <tr
+                  key={lap.id}
+                  className={
+                    [review.flags.has(lap.id) && 'laps-table__row--flagged', newLapIds.has(lap.id) && 'is-new']
+                      .filter(Boolean)
+                      .join(' ') || undefined
+                  }
+                >
                   <td className="laps-table__time">{formatMoment(lap.finishedAt)}</td>
                   <td>
                     <RunnerName runner={lapRunner(lap)} />
