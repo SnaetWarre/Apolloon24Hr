@@ -364,6 +364,35 @@ try {
   }
   console.log('PASS searching the shown status and source finds those runners');
 
+  // Timing clocks a lap while an operator aims at Verwijderen in Beheer › Rondes: the row under the
+  // mouse must stay the same lap, and the new lap shows on top once the mouse leaves the table.
+  await page.goto(`${baseUrl}/admin?section=laps`);
+  const lapRows = page.locator('.laps-table tbody tr');
+  await lapRows.nth(5).waitFor();
+  const aimedLap = await lapRows.nth(2).innerText();
+  const deleteBox = await lapRows.nth(2).getByRole('button', { name: 'Verwijderen', exact: true }).boundingBox();
+  const aim = { x: deleteBox.x + deleteBox.width / 2, y: deleteBox.y + deleteBox.height / 2 };
+  await page.mouse.move(aim.x, aim.y);
+  const nextLapRunner = (await snapshot()).runners.find(
+    (runner) => runner.status === 'registered' || runner.status === 'warming_up'
+  );
+  await rpc.runners.setStatus.mutate({ id: nextLapRunner.id, status: 'waiting' });
+  const lapsRefreshed = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/history');
+  await rpc.race.handoff.mutate(await expectation());
+  await lapsRefreshed;
+  await page.waitForTimeout(500);
+  const rowUnderMouse = await page.evaluate(
+    ({ x, y }) => document.elementFromPoint(x, y)?.closest('tr')?.innerText,
+    aim
+  );
+  assert.equal(rowUnderMouse, aimedLap, 'a new lap moved another lap under the mouse in Beheer › Rondes');
+  const newestLap = (await (await fetch(`${baseUrl}/api/history?scope=full`)).json()).laps.reduce((newest, lap) =>
+    lap.finishedAt > newest.finishedAt ? lap : newest
+  );
+  await page.mouse.move(0, 0);
+  await lapRows.first().filter({ hasText: newestLap.runnerName }).waitFor();
+  console.log('PASS a new lap waits while the mouse is on the Rondes table and shows on top after');
+
   // The Buitenscherm shows a long Belgian name in full on a TV instead of "Marie-Christine Van den…".
   const longName = 'Marie-Christine Van den Broeck-Vandevelde';
   const { activeRunnerId } = (await snapshot()).race;

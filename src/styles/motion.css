@@ -172,14 +172,16 @@
    for another colour. */
 .queue-runner--arrived,
 .overview-laps tr.is-new td,
-.timing-log tr.is-new td {
+.timing-log tr.is-new td,
+.laps-table tr.is-new td {
   position: relative;
   isolation: isolate;
 }
 
 .queue-runner--arrived::after,
 .overview-laps tr.is-new td::after,
-.timing-log tr.is-new td::after {
+.timing-log tr.is-new td::after,
+.laps-table tr.is-new td::after {
   content: "";
   position: absolute;
   inset: 0;

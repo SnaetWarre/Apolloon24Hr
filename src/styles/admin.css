@@ -199,12 +199,23 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* A lap that showed up while this tab was open rises in and its wash fades. */
+.laps-table tr.is-new {
+  animation: rise-in var(--dur-2) var(--ease-out) backwards;
+}
+
 .laps-table__row--flagged td {
   background: var(--warn-wash);
 }
 
 .laps-table__flag {
   color: var(--warn-ink);
+}
+
+.laps-held {
+  margin-inline-start: auto;
+  color: var(--ink-3);
+  font-size: 13px;
 }
 
 .laps-table__actions {
