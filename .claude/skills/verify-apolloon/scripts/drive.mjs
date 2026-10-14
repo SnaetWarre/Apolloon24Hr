@@ -8,6 +8,7 @@
 //   await run.proof(page, 'before-press');       // screenshot + ARIA snapshot + /api/state
 //   await run.close();
 import { createTRPCClient, httpBatchLink } from '@trpc/client';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -25,6 +26,7 @@ export async function openRun(runName = process.env.APOLLOON_VERIFY_RUN) {
   let proofCount = fs.readdirSync(state.evidenceDir).filter((name) => name.endsWith('.png')).length;
   const notes = path.join(state.evidenceDir, 'actions.log');
   const cdpConnections = [];
+  const filmStarts = new WeakMap();
 
   const run = {
     state,
@@ -32,9 +34,27 @@ export async function openRun(runName = process.env.APOLLOON_VERIFY_RUN) {
     evidenceDir: state.evidenceDir,
     /** Full address on a laptop: run.url('/queue'), run.url('/admin?section=system', 1). */
     url: (route = '/', laptop = 0) => `${state.laptops[laptop].url}${route}`,
-    async newPage({ laptop = 0, electron = false, viewport = { width: 1366, height: 768 } } = {}) {
-      const context = await browser.newContext({ viewport, ...(electron ? { userAgent: ELECTRON_USER_AGENT } : {}) });
+    /**
+     * colorScheme: 'light' | 'dark' picks the theme the app starts in. reducedMotion: 'reduce' is the OS
+     * setting that shortens every animation. video: true films the page for run.film().
+     */
+    async newPage({
+      laptop = 0,
+      electron = false,
+      viewport = { width: 1366, height: 768 },
+      colorScheme,
+      reducedMotion,
+      video = false,
+    } = {}) {
+      const context = await browser.newContext({
+        viewport,
+        ...(electron ? { userAgent: ELECTRON_USER_AGENT } : {}),
+        ...(colorScheme ? { colorScheme } : {}),
+        ...(reducedMotion ? { reducedMotion } : {}),
+        ...(video ? { recordVideo: { dir: path.join(state.evidenceDir, 'video'), size: viewport } } : {}),
+      });
       const page = await context.newPage();
+      if (video) filmStarts.set(page, Date.now());
       page.on('pageerror', (error) => run.note(`pageerror on laptop ${laptop}: ${error.message}`));
       return page;
     },
@@ -88,6 +108,45 @@ export async function openRun(runName = process.env.APOLLOON_VERIFY_RUN) {
       const appState = await run.api('/api/state', laptop);
       fs.writeFileSync(`${base}.state.json`, `${JSON.stringify(appState, null, 2)}\n`);
       run.note(`proof ${path.basename(base)} at ${page.url()}`);
+      return base;
+    },
+    /**
+     * Ends a page opened with { video: true } and saves, from `from` (a Date.now() taken just before the
+     * action) to the end of the scene, cropped to `clip` ({ x, y, width, height }, for example a
+     * locator's boundingBox()):
+     * - NN-name.gif, which plays and loops by itself in a PR's before and after table;
+     * - NN-name.mp4, for clips too long or too large for a GIF (GitHub plays it as a video);
+     * - NN-name.frames.png, 9 numbered frames 200 ms apart in a grid, only for an agent to look at
+     *   the motion, since it cannot watch a video. Never put it in a PR.
+     * Closes the page's context, so film at the end of a scene.
+     */
+    async film(page, name, { from, clip } = {}) {
+      const video = page.video();
+      if (!video) throw new Error('Open the page with run.newPage({ video: true }) to film it');
+      const screen = page.viewportSize();
+      await page.context().close();
+      proofCount += 1;
+      const base = path.join(state.evidenceDir, `${String(proofCount).padStart(2, '0')}-${name}`);
+      // Keep the crop inside the frame, so a padded bounding box near an edge still works.
+      const x = Math.max(0, Math.round(clip?.x ?? 0));
+      const y = Math.max(0, Math.round(clip?.y ?? 0));
+      const cropWidth = clip && Math.min(screen.width - x, Math.round(clip.x + clip.width) - x);
+      const cropHeight = clip && Math.min(screen.height - y, Math.round(clip.y + clip.height) - y);
+      const crop = clip ? `crop=${cropWidth}:${cropHeight}:${x}:${y},` : '';
+      const skip = String(from ? Math.max(0, from - filmStarts.get(page)) / 1000 : 0);
+      const input = ['-loglevel', 'error', '-y', '-ss', skip, '-i', await video.path()];
+      // Even sizes, at most 960 wide: H.264 needs even sizes and a GIF wider than that gets heavy.
+      const scale = "scale='min(960,iw)':-2:flags=lanczos";
+      const gif = `${crop}fps=20,${scale},split[a][b];[a]palettegen[p];[b][p]paletteuse`;
+      execFileSync('ffmpeg', [...input, '-vf', gif, `${base}.gif`]);
+      const mp4 = ['-vf', `${crop}${scale}`, '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-movflags', '+faststart'];
+      execFileSync('ffmpeg', [...input, ...mp4, `${base}.mp4`]);
+      // The frame number sits on a dark box so it reads on both themes.
+      const number =
+        "drawtext=font=Sans:text='%{eif\\:n+1\\:d}':x=10:y=10:fontsize=28:fontcolor=white:box=1:boxcolor=black@0.75:boxborderw=8";
+      const frames = `${crop}fps=5,scale=640:-2,${number},tile=3x3:padding=16:margin=16:color=0x808080`;
+      execFileSync('ffmpeg', [...input, '-vf', frames, '-frames:v', '1', `${base}.frames.png`]);
+      run.note(`film ${path.basename(base)}: .gif, .mp4, and .frames.png`);
       return base;
     },
     async close() {

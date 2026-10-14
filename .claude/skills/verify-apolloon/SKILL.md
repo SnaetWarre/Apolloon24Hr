@@ -89,7 +89,20 @@ APOLLOON_VERIFY_RUN=my-check node /path/to/your-drive.mjs
 
 What the library gives you:
 
-- `run.newPage({ laptop, electron, viewport })` opens a page. Pass `electron: true` to send the Electron user agent. Only failover reads it: a browser moves to another laptop, the Electron app stays on its own. Desktop-only panels need the real bridge from `run.electronPage()`, not the user agent.
+- `run.newPage({ laptop, electron, viewport, colorScheme, reducedMotion, video })` opens a page. Pass `electron: true` to send the Electron user agent. Only failover reads it: a browser moves to another laptop, the Electron app stays on its own. Desktop-only panels need the real bridge from `run.electronPage()`, not the user agent.
+  `colorScheme: 'light' | 'dark'` picks the theme the app starts in when nothing is stored. `reducedMotion: 'reduce'` turns on the OS setting that shortens every animation. `video: true` films the page for `run.film`.
+- `run.film(page, name, { from, clip })` ends a filmed page and saves three files that start at `from` and are cropped to `clip`:
+  - `NN-name.gif` plays and loops by itself. It is what goes in a PR's before and after table.
+  - `NN-name.mp4` is for clips too long or too heavy for a GIF (GitHub's limit is 10 MB). `gh pr create --attach` shows it as a video player below the body; it cannot sit in a table cell.
+  - `NN-name.frames.png` is 9 numbered frames, 200 ms apart, in a grid. It is only for you to look at the motion, because you cannot watch a video. Never put it in a PR.
+
+  Take `const from = Date.now()` just before the action. For `clip`, use the visible box, for example `await page.locator('.modal').boundingBox()` with some margin, not a full-screen wrapper such as the `dialog` element. It closes the page, so film at the end of a scene. Most transitions last under 300 ms, so slow them down first, and say how much slower in the PR:
+
+  ```js
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Animation.enable');
+  await cdp.send('Animation.setPlaybackRate', { playbackRate: 0.1 }); // CSS animations and transitions run 10 times slower
+  ```
 - `run.electronPage()` returns the page inside the real desktop window started by `verify.mjs electron`. `window.apolloonDesktop.window.*` can be called through `page.evaluate`. `maximize()` never fires its event on this Hyprland desktop, and fullscreen only follows a real F11 key, which the headless window never gets (see `features/desktop-window.md`).
 - `run.api(route, laptop)` reads `/api/state`, `/api/history?scope=full`, `/api/cluster/status`, `/api/health`, `/api/registrations`, or `/api/export/*`. It returns JSON, the text of a `.csv`, and a `Buffer` for `race.xlsx`. `/api/state` can lag the screen by about 250 ms, so poll it until the change shows instead of reading it once.
 - `run.rpc(laptop)` is a tRPC client. Use it only to put the app into the state a check needs (for example moving runners to `waiting`), never for the action you are proving.
