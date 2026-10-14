@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
+import { brusselsMoment, isAvailableAtMoment } from '../src/lib/availability.ts';
 import { temporaryDataPath } from './temporary-data.ts';
 
 const dataPath = temporaryDataPath('demo-race');
@@ -29,6 +30,21 @@ test('the demo race starts at 20:00 Brussels time and keeps its laps between 1:0
     assert.ok(laps.length > 800 && laps.length < 1_100, `${laps.length} laps`);
     assert.ok(laps.every((lap) => lap.durationMs >= 68_000 && lap.durationMs <= 85_000));
     assert.equal(db.getAllRunners().filter((runner) => runner.status === 'waiting').length, 8);
+
+    // Every runner has made-up form answers, and every hour of the race has runners free.
+    const registrations = Object.values(db.getRunnerRegistrations());
+    assert.equal(registrations.length, db.getAllRunners().length);
+    for (const registration of registrations) {
+      for (const [field, value] of Object.entries(registration)) {
+        assert.ok(Array.isArray(value) ? value.length : value.trim(), `${field} is empty`);
+      }
+      assert.match(registration.email, /@example\.be$/);
+    }
+    for (let hour = 0; hour < 24; hour += 1) {
+      const moment = brusselsMoment(race.raceStartedAt! + hour * 3_600_000);
+      const free = registrations.filter((registration) => isAvailableAtMoment(registration.availableHours, moment));
+      assert.ok(free.length >= 3, `${free.length} runners free at ${moment.hour}u ${moment.weekday}`);
+    }
 
     // Nothing is due a second later; at the next 20:00 the race starts over.
     assert.equal(demo.advanceDemoRace(now + 1), false);

@@ -5,6 +5,7 @@ import { insertRunner } from './db/runners.js';
 import { getNextWaitingRunner, getMaxQueueIndex } from './db/queue.js';
 import { performHandoff } from './db/timing.js';
 import { isClusterEnabled } from './env.js';
+import type { RunnerRegistration } from '../shared/schemas.js';
 import { brusselsOffsetMs } from '../shared/time.js';
 
 /**
@@ -80,6 +81,57 @@ const LABEL_PATTERNS = [
   ['HILOK', 'Dames'],
 ];
 
+/** How the registration form names the labels it can set; the Speedteams are not on it. */
+const FORM_CATEGORIES: Record<string, string> = {
+  '1ste jaar': 'Eerstejaars',
+  HILOK: 'HILOK Gent',
+  Kinesia: 'Kinesia Antwerpen',
+  Mesacosa: 'Mesacosa',
+  Dames: 'Vrouw',
+};
+
+/**
+ * Made-up form answers, so profiles, the hours filter and "Nu beschikbaar"
+ * have something to show. Every hour has a few runners free. The hours name
+ * no weekday (`21-22u`), so they count on whatever day the demo runs; the
+ * form's own `21-22u (dinsdag)` would only count on the event's days.
+ * Uses example.be addresses and 0470 00 numbers.
+ */
+function demoRegistration(index: number, name: string, labels: string[], startedAt: number): RunnerRegistration {
+  const hourOffsets = [0, 1, 2, 12, 13].map((offset) => (index * 5 + offset) % 24).sort((a, b) => a - b);
+  const pad = (value: number) => String(value).padStart(2, '0');
+  const pace = 72 + (index % 9) * 3;
+  const categories = labels.flatMap((label) => FORM_CATEGORIES[label] ?? []);
+  return {
+    submittedAt: new Date(startedAt - (20 + index) * 86_400_000 - index * 1_837_000).toLocaleString('nl-BE', {
+      timeZone: 'Europe/Brussels',
+    }),
+    email: `${name
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[^a-z ]/g, '')
+      .trim()
+      .replace(/\s+/g, '.')}@example.be`,
+    phone: `0470 00 ${10 + index} ${pad((index * 7) % 100)}`,
+    studyPhase: ['1ste bachelor', '2de bachelor', '3de bachelor', 'master', 'alumnus'][index % 5],
+    estimatedLaps: String(6 + (index % 10)),
+    estimatedPace: `1:${pad(pace - 60)}`,
+    maxLapsPerBlock: String(3 + (index % 4)),
+    availableHours: hourOffsets.map(
+      (offset) => `${pad((RACE_START_HOUR + offset) % 24)}-${pad((RACE_START_HOUR + offset + 1) % 24)}u`
+    ),
+    reuseConsent: index % 5 === 0 ? 'Nee' : 'Ja',
+    flexibility: index % 3 === 0 ? 'Ik kan inspringen als het moet' : 'Enkel op de opgegeven uren',
+    remarks: [
+      'Liefst niet twee blokken na elkaar.',
+      'Ik breng mijn eigen spikes mee.',
+      'Bel gerust als er iemand uitvalt.',
+    ][index % 3],
+    categories: categories.length ? categories : ['Geen van bovenstaande'],
+    fastestLap: `1:${pad(pace - 66)}`,
+  };
+}
+
 /** A number in [0, 1) that is the same every time for the same key, so a restart replays the same race. */
 function unit(key: string): number {
   return createHash('sha256').update(key).digest().readUInt32BE(0) / 2 ** 32;
@@ -113,17 +165,19 @@ function resetRace(startedAt: number): void {
          race_finished_at = NULL, active_labels_json = NULL
      WHERE id = 1`
   );
-  RUNNER_NAMES.forEach((name, index) =>
+  RUNNER_NAMES.forEach((name, index) => {
+    const labels = LABEL_PATTERNS[index % LABEL_PATTERNS.length];
     insertRunner({
       name,
       runnerNumber: String(101 + index),
-      labels: LABEL_PATTERNS[index % LABEL_PATTERNS.length],
+      labels,
       targetLaps: 10 + (index % 12),
-      registrationSource: 'manual',
+      registrationSource: 'import',
+      registration: demoRegistration(index, name, labels, startedAt),
       status: 'registered',
       statusSince: startedAt,
-    })
-  );
+    });
+  });
   fillQueue(startedAt);
   performHandoff(startedAt);
   fillQueue(startedAt);
