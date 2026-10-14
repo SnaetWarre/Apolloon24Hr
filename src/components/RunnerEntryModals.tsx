@@ -12,6 +12,8 @@ import { LabelBadge, labelKindTitle } from './LabelBadge';
 
 const selectRunners = ({ runners }: LiveAppSnapshot) => ({ runners });
 const selectLabels = ({ labels }: LiveAppSnapshot) => ({ labels });
+const DOUBLE_CLICK_MS = 500;
+const DOUBLE_CLICK_SLOP_PX = 8;
 
 export function RunnerActivationModal({
   onClose,
@@ -35,6 +37,7 @@ export function RunnerActivationModal({
   const [activatingId, setActivatingId] = React.useState<string | null>(null);
   const [activationError, setActivationError] = React.useState<string | null>(null);
   const activationBusyRef = React.useRef(false);
+  const lastActivateClick = React.useRef({ at: Number.NEGATIVE_INFINITY, x: 0, y: 0 });
 
   const searchableRunners = React.useMemo(() => {
     return [...runners].sort(sortRunnerByNumberThenName);
@@ -78,6 +81,19 @@ export function RunnerActivationModal({
       activationBusyRef.current = false;
       setActivatingId(null);
     }
+  }
+
+  // After a check-in the list resets, so a double click's second click can land on another runner's Opwarmen.
+  function isSecondClick(event: React.MouseEvent) {
+    // Enter and Space click with detail 0.
+    if (event.detail === 0) return false;
+    const last = lastActivateClick.current;
+    lastActivateClick.current = { at: event.timeStamp, x: event.clientX, y: event.clientY };
+    return (
+      event.timeStamp - last.at < DOUBLE_CLICK_MS &&
+      Math.abs(event.clientX - last.x) <= DOUBLE_CLICK_SLOP_PX &&
+      Math.abs(event.clientY - last.y) <= DOUBLE_CLICK_SLOP_PX
+    );
   }
 
   function openProfile(runnerId: string) {
@@ -180,7 +196,9 @@ export function RunnerActivationModal({
                 {isAvailableForActivation(runner) ? (
                   <button
                     className="btn btn--primary btn--fixed"
-                    onClick={() => activate(runner.id)}
+                    onClick={(event) => {
+                      if (!isSecondClick(event)) void activate(runner.id);
+                    }}
                     disabled={Boolean(activatingId)}
                   >
                     {activatingId === runner.id ? 'Bezig...' : 'Opwarmen'}
