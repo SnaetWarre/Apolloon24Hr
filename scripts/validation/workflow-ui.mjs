@@ -327,6 +327,40 @@ try {
   }
   console.log('PASS a double click on a queue row button moves only that runner');
 
+  // With Meerdere lopers aanmelden on, a check-in clears the search and the full list, lowest number
+  // first, slides under the mouse. The second click of a double click must not check in that runner.
+  const raceState = await snapshot();
+  const lowestNumbers = raceState.runners
+    .filter((runner) => runner.runnerNumber && runner.id !== raceState.race.activeRunnerId)
+    .sort((a, b) => Number(a.runnerNumber) - Number(b.runnerNumber))
+    .slice(0, 6);
+  for (const runner of lowestNumbers) await rpc.runners.setStatus.mutate({ id: runner.id, status: 'registered' });
+  const searchedRunner = (await snapshot()).runners.find(
+    (runner) =>
+      runner.status === 'registered' && runner.runnerNumber && !lowestNumbers.some(({ id }) => id === runner.id)
+  );
+  assert.ok(searchedRunner, 'Requires a registered runner with a number');
+  await page.goto(`${baseUrl}/queue`);
+  await page.getByRole('button', { name: 'Loper zoeken', exact: true }).click();
+  const multiSearch = page.getByRole('dialog', { name: 'Loper zoeken', exact: true });
+  await multiSearch.getByRole('checkbox', { name: 'Meerdere lopers aanmelden' }).check();
+  await multiSearch.getByRole('textbox').fill(searchedRunner.runnerNumber);
+  const multiButton = multiSearch.locator('.runner-search-row').getByRole('button', { name: 'Opwarmen', exact: true });
+  await multiButton.waitFor();
+  assert.equal(await multiButton.count(), 1);
+  const statusBefore = new Map((await snapshot()).runners.map((runner) => [runner.id, runner.status]));
+  const multiBox = await multiButton.boundingBox();
+  await page.mouse.click(multiBox.x + multiBox.width / 2, multiBox.y + multiBox.height / 2);
+  await page.waitForTimeout(150);
+  await page.mouse.click(multiBox.x + multiBox.width / 2, multiBox.y + multiBox.height / 2);
+  await page.waitForTimeout(500);
+  const checkedIn = (await snapshot()).runners
+    .filter((runner) => runner.status !== statusBefore.get(runner.id))
+    .map((runner) => `${runner.runnerNumber} ${runner.name}`);
+  assert.deepEqual(checkedIn, [`${searchedRunner.runnerNumber} ${searchedRunner.name}`]);
+  await page.keyboard.press('Escape');
+  console.log('PASS a double click on Opwarmen in Loper zoeken checks in one runner');
+
   // An operator fixes the sheet, saves it under the same name, and picks it again: the new rows must import.
   const importFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'apolloon-import-')), 'runners.csv');
   const pickImportFile = async () => {
