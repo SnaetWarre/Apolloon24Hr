@@ -321,10 +321,12 @@ export function RunnerAddModal({
   }
 
   function handleKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
-    if (event.key === 'Enter' && event.ctrlKey && !event.repeat && !event.nativeEvent.isComposing) {
-      event.preventDefault();
-      void save();
-    }
+    if (event.key !== 'Enter' || event.repeat || event.nativeEvent.isComposing) return;
+    // Plain Enter saves from a one-line field; the notes textarea keeps Enter for new lines.
+    const inLineField = event.target instanceof HTMLInputElement && event.target.type !== 'checkbox';
+    if (!event.ctrlKey && !inLineField) return;
+    event.preventDefault();
+    void save();
   }
 
   function toggleLabel(labelId: string) {

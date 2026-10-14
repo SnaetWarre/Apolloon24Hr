@@ -1,5 +1,6 @@
 // Every button or fold-out that opens text fields puts the cursor in the first one, so the operator
-// can click once and type. A new button that opens text fields belongs in this list.
+// can click once and type. A new button that opens text fields belongs in this list. Enter in a one-line
+// field of Nieuwe loper saves, so the keyboard alone adds a runner.
 // Runs against a disposable, ready-seeded server with linking on (see run.mjs).
 import assert from 'node:assert/strict';
 import { createTRPCClient, httpBatchLink } from '@trpc/client';
@@ -58,8 +59,26 @@ try {
   await page.keyboard.press('Escape');
   await search.waitFor({ state: 'detached' });
 
+  // Number, Tab, name, Enter adds the runner, the same as clicking Toevoegen aan opwarmen.
+  const taken = new Set((await snapshot()).runners.map((runner) => runner.runnerNumber));
+  let freeNumber = 900;
+  while (taken.has(String(freeNumber))) freeNumber += 1;
+  freeNumber = String(freeNumber);
   await page.getByRole('button', { name: 'Nieuwe loper', exact: true }).click();
   let newRunner = page.getByRole('dialog', { name: 'Nieuwe loper', exact: true });
+  await typesInto('Wachtrij › Nieuwe loper', newRunner.getByRole('textbox', { name: 'Lopersnummer' }), freeNumber);
+  await page.keyboard.press('Tab');
+  await page.keyboard.type('Enter Loper');
+  await page.keyboard.press('Enter');
+  await newRunner.waitFor({ state: 'detached', timeout: 3_000 }).catch(() => {
+    throw new Error(`Typed ${freeNumber}, Tab, a name and Enter in Nieuwe loper: the dialog is still open`);
+  });
+  const added = (await snapshot()).runners.find((runner) => runner.runnerNumber === freeNumber);
+  assert.equal(added?.status, 'warming_up', 'Enter in Nieuwe loper adds the runner to Opwarming');
+  console.log('PASS Wachtrij › Nieuwe loper › Enter saves');
+
+  await page.getByRole('button', { name: 'Nieuwe loper', exact: true }).click();
+  newRunner = page.getByRole('dialog', { name: 'Nieuwe loper', exact: true });
   await typesInto('Wachtrij › Nieuwe loper', newRunner.getByRole('textbox', { name: 'Lopersnummer' }), '7');
   await newRunner.getByText('Contact en beschikbaarheid').click();
   await typesInto(
@@ -73,6 +92,15 @@ try {
     newRunner.getByRole('spinbutton', { name: 'Historisch gemiddelde' }).first(),
     '5'
   );
+  // Enter in Notities adds a line instead of saving.
+  const notes = newRunner.getByRole('textbox', { name: 'Notities' });
+  await notes.click();
+  await page.keyboard.type('een');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('twee');
+  assert.equal(await notes.inputValue(), 'een\ntwee', 'Enter in Notities adds a line');
+  assert.ok(await newRunner.isVisible(), 'Enter in Notities keeps Nieuwe loper open');
+  console.log('PASS Nieuwe loper › Enter in Notities adds a line');
 
   await page.goto(`${baseUrl}/admin?section=runners`);
   await page.getByRole('button', { name: 'Nieuwe loper', exact: true }).click();
