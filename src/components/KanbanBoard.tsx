@@ -35,6 +35,8 @@ const LONG_WARM_UP_MS = 10 * 60_000;
 // Windows counts two clicks up to 500 ms apart and 4 px from each other as a double click.
 const DOUBLE_CLICK_MS = 500;
 const DOUBLE_CLICK_SLOP_PX = 8;
+// A click this soon after its row moved was aimed at the runner who was there before.
+const MOVED_ROW_CLICK_MS = 600;
 
 function TimerBadge({ runner }: { runner: Runner }) {
   const running = Boolean(runner.statusSince && runner.status !== 'ran');
@@ -108,6 +110,56 @@ export const KanbanBoard: React.FC<{
       Math.abs(event.clientY - last.y) <= DOUBLE_CLICK_SLOP_PX
     );
   }, []);
+  // Where each row sat in its list after the last render, and when it last moved there. Null while
+  // folded away in Heeft gelopen.
+  const workspaceRef = React.useRef<HTMLDivElement>(null);
+  const rowSpots = React.useRef(new WeakMap<HTMLElement, { y: number; movedAt: number } | null>());
+  // The spans (top, bottom) each list's rows covered after the last render.
+  const listSpans = React.useRef(new Map<HTMLElement, [number, number][]>());
+  // A handoff on Timing or a move on another laptop shifts the rows under a still mouse.
+  const rowJustMoved = React.useCallback((event: React.MouseEvent) => {
+    if (event.detail === 0) return false;
+    const row = event.currentTarget.closest<HTMLElement>('[data-runner-id]');
+    const spot = row && rowSpots.current.get(row);
+    return Boolean(spot && event.timeStamp - spot.movedAt < MOVED_ROW_CLICK_MS);
+  }, []);
+  // A row that moved slides from its old place, so the operator sees the list change. A new row that
+  // took the place of another counts as moved; one in a spot that was empty does not. Runs after every
+  // render and when Heeft gelopen opens or closes.
+  const placeRows = React.useCallback(() => {
+    const rows = workspaceRef.current?.querySelectorAll<HTMLElement>('[data-runner-id]') ?? [];
+    const now = performance.now();
+    const spans = new Map<HTMLElement, [number, number][]>();
+    const slides: [HTMLElement, number][] = [];
+    for (const row of rows) {
+      const last = rowSpots.current.get(row);
+      if (!row.checkVisibility()) {
+        rowSpots.current.set(row, null);
+        continue;
+      }
+      // Within its own list, so scrolling a lane is not a move. offsetTop counts from the list or from
+      // an element above it, depending on the browser's layout of the moment.
+      const list = row.parentElement as HTMLElement;
+      const y = row.offsetParent === list ? row.offsetTop : row.offsetTop - list.offsetTop - list.clientTop;
+      const bottom = y + row.offsetHeight;
+      spans.set(list, [...(spans.get(list) ?? []), [y, bottom]]);
+      if (last && last.y !== y) slides.push([row, last.y - y]);
+      const moved = last
+        ? last.y !== y
+        : last === undefined &&
+          (listSpans.current.get(list) ?? []).some(([otherY, otherBottom]) => otherY < bottom && y < otherBottom);
+      rowSpots.current.set(row, { y, movedAt: moved ? now : (last?.movedAt ?? Number.NEGATIVE_INFINITY) });
+    }
+    listSpans.current = spans;
+    for (const [row] of slides) row.style.animation = 'none';
+    // Restarts a slide that is still running.
+    if (slides.length) void workspaceRef.current?.offsetHeight;
+    for (const [row, offset] of slides) {
+      row.style.setProperty('--slide-from', `${offset}px`);
+      row.style.animation = 'slide-from var(--dur-2) var(--ease-out)';
+    }
+  }, []);
+  React.useLayoutEffect(placeRows);
   const handleHide = React.useCallback(
     (id: string) => runQueueAction(() => hideRunner(id)),
     [hideRunner, runQueueAction]
@@ -210,11 +262,11 @@ export const KanbanBoard: React.FC<{
         insertionEdge={insertionEdge}
         onOpenProfile={onOpenProfile}
         onAdvance={(event) => {
-          if (isSecondClick(event)) return;
+          if (isSecondClick(event) || rowJustMoved(event)) return;
           void runQueueAction(() => setStatus(runner.id, runner.status === 'warming_up' ? 'waiting' : 'warming_up'));
         }}
         onToggleHidden={(event) => {
-          if (isSecondClick(event)) return;
+          if (isSecondClick(event) || rowJustMoved(event)) return;
           void (runner.hiddenFromQueue ? handleUnhide(runner.id) : handleHide(runner.id));
         }}
       />
@@ -238,7 +290,7 @@ export const KanbanBoard: React.FC<{
           {actionError}
         </div>
       )}
-      <div className="queue-workspace">
+      <div className="queue-workspace" ref={workspaceRef}>
         <div className="queue-lanes">
           {COLUMNS.map((column) => {
             const columnRunners = column.key === 'warming_up' ? warmingUpSorted : waitingSorted;
@@ -275,7 +327,7 @@ export const KanbanBoard: React.FC<{
             );
           })}
         </div>
-        <details className="queue-completed">
+        <details className="queue-completed" onToggle={placeRows}>
           <summary className="disclosure">
             Heeft gelopen <span>{ranSorted.length}</span>
             <small>Terug laten opwarmen of verbergen</small>

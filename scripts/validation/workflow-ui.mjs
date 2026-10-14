@@ -327,6 +327,41 @@ try {
   }
   console.log('PASS a double click on a queue row button moves only that runner');
 
+  // A handoff on Timing takes the first runner out of Klaar om te lopen, so the rows below slide up, and puts
+  // the runner who finished on top of Heeft gelopen, so those rows slide down. A click that comes right after
+  // must not land on the runner who slid under the mouse.
+  for (const runner of (await snapshot()).runners.filter((runner) => runner.status === 'warming_up')) {
+    await rpc.runners.setStatus.mutate({ id: runner.id, status: 'waiting' });
+  }
+  await page.goto(`${baseUrl}/queue`);
+  await page.locator('.queue-completed > summary').click();
+  for (const [list, index, button] of [
+    [page.getByRole('region', { name: 'Klaar om te lopen' }), 1, 'Opwarmen'],
+    [page.locator('.queue-completed'), 0, 'Verberg'],
+  ]) {
+    const rows = list.locator('.queue-runner');
+    await rows.nth(2).waitFor();
+    const target = rows.nth(index).getByRole('button', { name: button, exact: true });
+    await target.scrollIntoViewIfNeeded();
+    const aim = await target.boundingBox();
+    await page.mouse.move(aim.x + aim.width / 2, aim.y + aim.height / 2);
+    const firstRow = await rows.first().innerText();
+    await rpc.race.handoff.mutate(await expectation());
+    const shown = (runner) => `${runner.status} ${runner.hiddenFromQueue}`;
+    const afterHandoff = new Map((await snapshot()).runners.map((runner) => [runner.id, shown(runner)]));
+    await waitUntil(async () => (await rows.first().innerText()) !== firstRow);
+    await page.mouse.click(aim.x + aim.width / 2, aim.y + aim.height / 2);
+    await page.waitForTimeout(500);
+    assert.deepEqual(
+      (await snapshot()).runners
+        .filter((runner) => shown(runner) !== afterHandoff.get(runner.id))
+        .map(({ name }) => name),
+      [],
+      `a click on ${button} right after a handoff moved the runner who slid under the mouse`
+    );
+  }
+  console.log('PASS a click right after a handoff does not move the runner who slid under the mouse');
+
   // With Meerdere lopers aanmelden on, a check-in clears the search and the full list, lowest number
   // first, slides under the mouse. The second click of a double click must not check in that runner.
   const raceState = await snapshot();
