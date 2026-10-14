@@ -91,6 +91,30 @@ try {
     await fix.waitFor({ state: 'detached' });
   }
 
+  // With the cursor already there, a runner number and Enter move the lap, as Enter does in Loper zoeken.
+  const lapsNow = async () => (await (await fetch(`${baseUrl}/api/history?scope=full`)).json()).laps;
+  const newest = (await lapsNow()).sort((a, b) => b.finishedAt - a.finishedAt)[0];
+  const searchText = (runner) =>
+    `${runner.runnerNumber ?? ''} ${runner.name} ${runner.labels.map((label) => label.name).join(' ')}`.toLowerCase();
+  const others = (await snapshot()).runners.filter((runner) => runner.id !== newest.runnerId);
+  const target = others.find(
+    (runner) =>
+      runner.runnerNumber && others.filter((other) => searchText(other).includes(runner.runnerNumber)).length === 1
+  );
+  await page.locator('.laps-table tbody tr').first().getByRole('button', { name: 'Andere loper', exact: true }).click();
+  const move = page.getByRole('dialog', { name: 'Ronde naar andere loper', exact: true });
+  await typesInto(
+    'Beheer › Rondes › Andere loper, nummer',
+    move.getByRole('textbox', { name: 'Loper zoeken' }),
+    target.runnerNumber
+  );
+  assert.equal(await move.getByRole('radio').count(), 1);
+  await page.keyboard.press('Enter');
+  await move.waitFor({ state: 'detached', timeout: 2_000 });
+  await page.getByText(/staat nu op/).waitFor();
+  assert.equal((await lapsNow()).find((lap) => lap.id === newest.id).runnerId, target.id);
+  console.log('PASS Beheer › Rondes › Andere loper: a runner number and Enter move the lap');
+
   await page.goto(`${baseUrl}/admin?section=system`);
   await page.getByText('Laptop niet in de lijst? Vul het adres in').click();
   await typesInto(

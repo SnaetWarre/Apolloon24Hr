@@ -204,12 +204,21 @@ function LapRunnerDialog({
 
   const title = kind === 'move' ? 'Ronde naar andere loper' : 'Ronde splitsen';
   const suggestions = nearbyRunnerIds(laps, lap);
-  const candidates = runners
+  const matches = runners
     .filter((runner) => kind === 'split' || runner.id !== lap.runnerId)
-    .filter((runner) => runnerMatchesSearch(runner, query))
+    .filter((runner) => runnerMatchesSearch(runner, query));
+  const candidates = matches
     .sort((a, b) => rank(suggestions, a.id) - rank(suggestions, b.id) || compareNumbers(a, b))
     .slice(0, PICKER_SIZE);
   const selected = runners.find((runner) => runner.id === selectedId) ?? null;
+  // Like Loper zoeken in Wachtrij: Enter takes the one runner the search found, else the one selected.
+  const enterRunner = query.trim() && matches.length === 1 ? matches[0] : selected;
+
+  function handleSearchKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+    if (event.key !== 'Enter' || event.repeat || event.nativeEvent.isComposing || !enterRunner) return;
+    event.preventDefault();
+    onPick(enterRunner);
+  }
 
   return (
     <ModalDialog label={title} onRequestClose={onClose} initialFocusRef={searchRef}>
@@ -232,9 +241,17 @@ function LapRunnerDialog({
           className="input"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
+          onKeyDown={handleSearchKeyDown}
           placeholder="Zoek op nummer of naam"
           aria-label="Loper zoeken"
         />
+        {enterRunner && (
+          <p className="label-picker-help">
+            {kind === 'move'
+              ? `Enter: ronde naar ${runnerText(enterRunner)}.`
+              : `Enter: tweede helft naar ${runnerText(enterRunner)}.`}
+          </p>
+        )}
         <div className="laps-picker" role="radiogroup" aria-label="Loper">
           {candidates.map((runner) => (
             <label key={runner.id} className="laps-picker__option">
