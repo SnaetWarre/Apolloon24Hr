@@ -111,37 +111,44 @@ export async function openRun(runName = process.env.APOLLOON_VERIFY_RUN) {
       return base;
     },
     /**
-     * Ends a page opened with { video: true } and saves NN-name.webm plus NN-name.strip.png, a grid of
-     * frames that shows motion as one image. `from` is a Date.now() taken just before the action, so the
-     * strip starts there instead of at page load. `clip` ({ x, y, width, height }, for example from
-     * locator.boundingBox()) crops every frame to one element. Closes the page's context, so film at the end of a scene.
+     * Ends a page opened with { video: true } and saves NN-name.webm plus NN-name.strip.png: numbered
+     * frames in a grid, read left to right and top to bottom, so motion shows in one image. `from` is a
+     * Date.now() taken just before the action, so frame 1 is the action instead of page load. `clip`
+     * ({ x, y, width, height }, for example from locator.boundingBox()) crops every frame to one element.
+     * Closes the page's context, so film at the end of a scene.
      */
-    async film(page, name, { from, clip, fps = 10, columns = 5, rows = 4, width = 480 } = {}) {
+    async film(page, name, { from, clip, fps = 5, columns = 3, rows = 3, width = 640 } = {}) {
       const video = page.video();
       if (!video) throw new Error('Open the page with run.newPage({ video: true }) to film it');
+      const screen = page.viewportSize();
       await page.context().close();
       proofCount += 1;
       const base = path.join(state.evidenceDir, `${String(proofCount).padStart(2, '0')}-${name}`);
       fs.renameSync(await video.path(), `${base}.webm`);
+      // Keep the crop inside the frame, so a padded bounding box near an edge still works.
+      const x = Math.max(0, Math.round(clip?.x ?? 0));
+      const y = Math.max(0, Math.round(clip?.y ?? 0));
+      const cropWidth = clip && Math.min(screen.width - x, Math.round(clip.x + clip.width) - x);
+      const cropHeight = clip && Math.min(screen.height - y, Math.round(clip.y + clip.height) - y);
       const skip = String(from ? Math.max(0, from - filmStarts.get(page)) / 1000 : 0);
-      const crop = clip ? `crop=${[clip.width, clip.height, clip.x, clip.y].map(Math.round).join(':')},` : '';
-      const grid = `${crop}fps=${fps},scale=${width}:-1,tile=${columns}x${rows}`;
+      const filters = [
+        clip && `crop=${cropWidth}:${cropHeight}:${x}:${y}`,
+        `fps=${fps}`,
+        `scale=${width}:-1`,
+        // Frame number in the top left corner, on a box so it reads on both themes.
+        "drawtext=font=Sans:text='%{eif\\:n+1\\:d}':x=10:y=10:fontsize=28:fontcolor=white:box=1:boxcolor=black@0.75:boxborderw=8",
+        `tile=${columns}x${rows}:padding=16:margin=16:color=0x808080`,
+      ].filter(Boolean);
       const strip = `${base}.strip.png`;
-      execFileSync('ffmpeg', [
-        '-loglevel',
-        'error',
-        '-y',
-        '-ss',
-        skip,
-        '-i',
-        `${base}.webm`,
-        '-vf',
-        grid,
-        '-frames:v',
-        '1',
-        strip,
-      ]);
-      run.note(`film ${path.basename(base)}: ${columns * rows} frames at ${fps} per second`);
+      execFileSync(
+        'ffmpeg',
+        ['-loglevel', 'error', '-y', '-ss', skip, '-i', `${base}.webm`, '-vf', filters.join(',')].concat([
+          '-frames:v',
+          '1',
+          strip,
+        ])
+      );
+      run.note(`film ${path.basename(base)}: ${columns * rows} numbered frames, ${1000 / fps} ms apart`);
       return base;
     },
     async close() {
