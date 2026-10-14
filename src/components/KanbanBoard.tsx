@@ -68,7 +68,11 @@ function compareByStatusSinceDesc(a: Runner, b: Runner) {
   return (b.statusSince ?? 0) - (a.statusSince ?? 0);
 }
 
-export const KanbanBoard: React.FC<{ onOpenProfile: (runnerId: string) => void }> = ({ onOpenProfile }) => {
+export const KanbanBoard: React.FC<{
+  onOpenProfile: (runnerId: string) => void;
+  /** A runner just checked in from the page header; its row scrolls into view in Opwarming. */
+  revealRunnerId?: string | null;
+}> = ({ onOpenProfile, revealRunnerId }) => {
   const { runners } = useAppData(selectKanbanData);
   const search = useBoardSearch();
   const { setStatus, moveInQueue, hideRunner, unhideRunner } = useAppActions();
@@ -128,6 +132,16 @@ export const KanbanBoard: React.FC<{ onOpenProfile: (runnerId: string) => void }
       .filter((runner) => runner.status === 'warming_up')
       .sort((a, b) => compareByStatusSinceAsc(a, b) || runnerNumberValue(a) - runnerNumberValue(b));
   }, [filteredRunners]);
+
+  // Opwarming lists the longest warm-up first, so a runner who just arrived lands at the bottom, often below the fold.
+  const revealRowId = warmingUpSorted.some((runner) => runner.id === revealRunnerId) ? revealRunnerId : null;
+  React.useEffect(() => {
+    if (!revealRowId) return;
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    document
+      .querySelector(`[data-runner-id="${CSS.escape(revealRowId)}"]`)
+      ?.scrollIntoView({ block: 'nearest', behavior: reduceMotion ? 'auto' : 'smooth' });
+  }, [revealRowId]);
 
   const completeWaitingQueue = React.useMemo(() => {
     return runners
@@ -364,6 +378,7 @@ function QueueRunnerRow({
   return (
     <div
       ref={setDropRef}
+      data-runner-id={runner.id}
       className={insertionEdge ? `queue-drop-target queue-drop-target--${insertionEdge}` : undefined}
     >
       {insertionEdge && <span className="queue-insertion-label">Hier invoegen</span>}

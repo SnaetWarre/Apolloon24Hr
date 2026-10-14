@@ -17,10 +17,13 @@ export function RunnerActivationModal({
   onClose,
   onOpenProfile,
   onActivated,
+  onCheckedIn,
 }: {
   onClose: () => void;
   onOpenProfile?: (runnerId: string) => void;
   onActivated?: () => void;
+  /** One runner checked in and the dialog closed, so the page shows the result instead. */
+  onCheckedIn?: (runnerId: string) => void;
 }) {
   const { runners } = useAppData(selectRunners);
   const { setStatus } = useAppActions();
@@ -66,6 +69,7 @@ export function RunnerActivationModal({
         setQuery('');
         searchInputRef.current?.focus();
       } else {
+        onCheckedIn?.(runnerId);
         onClose();
       }
     } catch (err) {
@@ -211,7 +215,7 @@ export function RunnerAddModal({
   destination = 'warming_up',
 }: {
   onClose: () => void;
-  onAdded?: () => void;
+  onAdded?: (runnerId: string) => void;
   destination?: 'warming_up' | 'registered';
 }) {
   const { labels } = useAppData(selectLabels);
@@ -277,7 +281,7 @@ export function RunnerAddModal({
     setSaving(true);
     setError(null);
     try {
-      await addRunner({
+      const { id } = await addRunner({
         runnerNumber: runnerNumber.trim() || null,
         name: cleanName,
         historicalAvgMs: minuteSecondInputToMs(historicalAvgMinutes, historicalAvgSeconds),
@@ -288,7 +292,7 @@ export function RunnerAddModal({
         labels: selectedLabels,
         status: destination,
       });
-      onAdded?.();
+      onAdded?.(id);
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Loper toevoegen mislukt');

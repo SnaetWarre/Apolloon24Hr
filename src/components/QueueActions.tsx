@@ -4,7 +4,13 @@ import { Icon } from './Icon';
 import { RunnerActivationModal, RunnerAddModal } from './RunnerEntryModals';
 
 /** Queue page actions: filter the board, add a new runner, or check a runner in. */
-export function QueueActions({ onOpenProfile }: { onOpenProfile?: (runnerId: string) => void }) {
+export function QueueActions({
+  onOpenProfile,
+  onCheckedIn,
+}: {
+  onOpenProfile?: (runnerId: string) => void;
+  onCheckedIn?: (runnerId: string) => void;
+}) {
   const search = useBoardSearch();
   const [activationOpen, setActivationOpen] = React.useState(false);
   const [addOpen, setAddOpen] = React.useState(false);
@@ -48,9 +54,18 @@ export function QueueActions({ onOpenProfile }: { onOpenProfile?: (runnerId: str
           onClose={() => setActivationOpen(false)}
           onOpenProfile={onOpenProfile}
           onActivated={() => setBoardSearch('')}
+          onCheckedIn={onCheckedIn}
         />
       )}
-      {addOpen && <RunnerAddModal onClose={() => setAddOpen(false)} onAdded={() => setBoardSearch('')} />}
+      {addOpen && (
+        <RunnerAddModal
+          onClose={() => setAddOpen(false)}
+          onAdded={(runnerId) => {
+            setBoardSearch('');
+            onCheckedIn?.(runnerId);
+          }}
+        />
+      )}
     </>
   );
 }
