@@ -16,6 +16,7 @@ import { useArrivals } from '../lib/motion';
 import { compareWaitingOrder, runnerMatchesSearch } from '../lib/runners';
 import { formatDurationMs, formatElapsedSeconds } from '../lib/time';
 import { useSecondTick } from '../lib/useClockTick';
+import { useSecondClick } from '../lib/useSecondClick';
 import { kanbanCollisionDetection, resolveKanbanDrop } from '../lib/kanban';
 import type { LiveAppSnapshot, Runner, RunnerStatus } from '../types';
 import { LabelBadge } from './LabelBadge';
@@ -32,9 +33,6 @@ const COLUMNS: { key: RunnerStatus; title: string }[] = [
 // Warming up this long is worth a glance; it never blocks anything.
 const LONG_WARM_UP_MS = 10 * 60_000;
 
-// Windows counts two clicks up to 500 ms apart and 4 px from each other as a double click.
-const DOUBLE_CLICK_MS = 500;
-const DOUBLE_CLICK_SLOP_PX = 8;
 // A click this soon after its row moved was aimed at the runner who was there before.
 const MOVED_ROW_CLICK_MS = 600;
 
@@ -98,18 +96,7 @@ export const KanbanBoard: React.FC<{
   }, []);
   // A row leaves its lane on the first click, so the second click of a double click would land
   // on the button of the runner who slid up under the mouse.
-  const lastRowClick = React.useRef({ at: Number.NEGATIVE_INFINITY, x: 0, y: 0 });
-  const isSecondClick = React.useCallback((event: React.MouseEvent) => {
-    // Enter and Space click with detail 0.
-    if (event.detail === 0) return false;
-    const last = lastRowClick.current;
-    lastRowClick.current = { at: event.timeStamp, x: event.clientX, y: event.clientY };
-    return (
-      event.timeStamp - last.at < DOUBLE_CLICK_MS &&
-      Math.abs(event.clientX - last.x) <= DOUBLE_CLICK_SLOP_PX &&
-      Math.abs(event.clientY - last.y) <= DOUBLE_CLICK_SLOP_PX
-    );
-  }, []);
+  const isSecondClick = useSecondClick();
   // Where each row sat in its list after the last render, and when it last moved there. Null while
   // folded away in Heeft gelopen.
   const workspaceRef = React.useRef<HTMLDivElement>(null);

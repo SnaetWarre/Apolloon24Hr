@@ -11,6 +11,7 @@ import { formatClockTimeMs, formatDurationMs } from '../lib/time';
 import { labelKindTitle } from './LabelBadge';
 import type { LiveAppSnapshot, Runner, RunnerRegistration, RunnerStatus } from '../types';
 import { LiveElapsed } from './LiveTime';
+import { useSecondClick } from '../lib/useSecondClick';
 
 const selectRunnerProfileData = ({ runners, labels }: LiveAppSnapshot) => ({
   runners,
@@ -60,6 +61,9 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
     editableRunnerKey !== getEditableRunnerKey(draftBaseline, registrationBaseline)
   );
   const initializedRunnerId = React.useRef<string | null>(null);
+  // Opwarmen and Uit opwarmen halen swap places once the first click is saved, so the second
+  // click of a double click would land on the opposite action.
+  const isSecondClick = useSecondClick();
 
   function loadLatestProfile() {
     if (!runner) return;
@@ -234,7 +238,14 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
               <h3>Wachtrij</h3>
               <p>Haal deze loper uit de actieve lijst zonder profiel of rondedata te verwijderen.</p>
             </div>
-            <button className="btn btn--ghost" onClick={removeFromQueueFlow} disabled={queueActionBusy}>
+            <button
+              className="btn btn--ghost"
+              onClick={(event) => {
+                if (isSecondClick(event)) return;
+                void removeFromQueueFlow();
+              }}
+              disabled={queueActionBusy}
+            >
               {queueActionBusy ? 'Bezig...' : queueRemovalLabel}
             </button>
           </section>
@@ -245,7 +256,14 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
                 <h3>Wachtrij</h3>
                 <p>Zet deze loper bij opwarming.</p>
               </div>
-              <button className="btn btn--primary" onClick={startWarmup} disabled={queueActionBusy}>
+              <button
+                className="btn btn--primary"
+                onClick={(event) => {
+                  if (isSecondClick(event)) return;
+                  void startWarmup();
+                }}
+                disabled={queueActionBusy}
+              >
                 {queueActionBusy ? 'Bezig...' : 'Opwarmen'}
               </button>
             </section>

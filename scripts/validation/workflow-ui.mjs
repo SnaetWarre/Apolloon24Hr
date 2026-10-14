@@ -59,6 +59,29 @@ try {
   await page.getByRole('button', { name: 'Filter wissen', exact: true }).click();
   assert.equal(await boardFilter.inputValue(), '');
   console.log('PASS exact bib lookup, repeated check-in, focus restoration, and board filter clearing');
+  const profileRunner = initial.runners[4];
+  await rpc.runners.setStatus.mutate({ id: profileRunner.id, status: 'registered' });
+  await page.getByRole('button', { name: 'Loper zoeken', exact: true }).click();
+  await page.keyboard.type(profileRunner.name);
+  await page
+    .locator('.runner-search-row')
+    .filter({ hasText: profileRunner.name })
+    .getByRole('button', { name: 'Profiel', exact: true })
+    .click();
+  const profileDialog = page.getByRole('dialog', { name: 'Lopersprofiel', exact: true });
+  const warmupBox = await profileDialog.getByRole('button', { name: 'Opwarmen', exact: true }).boundingBox();
+  // Windows counts two clicks up to 500 ms apart as a double click; the first swaps the button.
+  await page.mouse.click(warmupBox.x + warmupBox.width / 2, warmupBox.y + warmupBox.height / 2);
+  await page.waitForTimeout(150);
+  await page.mouse.click(warmupBox.x + warmupBox.width / 2, warmupBox.y + warmupBox.height / 2);
+  await profileDialog.getByText(`${profileRunner.name} staat bij opwarming.`, { exact: true }).waitFor();
+  await page.waitForTimeout(500);
+  assert.equal(await page.getByRole('dialog', { name: 'Uit de wachtrij halen?' }).count(), 0);
+  assert.equal((await snapshot()).runners.find((runner) => runner.id === profileRunner.id).status, 'warming_up');
+  await page.keyboard.press('Escape');
+  await profileDialog.waitFor({ state: 'detached' });
+  await rpc.runners.setStatus.mutate({ id: profileRunner.id, status: profileRunner.status });
+  console.log('PASS a double click on Opwarmen in the profile checks the runner in once');
   for (const runner of initial.runners.filter((runner) => runner.status === 'waiting')) {
     await rpc.runners.setStatus.mutate({ id: runner.id, status: 'warming_up' });
   }
