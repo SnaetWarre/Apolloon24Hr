@@ -12,6 +12,9 @@ import { QueueActions } from './QueueActions';
 import { RunnerName } from './RunnerName';
 import { RunnerProfileModal } from './RunnerProfileModal';
 
+// Long enough to read a name after the dialog closes, short enough to be gone before the next runner arrives.
+const CHECK_IN_NOTICE_MS = 5_000;
+
 const selectQueuePageData = ({ race, runners }: LiveAppSnapshot) => ({
   race,
   runners,
@@ -20,7 +23,15 @@ const selectQueuePageData = ({ race, runners }: LiveAppSnapshot) => ({
 export function QueuePage() {
   const { race, runners } = useAppData(selectQueuePageData);
   const [profileRunnerId, setProfileRunnerId] = React.useState<string | null>(null);
+  const [checkedInId, setCheckedInId] = React.useState<string | null>(null);
 
+  React.useEffect(() => {
+    if (!checkedInId) return;
+    const timeout = window.setTimeout(() => setCheckedInId(null), CHECK_IN_NOTICE_MS);
+    return () => window.clearTimeout(timeout);
+  }, [checkedInId]);
+
+  const checkedIn = runners.find((runner) => runner.id === checkedInId);
   const activeRunner = runners.find((runner) => runner.id === race.activeRunnerId) || null;
   const nextRunner = getNextWaitingRunner(runners);
   const waitingCount = runners.filter((runner) => runner.status === 'waiting').length;
@@ -32,7 +43,17 @@ export function QueuePage() {
 
   return (
     <>
-      <PageHeader title="Wachtrij" actions={<QueueActions onOpenProfile={setProfileRunnerId} />} />
+      <PageHeader
+        title="Wachtrij"
+        meta={
+          checkedIn && (
+            <div key={checkedIn.id} className="success-banner" role="status">
+              {checkedIn.name} staat bij opwarming.
+            </div>
+          )
+        }
+        actions={<QueueActions onOpenProfile={setProfileRunnerId} onCheckedIn={setCheckedInId} />}
+      />
       <section className="race-strip" aria-label="Wisselzone">
         <div className="race-strip__now">
           <span className="race-strip__label">
@@ -72,7 +93,7 @@ export function QueuePage() {
           </span>
         </div>
       </section>
-      <KanbanBoard onOpenProfile={setProfileRunnerId} />
+      <KanbanBoard onOpenProfile={setProfileRunnerId} revealRunnerId={checkedInId} />
       <AvailableNowPanel runners={runners} onOpenProfile={setProfileRunnerId} />
       {profileRunnerId && <RunnerProfileModal runnerId={profileRunnerId} onClose={() => setProfileRunnerId(null)} />}
     </>

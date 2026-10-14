@@ -381,6 +381,35 @@ try {
   );
   assert.equal(clipped, false, 'the long name is cut off on the Buitenscherm');
   console.log('PASS the Buitenscherm shows a long runner name in full at 1920x1080');
+
+  // Opwarming lists the longest warm-up first, so a runner who just checked in lands at the bottom of
+  // a full lane. Without a visible answer, a tired operator checks the same runner in again.
+  for (let index = 0; index < 14; index += 1) {
+    await rpc.runners.create.mutate({ name: `Warm-up filler ${index + 1}`, status: 'warming_up' });
+  }
+  const arriving = await rpc.runners.create.mutate({ name: 'Late arrival', runnerNumber: '9075' });
+  const checkinPage = await browser.newPage({ viewport: { width: 1366, height: 768 } });
+  await checkinPage.goto(`${baseUrl}/queue`);
+  const warmUpRows = checkinPage.getByRole('region', { name: 'Opwarming' }).locator('.queue-lane__rows');
+  assert.ok(
+    await warmUpRows.evaluate((rows) => rows.scrollHeight > rows.clientHeight),
+    'Opwarming must scroll for this check'
+  );
+  await checkinPage.getByRole('button', { name: 'Loper zoeken', exact: true }).click();
+  await checkinPage.keyboard.type('9075');
+  await checkinPage.keyboard.press('Enter');
+  await checkinPage.getByRole('dialog').waitFor({ state: 'detached' });
+  const arrivedRow = checkinPage.getByRole('button', { name: `Verplaats ${arriving.name}`, exact: true });
+  await arrivedRow.waitFor();
+  const rowInView = async () => {
+    const [row, lane] = [await arrivedRow.boundingBox(), await warmUpRows.boundingBox()];
+    return row.y >= lane.y && row.y + row.height <= lane.y + lane.height;
+  };
+  for (let attempt = 0; attempt < 40 && !(await rowInView()); attempt += 1) await checkinPage.waitForTimeout(50);
+  assert.ok(await rowInView(), 'the checked-in runner stays below the fold of Opwarming');
+  await checkinPage.getByRole('status').getByText(`${arriving.name} staat bij opwarming.`, { exact: true }).waitFor();
+  await checkinPage.close();
+  console.log('PASS checking a runner in scrolls their row into view and names them on Wachtrij');
 } finally {
   await browser.close();
 }
