@@ -90,29 +90,16 @@ const FORM_CATEGORIES: Record<string, string> = {
   Dames: 'Vrouw',
 };
 
-const BRUSSELS_HOUR = new Intl.DateTimeFormat('nl-BE', {
-  hour: '2-digit',
-  hourCycle: 'h23',
-  weekday: 'long',
-  timeZone: 'Europe/Brussels',
-});
-
-/** `21-22u (dinsdag)`: the form's name for the hour that starts at `atMs`. */
-function formHourBlock(atMs: number): string {
-  const parts = BRUSSELS_HOUR.formatToParts(atMs);
-  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((entry) => entry.type === type)?.value ?? '';
-  const hour = Number(part('hour'));
-  const pad = (value: number) => String(value).padStart(2, '0');
-  return `${pad(hour)}-${pad((hour + 1) % 24)}u (${part('weekday')})`;
-}
-
 /**
  * Made-up form answers, so profiles, the hours filter and "Nu beschikbaar"
- * have something to show. The hours fall inside this race, and every hour
- * has a few runners free. Uses example.be addresses and 0470 00 numbers.
+ * have something to show. Every hour has a few runners free. The hours name
+ * no weekday (`21-22u`), so they count on whatever day the demo runs; the
+ * form's own `21-22u (dinsdag)` would only count on the event's days.
+ * Uses example.be addresses and 0470 00 numbers.
  */
 function demoRegistration(index: number, name: string, labels: string[], startedAt: number): RunnerRegistration {
   const hourOffsets = [0, 1, 2, 12, 13].map((offset) => (index * 5 + offset) % 24).sort((a, b) => a - b);
+  const pad = (value: number) => String(value).padStart(2, '0');
   const pace = 72 + (index % 9) * 3;
   const categories = labels.flatMap((label) => FORM_CATEGORIES[label] ?? []);
   return {
@@ -125,12 +112,14 @@ function demoRegistration(index: number, name: string, labels: string[], started
       .replace(/[^a-z ]/g, '')
       .trim()
       .replace(/\s+/g, '.')}@example.be`,
-    phone: `0470 00 ${10 + index} ${String((index * 7) % 100).padStart(2, '0')}`,
+    phone: `0470 00 ${10 + index} ${pad((index * 7) % 100)}`,
     studyPhase: ['1ste bachelor', '2de bachelor', '3de bachelor', 'master', 'alumnus'][index % 5],
     estimatedLaps: String(6 + (index % 10)),
-    estimatedPace: `1:${String(pace - 60).padStart(2, '0')}`,
+    estimatedPace: `1:${pad(pace - 60)}`,
     maxLapsPerBlock: String(3 + (index % 4)),
-    availableHours: hourOffsets.map((offset) => formHourBlock(startedAt + offset * 3_600_000)),
+    availableHours: hourOffsets.map(
+      (offset) => `${pad((RACE_START_HOUR + offset) % 24)}-${pad((RACE_START_HOUR + offset + 1) % 24)}u`
+    ),
     reuseConsent: index % 5 === 0 ? 'Nee' : 'Ja',
     flexibility: index % 3 === 0 ? 'Ik kan inspringen als het moet' : 'Enkel op de opgegeven uren',
     remarks: [
@@ -139,7 +128,7 @@ function demoRegistration(index: number, name: string, labels: string[], started
       'Bel gerust als er iemand uitvalt.',
     ][index % 3],
     categories: categories.length ? categories : ['Geen van bovenstaande'],
-    fastestLap: `1:${String(pace - 66).padStart(2, '0')}`,
+    fastestLap: `1:${pad(pace - 66)}`,
   };
 }
 

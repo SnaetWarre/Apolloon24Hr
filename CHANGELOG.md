@@ -8,8 +8,8 @@ All notable changes to Apolloon Telsysteem will be documented in this file.
 
 - De demowedstrijd (`DEMO_RACE`) geeft elke loper verzonnen
   inschrijvingsgegevens: e-mail, gsm-nummer, uren en de andere antwoorden van
-  het formulier. De uren vallen binnen de demowedstrijd, zodat Nu beschikbaar
-  op Wachtrij elk uur lopers toont
+  het formulier. De uren noemen geen weekdag (`21-22u`), zodat Nu beschikbaar
+  op Wachtrij op elke dag van de demo elk uur lopers toont
 
 ## [4.5.0] - 2026-10-12
 
