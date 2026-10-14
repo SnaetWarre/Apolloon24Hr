@@ -8,6 +8,7 @@
 //   await run.proof(page, 'before-press');       // screenshot + ARIA snapshot + /api/state
 //   await run.close();
 import { createTRPCClient, httpBatchLink } from '@trpc/client';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -25,6 +26,7 @@ export async function openRun(runName = process.env.APOLLOON_VERIFY_RUN) {
   let proofCount = fs.readdirSync(state.evidenceDir).filter((name) => name.endsWith('.png')).length;
   const notes = path.join(state.evidenceDir, 'actions.log');
   const cdpConnections = [];
+  const filmStarts = new WeakMap();
 
   const run = {
     state,
@@ -32,9 +34,27 @@ export async function openRun(runName = process.env.APOLLOON_VERIFY_RUN) {
     evidenceDir: state.evidenceDir,
     /** Full address on a laptop: run.url('/queue'), run.url('/admin?section=system', 1). */
     url: (route = '/', laptop = 0) => `${state.laptops[laptop].url}${route}`,
-    async newPage({ laptop = 0, electron = false, viewport = { width: 1366, height: 768 } } = {}) {
-      const context = await browser.newContext({ viewport, ...(electron ? { userAgent: ELECTRON_USER_AGENT } : {}) });
+    /**
+     * colorScheme: 'light' | 'dark' picks the theme the app starts in. reducedMotion: 'reduce' is the OS
+     * setting that shortens every animation. video: true films the page for run.film().
+     */
+    async newPage({
+      laptop = 0,
+      electron = false,
+      viewport = { width: 1366, height: 768 },
+      colorScheme,
+      reducedMotion,
+      video = false,
+    } = {}) {
+      const context = await browser.newContext({
+        viewport,
+        ...(electron ? { userAgent: ELECTRON_USER_AGENT } : {}),
+        ...(colorScheme ? { colorScheme } : {}),
+        ...(reducedMotion ? { reducedMotion } : {}),
+        ...(video ? { recordVideo: { dir: path.join(state.evidenceDir, 'video'), size: viewport } } : {}),
+      });
       const page = await context.newPage();
+      if (video) filmStarts.set(page, Date.now());
       page.on('pageerror', (error) => run.note(`pageerror on laptop ${laptop}: ${error.message}`));
       return page;
     },
@@ -88,6 +108,40 @@ export async function openRun(runName = process.env.APOLLOON_VERIFY_RUN) {
       const appState = await run.api('/api/state', laptop);
       fs.writeFileSync(`${base}.state.json`, `${JSON.stringify(appState, null, 2)}\n`);
       run.note(`proof ${path.basename(base)} at ${page.url()}`);
+      return base;
+    },
+    /**
+     * Ends a page opened with { video: true } and saves NN-name.webm plus NN-name.strip.png, a grid of
+     * frames that shows motion as one image. `from` is a Date.now() taken just before the action, so the
+     * strip starts there instead of at page load. `clip` ({ x, y, width, height }, for example from
+     * locator.boundingBox()) crops every frame to one element. Closes the page's context, so film at the end of a scene.
+     */
+    async film(page, name, { from, clip, fps = 10, columns = 5, rows = 4, width = 480 } = {}) {
+      const video = page.video();
+      if (!video) throw new Error('Open the page with run.newPage({ video: true }) to film it');
+      await page.context().close();
+      proofCount += 1;
+      const base = path.join(state.evidenceDir, `${String(proofCount).padStart(2, '0')}-${name}`);
+      fs.renameSync(await video.path(), `${base}.webm`);
+      const skip = String(from ? Math.max(0, from - filmStarts.get(page)) / 1000 : 0);
+      const crop = clip ? `crop=${[clip.width, clip.height, clip.x, clip.y].map(Math.round).join(':')},` : '';
+      const grid = `${crop}fps=${fps},scale=${width}:-1,tile=${columns}x${rows}`;
+      const strip = `${base}.strip.png`;
+      execFileSync('ffmpeg', [
+        '-loglevel',
+        'error',
+        '-y',
+        '-ss',
+        skip,
+        '-i',
+        `${base}.webm`,
+        '-vf',
+        grid,
+        '-frames:v',
+        '1',
+        strip,
+      ]);
+      run.note(`film ${path.basename(base)}: ${columns * rows} frames at ${fps} per second`);
       return base;
     },
     async close() {

@@ -89,7 +89,15 @@ APOLLOON_VERIFY_RUN=my-check node /path/to/your-drive.mjs
 
 What the library gives you:
 
-- `run.newPage({ laptop, electron, viewport })` opens a page. Pass `electron: true` to send the Electron user agent. Only failover reads it: a browser moves to another laptop, the Electron app stays on its own. Desktop-only panels need the real bridge from `run.electronPage()`, not the user agent.
+- `run.newPage({ laptop, electron, viewport, colorScheme, reducedMotion, video })` opens a page. Pass `electron: true` to send the Electron user agent. Only failover reads it: a browser moves to another laptop, the Electron app stays on its own. Desktop-only panels need the real bridge from `run.electronPage()`, not the user agent.
+  `colorScheme: 'light' | 'dark'` picks the theme the app starts in when nothing is stored. `reducedMotion: 'reduce'` turns on the OS setting that shortens every animation. `video: true` films the page for `run.film`.
+- `run.film(page, name, { from, clip })` ends a filmed page and saves `NN-name.webm` and `NN-name.strip.png`, a grid of 20 frames at 10 per second that shows motion as one image you can read. Take `const from = Date.now()` just before the action so the strip starts there. `clip` (for example `await locator.boundingBox()`) crops every frame to one element. It closes the page, so film at the end of a scene. Most transitions last under 300 ms, so slow them down first:
+
+  ```js
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Animation.enable');
+  await cdp.send('Animation.setPlaybackRate', { playbackRate: 0.1 }); // CSS animations and transitions run 10 times slower
+  ```
 - `run.electronPage()` returns the page inside the real desktop window started by `verify.mjs electron`. `window.apolloonDesktop.window.*` can be called through `page.evaluate`. `maximize()` never fires its event on this Hyprland desktop, and fullscreen only follows a real F11 key, which the headless window never gets (see `features/desktop-window.md`).
 - `run.api(route, laptop)` reads `/api/state`, `/api/history?scope=full`, `/api/cluster/status`, `/api/health`, `/api/registrations`, or `/api/export/*`. It returns JSON, the text of a `.csv`, and a `Buffer` for `race.xlsx`. `/api/state` can lag the screen by about 250 ms, so poll it until the change shows instead of reading it once.
 - `run.rpc(laptop)` is a tRPC client. Use it only to put the app into the state a check needs (for example moving runners to `waiting`), never for the action you are proving.
