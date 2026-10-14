@@ -1,6 +1,6 @@
 ---
 name: apolloon-ui-hunt
-description: Walk the Apolloon screens the way a tired teacher or a spectator meets them, find real UI, UX, and motion problems (clipped or overlapping text, lost focus, extra clicks, missing feedback, animations that replay, jump, or hide what changed, TV pages that are hard to read), prove each one with screenshots, measurements, or a filmed frame strip through the verify-apolloon skill, and fix each one in its own T3 Code thread that ships and merges a PR through the ship-apolloon-pr skill. Built to run again and again; a ledger keeps rounds from repeating each other. Use it instead of apolloon-bug-hunt when the focus is the frontend. Arguments - a number sets the minimum finding count; any other text is a focus area (a screen, a flow, "motion", "TV").
+description: Walk the Apolloon screens the way a tired teacher or a spectator meets them, find real UI, UX, and motion problems (clipped or overlapping text, lost focus, extra clicks, missing feedback, animations that replay, jump, or hide what changed, TV pages that are hard to read), prove each one with screenshots, measurements, or a filmed clip through the verify-apolloon skill, and fix each one in its own T3 Code thread that ships and merges a PR through the ship-apolloon-pr skill. Built to run again and again; a ledger keeps rounds from repeating each other. Use it instead of apolloon-bug-hunt when the focus is the frontend. Arguments - a number sets the minimum finding count; any other text is a focus area (a screen, a flow, "motion", "TV").
 ---
 
 # Apolloon UI hunt
@@ -81,13 +81,13 @@ Back every finding with at least one of these, and assert on it so the script fa
 
 - **A measurement.** Cut-off text: `el.scrollWidth > el.clientWidth`. Overlap: compare `locator.boundingBox()` of the two elements. Lost cursor: `document.activeElement` after the action. Layout shift: collect `layout-shift` entries with a `PerformanceObserver` (`buffered: true`) around the action, and the button's `boundingBox()` before and after. Replaying animation: count `document.getAnimations()` started by one poll with nothing changed. Contrast: compute it from `getComputedStyle` colours (draw them on a canvas to get sRGB, as `scripts/validation/theme-ui.mjs` does) and compare with 4.5:1 for body text and 3:1 for large text. Clicks: count them for the task, before and after.
 - **A screenshot** that anyone would call broken, from `run.proof`. Take it in both themes with `run.newPage({ colorScheme: 'dark' })` when colour matters, and at 1920x1080 for TVs (`viewport: { width: 1920, height: 1080 }`).
-- **A frame strip** for motion. Open the page with `run.newPage({ video: true })`, slow animations with `Animation.setPlaybackRate`, take `const from = Date.now()` before the action, and call `run.film(page, name, { from, clip })`. Then look at `NN-name.strip.png` yourself. The verify skill shows the exact calls. Compare with `reducedMotion: 'reduce'` when the problem is about reduced motion.
+- **A filmed clip** for motion. Open the page with `run.newPage({ video: true })`, slow animations with `Animation.setPlaybackRate`, take `const from = Date.now()` before the action, and call `run.film(page, name, { from, clip })`. Look at `NN-name.frames.png` yourself to judge the motion; the `.gif` is for the PR. The verify skill shows the exact calls. Compare with `reducedMotion: 'reduce'` when the problem is about reduced motion.
 
 Then decide:
 
 - It shows twice in a row on `origin/main` (`doctor` prints the commit), not once while another build was busy.
 - You can name the operator or spectator, the flow, and what goes wrong for them: a wrong key press, a missed lap, a second click, text they cannot read. If you cannot, drop it.
-- When the measurement passes or the strip looks fine, the suspicion was wrong. Drop it and write it in the ledger.
+- When the measurement passes or the motion looks fine, the suspicion was wrong. Drop it and write it in the ledger.
 
 Stop every run with `verify.mjs down --run=<slug>`. Never `pkill -f` or `pgrep -f`. Nothing opens a window on the user's screen.
 
@@ -96,7 +96,7 @@ Stop every run with `verify.mjs down --run=<slug>`. Never `pkill -f` or `pgrep -
 For each verified finding with a small, clear fix, call `t3_thread_launch` with:
 
 - `workspaceStrategy: {"type":"worktree","baseRef":"main","branch":"fix/ui-<slug>","startFromOrigin":true}`
-- a self-contained `message` with: the problem in plain words, who it hurts and in which flow; the drive script and its failing assertion (give the `$HUNT` paths, which the thread can read, including screenshots and strips); actual vs expected; the intended fix and its scope; the check to add; and the rules below.
+- a self-contained `message` with: the problem in plain words, who it hurts and in which flow; the drive script and its failing assertion (give the `$HUNT` paths, which the thread can read, including screenshots and clips); actual vs expected; the intended fix and its scope; the check to add; and the rules below.
 
 Rules to put in every thread prompt (the thread runs in another worktree and does not see this project's memory):
 
@@ -105,7 +105,7 @@ Rules to put in every thread prompt (the thread runs in another worktree and doe
 - Before touching styles, load the user's `good-css` skill, and for anything that changes how a screen looks, the `frontend-design` skill (both installed in the user's Claude Code under `~/.claude/skills/`). If your agent does not list them, read their `SKILL.md` files and follow them.
 - Fix it with the existing tokens in `src/styles/tokens.css` and the keyframes in `src/styles/motion.css`. Add a new token or keyframe only when none fits. Keep the change to the screen and the problem named; no restyling around it.
 - Add a check to the matching `scripts/validation/*-ui.mjs` that fails on `main` and passes on your branch, using the same measurement as the repro, so `npm run test:ui` catches it next time. Skip the check only when the problem cannot be measured (pure motion), and say so in the PR.
-- In the PR, show base and head screenshots side by side in both themes when colour matters, at 1366x768 for operator screens and 1920x1080 for TVs. For motion, attach the base and head frame strips from `run.film`.
+- In the PR, show base and head screenshots side by side in both themes when colour matters, at 1366x768 for operator screens and 1920x1080 for TVs. For motion, put the base and head GIFs from `run.film` side by side in the table and say how much the clip is slowed down. Never attach the `.frames.png` grid.
 
 When two fixes touch the same file or the same component, say so in both prompts so each keeps its diff focused.
 
@@ -113,7 +113,7 @@ When two fixes touch the same file or the same component, say so in both prompts
 
 Append to `$LEDGER` for this round: the date, each flow walked (screen, scenario, theme, viewport), each finding with its thread and PR, and each dropped suspicion with its reason in one line.
 
-Then give the user a short list. For each finding: what is wrong and for whom, how you showed it (the measurement or the strip), and its thread. Then the PR and merge state as the threads finish. List dropped suspicions in one line each. Say plainly which threads are still running or failed. Never claim a merge you did not see. Keep `$HUNT` until every thread has read its repro; delete earlier rounds' folders once their PRs merged.
+Then give the user a short list. For each finding: what is wrong and for whom, how you showed it (the measurement or the clip), and its thread. Then the PR and merge state as the threads finish. List dropped suspicions in one line each. Say plainly which threads are still running or failed. Never claim a merge you did not see. Keep `$HUNT` until every thread has read its repro; delete earlier rounds' folders once their PRs merged.
 
 ## Running it on repeat
 

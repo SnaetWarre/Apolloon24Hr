@@ -69,7 +69,7 @@ gh pr create --base main --title "<title>" --body-file $SHIP/body.md \
   --attach "$SHIP/head/03-timing-short-lap-question.png#After: …"
 ```
 
-with `![Before](<same path>)` in `body.md` so `gh` swaps in the uploaded URL in place. Use `gh pr edit` with the same flags for an existing PR. If an attachment fails partway, look at the PR before retrying so nothing uploads twice. Never commit screenshots or evidence files.
+with `![Before](<same path>)` in `body.md` so `gh` swaps in the uploaded URL in place. For motion (an animation, a transition, a flash), use the `.gif` files from `run.film` in the same table instead of screenshots, and say in the row how much slower the clip plays. A clip over 10 MB goes in as the `.mp4` instead, which GitHub shows as a video player below the body. Use `gh pr edit` with the same flags for an existing PR. If an attachment fails partway, look at the PR before retrying so nothing uploads twice. Never commit screenshots or evidence files.
 
 ## Performance claims
 

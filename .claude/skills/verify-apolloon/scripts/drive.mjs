@@ -111,44 +111,42 @@ export async function openRun(runName = process.env.APOLLOON_VERIFY_RUN) {
       return base;
     },
     /**
-     * Ends a page opened with { video: true } and saves NN-name.webm plus NN-name.strip.png: numbered
-     * frames in a grid, read left to right and top to bottom, so motion shows in one image. `from` is a
-     * Date.now() taken just before the action, so frame 1 is the action instead of page load. `clip`
-     * ({ x, y, width, height }, for example from locator.boundingBox()) crops every frame to one element.
+     * Ends a page opened with { video: true } and saves, from `from` (a Date.now() taken just before the
+     * action) to the end of the scene, cropped to `clip` ({ x, y, width, height }, for example a
+     * locator's boundingBox()):
+     * - NN-name.gif, which plays and loops by itself in a PR's before and after table;
+     * - NN-name.mp4, for clips too long or too large for a GIF (GitHub plays it as a video);
+     * - NN-name.frames.png, 9 numbered frames 200 ms apart in a grid, only for an agent to look at
+     *   the motion, since it cannot watch a video. Never put it in a PR.
      * Closes the page's context, so film at the end of a scene.
      */
-    async film(page, name, { from, clip, fps = 5, columns = 3, rows = 3, width = 640 } = {}) {
+    async film(page, name, { from, clip } = {}) {
       const video = page.video();
       if (!video) throw new Error('Open the page with run.newPage({ video: true }) to film it');
       const screen = page.viewportSize();
       await page.context().close();
       proofCount += 1;
       const base = path.join(state.evidenceDir, `${String(proofCount).padStart(2, '0')}-${name}`);
-      fs.renameSync(await video.path(), `${base}.webm`);
       // Keep the crop inside the frame, so a padded bounding box near an edge still works.
       const x = Math.max(0, Math.round(clip?.x ?? 0));
       const y = Math.max(0, Math.round(clip?.y ?? 0));
       const cropWidth = clip && Math.min(screen.width - x, Math.round(clip.x + clip.width) - x);
       const cropHeight = clip && Math.min(screen.height - y, Math.round(clip.y + clip.height) - y);
+      const crop = clip ? `crop=${cropWidth}:${cropHeight}:${x}:${y},` : '';
       const skip = String(from ? Math.max(0, from - filmStarts.get(page)) / 1000 : 0);
-      const filters = [
-        clip && `crop=${cropWidth}:${cropHeight}:${x}:${y}`,
-        `fps=${fps}`,
-        `scale=${width}:-1`,
-        // Frame number in the top left corner, on a box so it reads on both themes.
-        "drawtext=font=Sans:text='%{eif\\:n+1\\:d}':x=10:y=10:fontsize=28:fontcolor=white:box=1:boxcolor=black@0.75:boxborderw=8",
-        `tile=${columns}x${rows}:padding=16:margin=16:color=0x808080`,
-      ].filter(Boolean);
-      const strip = `${base}.strip.png`;
-      execFileSync(
-        'ffmpeg',
-        ['-loglevel', 'error', '-y', '-ss', skip, '-i', `${base}.webm`, '-vf', filters.join(',')].concat([
-          '-frames:v',
-          '1',
-          strip,
-        ])
-      );
-      run.note(`film ${path.basename(base)}: ${columns * rows} numbered frames, ${1000 / fps} ms apart`);
+      const input = ['-loglevel', 'error', '-y', '-ss', skip, '-i', await video.path()];
+      // Even sizes, at most 960 wide: H.264 needs even sizes and a GIF wider than that gets heavy.
+      const scale = "scale='min(960,iw)':-2:flags=lanczos";
+      const gif = `${crop}fps=20,${scale},split[a][b];[a]palettegen[p];[b][p]paletteuse`;
+      execFileSync('ffmpeg', [...input, '-vf', gif, `${base}.gif`]);
+      const mp4 = ['-vf', `${crop}${scale}`, '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-movflags', '+faststart'];
+      execFileSync('ffmpeg', [...input, ...mp4, `${base}.mp4`]);
+      // The frame number sits on a dark box so it reads on both themes.
+      const number =
+        "drawtext=font=Sans:text='%{eif\\:n+1\\:d}':x=10:y=10:fontsize=28:fontcolor=white:box=1:boxcolor=black@0.75:boxborderw=8";
+      const frames = `${crop}fps=5,scale=640:-2,${number},tile=3x3:padding=16:margin=16:color=0x808080`;
+      execFileSync('ffmpeg', [...input, '-vf', frames, '-frames:v', '1', `${base}.frames.png`]);
+      run.note(`film ${path.basename(base)}: .gif, .mp4, and .frames.png`);
       return base;
     },
     async close() {
