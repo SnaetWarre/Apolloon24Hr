@@ -118,7 +118,7 @@ export function WelcomeView({
                   {shortUrl(host.url)}
                   <Icon name={copied ? 'check' : 'copy'} size={13} className={copied ? 'icon--pop' : undefined} />
                 </button>{' '}
-                in de browser van de tv&apos;s en kies Binnenscherm of Buitenscherm.
+                in de browser van de tv&apos;s en kies Binnenscherm, Competitiescherm of Buitenscherm.
               </li>
             )}
           </ol>

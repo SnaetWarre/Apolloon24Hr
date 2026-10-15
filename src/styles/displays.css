@@ -375,13 +375,14 @@ html[data-display-tone="light"] body {
   }
 }
 
-/* ---------- Binnenscherm ---------- */
-.display-root--inside {
+/* ---------- Binnenscherm and Competitiescherm ---------- */
+.display-root--inside,
+.display-root--competitions {
   display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
   gap: 1.6vh;
   height: calc(100vh - var(--titlebar-h));
-  padding: 2.6vh 2.4vw;
+  padding: 2.2vh 2vw;
   overflow: clip;
   border-block-start: 0.6vh solid var(--apolloon-blue);
 }
@@ -390,11 +391,13 @@ html[data-display-tone="light"] body {
   display: flex;
   align-items: center;
   gap: 2vw;
+  min-width: 0;
   min-height: 0;
 }
 
 .inside-totals {
   display: flex;
+  flex: none;
   gap: 2.4vw;
   margin-block: 0;
   margin-inline: auto 0;
@@ -418,13 +421,20 @@ html[data-display-tone="light"] body {
   letter-spacing: -0.02em;
 }
 
+.inside-totals dd.value-tick {
+  animation-duration: var(--dur-3);
+}
+
+/* Who runs now and who is next share the top line with the brand and the totals. */
 .inside-now {
   display: flex;
   align-items: baseline;
   gap: 0.6vw;
   min-width: 0;
+  overflow: clip;
   color: var(--d-ink-2);
-  font-size: clamp(16px, 1.25vw, max(26px, min(1.3542vw, 2.4074vh)));
+  font-size: clamp(16px, 1.25vw, max(28px, min(1.4583vw, 2.5926vh)));
+  white-space: nowrap;
 }
 
 .inside-now__label {
@@ -444,50 +454,93 @@ html[data-display-tone="light"] body {
 
 .inside-now__runner {
   display: inline-block;
+  min-width: 0;
+  overflow: clip;
   color: var(--d-ink);
   font-weight: 650;
   letter-spacing: -0.02em;
-  overflow-wrap: anywhere;
+  text-overflow: ellipsis;
 }
 
 .inside-now__next {
+  min-width: 0;
+  overflow: clip;
   margin-inline-start: 0.6vw;
   padding-inline-start: 1.2vw;
   border-inline-start: 1px solid var(--d-line);
+  text-overflow: ellipsis;
 }
 
 .inside-now__next strong {
-  display: inline-block;
+  display: inline;
   color: var(--d-ink);
   font-weight: 600;
-  overflow-wrap: anywhere;
 }
 
-.inside-totals dd.value-tick {
-  animation-duration: var(--dur-3);
+.inside-board {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+  gap: 1.2vw;
+  min-height: 0;
 }
 
-.inside-recent-laps {
-  min-width: 0;
-  padding: 0.4vh 1.4vw;
+.display-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 1.6vh 1.3vw;
   border: 1px solid var(--d-line);
   border-radius: 0.7vw;
   background: var(--d-surface);
+  overflow: clip;
 }
 
-.recent-lap-table {
+.inside-panel-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 1vw;
+  min-width: 0;
+}
+
+.inside-panel-heading h2 {
+  flex: none;
+  font-size: clamp(20px, 1.5vw, max(32px, min(1.6667vw, 2.963vh)));
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.inside-panel-heading > span {
+  min-width: 0;
+  overflow: clip;
+  margin-inline-start: auto;
+  color: var(--d-ink-3);
+  font-size: clamp(12px, 0.85vw, max(18px, min(0.9375vw, 1.6667vh)));
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Both lists keep 25 rows of the same height, so their rows line up across the screen. */
+.inside-list {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 0.6vh;
+}
+
+.display-table {
   width: 100%;
+  height: 100%;
   border-collapse: collapse;
   table-layout: fixed;
   font-size: inherit;
+  font-variant-numeric: tabular-nums;
 }
 
-.recent-lap-table th,
-.recent-lap-table td {
-  padding: 0.45vh 0.6vw;
+.display-table th,
+.display-table td {
+  padding: 0 0.6vw;
   border: 0;
   background: transparent;
-  line-height: 1.15;
+  line-height: 1.1;
   text-align: start;
   white-space: nowrap;
   overflow: clip;
@@ -495,31 +548,43 @@ html[data-display-tone="light"] body {
   transition: none;
 }
 
-.recent-lap-table th {
-  position: static;
-  color: var(--d-ink-3);
-  font-size: clamp(12px, 0.85vw, max(17px, min(0.8854vw, 1.5741vh)));
-  font-weight: 500;
+.display-table thead tr {
+  height: 2.4vh;
 }
 
-.recent-lap-table th:nth-child(1) { width: 11%; }
-.recent-lap-table th:nth-child(3),
-.recent-lap-table th:nth-child(4),
-.recent-lap-table th:nth-child(5) { width: 14%; }
+.display-table th {
+  position: static;
+  color: var(--d-ink-3);
+  font-size: clamp(12px, 0.8vw, max(16px, min(0.8333vw, 1.4815vh)));
+  font-weight: 500;
+  vertical-align: bottom;
+  padding-block-end: 0.4vh;
+}
 
-.recent-lap-row td {
+.display-table tbody td {
   border-block-start: 1px solid var(--d-line);
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .recent-lap-row:hover td {
+  .display-table tbody tr:hover td {
     background: transparent;
   }
 }
 
+/* An empty row is as tall as a filled one; the table shares out its height by row height. */
+.display-table__empty td {
+  font-size: clamp(15px, 1.1vw, max(23px, min(1.1979vw, 2.1296vh)));
+}
+
+.recent-lap-table th:nth-child(1) { width: 11%; }
+.recent-lap-table th:nth-child(3) { width: 14%; }
+.recent-lap-table th:nth-child(4) { width: 9%; }
+.recent-lap-table th:nth-child(5),
+.recent-lap-table th:nth-child(6) { width: 12%; }
+
 .recent-lap-when {
   color: var(--d-ink-3);
-  font-size: clamp(14px, 1.05vw, max(22px, min(1.1458vw, 2.037vh)));
+  font-size: clamp(13px, 0.95vw, max(20px, min(1.0417vw, 1.8519vh)));
 }
 
 .recent-lap-badge {
@@ -528,7 +593,7 @@ html[data-display-tone="light"] body {
   border-radius: 0.3em;
   background: var(--apolloon-blue);
   color: oklch(100% 0 none);
-  font-size: clamp(11px, 0.75vw, max(15px, min(0.7813vw, 1.3889vh)));
+  font-size: clamp(11px, 0.7vw, max(14px, min(0.7292vw, 1.2963vh)));
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -536,34 +601,41 @@ html[data-display-tone="light"] body {
 }
 
 .recent-lap-runner {
-  font-size: clamp(18px, 1.35vw, max(28px, min(1.4583vw, 2.5926vh)));
+  font-size: clamp(15px, 1.1vw, max(23px, min(1.1979vw, 2.1296vh)));
   font-weight: 600;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.015em;
 }
 
 .recent-lap-number {
-  margin-inline-start: 0.8em;
+  margin-inline-start: 0.7em;
   color: var(--d-ink-3);
-  font-size: 0.6em;
+  font-size: 0.7em;
   font-weight: 500;
   letter-spacing: 0;
 }
 
-.recent-lap-time {
+.recent-lap-time,
+.recent-lap-coefficient {
   color: var(--d-ink-2);
-  font-size: clamp(16px, 1.15vw, max(24px, min(1.25vw, 2.2222vh)));
+  font-size: clamp(14px, 1vw, max(21px, min(1.0938vw, 1.9444vh)));
   font-weight: 500;
 }
 
 .recent-lap-time--current {
   color: var(--d-ink);
-  font-size: clamp(20px, 1.6vw, max(32px, min(1.6667vw, 2.963vh)));
+  font-size: clamp(15px, 1.1vw, max(23px, min(1.1979vw, 2.1296vh)));
   font-weight: 650;
-  letter-spacing: -0.04em;
+  letter-spacing: -0.02em;
 }
 
 .recent-lap-row.is-latest .recent-lap-time--current {
   color: var(--d-accent);
+}
+
+/* The coefficient is what the lap time earns in Punten; the gold ties it to the ranking next to it. */
+.recent-lap-coefficient {
+  color: var(--d-gold);
+  font-weight: 600;
 }
 
 /* The lap that just landed slides in from the track side; the older rows shift down. */
@@ -582,166 +654,80 @@ html[data-display-tone="light"] body {
   }
 }
 
-.inside-board {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 1.2vw;
-  min-height: 0;
+.points-table th:nth-child(1) { width: 3.2em; }
+.points-table th:nth-child(3) { width: 18%; }
+.points-table th:nth-child(4) { width: 22%; }
+
+.points-table th:nth-child(3),
+.points-table th:nth-child(4),
+.display-table .points-laps,
+.display-table .points-total {
+  text-align: end;
 }
 
-.display-panel {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  padding: 2vh 1.4vw;
-  border: 1px solid var(--d-line);
-  border-radius: 0.7vw;
-  background: var(--d-surface);
-  overflow: clip;
-}
-
-.inside-panel-heading {
-  display: flex;
-  align-items: center;
-  gap: 1vw;
-}
-
-.inside-panel-heading h2 {
-  font-size: clamp(20px, 1.6vw, max(34px, min(1.7708vw, 3.1481vh)));
-  font-weight: 600;
-  letter-spacing: -0.02em;
-}
-
-.inside-panel-heading > span {
-  margin-inline-start: auto;
+.display-table .points-place {
   color: var(--d-ink-3);
-  font-size: clamp(13px, 0.95vw, max(20px, min(1.0417vw, 1.8519vh)));
-}
-
-.inside-ranking-modes {
-  display: flex;
-  gap: 0.2vw;
-  margin-inline-start: auto;
-  padding: 0.2vw;
-  border: 1px solid var(--d-line);
-  border-radius: 0.4vw;
-}
-
-.inside-ranking-modes button {
-  padding: 0.4vh 0.8vw;
-  border: 0;
-  border-radius: 0.3vw;
-  background: transparent;
-  color: var(--d-ink-3);
-  font: 500 clamp(13px, 0.95vw, max(20px, min(1.0417vw, 1.8519vh))) var(--font-body);
-  cursor: pointer;
-}
-
-.inside-ranking-modes button {
-  transition: background-color var(--dur-2) var(--ease-out), color var(--dur-2) var(--ease-out);
-}
-
-.inside-ranking-modes button:active {
-  background: var(--d-surface-2);
-}
-
-.inside-ranking-modes button.is-active {
-  background: var(--apolloon-blue);
-  color: oklch(100% 0 none);
-}
-
-.inside-ranking-rotation {
-  height: 2px;
-  margin: 1.2vh 0 0.8vh;
-  border-radius: 1px;
-  background: var(--d-line);
-  overflow: clip;
-}
-
-.inside-ranking-rotation i {
-  display: block;
-  height: 100%;
-  background: var(--apolloon-blue);
-  transform-origin: left center;
-  animation: ranking-rotation linear forwards;
-}
-
-@keyframes ranking-rotation {
-  from { transform: scaleX(0); }
-  to { transform: scaleX(1); }
-}
-
-.inside-ranking-modes-help {
-  color: var(--d-ink-3);
-  font-size: clamp(12px, 0.85vw, max(17px, min(0.8854vw, 1.5741vh)));
-}
-
-.ranking-list {
-  display: grid;
-  flex: 1;
-  grid-auto-rows: minmax(0, 1fr);
-  min-height: 0;
-  margin: 0.6vh 0 0;
-  padding: 0;
-  list-style: none;
-}
-
-.ranking-row {
-  display: grid;
-  grid-template-columns: 2.4vw minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 1vw;
-  min-height: 0;
-  border-block-end: 1px solid var(--d-line);
-  font-size: clamp(16px, 1.3vw, max(28px, min(1.4583vw, 2.5926vh)));
-}
-
-.ranking-row:last-child {
-  border-block-end: 0;
-}
-
-.ranking-row > span {
-  color: var(--d-ink-3);
+  font-size: clamp(14px, 1vw, max(21px, min(1.0938vw, 1.9444vh)));
   font-weight: 500;
   text-align: center;
 }
 
-.ranking-row:nth-child(-n + 3) > span {
+.points-row:nth-child(-n + 3) .points-place {
   color: var(--d-gold);
+  font-weight: 700;
+}
+
+.points-runner {
+  font-size: clamp(15px, 1.1vw, max(23px, min(1.1979vw, 2.1296vh)));
+  font-weight: 550;
+}
+
+.points-laps {
+  color: var(--d-ink-3);
+  font-size: clamp(14px, 1vw, max(21px, min(1.0938vw, 1.9444vh)));
+}
+
+.points-total {
+  color: var(--d-ink);
+  font-size: clamp(15px, 1.1vw, max(23px, min(1.1979vw, 2.1296vh)));
   font-weight: 650;
 }
 
-.ranking-row:first-child {
-  margin: 0 -0.6vw;
-  padding: 0 0.6vw;
-  border-radius: 0.4vw;
-  border-block-end-color: transparent;
+.points-row:first-child td {
   background: color-mix(in oklch, var(--apolloon-blue) 18%, transparent);
 }
 
-.ranking-row > strong {
-  overflow: clip;
-  font-weight: 550;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ranking-row > em {
-  color: var(--d-ink-2);
-  font-size: clamp(15px, 1.2vw, max(26px, min(1.3542vw, 2.4074vh)));
-  font-style: normal;
-}
-
-.inside-controls {
+/*
+ * Operator controls. A tv has no mouse, so they stay out of sight until a pointer
+ * moves over the screen or a key focuses them.
+ */
+.display-controls {
+  position: fixed;
+  inset-block-end: 1.2vh;
+  inset-inline-end: 1.2vw;
+  z-index: 5;
   display: flex;
   align-items: center;
-  gap: 1vw;
-  margin-block-start: 0.8vh;
-  padding-block-start: 0.8vh;
-  border-block-start: 1px solid var(--d-line);
+  gap: 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--d-line);
+  border-radius: 8px;
+  background: var(--d-surface);
   color: var(--d-ink-3);
   font-size: 13px;
-  opacity: 0.8;
+  box-shadow: 0 8px 24px oklch(0% 0 none / 0.3);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .display-controls {
+    opacity: 0;
+    transition: opacity var(--dur-2) var(--ease-out);
+  }
+
+  .display-root:hover .display-controls,
+  .display-controls:focus-within {
+    opacity: 1;
+  }
 }
 
 .ranking-label-filter {
@@ -780,138 +766,6 @@ html[data-display-tone="light"] body {
   gap: 4px;
 }
 
-.inside-ranking-rotation-note {
-  margin-inline-start: auto !important;
-}
-
-.inside-ranking-rotation-note {
-  margin: 0;
-}
-
-.inside-competitions {
-  gap: 0;
-  overflow-y: auto;
-  scrollbar-width: none;
-}
-
-.competition h3 {
-  margin: 1.2vh 0 0.3vh;
-  color: var(--d-ink-3);
-  font-size: clamp(13px, 0.95vw, max(20px, min(1.0417vw, 1.8519vh)));
-  font-weight: 500;
-}
-
-.progress-item {
-  display: grid;
-  grid-template-columns: minmax(0, 11vw) minmax(0, 1fr) 6.5vw;
-  align-items: center;
-  gap: 1vw;
-  padding: 0.35vh 0;
-  font-size: clamp(14px, 1.05vw, max(22px, min(1.1458vw, 2.037vh)));
-}
-
-.progress-item .label-pill {
-  justify-self: start;
-  min-height: 1.6em;
-  max-width: 100%;
-  padding-block: 0;
-  padding-inline: 0.4em 0.5em;
-  gap: 0.45em;
-  border: 0 !important;
-  background: transparent;
-  color: var(--d-ink);
-  font-size: inherit;
-  overflow: clip;
-  text-overflow: ellipsis;
-}
-
-.progress-item .label-image {
-  width: 1.15em;
-  height: 1.15em;
-}
-
-.progress-item .label-dot {
-  width: 0.55em;
-  height: 0.55em;
-}
-
-.progress-item.is-leading .label-pill {
-  font-weight: 650;
-}
-
-.progress-track {
-  height: 0.7vh;
-  min-height: 6px;
-  border-radius: 1vh;
-  background: var(--d-surface-2);
-  overflow: clip;
-}
-
-/* The bar is full width and slides in from the left; the track clips it. A
-   transform runs on the compositor, where a width transition laid out the
-   whole screen every frame. */
-.progress-track span {
-  display: block;
-  height: 100%;
-  border-radius: 1vh;
-  transform: translateX(calc(var(--progress, 0%) - 100%));
-  transition: transform 600ms ease;
-}
-
-.progress-item em {
-  color: var(--d-ink-2);
-  font-size: clamp(15px, 1.15vw, max(24px, min(1.25vw, 2.2222vh)));
-  font-style: normal;
-  font-weight: 550;
-  text-align: end;
-  white-space: nowrap;
-}
-
-.competition-list.is-dense {
-  columns: 2;
-  column-gap: 2vw;
-}
-
-.competition {
-  break-inside: avoid;
-}
-
-.competition-list.is-dense .progress-item {
-  grid-template-columns: minmax(0, 9vw) minmax(0, 1fr) auto;
-  gap: 0.7vw;
-  font-size: clamp(13px, 0.95vw, max(20px, min(1.0417vw, 1.8519vh)));
-}
-
-.competition-list.is-dense .progress-item em {
-  font-size: clamp(14px, 1vw, max(22px, min(1.1458vw, 2.037vh)));
-}
-
-/* The rows of one competition share their columns, so the name column is as
-   wide as its longest name (ellipsis only when there is really no room) and
-   the bars still start at the same place. */
-@supports (grid-template-columns: subgrid) {
-  .competition {
-    display: grid;
-    grid-template-columns: minmax(0, max-content) minmax(5vw, 1fr) auto;
-    column-gap: 1vw;
-  }
-
-  .competition h3 {
-    grid-column: 1 / -1;
-  }
-
-  .competition .progress-item,
-  .competition-list.is-dense .progress-item {
-    grid-column: 1 / -1;
-    grid-template-columns: subgrid;
-    column-gap: inherit;
-  }
-
-  .competition-list.is-dense .competition {
-    column-gap: 0.7vw;
-  }
-}
-
 .inside-empty {
   display: grid;
   place-items: center;
@@ -924,6 +778,248 @@ html[data-display-tone="light"] body {
   text-align: center;
 }
 
+/* ---------- Competitiescherm ---------- */
+/*
+ * Every competition is a scoreboard: the teams' laps as big condensed figures
+ * (Big Shoulders, the face of a stadium board), leader first, and one strip that
+ * splits all their laps by team colour, like a tug of war. Only the figures and
+ * the title use Big Shoulders; names and the ranking stay in Geist.
+ */
+.display-root--competitions {
+  --score-font: "Big Shoulders Display", var(--font-body);
+}
+
+.competitions-title {
+  font: 800 clamp(26px, 2vw, max(44px, min(2.2917vw, 4.0741vh)))/1 var(--score-font);
+  letter-spacing: 0.01em;
+}
+
+.competitions-board {
+  display: grid;
+  grid-template-columns: minmax(0, 2.3fr) minmax(0, 1fr);
+  gap: 1.2vw;
+  min-height: 0;
+}
+
+.competitions-bands {
+  display: grid;
+  grid-auto-rows: minmax(0, 1fr);
+  gap: 1.4vh;
+  min-height: 0;
+}
+
+.competition-band {
+  container-type: size;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  min-height: 0;
+  padding: 1.8vh 1.6vw 2vh;
+  border: 1px solid var(--d-line);
+  border-radius: 0.7vw;
+  background: var(--d-surface);
+  overflow: clip;
+}
+
+.competition-band__head {
+  display: flex;
+  align-items: baseline;
+  gap: 1.4vw;
+  min-width: 0;
+}
+
+.competition-band__head h2 {
+  flex: none;
+  color: var(--d-ink-2);
+  font-size: clamp(16px, 1.2vw, max(26px, min(1.3542vw, 2.4074vh)));
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.competition-band__head p {
+  min-width: 0;
+  overflow: clip;
+  margin: 0 0 0 auto;
+  color: var(--d-ink);
+  font-size: clamp(16px, 1.2vw, max(26px, min(1.3542vw, 2.4074vh)));
+  font-weight: 550;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.competition-scores {
+  display: grid;
+  grid-template-columns: repeat(var(--teams), minmax(0, 1fr));
+  align-items: end;
+  gap: 0 3cqi;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.competition-scores li {
+  display: grid;
+  gap: 0.6cqh;
+  min-width: 0;
+}
+
+/* The figure fills the band: as high as the band allows, as wide as its share of the row. */
+.competition-score {
+  display: block;
+  color: color-mix(in oklch, var(--d-ink) 50%, transparent);
+  font: 800 min(64cqh, calc(56cqi / var(--teams)))/0.8 var(--score-font);
+  letter-spacing: -0.01em;
+}
+
+.competition-scores .is-leading .competition-score {
+  color: var(--d-ink);
+}
+
+.competition-team {
+  display: flex;
+  align-items: center;
+  gap: 0.45em;
+  min-width: 0;
+  color: var(--d-ink-2);
+  font-size: clamp(15px, min(1.15vw, 9cqh), max(26px, min(1.3542vw, 2.4074vh)));
+  font-weight: 600;
+}
+
+.competition-team > span {
+  min-width: 0;
+  overflow: clip;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.is-leading .competition-team {
+  color: var(--d-ink);
+}
+
+.competition-team img {
+  flex: none;
+  width: 1.3em;
+  height: 1.3em;
+  object-fit: contain;
+}
+
+.competition-team__dot {
+  flex: none;
+  width: 0.6em;
+  height: 0.6em;
+  border-radius: 50%;
+  background: var(--team);
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--d-ink) 25%, transparent);
+}
+
+/* The strip is the track: each team takes its share of all laps in this competition. */
+.competition-strip {
+  position: relative;
+  display: flex;
+  gap: 0.2vw;
+  height: clamp(10px, 9cqh, max(28px, min(1.4583vw, 2.5926vh)));
+  margin-block-start: 1.6cqh;
+  border-radius: 0.4vh;
+  background: var(--d-surface-2);
+  overflow: clip;
+}
+
+.competition-strip span {
+  flex-basis: 0;
+  min-width: 0;
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--d-ink) 18%, transparent);
+}
+
+/* A duel reads like a scoreboard: home on the left, away on the right, the strip between them. */
+.is-duel .competition-scores li:last-child {
+  justify-items: end;
+}
+
+/* In a duel the middle of the track is the line to cross. */
+.is-duel .competition-strip::after {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: calc(50% - 0.15vw);
+  width: 0.3vw;
+  background: var(--d-bg);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .competition-strip span {
+    transition: flex-grow 600ms var(--ease-out);
+  }
+}
+
+.laps-ranking {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+
+.laps-ranking__help {
+  margin: 0.4vh 0 0.8vh;
+  color: var(--d-ink-3);
+  font-size: clamp(12px, 0.85vw, max(18px, min(0.9375vw, 1.6667vh)));
+}
+
+.laps-ranking__list {
+  display: grid;
+  grid-auto-rows: minmax(0, 1fr);
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.laps-ranking__row {
+  display: grid;
+  grid-template-columns: 2.2em minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.6vw;
+  min-height: 0;
+  border-block-start: 1px solid var(--d-line);
+  font-size: clamp(15px, 1.1vw, max(23px, min(1.1979vw, 2.1296vh)));
+}
+
+.laps-ranking__row > span {
+  color: var(--d-ink-3);
+  font-weight: 500;
+  text-align: center;
+}
+
+.laps-ranking__row:nth-child(-n + 3) > span {
+  color: var(--d-gold);
+  font-weight: 700;
+}
+
+.laps-ranking__row > strong {
+  overflow: clip;
+  font-weight: 550;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.laps-ranking__row > em {
+  font-style: normal;
+  font-weight: 650;
+  text-align: end;
+  white-space: nowrap;
+}
+
+.laps-ranking__row small {
+  margin-inline-start: 0.5em;
+  color: var(--d-ink-3);
+  font-size: 0.72em;
+  font-weight: 500;
+}
+
+.laps-ranking__row:first-child {
+  border-radius: 0.4vw;
+  border-block-start-color: transparent;
+  background: color-mix(in oklch, var(--apolloon-blue) 18%, transparent);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .outside-record-flash,
   .record-flash-content span,
@@ -931,18 +1027,16 @@ html[data-display-tone="light"] body {
   .record-flash-content em {
     animation: none;
   }
-
-  .progress-track span {
-    transition: none;
-  }
 }
 
 @media (max-aspect-ratio: 4 / 3) {
-  .inside-board {
+  .inside-board,
+  .competitions-board {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .display-root--inside {
+  .display-root--inside,
+  .display-root--competitions {
     height: auto;
     min-height: calc(100vh - var(--titlebar-h));
     overflow: visible;

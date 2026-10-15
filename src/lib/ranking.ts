@@ -37,11 +37,15 @@ export function calculateLapCoefficient(durationMs: number): number {
   return 1 + Math.max(0, BASELINE_LAP_MS - durationMs) * COEFFICIENT_PER_MS;
 }
 
+/** The coefficient a lap earns; a lap without a measured time (a double press, a split half) gets 1. */
+export function lapCoefficient(lap: Pick<LapRecord, 'durationMs' | 'source'>): number {
+  return isMeasuredLap(lap) ? calculateLapCoefficient(lap.durationMs) : 1;
+}
+
 export function calculateLapPoints(lap: Pick<LapRecord, 'durationMs' | 'finishedAt' | 'source'>): number {
   if (!Number.isFinite(lap.finishedAt)) return 0;
   const hour = Number(BRUSSELS_HOUR_FORMATTER.format(lap.finishedAt));
-  const coefficient = isMeasuredLap(lap) ? calculateLapCoefficient(lap.durationMs) : 1;
-  return BASE_POINTS_PER_LAP * coefficient * DAYPART_FACTORS[Math.floor(hour / 4)];
+  return BASE_POINTS_PER_LAP * lapCoefficient(lap) * DAYPART_FACTORS[Math.floor(hour / 4)];
 }
 
 export function buildRunnerRanking(

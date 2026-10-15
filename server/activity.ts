@@ -220,6 +220,7 @@ const SCREEN_NAMES: Array<[RegExp, string]> = [
   [/^\/analysis/, 'Analyse'],
   [/^\/tactics/, 'Tactiek'],
   [/^\/display\/inside/, 'Binnenscherm'],
+  [/^\/display\/competitions/, 'Competitiescherm'],
   [/^\/display\/outside/, 'Buitenscherm'],
   [/^\/$/, 'Start'],
 ];

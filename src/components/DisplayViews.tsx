@@ -7,14 +7,15 @@ import { formatClockTimeMs, formatDurationMs, formatElapsedSeconds } from '../li
 import { getNextWaitingRunner, lapRunnerLabel, runnerLabel } from '../lib/runners';
 import { observeDisplayHistory } from '../lib/displayHistory';
 import { useArrivals } from '../lib/motion';
-import { buildRecentLapSummaries, buildRunnerRanking, collectRankingLabels, type RankingMode } from '../lib/ranking';
+import { buildRecentLapSummaries, buildRunnerRanking, collectRankingLabels, lapCoefficient } from '../lib/ranking';
 import type { Label, LapRecord, LiveAppSnapshot, PublicRecordMode, RaceEvent, Runner } from '../types';
 import { compareLabels, LabelBadge, labelKindOrder, labelKindTitle } from './LabelBadge';
 import { LiveElapsed } from './LiveTime';
 
 const OUTSIDE_ALERT_VISIBLE_MS = 8_000;
-const INSIDE_RANKING_ROTATION_MS = 15_000;
-const INSIDE_RECENT_LAP_COUNT = 6;
+// The rows of both lists on the Binnenscherm, and the runners on the Competities screen.
+const INSIDE_LIST_LENGTH = 25;
+const COMPETITION_RANKING_LENGTH = 20;
 const selectOutsideDisplayData = ({ runners, race, settings }: LiveAppSnapshot) => ({
   runners,
   race,
@@ -163,284 +164,364 @@ export function InsideDisplay() {
   const activeRunner = finished ? null : runners.find((runner) => runner.id === race.activeRunnerId) || null;
   const nextRunner = finished ? null : getNextWaitingRunner(runners);
   const { laps, initialized: historyIsInitialized } = useRaceHistory({ scope: 'full' });
-  const [rankingMode, setRankingMode] = React.useState<RankingMode>('laps');
   const [rankingLabelId, setRankingLabelId] = React.useState<string | null>(null);
-  const [rotationPaused, setRotationPaused] = React.useState(false);
-  const [prefersReducedMotion, setPrefersReducedMotion] = React.useState(false);
-  const recentLapSummaries = buildRecentLapSummaries(laps, INSIDE_RECENT_LAP_COUNT);
+  const recentLapSummaries = buildRecentLapSummaries(laps, INSIDE_LIST_LENGTH);
   const rankingLabels = collectRankingLabels(labels, laps);
-  const ranking = buildRunnerRanking(runners, laps, rankingMode, rankingLabelId).slice(0, 10);
-  const competitions = groupCompetitions(buildLabelStats(labels, runners, laps));
-
-  React.useEffect(() => {
-    const reducedMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
-    const updateReducedMotionPreference = () => setPrefersReducedMotion(reducedMotionQuery.matches);
-    updateReducedMotionPreference();
-    reducedMotionQuery.addEventListener('change', updateReducedMotionPreference);
-    return () => reducedMotionQuery.removeEventListener('change', updateReducedMotionPreference);
-  }, []);
-
-  React.useEffect(() => {
-    if (prefersReducedMotion || rotationPaused) return;
-    const rotationTimeout = window.setTimeout(() => {
-      setRankingMode((currentMode) => (currentMode === 'laps' ? 'coefficient' : 'laps'));
-    }, INSIDE_RANKING_ROTATION_MS);
-    return () => window.clearTimeout(rotationTimeout);
-  }, [prefersReducedMotion, rankingMode, rotationPaused]);
-
-  const rotationActive = !prefersReducedMotion && !rotationPaused;
-  const competitionRowCount = competitions.reduce((total, competition) => total + competition.stats.length, 0);
-  // Same definition as Analyse, so the public and operator screens agree.
-  const lapsPerHour = buildKpis(laps, race).lapsPerHour;
+  const ranking = buildRunnerRanking(runners, laps, 'coefficient', rankingLabelId).slice(0, INSIDE_LIST_LENGTH);
+  const rankingLabelName = rankingLabels.find((label) => label.id === rankingLabelId)?.name;
   const activeKey = activeRunner?.id ?? 'none';
   const nextKey = nextRunner?.id ?? 'none';
-  // What changes after the screen opened moves: a handover, a lap that lands, a ranking that switches.
-  const changed = useArrivals([
-    `active:${activeKey}`,
-    `next:${nextKey}`,
-    `laps:${laps.length}`,
-    `ranking:${rankingMode}:${rankingLabelId ?? ''}`,
-  ]);
+  const rankingKey = `ranking:${rankingLabelId ?? ''}`;
+  // What changes after the screen opened moves: a handover, a lap that lands, another label.
+  const changed = useArrivals([`active:${activeKey}`, `next:${nextKey}`, rankingKey]);
   const newLapIds = useArrivals(
     recentLapSummaries.map(({ lap }) => lap.id),
     historyIsInitialized
   );
-  const rankingKey = `ranking:${rankingMode}:${rankingLabelId ?? ''}`;
 
   return (
     <main className={`display-root display-root--inside display-root--${presentation}`}>
       <header className="inside-header">
         <DisplayBrand />
         <h1 className="visually-hidden">24 urenloop, live standen</h1>
-        <dl className="inside-totals">
-          <div>
-            <dt>Racetijd</dt>
-            <dd>
-              {race.raceStartedAt ? (
-                race.raceFinishedAt ? (
-                  formatElapsedSeconds(race.raceFinishedAt - race.raceStartedAt)
-                ) : (
-                  <LiveElapsed startedAt={race.raceStartedAt} />
-                )
-              ) : (
-                '0:00'
-              )}
-            </dd>
-          </div>
-          <div>
-            <dt>Rondes</dt>
-            <dd key={laps.length} className={changed.has(`laps:${laps.length}`) ? 'value-tick' : undefined}>
-              {laps.length.toLocaleString('nl-BE')}
-            </dd>
-          </div>
-          <div>
-            <dt>Per uur</dt>
-            <dd>
-              {lapsPerHour == null
-                ? '—'
-                : lapsPerHour.toLocaleString('nl-BE', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
-            </dd>
-          </div>
-        </dl>
+        <section className="inside-now" aria-label="Nu op de piste">
+          <span className="inside-now__label">
+            {!finished && <LiveDot />}
+            {finished ? 'Race afgelopen' : 'Nu op de piste'}
+          </span>
+          <strong
+            key={activeKey}
+            className={`inside-now__runner${changed.has(`active:${activeKey}`) ? ' display-rise' : ''}`}
+          >
+            {activeRunner
+              ? runnerLabel(activeRunner)
+              : finished
+                ? 'Bedankt aan alle lopers'
+                : race.raceStartedAt
+                  ? 'Even niemand'
+                  : 'Nog niemand gestart'}
+          </strong>
+          {!finished && (
+            <span className="inside-now__next">
+              Volgende{' '}
+              <strong key={nextKey} className={changed.has(`next:${nextKey}`) ? 'display-rise' : undefined}>
+                {nextRunner ? runnerLabel(nextRunner) : 'niemand klaar'}
+              </strong>
+            </span>
+          )}
+        </section>
+        <DisplayTotals race={race} laps={laps} />
       </header>
 
-      <section className="inside-now" aria-label="Nu op de piste">
-        <span className="inside-now__label">
-          {!finished && <LiveDot />}
-          {finished ? 'Race afgelopen' : 'Nu op de piste'}
-        </span>
-        <strong
-          key={activeKey}
-          className={`inside-now__runner${changed.has(`active:${activeKey}`) ? ' display-rise' : ''}`}
-        >
-          {activeRunner
-            ? runnerLabel(activeRunner)
-            : finished
-              ? 'Bedankt aan alle lopers'
-              : race.raceStartedAt
-                ? 'Even niemand'
-                : 'Nog niemand gestart'}
-        </strong>
-        {!finished && (
-          <span className="inside-now__next">
-            Volgende{' '}
-            <strong key={nextKey} className={changed.has(`next:${nextKey}`) ? 'display-rise' : undefined}>
-              {nextRunner ? runnerLabel(nextRunner) : 'niemand klaar'}
-            </strong>
-          </span>
-        )}
-      </section>
-
-      <section className="inside-recent-laps" aria-label={`Laatste ${INSIDE_RECENT_LAP_COUNT} lopers`}>
-        <h2 className="visually-hidden">Laatste {INSIDE_RECENT_LAP_COUNT} lopers</h2>
-        {recentLapSummaries.length ? (
-          <table className="recent-lap-table">
-            <thead>
-              <tr>
-                <th scope="col">Binnen om</th>
-                <th scope="col">Loper</th>
-                <th scope="col">Deze ronde</th>
-                <th scope="col">Snelste ronde</th>
-                <th scope="col">Gem. ronde</th>
-              </tr>
-            </thead>
-            <tbody>
-              {recentLapSummaries.map(({ lap, bestLapMs, averageLapMs }, index) => (
-                <tr
-                  key={lap.id}
-                  className={`recent-lap-row${index === 0 ? ' is-latest' : ''}${newLapIds.has(lap.id) ? ' is-new' : ''}`}
-                >
-                  <td className="recent-lap-when">
-                    {index === 0 ? (
-                      <span className="recent-lap-badge">Net binnen</span>
-                    ) : (
-                      formatDisplayClockTime(lap.finishedAt)
-                    )}
-                  </td>
-                  <td className="recent-lap-runner">
-                    {lapRunnerLabel(lap)}
-                    <span className="recent-lap-number">ronde {lap.lapNumber}</span>
-                  </td>
-                  <td className="recent-lap-time recent-lap-time--current">{formatDurationMs(lap.durationMs)}</td>
-                  <td className="recent-lap-time">{formatDurationMs(bestLapMs)}</td>
-                  <td className="recent-lap-time">{formatDurationMs(averageLapMs)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        ) : (
-          <div className="inside-empty">De eerste rondes verschijnen hier zodra de timing start.</div>
-        )}
-      </section>
-
       <div className="inside-board">
-        <section className="display-panel inside-ranking-panel">
+        <section className="display-panel inside-list" aria-label={`Laatste ${INSIDE_LIST_LENGTH} lopers`}>
           <div className="inside-panel-heading">
-            <h2>Ranking</h2>
-            <div className="inside-ranking-modes" role="group" aria-label="Rangschikking op basis van">
-              <button
-                className={rankingMode === 'laps' ? 'is-active' : ''}
-                onClick={() => setRankingMode('laps')}
-                aria-pressed={rankingMode === 'laps'}
-              >
-                Meeste rondes
-              </button>
-              <button
-                className={rankingMode === 'coefficient' ? 'is-active' : ''}
-                onClick={() => setRankingMode('coefficient')}
-                aria-pressed={rankingMode === 'coefficient'}
-              >
-                Punten
-              </button>
-            </div>
+            <h2>Laatste {INSIDE_LIST_LENGTH} lopers</h2>
           </div>
-          <div className="inside-ranking-rotation" aria-hidden="true">
-            {rotationActive && <i key={rankingMode} style={{ animationDuration: `${INSIDE_RANKING_ROTATION_MS}ms` }} />}
-          </div>
-          <p className="inside-ranking-modes-help">
-            {rankingMode === 'coefficient'
-              ? 'Punten: snellere rondes scoren hoger; het tijdvak van aankomst telt mee.'
-              : 'Meeste rondes; bij gelijke stand telt het snelste gemiddelde.'}
-            {rankingLabelId ? ` Label: ${rankingLabels.find((label) => label.id === rankingLabelId)?.name ?? ''}.` : ''}
-          </p>
-          <ol key={rankingKey} className={`ranking-list${changed.has(rankingKey) ? ' display-rise' : ''}`}>
-            {ranking.map((runner, index) => (
-              <li key={runner.runnerId} className="ranking-row">
-                <span>{index + 1}</span>
-                <strong>{lapRunnerLabel(runner)}</strong>
-                <em>
-                  {rankingMode === 'coefficient'
-                    ? `${formatPoints(runner.coefficientTotal)} ptn · ${runner.lapCount} rondes`
-                    : `${runner.lapCount} rondes · gem. ${formatDurationMs(runner.averageLapMs)}`}
-                </em>
-              </li>
-            ))}
-            {!ranking.length && <li className="inside-empty">Nog geen rondes voor deze selectie</li>}
-          </ol>
-          <div className="inside-controls">
-            <label className="ranking-label-filter">
-              <span>Label</span>
-              <select value={rankingLabelId ?? ''} onChange={(event) => setRankingLabelId(event.target.value || null)}>
-                <option value="">Alle labels</option>
-                {rankingLabels.map((label) => (
-                  <option key={label.id} value={label.id}>
-                    {label.name}
-                  </option>
+          {recentLapSummaries.length ? (
+            <table className="display-table recent-lap-table">
+              <thead>
+                <tr>
+                  <th scope="col">Binnen om</th>
+                  <th scope="col">Loper</th>
+                  <th scope="col">Deze ronde</th>
+                  <th scope="col">Coëf.</th>
+                  <th scope="col">Snelste</th>
+                  <th scope="col">Gem.</th>
+                </tr>
+              </thead>
+              <tbody>
+                {recentLapSummaries.map(({ lap, bestLapMs, averageLapMs }, index) => (
+                  <tr
+                    key={lap.id}
+                    className={`recent-lap-row${index === 0 ? ' is-latest' : ''}${newLapIds.has(lap.id) ? ' is-new' : ''}`}
+                  >
+                    <td className="recent-lap-when">
+                      {index === 0 ? (
+                        <span className="recent-lap-badge">Net binnen</span>
+                      ) : (
+                        formatDisplayClockTime(lap.finishedAt)
+                      )}
+                    </td>
+                    <td className="recent-lap-runner">
+                      {lapRunnerLabel(lap)}
+                      <span className="recent-lap-number">ronde {lap.lapNumber}</span>
+                    </td>
+                    <td className="recent-lap-time recent-lap-time--current">{formatDurationMs(lap.durationMs)}</td>
+                    <td className="recent-lap-coefficient">{formatCoefficient(lapCoefficient(lap))}</td>
+                    <td className="recent-lap-time">{formatDurationMs(bestLapMs)}</td>
+                    <td className="recent-lap-time">{formatDurationMs(averageLapMs)}</td>
+                  </tr>
                 ))}
-              </select>
-            </label>
-            <div className="inside-presentation" role="group" aria-label="Weergave van dit scherm">
-              <button
-                className={`inside-control-button${presentation === 'light' ? ' is-active' : ''}`}
-                aria-pressed={presentation === 'light'}
-                onClick={() => setPresentation('light')}
-              >
-                Licht
-              </button>
-              <button
-                className={`inside-control-button${presentation === 'dark' ? ' is-active' : ''}`}
-                aria-pressed={presentation === 'dark'}
-                onClick={() => setPresentation('dark')}
-              >
-                Donker
-              </button>
-            </div>
-            <p className="inside-ranking-rotation-note">
-              {prefersReducedMotion
-                ? 'Automatisch wisselen is uitgeschakeld'
-                : rotationPaused
-                  ? 'Automatisch wisselen is gepauzeerd'
-                  : 'Wisselt automatisch om de 15 seconden'}
-            </p>
-            {!prefersReducedMotion && (
-              <button
-                className="inside-control-button"
-                aria-pressed={rotationPaused}
-                onClick={() => setRotationPaused((paused) => !paused)}
-              >
-                {rotationPaused ? 'Hervat wisselen' : 'Pauzeer wisselen'}
-              </button>
-            )}
-          </div>
-        </section>
-        <section className="display-panel inside-competitions">
-          <div className="inside-panel-heading">
-            <h2>Competities</h2>
-          </div>
-          {competitions.length ? (
-            <div className={`competition-list${competitionRowCount > 9 ? ' is-dense' : ''}`}>
-              {competitions.map((competition) => (
-                <div key={competition.kind} className="competition">
-                  <h3>{competition.title}</h3>
-                  {competition.stats.map((stat, index) => (
-                    <div
-                      key={stat.label.id}
-                      className={`progress-item${index === 0 && stat.laps > 0 ? ' is-leading' : ''}`}
-                    >
-                      <LabelBadge label={stat.label} />
-                      <div className="progress-track">
-                        <span
-                          title={`${stat.laps} rondes`}
-                          style={
-                            {
-                              '--progress': `${competition.maxLaps > 0 ? (stat.laps / competition.maxLaps) * 100 : 0}%`,
-                              background: stat.label.color,
-                            } as React.CSSProperties
-                          }
-                        />
-                      </div>
-                      <em>{stat.laps} rondes</em>
-                    </div>
-                  ))}
-                </div>
-              ))}
-            </div>
+                <EmptyRows count={INSIDE_LIST_LENGTH - recentLapSummaries.length} columns={6} />
+              </tbody>
+            </table>
           ) : (
-            <div className="inside-empty">Nog geen labels met lopers.</div>
+            <div className="inside-empty">De eerste rondes verschijnen hier zodra de timing start.</div>
+          )}
+        </section>
+
+        <section className="display-panel inside-list" aria-label="Ranking op punten">
+          <div className="inside-panel-heading">
+            <h2>Ranking op punten</h2>
+            <span>
+              {rankingLabelName
+                ? `Alleen ${rankingLabelName}`
+                : 'Snelle rondes en rondes tussen middernacht en 16 uur tellen zwaarder'}
+            </span>
+          </div>
+          {ranking.length ? (
+            <table
+              key={rankingKey}
+              className={`display-table points-table${changed.has(rankingKey) ? ' display-rise' : ''}`}
+            >
+              <thead>
+                <tr>
+                  <th scope="col">
+                    <span className="visually-hidden">Plaats</span>
+                  </th>
+                  <th scope="col">Loper</th>
+                  <th scope="col">Rondes</th>
+                  <th scope="col">Punten</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ranking.map((runner, index) => (
+                  <tr key={runner.runnerId} className="points-row">
+                    <td className="points-place">{index + 1}</td>
+                    <td className="points-runner">{lapRunnerLabel(runner)}</td>
+                    <td className="points-laps">{runner.lapCount}</td>
+                    <td className="points-total">{formatPoints(runner.coefficientTotal)}</td>
+                  </tr>
+                ))}
+                <EmptyRows count={INSIDE_LIST_LENGTH - ranking.length} columns={4} />
+              </tbody>
+            </table>
+          ) : (
+            <div className="inside-empty">Nog geen rondes voor deze selectie</div>
           )}
         </section>
       </div>
+
+      <footer className="display-controls">
+        <label className="ranking-label-filter">
+          <span>Ranking voor</span>
+          <select value={rankingLabelId ?? ''} onChange={(event) => setRankingLabelId(event.target.value || null)}>
+            <option value="">Alle lopers</option>
+            {rankingLabels.map((label) => (
+              <option key={label.id} value={label.id}>
+                {label.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <PresentationSwitch presentation={presentation} onChange={setPresentation} />
+      </footer>
     </main>
+  );
+}
+
+export function CompetitionDisplay() {
+  const { runners, labels, race } = useAppData(selectInsideDisplayData);
+  const [presentation, setPresentation] = useDisplayPresentation('competitions', 'dark');
+  const { laps } = useRaceHistory({ scope: 'full' });
+  const competitions = groupCompetitions(buildLabelStats(labels, runners, laps));
+  const ranking = buildRunnerRanking(runners, laps, 'laps', null).slice(0, COMPETITION_RANKING_LENGTH);
+
+  return (
+    <main className={`display-root display-root--competitions display-root--${presentation}`}>
+      <header className="inside-header">
+        <DisplayBrand />
+        <h1 className="competitions-title">Competities</h1>
+        <DisplayTotals race={race} laps={laps} />
+      </header>
+
+      <div className="competitions-board">
+        <div className="competitions-bands">
+          {competitions.length ? (
+            competitions.map((competition) => <CompetitionBand key={competition.kind} competition={competition} />)
+          ) : (
+            <div className="inside-empty">Nog geen labels met lopers. Geef lopers een label in Beheer › Labels.</div>
+          )}
+        </div>
+
+        <section className="display-panel laps-ranking" aria-label="Ranking op meeste rondes">
+          <div className="inside-panel-heading">
+            <h2>Meeste rondes</h2>
+          </div>
+          <p className="laps-ranking__help">Bij gelijke stand telt het snelste gemiddelde.</p>
+          {ranking.length ? (
+            <ol className="laps-ranking__list">
+              {ranking.map((runner, index) => (
+                <li key={runner.runnerId} className="laps-ranking__row">
+                  <span>{index + 1}</span>
+                  <strong>{lapRunnerLabel(runner)}</strong>
+                  <em>
+                    {runner.lapCount}
+                    <small> gem. {formatDurationMs(runner.averageLapMs)}</small>
+                  </em>
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <div className="inside-empty">Nog geen rondes.</div>
+          )}
+        </section>
+      </div>
+
+      <footer className="display-controls">
+        <PresentationSwitch presentation={presentation} onChange={setPresentation} />
+      </footer>
+    </main>
+  );
+}
+
+type Competition = ReturnType<typeof groupCompetitions>[number];
+
+/**
+ * One competition as a scoreboard: every team's laps as a big figure, leader first,
+ * and one strip below that splits all their laps by team, like a tug of war.
+ */
+function CompetitionBand({ competition }: { competition: Competition }) {
+  const { stats } = competition;
+  const leader = stats[0];
+  const totalLaps = stats.reduce((total, stat) => total + stat.laps, 0);
+  const leaderKey = `leader:${leader.label.id}`;
+  // A new figure ticks; a new leader moves the whole scoreboard.
+  const changed = useArrivals([leaderKey, ...stats.map((stat) => `${stat.label.id}:${stat.laps}`)]);
+
+  return (
+    <section
+      className={`competition-band${stats.length === 2 ? ' is-duel' : ''}`}
+      aria-label={competition.title}
+      style={{ '--teams': stats.length } as React.CSSProperties}
+    >
+      <div className="competition-band__head">
+        <h2>{competition.title}</h2>
+        <p>{competitionVerdict(stats)}</p>
+      </div>
+      <ol key={leaderKey} className={`competition-scores${changed.has(leaderKey) ? ' display-rise' : ''}`}>
+        {stats.map((stat) => (
+          <li
+            key={stat.label.id}
+            className={stat.laps > 0 && stat.laps === leader.laps ? 'is-leading' : undefined}
+            style={{ '--team': stat.label.color } as React.CSSProperties}
+          >
+            <span className="competition-team">
+              {stat.label.imageUrl ? (
+                <img src={stat.label.imageUrl} alt="" />
+              ) : (
+                <i className="competition-team__dot" aria-hidden="true" />
+              )}
+              <span>{stat.label.name}</span>
+            </span>
+            <strong
+              key={stat.laps}
+              className={
+                changed.has(`${stat.label.id}:${stat.laps}`) ? 'competition-score value-tick' : 'competition-score'
+              }
+            >
+              {stat.laps.toLocaleString('nl-BE')}
+              <span className="visually-hidden"> rondes</span>
+            </strong>
+          </li>
+        ))}
+      </ol>
+      <div className="competition-strip" aria-hidden="true">
+        {totalLaps > 0 &&
+          stats.map((stat) => (
+            <span key={stat.label.id} style={{ flexGrow: stat.laps, background: stat.label.color }} />
+          ))}
+      </div>
+    </section>
+  );
+}
+
+function competitionVerdict(stats: Competition['stats']) {
+  const [leader, second] = stats;
+  if (leader.laps === 0) return 'Nog geen rondes';
+  if (!second) return leader.laps === 1 ? '1 ronde' : `${leader.laps} rondes`;
+  const tied = stats.filter((stat) => stat.laps === leader.laps);
+  if (tied.length === stats.length && stats.length > 2) return 'Iedereen staat gelijk';
+  if (tied.length === 2) return `${tied[0].label.name} en ${tied[1].label.name} staan gelijk`;
+  if (tied.length > 2) return `${tied.length} ploegen staan gelijk`;
+  const lead = leader.laps - second.laps;
+  return `${leader.label.name} leidt met ${lead === 1 ? '1 ronde' : `${lead} rondes`}`;
+}
+
+/** Keeps a list at its full number of rows, so the rows of the two lists line up. */
+function EmptyRows({ count, columns }: { count: number; columns: number }) {
+  return Array.from({ length: Math.max(0, count) }, (_, index) => (
+    <tr key={index} className="display-table__empty" aria-hidden="true">
+      {Array.from({ length: columns }, (_, column) => (
+        <td key={column}>{'\u00a0'}</td>
+      ))}
+    </tr>
+  ));
+}
+
+function DisplayTotals({ race, laps }: { race: LiveAppSnapshot['race']; laps: LapRecord[] }) {
+  // Same definition as Analyse, so the public and operator screens agree.
+  const lapsPerHour = buildKpis(laps, race).lapsPerHour;
+  const changed = useArrivals([`laps:${laps.length}`]);
+  return (
+    <dl className="inside-totals">
+      <div>
+        <dt>Racetijd</dt>
+        <dd>
+          {race.raceStartedAt ? (
+            race.raceFinishedAt ? (
+              formatElapsedSeconds(race.raceFinishedAt - race.raceStartedAt)
+            ) : (
+              <LiveElapsed startedAt={race.raceStartedAt} />
+            )
+          ) : (
+            '0:00'
+          )}
+        </dd>
+      </div>
+      <div>
+        <dt>Rondes</dt>
+        <dd key={laps.length} className={changed.has(`laps:${laps.length}`) ? 'value-tick' : undefined}>
+          {laps.length.toLocaleString('nl-BE')}
+        </dd>
+      </div>
+      <div>
+        <dt>Per uur</dt>
+        <dd>
+          {lapsPerHour == null
+            ? '—'
+            : lapsPerHour.toLocaleString('nl-BE', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
+        </dd>
+      </div>
+    </dl>
+  );
+}
+
+function PresentationSwitch({
+  presentation,
+  onChange,
+}: {
+  presentation: DisplayPresentation;
+  onChange: (next: DisplayPresentation) => void;
+}) {
+  return (
+    <div className="inside-presentation" role="group" aria-label="Weergave van dit scherm">
+      <button
+        className={`inside-control-button${presentation === 'light' ? ' is-active' : ''}`}
+        aria-pressed={presentation === 'light'}
+        onClick={() => onChange('light')}
+      >
+        Licht
+      </button>
+      <button
+        className={`inside-control-button${presentation === 'dark' ? ' is-active' : ''}`}
+        aria-pressed={presentation === 'dark'}
+        onClick={() => onChange('dark')}
+      >
+        Donker
+      </button>
+    </div>
   );
 }
 
@@ -454,7 +535,7 @@ type DisplayPresentation = 'light' | 'dark';
  * laptop, whose browser storage is empty.
  */
 function useDisplayPresentation(
-  display: 'inside' | 'outside',
+  display: 'inside' | 'outside' | 'competitions',
   defaultPresentation: DisplayPresentation
 ): [DisplayPresentation, (next: DisplayPresentation) => void] {
   const storageKey = `apolloon.display.${display}`;
@@ -494,7 +575,11 @@ function useDisplayPresentation(
 }
 
 function formatPoints(points: number) {
-  return points.toLocaleString('nl-BE', { maximumFractionDigits: 1 });
+  return points.toLocaleString('nl-BE', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+}
+
+function formatCoefficient(coefficient: number) {
+  return coefficient.toLocaleString('nl-BE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function formatDisplayClockTime(finishedAt: number) {

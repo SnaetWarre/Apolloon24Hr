@@ -5,6 +5,7 @@ import {
   buildRunnerRanking,
   calculateLapCoefficient,
   calculateLapPoints,
+  lapCoefficient,
 } from '../src/lib/ranking.ts';
 import type { Label, LapRecord, Runner } from '../src/types.ts';
 
@@ -344,4 +345,10 @@ test('a double press still counts as a lap but not as a lap time', () => {
   assert.equal(annaSummary?.averageLapMs, 85_000);
   assert.equal(bertSummary?.bestLapMs, null);
   assert.equal(bertSummary?.averageLapMs, null);
+});
+
+test('a lap shows the coefficient it earned; a lap without a measured time shows 1', () => {
+  assertClose(lapCoefficient({ durationMs: 73_000, source: 'timing' }), 2.5);
+  assertClose(lapCoefficient({ durationMs: 12_000, source: 'timing' }), 1);
+  assertClose(lapCoefficient({ durationMs: 60_000, source: 'split' }), 1);
 });
