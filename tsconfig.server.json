@@ -13,5 +13,6 @@
     "resolveJsonModule": true,
     "types": ["node"]
   },
-  "include": ["server/**/*.ts", "scripts/**/*.ts", "shared/**/*.ts"]
+  "include": ["server/**/*.ts", "scripts/**/*.ts", "shared/**/*.ts"],
+  "exclude": ["scripts/wrapped/**"]
 }

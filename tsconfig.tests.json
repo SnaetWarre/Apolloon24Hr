@@ -9,5 +9,6 @@
     "jsx": "react-jsx",
     "lib": ["ES2022", "DOM", "DOM.Iterable"]
   },
-  "include": ["tests/**/*.ts"]
+  "include": ["tests/**/*.ts", "scripts/wrapped/**/*.ts"],
+  "exclude": []
 }

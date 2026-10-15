@@ -107,6 +107,14 @@ const routeTree = rootRoute.addChildren([
     component: lazyRouteComponent(() => import('./components/DisplayViews'), 'CompetitionDisplay'),
     pendingComponent: pending('Competitiescherm wordt geladen...', true),
   }),
+  createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/wrapped/card',
+    validateSearch: (search: Record<string, unknown>): { runner?: string } =>
+      typeof search.runner === 'string' ? { runner: search.runner } : {},
+    loader: prefetch(allLaps, registrations),
+    component: lazyRouteComponent(() => import('./components/wrapped/WrappedCardPage'), 'WrappedCardPage'),
+  }),
 ]);
 
 export const router = createRouter({

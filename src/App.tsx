@@ -18,7 +18,9 @@ export function AppRoot() {
   // useFailover waits a few seconds, so the first connection being made never counts as a failure.
   const switching = useFailover((initialized && disconnected) || Boolean(error));
   const pathname = useRouterState({ select: (state) => state.location.pathname });
-  const displayRoute = pathname.startsWith('/display/');
+  // A Wrapped card is saved as an image, so it shows nothing but the card.
+  const cardRoute = pathname.startsWith('/wrapped/');
+  const displayRoute = cardRoute || pathname.startsWith('/display/');
 
   React.useLayoutEffect(() => {
     setDocumentSurface(displayRoute ? 'display' : 'operator');
@@ -55,6 +57,8 @@ export function AppRoot() {
       </Shell>
     );
   }
+
+  if (cardRoute) return <Outlet />;
 
   if (displayRoute) {
     return (
