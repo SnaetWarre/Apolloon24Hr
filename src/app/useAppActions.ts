@@ -151,6 +151,7 @@ export function useAppActions() {
         trpc.settings.updatePublicRecordMode.mutate({ publicRecordMode })
       ),
       createBackup: action(() => trpc.backups.create.mutate(), [clusterStatusKey, backupsKey]),
+      clearRace: action(() => trpc.race.clear.mutate(), [appKey, clusterStatusKey, backupsKey]),
       restoreBackup: action(
         (fileName: string) => trpc.backups.restore.mutate({ fileName }),
         [appKey, clusterStatusKey, backupsKey]
