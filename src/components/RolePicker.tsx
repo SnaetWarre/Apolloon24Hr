@@ -87,19 +87,7 @@ export function RolePicker() {
   return (
     <>
       <PageHeader
-        title="Overzicht"
-        meta={
-          !race.raceStartedAt ? (
-            <span>Race nog niet gestart</span>
-          ) : race.raceFinishedAt ? (
-            <span>Race afgesloten</span>
-          ) : (
-            <span className="header-tag">
-              <LiveDot />
-              Gestart om {formatClockTimeMs(race.raceStartedAt).slice(0, 5)}
-            </span>
-          )
-        }
+        title="Overzicht" 
         actions={
           host && (
             <button type="button" className="btn btn--sm" onClick={copyHostUrl} title={host.url}>
