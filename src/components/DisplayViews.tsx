@@ -350,7 +350,7 @@ export function CompetitionDisplay() {
           >
             {competitions.map((teams, index) => (
               <CompetitionBars
-                key={teams.map((team) => team.id).join('.')}
+                key={competitionKey(teams)}
                 teams={teams}
                 lapsByLabel={lapsByLabel}
                 onRemove={() => setCompetitions(competitions.filter((_, other) => other !== index))}
@@ -415,6 +415,7 @@ export function CompetitionDisplay() {
       {picking && (
         <CompetitionPicker
           labels={labels}
+          taken={new Set(competitions.map(competitionKey))}
           onCancel={() => setPicking(false)}
           onAdd={(teams) => {
             setCompetitions([...competitions, teams]);
@@ -447,18 +448,19 @@ function CompetitionBars({
   const title = teams.map((team) => team.name).join(' vs ');
   const changed = useArrivals(standings.map(({ label, laps }) => `${label.id}:${laps}`));
   const listRef = React.useRef<HTMLOListElement>(null);
-  const rowTops = React.useRef(new Map<string, number>());
+  // Places, not pixels: a competition added or removed elsewhere resizes the rows,
+  // and that must not look like an overtake.
+  const rowPlaces = React.useRef(new Map<string, number>());
   React.useLayoutEffect(() => {
     const rows = listRef.current?.querySelectorAll<HTMLElement>('[data-label-id]') ?? [];
-    for (const row of rows) {
+    for (const [place, row] of rows.entries()) {
       const id = row.dataset.labelId ?? '';
-      const top = row.offsetTop;
-      const last = rowTops.current.get(id);
-      rowTops.current.set(id, top);
-      if (last === undefined || last === top) continue;
+      const last = rowPlaces.current.get(id);
+      rowPlaces.current.set(id, place);
+      if (last === undefined || last === place) continue;
       row.style.animation = 'none';
       void row.offsetHeight;
-      row.style.setProperty('--slide-from', `${last - top}px`);
+      row.style.setProperty('--slide-from', `${(last - place) * row.offsetHeight}px`);
       row.style.animation = 'slide-from var(--dur-3) var(--ease-out)';
     }
   });
@@ -537,10 +539,13 @@ function competitionVerdict(standings: Array<{ label: Label; laps: number }>) {
 /** Tick the teams of one competition, then add it. */
 function CompetitionPicker({
   labels,
+  taken,
   onCancel,
   onAdd,
 }: {
   labels: Label[];
+  /** Keys of the competitions already on the screen. */
+  taken: Set<string>;
   onCancel: () => void;
   onAdd: (teams: Label[]) => void;
 }) {
@@ -551,6 +556,7 @@ function CompetitionPicker({
     const title = labelKindTitle(label.kind);
     groups.set(title, [...(groups.get(title) ?? []), label]);
   }
+  const duplicate = taken.has(competitionKey(picked.map((id) => ({ id }))));
   const toggle = (id: string) =>
     setPicked((current) => (current.includes(id) ? current.filter((other) => other !== id) : [...current, id]));
 
@@ -591,10 +597,14 @@ function CompetitionPicker({
           <button
             type="button"
             className="inside-control-button is-primary"
-            disabled={picked.length < 2}
+            disabled={picked.length < 2 || duplicate}
             onClick={() => onAdd(sorted.filter((label) => picked.includes(label.id)))}
           >
-            {picked.length < 2 ? 'Kies minstens 2 ploegen' : `Toevoegen met ${picked.length} ploegen`}
+            {picked.length < 2
+              ? 'Kies minstens 2 ploegen'
+              : duplicate
+                ? 'Deze competitie staat er al op'
+                : `Toevoegen met ${picked.length} ploegen`}
           </button>
         </div>
       </div>
@@ -714,6 +724,14 @@ function useDisplayPresentation(
 
 const MAX_COMPETITIONS = 6;
 
+/** The same teams give the same key, whatever order they were picked in. */
+function competitionKey(teams: Array<{ id: string }>) {
+  return teams
+    .map((team) => team.id)
+    .sort()
+    .join('.');
+}
+
 /**
  * The competitions on the Competitiescherm, as `?competities=id.id.id,id.id`.
  * A label that was deleted drops out, and so does a competition left with one team.
@@ -725,6 +743,7 @@ function useDisplayCompetitions(labels: Label[]): [Label[][], (next: Label[][]) 
     .split(',')
     .map((competition) => [...new Set(competition.split('.').flatMap((id) => labelsById.get(id) ?? []))])
     .filter((teams) => teams.length >= 2)
+    .filter((teams, index, all) => all.findIndex((other) => competitionKey(other) === competitionKey(teams)) === index)
     .slice(0, MAX_COMPETITIONS);
   return [
     competitions,
