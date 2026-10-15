@@ -155,6 +155,30 @@ export function deleteLabel(id: string): boolean {
   });
 }
 
+/**
+ * Puts a runner in a label. A runner runs for one speedteam, so joining one
+ * leaves the other. False when the label or the runner no longer exists.
+ */
+export function addRunnerToLabel(labelId: string, runnerId: string): boolean {
+  return transaction(() => {
+    const label = getLabel(labelId);
+    if (!label || !one('SELECT 1 FROM runners WHERE id = ?', [runnerId])) return false;
+    if (label.kind === 'speedteam') {
+      run(
+        `DELETE FROM runner_labels
+         WHERE runner_id = ? AND label_id IN (SELECT id FROM labels WHERE kind = 'speedteam' AND id != ?)`,
+        [runnerId, labelId]
+      );
+    }
+    run('INSERT OR IGNORE INTO runner_labels (runner_id, label_id) VALUES (?, ?)', [runnerId, labelId]);
+    return true;
+  });
+}
+
+export function removeRunnerFromLabel(labelId: string, runnerId: string): void {
+  run('DELETE FROM runner_labels WHERE runner_id = ? AND label_id = ?', [runnerId, labelId]);
+}
+
 /** Each runner's stored labels. */
 export function getRunnerLabelsMap(runnerId?: string): Map<string, Label[]> {
   const rows = all<Label & { runnerId: string }>(

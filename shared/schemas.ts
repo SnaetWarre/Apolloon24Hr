@@ -373,6 +373,13 @@ export type LabelInput = z.infer<typeof labelInputSchema>;
 export const labelPatchSchema = labelInputSchema.partial();
 export type LabelPatch = z.infer<typeof labelPatchSchema>;
 
+/** One runner in one label, for adding or removing them from Beheer › Labels. */
+export const labelMemberSchema = z.object({
+  labelId: z.string().min(1),
+  runnerId: z.string().min(1),
+});
+export type LabelMember = z.infer<typeof labelMemberSchema>;
+
 /** A label logo the browser already scaled down; stored in the database so every laptop has it. */
 export const labelImageUploadSchema = z.object({
   mime: z.enum(['image/webp', 'image/png']),

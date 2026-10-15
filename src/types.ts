@@ -14,6 +14,7 @@ export type {
   Label,
   LabelImageUpload,
   LabelInput,
+  LabelMember,
   LabelPatch,
   LapRecord,
   LiveAppSnapshot,

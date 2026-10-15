@@ -154,6 +154,8 @@ export {
   createLabel,
   updateLabel,
   deleteLabel,
+  addRunnerToLabel,
+  removeRunnerFromLabel,
   saveLabelImage,
   getLabelImage,
 } from './db/labels.js';

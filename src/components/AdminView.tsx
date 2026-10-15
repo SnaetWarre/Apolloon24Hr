@@ -67,7 +67,7 @@ export function AdminView() {
           <LapsSection active={activeSection === 'laps'} />
         </div>
         <div className={contentClass('labels')} hidden={activeSection !== 'labels'}>
-          <LabelsSection labels={labels} />
+          <LabelsSection labels={labels} runners={runners} />
         </div>
         <div className={contentClass('public')} hidden={activeSection !== 'public'}>
           <PublicSection publicRecordMode={settings.publicRecordMode} />
