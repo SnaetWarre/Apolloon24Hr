@@ -2,13 +2,13 @@ import React from 'react';
 import { useAppActions } from '../../app/index';
 import { useConfirm } from '../ConfirmDialog';
 import { labelKindTitle } from '../LabelBadge';
-import type { Label } from '../../types';
+import type { Label, Runner } from '../../types';
 import { AdminNoticeBanner, useAdminAction } from './AdminNotice';
 import { groupLabels } from '../../lib/labels';
 import { LabelAdminRow } from './LabelAdminRow';
 import { LabelImagePicker } from './LabelImagePicker';
 
-export function LabelsSection({ labels }: { labels: Label[] }) {
+export function LabelsSection({ labels, runners }: { labels: Label[]; runners: Runner[] }) {
   const confirm = useConfirm();
   const { createLabel, updateLabel, deleteLabel } = useAppActions();
   const { pending, notice, run } = useAdminAction();
@@ -92,6 +92,7 @@ export function LabelsSection({ labels }: { labels: Label[] }) {
               <LabelAdminRow
                 key={label.id}
                 label={label}
+                runners={runners}
                 onSave={async (fields) => {
                   await updateLabel(label.id, fields);
                 }}

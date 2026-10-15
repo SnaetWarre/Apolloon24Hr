@@ -113,6 +113,16 @@ export function describeWrite(path: string, input: unknown): ((result: unknown) 
       const label = labelName(id);
       return () => `Label ${label} verwijderd`;
     }
+    case 'labels.addRunner': {
+      const runner = runnerName(String(value.runnerId ?? ''));
+      const label = labelName(id);
+      return () => `${runner} toegevoegd aan label ${label}`;
+    }
+    case 'labels.removeRunner': {
+      const runner = runnerName(String(value.runnerId ?? ''));
+      const label = labelName(id);
+      return () => `${runner} uit label ${label} gehaald`;
+    }
     case 'labels.uploadImage':
       return () => 'Logo opgeladen';
     case 'settings.updatePublicRecordMode':

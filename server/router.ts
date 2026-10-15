@@ -5,6 +5,7 @@ import {
   importCsvSchema,
   importXlsxSchema,
   labelImageUploadSchema,
+  labelMemberSchema,
   labelInputSchema,
   labelPatchSchema,
   lapIdSchema,
@@ -42,6 +43,7 @@ import { currentTerm, waitForCommit } from './consensus.js';
 import { LAPTOP_NAME } from './host.js';
 import { selfUrl } from './peers.js';
 import {
+  addRunnerToLabel,
   createBurgieGepaktEvent,
   createLabel,
   deleteLabel,
@@ -68,6 +70,7 @@ import {
   replaceEventData,
   restoreDataSchema,
   recordWrite,
+  removeRunnerFromLabel,
   saveForwardedWrite,
   saveLabelImage,
   setPublicRecordMode,
@@ -417,6 +420,18 @@ export const appRouter = t.router({
     delete: t.procedure.input(runnerIdSchema).mutation(
       write((input) => {
         if (!deleteLabel(input.id)) fail('NOT_FOUND', 'Label niet gevonden');
+        return { ok: true };
+      })
+    ),
+    addRunner: t.procedure.input(labelMemberSchema).mutation(
+      write((input) => {
+        if (!addRunnerToLabel(input.labelId, input.runnerId)) fail('NOT_FOUND', 'Label of loper niet gevonden');
+        return { ok: true };
+      })
+    ),
+    removeRunner: t.procedure.input(labelMemberSchema).mutation(
+      write((input) => {
+        removeRunnerFromLabel(input.labelId, input.runnerId);
         return { ok: true };
       })
     ),

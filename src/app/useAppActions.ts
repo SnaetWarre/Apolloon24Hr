@@ -4,6 +4,7 @@ import { trpc } from '../api';
 import type {
   LabelImageUpload,
   LabelInput,
+  LabelMember,
   LabelPatch,
   LiveAppSnapshot,
   PublicRecordMode,
@@ -136,6 +137,8 @@ export function useAppActions() {
       createLabel: action((input: LabelInput) => trpc.labels.create.mutate(input)),
       updateLabel: action((id: string, fields: LabelPatch) => trpc.labels.update.mutate({ id, fields })),
       deleteLabel: action((id: string) => trpc.labels.delete.mutate({ id })),
+      addRunnerToLabel: action((member: LabelMember) => trpc.labels.addRunner.mutate(member)),
+      removeRunnerFromLabel: action((member: LabelMember) => trpc.labels.removeRunner.mutate(member)),
       uploadLabelImage: action((input: LabelImageUpload) => trpc.labels.uploadImage.mutate(input), []),
       handoff: action((press: PressTime) => trpc.race.handoff.mutate({ ...raceExpectation(), ...press })),
       startNext: action((press: PressTime) => trpc.race.startNext.mutate({ ...raceExpectation(), ...press })),
