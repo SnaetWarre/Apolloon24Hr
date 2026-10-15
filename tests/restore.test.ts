@@ -55,3 +55,37 @@ test('repeating a forwarded restore returns the same result without another safe
     db.closeDb();
   }
 });
+
+test('clearing the race after a test run keeps runners and labels, and a backup of the race', async () => {
+  const db = await import('../server/db.ts');
+  const backups = await import('../server/backups.ts');
+  const { appRouter } = await import('../server/router.ts');
+  try {
+    await db.initDb();
+    const first = db.insertRunner({ name: 'Test runner', runnerNumber: '901' });
+    const second = db.insertRunner({ name: 'Other runner', runnerNumber: '902' });
+    db.updateRunnerStatus({ id: first.id, status: 'waiting', statusSince: 900, queueIndex: 0 });
+    db.updateRunnerStatus({ id: second.id, status: 'waiting', statusSince: 900, queueIndex: 1 });
+    db.performHandoff(1_000);
+    db.performHandoff(80_000);
+    db.createBurgieGepaktEvent(81_000);
+    const labelCount = db.getLabels().length;
+
+    const caller = appRouter.createCaller({ forwarded: true, requestId: 'clear-race', origin: 'test' });
+    const result = await caller.race.clear();
+    assert.equal(result.laps, 1);
+    assert.ok(backups.listBackups().some((record) => record.fileName === result.safetyBackup));
+    assert.deepEqual(db.raceProgress(), { raceStarted: false, raceRunning: false });
+    assert.equal(db.getRaceState().activeRunnerId, null);
+    assert.equal(db.getRecentRaceEvents(10).length, 0);
+    for (const runner of [first, second]) {
+      const after = db.getRunnerById(runner.id);
+      assert.equal(after?.status, 'registered');
+      assert.equal(after?.queueIndex, null);
+    }
+    assert.equal(db.getLabels().length, labelCount);
+    assert.match(db.getActivity(1)[0]?.summary ?? '', /Race gewist na de testrun \(1 rondes\)/);
+  } finally {
+    db.closeDb();
+  }
+});

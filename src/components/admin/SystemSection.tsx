@@ -5,9 +5,10 @@ import { describeAutoLinks, describeGroup } from '../../lib/systemStatus';
 import { formatClockTimeMs } from '../../lib/time';
 import { useConfirm } from '../ConfirmDialog';
 import { NetworkSetupPanel } from '../NetworkSetupPanel';
-import type { BackupStatus, ClusterMemberStatus, ClusterStatus, NearbyGroup, Runner } from '../../types';
+import type { BackupStatus, ClusterMemberStatus, ClusterStatus, NearbyGroup, RaceState, Runner } from '../../types';
 import { AboutPanel } from './AboutPanel';
 import { AdminNoticeBanner, useAdminAction } from './AdminNotice';
+import { ClearRacePanel } from './ClearRacePanel';
 import { RestorePanel } from './RestorePanel';
 import { formatFileSize, formatRelativeAge } from './adminFormat';
 import { countLabel, laptopLabel, shortUrl, useJoinGroup } from './useJoinGroup';
@@ -16,11 +17,13 @@ export function SystemSection({
   cluster,
   hostUrl,
   runners,
+  race,
   labelCount,
 }: {
   cluster: ClusterStatus | null;
   hostUrl: string;
   runners: Runner[];
+  race: RaceState;
   labelCount: number;
 }) {
   return (
@@ -31,6 +34,7 @@ export function SystemSection({
       </section>
       {cluster && <BackupPanel backup={cluster.backup} />}
       <RestorePanel runnerCount={runners.length} />
+      <ClearRacePanel race={race} />
       <section className="panel">
         <h2>Database status</h2>
         <div className="stats-grid">

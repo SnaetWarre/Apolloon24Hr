@@ -42,6 +42,8 @@ export function describeWrite(path: string, input: unknown): ((result: unknown) 
     }
     case 'race.finish':
       return () => 'Wedstrijd beëindigd';
+    case 'race.clear':
+      return (result) => `Race gewist na de testrun (${(result as { laps?: number } | null)?.laps ?? 0} rondes)`;
     case 'laps.move': {
       const lap = lapText(value.lapId);
       const runner = runnerName(String(value.runnerId ?? ''));

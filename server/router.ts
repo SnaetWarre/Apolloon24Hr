@@ -48,6 +48,7 @@ import {
   deleteLap,
   deleteRunner,
   canUndoFinish,
+  clearRace,
   finishRace,
   findForwardedWrite,
   getActivity,
@@ -266,17 +267,20 @@ function pressMoment(press: TimingPress, maxAgeMs = PRESS_MAX_AGE_MS): number {
   return Math.max(plausible ? pressedAt : now, press.activeStartedAt ?? 0);
 }
 
+/** A verified backup of the data right before a write that replaces it, so that write can be undone. */
+async function safetyBackup(reason: 'pre-restore' | 'pre-clear') {
+  const head = getLogHead();
+  const term = currentTerm();
+  const safety = await createVerifiedBackup(reason);
+  return {
+    value: { safetyBackup: safety.fileName, safetyHostUrl: selfUrl(), safetyHostName: LAPTOP_NAME },
+    isCurrent: () => currentTerm() === term && getLogHead().id === head.id,
+  };
+}
+
 const applyRestore = write(
   (input: z.infer<typeof restoreDataSchema>, safety) => ({ ...replaceEventData(input), ...safety }),
-  async () => {
-    const head = getLogHead();
-    const term = currentTerm();
-    const safety = await createVerifiedBackup('pre-restore');
-    return {
-      value: { safetyBackup: safety.fileName, safetyHostUrl: selfUrl(), safetyHostName: LAPTOP_NAME },
-      isCurrent: () => currentTerm() === term && getLogHead().id === head.id,
-    };
-  }
+  () => safetyBackup('pre-restore')
 );
 
 /** One laptop out of the group at a time: it waits until everything written before it is on a majority. */
@@ -457,6 +461,13 @@ export const appRouter = t.router({
         finishRace(pressMoment(input, FINISH_PRESS_MAX_AGE_MS));
         return { ok: true };
       })
+    ),
+    /** Empties the race after a test run on every laptop, keeping a backup of it first. */
+    clear: t.procedure.mutation(
+      write(
+        (_input: void, safety) => ({ ...clearRace(clusterNow()), ...safety }),
+        () => safetyBackup('pre-clear')
+      )
     ),
   }),
 

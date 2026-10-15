@@ -14,9 +14,10 @@ import { ADMIN_SECTIONS, isAdminSection, type AdminSection } from './adminSectio
 import { PageHeader } from './PageHeader';
 import { SectionNavigation } from './SectionNavigation';
 
-const selectAdminData = ({ labels, runners, settings, host }: LiveAppSnapshot) => ({
+const selectAdminData = ({ labels, runners, race, settings, host }: LiveAppSnapshot) => ({
   labels,
   runners,
+  race,
   settings,
   host,
 });
@@ -29,7 +30,7 @@ export function AdminView() {
   const router = useRouter();
   const setActiveSection = (section: AdminSection) =>
     void router.navigate({ to: '/admin', search: { section }, replace: true });
-  const { labels, runners, settings, host } = useAppData(selectAdminData);
+  const { labels, runners, race, settings, host } = useAppData(selectAdminData);
   const { cluster, error: clusterError } = useClusterStatus();
   const needsAttention = readinessSummary(buildEventReadiness(cluster)) !== 'ready';
   // A section chosen after the page opened rises in; the first one is simply there.
@@ -75,7 +76,13 @@ export function AdminView() {
           <ActivitySection active={activeSection === 'activity'} />
         </div>
         <div className={contentClass('system')} hidden={activeSection !== 'system'}>
-          <SystemSection cluster={cluster} hostUrl={host?.url ?? ''} runners={runners} labelCount={labels.length} />
+          <SystemSection
+            cluster={cluster}
+            hostUrl={host?.url ?? ''}
+            runners={runners}
+            race={race}
+            labelCount={labels.length}
+          />
         </div>
       </div>
     </>
