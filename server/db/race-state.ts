@@ -63,3 +63,25 @@ export function clearActiveRunner(runnerId?: string): void {
   if (runnerId) run(`${sql} AND active_runner_id = ?`, [runnerId]);
   else run(sql);
 }
+
+/**
+ * Takes the race back to before the start, for after a test run: laps, handoffs,
+ * race events and the queue go; runners, labels and settings stay. Everyone is
+ * registered again, so they are checked in anew for the real race.
+ */
+export function clearRace(nowMs: number): { laps: number } {
+  const laps = one<{ count: number }>('SELECT COUNT(*) AS count FROM laps')?.count ?? 0;
+  for (const table of ['laps', 'handoff_history', 'race_events']) run(`DELETE FROM ${table}`);
+  run(
+    `UPDATE race_state
+     SET active_runner_id = NULL, active_started_at = NULL, race_started_at = NULL,
+         race_finished_at = NULL, active_labels_json = NULL
+     WHERE id = 1`
+  );
+  run(
+    `UPDATE runners SET status = 'registered', queue_index = NULL, status_since = ?, hidden_at = NULL
+     WHERE status <> 'registered' OR queue_index IS NOT NULL OR hidden_at IS NOT NULL`,
+    [nowMs]
+  );
+  return { laps };
+}

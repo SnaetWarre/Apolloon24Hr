@@ -128,6 +128,7 @@ export function RestorePanel({ runnerCount }: { runnerCount: number }) {
 function backupKind(record: BackupRecord): string {
   if (record.scheduled) return 'Automatisch';
   if (record.fileName.includes('-pre-restore-')) return 'Vóór terugzetten';
+  if (record.fileName.includes('-pre-clear-')) return 'Vóór race wissen';
   if (record.fileName.includes('-pre-join-')) return 'Vóór koppelen';
   if (record.fileName.includes('-pre-resync-')) return 'Vóór bijwerken';
   return 'Handmatig';
