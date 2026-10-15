@@ -4,8 +4,22 @@ All notable changes to Apolloon Telsysteem will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Competitiescherm (`/display/competitions`): kies zelf welke ploegen tegen
+  elkaar strijden (bv. 1ste, 2de en 3de jaar) met Competitie toevoegen. Elke
+  competitie is een staafdiagram met de leider bovenaan, het aantal rondes
+  aan het einde van elke staaf en de achterstand op de leider. Een ploeg die
+  een andere inhaalt, schuift naar haar nieuwe plaats. Naast de competities
+  staat de top 20 op meeste rondes. Open het naast het Binnenscherm in een
+  tweede browser; de gekozen competities staan in het adres
+
 ### Changed
 
+- Het Binnenscherm toont de laatste 25 lopers en de top 25 op punten naast
+  elkaar. Elke ronde toont de punten die ze opleverde (tijdcoëfficiënt en dagdeel samen). Het scherm wisselt niet meer
+  tussen meeste rondes en punten; meeste rondes en de competities staan nu op
+  het Competitiescherm
 - De demowedstrijd (`DEMO_RACE`) geeft elke loper verzonnen
   inschrijvingsgegevens: e-mail, gsm-nummer, uren en de andere antwoorden van
   het formulier. De uren noemen geen weekdag (`21-22u`), zodat Nu beschikbaar

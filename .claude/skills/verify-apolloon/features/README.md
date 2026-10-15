@@ -50,7 +50,7 @@ Each feature file starts with an H1 title and one paragraph describing the user-
 - [Wachtrij](./queue.md) covers checking runners in, adding a new runner, moving runners between Opwarming and Klaar om te lopen, and the board filter.
 - [Beheer › Lopers](./runners-admin.md) covers the runner list, its search and hour filter, and adding a runner by hand.
 - [Registration import](./registration-import.md) covers importing the form's CSV or Excel file in Beheer › Voorbereiding.
-- [Public displays](./public-displays.md) covers the Binnenscherm and Buitenscherm TV pages.
+- [Public displays](./public-displays.md) covers the Binnenscherm, Competitiescherm and Buitenscherm TV pages.
 - [Linked laptops](./linked-laptops.md) covers linking three laptops and carrying on when one disappears.
 - [Desktop window](./desktop-window.md) covers what only the Electron window adds: the title bar and the preload bridge.
 - [Beheer › Rondes](./laps-admin.md) covers fixing laps after the fact: moving one to another runner, splitting one, deleting one, and the marked laps.

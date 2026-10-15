@@ -18,6 +18,7 @@ type NavigationPath =
   | '/tactics'
   | '/admin'
   | '/display/inside'
+  | '/display/competitions'
   | '/display/outside';
 
 const NAVIGATION_GROUPS: ReadonlyArray<{
@@ -43,6 +44,7 @@ const NAVIGATION_GROUPS: ReadonlyArray<{
     title: 'Publieksschermen',
     items: [
       { path: '/display/inside', label: 'Binnenscherm', icon: 'displayInside' },
+      { path: '/display/competitions', label: 'Competitiescherm', icon: 'displayCompetitions' },
       {
         path: '/display/outside',
         label: 'Buitenscherm',

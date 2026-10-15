@@ -82,6 +82,10 @@ export function PublicSection({ publicRecordMode }: { publicRecordMode: PublicRe
           <Icon name="displayInside" size={14} />
           Binnenscherm openen
         </Link>
+        <Link className="btn btn--sm" to="/display/competitions">
+          <Icon name="displayCompetitions" size={14} />
+          Competitiescherm openen
+        </Link>
       </div>
       <AdminNoticeBanner notice={notice} />
     </section>

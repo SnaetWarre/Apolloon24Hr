@@ -45,6 +45,11 @@ const PATHS = {
       <path d="M8 21h8M12 17v4" />
     </>
   ),
+  displayCompetitions: (
+    <>
+      <path d="M8 21V10h8v11M2 21v-7h6M16 21v-5h6M1 21h22" />
+    </>
+  ),
   displayOutside: (
     <>
       <rect x="2" y="7" width="20" height="14" rx="2" />

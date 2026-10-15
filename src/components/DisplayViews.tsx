@@ -7,14 +7,17 @@ import { formatClockTimeMs, formatDurationMs, formatElapsedSeconds } from '../li
 import { getNextWaitingRunner, lapRunnerLabel, runnerLabel } from '../lib/runners';
 import { observeDisplayHistory } from '../lib/displayHistory';
 import { useArrivals } from '../lib/motion';
-import { buildRecentLapSummaries, buildRunnerRanking, collectRankingLabels, type RankingMode } from '../lib/ranking';
+import { buildRecentLapSummaries, buildRunnerRanking, calculateLapPoints, collectRankingLabels } from '../lib/ranking';
 import type { Label, LapRecord, LiveAppSnapshot, PublicRecordMode, RaceEvent, Runner } from '../types';
-import { compareLabels, LabelBadge, labelKindOrder, labelKindTitle } from './LabelBadge';
+import { Icon } from './Icon';
+import { compareLabels, LabelBadge, labelKindTitle } from './LabelBadge';
+import { ModalDialog } from './ModalDialog';
 import { LiveElapsed } from './LiveTime';
 
 const OUTSIDE_ALERT_VISIBLE_MS = 8_000;
-const INSIDE_RANKING_ROTATION_MS = 15_000;
-const INSIDE_RECENT_LAP_COUNT = 6;
+// The rows of both lists on the Binnenscherm, and the runners on the Competities screen.
+const INSIDE_LIST_LENGTH = 25;
+const COMPETITION_RANKING_LENGTH = 20;
 const selectOutsideDisplayData = ({ runners, race, settings }: LiveAppSnapshot) => ({
   runners,
   race,
@@ -163,338 +166,619 @@ export function InsideDisplay() {
   const activeRunner = finished ? null : runners.find((runner) => runner.id === race.activeRunnerId) || null;
   const nextRunner = finished ? null : getNextWaitingRunner(runners);
   const { laps, initialized: historyIsInitialized } = useRaceHistory({ scope: 'full' });
-  const [rankingMode, setRankingMode] = React.useState<RankingMode>('laps');
   const [rankingLabelId, setRankingLabelId] = React.useState<string | null>(null);
-  const [rotationPaused, setRotationPaused] = React.useState(false);
-  const [prefersReducedMotion, setPrefersReducedMotion] = React.useState(false);
-  const recentLapSummaries = buildRecentLapSummaries(laps, INSIDE_RECENT_LAP_COUNT);
+  const recentLapSummaries = buildRecentLapSummaries(laps, INSIDE_LIST_LENGTH);
   const rankingLabels = collectRankingLabels(labels, laps);
-  const ranking = buildRunnerRanking(runners, laps, rankingMode, rankingLabelId).slice(0, 10);
-  const competitions = groupCompetitions(buildLabelStats(labels, runners, laps));
-
-  React.useEffect(() => {
-    const reducedMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
-    const updateReducedMotionPreference = () => setPrefersReducedMotion(reducedMotionQuery.matches);
-    updateReducedMotionPreference();
-    reducedMotionQuery.addEventListener('change', updateReducedMotionPreference);
-    return () => reducedMotionQuery.removeEventListener('change', updateReducedMotionPreference);
-  }, []);
-
-  React.useEffect(() => {
-    if (prefersReducedMotion || rotationPaused) return;
-    const rotationTimeout = window.setTimeout(() => {
-      setRankingMode((currentMode) => (currentMode === 'laps' ? 'coefficient' : 'laps'));
-    }, INSIDE_RANKING_ROTATION_MS);
-    return () => window.clearTimeout(rotationTimeout);
-  }, [prefersReducedMotion, rankingMode, rotationPaused]);
-
-  const rotationActive = !prefersReducedMotion && !rotationPaused;
-  const competitionRowCount = competitions.reduce((total, competition) => total + competition.stats.length, 0);
-  // Same definition as Analyse, so the public and operator screens agree.
-  const lapsPerHour = buildKpis(laps, race).lapsPerHour;
+  const ranking = buildRunnerRanking(runners, laps, 'coefficient', rankingLabelId).slice(0, INSIDE_LIST_LENGTH);
+  const rankingLabelName = rankingLabels.find((label) => label.id === rankingLabelId)?.name;
   const activeKey = activeRunner?.id ?? 'none';
   const nextKey = nextRunner?.id ?? 'none';
-  // What changes after the screen opened moves: a handover, a lap that lands, a ranking that switches.
-  const changed = useArrivals([
-    `active:${activeKey}`,
-    `next:${nextKey}`,
-    `laps:${laps.length}`,
-    `ranking:${rankingMode}:${rankingLabelId ?? ''}`,
-  ]);
+  const rankingKey = `ranking:${rankingLabelId ?? ''}`;
+  // What changes after the screen opened moves: a handover, a lap that lands, another label.
+  const changed = useArrivals([`active:${activeKey}`, `next:${nextKey}`, rankingKey]);
   const newLapIds = useArrivals(
     recentLapSummaries.map(({ lap }) => lap.id),
     historyIsInitialized
   );
-  const rankingKey = `ranking:${rankingMode}:${rankingLabelId ?? ''}`;
 
   return (
     <main className={`display-root display-root--inside display-root--${presentation}`}>
       <header className="inside-header">
         <DisplayBrand />
         <h1 className="visually-hidden">24 urenloop, live standen</h1>
-        <dl className="inside-totals">
-          <div>
-            <dt>Racetijd</dt>
-            <dd>
-              {race.raceStartedAt ? (
-                race.raceFinishedAt ? (
-                  formatElapsedSeconds(race.raceFinishedAt - race.raceStartedAt)
-                ) : (
-                  <LiveElapsed startedAt={race.raceStartedAt} />
-                )
-              ) : (
-                '0:00'
-              )}
-            </dd>
-          </div>
-          <div>
-            <dt>Rondes</dt>
-            <dd key={laps.length} className={changed.has(`laps:${laps.length}`) ? 'value-tick' : undefined}>
-              {laps.length.toLocaleString('nl-BE')}
-            </dd>
-          </div>
-          <div>
-            <dt>Per uur</dt>
-            <dd>
-              {lapsPerHour == null
-                ? '—'
-                : lapsPerHour.toLocaleString('nl-BE', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
-            </dd>
-          </div>
-        </dl>
+        <section className="inside-now" aria-label="Nu op de piste">
+          <span className="inside-now__label">
+            {!finished && <LiveDot />}
+            {finished ? 'Race afgelopen' : 'Nu op de piste'}
+          </span>
+          <strong
+            key={activeKey}
+            className={`inside-now__runner${changed.has(`active:${activeKey}`) ? ' display-rise' : ''}`}
+          >
+            {activeRunner
+              ? runnerLabel(activeRunner)
+              : finished
+                ? 'Bedankt aan alle lopers'
+                : race.raceStartedAt
+                  ? 'Even niemand'
+                  : 'Nog niemand gestart'}
+          </strong>
+          {!finished && (
+            <span className="inside-now__next">
+              Volgende{' '}
+              <strong key={nextKey} className={changed.has(`next:${nextKey}`) ? 'display-rise' : undefined}>
+                {nextRunner ? runnerLabel(nextRunner) : 'niemand klaar'}
+              </strong>
+            </span>
+          )}
+        </section>
+        <DisplayTotals race={race} laps={laps} />
       </header>
 
-      <section className="inside-now" aria-label="Nu op de piste">
-        <span className="inside-now__label">
-          {!finished && <LiveDot />}
-          {finished ? 'Race afgelopen' : 'Nu op de piste'}
-        </span>
-        <strong
-          key={activeKey}
-          className={`inside-now__runner${changed.has(`active:${activeKey}`) ? ' display-rise' : ''}`}
-        >
-          {activeRunner
-            ? runnerLabel(activeRunner)
-            : finished
-              ? 'Bedankt aan alle lopers'
-              : race.raceStartedAt
-                ? 'Even niemand'
-                : 'Nog niemand gestart'}
-        </strong>
-        {!finished && (
-          <span className="inside-now__next">
-            Volgende{' '}
-            <strong key={nextKey} className={changed.has(`next:${nextKey}`) ? 'display-rise' : undefined}>
-              {nextRunner ? runnerLabel(nextRunner) : 'niemand klaar'}
-            </strong>
-          </span>
-        )}
-      </section>
-
-      <section className="inside-recent-laps" aria-label={`Laatste ${INSIDE_RECENT_LAP_COUNT} lopers`}>
-        <h2 className="visually-hidden">Laatste {INSIDE_RECENT_LAP_COUNT} lopers</h2>
-        {recentLapSummaries.length ? (
-          <table className="recent-lap-table">
-            <thead>
-              <tr>
-                <th scope="col">Binnen om</th>
-                <th scope="col">Loper</th>
-                <th scope="col">Deze ronde</th>
-                <th scope="col">Snelste ronde</th>
-                <th scope="col">Gem. ronde</th>
-              </tr>
-            </thead>
-            <tbody>
-              {recentLapSummaries.map(({ lap, bestLapMs, averageLapMs }, index) => (
-                <tr
-                  key={lap.id}
-                  className={`recent-lap-row${index === 0 ? ' is-latest' : ''}${newLapIds.has(lap.id) ? ' is-new' : ''}`}
-                >
-                  <td className="recent-lap-when">
-                    {index === 0 ? (
-                      <span className="recent-lap-badge">Net binnen</span>
-                    ) : (
-                      formatDisplayClockTime(lap.finishedAt)
-                    )}
-                  </td>
-                  <td className="recent-lap-runner">
-                    {lapRunnerLabel(lap)}
-                    <span className="recent-lap-number">ronde {lap.lapNumber}</span>
-                  </td>
-                  <td className="recent-lap-time recent-lap-time--current">{formatDurationMs(lap.durationMs)}</td>
-                  <td className="recent-lap-time">{formatDurationMs(bestLapMs)}</td>
-                  <td className="recent-lap-time">{formatDurationMs(averageLapMs)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        ) : (
-          <div className="inside-empty">De eerste rondes verschijnen hier zodra de timing start.</div>
-        )}
-      </section>
-
       <div className="inside-board">
-        <section className="display-panel inside-ranking-panel">
+        <section className="display-panel inside-list" aria-label={`Laatste ${INSIDE_LIST_LENGTH} lopers`}>
           <div className="inside-panel-heading">
-            <h2>Ranking</h2>
-            <div className="inside-ranking-modes" role="group" aria-label="Rangschikking op basis van">
-              <button
-                className={rankingMode === 'laps' ? 'is-active' : ''}
-                onClick={() => setRankingMode('laps')}
-                aria-pressed={rankingMode === 'laps'}
-              >
-                Meeste rondes
-              </button>
-              <button
-                className={rankingMode === 'coefficient' ? 'is-active' : ''}
-                onClick={() => setRankingMode('coefficient')}
-                aria-pressed={rankingMode === 'coefficient'}
-              >
-                Punten
-              </button>
-            </div>
+            <h2>Laatste {INSIDE_LIST_LENGTH} lopers</h2>
           </div>
-          <div className="inside-ranking-rotation" aria-hidden="true">
-            {rotationActive && <i key={rankingMode} style={{ animationDuration: `${INSIDE_RANKING_ROTATION_MS}ms` }} />}
-          </div>
-          <p className="inside-ranking-modes-help">
-            {rankingMode === 'coefficient'
-              ? 'Punten: snellere rondes scoren hoger; het tijdvak van aankomst telt mee.'
-              : 'Meeste rondes; bij gelijke stand telt het snelste gemiddelde.'}
-            {rankingLabelId ? ` Label: ${rankingLabels.find((label) => label.id === rankingLabelId)?.name ?? ''}.` : ''}
-          </p>
-          <ol key={rankingKey} className={`ranking-list${changed.has(rankingKey) ? ' display-rise' : ''}`}>
-            {ranking.map((runner, index) => (
-              <li key={runner.runnerId} className="ranking-row">
-                <span>{index + 1}</span>
-                <strong>{lapRunnerLabel(runner)}</strong>
-                <em>
-                  {rankingMode === 'coefficient'
-                    ? `${formatPoints(runner.coefficientTotal)} ptn · ${runner.lapCount} rondes`
-                    : `${runner.lapCount} rondes · gem. ${formatDurationMs(runner.averageLapMs)}`}
-                </em>
-              </li>
-            ))}
-            {!ranking.length && <li className="inside-empty">Nog geen rondes voor deze selectie</li>}
-          </ol>
-          <div className="inside-controls">
-            <label className="ranking-label-filter">
-              <span>Label</span>
-              <select value={rankingLabelId ?? ''} onChange={(event) => setRankingLabelId(event.target.value || null)}>
-                <option value="">Alle labels</option>
-                {rankingLabels.map((label) => (
-                  <option key={label.id} value={label.id}>
-                    {label.name}
-                  </option>
+          {recentLapSummaries.length ? (
+            <table className="display-table recent-lap-table">
+              <thead>
+                <tr>
+                  <th scope="col">Binnen om</th>
+                  <th scope="col">Loper</th>
+                  <th scope="col">Deze ronde</th>
+                  <th scope="col">Punten</th>
+                  <th scope="col">Snelste</th>
+                  <th scope="col">Gem.</th>
+                </tr>
+              </thead>
+              <tbody>
+                {recentLapSummaries.map(({ lap, bestLapMs, averageLapMs }, index) => (
+                  <tr
+                    key={lap.id}
+                    className={`recent-lap-row${index === 0 ? ' is-latest' : ''}${newLapIds.has(lap.id) ? ' is-new' : ''}`}
+                  >
+                    <td className="recent-lap-when">
+                      {index === 0 ? (
+                        <span className="recent-lap-badge">Net binnen</span>
+                      ) : (
+                        formatDisplayClockTime(lap.finishedAt)
+                      )}
+                    </td>
+                    <td className="recent-lap-runner">
+                      {lapRunnerLabel(lap)}
+                      <span className="recent-lap-number">ronde {lap.lapNumber}</span>
+                    </td>
+                    <td className="recent-lap-time recent-lap-time--current">{formatDurationMs(lap.durationMs)}</td>
+                    <td className="recent-lap-points">{formatPoints(calculateLapPoints(lap))}</td>
+                    <td className="recent-lap-time">{formatDurationMs(bestLapMs)}</td>
+                    <td className="recent-lap-time">{formatDurationMs(averageLapMs)}</td>
+                  </tr>
                 ))}
-              </select>
-            </label>
-            <div className="inside-presentation" role="group" aria-label="Weergave van dit scherm">
-              <button
-                className={`inside-control-button${presentation === 'light' ? ' is-active' : ''}`}
-                aria-pressed={presentation === 'light'}
-                onClick={() => setPresentation('light')}
-              >
-                Licht
-              </button>
-              <button
-                className={`inside-control-button${presentation === 'dark' ? ' is-active' : ''}`}
-                aria-pressed={presentation === 'dark'}
-                onClick={() => setPresentation('dark')}
-              >
-                Donker
-              </button>
-            </div>
-            <p className="inside-ranking-rotation-note">
-              {prefersReducedMotion
-                ? 'Automatisch wisselen is uitgeschakeld'
-                : rotationPaused
-                  ? 'Automatisch wisselen is gepauzeerd'
-                  : 'Wisselt automatisch om de 15 seconden'}
-            </p>
-            {!prefersReducedMotion && (
-              <button
-                className="inside-control-button"
-                aria-pressed={rotationPaused}
-                onClick={() => setRotationPaused((paused) => !paused)}
-              >
-                {rotationPaused ? 'Hervat wisselen' : 'Pauzeer wisselen'}
-              </button>
-            )}
-          </div>
-        </section>
-        <section className="display-panel inside-competitions">
-          <div className="inside-panel-heading">
-            <h2>Competities</h2>
-          </div>
-          {competitions.length ? (
-            <div className={`competition-list${competitionRowCount > 9 ? ' is-dense' : ''}`}>
-              {competitions.map((competition) => (
-                <div key={competition.kind} className="competition">
-                  <h3>{competition.title}</h3>
-                  {competition.stats.map((stat, index) => (
-                    <div
-                      key={stat.label.id}
-                      className={`progress-item${index === 0 && stat.laps > 0 ? ' is-leading' : ''}`}
-                    >
-                      <LabelBadge label={stat.label} />
-                      <div className="progress-track">
-                        <span
-                          title={`${stat.laps} rondes`}
-                          style={
-                            {
-                              '--progress': `${competition.maxLaps > 0 ? (stat.laps / competition.maxLaps) * 100 : 0}%`,
-                              background: stat.label.color,
-                            } as React.CSSProperties
-                          }
-                        />
-                      </div>
-                      <em>{stat.laps} rondes</em>
-                    </div>
-                  ))}
-                </div>
-              ))}
-            </div>
+                <EmptyRows count={INSIDE_LIST_LENGTH - recentLapSummaries.length} columns={6} />
+              </tbody>
+            </table>
           ) : (
-            <div className="inside-empty">Nog geen labels met lopers.</div>
+            <div className="inside-empty">De eerste rondes verschijnen hier zodra de timing start.</div>
+          )}
+        </section>
+
+        <section className="display-panel inside-list" aria-label="Ranking op punten">
+          <div className="inside-panel-heading">
+            <h2>Ranking op punten</h2>
+            <span>
+              {rankingLabelName
+                ? `Alleen ${rankingLabelName}`
+                : 'Snelle rondes en rondes tussen middernacht en 16 uur tellen zwaarder'}
+            </span>
+          </div>
+          {ranking.length ? (
+            <table
+              key={rankingKey}
+              className={`display-table points-table${changed.has(rankingKey) ? ' display-rise' : ''}`}
+            >
+              <thead>
+                <tr>
+                  <th scope="col">
+                    <span className="visually-hidden">Plaats</span>
+                  </th>
+                  <th scope="col">Loper</th>
+                  <th scope="col">Rondes</th>
+                  <th scope="col">Punten</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ranking.map((runner, index) => (
+                  <tr key={runner.runnerId} className="points-row">
+                    <td className="points-place">{index + 1}</td>
+                    <td className="points-runner">{lapRunnerLabel(runner)}</td>
+                    <td className="points-laps">{runner.lapCount}</td>
+                    <td className="points-total">{formatPoints(runner.coefficientTotal)}</td>
+                  </tr>
+                ))}
+                <EmptyRows count={INSIDE_LIST_LENGTH - ranking.length} columns={4} />
+              </tbody>
+            </table>
+          ) : (
+            <div className="inside-empty">Nog geen rondes voor deze selectie</div>
           )}
         </section>
       </div>
+
+      <footer className="display-controls">
+        <label className="ranking-label-filter">
+          <span>Ranking voor</span>
+          <select value={rankingLabelId ?? ''} onChange={(event) => setRankingLabelId(event.target.value || null)}>
+            <option value="">Alle lopers</option>
+            {rankingLabels.map((label) => (
+              <option key={label.id} value={label.id}>
+                {label.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <PresentationSwitch presentation={presentation} onChange={setPresentation} />
+      </footer>
     </main>
   );
 }
 
+export function CompetitionDisplay() {
+  const { runners, labels, race } = useAppData(selectInsideDisplayData);
+  const [presentation, setPresentation] = useDisplayPresentation('competitions', 'dark');
+  const [competitions, setCompetitions] = useDisplayCompetitions(labels);
+  const [picking, setPicking] = React.useState(false);
+  const { laps } = useRaceHistory({ scope: 'full' });
+  const lapsByLabel = countLapsByLabel(laps);
+  const ranking = buildRunnerRanking(runners, laps, 'laps', null).slice(0, COMPETITION_RANKING_LENGTH);
+  const canAdd = competitions.length < MAX_COMPETITIONS && labels.length >= 2;
+
+  return (
+    <main className={`display-root display-root--competitions display-root--${presentation}`}>
+      <header className="inside-header">
+        <DisplayBrand />
+        <h1 className="competitions-title">Competities</h1>
+        <DisplayTotals race={race} laps={laps} />
+      </header>
+
+      <div className="competitions-board">
+        {competitions.length ? (
+          <div
+            className="competitions-list"
+            // Each competition gets height for its teams plus its title.
+            style={{ gridTemplateRows: competitions.map((teams) => `minmax(0, ${teams.length + 1.4}fr)`).join(' ') }}
+          >
+            {competitions.map((teams, index) => (
+              <CompetitionBars
+                key={teams.map((team) => team.id).join('.')}
+                teams={teams}
+                lapsByLabel={lapsByLabel}
+                onRemove={() => setCompetitions(competitions.filter((_, other) => other !== index))}
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="competitions-empty">
+            <p>Kies welke ploegen tegen elkaar strijden, bijvoorbeeld 1ste, 2de en 3de jaar.</p>
+            <button
+              type="button"
+              className="competitions-empty__add"
+              onClick={() => setPicking(true)}
+              disabled={!canAdd}
+            >
+              <Icon name="plus" size={20} />
+              Competitie toevoegen
+            </button>
+            {labels.length < 2 && <p>Maak eerst minstens twee labels in Beheer › Labels.</p>}
+          </div>
+        )}
+
+        <section className="display-panel laps-ranking" aria-label="Ranking op meeste rondes">
+          <div className="inside-panel-heading">
+            <h2>Meeste rondes</h2>
+          </div>
+          <p className="laps-ranking__help">Bij gelijke stand telt het snelste gemiddelde.</p>
+          {ranking.length ? (
+            <ol className="laps-ranking__list">
+              {ranking.map((runner, index) => (
+                <li key={runner.runnerId} className="laps-ranking__row">
+                  <span>{index + 1}</span>
+                  <strong>{lapRunnerLabel(runner)}</strong>
+                  <em>
+                    {runner.lapCount}
+                    <small> gem. {formatDurationMs(runner.averageLapMs)}</small>
+                  </em>
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <div className="inside-empty">Nog geen rondes.</div>
+          )}
+        </section>
+      </div>
+
+      <footer className="display-controls">
+        {competitions.length > 0 && (
+          <button
+            type="button"
+            className="inside-control-button"
+            onClick={() => setPicking(true)}
+            disabled={!canAdd}
+            title={canAdd ? undefined : `Er passen ${MAX_COMPETITIONS} competities op dit scherm`}
+          >
+            Competitie toevoegen
+          </button>
+        )}
+        <PresentationSwitch presentation={presentation} onChange={setPresentation} />
+      </footer>
+
+      {picking && (
+        <CompetitionPicker
+          labels={labels}
+          onCancel={() => setPicking(false)}
+          onAdd={(teams) => {
+            setCompetitions([...competitions, teams]);
+            setPicking(false);
+          }}
+        />
+      )}
+    </main>
+  );
+}
+
+/**
+ * One competition as a bar chart: a thick bar per team, leader on top, its laps at the
+ * end of the bar and how far it trails the leader. A team that overtakes another
+ * slides to its new place, so the room sees the overtake.
+ */
+function CompetitionBars({
+  teams,
+  lapsByLabel,
+  onRemove,
+}: {
+  teams: Label[];
+  lapsByLabel: Map<string, number>;
+  onRemove: () => void;
+}) {
+  const standings = teams
+    .map((label) => ({ label, laps: lapsByLabel.get(label.id) ?? 0 }))
+    .sort((first, second) => second.laps - first.laps || first.label.name.localeCompare(second.label.name, 'nl-BE'));
+  const leaderLaps = standings[0].laps;
+  const title = teams.map((team) => team.name).join(' vs ');
+  const changed = useArrivals(standings.map(({ label, laps }) => `${label.id}:${laps}`));
+  const listRef = React.useRef<HTMLOListElement>(null);
+  const rowTops = React.useRef(new Map<string, number>());
+  React.useLayoutEffect(() => {
+    const rows = listRef.current?.querySelectorAll<HTMLElement>('[data-label-id]') ?? [];
+    for (const row of rows) {
+      const id = row.dataset.labelId ?? '';
+      const top = row.offsetTop;
+      const last = rowTops.current.get(id);
+      rowTops.current.set(id, top);
+      if (last === undefined || last === top) continue;
+      row.style.animation = 'none';
+      void row.offsetHeight;
+      row.style.setProperty('--slide-from', `${last - top}px`);
+      row.style.animation = 'slide-from var(--dur-3) var(--ease-out)';
+    }
+  });
+
+  return (
+    <section
+      className="competition"
+      aria-label={title}
+      style={
+        {
+          '--teams': teams.length,
+          // The bars leave room for the widest figure after them.
+          '--digits': leaderLaps.toLocaleString('nl-BE').length,
+        } as React.CSSProperties
+      }
+    >
+      <div className="competition__head">
+        <h2>{title}</h2>
+        <p>{competitionVerdict(standings)}</p>
+        <button type="button" className="competition__remove" onClick={onRemove} aria-label={`${title} verwijderen`}>
+          <Icon name="close" size={16} />
+        </button>
+      </div>
+      <ol ref={listRef} className="competition__bars">
+        {standings.map(({ label, laps }) => {
+          const behind = leaderLaps - laps;
+          return (
+            <li
+              key={label.id}
+              data-label-id={label.id}
+              className={`competition__row${laps > 0 && behind === 0 ? ' is-leading' : ''}`}
+              style={{ '--team': label.color, '--share': leaderLaps ? laps / leaderLaps : 0 } as React.CSSProperties}
+            >
+              <span className="competition__team">
+                {label.imageUrl ? (
+                  <img src={label.imageUrl} alt="" />
+                ) : (
+                  <i className="competition__dot" aria-hidden="true" />
+                )}
+                <span>{label.name}</span>
+              </span>
+              <span className="competition__track">
+                <i className="competition__bar" aria-hidden="true" />
+                <strong
+                  key={laps}
+                  className={`competition__laps${changed.has(`${label.id}:${laps}`) ? ' value-tick' : ''}`}
+                >
+                  {laps.toLocaleString('nl-BE')}
+                  <span className="visually-hidden"> rondes</span>
+                </strong>
+                {behind > 0 && (
+                  <em className="competition__behind">
+                    −{behind.toLocaleString('nl-BE')}
+                    <span className="visually-hidden"> op de leider</span>
+                  </em>
+                )}
+              </span>
+            </li>
+          );
+        })}
+      </ol>
+    </section>
+  );
+}
+
+function competitionVerdict(standings: Array<{ label: Label; laps: number }>) {
+  const [leader, second] = standings;
+  if (leader.laps === 0) return 'Nog geen rondes';
+  const tied = standings.filter((standing) => standing.laps === leader.laps);
+  if (tied.length === standings.length) return 'Gelijke stand';
+  if (tied.length > 1) return `${tied.map((standing) => standing.label.name).join(' en ')} staan gelijk`;
+  const lead = leader.laps - second.laps;
+  return `${leader.label.name} leidt met ${lead === 1 ? '1 ronde' : `${lead} rondes`}`;
+}
+
+/** Tick the teams of one competition, then add it. */
+function CompetitionPicker({
+  labels,
+  onCancel,
+  onAdd,
+}: {
+  labels: Label[];
+  onCancel: () => void;
+  onAdd: (teams: Label[]) => void;
+}) {
+  const [picked, setPicked] = React.useState<string[]>([]);
+  const sorted = [...labels].sort(compareLabels);
+  const groups = new Map<string, Label[]>();
+  for (const label of sorted) {
+    const title = labelKindTitle(label.kind);
+    groups.set(title, [...(groups.get(title) ?? []), label]);
+  }
+  const toggle = (id: string) =>
+    setPicked((current) => (current.includes(id) ? current.filter((other) => other !== id) : [...current, id]));
+
+  return (
+    <ModalDialog label="Nieuwe competitie" onRequestClose={onCancel} closeOnBackdrop>
+      <div className="competition-picker">
+        <h2>Nieuwe competitie</h2>
+        <p>Kies twee of meer ploegen die tegen elkaar strijden.</p>
+        {[...groups.entries()].map(([title, groupLabels]) => (
+          <div key={title} className="competition-picker__group" role="group" aria-label={title}>
+            <h3>{title}</h3>
+            <div className="competition-picker__choices">
+              {groupLabels.map((label) => (
+                <button
+                  key={label.id}
+                  type="button"
+                  className="competition-picker__choice"
+                  style={{ '--team': label.color } as React.CSSProperties}
+                  aria-pressed={picked.includes(label.id)}
+                  onClick={() => toggle(label.id)}
+                >
+                  {label.imageUrl ? (
+                    <img src={label.imageUrl} alt="" />
+                  ) : (
+                    <i className="competition__dot" aria-hidden="true" />
+                  )}
+                  <span>{label.name}</span>
+                  <Icon name="check" size={16} className="competition-picker__check" />
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
+        <div className="competition-picker__actions">
+          <button type="button" className="inside-control-button" onClick={onCancel}>
+            Annuleer
+          </button>
+          <button
+            type="button"
+            className="inside-control-button is-primary"
+            disabled={picked.length < 2}
+            onClick={() => onAdd(sorted.filter((label) => picked.includes(label.id)))}
+          >
+            {picked.length < 2 ? 'Kies minstens 2 ploegen' : `Toevoegen met ${picked.length} ploegen`}
+          </button>
+        </div>
+      </div>
+    </ModalDialog>
+  );
+}
+
+function countLapsByLabel(laps: LapRecord[]) {
+  const counts = new Map<string, number>();
+  for (const lap of laps) {
+    for (const label of lap.labels) counts.set(label.id, (counts.get(label.id) ?? 0) + 1);
+  }
+  return counts;
+}
+
+/** Keeps a list at its full number of rows, so the rows of the two lists line up. */
+function EmptyRows({ count, columns }: { count: number; columns: number }) {
+  return Array.from({ length: Math.max(0, count) }, (_, index) => (
+    <tr key={index} className="display-table__empty" aria-hidden="true">
+      {Array.from({ length: columns }, (_, column) => (
+        <td key={column}>{'\u00a0'}</td>
+      ))}
+    </tr>
+  ));
+}
+
+function DisplayTotals({ race, laps }: { race: LiveAppSnapshot['race']; laps: LapRecord[] }) {
+  // Same definition as Analyse, so the public and operator screens agree.
+  const lapsPerHour = buildKpis(laps, race).lapsPerHour;
+  const changed = useArrivals([`laps:${laps.length}`]);
+  return (
+    <dl className="inside-totals">
+      <div>
+        <dt>Racetijd</dt>
+        <dd>
+          {race.raceStartedAt ? (
+            race.raceFinishedAt ? (
+              formatElapsedSeconds(race.raceFinishedAt - race.raceStartedAt)
+            ) : (
+              <LiveElapsed startedAt={race.raceStartedAt} />
+            )
+          ) : (
+            '0:00'
+          )}
+        </dd>
+      </div>
+      <div>
+        <dt>Rondes</dt>
+        <dd key={laps.length} className={changed.has(`laps:${laps.length}`) ? 'value-tick' : undefined}>
+          {laps.length.toLocaleString('nl-BE')}
+        </dd>
+      </div>
+      <div>
+        <dt>Per uur</dt>
+        <dd>
+          {lapsPerHour == null
+            ? '—'
+            : lapsPerHour.toLocaleString('nl-BE', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
+        </dd>
+      </div>
+    </dl>
+  );
+}
+
+function PresentationSwitch({
+  presentation,
+  onChange,
+}: {
+  presentation: DisplayPresentation;
+  onChange: (next: DisplayPresentation) => void;
+}) {
+  return (
+    <div className="inside-presentation" role="group" aria-label="Weergave van dit scherm">
+      <button
+        className={`inside-control-button${presentation === 'light' ? ' is-active' : ''}`}
+        aria-pressed={presentation === 'light'}
+        onClick={() => onChange('light')}
+      >
+        Licht
+      </button>
+      <button
+        className={`inside-control-button${presentation === 'dark' ? ' is-active' : ''}`}
+        aria-pressed={presentation === 'dark'}
+        onClick={() => onChange('dark')}
+      >
+        Donker
+      </button>
+    </div>
+  );
+}
+
 type DisplayPresentation = 'light' | 'dark';
+type DisplayName = 'inside' | 'outside' | 'competitions';
 
 /**
  * Displays keep their own presentation, independent of the operator theme.
- * Order: `?thema=licht|donker` in the URL, then the choice made on this display
- * (remembered by this browser), then the default for the screen.
- * A choice also goes into the URL: failover reopens the same address on another
- * laptop, whose browser storage is empty.
+ * `?thema=licht|donker` in the address, then the choice made on this display,
+ * then the default for the screen.
  */
 function useDisplayPresentation(
-  display: 'inside' | 'outside',
+  display: DisplayName,
   defaultPresentation: DisplayPresentation
 ): [DisplayPresentation, (next: DisplayPresentation) => void] {
-  const storageKey = `apolloon.display.${display}`;
+  const [value, setValue] = useDisplaySetting(display, 'thema');
+  // Older versions stored 'light' and 'dark'.
+  const presentation =
+    value === 'licht' || value === 'light'
+      ? 'light'
+      : value === 'donker' || value === 'dark'
+        ? 'dark'
+        : defaultPresentation;
+  React.useLayoutEffect(() => {
+    document.documentElement.dataset.displayTone = presentation;
+  }, [presentation]);
+  return [presentation, (next) => setValue(next === 'light' ? 'licht' : 'donker')];
+}
+
+const MAX_COMPETITIONS = 6;
+
+/**
+ * The competitions on the Competitiescherm, as `?competities=id.id.id,id.id`.
+ * A label that was deleted drops out, and so does a competition left with one team.
+ */
+function useDisplayCompetitions(labels: Label[]): [Label[][], (next: Label[][]) => void] {
+  const [value, setValue] = useDisplaySetting('competitions', 'competities');
+  const labelsById = new Map(labels.map((label) => [label.id, label]));
+  const competitions = (value ?? '')
+    .split(',')
+    .map((competition) => [...new Set(competition.split('.').flatMap((id) => labelsById.get(id) ?? []))])
+    .filter((teams) => teams.length >= 2)
+    .slice(0, MAX_COMPETITIONS);
+  return [
+    competitions,
+    (next) => setValue(next.length ? next.map((teams) => teams.map((team) => team.id).join('.')).join(',') : null),
+  ];
+}
+
+/**
+ * A choice made on one display. The address wins, then what this browser remembers.
+ * The choice always goes into the address too: failover reopens the same address
+ * on another laptop, whose browser storage is empty.
+ */
+function useDisplaySetting(display: DisplayName, param: string): [string | null, (next: string | null) => void] {
+  const storageKey = param === 'thema' ? `apolloon.display.${display}` : `apolloon.display.${display}.${param}`;
   const navigate = useNavigate();
   const searchString = useRouterState({ select: (state) => state.location.searchStr });
-  const requested = new URLSearchParams(searchString).get('thema');
-  const [stored, setStored] = React.useState<DisplayPresentation | null>(() => {
+  const requested = new URLSearchParams(searchString).get(param);
+  const [stored, setStored] = React.useState<string | null>(() => {
     try {
-      const value = window.localStorage.getItem(storageKey);
-      return value === 'light' || value === 'dark' ? value : null;
+      return window.localStorage.getItem(storageKey);
     } catch {
       return null;
     }
   });
+  const writeAddress = React.useCallback(
+    (next: string | null) =>
+      void navigate({
+        to: '.',
+        search: (previous: Record<string, unknown>) => ({ ...previous, [param]: next ?? undefined }),
+        replace: true,
+      }),
+    [navigate, param]
+  );
   const choose = React.useCallback(
-    (next: DisplayPresentation) => {
+    (next: string | null) => {
       try {
-        window.localStorage.setItem(storageKey, next);
+        if (next === null) window.localStorage.removeItem(storageKey);
+        else window.localStorage.setItem(storageKey, next);
       } catch {
         // Keep the choice for this session only.
       }
       setStored(next);
-      void navigate({
-        to: '.',
-        search: (previous: Record<string, unknown>) => ({ ...previous, thema: next === 'light' ? 'licht' : 'donker' }),
-        replace: true,
-      });
+      writeAddress(next);
     },
-    [navigate, storageKey]
+    [storageKey, writeAddress]
   );
-  const presentation =
-    requested === 'licht' ? 'light' : requested === 'donker' ? 'dark' : (stored ?? defaultPresentation);
-  React.useLayoutEffect(() => {
-    document.documentElement.dataset.displayTone = presentation;
-  }, [presentation]);
-  return [presentation, choose];
+  React.useEffect(() => {
+    if (requested === null && stored !== null) writeAddress(stored);
+  }, [requested, stored, writeAddress]);
+  return [requested ?? stored, choose];
 }
 
 function formatPoints(points: number) {
-  return points.toLocaleString('nl-BE', { maximumFractionDigits: 1 });
+  return points.toLocaleString('nl-BE', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 }
 
 function formatDisplayClockTime(finishedAt: number) {
@@ -608,48 +892,4 @@ function OutsideBurgieFlash({ event }: { event: RaceEvent }) {
 function eventRunnerLabel(event: RaceEvent) {
   if (!event.runnerName) return 'Publiek moment';
   return lapRunnerLabel({ runnerNumber: event.runnerNumber, runnerName: event.runnerName });
-}
-
-function buildLabelStats(labels: Label[], runners: Runner[], laps: LapRecord[]) {
-  const totals = new Map(labels.map((label) => [label.id, { label, runnerIds: new Set<string>(), laps: 0 }]));
-
-  for (const runner of runners) {
-    for (const label of runner.labels) {
-      totals.get(label.id)?.runnerIds.add(runner.id);
-    }
-  }
-
-  for (const lap of laps) {
-    for (const label of lap.labels) {
-      const total = totals.get(label.id);
-      if (!total) continue;
-      total.runnerIds.add(lap.runnerId);
-      total.laps += 1;
-    }
-  }
-
-  return [...totals.values()]
-    .filter((total) => total.runnerIds.size > 0 || total.laps > 0)
-    .map((total) => ({ label: total.label, runnerCount: total.runnerIds.size, laps: total.laps }))
-    .sort((a, b) => compareLabels(a.label, b.label));
-}
-
-function groupCompetitions(stats: ReturnType<typeof buildLabelStats>) {
-  const groups = new Map<string, typeof stats>();
-  for (const stat of stats) {
-    const kindTitle = labelKindTitle(stat.label.kind);
-    groups.set(kindTitle, [...(groups.get(kindTitle) ?? []), stat]);
-  }
-  return [...groups.entries()]
-    .map(([title, groupStats]) => ({
-      kind: title,
-      title,
-      order: labelKindOrder(groupStats[0].label.kind),
-      maxLaps: Math.max(0, ...groupStats.map((stat) => stat.laps)),
-      // Within a competition the leader goes first.
-      stats: [...groupStats].sort(
-        (first, second) => second.laps - first.laps || first.label.name.localeCompare(second.label.name, 'nl-BE')
-      ),
-    }))
-    .sort((first, second) => first.order - second.order);
 }

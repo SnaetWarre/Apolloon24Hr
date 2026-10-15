@@ -100,6 +100,13 @@ const routeTree = rootRoute.addChildren([
     component: lazyRouteComponent(() => import('./components/DisplayViews'), 'InsideDisplay'),
     pendingComponent: pending('Binnenscherm wordt geladen...', true),
   }),
+  createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/display/competitions',
+    loader: prefetch(allLaps),
+    component: lazyRouteComponent(() => import('./components/DisplayViews'), 'CompetitionDisplay'),
+    pendingComponent: pending('Competitiescherm wordt geladen...', true),
+  }),
 ]);
 
 export const router = createRouter({
