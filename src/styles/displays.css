@@ -111,33 +111,6 @@ html[data-display-tone="light"] body {
   display: none;
 }
 
-.display-labels .label-pill {
-  min-height: 1.6em;
-  padding-block: 0;
-  padding-inline: 0.45em 0.55em;
-  gap: 0.4em;
-  border-color: var(--d-line) !important;
-  border-radius: 0.3em;
-  background: transparent;
-  color: var(--d-ink-2);
-  font-size: inherit;
-  font-weight: 500;
-}
-
-.display-labels .label-dot {
-  width: 0.5em;
-  height: 0.5em;
-}
-
-.display-labels .label-image {
-  width: 1.1em;
-  height: 1.1em;
-}
-
-.display-labels {
-  gap: 0.4em;
-}
-
 /* ---------- Buitenscherm ---------- */
 .display-root--outside {
   position: relative;
@@ -245,10 +218,6 @@ html[data-display-tone="light"] body {
 .display-runner-name--empty {
   color: var(--d-ink-3);
   font-weight: 500;
-}
-
-.outside-band .display-labels {
-  font-size: clamp(20px, 1.6vw, max(34px, min(1.7708vw, 3.1481vh)));
 }
 
 .outside-band--next .display-runner {

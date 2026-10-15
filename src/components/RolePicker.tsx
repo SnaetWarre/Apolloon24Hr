@@ -86,7 +86,7 @@ export function RolePicker() {
   return (
     <>
       <PageHeader
-        title="Overzicht" 
+        title="Overzicht"
         actions={
           host && (
             <button type="button" className="btn btn--sm" onClick={copyHostUrl} title={host.url}>

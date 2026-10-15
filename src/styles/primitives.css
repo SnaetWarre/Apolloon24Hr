@@ -580,8 +580,7 @@ td .label-pill {
 
 /* min-width: 0 lets a row of pills shrink, so a long label name gets its ellipsis. */
 .label-list,
-.label-row,
-.display-labels {
+.label-row {
   display: inline-flex;
   flex-wrap: wrap;
   min-width: 0;
