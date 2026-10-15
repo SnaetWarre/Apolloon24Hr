@@ -10,7 +10,7 @@ import { useArrivals } from '../lib/motion';
 import { buildRecentLapSummaries, buildRunnerRanking, calculateLapPoints, collectRankingLabels } from '../lib/ranking';
 import type { Label, LapRecord, LiveAppSnapshot, PublicRecordMode, RaceEvent, Runner } from '../types';
 import { Icon } from './Icon';
-import { compareLabels, labelKindTitle } from './LabelBadge';
+import { compareLabels, LabelBadge, labelKindTitle } from './LabelBadge';
 import { ModalDialog } from './ModalDialog';
 import { LiveElapsed } from './LiveTime';
 
@@ -856,9 +856,25 @@ function DisplayRunner({ runner, empty }: { runner: Runner | null; empty: string
   }, [name]);
   if (!runner) return <strong className="display-runner-name display-runner-name--empty">{empty}</strong>;
   return (
-    <div ref={rowRef} className="display-runner">
-      {runner.runnerNumber && <span className="display-bib">{runner.runnerNumber}</span>}
-      <strong className="display-runner-name">{runner.name}</strong>
+    <>
+      <div ref={rowRef} className="display-runner">
+        {runner.runnerNumber && <span className="display-bib">{runner.runnerNumber}</span>}
+        <strong className="display-runner-name">{runner.name}</strong>
+      </div>
+      <DisplayLabels labels={runner.labels} />
+    </>
+  );
+}
+
+// Only zusterverenigingen show outside; other labels (like speedteams) stay private.
+function DisplayLabels({ labels }: { labels: Label[] }) {
+  const shown = labels.filter((label) => label.kind === 'zustervereniging' || label.kind === 'association');
+  if (!shown.length) return null;
+  return (
+    <div className="display-labels">
+      {shown.map((label) => (
+        <LabelBadge key={label.id} label={label} />
+      ))}
     </div>
   );
 }
