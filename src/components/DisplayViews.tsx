@@ -9,7 +9,9 @@ import { observeDisplayHistory } from '../lib/displayHistory';
 import { useArrivals } from '../lib/motion';
 import { buildRecentLapSummaries, buildRunnerRanking, collectRankingLabels, lapCoefficient } from '../lib/ranking';
 import type { Label, LapRecord, LiveAppSnapshot, PublicRecordMode, RaceEvent, Runner } from '../types';
-import { compareLabels, LabelBadge, labelKindOrder, labelKindTitle } from './LabelBadge';
+import { Icon } from './Icon';
+import { compareLabels, LabelBadge, labelKindTitle } from './LabelBadge';
+import { ModalDialog } from './ModalDialog';
 import { LiveElapsed } from './LiveTime';
 
 const OUTSIDE_ALERT_VISIBLE_MS = 8_000;
@@ -324,9 +326,12 @@ export function InsideDisplay() {
 export function CompetitionDisplay() {
   const { runners, labels, race } = useAppData(selectInsideDisplayData);
   const [presentation, setPresentation] = useDisplayPresentation('competitions', 'dark');
+  const [competitions, setCompetitions] = useDisplayCompetitions(labels);
+  const [picking, setPicking] = React.useState(false);
   const { laps } = useRaceHistory({ scope: 'full' });
-  const competitions = groupCompetitions(buildLabelStats(labels, runners, laps));
+  const lapsByLabel = countLapsByLabel(laps);
   const ranking = buildRunnerRanking(runners, laps, 'laps', null).slice(0, COMPETITION_RANKING_LENGTH);
+  const canAdd = competitions.length < MAX_COMPETITIONS && labels.length >= 2;
 
   return (
     <main className={`display-root display-root--competitions display-root--${presentation}`}>
@@ -337,13 +342,36 @@ export function CompetitionDisplay() {
       </header>
 
       <div className="competitions-board">
-        <div className="competitions-bands">
-          {competitions.length ? (
-            competitions.map((competition) => <CompetitionBand key={competition.kind} competition={competition} />)
-          ) : (
-            <div className="inside-empty">Nog geen labels met lopers. Geef lopers een label in Beheer › Labels.</div>
-          )}
-        </div>
+        {competitions.length ? (
+          <div
+            className="competitions-list"
+            // Each competition gets height for its teams plus its title.
+            style={{ gridTemplateRows: competitions.map((teams) => `minmax(0, ${teams.length + 1.4}fr)`).join(' ') }}
+          >
+            {competitions.map((teams, index) => (
+              <CompetitionBars
+                key={teams.map((team) => team.id).join('.')}
+                teams={teams}
+                lapsByLabel={lapsByLabel}
+                onRemove={() => setCompetitions(competitions.filter((_, other) => other !== index))}
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="competitions-empty">
+            <p>Kies welke ploegen tegen elkaar strijden, bijvoorbeeld 1ste, 2de en 3de jaar.</p>
+            <button
+              type="button"
+              className="competitions-empty__add"
+              onClick={() => setPicking(true)}
+              disabled={!canAdd}
+            >
+              <Icon name="plus" size={20} />
+              Competitie toevoegen
+            </button>
+            {labels.length < 2 && <p>Maak eerst minstens twee labels in Beheer › Labels.</p>}
+          </div>
+        )}
 
         <section className="display-panel laps-ranking" aria-label="Ranking op meeste rondes">
           <div className="inside-panel-heading">
@@ -370,83 +398,216 @@ export function CompetitionDisplay() {
       </div>
 
       <footer className="display-controls">
+        {competitions.length > 0 && (
+          <button
+            type="button"
+            className="inside-control-button"
+            onClick={() => setPicking(true)}
+            disabled={!canAdd}
+            title={canAdd ? undefined : `Er passen ${MAX_COMPETITIONS} competities op dit scherm`}
+          >
+            Competitie toevoegen
+          </button>
+        )}
         <PresentationSwitch presentation={presentation} onChange={setPresentation} />
       </footer>
+
+      {picking && (
+        <CompetitionPicker
+          labels={labels}
+          onCancel={() => setPicking(false)}
+          onAdd={(teams) => {
+            setCompetitions([...competitions, teams]);
+            setPicking(false);
+          }}
+        />
+      )}
     </main>
   );
 }
 
-type Competition = ReturnType<typeof groupCompetitions>[number];
-
 /**
- * One competition as a scoreboard: every team's laps as a big figure, leader first,
- * and one strip below that splits all their laps by team, like a tug of war.
+ * One competition as a bar chart: a thick bar per team, leader on top, its laps at the
+ * end of the bar and how far it trails the leader. A team that overtakes another
+ * slides to its new place, so the room sees the overtake.
  */
-function CompetitionBand({ competition }: { competition: Competition }) {
-  const { stats } = competition;
-  const leader = stats[0];
-  const totalLaps = stats.reduce((total, stat) => total + stat.laps, 0);
-  const leaderKey = `leader:${leader.label.id}`;
-  // A new figure ticks; a new leader moves the whole scoreboard.
-  const changed = useArrivals([leaderKey, ...stats.map((stat) => `${stat.label.id}:${stat.laps}`)]);
+function CompetitionBars({
+  teams,
+  lapsByLabel,
+  onRemove,
+}: {
+  teams: Label[];
+  lapsByLabel: Map<string, number>;
+  onRemove: () => void;
+}) {
+  const standings = teams
+    .map((label) => ({ label, laps: lapsByLabel.get(label.id) ?? 0 }))
+    .sort((first, second) => second.laps - first.laps || first.label.name.localeCompare(second.label.name, 'nl-BE'));
+  const leaderLaps = standings[0].laps;
+  const title = teams.map((team) => team.name).join(' vs ');
+  const changed = useArrivals(standings.map(({ label, laps }) => `${label.id}:${laps}`));
+  const listRef = React.useRef<HTMLOListElement>(null);
+  const rowTops = React.useRef(new Map<string, number>());
+  React.useLayoutEffect(() => {
+    const rows = listRef.current?.querySelectorAll<HTMLElement>('[data-label-id]') ?? [];
+    for (const row of rows) {
+      const id = row.dataset.labelId ?? '';
+      const top = row.offsetTop;
+      const last = rowTops.current.get(id);
+      rowTops.current.set(id, top);
+      if (last === undefined || last === top) continue;
+      row.style.animation = 'none';
+      void row.offsetHeight;
+      row.style.setProperty('--slide-from', `${last - top}px`);
+      row.style.animation = 'slide-from var(--dur-3) var(--ease-out)';
+    }
+  });
 
   return (
     <section
-      className={`competition-band${stats.length === 2 ? ' is-duel' : ''}`}
-      aria-label={competition.title}
-      style={{ '--teams': stats.length } as React.CSSProperties}
+      className="competition"
+      aria-label={title}
+      style={
+        {
+          '--teams': teams.length,
+          // The bars leave room for the widest figure after them.
+          '--digits': leaderLaps.toLocaleString('nl-BE').length,
+        } as React.CSSProperties
+      }
     >
-      <div className="competition-band__head">
-        <h2>{competition.title}</h2>
-        <p>{competitionVerdict(stats)}</p>
+      <div className="competition__head">
+        <h2>{title}</h2>
+        <p>{competitionVerdict(standings)}</p>
+        <button type="button" className="competition__remove" onClick={onRemove} aria-label={`${title} verwijderen`}>
+          <Icon name="close" size={16} />
+        </button>
       </div>
-      <ol key={leaderKey} className={`competition-scores${changed.has(leaderKey) ? ' display-rise' : ''}`}>
-        {stats.map((stat) => (
-          <li
-            key={stat.label.id}
-            className={stat.laps > 0 && stat.laps === leader.laps ? 'is-leading' : undefined}
-            style={{ '--team': stat.label.color } as React.CSSProperties}
-          >
-            <span className="competition-team">
-              {stat.label.imageUrl ? (
-                <img src={stat.label.imageUrl} alt="" />
-              ) : (
-                <i className="competition-team__dot" aria-hidden="true" />
-              )}
-              <span>{stat.label.name}</span>
-            </span>
-            <strong
-              key={stat.laps}
-              className={
-                changed.has(`${stat.label.id}:${stat.laps}`) ? 'competition-score value-tick' : 'competition-score'
-              }
+      <ol ref={listRef} className="competition__bars">
+        {standings.map(({ label, laps }) => {
+          const behind = leaderLaps - laps;
+          return (
+            <li
+              key={label.id}
+              data-label-id={label.id}
+              className={`competition__row${laps > 0 && behind === 0 ? ' is-leading' : ''}`}
+              style={{ '--team': label.color, '--share': leaderLaps ? laps / leaderLaps : 0 } as React.CSSProperties}
             >
-              {stat.laps.toLocaleString('nl-BE')}
-              <span className="visually-hidden"> rondes</span>
-            </strong>
-          </li>
-        ))}
+              <span className="competition__team">
+                {label.imageUrl ? (
+                  <img src={label.imageUrl} alt="" />
+                ) : (
+                  <i className="competition__dot" aria-hidden="true" />
+                )}
+                <span>{label.name}</span>
+              </span>
+              <span className="competition__track">
+                <i className="competition__bar" aria-hidden="true" />
+                <strong
+                  key={laps}
+                  className={`competition__laps${changed.has(`${label.id}:${laps}`) ? ' value-tick' : ''}`}
+                >
+                  {laps.toLocaleString('nl-BE')}
+                  <span className="visually-hidden"> rondes</span>
+                </strong>
+                {behind > 0 && (
+                  <em className="competition__behind">
+                    −{behind.toLocaleString('nl-BE')}
+                    <span className="visually-hidden"> op de leider</span>
+                  </em>
+                )}
+              </span>
+            </li>
+          );
+        })}
       </ol>
-      <div className="competition-strip" aria-hidden="true">
-        {totalLaps > 0 &&
-          stats.map((stat) => (
-            <span key={stat.label.id} style={{ flexGrow: stat.laps, background: stat.label.color }} />
-          ))}
-      </div>
     </section>
   );
 }
 
-function competitionVerdict(stats: Competition['stats']) {
-  const [leader, second] = stats;
+function competitionVerdict(standings: Array<{ label: Label; laps: number }>) {
+  const [leader, second] = standings;
   if (leader.laps === 0) return 'Nog geen rondes';
-  if (!second) return leader.laps === 1 ? '1 ronde' : `${leader.laps} rondes`;
-  const tied = stats.filter((stat) => stat.laps === leader.laps);
-  if (tied.length === stats.length && stats.length > 2) return 'Iedereen staat gelijk';
-  if (tied.length === 2) return `${tied[0].label.name} en ${tied[1].label.name} staan gelijk`;
-  if (tied.length > 2) return `${tied.length} ploegen staan gelijk`;
+  const tied = standings.filter((standing) => standing.laps === leader.laps);
+  if (tied.length === standings.length) return 'Gelijke stand';
+  if (tied.length > 1) return `${tied.map((standing) => standing.label.name).join(' en ')} staan gelijk`;
   const lead = leader.laps - second.laps;
   return `${leader.label.name} leidt met ${lead === 1 ? '1 ronde' : `${lead} rondes`}`;
+}
+
+/** Tick the teams of one competition, then add it. */
+function CompetitionPicker({
+  labels,
+  onCancel,
+  onAdd,
+}: {
+  labels: Label[];
+  onCancel: () => void;
+  onAdd: (teams: Label[]) => void;
+}) {
+  const [picked, setPicked] = React.useState<string[]>([]);
+  const sorted = [...labels].sort(compareLabels);
+  const groups = new Map<string, Label[]>();
+  for (const label of sorted) {
+    const title = labelKindTitle(label.kind);
+    groups.set(title, [...(groups.get(title) ?? []), label]);
+  }
+  const toggle = (id: string) =>
+    setPicked((current) => (current.includes(id) ? current.filter((other) => other !== id) : [...current, id]));
+
+  return (
+    <ModalDialog label="Nieuwe competitie" onRequestClose={onCancel} closeOnBackdrop>
+      <div className="competition-picker">
+        <h2>Nieuwe competitie</h2>
+        <p>Kies twee of meer ploegen die tegen elkaar strijden.</p>
+        {[...groups.entries()].map(([title, groupLabels]) => (
+          <div key={title} className="competition-picker__group" role="group" aria-label={title}>
+            <h3>{title}</h3>
+            <div className="competition-picker__choices">
+              {groupLabels.map((label) => (
+                <button
+                  key={label.id}
+                  type="button"
+                  className="competition-picker__choice"
+                  style={{ '--team': label.color } as React.CSSProperties}
+                  aria-pressed={picked.includes(label.id)}
+                  onClick={() => toggle(label.id)}
+                >
+                  {label.imageUrl ? (
+                    <img src={label.imageUrl} alt="" />
+                  ) : (
+                    <i className="competition__dot" aria-hidden="true" />
+                  )}
+                  <span>{label.name}</span>
+                  <Icon name="check" size={16} className="competition-picker__check" />
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
+        <div className="competition-picker__actions">
+          <button type="button" className="inside-control-button" onClick={onCancel}>
+            Annuleer
+          </button>
+          <button
+            type="button"
+            className="inside-control-button is-primary"
+            disabled={picked.length < 2}
+            onClick={() => onAdd(sorted.filter((label) => picked.includes(label.id)))}
+          >
+            {picked.length < 2 ? 'Kies minstens 2 ploegen' : `Toevoegen met ${picked.length} ploegen`}
+          </button>
+        </div>
+      </div>
+    </ModalDialog>
+  );
+}
+
+function countLapsByLabel(laps: LapRecord[]) {
+  const counts = new Map<string, number>();
+  for (const lap of laps) {
+    for (const label of lap.labels) counts.set(label.id, (counts.get(label.id) ?? 0) + 1);
+  }
+  return counts;
 }
 
 /** Keeps a list at its full number of rows, so the rows of the two lists line up. */
@@ -526,52 +687,94 @@ function PresentationSwitch({
 }
 
 type DisplayPresentation = 'light' | 'dark';
+type DisplayName = 'inside' | 'outside' | 'competitions';
 
 /**
  * Displays keep their own presentation, independent of the operator theme.
- * Order: `?thema=licht|donker` in the URL, then the choice made on this display
- * (remembered by this browser), then the default for the screen.
- * A choice also goes into the URL: failover reopens the same address on another
- * laptop, whose browser storage is empty.
+ * `?thema=licht|donker` in the address, then the choice made on this display,
+ * then the default for the screen.
  */
 function useDisplayPresentation(
-  display: 'inside' | 'outside' | 'competitions',
+  display: DisplayName,
   defaultPresentation: DisplayPresentation
 ): [DisplayPresentation, (next: DisplayPresentation) => void] {
-  const storageKey = `apolloon.display.${display}`;
+  const [value, setValue] = useDisplaySetting(display, 'thema');
+  // Older versions stored 'light' and 'dark'.
+  const presentation =
+    value === 'licht' || value === 'light'
+      ? 'light'
+      : value === 'donker' || value === 'dark'
+        ? 'dark'
+        : defaultPresentation;
+  React.useLayoutEffect(() => {
+    document.documentElement.dataset.displayTone = presentation;
+  }, [presentation]);
+  return [presentation, (next) => setValue(next === 'light' ? 'licht' : 'donker')];
+}
+
+const MAX_COMPETITIONS = 6;
+
+/**
+ * The competitions on the Competitiescherm, as `?competities=id.id.id,id.id`.
+ * A label that was deleted drops out, and so does a competition left with one team.
+ */
+function useDisplayCompetitions(labels: Label[]): [Label[][], (next: Label[][]) => void] {
+  const [value, setValue] = useDisplaySetting('competitions', 'competities');
+  const labelsById = new Map(labels.map((label) => [label.id, label]));
+  const competitions = (value ?? '')
+    .split(',')
+    .map((competition) => [...new Set(competition.split('.').flatMap((id) => labelsById.get(id) ?? []))])
+    .filter((teams) => teams.length >= 2)
+    .slice(0, MAX_COMPETITIONS);
+  return [
+    competitions,
+    (next) => setValue(next.length ? next.map((teams) => teams.map((team) => team.id).join('.')).join(',') : null),
+  ];
+}
+
+/**
+ * A choice made on one display. The address wins, then what this browser remembers.
+ * The choice always goes into the address too: failover reopens the same address
+ * on another laptop, whose browser storage is empty.
+ */
+function useDisplaySetting(display: DisplayName, param: string): [string | null, (next: string | null) => void] {
+  const storageKey = param === 'thema' ? `apolloon.display.${display}` : `apolloon.display.${display}.${param}`;
   const navigate = useNavigate();
   const searchString = useRouterState({ select: (state) => state.location.searchStr });
-  const requested = new URLSearchParams(searchString).get('thema');
-  const [stored, setStored] = React.useState<DisplayPresentation | null>(() => {
+  const requested = new URLSearchParams(searchString).get(param);
+  const [stored, setStored] = React.useState<string | null>(() => {
     try {
-      const value = window.localStorage.getItem(storageKey);
-      return value === 'light' || value === 'dark' ? value : null;
+      return window.localStorage.getItem(storageKey);
     } catch {
       return null;
     }
   });
+  const writeAddress = React.useCallback(
+    (next: string | null) =>
+      void navigate({
+        to: '.',
+        search: (previous: Record<string, unknown>) => ({ ...previous, [param]: next ?? undefined }),
+        replace: true,
+      }),
+    [navigate, param]
+  );
   const choose = React.useCallback(
-    (next: DisplayPresentation) => {
+    (next: string | null) => {
       try {
-        window.localStorage.setItem(storageKey, next);
+        if (next === null) window.localStorage.removeItem(storageKey);
+        else window.localStorage.setItem(storageKey, next);
       } catch {
         // Keep the choice for this session only.
       }
       setStored(next);
-      void navigate({
-        to: '.',
-        search: (previous: Record<string, unknown>) => ({ ...previous, thema: next === 'light' ? 'licht' : 'donker' }),
-        replace: true,
-      });
+      writeAddress(next);
     },
-    [navigate, storageKey]
+    [storageKey, writeAddress]
   );
-  const presentation =
-    requested === 'licht' ? 'light' : requested === 'donker' ? 'dark' : (stored ?? defaultPresentation);
-  React.useLayoutEffect(() => {
-    document.documentElement.dataset.displayTone = presentation;
-  }, [presentation]);
-  return [presentation, choose];
+  React.useEffect(() => {
+    if (requested === null && stored !== null) writeAddress(stored);
+  }, [requested, stored, writeAddress]);
+  return [requested ?? stored, choose];
 }
 
 function formatPoints(points: number) {
@@ -693,48 +896,4 @@ function OutsideBurgieFlash({ event }: { event: RaceEvent }) {
 function eventRunnerLabel(event: RaceEvent) {
   if (!event.runnerName) return 'Publiek moment';
   return lapRunnerLabel({ runnerNumber: event.runnerNumber, runnerName: event.runnerName });
-}
-
-function buildLabelStats(labels: Label[], runners: Runner[], laps: LapRecord[]) {
-  const totals = new Map(labels.map((label) => [label.id, { label, runnerIds: new Set<string>(), laps: 0 }]));
-
-  for (const runner of runners) {
-    for (const label of runner.labels) {
-      totals.get(label.id)?.runnerIds.add(runner.id);
-    }
-  }
-
-  for (const lap of laps) {
-    for (const label of lap.labels) {
-      const total = totals.get(label.id);
-      if (!total) continue;
-      total.runnerIds.add(lap.runnerId);
-      total.laps += 1;
-    }
-  }
-
-  return [...totals.values()]
-    .filter((total) => total.runnerIds.size > 0 || total.laps > 0)
-    .map((total) => ({ label: total.label, runnerCount: total.runnerIds.size, laps: total.laps }))
-    .sort((a, b) => compareLabels(a.label, b.label));
-}
-
-function groupCompetitions(stats: ReturnType<typeof buildLabelStats>) {
-  const groups = new Map<string, typeof stats>();
-  for (const stat of stats) {
-    const kindTitle = labelKindTitle(stat.label.kind);
-    groups.set(kindTitle, [...(groups.get(kindTitle) ?? []), stat]);
-  }
-  return [...groups.entries()]
-    .map(([title, groupStats]) => ({
-      kind: title,
-      title,
-      order: labelKindOrder(groupStats[0].label.kind),
-      maxLaps: Math.max(0, ...groupStats.map((stat) => stat.laps)),
-      // Within a competition the leader goes first.
-      stats: [...groupStats].sort(
-        (first, second) => second.laps - first.laps || first.label.name.localeCompare(second.label.name, 'nl-BE')
-      ),
-    }))
-    .sort((first, second) => first.order - second.order);
 }

@@ -6,10 +6,13 @@ All notable changes to Apolloon Telsysteem will be documented in this file.
 
 ### Added
 
-- Competitiescherm (`/display/competitions`): alle competities als scorebord,
-  met per ploeg het aantal rondes in grote cijfers, een balk die de rondes
-  per competitie verdeelt, wie leidt en met hoeveel, en de top 20 op meeste
-  rondes. Open het naast het Binnenscherm in een tweede browser
+- Competitiescherm (`/display/competitions`): kies zelf welke ploegen tegen
+  elkaar strijden (bv. 1ste, 2de en 3de jaar) met Competitie toevoegen. Elke
+  competitie is een staafdiagram met de leider bovenaan, het aantal rondes
+  aan het einde van elke staaf en de achterstand op de leider. Een ploeg die
+  een andere inhaalt, schuift naar haar nieuwe plaats. Naast de competities
+  staat de top 20 op meeste rondes. Open het naast het Binnenscherm in een
+  tweede browser; de gekozen competities staan in het adres
 
 ### Changed
 
