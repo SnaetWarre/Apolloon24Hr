@@ -156,6 +156,12 @@ html[data-display-tone="light"] body {
   color: oklch(100% 0 none);
 }
 
+.display-root--outside > .display-brand .brand-mark {
+  width: clamp(276px, 24.15vw, 42.55vh);
+  height: auto;
+  aspect-ratio: 560 / 169;
+}
+
 .outside-band {
   display: flex;
   flex-direction: column;
@@ -216,7 +222,7 @@ html[data-display-tone="light"] body {
   gap: 0.35em;
   min-width: 0;
   padding-inline-end: 12vw;
-  font-size: calc(var(--runner-name-scale, 1) * clamp(64px, 8.4vw, max(176px, min(9.1667vw, 16.2963vh))));
+  font-size: calc(var(--runner-name-scale, 1) * clamp(46px, 6.04vw, max(128px, min(6.63vw, 11.77vh))));
 }
 
 .display-bib {
@@ -230,7 +236,7 @@ html[data-display-tone="light"] body {
 
 .display-runner-name {
   min-width: 0;
-  font-size: calc(var(--runner-name-scale, 1) * clamp(64px, 8.4vw, max(176px, min(9.1667vw, 16.2963vh))));
+  font-size: calc(var(--runner-name-scale, 1) * clamp(46px, 6.04vw, max(128px, min(6.63vw, 11.77vh))));
   font-weight: 650;
   line-height: 1;
   letter-spacing: -0.035em;
@@ -252,12 +258,12 @@ html[data-display-tone="light"] body {
 }
 
 .outside-band--next .display-runner {
-  font-size: clamp(44px, 5.4vw, max(116px, min(6.0417vw, 10.7407vh)));
+  font-size: clamp(32px, 3.91vw, max(84px, min(4.37vw, 7.76vh)));
 }
 
 .outside-band--next .display-runner-name {
   color: var(--d-ink-2);
-  font-size: clamp(44px, 5.4vw, max(116px, min(6.0417vw, 10.7407vh)));
+  font-size: clamp(32px, 3.91vw, max(84px, min(4.37vw, 7.76vh)));
 }
 
 /*
