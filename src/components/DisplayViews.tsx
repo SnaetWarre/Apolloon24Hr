@@ -7,7 +7,7 @@ import { formatClockTimeMs, formatDurationMs, formatElapsedSeconds } from '../li
 import { getNextWaitingRunner, lapRunnerLabel, runnerLabel } from '../lib/runners';
 import { observeDisplayHistory } from '../lib/displayHistory';
 import { useArrivals } from '../lib/motion';
-import { buildRecentLapSummaries, buildRunnerRanking, collectRankingLabels, lapCoefficient } from '../lib/ranking';
+import { buildRecentLapSummaries, buildRunnerRanking, calculateLapPoints, collectRankingLabels } from '../lib/ranking';
 import type { Label, LapRecord, LiveAppSnapshot, PublicRecordMode, RaceEvent, Runner } from '../types';
 import { Icon } from './Icon';
 import { compareLabels, LabelBadge, labelKindTitle } from './LabelBadge';
@@ -227,7 +227,7 @@ export function InsideDisplay() {
                   <th scope="col">Binnen om</th>
                   <th scope="col">Loper</th>
                   <th scope="col">Deze ronde</th>
-                  <th scope="col">Coëf.</th>
+                  <th scope="col">Punten</th>
                   <th scope="col">Snelste</th>
                   <th scope="col">Gem.</th>
                 </tr>
@@ -250,7 +250,7 @@ export function InsideDisplay() {
                       <span className="recent-lap-number">ronde {lap.lapNumber}</span>
                     </td>
                     <td className="recent-lap-time recent-lap-time--current">{formatDurationMs(lap.durationMs)}</td>
-                    <td className="recent-lap-coefficient">{formatCoefficient(lapCoefficient(lap))}</td>
+                    <td className="recent-lap-points">{formatPoints(calculateLapPoints(lap))}</td>
                     <td className="recent-lap-time">{formatDurationMs(bestLapMs)}</td>
                     <td className="recent-lap-time">{formatDurationMs(averageLapMs)}</td>
                   </tr>
@@ -779,10 +779,6 @@ function useDisplaySetting(display: DisplayName, param: string): [string | null,
 
 function formatPoints(points: number) {
   return points.toLocaleString('nl-BE', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
-}
-
-function formatCoefficient(coefficient: number) {
-  return coefficient.toLocaleString('nl-BE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function formatDisplayClockTime(finishedAt: number) {

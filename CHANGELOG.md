@@ -17,7 +17,7 @@ All notable changes to Apolloon Telsysteem will be documented in this file.
 ### Changed
 
 - Het Binnenscherm toont de laatste 25 lopers en de top 25 op punten naast
-  elkaar. Elke ronde toont haar coëfficiënt. Het scherm wisselt niet meer
+  elkaar. Elke ronde toont de punten die ze opleverde (tijdcoëfficiënt en dagdeel samen). Het scherm wisselt niet meer
   tussen meeste rondes en punten; meeste rondes en de competities staan nu op
   het Competitiescherm
 - De demowedstrijd (`DEMO_RACE`) geeft elke loper verzonnen

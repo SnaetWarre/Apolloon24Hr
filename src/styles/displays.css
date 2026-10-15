@@ -615,7 +615,7 @@ html[data-display-tone="light"] body {
 }
 
 .recent-lap-time,
-.recent-lap-coefficient {
+.recent-lap-points {
   color: var(--d-ink-2);
   font-size: clamp(14px, 1vw, max(21px, min(1.0938vw, 1.9444vh)));
   font-weight: 500;
@@ -632,8 +632,8 @@ html[data-display-tone="light"] body {
   color: var(--d-accent);
 }
 
-/* The coefficient is what the lap time earns in Punten; the gold ties it to the ranking next to it. */
-.recent-lap-coefficient {
+/* What this lap adds to the runner's points; the gold ties it to the ranking next to it. */
+.recent-lap-points {
   color: var(--d-gold);
   font-weight: 600;
 }
