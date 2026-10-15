@@ -1,5 +1,4 @@
 import React from 'react';
-import { LiveDot } from './LiveDot';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { useAppData, useClusterStatus, useRaceHistory } from '../app/index';
 import { getNextWaitingRunner } from '../lib/runners';
