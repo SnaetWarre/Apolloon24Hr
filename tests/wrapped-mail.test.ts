@@ -86,7 +86,7 @@ test('each runner gets their own card inline, and nobody without a real address 
     const raw = mail.received[0].raw.replace(/=\r\n/g, '');
     assert.match(raw, /Content-ID: <wrapped-card>/);
     assert.match(raw, /Content-ID: <apolloon-logo>/);
-    assert.match(raw, /In je Instagram-story/);
+    assert.match(raw, /Open Instagram/);
     assert.match(raw, /src=3D"cid:wrapped-card"/);
     // Also as a plain attachment, so it saves to a phone in one tap.
     assert.match(raw, /Content-Disposition: attachment; filename=1\.png/);

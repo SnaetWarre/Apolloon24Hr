@@ -27,11 +27,13 @@ import {
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const serverEntry = path.join(repoRoot, 'dist-server/server/index.js');
 const MAIL_TEXT_FILE = 'mail.txt';
-const DEFAULT_MAIL_TEXT = (year: number) => `Onderwerp: Jouw 24 Urenloop ${year}
+const DEFAULT_MAIL_TEXT = (year: number) => `Onderwerp: Jouw 24u Wrapped ${year}, Apolloon edition
 
-Hoi!
+Hey!
 
-Bedankt om mee te lopen op de 24 Urenloop. Hieronder zit jouw kaart met je rondjes, je snelste en gemiddelde ronde, je lopersprofiel en je plaats in het klassement.
+Bedankt om mee te lopen voor Apolloon! Hieronder staat jouw 24u Wrapped, Apolloon edition.
+
+Sla hem op en zet hem in je Instagram-story!
 `;
 
 const [command, ...rest] = process.argv.slice(2);

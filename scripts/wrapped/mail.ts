@@ -90,42 +90,29 @@ const BLUE = '#0d78d3';
 const NIGHT = '#162033';
 const LOGO = fileURLToPath(new URL('../../public/brand/apolloon-logo.png', import.meta.url));
 
-/** Instagram cannot take a picture from a link, so the mail says how to post it in three taps. */
-const STORY_STEPS = [
-  'Open deze mail op je gsm en hou je kaart ingedrukt.',
-  'Kies "Afbeelding opslaan". Je kaart zit ook als bijlage onderaan deze mail.',
-  "Open Instagram, start een story en kies je kaart uit je foto's.",
-];
-
 function message(input: WrappedMailInput, card: WrappedManifestEntry, to: string) {
   const paragraphs = input.text
     .split(/\n{2,}/)
     .map((paragraph) => `<p style="margin:0 0 16px">${escapeHtml(paragraph).replace(/\n/g, '<br>')}</p>`)
     .join('');
-  const steps = STORY_STEPS.map((step) => `<li style="margin:0 0 6px">${escapeHtml(step)}</li>`).join('');
   const html = `<!doctype html>
 <html lang="nl"><body style="margin:0;padding:0;background:#eef2f7">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef2f7"><tr><td align="center" style="padding:24px 12px">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border-radius:16px;font-family:Helvetica,Arial,sans-serif;color:${NIGHT}">
 <tr><td style="padding:24px 28px 18px;border-bottom:4px solid ${BLUE}"><img src="cid:apolloon-logo" alt="Apolloon" width="140" style="display:block;border:0;width:140px;height:auto"></td></tr>
 <tr><td style="padding:28px 28px 8px;font-size:16px;line-height:1.5">${paragraphs}</td></tr>
-<tr><td align="center" style="padding:4px 28px 24px"><img src="cid:wrapped-card" alt="Jouw kaart van de 24 Urenloop" width="300" style="display:block;width:300px;max-width:100%;height:auto;border:0;border-radius:12px"></td></tr>
-<tr><td style="padding:0 28px 28px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eaf3fc;border-radius:12px"><tr><td style="padding:20px 22px;font-size:15px;line-height:1.5">
-<p style="margin:0 0 10px;font-size:17px;font-weight:bold">In je Instagram-story</p>
-<ol style="margin:0 0 18px;padding-left:20px">${steps}</ol>
-<a href="https://www.instagram.com/" style="display:inline-block;background:${BLUE};color:#ffffff;text-decoration:none;font-weight:bold;padding:12px 24px;border-radius:999px">Open Instagram</a>
-</td></tr></table></td></tr>
+<tr><td align="center" style="padding:4px 28px 20px"><img src="cid:wrapped-card" alt="Jouw 24u Wrapped" width="300" style="display:block;width:300px;max-width:100%;height:auto;border:0;border-radius:12px"></td></tr>
+<tr><td align="center" style="padding:0 28px 28px"><a href="https://www.instagram.com/" style="display:inline-block;background:${BLUE};color:#ffffff;text-decoration:none;font-weight:bold;padding:12px 24px;border-radius:999px">Open Instagram</a></td></tr>
 <tr><td style="padding:0 28px 28px;font-size:16px;line-height:1.5">Sportieve groeten,<br>Apolloon</td></tr>
 </table>
 <p style="margin:16px 0 0;font-family:Helvetica,Arial,sans-serif;font-size:12px;color:#6b7686">Apolloon, 24 Urenloop</p>
 </td></tr></table>
 </body></html>`;
-  const plainSteps = STORY_STEPS.map((step, index) => `${index + 1}. ${step}`).join('\n');
   return {
     from: input.from,
     to,
     subject: input.subject,
-    text: `${input.text}\n\nIn je Instagram-story:\n${plainSteps}\n\nSportieve groeten,\nApolloon`,
+    text: `${input.text}\n\nSportieve groeten,\nApolloon`,
     html,
     // The card shows in the mail and is attached once more, so it saves to a phone in one tap.
     attachments: [
