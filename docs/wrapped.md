@@ -2,7 +2,7 @@
 
 After the race, every runner who ran at least one lap gets one image of their race (1080×1920, an Instagram story) by e-mail. Runners with no laps get nothing.
 
-Wrapped is not part of the event app. You run it once, at home, from your own laptop, on a backup of the race. The race laptops need nothing.
+Wrapped is not part of the event app. You run it once, at home, from your own laptop, on a backup of the race that someone takes at the event (step 1). The race laptops need nothing else, and nothing needs internet at the event.
 
 ## What is on a card
 
@@ -23,7 +23,7 @@ To change the design, change only `WrappedCard.tsx` and `wrapped.css`.
 
 ## After the race
 
-1. On any race laptop, open Beheer › Systeem & herstel, click "Nu backup maken", and copy the newest `apolloon-….sqlite` from the app data folder's `backups/` to a USB stick. Take it after the race was finished.
+1. After the race is finished, someone at the event opens Beheer › Systeem & herstel on any race laptop, clicks "Nu backup maken" and then "Laatste backup downloaden". That saves one `apolloon-….sqlite` file in the laptop's Downloads folder. They put it on a USB stick or share it privately with whoever runs Wrapped, never as a public link: it holds everyone's form answers. You don't need to be at the event, and it can wait: every linked laptop keeps the race and its backups until someone clears the race, and clearing makes a backup first.
 2. On your laptop, in this repository (once: `npm ci` and `npx playwright install chromium`):
 
    ```sh
