@@ -6,7 +6,6 @@ import test from 'node:test';
 import { SMTPServer } from 'smtp-server';
 import { sendWrappedMails, type SmtpServer } from '../scripts/wrapped/mail.ts';
 import { mergeManifest, readManifest, writeManifest, type WrappedCard } from '../scripts/wrapped/manifest.ts';
-import { sharePageHtml } from '../scripts/wrapped/share-page.ts';
 
 type Received = { to: string[]; raw: string };
 
@@ -161,32 +160,4 @@ test('the test mail goes to the sender and marks nobody as mailed', async () => 
   } finally {
     await mail.close();
   }
-});
-
-test('once a card is online, the mail button opens its share page', async () => {
-  const mail = await fakeGmail();
-  const folder = await folderWithCards([card('1', 'een@example.be')]);
-  const manifest = (await readManifest(folder))!;
-  manifest.cards[0].shareUrl = 'https://example.be/w/token-1/';
-  await writeManifest(folder, manifest);
-  try {
-    await sendWrappedMails(input(folder), { server: mail.smtp, delayMs: 0 });
-    const raw = mail.received[0].raw.replace(/=\r\n/g, '');
-    assert.match(raw, /href=3D"https:\/\/example\.be\/w\/token-1\/"/);
-    assert.match(raw, /Zet in je Instagram-story/);
-    assert.doesNotMatch(raw, /Open Instagram/);
-    // Making the card again keeps its link, so a mail already sent keeps working.
-    const remade = mergeManifest(await readManifest(folder), [card('1', 'een@example.be')], Date.now());
-    assert.equal(remade.cards[0].shareUrl, 'https://example.be/w/token-1/');
-  } finally {
-    await mail.close();
-  }
-});
-
-test('the share page shares only the image and escapes the name', () => {
-  const html = sharePageHtml({ name: 'Jo <de "snelle">', year: 2026 });
-  assert.match(html, /24u Wrapped 2026 van Jo &#60;de &#34;snelle&#34;&#62;/);
-  assert.doesNotMatch(html, /<de/);
-  assert.match(html, /navigator\.share\(\{ files: \[file\] \}\)/);
-  assert.match(html, /noindex/);
 });

@@ -91,10 +91,6 @@ const NIGHT = '#162033';
 const LOGO = fileURLToPath(new URL('../../public/brand/apolloon-logo.png', import.meta.url));
 
 function message(input: WrappedMailInput, card: WrappedManifestEntry, to: string) {
-  // The share page opens the phone's share menu with the card; without one, the button only opens Instagram.
-  const button = card.shareUrl
-    ? { href: card.shareUrl, label: 'Zet in je Instagram-story' }
-    : { href: 'https://www.instagram.com/', label: 'Open Instagram' };
   const paragraphs = input.text
     .split(/\n{2,}/)
     .map((paragraph) => `<p style="margin:0 0 16px">${escapeHtml(paragraph).replace(/\n/g, '<br>')}</p>`)
@@ -106,7 +102,7 @@ function message(input: WrappedMailInput, card: WrappedManifestEntry, to: string
 <tr><td style="padding:24px 28px 18px;border-bottom:4px solid ${BLUE}"><img src="cid:apolloon-logo" alt="Apolloon" width="140" style="display:block;border:0;width:140px;height:auto"></td></tr>
 <tr><td style="padding:28px 28px 8px;font-size:16px;line-height:1.5">${paragraphs}</td></tr>
 <tr><td align="center" style="padding:4px 28px 20px"><img src="cid:wrapped-card" alt="Jouw 24u Wrapped" width="300" style="display:block;width:300px;max-width:100%;height:auto;border:0;border-radius:12px"></td></tr>
-<tr><td align="center" style="padding:0 28px 28px"><a href="${escapeHtml(button.href)}" style="display:inline-block;background:${BLUE};color:#ffffff;text-decoration:none;font-weight:bold;font-size:17px;padding:14px 28px;border-radius:999px">${button.label}</a></td></tr>
+<tr><td align="center" style="padding:0 28px 28px"><a href="https://www.instagram.com/" style="display:inline-block;background:${BLUE};color:#ffffff;text-decoration:none;font-weight:bold;padding:12px 24px;border-radius:999px">Open Instagram</a></td></tr>
 <tr><td style="padding:0 28px 28px;font-size:16px;line-height:1.5">Sportieve groeten,<br>Apolloon</td></tr>
 </table>
 <p style="margin:16px 0 0;font-family:Helvetica,Arial,sans-serif;font-size:12px;color:#6b7686">Apolloon, 24 Urenloop</p>
@@ -116,7 +112,7 @@ function message(input: WrappedMailInput, card: WrappedManifestEntry, to: string
     from: input.from,
     to,
     subject: input.subject,
-    text: `${input.text}\n\n${button.label}: ${button.href}\n\nSportieve groeten,\nApolloon`,
+    text: `${input.text}\n\nSportieve groeten,\nApolloon`,
     html,
     // The card shows in the mail and is attached once more, so it saves to a phone in one tap.
     attachments: [
