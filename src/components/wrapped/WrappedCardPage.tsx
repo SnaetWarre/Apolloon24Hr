@@ -12,7 +12,7 @@ export function WrappedCardPage() {
   const runnerId = useRouterState({
     select: (state) => (state.location.search as { runner?: string }).runner ?? null,
   });
-  const { wrapped, ready } = useWrapped();
+  const { wrapped, ready, race } = useWrapped();
   const runner = ready ? wrapped.find((entry) => entry.runnerId === runnerId) : undefined;
 
   React.useEffect(() => {
@@ -35,7 +35,10 @@ export function WrappedCardPage() {
   if (!runner) return <p className="wrapped-missing">Geen loper met rondes gevonden voor deze kaart.</p>;
   return (
     <div className="wrapped-page">
-      <WrappedCard runner={runner} />
+      <WrappedCard
+        runner={runner}
+        year={new Date(race.raceFinishedAt ?? race.raceStartedAt ?? Date.now()).getFullYear()}
+      />
     </div>
   );
 }

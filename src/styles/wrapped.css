@@ -9,7 +9,7 @@
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 64px;
+  gap: 56px;
   box-sizing: border-box;
   width: 1080px;
   height: 1920px;
@@ -48,9 +48,10 @@
   letter-spacing: 0.04em;
 }
 
-.wrapped-card__who {
+.wrapped-card__profile {
   display: grid;
-  gap: 12px;
+  justify-items: start;
+  gap: 16px;
 }
 
 .wrapped-card__number {
@@ -65,85 +66,105 @@
   overflow-wrap: anywhere;
 }
 
-.wrapped-card__hero {
-  display: grid;
-  justify-items: start;
-  gap: 20px;
+.wrapped-card__labels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
 }
 
-.wrapped-card__km {
-  padding: 8px 40px 16px;
+.wrapped-card__labels .label-pill {
+  min-height: 60px;
+  gap: 12px;
+  padding-inline: 16px 20px;
+  border-radius: 12px;
+  font-size: 30px;
+}
+
+.wrapped-card__labels .label-image {
+  width: 40px;
+  height: 40px;
+}
+
+/* The runner type on the yellow slab, the loudest thing on the card. */
+.wrapped-card__type {
+  display: grid;
+  justify-self: stretch;
+  gap: 8px;
+  margin-block-start: 24px;
+  padding: 28px 40px 32px;
   background: var(--wrapped-yellow);
   color: var(--wrapped-night);
-  font: 900 280px/0.9 "Big Shoulders Display", var(--font-body);
-  font-variant-numeric: tabular-nums;
 }
 
-.wrapped-card__km small {
-  margin-inline-start: 16px;
-  font-size: 120px;
+.wrapped-card__type span,
+.wrapped-card__kicker {
+  font: 700 30px/1 var(--font-body);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
 
-.wrapped-card__laps {
-  font: 800 72px/1 var(--font-body);
+/* 104px keeps the longest type, "Kilometervreter", on one line. */
+.wrapped-card__type strong {
+  font: 900 104px/0.9 "Big Shoulders Display", var(--font-body);
+  text-transform: uppercase;
+}
+
+.wrapped-card__type p {
+  margin: 0;
+  font: 700 36px/1.2 var(--font-body);
+  text-wrap: balance;
 }
 
 .wrapped-card__stats {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 32px;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 40px 32px;
   margin: 0;
 }
 
 .wrapped-card__stats dt {
-  font: 600 30px/1.2 var(--font-body);
+  font: 600 32px/1.2 var(--font-body);
   opacity: 0.8;
 }
 
 .wrapped-card__stats dd {
   margin: 8px 0 0;
-  font: 800 64px/1 var(--font-body);
+  font: 800 88px/1 var(--font-body);
   font-variant-numeric: tabular-nums;
 }
 
-.wrapped-card__stats small {
-  font-size: 36px;
-  opacity: 0.7;
-}
-
-.wrapped-card__facts {
+.wrapped-card__places {
   display: grid;
-  gap: 28px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  font: 700 46px/1.2 var(--font-body);
-  text-wrap: balance;
-}
-
-.wrapped-card__facts li::before {
-  content: "★ ";
-  color: var(--wrapped-yellow);
-}
-
-.wrapped-card__labels {
-  display: flex;
-  flex-wrap: wrap;
   gap: 16px;
   margin-block-start: auto;
 }
 
-.wrapped-card__labels .label-pill {
-  min-height: 64px;
-  gap: 12px;
-  padding-inline: 16px 20px;
-  border-radius: 12px;
-  font-size: 32px;
+.wrapped-card__kicker {
+  opacity: 0.8;
 }
 
-.wrapped-card__labels .label-image {
-  width: 44px;
-  height: 44px;
+.wrapped-card__place {
+  margin: 0;
+  font: 700 44px/1 var(--font-body);
+}
+
+.wrapped-card__place strong {
+  color: var(--wrapped-yellow);
+  font: 900 140px/0.9 "Big Shoulders Display", var(--font-body);
+}
+
+.wrapped-card__places ul {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font: 600 38px/1.2 var(--font-body);
+}
+
+.wrapped-card__places li strong {
+  color: var(--wrapped-yellow);
+  font-weight: 900;
 }
 
 /* /wrapped/card: the card alone, at the top left, exactly as the PNG. */

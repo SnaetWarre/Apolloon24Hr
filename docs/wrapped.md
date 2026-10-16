@@ -6,14 +6,18 @@ Wrapped is not part of the event app. You run it once, at home, from your own la
 
 ## What is on a card
 
-The card page is `/wrapped/card?runner=<id>` (`src/components/wrapped/WrappedCard.tsx`, styles in `src/styles/wrapped.css`). It shows the distance (one lap is 520 m), the lap count, the fastest and average lap, the place in laps, the runner's labels, and the four best "facts". The facts are short Dutch sentences such as "Je liep 4 rondes tussen middernacht en 6 uur".
+The card page is `/wrapped/card?runner=<id>` (`src/components/wrapped/WrappedCard.tsx`, styles in `src/styles/wrapped.css`). Apolloon's working group chose what is on it:
 
-`src/lib/wrapped.ts` computes the numbers and the facts with the same rules as the rest of the app:
+- Lopersprofiel: name, number, labels, and a runner type from their own race. The types are Sprinter (fastest lap in the fastest 10%), Kilometervreter (more laps than 90% of runners), Metronoom (at least 3 lap times within 4 seconds of each other), Nachtloper (most laps between 00:00 and 06:00), Vroege vogel (most laps between 06:00 and 10:00), and otherwise Teamspeler. The first one that fits wins.
+- Aantal rondjes, snelste ronde, and gemiddelde rondetijd.
+- Burgies gepakt: the "Burgie gepakt" moments while this runner was on the track, shown only when there was at least one.
+- Coëfficiëntenplaats: the place by points among everyone who ran ("3e van 140 lopers" in the top ten, "Top 30%" below that), and the place in up to three of the runner's labels.
+
+`src/lib/wrapped.ts` computes these with the same rules as the rest of the app:
 
 - Every lap counts as a lap. Lap times skip double presses, split halves and forgotten handoffs (`isMeasuredLap` and `hasPlausibleDuration`).
-- Points use `calculateLapPoints`. A label rank counts the labels a runner had when they ran each lap.
+- Points use `calculateLapPoints`. A label place counts the labels a runner had when they ran each lap, as the Binnenscherm does.
 - Hours are Brussels hours.
-- A guess from the form, such as "8" rondes or "1:25" per lap, only shows when it reads cleanly. "Zo veel mogelijk" leaves that fact out.
 
 To change the design, change only `WrappedCard.tsx` and `wrapped.css`.
 
@@ -48,4 +52,4 @@ Nothing here costs money: Playwright makes the images and a normal Gmail account
 
 ## Tests
 
-`tests/wrapped.test.ts` checks the numbers and facts on a made-up race. `tests/wrapped-mail.test.ts` sends through a local fake SMTP server (`smtp-server`) and checks the attachment, the resume after a stop, the stop on a wrong password, and that the test mail marks nobody as mailed.
+`tests/wrapped.test.ts` checks the numbers, places and runner types on a made-up race. `tests/wrapped-mail.test.ts` sends through a local fake SMTP server (`smtp-server`) and checks the attachment, the resume after a stop, the stop on a wrong password, and that the test mail marks nobody as mailed.
