@@ -139,6 +139,8 @@ backup retention, and the event-day recovery runbook.
   browser operator take to reopen on another laptop when theirs crashes or
   freezes, and whether short freezes move them (`npm run build` first).
 - `public/event-network/`: static-address scripts, downloadable from Beheer for manual use.
+- `scripts/wrapped/`: Apolloon Wrapped, run after the race: every runner's card (`/wrapped/card`) as a PNG and
+  mailed through Gmail (`npm run wrapped:cards`, `npm run wrapped:mail`; see `docs/wrapped.md`).
 - `docs/beschrijving.txt`: the original requirements.
 - `.dev-data/` and `.test-data/` are disposable local databases.
 - `data/app.db` is the normal local app database. Local databases are git-ignored;
