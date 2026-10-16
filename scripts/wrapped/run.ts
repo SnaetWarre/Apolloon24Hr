@@ -31,12 +31,7 @@ const DEFAULT_MAIL_TEXT = (year: number) => `Onderwerp: Jouw 24 Urenloop ${year}
 
 Hoi!
 
-Bedankt om mee te lopen op de 24 Urenloop. Hierbij jouw kaart: je rondes, je snelste ronde en een paar weetjes over jouw race.
-
-Deel hem gerust in je Instagram-story!
-
-Sportieve groeten,
-Apolloon
+Bedankt om mee te lopen op de 24 Urenloop. Hieronder zit jouw kaart met je rondjes, je snelste en gemiddelde ronde, je lopersprofiel en je plaats in het klassement.
 `;
 
 const [command, ...rest] = process.argv.slice(2);

@@ -1,11 +1,12 @@
 /*
  * Apolloon Wrapped: one 1080×1920 story image per runner (WrappedCard.tsx).
- * A placeholder in the Buitenscherm's colours (blue, night blue, yellow slab) until the
- * real design arrives. Sizes are in px on purpose: the card is an image, not a page.
+ * A placeholder in Apolloon blue and night blue until the real design arrives. No
+ * yellow: that is a rival club's colour. Sizes are in px on purpose: the card is an
+ * image, not a page.
  */
 .wrapped-card {
   --wrapped-night: oklch(24.4% 0.039 262.6);
-  --wrapped-yellow: oklch(87.18% 0.1716 90.95);
+  --wrapped-accent: oklch(84% 0.08 240);
   position: relative;
   display: flex;
   flex-direction: column;
@@ -85,15 +86,19 @@
   height: 40px;
 }
 
-/* The runner type on the yellow slab, the loudest thing on the card. */
+/* The runner type on a white slab, the loudest thing on the card. */
 .wrapped-card__type {
   display: grid;
   justify-self: stretch;
   gap: 8px;
   margin-block-start: 24px;
   padding: 28px 40px 32px;
-  background: var(--wrapped-yellow);
+  background: oklch(100% 0 none);
   color: var(--wrapped-night);
+}
+
+.wrapped-card__type span {
+  color: var(--apolloon-blue);
 }
 
 .wrapped-card__type span,
@@ -105,6 +110,7 @@
 
 /* 104px keeps the longest type, "Kilometervreter", on one line. */
 .wrapped-card__type strong {
+  color: var(--apolloon-blue);
   font: 900 104px/0.9 "Big Shoulders Display", var(--font-body);
   text-transform: uppercase;
 }
@@ -149,7 +155,7 @@
 }
 
 .wrapped-card__place strong {
-  color: var(--wrapped-yellow);
+  color: var(--wrapped-accent);
   font: 900 140px/0.9 "Big Shoulders Display", var(--font-body);
 }
 
@@ -163,7 +169,7 @@
 }
 
 .wrapped-card__places li strong {
-  color: var(--wrapped-yellow);
+  color: var(--wrapped-accent);
   font-weight: 900;
 }
 

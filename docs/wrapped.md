@@ -31,7 +31,7 @@ To change the design, change only `WrappedCard.tsx` and `wrapped.css`.
    ```
 
    This builds the app, starts it on a copy of the backup, and saves every card as a PNG in `~/Documents/Apolloon Wrapped <year>/`, together with `manifest.json` (who has which card and who got it by mail) and `mail.txt`. It takes about a minute for 100 runners. Add `--out=<folder>` for another folder and `--only=146,203` to make only those runners' cards, for example to check the design. It refuses a backup in which the race is not finished, unless you add `--force`.
-3. Look at a few cards. Edit `mail.txt`: the first line is the subject (`Onderwerp: …`), the rest is the mail.
+3. Look at a few cards. Edit `mail.txt`: the first line is the subject (`Onderwerp: …`), the rest is the greeting and message. The mail adds the Apolloon logo, the card, three steps to put it in an Instagram story with an "Open Instagram" button, and the sign-off. Instagram has no link that posts a picture straight into a story, so the steps are the shortest way.
 4. See who gets a mail:
 
    ```sh
