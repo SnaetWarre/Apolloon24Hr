@@ -40,6 +40,7 @@
     "test:sim": "node --import tsx --test tests/raft-sim.test.ts",
     "rehearse": "node scripts/rehearse.mjs",
     "wrapped:cards": "npm run build && tsx scripts/wrapped/run.ts cards",
+    "wrapped:publish": "tsx scripts/wrapped/run.ts publish",
     "wrapped:mail": "tsx scripts/wrapped/run.ts mail",
     "bench:network": "node scripts/bench-network.mjs",
     "bench:failover": "node scripts/bench-failover.mjs",

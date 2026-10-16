@@ -31,15 +31,37 @@ To change the design, change only `WrappedCard.tsx` and `wrapped.css`.
    ```
 
    This builds the app, starts it on a copy of the backup, and saves every card as a PNG in `~/Documents/Apolloon Wrapped <year>/`, together with `manifest.json` (who has which card and who got it by mail) and `mail.txt`. It takes about a minute for 100 runners. Add `--out=<folder>` for another folder and `--only=146,203` to make only those runners' cards, for example to check the design. It refuses a backup in which the race is not finished, unless you add `--force`.
-3. Look at a few cards. Edit `mail.txt`: the first line is the subject (`Onderwerp: …`), the rest is the greeting and message. The mail adds the Apolloon logo, the card, an "Open Instagram" button, and the sign-off.
-4. See who gets a mail:
+3. Look at a few cards. Edit `mail.txt`: the first line is the subject (`Onderwerp: …`), the rest is the greeting and message. The mail adds the Apolloon logo, the card, a "Zet in je Instagram-story" button to the runner's share page (step 4), and the sign-off. `wrapped:mail -- --send` refuses to start while a card is not online yet.
+4. Put the share pages online:
+
+   ```sh
+   npm run wrapped:publish
+   ```
+
+   This uploads one page per card to the VPS, at `https://185-102-172-74.sslip.io/w/<random token>/`, and writes each link into `manifest.json`. The button in the mail opens that page. On a phone, its "Zet in je Instagram-story" button opens the share menu with the card, where Instagram offers Story. Instagram has no link that posts a picture straight into a story, so the page is what makes it one tap. The tokens are random and the pages tell search engines to stay away, but anyone with a link can see that card. Publishing again keeps every link. About 400 cards take about 300 MB on the VPS. Remove them once nobody needs them: `ssh root@185.102.172.74 'rm -rf /srv/apolloon-wrapped/w/*'`.
+
+   The VPS serves these pages with Caddy (installed 2026-10-16 from Ubuntu's packages). Caddy gets the https certificate by itself: the phone's share menu only works on an https page. `sslip.io` is a free name that points at the VPS's address. `/etc/caddy/Caddyfile`:
+
+   ```text
+   185-102-172-74.sslip.io {
+       root * /srv/apolloon-wrapped
+       file_server
+       header {
+           X-Robots-Tag "noindex, nofollow"
+           Referrer-Policy "no-referrer"
+           -Server
+       }
+   }
+   ```
+
+5. See who gets a mail:
 
    ```sh
    npm run wrapped:mail
    ```
 
    This sends nothing. It lists who has no valid e-mail address (send those cards yourself), who answered "Nee" to being contacted again (they get no mail), and runners who share an address.
-5. Make a Google app password for the sending Gmail account: Google account › Security › 2-Step Verification must be on, then App passwords. Send yourself a test mail, then everyone:
+6. Make a Google app password for the sending Gmail account: Google account › Security › 2-Step Verification must be on, then App passwords. Send yourself a test mail, then everyone:
 
    ```sh
    npm run wrapped:mail -- --test --from=club@gmail.com

@@ -1,10 +1,14 @@
 // Apolloon Wrapped, run after the race from one laptop at home (docs/wrapped.md):
 //   npm run wrapped:cards -- --db=<backup.sqlite> [--out=<folder>] [--only=146,203] [--force]
+//   npm run wrapped:publish -- [--out=<folder>] [--only=146,203]
 //   npm run wrapped:mail -- [--out=<folder>] [--from=<gmail address>] [--test | --send]
 // `cards` starts the built app on a copy of the backup and saves every runner's card
-// (/wrapped/card) as a 1080×1920 PNG with Playwright. `mail` sends each runner their card
-// through Gmail; without --test or --send it only lists who would get one.
-import { spawn } from 'node:child_process';
+// (/wrapped/card) as a 1080×1920 PNG with Playwright. `publish` uploads a share page per
+// card to the VPS, so the button in the mail puts the card in an Instagram story in one tap.
+// `mail` sends each runner their card through Gmail; without --test or --send it only lists
+// who would get one.
+import { execFileSync, spawn } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
@@ -15,6 +19,7 @@ import { chromium } from 'playwright';
 import { buildWrapped, wrappedFileNames } from '../../src/lib/wrapped.ts';
 import type { LapRecord, LiveAppSnapshot, RaceEvent, RunnerRegistration } from '../../shared/schemas.ts';
 import { sendWrappedMails, GMAIL, type SmtpServer } from './mail.ts';
+import { SHARE_IMAGE_FILE, sharePageHtml } from './share-page.ts';
 import {
   mailableCards,
   mergeManifest,
@@ -27,13 +32,18 @@ import {
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const serverEntry = path.join(repoRoot, 'dist-server/server/index.js');
 const MAIL_TEXT_FILE = 'mail.txt';
+// The share pages live on the VPS behind Caddy, which gets the https certificate for this
+// free sslip.io name (it points at the VPS's address). docs/wrapped.md has the Caddy setup.
+const SHARE_SSH = process.env.WRAPPED_SSH ?? 'root@185.102.172.74';
+const SHARE_DIR = '/srv/apolloon-wrapped/w';
+const SHARE_BASE_URL = process.env.WRAPPED_SHARE_URL ?? 'https://185-102-172-74.sslip.io/w';
 const DEFAULT_MAIL_TEXT = (year: number) => `Onderwerp: Jouw 24u Wrapped ${year}, Apolloon edition
 
 Hey!
 
 Bedankt om mee te lopen voor Apolloon! Hieronder staat jouw 24u Wrapped, Apolloon edition.
 
-Sla hem op en zet hem in je Instagram-story!
+Met de knop onder je kaart zet je hem zo in je Instagram-story!
 `;
 
 const [command, ...rest] = process.argv.slice(2);
@@ -46,8 +56,9 @@ const options = Object.fromEntries(
 
 try {
   if (command === 'cards') await makeCards();
+  else if (command === 'publish') await publish();
   else if (command === 'mail') await mail();
-  else throw new Error('Gebruik: run.ts cards --db=<backup.sqlite> | run.ts mail [--test | --send]');
+  else throw new Error('Gebruik: run.ts cards --db=<backup.sqlite> | run.ts publish | run.ts mail [--test | --send]');
 } catch (error) {
   console.error(`\n${error instanceof Error ? error.message : String(error)}`);
   process.exitCode = 1;
@@ -123,6 +134,41 @@ async function makeCards() {
   }
 }
 
+async function publish() {
+  const out = outputFolder(new Date().getFullYear());
+  const manifest = await readManifest(out);
+  if (!manifest) throw new Error(`Geen kaarten in ${out}. Maak ze eerst met npm run wrapped:cards, of geef --out mee.`);
+  const only = options.only ? new Set(options.only.split(',').map((each) => each.trim())) : null;
+  const chosen = manifest.cards.filter(
+    (card) => !only || only.has(card.runnerId) || (card.runnerNumber != null && only.has(card.runnerNumber))
+  );
+  if (!chosen.length) throw new Error('Geen kaarten om online te zetten.');
+
+  // A random token per runner: nobody finds someone else's page, and it stays the same when published again.
+  for (const card of chosen) card.shareUrl ??= `${SHARE_BASE_URL}/${randomBytes(16).toString('base64url')}/`;
+  const year = new Date(manifest.madeAt).getFullYear();
+  const staging = fs.mkdtempSync(path.join(os.tmpdir(), 'apolloon-wrapped-share-'));
+  try {
+    for (const card of chosen) {
+      const page = path.join(staging, new URL(card.shareUrl!).pathname.split('/').filter(Boolean).at(-1)!);
+      fs.mkdirSync(page);
+      fs.copyFileSync(path.join(out, card.fileName), path.join(page, SHARE_IMAGE_FILE));
+      fs.writeFileSync(path.join(page, 'index.html'), sharePageHtml({ name: card.name, year }));
+    }
+    console.log(`${chosen.length} deelpagina's uploaden naar ${SHARE_SSH}:${SHARE_DIR}`);
+    execFileSync('rsync', ['-a', '--chmod=D755,F644', `${staging}/`, `${SHARE_SSH}:${SHARE_DIR}/`], {
+      stdio: 'inherit',
+    });
+  } finally {
+    fs.rmSync(staging, { recursive: true, force: true });
+  }
+  await writeManifest(out, manifest);
+
+  const check = await fetch(chosen[0].shareUrl!);
+  if (!check.ok) throw new Error(`De deelpagina geeft ${check.status}: ${chosen[0].shareUrl}`);
+  console.log(`Online. Voorbeeld: ${chosen[0].shareUrl}`);
+}
+
 async function mail() {
   const out = outputFolder(new Date().getFullYear());
   const manifest = await readManifest(out);
@@ -164,6 +210,13 @@ async function mail() {
     (card) => `${label(card)}: ${card.error}`
   );
 
+  const offline = toMail.filter((card) => !card.shareUrl);
+  if (offline.length) {
+    console.log(
+      `\n${offline.length} kaarten staan nog niet online, dus hun knop opent alleen Instagram. Zet ze online met: npm run wrapped:publish -- --out="${out}"`
+    );
+  }
+
   const testOnly = options.test === 'true';
   if (!testOnly && options.send !== 'true') {
     console.log(
@@ -175,6 +228,8 @@ async function mail() {
   if (!from?.includes('@')) throw new Error('Geef het Gmail-adres mee: --from=<adres>');
   if (!testOnly) {
     if (!toMail.length) return console.log('\nIedereen met een geldig adres kreeg zijn kaart al.');
+    if (offline.length)
+      throw new Error('Zet eerst alle kaarten online (npm run wrapped:publish), anders werkt de deelknop niet.');
     const answer = await ask(
       `\n${toMail.length} mails versturen vanaf ${from}, ongeveer ${Math.ceil((toMail.length * 2) / 60)} minuten? Typ ja: `
     );

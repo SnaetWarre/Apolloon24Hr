@@ -22,6 +22,8 @@ export type WrappedManifestEntry = WrappedCard & {
   sentAt: number | null;
   /** Why the last mail to this runner failed, until one gets through. */
   error: string | null;
+  /** The runner's share page, set by `npm run wrapped:publish`; a random token keeps it unguessable. */
+  shareUrl?: string | null;
 };
 
 export type WrappedManifest = { madeAt: number; cards: WrappedManifestEntry[] };
@@ -46,12 +48,19 @@ export async function writeManifest(folder: string, manifest: WrappedManifest): 
 
 /**
  * Adds the cards just made to the list. Making a card again keeps whether it was mailed,
- * so nobody gets a second mail, and cards made in an earlier run stay on the list.
+ * so nobody gets a second mail, and its share link, so a link in a sent mail keeps working.
+ * Cards made in an earlier run stay on the list.
  */
 export function mergeManifest(previous: WrappedManifest | null, cards: WrappedCard[], madeAt: number): WrappedManifest {
   const byRunner = new Map(previous?.cards.map((card) => [card.runnerId, card]) ?? []);
   for (const card of cards) {
-    byRunner.set(card.runnerId, { ...card, sentAt: byRunner.get(card.runnerId)?.sentAt ?? null, error: null });
+    const previousCard = byRunner.get(card.runnerId);
+    byRunner.set(card.runnerId, {
+      ...card,
+      sentAt: previousCard?.sentAt ?? null,
+      error: null,
+      shareUrl: previousCard?.shareUrl ?? null,
+    });
   }
   return { madeAt, cards: [...byRunner.values()].sort((a, b) => a.fileName.localeCompare(b.fileName, 'nl-BE')) };
 }
