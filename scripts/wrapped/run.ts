@@ -33,7 +33,7 @@ Hey!
 
 Bedankt om mee te lopen voor Apolloon! Hieronder staat jouw 24u Wrapped, Apolloon edition.
 
-Sla hem op en zet hem in je Instagram-story!
+Sla ze op en zet ze in je Instagram-story!
 `;
 
 const [command, ...rest] = process.argv.slice(2);

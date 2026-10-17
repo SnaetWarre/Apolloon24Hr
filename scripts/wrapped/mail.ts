@@ -86,9 +86,23 @@ export async function sendWrappedMails(
 }
 
 // Mail apps ignore stylesheets and modern CSS, so the mail is tables with inline styles.
-const BLUE = '#0d78d3';
-const NIGHT = '#162033';
-const LOGO = fileURLToPath(new URL('../../public/brand/apolloon-logo.png', import.meta.url));
+// Dark, in the colours of the Wrapped pages.
+const NIGHT = '#0a1037';
+const DEEP = '#05081f';
+const LIGHT = '#e2e6ff';
+const ORANGE = '#eb6c1d';
+const LOGO = fileURLToPath(new URL('./apolloon-logo-white.png', import.meta.url));
+/** The checkered strip from page 4, as table cells because mail apps drop background images. */
+const CHECKERS = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0">${[0, 1]
+  .map(
+    (row) =>
+      `<tr>${Array.from(
+        { length: 26 },
+        (_, index) =>
+          `<td height="10" style="height:10px;line-height:10px;font-size:0;background:${(index + row) % 2 ? NIGHT : LIGHT}">&nbsp;</td>`
+      ).join('')}</tr>`
+  )
+  .join('')}</table>`;
 
 function message(input: WrappedMailInput, card: WrappedManifestEntry, to: string) {
   const paragraphs = input.text
@@ -105,16 +119,18 @@ function message(input: WrappedMailInput, card: WrappedManifestEntry, to: string
     (_, row) => `<tr>${cells.slice(row * 2, row * 2 + 2).join('')}</tr>`
   ).join('');
   const html = `<!doctype html>
-<html lang="nl"><body style="margin:0;padding:0;background:#eef2f7">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef2f7"><tr><td align="center" style="padding:24px 12px">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border-radius:16px;font-family:Helvetica,Arial,sans-serif;color:${NIGHT}">
-<tr><td style="padding:24px 28px 18px;border-bottom:4px solid ${BLUE}"><img src="cid:apolloon-logo" alt="Apolloon" width="140" style="display:block;border:0;width:140px;height:auto"></td></tr>
-<tr><td style="padding:28px 28px 8px;font-size:16px;line-height:1.5">${paragraphs}</td></tr>
+<html lang="nl"><head><meta name="color-scheme" content="dark"><meta name="supported-color-schemes" content="dark"></head>
+<body style="margin:0;padding:0;background:${DEEP}">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${DEEP}"><tr><td align="center" style="padding:24px 12px">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:${NIGHT};border-radius:16px;overflow:hidden;font-family:Helvetica,Arial,sans-serif;color:${LIGHT}">
+<tr><td style="padding:26px 28px 22px"><img src="cid:apolloon-logo" alt="Apolloon" width="140" style="display:block;border:0;width:140px;height:auto"></td></tr>
+<tr><td style="padding:0">${CHECKERS}</td></tr>
+<tr><td style="padding:28px 28px 8px;font-size:16px;line-height:1.5;color:${LIGHT}">${paragraphs}</td></tr>
 <tr><td align="center" style="padding:4px 20px 20px"><table role="presentation" cellpadding="0" cellspacing="0">${pages}</table></td></tr>
-<tr><td align="center" style="padding:0 28px 28px"><a href="https://www.instagram.com/" style="display:inline-block;background:${BLUE};color:#ffffff;text-decoration:none;font-weight:bold;padding:12px 24px;border-radius:999px">Open Instagram</a></td></tr>
-<tr><td style="padding:0 28px 28px;font-size:16px;line-height:1.5">Sportieve groeten,<br>Apolloon</td></tr>
+<tr><td align="center" style="padding:0 28px 28px"><a href="https://www.instagram.com/" style="display:inline-block;background:${ORANGE};color:#ffffff;text-decoration:none;font-weight:bold;padding:12px 24px;border-radius:999px">Open Instagram</a></td></tr>
+<tr><td style="padding:0 28px 28px;font-size:16px;line-height:1.5;color:${LIGHT}">Sportieve groeten,<br><strong style="color:${ORANGE}">Apolloon</strong></td></tr>
 </table>
-<p style="margin:16px 0 0;font-family:Helvetica,Arial,sans-serif;font-size:12px;color:#6b7686">Apolloon, 24 Urenloop</p>
+<p style="margin:16px 0 0;font-family:Helvetica,Arial,sans-serif;font-size:12px;color:#6f7aa8">Apolloon, 24 Urenloop</p>
 </td></tr></table>
 </body></html>`;
   return {
