@@ -1,182 +1,124 @@
 /*
- * Apolloon Wrapped: one 1080×1920 story image per runner (WrappedCard.tsx).
- * A placeholder in Apolloon blue and night blue until the real design arrives. No
- * yellow: that is a rival club's colour. Sizes are in px on purpose: the card is an
- * image, not a page.
+ * Apolloon Wrapped: four 1080×1920 story images per runner (WrappedStory.tsx), a copy of
+ * the Canva design. The fonts are the design's own, all SIL Open Font License
+ * (public/fonts/OFL-*.txt). League Spartan is the 2014 version Canva uses; the newer
+ * one has narrower figures. Sizes are in px on purpose: the pages are images.
  */
-.wrapped-card {
-  --wrapped-night: oklch(24.4% 0.039 262.6);
-  --wrapped-accent: oklch(84% 0.08 240);
+@font-face {
+  font-family: "Bebas Neue";
+  font-display: block;
+  src: url(/fonts/bebas-neue-latin-400-normal.woff2) format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "Bebas Neue";
+  font-display: block;
+  src: url(/fonts/bebas-neue-latin-ext-400-normal.woff2) format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: "Racing Sans One";
+  font-display: block;
+  src: url(/fonts/racing-sans-one-latin-400-normal.woff2) format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "Racing Sans One";
+  font-display: block;
+  src: url(/fonts/racing-sans-one-latin-ext-400-normal.woff2) format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: "League Spartan 2014";
+  font-weight: 700;
+  font-display: block;
+  src: url(/fonts/league-spartan-bold-2014.otf) format("opentype");
+}
+
+.wrapped-story {
+  --wrapped-night: #0a1037;
+  --wrapped-orange: #eb6c1d;
+  --wrapped-blue: #5083bf;
   position: relative;
-  display: flex;
-  flex-direction: column;
-  gap: 56px;
-  box-sizing: border-box;
   width: 1080px;
   height: 1920px;
   overflow: clip;
-  padding: 120px 96px;
-  background: linear-gradient(170deg, var(--apolloon-blue) 0%, var(--wrapped-night) 78%);
-  color: oklch(100% 0 none);
-  font-family: var(--font-body);
+  color: #fff;
+  background: 0 0 / 100% 100% no-repeat;
 }
 
-.wrapped-card::before {
-  content: "";
+.wrapped-story--1 { background-image: url(/wrapped/page-1.svg); }
+.wrapped-story--2 { background-image: url(/wrapped/page-2.svg); }
+.wrapped-story--3 { background-image: url(/wrapped/page-3.svg); color: var(--wrapped-night); }
+.wrapped-story--4 { background-image: url(/wrapped/page-4.svg); }
+
+/* The logo's ink fills 334×83 px at 52, 143 in the design; the PNG has a margin around it. */
+.wrapped-story__logo {
   position: absolute;
-  inset: 40px;
-  border: 8px solid currentColor;
-  border-radius: 24px;
-  opacity: 0.5;
-  pointer-events: none;
+  inset: 131.5px auto auto 48.4px;
+  width: 339px;
+  height: 102.3px;
 }
 
-.wrapped-card__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 32px;
+.wrapped-story__text {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  fill: currentColor;
 }
 
-.wrapped-card__logo {
-  width: 330px;
-  height: 100px;
-}
-
-.wrapped-card__event {
-  font: 700 40px/1 var(--font-body);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.wrapped-card__profile {
-  display: grid;
-  justify-items: start;
-  gap: 16px;
-}
-
-.wrapped-card__number {
-  font: 600 44px/1 var(--font-body);
-  opacity: 0.8;
-}
-
-.wrapped-card__name {
-  margin: 0;
-  font: 900 104px/0.95 var(--font-body);
-  text-wrap: balance;
-  overflow-wrap: anywhere;
-}
-
-.wrapped-card__labels {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 16px;
-}
-
-.wrapped-card__labels .label-pill {
-  min-height: 60px;
-  gap: 12px;
-  padding-inline: 16px 20px;
-  border-radius: 12px;
-  font-size: 30px;
-}
-
-.wrapped-card__labels .label-image {
-  width: 40px;
-  height: 40px;
-}
-
-/* The runner type on a white slab, the loudest thing on the card. */
-.wrapped-card__type {
-  display: grid;
-  justify-self: stretch;
-  gap: 8px;
-  margin-block-start: 24px;
-  padding: 28px 40px 32px;
-  background: oklch(100% 0 none);
-  color: var(--wrapped-night);
-}
-
-.wrapped-card__type span {
-  color: var(--apolloon-blue);
-}
-
-.wrapped-card__type span,
-.wrapped-card__kicker {
-  font: 700 30px/1 var(--font-body);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
-
-/* 104px keeps the longest type, "Kilometervreter", on one line. */
-.wrapped-card__type strong {
-  color: var(--apolloon-blue);
-  font: 900 104px/0.9 "Big Shoulders Display", var(--font-body);
+.wrapped-bebas {
+  font-family: "Bebas Neue";
+  letter-spacing: 0.035em;
   text-transform: uppercase;
 }
 
-.wrapped-card__type p {
+.wrapped-tight {
+  letter-spacing: 0;
+}
+
+.wrapped-racing {
+  font-family: "Racing Sans One";
+  letter-spacing: 0;
+}
+
+.wrapped-spartan {
+  font-family: "League Spartan 2014";
+  font-weight: 700;
+}
+
+.wrapped-night { fill: var(--wrapped-night); }
+.wrapped-orange { fill: var(--wrapped-orange); }
+.wrapped-blue { fill: var(--wrapped-blue); }
+
+.wrapped-story__type-text {
   margin: 0;
-  font: 700 36px/1.2 var(--font-body);
-  text-wrap: balance;
+  color: var(--wrapped-blue);
+  font: 70.55px/78.3px "Bebas Neue";
+  letter-spacing: 0.035em;
+  text-transform: uppercase;
 }
 
-.wrapped-card__stats {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 40px 32px;
-  margin: 0;
+.wrapped-story__bar { fill: #eef0ff; }
+.wrapped-story__bar--on { fill: #f4762f; }
+.wrapped-story__dot { fill: #2a2a2a; }
+
+.wrapped-story__hour {
+  fill: #aab2c2;
+  font: 700 28px var(--font-body);
+  font-feature-settings: "zero";
 }
 
-.wrapped-card__stats dt {
-  font: 600 32px/1.2 var(--font-body);
-  opacity: 0.8;
-}
-
-.wrapped-card__stats dd {
-  margin: 8px 0 0;
-  font: 800 88px/1 var(--font-body);
-  font-variant-numeric: tabular-nums;
-}
-
-.wrapped-card__places {
-  display: grid;
-  gap: 16px;
-  margin-block-start: auto;
-}
-
-.wrapped-card__kicker {
-  opacity: 0.8;
-}
-
-.wrapped-card__place {
-  margin: 0;
-  font: 700 44px/1 var(--font-body);
-}
-
-.wrapped-card__place strong {
-  color: var(--wrapped-accent);
-  font: 900 140px/0.9 "Big Shoulders Display", var(--font-body);
-}
-
-.wrapped-card__places ul {
-  display: grid;
-  gap: 12px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  font: 600 38px/1.2 var(--font-body);
-}
-
-.wrapped-card__places li strong {
-  color: var(--wrapped-accent);
-  font-weight: 900;
-}
-
-/* /wrapped/card: the card alone, at the top left, exactly as the PNG. */
+/* /wrapped/card: the runner's pages under each other, each saved as its own PNG. */
 .wrapped-page {
+  display: grid;
   width: 1080px;
-  height: 1920px;
 }
 
 .wrapped-missing {

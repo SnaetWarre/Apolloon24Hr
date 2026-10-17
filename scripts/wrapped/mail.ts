@@ -15,7 +15,7 @@ export type WrappedMailInput = {
   password: string;
   subject: string;
   text: string;
-  /** Sends one card to the sender's own address and changes nothing in the manifest. */
+  /** Sends one runner's Wrapped to the sender's own address and changes nothing in the manifest. */
   testOnly: boolean;
 };
 
@@ -95,13 +95,22 @@ function message(input: WrappedMailInput, card: WrappedManifestEntry, to: string
     .split(/\n{2,}/)
     .map((paragraph) => `<p style="margin:0 0 16px">${escapeHtml(paragraph).replace(/\n/g, '<br>')}</p>`)
     .join('');
+  // Two pages per row, each as wide as fits next to the other on a phone.
+  const cells = card.files.map(
+    (_, index) =>
+      `<td style="padding:6px"><img src="cid:wrapped-${index + 1}" alt="Jouw 24u Wrapped, deel ${index + 1}" width="220" style="display:block;width:220px;max-width:100%;height:auto;border:0;border-radius:10px"></td>`
+  );
+  const pages = Array.from(
+    { length: Math.ceil(cells.length / 2) },
+    (_, row) => `<tr>${cells.slice(row * 2, row * 2 + 2).join('')}</tr>`
+  ).join('');
   const html = `<!doctype html>
 <html lang="nl"><body style="margin:0;padding:0;background:#eef2f7">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef2f7"><tr><td align="center" style="padding:24px 12px">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border-radius:16px;font-family:Helvetica,Arial,sans-serif;color:${NIGHT}">
 <tr><td style="padding:24px 28px 18px;border-bottom:4px solid ${BLUE}"><img src="cid:apolloon-logo" alt="Apolloon" width="140" style="display:block;border:0;width:140px;height:auto"></td></tr>
 <tr><td style="padding:28px 28px 8px;font-size:16px;line-height:1.5">${paragraphs}</td></tr>
-<tr><td align="center" style="padding:4px 28px 20px"><img src="cid:wrapped-card" alt="Jouw 24u Wrapped" width="300" style="display:block;width:300px;max-width:100%;height:auto;border:0;border-radius:12px"></td></tr>
+<tr><td align="center" style="padding:4px 20px 20px"><table role="presentation" cellpadding="0" cellspacing="0">${pages}</table></td></tr>
 <tr><td align="center" style="padding:0 28px 28px"><a href="https://www.instagram.com/" style="display:inline-block;background:${BLUE};color:#ffffff;text-decoration:none;font-weight:bold;padding:12px 24px;border-radius:999px">Open Instagram</a></td></tr>
 <tr><td style="padding:0 28px 28px;font-size:16px;line-height:1.5">Sportieve groeten,<br>Apolloon</td></tr>
 </table>
@@ -114,11 +123,15 @@ function message(input: WrappedMailInput, card: WrappedManifestEntry, to: string
     subject: input.subject,
     text: `${input.text}\n\nSportieve groeten,\nApolloon`,
     html,
-    // The card shows in the mail and is attached once more, so it saves to a phone in one tap.
+    // The pages show in the mail and are attached once more, so they save to a phone in one tap.
     attachments: [
       { filename: 'apolloon.png', path: LOGO, cid: 'apolloon-logo' },
-      { filename: card.fileName, path: path.join(input.folder, card.fileName), cid: 'wrapped-card' },
-      { filename: card.fileName, path: path.join(input.folder, card.fileName) },
+      ...card.files.map((file, index) => ({
+        filename: file,
+        path: path.join(input.folder, file),
+        cid: `wrapped-${index + 1}`,
+      })),
+      ...card.files.map((file) => ({ filename: file, path: path.join(input.folder, file) })),
     ],
   };
 }

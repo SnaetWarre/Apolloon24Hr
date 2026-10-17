@@ -1,25 +1,24 @@
 # Apolloon Wrapped
 
-After the race, every runner who ran at least one lap gets one image of their race (1080×1920, an Instagram story) by e-mail. Runners with no laps get nothing.
+After the race, every runner who ran at least one lap gets four story images of their race (1080×1920, for Instagram) by e-mail. Runners with no laps get nothing.
 
 Wrapped is not part of the event app. You run it once, at home, from your own laptop, on a backup of the race that someone takes at the event (step 1). The race laptops need nothing else, and nothing needs internet at the event.
 
-## What is on a card
+## What is on the pages
 
-The card page is `/wrapped/card?runner=<id>` (`src/components/wrapped/WrappedCard.tsx`, styles in `src/styles/wrapped.css`). Apolloon's working group chose what is on it:
+The pages are a copy of the Canva design "24 urenloop WRAPPED" (October 2026). `/wrapped/card?runner=<id>` shows one runner's pages under each other (`src/components/wrapped/WrappedStory.tsx`, styles in `src/styles/wrapped.css`):
 
-- Lopersprofiel: name, number, labels, and a runner type from their own race. The types are Sprinter (fastest lap in the fastest 10%), Kilometervreter (more laps than 90% of runners), Metronoom (at least 3 lap times within 4 seconds of each other), Nachtloper (most laps between 00:00 and 06:00), Vroege vogel (most laps between 06:00 and 10:00), and otherwise Teamspeler. The first one that fits wins.
-- Aantal rondjes, snelste ronde, and gemiddelde rondetijd.
-- Burgies gepakt: the "Burgie gepakt" moments while this runner was on the track, shown only when there was at least one.
-- Coëfficiëntenplaats: the place by points among everyone who ran ("3e van 140 lopers" in the top ten, "Top 30%" below that), and the place in up to three of the runner's labels.
+1. First and last name, aantal rondes, snelste ronde, gemiddelde tijd, looptype, and totale afstand (520 m per lap).
+2. "<first name>, je liep" with the lap count, the share of runners who ran fewer laps ("meer dan 78% van alle lopers"), and the distance in meters.
+3. The fastest lap: which of the runner's own laps it was, the time of day it ended, and its place among everyone's fastest lap ("#17 van Apolloon"). Runners without a lap time skip this page.
+4. The looptype with one line about it, and a chart of the runner's laps per hour from the start of the race. The types are Sprinter (fastest lap in the fastest 10%), Kilometervreter (more laps than 90% of runners), Metronoom (at least 3 lap times within 4 seconds of each other), Nachtuil (most laps between 00:00 and 06:00), Vroege vogel (most laps between 06:00 and 10:00), and otherwise Teamspeler. The first one that fits wins. For Nachtuil and Vroege vogel the bars in those hours are orange.
 
-`src/lib/wrapped.ts` computes these with the same rules as the rest of the app:
+The boxes, checkered flags and the car are the design's own drawings, taken from its PDF (`public/wrapped/page-1.svg` to `page-4.svg`). The component puts the text on top at the positions, sizes and angles from the PDF; a long name or number shrinks to stay in its box. The fonts are the design's: Bebas Neue, Racing Sans One, and the 2014 League Spartan Bold (the newer League Spartan has narrower figures). Canva uses its own slightly thinner cut of Bebas Neue that is not available elsewhere, so that text is a little bolder and about 2% wider than in Canva.
+
+`src/lib/wrapped.ts` computes the numbers with the same rules as the rest of the app:
 
 - Every lap counts as a lap. Lap times skip double presses, split halves and forgotten handoffs (`isMeasuredLap` and `hasPlausibleDuration`).
-- Points use `calculateLapPoints`. A label place counts the labels a runner had when they ran each lap, as the Binnenscherm does.
 - Hours are Brussels hours.
-
-To change the design, change only `WrappedCard.tsx` and `wrapped.css`.
 
 ## After the race
 
@@ -30,15 +29,15 @@ To change the design, change only `WrappedCard.tsx` and `wrapped.css`.
    npm run wrapped:cards -- --db=/path/to/apolloon-….sqlite
    ```
 
-   This builds the app, starts it on a copy of the backup, and saves every card as a PNG in `~/Documents/Apolloon Wrapped <year>/`, together with `manifest.json` (who has which card and who got it by mail) and `mail.txt`. It takes about a minute for 100 runners. Add `--out=<folder>` for another folder and `--only=146,203` to make only those runners' cards, for example to check the design. It refuses a backup in which the race is not finished, unless you add `--force`.
-3. Look at a few cards. Edit `mail.txt`: the first line is the subject (`Onderwerp: …`), the rest is the greeting and message. The mail adds the Apolloon logo, the card, an "Open Instagram" button, and the sign-off.
+   This builds the app, starts it on a copy of the backup, and saves every runner's pages as PNGs (`0012 - Jan Peeters 1.png` to `4.png`) in `~/Documents/Apolloon Wrapped <year>/`, together with `manifest.json` (who has which images and who got them by mail) and `mail.txt`. It takes about a minute for 100 runners. Add `--out=<folder>` for another folder and `--only=146,203` to make only those runners' pages, for example to check the design. It refuses a backup in which the race is not finished, unless you add `--force`.
+3. Look at a few runners' pages. Edit `mail.txt`: the first line is the subject (`Onderwerp: …`), the rest is the greeting and message. The mail adds the Apolloon logo, the pages two by two, an "Open Instagram" button, and the sign-off.
 4. See who gets a mail:
 
    ```sh
    npm run wrapped:mail
    ```
 
-   This sends nothing. It lists who has no valid e-mail address (send those cards yourself), who answered "Nee" to being contacted again (they get no mail), and runners who share an address.
+   This sends nothing. It lists who has no valid e-mail address (send those images yourself), who answered "Nee" to being contacted again (they get no mail), and runners who share an address.
 5. Make a Google app password for the sending Gmail account: Google account › Security › 2-Step Verification must be on, then App passwords. Send yourself a test mail, then everyone:
 
    ```sh
@@ -46,10 +45,10 @@ To change the design, change only `WrappedCard.tsx` and `wrapped.css`.
    npm run wrapped:mail -- --send --from=club@gmail.com
    ```
 
-   It asks for the app password and never stores it (or set `WRAPPED_GMAIL_PASSWORD`). It sends one mail every 2 seconds, with the card shown in the mail and attached once more so it saves to a phone in one tap. After each mail it writes `sentAt` to `manifest.json`, so if it stops (no internet, wrong password, Gmail's limit of about 500 mails a day), running it again only sends to the people still left. Nobody gets two mails.
+   It asks for the app password and never stores it (or set `WRAPPED_GMAIL_PASSWORD`). It sends one mail every 2 seconds, with the pages shown in the mail and attached once more so they save to a phone in one tap. After each mail it writes `sentAt` to `manifest.json`, so if it stops (no internet, wrong password, Gmail's limit of about 500 mails a day), running it again only sends to the people still left. Nobody gets two mails.
 
 Nothing here costs money: Playwright makes the images and a normal Gmail account sends the mails.
 
 ## Tests
 
-`tests/wrapped.test.ts` checks the numbers, places and runner types on a made-up race. `tests/wrapped-mail.test.ts` sends through a local fake SMTP server (`smtp-server`) and checks the attachment, the resume after a stop, the stop on a wrong password, and that the test mail marks nobody as mailed.
+`tests/wrapped.test.ts` checks the numbers, places and runner types on a made-up race. `tests/wrapped-mail.test.ts` sends through a local fake SMTP server (`smtp-server`) and checks the attachments, the resume after a stop, the stop on a wrong password, and that the test mail marks nobody as mailed.
