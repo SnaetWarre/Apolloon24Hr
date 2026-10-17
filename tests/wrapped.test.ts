@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildWrapped, formatPlace, wrappedFileNames, type WrappedRunner } from '../src/lib/wrapped.ts';
-import type { Label, LapRecord, RaceEvent, Runner, RunnerRegistration } from '../src/types.ts';
+import { buildWrapped, formatTimeOfDay, splitName, wrappedFileNames, type WrappedRunner } from '../src/lib/wrapped.ts';
+import type { Label, LapRecord, Runner, RunnerRegistration } from '../src/types.ts';
 
 // A made-up race: 20:00 Tuesday to 20:00 Wednesday in Brussels (UTC+2 in September).
 const RACE_START = Date.parse('2026-09-22T18:00:00Z');
@@ -88,24 +88,10 @@ function buildRace() {
     r2: registration({ email: '///' }),
     r3: registration({ email: 'cas@example.be', reuseConsent: 'Nee' }),
   };
-  const events: RaceEvent[] = [
-    {
-      id: 'burgie',
-      type: 'burgie_gepakt',
-      message: '',
-      occurredAt: RACE_START + minutes(5 * 60 + 11),
-      createdAt: RACE_START + minutes(5 * 60 + 11),
-      runnerId: 'r2',
-      runnerNumber: '2',
-      runnerName: 'Bert Night',
-    },
-  ];
-  return buildWrapped({ runners, laps, registrations, events });
+  return buildWrapped({ runners, laps, registrations, raceStartedAt: RACE_START });
 }
 
 const byId = (runners: WrappedRunner[], id: string) => runners.find((entry) => entry.runnerId === id)!;
-const assertClose = (actual: number, expected: number) =>
-  assert.ok(Math.abs(actual - expected) < 1e-9, `${actual} is not ${expected}`);
 
 test('only runners with a lap get a card, and every lap counts', () => {
   const runners = buildRace();
@@ -127,30 +113,34 @@ test('lap times skip double presses, split halves, and forgotten handoffs', () =
   assert.equal(byId(runners, 'r3').averageLapMs, null);
 });
 
-test('coefficient places overall and per label, by the label at the time of each lap', () => {
+test('names, distance, and the share of runners with fewer laps', () => {
   const runners = buildRace();
   const anna = byId(runners, 'r1');
-  // 45 + 20 (double press, no speed bonus) + 57.5, all between 20:00 and 24:00.
-  assertClose(anna.points, 122.5);
-  assert.deepEqual(anna.pointsRank, { place: 1, of: 3 });
-  assert.deepEqual(byId(runners, 'r2').pointsRank, { place: 2, of: 3 });
-  assert.deepEqual(byId(runners, 'r3').pointsRank, { place: 3, of: 3 });
-  assert.deepEqual(
-    anna.labelPointsRanks.map((rank) => [rank.label.id, rank.place, rank.of]),
-    [['first-years', 1, 2]]
-  );
-  // Bert ran one lap with the label and has none now.
-  assert.deepEqual(
-    byId(runners, 'r2').labelPointsRanks.map((rank) => [rank.label.id, rank.place, rank.of]),
-    [['first-years', 2, 2]]
-  );
-  assert.deepEqual(byId(runners, 'r3').labelPointsRanks, []);
+  assert.deepEqual([anna.firstName, anna.lastName], ['Anna', 'Fast']);
+  assert.equal(anna.meters, 1560);
+  assert.equal(anna.lapsBeatenPercent, 66);
+  assert.equal(byId(runners, 'r2').lapsBeatenPercent, 33);
+  assert.equal(byId(runners, 'r3').lapsBeatenPercent, 0);
+  assert.deepEqual(splitName('  Jan  Van den Bossche '), ['Jan', 'Van den Bossche']);
+  assert.deepEqual(splitName('Cher'), ['Cher', '']);
 });
 
-test('burgies count the moments a runner was on the track', () => {
+test('the fastest lap: which of their own laps, when, and its place among everyone', () => {
   const runners = buildRace();
-  assert.equal(byId(runners, 'r2').burgies, 1);
-  assert.equal(byId(runners, 'r1').burgies, 0);
+  // Anna's second lap was a double press, so her fastest real lap is her third.
+  assert.deepEqual(byId(runners, 'r1').fastestLap, { number: 3, finishedAt: RACE_START + minutes(4), place: 1 });
+  assert.equal(byId(runners, 'r2').fastestLap?.place, 2);
+  assert.equal(byId(runners, 'r3').fastestLap, null);
+  assert.equal(formatTimeOfDay(RACE_START + minutes(7 * 60 + 41)), "03:41 's nachts");
+  assert.equal(formatTimeOfDay(RACE_START + minutes(15 * 60)), "11:00 's ochtends");
+});
+
+test('laps per hour count from the hour the race started', () => {
+  const runners = buildRace();
+  assert.equal(byId(runners, 'r1').lapsPerHour.length, 24);
+  assert.equal(byId(runners, 'r1').lapsPerHour[0], 3);
+  assert.equal(byId(runners, 'r2').lapsPerHour[5], 2);
+  assert.equal(byId(runners, 'r3').lapsPerHour[20], 1);
 });
 
 test('mail addresses stay as typed, and a no to being contacted again means no mail', () => {
@@ -162,9 +152,11 @@ test('mail addresses stay as typed, and a no to being contacted again means no m
   assert.equal(byId(runners, 'r1').refusedContact, false);
 });
 
-test('runner types: night runner and team player in a small race', () => {
+test('runner types: night owl and team player in a small race', () => {
   const runners = buildRace();
-  assert.equal(byId(runners, 'r2').runnerType.title, 'Nachtloper');
+  assert.equal(byId(runners, 'r2').runnerType.title, 'Nachtuil');
+  assert.equal(byId(runners, 'r2').runnerType.text, 'Al je 2 rondes waren tussen 00:00 en 06:00');
+  assert.deepEqual(byId(runners, 'r2').runnerType.hours, { from: 0, to: 6 });
   assert.equal(byId(runners, 'r1').runnerType.title, 'Teamspeler');
   assert.equal(byId(runners, 'r3').runnerType.title, 'Teamspeler');
 });
@@ -179,21 +171,15 @@ test('runner types: sprinter, most laps, and a steady pace', () => {
   let at = RACE_START;
   const laps = ids.flatMap((id) => (durations[id] ?? [80_000, 90_000, 100_000]).map((ms) => lap(id, (at += ms), ms)));
   const types = new Map(
-    buildWrapped({ runners: ids.map((id) => runner(id, id)), laps, registrations: {}, events: [] }).map((entry) => [
-      entry.runnerId,
-      entry.runnerType,
-    ])
+    buildWrapped({ runners: ids.map((id) => runner(id, id)), laps, registrations: {}, raceStartedAt: RACE_START }).map(
+      (entry) => [entry.runnerId, entry.runnerType]
+    )
   );
   assert.equal(types.get('sprint')?.title, 'Sprinter');
   assert.equal(types.get('many')?.title, 'Kilometervreter');
   assert.equal(types.get('steady')?.title, 'Metronoom');
-  assert.equal(types.get('steady')?.text, 'Je rondes lagen nooit meer dan 3 seconden uit elkaar.');
+  assert.equal(types.get('steady')?.text, 'Je rondes lagen nooit meer dan 3 seconden uit elkaar');
   assert.equal(types.get('a')?.title, 'Teamspeler');
-});
-
-test('a place in the top ten reads as a place, further down as a top percentage', () => {
-  assert.deepEqual(formatPlace({ place: 3, of: 140 }), { headline: '3e', detail: 'van 140 lopers' });
-  assert.deepEqual(formatPlace({ place: 37, of: 140 }), { headline: 'Top 30%', detail: 'plaats 37 van 140' });
 });
 
 test('file names sort by number, are safe on Windows, and never collide', () => {
@@ -202,7 +188,7 @@ test('file names sort by number, are safe on Windows, and never collide', () => 
     { runnerId: 'b', runnerNumber: null, name: 'Jo: "de snelle"?' },
     { runnerId: 'c', runnerNumber: null, name: 'Jo de snelle' },
   ]);
-  assert.equal(names.get('a'), '0012 - Jan Peeters.png');
-  assert.equal(names.get('b'), 'Jo de snelle.png');
-  assert.equal(names.get('c'), 'Jo de snelle (2).png');
+  assert.equal(names.get('a'), '0012 - Jan Peeters');
+  assert.equal(names.get('b'), 'Jo de snelle');
+  assert.equal(names.get('c'), 'Jo de snelle (2)');
 });

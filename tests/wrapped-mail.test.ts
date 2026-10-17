@@ -47,13 +47,15 @@ const card = (id: string, email: string, extra: Partial<WrappedCard> = {}): Wrap
   email,
   emailValid: email.includes('@'),
   refusedContact: false,
-  fileName: `${id}.png`,
+  files: [`${id} 1.png`, `${id} 2.png`],
   ...extra,
 });
 
 async function folderWithCards(cards: WrappedCard[]) {
   const folder = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'apolloon-wrapped-'));
-  for (const each of cards) await fs.promises.writeFile(path.join(folder, each.fileName), `png of ${each.runnerId}`);
+  for (const each of cards) {
+    for (const file of each.files) await fs.promises.writeFile(path.join(folder, file), `png of ${file}`);
+  }
   await writeManifest(folder, mergeManifest(null, cards, Date.now()));
   return folder;
 }
@@ -68,7 +70,7 @@ const input = (folder: string, extra: Partial<Parameters<typeof sendWrappedMails
   ...extra,
 });
 
-test('each runner gets their own card inline, and nobody without a real address or with a "no"', async () => {
+test('each runner gets their own pages inline, and nobody without a real address or with a "no"', async () => {
   const mail = await fakeGmail();
   const folder = await folderWithCards([
     card('1', 'een@example.be'),
@@ -84,12 +86,14 @@ test('each runner gets their own card inline, and nobody without a real address 
       [['een@example.be'], ['vier@example.be']]
     );
     const raw = mail.received[0].raw.replace(/=\r\n/g, '');
-    assert.match(raw, /Content-ID: <wrapped-card>/);
+    assert.match(raw, /Content-ID: <wrapped-1>/);
+    assert.match(raw, /Content-ID: <wrapped-2>/);
     assert.match(raw, /Content-ID: <apolloon-logo>/);
     assert.match(raw, /Open Instagram/);
-    assert.match(raw, /src=3D"cid:wrapped-card"/);
-    // Also as a plain attachment, so it saves to a phone in one tap.
-    assert.match(raw, /Content-Disposition: attachment; filename=1\.png/);
+    assert.match(raw, /src=3D"cid:wrapped-2"/);
+    // Also as plain attachments, so they save to a phone in one tap.
+    assert.match(raw, /Content-Disposition: attachment; filename="1 1\.png"/);
+    assert.match(raw, /Content-Disposition: attachment; filename="1 2\.png"/);
     const manifest = await readManifest(folder);
     assert.deepEqual(
       manifest?.cards.map((each) => each.sentAt != null),

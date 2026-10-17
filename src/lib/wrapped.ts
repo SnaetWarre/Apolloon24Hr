@@ -1,130 +1,124 @@
 /**
- * Apolloon Wrapped: after the race every runner who ran gets one image about their race,
- * to share on Instagram. Apolloon chose what is on it: the runner's profile and type,
- * their lap count, fastest and average lap, their coefficient place (overall and in each
- * of their labels), and the burgies caught while they ran. This file only computes those;
- * the card component draws them, so the design can change without touching the numbers.
+ * Apolloon Wrapped: after the race every runner who ran gets four story images about their
+ * race, to share on Instagram. This file only computes the numbers on them; the story
+ * component draws them, so the design can change without touching the numbers.
  */
-import type { Label, LapRecord, RaceEvent, Runner, RunnerRegistration } from '../types';
-import { compareLabels } from '../../shared/labelOrder';
+import type { LapRecord, Runner, RunnerRegistration } from '../types';
 import { hasPlausibleDuration, isMeasuredLap } from './analysis';
 import { mailHref } from './contact';
-import { calculateLapPoints } from './ranking';
 import { formatDurationMs } from './time';
 
-/** The labels a card lists a coefficient place for, best place first. */
-export const WRAPPED_LABEL_PLACES = 3;
+/** One lap of the track, in meters. */
+export const LAP_METERS = 520;
+const HOUR_MS = 3_600_000;
 
 const BRUSSELS_HOUR = new Intl.DateTimeFormat('nl-BE', {
   hour: '2-digit',
   hourCycle: 'h23',
   timeZone: 'Europe/Brussels',
 });
-
-export type WrappedRank = { place: number; of: number };
+const BRUSSELS_TIME = new Intl.DateTimeFormat('nl-BE', {
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+  timeZone: 'Europe/Brussels',
+});
 
 /** What kind of runner someone was, from their own race. */
 export type WrappedRunnerType = {
-  kind: 'sprinter' | 'kilometervreter' | 'metronoom' | 'nachtloper' | 'vroege_vogel' | 'teamspeler';
+  kind: 'sprinter' | 'kilometervreter' | 'metronoom' | 'nachtuil' | 'vroege_vogel' | 'teamspeler';
   title: string;
   text: string;
+  /** The clock hours [from, to) the type is about, drawn in orange on the chart. */
+  hours: { from: number; to: number } | null;
 };
 
 export type WrappedRunner = {
   runnerId: string;
   runnerNumber: string | null;
   name: string;
+  firstName: string;
+  lastName: string;
   /** As typed in the form; `emailValid` says whether it can be mailed. */
   email: string;
   emailValid: boolean;
   /** Answered no to being contacted again in the form, so they get no mail. */
   refusedContact: boolean;
-  labels: Label[];
   runnerType: WrappedRunnerType;
   laps: number;
+  meters: number;
+  /** Share of everyone who ran that ran fewer laps, in whole percents. */
+  lapsBeatenPercent: number;
   fastestLapMs: number | null;
   averageLapMs: number | null;
-  points: number;
-  /** Coefficient place among everyone who ran. */
-  pointsRank: WrappedRank;
-  /** Coefficient place in each label they ran laps in, best first. */
-  labelPointsRanks: Array<WrappedRank & { label: Label }>;
-  /** "Burgie gepakt" moments while this runner was on the track. */
-  burgies: number;
+  fastestLap: {
+    /** Which of this runner's own laps it was, from 1. */
+    number: number;
+    finishedAt: number;
+    /** Place among everyone's fastest lap; equal times share a place. */
+    place: number;
+  } | null;
+  /** Laps finished in each hour of the race, from the hour it started. */
+  lapsPerHour: number[];
 };
 
 export type WrappedInput = {
   runners: Runner[];
   laps: LapRecord[];
   registrations: Record<string, RunnerRegistration>;
-  events: RaceEvent[];
+  raceStartedAt: number | null;
 };
 
 /** One entry per runner with at least one lap. */
-export function buildWrapped({ runners, laps, registrations, events }: WrappedInput): WrappedRunner[] {
-  const lapsByRunner = groupBy(laps, (lap) => lap.runnerId);
+export function buildWrapped({ runners, laps, registrations, raceStartedAt }: WrappedInput): WrappedRunner[] {
+  const lapsByRunner = groupBy(
+    [...laps].sort((a, b) => a.finishedAt - b.finishedAt),
+    (lap) => lap.runnerId
+  );
   const stats = runners.flatMap((runner) => {
     const runnerLaps = lapsByRunner.get(runner.id);
     return runnerLaps ? [runnerStats(runner, runnerLaps)] : [];
   });
   const lapRanks = ranks(stats.map((entry) => [entry.runner.id, entry.laps]));
-  const pointRanks = ranks(stats.map((entry) => [entry.runner.id, entry.points]));
-  const timed = stats.filter((entry) => entry.fastestMs != null);
-  const fastestRanks = ranks(timed.map((entry) => [entry.runner.id, -entry.fastestMs!]));
-
-  // Per label, the points each runner earned in it: by the labels they had at the time of each lap,
-  // as the Binnenscherm ranks a label.
-  const labelsById = new Map<string, Label>();
-  const pointsByLabel = new Map<string, Map<string, number>>();
-  for (const lap of laps) {
-    for (const label of lap.labels) {
-      labelsById.set(label.id, label);
-      const points = pointsByLabel.get(label.id) ?? new Map<string, number>();
-      points.set(lap.runnerId, (points.get(lap.runnerId) ?? 0) + calculateLapPoints(lap));
-      pointsByLabel.set(label.id, points);
-    }
-  }
-  const labelRanks = new Map(
-    [...pointsByLabel].map(([labelId, points]) => [labelId, { places: ranks([...points]), of: points.size }])
-  );
-
-  const burgies = new Map<string, number>();
-  for (const event of events) {
-    if (event.type === 'burgie_gepakt' && event.runnerId) {
-      burgies.set(event.runnerId, (burgies.get(event.runnerId) ?? 0) + 1);
-    }
-  }
+  const timed = stats.filter((entry) => entry.fastest != null);
+  const fastestRanks = ranks(timed.map((entry) => [entry.runner.id, -entry.fastest!.durationMs]));
+  const firstHour = hourStart(raceStartedAt ?? Math.min(...laps.map((lap) => lap.startedAt)));
 
   return stats.map((entry): WrappedRunner => {
-    const { runner } = entry;
+    const { runner, fastest } = entry;
     const email = registrations[runner.id]?.email.trim() ?? '';
-    const labelPointsRanks = [...new Set(entry.lapList.flatMap((lap) => lap.labels.map((label) => label.id)))]
-      .map((labelId) => {
-        const rank = labelRanks.get(labelId)!;
-        return { label: labelsById.get(labelId)!, place: rank.places.get(runner.id)!, of: rank.of };
-      })
-      .filter((rank) => rank.of > 1)
-      .sort((a, b) => a.place - b.place || b.of - a.of || compareLabels(a.label, b.label))
-      .slice(0, WRAPPED_LABEL_PLACES);
+    const [firstName, lastName] = splitName(runner.name);
+    const lapsPerHour = Array.from({ length: 24 }, () => 0);
+    for (const lap of entry.lapList) {
+      const hour = Math.floor((lap.finishedAt - firstHour) / HOUR_MS);
+      lapsPerHour[Math.min(23, Math.max(0, hour))] += 1;
+    }
     return {
       runnerId: runner.id,
       runnerNumber: runner.runnerNumber,
       name: runner.name,
+      firstName,
+      lastName,
       email,
       emailValid: Boolean(mailHref(email)),
       refusedContact: /^\s*nee\b/i.test(registrations[runner.id]?.reuseConsent ?? ''),
-      labels: runner.labels,
       runnerType: runnerType(entry, {
         laps: { place: lapRanks.get(runner.id)!, of: stats.length },
-        fastestLap: entry.fastestMs != null ? { place: fastestRanks.get(runner.id)!, of: timed.length } : null,
+        fastestLap: fastest ? { place: fastestRanks.get(runner.id)!, of: timed.length } : null,
       }),
       laps: entry.laps,
-      fastestLapMs: entry.fastestMs,
+      meters: entry.laps * LAP_METERS,
+      lapsBeatenPercent: Math.floor((100 * stats.filter((other) => other.laps < entry.laps).length) / stats.length),
+      fastestLapMs: fastest?.durationMs ?? null,
       averageLapMs: entry.averageMs,
-      points: entry.points,
-      pointsRank: { place: pointRanks.get(runner.id)!, of: stats.length },
-      labelPointsRanks,
-      burgies: burgies.get(runner.id) ?? 0,
+      fastestLap: fastest
+        ? {
+            number: entry.lapList.indexOf(fastest) + 1,
+            finishedAt: fastest.finishedAt,
+            place: fastestRanks.get(runner.id)!,
+          }
+        : null,
+      lapsPerHour,
     };
   });
 }
@@ -133,58 +127,84 @@ type RunnerStats = ReturnType<typeof runnerStats>;
 
 function runnerStats(runner: Runner, lapList: LapRecord[]) {
   // A double press, a guessed split half, or a forgotten handoff counts as a lap but not as a lap time.
-  const measured = lapList
-    .filter((lap) => isMeasuredLap(lap) && hasPlausibleDuration(lap))
-    .map((lap) => lap.durationMs);
+  const measured = lapList.filter((lap) => isMeasuredLap(lap) && hasPlausibleDuration(lap));
+  const fastest = measured.reduce<LapRecord | null>(
+    (best, lap) => (best && best.durationMs <= lap.durationMs ? best : lap),
+    null
+  );
   return {
     runner,
     lapList,
     laps: lapList.length,
-    points: lapList.reduce((sum, lap) => sum + calculateLapPoints(lap), 0),
-    measured,
-    fastestMs: measured.length ? Math.min(...measured) : null,
-    averageMs: measured.length ? Math.round(measured.reduce((sum, ms) => sum + ms, 0) / measured.length) : null,
+    measured: measured.map((lap) => lap.durationMs),
+    fastest,
+    averageMs: measured.length
+      ? Math.round(measured.reduce((sum, lap) => sum + lap.durationMs, 0) / measured.length)
+      : null,
   };
 }
 
+type Rank = { place: number; of: number };
+
 /** The first type that fits, from the rarest to the one everybody gets. */
-function runnerType(
-  entry: RunnerStats,
-  rank: { laps: WrappedRank; fastestLap: WrappedRank | null }
-): WrappedRunnerType {
+function runnerType(entry: RunnerStats, rank: { laps: Rank; fastestLap: Rank | null }): WrappedRunnerType {
   const topTenth = (of: number) => Math.max(1, Math.ceil(of * 0.1));
   const hours = entry.lapList.map((lap) => Number(BRUSSELS_HOUR.format(lap.finishedAt)));
-  const share = (from: number, to: number) => hours.filter((hour) => hour >= from && hour < to).length / hours.length;
   const spreadMs = entry.measured.length >= 3 ? Math.max(...entry.measured) - Math.min(...entry.measured) : null;
+  const between = (from: number, to: number) => {
+    const count = hours.filter((hour) => hour >= from && hour < to).length;
+    const window = `tussen ${String(from).padStart(2, '0')}:00 en ${String(to).padStart(2, '0')}:00`;
+    const text =
+      count === entry.laps
+        ? entry.laps === 1
+          ? `Je ronde was ${window}`
+          : `Al je ${entry.laps} rondes waren ${window}`
+        : `${count} van je ${entry.laps} rondes ${count === 1 ? 'was' : 'waren'} ${window}`;
+    return { share: count / entry.laps, text, hours: { from, to } };
+  };
 
   if (rank.fastestLap && rank.fastestLap.of >= 5 && rank.fastestLap.place <= topTenth(rank.fastestLap.of)) {
-    return { kind: 'sprinter', title: 'Sprinter', text: 'Je snelste ronde hoort bij de snelste 10% van de 24 uur.' };
+    return {
+      kind: 'sprinter',
+      title: 'Sprinter',
+      text: 'Je snelste ronde hoort bij de snelste 10% van de 24 uur',
+      hours: null,
+    };
   }
   if (rank.laps.of >= 5 && rank.laps.place <= topTenth(rank.laps.of)) {
-    return { kind: 'kilometervreter', title: 'Kilometervreter', text: 'Je liep meer rondjes dan 90% van de lopers.' };
+    return {
+      kind: 'kilometervreter',
+      title: 'Kilometervreter',
+      text: 'Je liep meer rondes dan 90% van alle lopers',
+      hours: null,
+    };
   }
   if (spreadMs != null && spreadMs <= 4_000) {
     return {
       kind: 'metronoom',
       title: 'Metronoom',
-      text: `Je rondes lagen nooit meer dan ${Math.max(1, Math.round(spreadMs / 1000))} seconden uit elkaar.`,
+      text: `Je rondes lagen nooit meer dan ${Math.max(1, Math.round(spreadMs / 1000))} seconden uit elkaar`,
+      hours: null,
     };
   }
-  if (share(0, 6) >= 0.5) {
-    return {
-      kind: 'nachtloper',
-      title: 'Nachtloper',
-      text: 'De meeste van je rondjes liep je tussen middernacht en 6 uur.',
-    };
+  const night = between(0, 6);
+  if (night.share >= 0.5) return { kind: 'nachtuil', title: 'Nachtuil', text: night.text, hours: night.hours };
+  const morning = between(6, 10);
+  if (morning.share >= 0.5) {
+    return { kind: 'vroege_vogel', title: 'Vroege vogel', text: morning.text, hours: morning.hours };
   }
-  if (share(6, 10) >= 0.5) {
-    return {
-      kind: 'vroege_vogel',
-      title: 'Vroege vogel',
-      text: 'De meeste van je rondjes liep je tussen 6 en 10 uur.',
-    };
-  }
-  return { kind: 'teamspeler', title: 'Teamspeler', text: 'Elk rondje telt, en jij liep ze voor het team.' };
+  return {
+    kind: 'teamspeler',
+    title: 'Teamspeler',
+    text: 'Elke ronde telt, en jij liep ze voor het team',
+    hours: null,
+  };
+}
+
+/** "Warre Snaet" → ["Warre", "Snaet"]; everything after the first word is the last name. */
+export function splitName(name: string): [string, string] {
+  const [first = '', ...rest] = name.trim().split(/\s+/);
+  return [first, rest.join(' ')];
 }
 
 /** Place by runner id, 1 for the highest value; equal values share a place. */
@@ -202,32 +222,45 @@ function groupBy<T>(items: T[], key: (item: T) => string): Map<string, T[]> {
   return groups;
 }
 
+/** The whole hour a moment falls in; Brussels is a whole number of hours from UTC. */
+function hourStart(at: number): number {
+  return Math.floor(at / HOUR_MS) * HOUR_MS;
+}
+
+/** The Brussels clock hour of each hour on the chart, from the hour the race started. */
+export function chartHours(raceStartedAt: number): number[] {
+  const first = hourStart(raceStartedAt);
+  return Array.from({ length: 25 }, (_, index) => Number(BRUSSELS_HOUR.format(first + index * HOUR_MS)));
+}
+
 /** "1:05.3": minutes, seconds and tenths. */
 export function formatLapTime(ms: number): string {
   return formatDurationMs(ms).slice(0, -2);
 }
 
-/** "3e", or "Top 30%" further down, in steps of 5%. */
-export function formatPlace({ place, of }: WrappedRank): { headline: string; detail: string } {
-  if (place <= 10) return { headline: `${place}e`, detail: `van ${of} lopers` };
-  return { headline: `Top ${Math.ceil((place / of) * 20) * 5}%`, detail: `plaats ${place} van ${of}` };
+/** "03:41 's nachts", in Brussels time. */
+export function formatTimeOfDay(at: number): string {
+  const time = BRUSSELS_TIME.format(at);
+  const hour = Number(time.slice(0, 2));
+  const part = hour < 6 ? "'s nachts" : hour < 12 ? "'s ochtends" : hour < 18 ? "'s middags" : "'s avonds";
+  return `${time} ${part}`;
 }
 
-/** A file name per runner, "0012 - Jan Peeters.png"; two runners never share one. */
+/** A file name per runner without its extension, "0012 - Jan Peeters"; two runners never share one. */
 export function wrappedFileNames(runners: Array<Pick<WrappedRunner, 'runnerNumber' | 'name' | 'runnerId'>>) {
   const taken = new Set<string>();
   return new Map(
     runners.map((runner) => {
-      const base = wrappedFileName(runner).slice(0, -'.png'.length);
-      let fileName = `${base}.png`;
-      for (let copy = 2; taken.has(fileName.toLowerCase()); copy += 1) fileName = `${base} (${copy}).png`;
+      const base = wrappedFileName(runner);
+      let fileName = base;
+      for (let copy = 2; taken.has(fileName.toLowerCase()); copy += 1) fileName = `${base} (${copy})`;
       taken.add(fileName.toLowerCase());
       return [runner.runnerId, fileName];
     })
   );
 }
 
-/** "0012 - Jan Peeters.png": sorts by number, and safe as a Windows file name. */
+/** "0012 - Jan Peeters": sorts by number, and safe as a Windows file name. */
 function wrappedFileName(runner: Pick<WrappedRunner, 'runnerNumber' | 'name' | 'runnerId'>): string {
   const number = runner.runnerNumber?.trim();
   const name = runner.name
@@ -236,6 +269,5 @@ function wrappedFileName(runner: Pick<WrappedRunner, 'runnerNumber' | 'name' | '
     .trim()
     .replace(/[. ]+$/, '');
   const prefix = number ? (/^\d+$/.test(number) ? number.padStart(4, '0') : number.replace(/[^\w-]/g, '')) : '';
-  const base = [prefix, name || runner.runnerId].filter(Boolean).join(' - ');
-  return `${base.slice(0, 120)}.png`;
+  return [prefix, name || runner.runnerId].filter(Boolean).join(' - ').slice(0, 116);
 }

@@ -2,11 +2,11 @@ import fs from 'fs';
 import path from 'path';
 
 /**
- * `manifest.json` in the Wrapped folder: who has which card and who already got it by mail.
+ * `manifest.json` in the Wrapped folder: who has which images and who already got them by mail.
  * Written after every mail, so sending again after a stop only reaches the people still left.
  */
 
-/** One runner's card, as `npm run wrapped:cards` writes it. */
+/** One runner's Wrapped, as `npm run wrapped:cards` writes it. */
 export type WrappedCard = {
   runnerId: string;
   runnerNumber: string | null;
@@ -15,7 +15,8 @@ export type WrappedCard = {
   emailValid: boolean;
   /** Said no to being contacted again in the form. */
   refusedContact: boolean;
-  fileName: string;
+  /** The story pages in order, one PNG each. */
+  files: string[];
 };
 
 export type WrappedManifestEntry = WrappedCard & {
@@ -53,7 +54,7 @@ export function mergeManifest(previous: WrappedManifest | null, cards: WrappedCa
   for (const card of cards) {
     byRunner.set(card.runnerId, { ...card, sentAt: byRunner.get(card.runnerId)?.sentAt ?? null, error: null });
   }
-  return { madeAt, cards: [...byRunner.values()].sort((a, b) => a.fileName.localeCompare(b.fileName, 'nl-BE')) };
+  return { madeAt, cards: [...byRunner.values()].sort((a, b) => a.files[0].localeCompare(b.files[0], 'nl-BE')) };
 }
 
 /** Who gets a mail: a real address, no "no" to contact, and not mailed yet. */

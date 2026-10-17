@@ -1,8 +1,8 @@
 // Apolloon Wrapped, run after the race from one laptop at home (docs/wrapped.md):
 //   npm run wrapped:cards -- --db=<backup.sqlite> [--out=<folder>] [--only=146,203] [--force]
 //   npm run wrapped:mail -- [--out=<folder>] [--from=<gmail address>] [--test | --send]
-// `cards` starts the built app on a copy of the backup and saves every runner's card
-// (/wrapped/card) as a 1080×1920 PNG with Playwright. `mail` sends each runner their card
+// `cards` starts the built app on a copy of the backup and saves every runner's story pages
+// (/wrapped/card) as 1080×1920 PNGs with Playwright. `mail` sends each runner their pages
 // through Gmail; without --test or --send it only lists who would get one.
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -13,7 +13,7 @@ import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { buildWrapped, wrappedFileNames } from '../../src/lib/wrapped.ts';
-import type { LapRecord, LiveAppSnapshot, RaceEvent, RunnerRegistration } from '../../shared/schemas.ts';
+import type { LapRecord, LiveAppSnapshot, RunnerRegistration } from '../../shared/schemas.ts';
 import { sendWrappedMails, GMAIL, type SmtpServer } from './mail.ts';
 import {
   mailableCards,
@@ -60,7 +60,7 @@ async function makeCards() {
   try {
     const [state, history, registrations] = await Promise.all([
       app.get<LiveAppSnapshot>('/api/state'),
-      app.get<{ laps: LapRecord[]; events: RaceEvent[] }>('/api/history?scope=full'),
+      app.get<{ laps: LapRecord[] }>('/api/history?scope=full'),
       app.get<Record<string, RunnerRegistration>>('/api/registrations'),
     ]);
     if (!state.race.raceFinishedAt && options.force !== 'true') {
@@ -71,7 +71,12 @@ async function makeCards() {
     }
     const year = new Date(state.race.raceFinishedAt ?? state.race.raceStartedAt ?? Date.now()).getFullYear();
     const out = outputFolder(year);
-    const wrapped = buildWrapped({ runners: state.runners, laps: history.laps, registrations, events: history.events });
+    const wrapped = buildWrapped({
+      runners: state.runners,
+      laps: history.laps,
+      registrations,
+      raceStartedAt: state.race.raceStartedAt,
+    });
     const fileNames = wrappedFileNames(wrapped);
     const only = options.only ? new Set(options.only.split(',').map((each) => each.trim())) : null;
     const chosen = only
@@ -81,7 +86,7 @@ async function makeCards() {
       throw new Error(only ? 'Geen loper met rondes gevonden voor --only.' : 'Niemand liep een ronde.');
 
     fs.mkdirSync(out, { recursive: true });
-    console.log(`${chosen.length} kaarten maken in ${out}`);
+    console.log(`Wrapped maken voor ${chosen.length} lopers in ${out}`);
     const browser = await chromium.launch({ headless: true, executablePath: process.env.CHROMIUM_EXECUTABLE });
     const made: WrappedCard[] = [];
     const failed: string[] = [];
@@ -89,12 +94,17 @@ async function makeCards() {
       const page = await browser.newPage({ viewport: { width: 1080, height: 1920 }, deviceScaleFactor: 1 });
       for (const [index, runner] of chosen.entries()) {
         const fileName = fileNames.get(runner.runnerId)!;
+        const files: string[] = [];
         process.stdout.write(`\r${index + 1}/${chosen.length} ${runner.name}`.padEnd(60));
         try {
           await page.goto(`${app.url}/wrapped/card?runner=${encodeURIComponent(runner.runnerId)}`);
-          // The card page says when its fonts and logos are in.
+          // The page says when its fonts are in and long names fit.
           await page.waitForSelector('html[data-wrapped-ready="card"]', { timeout: 20_000 });
-          await page.screenshot({ path: path.join(out, fileName) });
+          const pages = page.locator('.wrapped-story');
+          for (let index = 0; index < (await pages.count()); index += 1) {
+            files.push(`${fileName} ${index + 1}.png`);
+            await pages.nth(index).screenshot({ path: path.join(out, files[index]) });
+          }
           made.push({
             runnerId: runner.runnerId,
             runnerNumber: runner.runnerNumber,
@@ -102,7 +112,7 @@ async function makeCards() {
             email: runner.email,
             emailValid: runner.emailValid,
             refusedContact: runner.refusedContact,
-            fileName,
+            files,
           });
         } catch (error) {
           failed.push(`${runner.name}: ${error instanceof Error ? error.message.split('\n')[0] : String(error)}`);
@@ -115,7 +125,7 @@ async function makeCards() {
     const textFile = path.join(out, MAIL_TEXT_FILE);
     if (!fs.existsSync(textFile)) fs.writeFileSync(textFile, DEFAULT_MAIL_TEXT(year));
 
-    console.log(`\n\n${made.length} kaarten gemaakt in ${out}`);
+    console.log(`\n\nWrapped gemaakt voor ${made.length} lopers in ${out}`);
     if (failed.length) console.log(`Mislukt (${failed.length}):\n  ${failed.join('\n  ')}`);
     console.log(`Pas de mail aan in ${textFile} en kijk wie hem krijgt met: npm run wrapped:mail -- --out="${out}"`);
   } finally {
@@ -144,9 +154,9 @@ async function mail() {
     `\n${toMail.length} lopers krijgen een mail; ${manifest.cards.filter((card) => card.sentAt).length} kregen hem al.`
   );
   list(
-    'Geen geldig e-mailadres, stuur hun kaart zelf door',
+    'Geen geldig e-mailadres, stuur hun beelden zelf door',
     manifest.cards.filter((card) => !card.emailValid),
-    (card) => `${label(card)}: ${card.email || '(leeg)'} → ${card.fileName}`
+    (card) => `${label(card)}: ${card.email || '(leeg)'} → ${card.files.join(', ')}`
   );
   list(
     'Willen niet meer gecontacteerd worden, krijgen geen mail',
@@ -154,7 +164,7 @@ async function mail() {
     label
   );
   list(
-    'Delen een e-mailadres met een andere loper (elk krijgt zijn eigen kaart)',
+    'Delen een e-mailadres met een andere loper (elk krijgt zijn eigen Wrapped)',
     mailed.filter((card) => counts.get(card.email.toLowerCase())! > 1),
     (card) => `${label(card)}: ${card.email}`
   );
@@ -174,7 +184,7 @@ async function mail() {
   const from = options.from;
   if (!from?.includes('@')) throw new Error('Geef het Gmail-adres mee: --from=<adres>');
   if (!testOnly) {
-    if (!toMail.length) return console.log('\nIedereen met een geldig adres kreeg zijn kaart al.');
+    if (!toMail.length) return console.log('\nIedereen met een geldig adres kreeg zijn Wrapped al.');
     const answer = await ask(
       `\n${toMail.length} mails versturen vanaf ${from}, ongeveer ${Math.ceil((toMail.length * 2) / 60)} minuten? Typ ja: `
     );
@@ -193,7 +203,7 @@ async function mail() {
   );
   console.log(
     testOnly
-      ? `\nTestmail verstuurd naar ${from}. Kijk of de kaart goed aankomt.`
+      ? `\nTestmail verstuurd naar ${from}. Kijk of de beelden goed aankomen.`
       : `\n${result.sent} verstuurd, ${result.left} over.`
   );
   for (const failure of result.failed) console.log(`  Mislukt: ${failure.name}: ${failure.error}`);
