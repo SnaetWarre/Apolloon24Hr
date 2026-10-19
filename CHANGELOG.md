@@ -4,6 +4,17 @@ All notable changes to Apolloon Telsysteem will be documented in this file.
 
 ## [Unreleased]
 
+## [4.6.1] - 2026-10-19
+
+Laptops koppelen alleen met dezelfde versie: zet 4.6.1 op alle laptops.
+
+### Changed
+
+- Het Buitenscherm toont de eerste ronde van de race nooit als record. Die
+  ronde loopt een langer parcours, dus ze flitst niet en latere rondes moeten
+  ze niet kloppen. De tweede ronde is het eerste record van de race. Voor de
+  rest telt de eerste ronde gewoon mee
+
 ## [4.6.0] - 2026-10-19
 
 Laptops koppelen alleen met dezelfde versie: zet 4.6.0 op alle laptops.
