@@ -4,6 +4,33 @@ All notable changes to Apolloon Telsysteem will be documented in this file.
 
 ## [Unreleased]
 
+## [4.7.0] - 2026-10-19
+
+Laptops koppelen alleen met dezelfde versie: zet 4.7.0 op alle laptops.
+
+### Added
+
+- De import van de inschrijvingen geeft lopers een label voor hun
+  studiefase: 2de bach, 3de bach, 1ste master of 2de master, elk met een eigen
+  kleur. 1ste bach valt onder 1ste jaar. Wat iemand zelf intypte, krijgt geen
+  label. Zo kunnen het Binnenscherm en het Competitiescherm de jaren tegen
+  elkaar zetten. Lopers die al eerder geïmporteerd zijn, houden hun labels;
+  importeer opnieuw op een lege laptop of zet het label met de hand
+
+### Changed
+
+- Beheer › Lopers gebruikt de volle breedte. De beschikbare uren staan
+  samengevoegd (`di 20u – wo 2u · wo 10–20u`, of `Hele race`), met een balk
+  van de 24 race-uren ervoor. Klik ergens op een rij om het profiel te
+  openen; de knop Profiel is weg. Verwijder verschijnt pas op de rij onder de
+  muis
+
+### Fixed
+
+- De import leest het tijdstip van elk antwoord weer uit het formulier van
+  2026 (kolom Tijdsstempel). Vult iemand het formulier twee keer in, dan
+  telt het nieuwste antwoord
+
 ## [4.6.1] - 2026-10-19
 
 Laptops koppelen alleen met dezelfde versie: zet 4.6.1 op alle laptops.
