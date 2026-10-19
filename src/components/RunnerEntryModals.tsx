@@ -10,6 +10,7 @@ import { runnerFormError } from '../lib/runnerForm';
 import { useAppActions, useAppData } from '../app/index';
 import type { LiveAppSnapshot, Runner } from '../types';
 import { LabelBadge, labelKindTitle } from './LabelBadge';
+import { useToast } from './Toaster';
 
 const selectRunners = ({ runners }: LiveAppSnapshot) => ({ runners });
 const selectLabels = ({ labels }: LiveAppSnapshot) => ({ labels });
@@ -28,13 +29,12 @@ export function RunnerActivationModal({
 }) {
   const { runners } = useAppData(selectRunners);
   const { setStatus } = useAppActions();
+  const toast = useToast();
   const [query, setQuery] = React.useState('');
   const [showAllMatches, setShowAllMatches] = React.useState(false);
   const [keepSearchOpen, setKeepSearchOpen] = React.useState(false);
-  const [activationNotice, setActivationNotice] = React.useState<string | null>(null);
   const searchInputRef = React.useRef<HTMLInputElement>(null);
   const [activatingId, setActivatingId] = React.useState<string | null>(null);
-  const [activationError, setActivationError] = React.useState<string | null>(null);
   const activationBusyRef = React.useRef(false);
   // After a check-in the list resets, so a double click's second click can land on another runner's Opwarmen.
   const isSecondClick = useSecondClick();
@@ -61,14 +61,12 @@ export function RunnerActivationModal({
     if (activationBusyRef.current) return;
     activationBusyRef.current = true;
     setActivatingId(runnerId);
-    setActivationError(null);
-    setActivationNotice(null);
     try {
       await setStatus(runnerId, 'warming_up');
       onActivated?.();
       const name = runners.find((runner) => runner.id === runnerId)?.name || 'Loper';
       if (keepSearchOpen) {
-        setActivationNotice(`${name} staat bij opwarming.`);
+        toast({ tone: 'success', text: `${name} staat bij opwarming.` });
         setQuery('');
         searchInputRef.current?.focus();
       } else {
@@ -76,7 +74,7 @@ export function RunnerActivationModal({
         onClose();
       }
     } catch (err) {
-      setActivationError(err instanceof Error ? err.message : 'Loper activeren mislukt');
+      toast({ tone: 'error', text: 'Loper activeren mislukt', detail: err instanceof Error ? err.message : undefined });
     } finally {
       activationBusyRef.current = false;
       setActivatingId(null);
@@ -142,11 +140,6 @@ export function RunnerActivationModal({
           Meerdere lopers aanmelden
         </label>
         <p className="label-picker-help">Aan: dit venster blijft open na elke aanmelding.</p>
-        {activationNotice && (
-          <div className="success-banner" role="status">
-            {activationNotice}
-          </div>
-        )}
         {hasQuery && filteredMatches.length === 1 && isAvailableForActivation(filteredMatches[0]) && (
           <p className="label-picker-help">Enter: deze loper naar opwarming.</p>
         )}
@@ -162,7 +155,6 @@ export function RunnerActivationModal({
               {hasQuery ? 'Geen loper gevonden.' : 'Geen beschikbare lopers in de databank.'}
             </div>
           )}
-          {activationError && <div className="warning-banner">{activationError}</div>}
           {visibleMatches.map((runner) => (
             <div key={runner.id} className="runner-search-row">
               <div>

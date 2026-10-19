@@ -1,4 +1,5 @@
 import React from 'react';
+import { useToast, type ToastMessage } from './Toaster';
 
 type NetAdapterProfile = {
   name: string;
@@ -45,8 +46,24 @@ export function NetworkSetupPanel() {
   const [eventOverChecked, setEventOverChecked] = React.useState(false);
   const [undoText, setUndoText] = React.useState('');
   const [message, setMessage] = React.useState<string | null>(null);
-  const [error, setError] = React.useState<string | null>(null);
   const pollTimer = React.useRef<number | null>(null);
+  const toast = useToast();
+
+  // The waiting line under the buttons goes away once the change worked or failed.
+  const done = (message: ToastMessage) => {
+    setMessage(null);
+    toast({ tone: 'success', ...message });
+  };
+  const fail = (text: string, reason?: string) => {
+    setMessage(null);
+    toast({
+      tone: 'error',
+      text,
+      detail: reason?.includes('alleen op de laptop zelf')
+        ? `${reason} Open Beheer op die laptop zelf (dus niet via het netwerk) en probeer het daar.`
+        : reason,
+    });
+  };
 
   const refresh = React.useCallback(async () => {
     try {
@@ -131,7 +148,6 @@ export function NetworkSetupPanel() {
 
   const startMakeStatic = async () => {
     setMessage(null);
-    setError(null);
     try {
       const response = await fetch('/api/net/make-static', {
         method: 'POST',
@@ -144,7 +160,7 @@ export function NetworkSetupPanel() {
       });
       const body = (await response.json()) as { ok: boolean; error?: string; elevationId?: string | null };
       if (!body.ok) {
-        setError(body.error || 'Vastzetten mislukt.');
+        fail('Vastzetten mislukt', body.error);
         setPhase('idle');
         return;
       }
@@ -157,31 +173,31 @@ export function NetworkSetupPanel() {
         (next) => next.primary !== null && next.primary.address === wanted && next.primary.dhcp === false,
         () => {
           setPhase('idle');
-          setMessage(
-            `Gelukt! Dit adres is nu vast: ${wanted}. Andere apparaten blijven bereikbaar op http://${wanted}:5173.`
-          );
+          done({
+            text: `Dit adres is nu vast: ${wanted}.`,
+            detail: `Andere apparaten blijven bereikbaar op http://${wanted}:5173.`,
+          });
         },
         (failure) => {
           setPhase('idle');
-          setMessage(null);
-          setError(failure);
+          fail('Vastzetten mislukt', failure);
         },
         () => {
           setPhase('idle');
-          setError(
+          fail(
+            'Vastzetten mislukt',
             'Er is niets veranderd. Waarschijnlijk is de toestemming geweigerd of weggeklikt. Probeer het opnieuw.'
           );
         }
       );
     } catch (err) {
       setPhase('idle');
-      setError(err instanceof Error ? err.message : 'Vastzetten mislukt.');
+      fail('Vastzetten mislukt', err instanceof Error ? err.message : undefined);
     }
   };
 
   const startRevert = async () => {
     setMessage(null);
-    setError(null);
     try {
       const response = await fetch('/api/net/revert-dhcp', {
         method: 'POST',
@@ -190,7 +206,7 @@ export function NetworkSetupPanel() {
       });
       const body = (await response.json()) as { ok: boolean; error?: string; elevationId?: string | null };
       if (!body.ok) {
-        setError(body.error || 'Terugzetten mislukt.');
+        fail('Terugzetten mislukt', body.error);
         setPhase('idle');
         return;
       }
@@ -204,23 +220,26 @@ export function NetworkSetupPanel() {
           setPhase('idle');
           setEventOverChecked(false);
           setUndoText('');
-          setMessage(
-            'Gelukt! Dit toestel haalt zijn adres weer automatisch op. Vergeet niet ook de kabel eruit te halen als je naar school-wifi gaat.'
-          );
+          done({
+            text: 'Dit toestel haalt zijn adres weer automatisch op.',
+            detail: 'Vergeet niet ook de kabel eruit te halen als je naar school-wifi gaat.',
+          });
         },
         (failure) => {
           setPhase('idle');
-          setMessage(null);
-          setError(failure);
+          fail('Terugzetten mislukt', failure);
         },
         () => {
           setPhase('idle');
-          setError('Er is niets veranderd. Waarschijnlijk is de toestemming geweigerd of weggeklikt.');
+          fail(
+            'Terugzetten mislukt',
+            'Er is niets veranderd. Waarschijnlijk is de toestemming geweigerd of weggeklikt.'
+          );
         }
       );
     } catch (err) {
       setPhase('idle');
-      setError(err instanceof Error ? err.message : 'Terugzetten mislukt.');
+      fail('Terugzetten mislukt', err instanceof Error ? err.message : undefined);
     }
   };
 
@@ -357,7 +376,6 @@ export function NetworkSetupPanel() {
             <button
               className="btn btn--primary"
               onClick={() => {
-                setError(null);
                 setMessage(null);
                 setPhase('confirm-make');
               }}
@@ -428,7 +446,6 @@ export function NetworkSetupPanel() {
             <button
               className="btn btn--secondary"
               onClick={() => {
-                setError(null);
                 setMessage(null);
                 setPhase('confirm-revert');
               }}
@@ -471,16 +488,8 @@ export function NetworkSetupPanel() {
       </p>
 
       {message && (
-        <div className="success-banner" role="status" aria-live="polite">
+        <div className="host-hint" role="status" aria-live="polite">
           {message}
-        </div>
-      )}
-      {error && (
-        <div className="warning-banner" role="alert">
-          {error}
-          {error.includes('alleen op de laptop zelf') && (
-            <> Open Beheer op die laptop zelf (dus niet via het netwerk) en probeer het daar.</>
-          )}
         </div>
       )}
     </>

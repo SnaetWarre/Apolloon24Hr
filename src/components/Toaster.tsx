@@ -1,4 +1,5 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { Icon } from './Icon';
 
 /** `text` is the outcome in one line; `detail` is an optional second line, like what to do next. */
@@ -21,6 +22,30 @@ const ToastContext = React.createContext<((toast: ToastInput) => void) | null>(n
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = React.useState<ToastEntry[]>([]);
   const nextIdRef = React.useRef(0);
+  const [host] = React.useState(() => {
+    const element = document.createElement('div');
+    element.style.display = 'contents';
+    return element;
+  });
+
+  // An open modal dialog blocks clicks on everything outside it, so the toasts move into the top one.
+  // moveBefore keeps their animations and timers running; append restarts them, in older browsers only.
+  React.useLayoutEffect(() => {
+    const place = () => {
+      const modals = document.querySelectorAll('dialog:modal');
+      const parent = modals[modals.length - 1] ?? document.body;
+      if (host.parentNode === parent) return;
+      if (host.isConnected && 'moveBefore' in parent) parent.moveBefore(host, null);
+      else parent.append(host);
+    };
+    place();
+    const observer = new MutationObserver(place);
+    observer.observe(document.body, { attributes: true, attributeFilter: ['open'], subtree: true });
+    return () => {
+      observer.disconnect();
+      host.remove();
+    };
+  }, [host]);
 
   const toast = React.useCallback((input: ToastInput) => {
     const entry = { ...input, id: ++nextIdRef.current, leaving: false };
@@ -38,11 +63,14 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   return (
     <ToastContext.Provider value={toast}>
       {children}
-      <section className="toaster" aria-label="Meldingen">
-        {toasts.map((entry) => (
-          <Toast key={entry.id} toast={entry} onDismiss={dismiss} onRemove={remove} />
-        ))}
-      </section>
+      {createPortal(
+        <section className="toaster" aria-label="Meldingen">
+          {toasts.map((entry) => (
+            <Toast key={entry.id} toast={entry} onDismiss={dismiss} onRemove={remove} />
+          ))}
+        </section>,
+        host
+      )}
     </ToastContext.Provider>
   );
 }

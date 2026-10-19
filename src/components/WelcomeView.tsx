@@ -140,11 +140,14 @@ function JoinChoice({ cluster, onOpenAdmin }: { cluster: ClusterStatus; onOpenAd
   if (cluster.members.length > 1) {
     const autoLinked = describeAutoLinks(cluster).find((link) => link.hostId === cluster.hostId);
     return (
-      <div className="success-banner" role="status">
-        {autoLinked ? `${autoLinked.text}.` : 'Gekoppeld.'} Deze laptop werkt samen met{' '}
-        {countLabel(cluster.members.length - 1, 'andere laptop', 'andere laptops')}. Importeer de inschrijvingen op één
-        van de laptops; ze verschijnen dan overal.
-      </div>
+      <p className="done-line" role="status">
+        <Icon name="check" size={14} />
+        <span>
+          {autoLinked ? `${autoLinked.text}.` : 'Gekoppeld.'} Deze laptop werkt samen met{' '}
+          {countLabel(cluster.members.length - 1, 'andere laptop', 'andere laptops')}. Importeer de inschrijvingen op
+          één van de laptops; ze verschijnen dan overal.
+        </span>
+      </p>
     );
   }
 

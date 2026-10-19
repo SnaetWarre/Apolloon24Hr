@@ -693,7 +693,6 @@ td .label-pill {
 
 /* ---------- Messages ---------- */
 .warning-banner,
-.success-banner,
 .host-hint {
   display: flex;
   flex-wrap: wrap;
@@ -709,14 +708,12 @@ td .label-pill {
 }
 
 .warning-banner > span,
-.success-banner > span,
 .host-hint > span {
   flex: 1 1 280px;
 }
 
 /* Feedback drops into place; it never just appears. */
-.warning-banner,
-.success-banner {
+.warning-banner {
   animation: notice-in var(--dur-2) var(--ease-out) backwards;
 }
 
@@ -731,13 +728,27 @@ td .label-pill {
   background: var(--stop-wash);
 }
 
-.success-banner {
-  border-color: var(--go-line);
-  background: var(--go-wash);
-}
-
 .host-hint {
   color: var(--ink-2);
+}
+
+/* A result that stays in view (under the Timing button, a finished update): a green
+   check and one line, no box. Results of a click elsewhere go to a toast. */
+.done-line {
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-start;
+  color: var(--ink-2);
+  font-size: 13.5px;
+  line-height: 1.5;
+  animation: notice-in var(--dur-2) var(--ease-out) backwards;
+}
+
+.done-line > .icon {
+  flex: none;
+  margin-block-start: 3px;
+  color: var(--go);
+  stroke-width: 2.5;
 }
 
 /* ---------- Toasts ----------

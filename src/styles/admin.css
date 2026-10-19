@@ -895,7 +895,7 @@
 /* Breathing room between stacked notices, forms and action rows inside a section. */
 .management-content .panel > .host-hint,
 .management-content .panel > .warning-banner,
-.management-content .panel > .success-banner {
+.management-content .panel > .done-line {
   margin-block: var(--space-2);
 }
 

@@ -459,16 +459,6 @@
   font-size: 13px;
 }
 
-/* A short notice beside the title stays one line inside the bar, so nothing below it moves. */
-.page-header__meta > .success-banner {
-  display: block;
-  min-width: 0;
-  padding-block: 5px;
-  overflow: clip;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .page-header__actions {
   display: flex;
   align-items: center;
