@@ -16,6 +16,7 @@ This folder is the maintained source for verifying what operators and spectators
 - `run.rpc()` is for setup only. The action under test is a click or key press on the page.
 - Only failover behaves differently for the desktop app: a page that should stay on its own laptop needs `run.newPage({ electron: true })`. Linking works from any page.
 - Wait for a role or text to appear. Do not sleep, except for the app's own time rules (the 20 s short-lap question).
+- The outcome of a button (saved, imported, linked, wiped) shows as a toast at the bottom right: `getByRole('status')` for a success, which leaves after 7 s or a click, and `getByRole('alert')` for a failure, which stays until clicked. Filter by text. A toast can cover a button in that corner; click the toast away first.
 - `/api/state` can show a change about 250 ms after the screen does. Poll it until the change shows, and let the last request finish before `run.close()`.
 
 ## Autofocus

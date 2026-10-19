@@ -126,14 +126,11 @@ export function useAppActions() {
       deleteRunner: action((id: string) => trpc.runners.delete.mutate({ id })),
       hideRunner: action((id: string) => trpc.runners.hide.mutate({ id })),
       unhideRunner: action((id: string) => trpc.runners.unhide.mutate({ id })),
-      importRunners: action(async (file: RegistrationFile) => {
-        const summary =
-          file.kind === 'xlsx'
-            ? await trpc.runners.importXlsx.mutate({ dataBase64: file.dataBase64 })
-            : await trpc.runners.importCsv.mutate({ csvText: file.csvText });
-        const counts = `${summary.created} aangemaakt, ${summary.updated} bijgewerkt, ${summary.skipped} overgeslagen`;
-        return summary.errors.length ? `${counts}. ${summary.errors.join('. ')}.` : counts;
-      }),
+      importRunners: action((file: RegistrationFile) =>
+        file.kind === 'xlsx'
+          ? trpc.runners.importXlsx.mutate({ dataBase64: file.dataBase64 })
+          : trpc.runners.importCsv.mutate({ csvText: file.csvText })
+      ),
       createLabel: action((input: LabelInput) => trpc.labels.create.mutate(input)),
       updateLabel: action((id: string, fields: LabelPatch) => trpc.labels.update.mutate({ id, fields })),
       deleteLabel: action((id: string) => trpc.labels.delete.mutate({ id })),

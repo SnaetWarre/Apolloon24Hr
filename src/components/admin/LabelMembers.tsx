@@ -3,13 +3,13 @@ import { useAppActions, useRegistrations } from '../../app/index';
 import { labelMembers, runnersToAdd, suggestedMembers } from '../../lib/labels';
 import { runnerLabel } from '../../lib/runners';
 import type { Label, Runner } from '../../types';
-import { AdminNoticeBanner, useAdminAction } from './AdminNotice';
+import { useAdminAction } from './useAdminAction';
 
 /** Who is in a label, with a search box to add runners and an × to take them out. */
 export function LabelMembers({ label, runners }: { label: Label; runners: Runner[] }) {
   const registrations = useRegistrations();
   const { addRunnerToLabel, removeRunnerFromLabel } = useAppActions();
-  const { pending, notice, run } = useAdminAction();
+  const { pending, run } = useAdminAction();
   const [query, setQuery] = React.useState('');
   const searchRef = React.useRef<HTMLInputElement>(null);
   const members = labelMembers(runners, label.id);
@@ -74,8 +74,6 @@ export function LabelMembers({ label, runners }: { label: Label; runners: Runner
           </ul>
         )}
       </div>
-
-      <AdminNoticeBanner notice={notice} />
 
       {members.length ? (
         <ul className="label-members__list" aria-label={`Lopers in ${label.name}`}>

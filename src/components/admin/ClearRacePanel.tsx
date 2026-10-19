@@ -1,7 +1,7 @@
 import { useAppActions } from '../../app/index';
 import { useConfirm } from '../ConfirmDialog';
 import type { RaceState } from '../../types';
-import { AdminNoticeBanner, useAdminAction } from './AdminNotice';
+import { useAdminAction } from './useAdminAction';
 import { formatRelativeAge } from './adminFormat';
 import { laptopWithAddress } from './useJoinGroup';
 
@@ -12,7 +12,7 @@ import { laptopWithAddress } from './useJoinGroup';
 export function ClearRacePanel({ race }: { race: RaceState }) {
   const confirm = useConfirm();
   const { clearRace } = useAppActions();
-  const { pending, notice, run } = useAdminAction();
+  const { pending, run } = useAdminAction();
   const running = race.raceStartedAt !== null && race.raceFinishedAt === null;
 
   async function clear(runners: boolean) {
@@ -52,8 +52,12 @@ export function ClearRacePanel({ race }: { race: RaceState }) {
     if (!confirmed) return;
     await run(
       () => clearRace({ runners }),
-      (result) =>
-        `${runners ? `Alles gewist: ${result.runners} lopers en ${result.laps} rondes weg` : `Race gewist: ${result.laps} rondes weg`}. De toestand van daarvoor staat op laptop ${laptopWithAddress({ name: result.safetyHostName, url: result.safetyHostUrl })}, in ${result.safetyBackup}. Zet die backup terug om dit ongedaan te maken.`,
+      (result) => ({
+        text: runners
+          ? `Alles gewist: ${result.runners} lopers en ${result.laps} rondes weg.`
+          : `Race gewist: ${result.laps} rondes weg.`,
+        detail: `Ongedaan maken kan met de backup "Vóór race wissen" op ${laptopWithAddress({ name: result.safetyHostName, url: result.safetyHostUrl })}.`,
+      }),
       runners ? 'Alles wissen mislukt' : 'Race wissen mislukt'
     );
   }
@@ -76,7 +80,6 @@ export function ClearRacePanel({ race }: { race: RaceState }) {
           Alles wissen
         </button>
       </div>
-      <AdminNoticeBanner notice={notice} />
     </section>
   );
 }

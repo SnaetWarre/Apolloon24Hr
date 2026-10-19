@@ -6,6 +6,7 @@ import { queryClient } from './app/index';
 import { ConfirmProvider } from './components/ConfirmDialog';
 import { DesktopTitleBar } from './components/DesktopTitleBar';
 import { AppErrorBoundary, reportClientError } from './components/ErrorScreens';
+import { ToastProvider } from './components/Toaster';
 import { getDesktop } from './lib/desktop';
 import { router } from './router';
 import './styles/index.css';
@@ -20,7 +21,9 @@ const app = (
   <AppErrorBoundary>
     <QueryClientProvider client={queryClient}>
       <ConfirmProvider>
-        <RouterProvider router={router} />
+        <ToastProvider>
+          <RouterProvider router={router} />
+        </ToastProvider>
       </ConfirmProvider>
     </QueryClientProvider>
   </AppErrorBoundary>

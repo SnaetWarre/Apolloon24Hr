@@ -1,7 +1,7 @@
 import { useAppActions } from '../../app/index';
 import type { NearbyGroup } from '../../types';
 import { useConfirm } from '../ConfirmDialog';
-import { useAdminAction } from './AdminNotice';
+import { useAdminAction } from './useAdminAction';
 
 /**
  * Koppelen: links this laptop with another one, after saying which laptop takes whose data.
@@ -20,7 +20,7 @@ export function useJoinGroup(
 ) {
   const confirm = useConfirm();
   const { joinGroup } = useAppActions();
-  const { pending, notice, run } = useAdminAction();
+  const { pending, run } = useAdminAction();
 
   async function join(url: string, found?: NearbyGroup) {
     if (!url || pending) return null;
@@ -56,12 +56,14 @@ export function useJoinGroup(
     return run(
       () => joinGroup(url),
       ({ backupFile }) =>
-        backupFile ? `Gekoppeld. De vorige gegevens staan in de backup ${backupFile}.` : 'Gekoppeld.',
+        backupFile
+          ? { text: 'Gekoppeld.', detail: 'De vorige gegevens van deze laptop staan in de backup "Vóór koppelen".' }
+          : 'Gekoppeld.',
       'Koppelen mislukt'
     );
   }
 
-  return { join, pending, notice };
+  return { join, pending };
 }
 
 export function shortUrl(url: string): string {

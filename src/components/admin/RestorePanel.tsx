@@ -5,7 +5,8 @@ import { useAppActions } from '../../app/index';
 import { backupsKey } from '../../app/snapshot';
 import { useConfirm } from '../ConfirmDialog';
 import type { BackupRecord } from '../../types';
-import { AdminNoticeBanner, useAdminAction } from './AdminNotice';
+import { useToast } from '../Toaster';
+import { useAdminAction } from './useAdminAction';
 import { formatFileSize, formatRelativeAge } from './adminFormat';
 import { laptopWithAddress } from './useJoinGroup';
 
@@ -19,7 +20,8 @@ const SHOWN_AT_FIRST = 8;
 export function RestorePanel({ runnerCount }: { runnerCount: number }) {
   const confirm = useConfirm();
   const { restoreBackup } = useAppActions();
-  const { pending, notice, setNotice, run } = useAdminAction();
+  const toast = useToast();
+  const { pending, run } = useAdminAction();
   const [showAll, setShowAll] = React.useState(false);
   const backups = useQuery({ queryKey: backupsKey, queryFn: () => trpc.backups.list.query(), refetchInterval: 60_000 });
   const records = backups.data ?? [];
@@ -31,7 +33,11 @@ export function RestorePanel({ runnerCount }: { runnerCount: number }) {
     try {
       preview = await trpc.backups.preview.query({ fileName: record.fileName });
     } catch (error) {
-      setNotice({ tone: 'error', text: error instanceof Error ? error.message : 'De backup kon niet gelezen worden.' });
+      toast({
+        tone: 'error',
+        text: 'De backup kon niet gelezen worden',
+        detail: error instanceof Error ? error.message : undefined,
+      });
       return;
     }
     const confirmed = await confirm({
@@ -61,8 +67,10 @@ export function RestorePanel({ runnerCount }: { runnerCount: number }) {
     if (!confirmed) return;
     await run(
       () => restoreBackup(record.fileName),
-      (result) =>
-        `Teruggezet naar ${formatMoment(record.createdAt)}: ${result.runners} lopers, ${result.laps} rondes. De toestand van daarvoor staat op laptop ${laptopWithAddress({ name: result.safetyHostName, url: result.safetyHostUrl })}, in ${result.safetyBackup}. Open daar Systeem & herstel om dit ongedaan te maken.`,
+      (result) => ({
+        text: `Teruggezet naar ${formatMoment(record.createdAt)}: ${result.runners} lopers, ${result.laps} rondes.`,
+        detail: `Ongedaan maken kan met de backup "Vóór terugzetten" op ${laptopWithAddress({ name: result.safetyHostName, url: result.safetyHostUrl })}.`,
+      }),
       'Terugzetten mislukt'
     );
   }
@@ -120,7 +128,6 @@ export function RestorePanel({ runnerCount }: { runnerCount: number }) {
           {showAll ? 'Minder tonen' : `Alle ${records.length} backups tonen`}
         </button>
       )}
-      <AdminNoticeBanner notice={notice} />
     </section>
   );
 }

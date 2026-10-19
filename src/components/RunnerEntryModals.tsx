@@ -24,7 +24,7 @@ export function RunnerActivationModal({
   onOpenProfile?: (runnerId: string) => void;
   onActivated?: () => void;
   /** One runner checked in and the dialog closed, so the page shows the result instead. */
-  onCheckedIn?: (runnerId: string) => void;
+  onCheckedIn?: (runnerId: string, name: string) => void;
 }) {
   const { runners } = useAppData(selectRunners);
   const { setStatus } = useAppActions();
@@ -66,13 +66,13 @@ export function RunnerActivationModal({
     try {
       await setStatus(runnerId, 'warming_up');
       onActivated?.();
+      const name = runners.find((runner) => runner.id === runnerId)?.name || 'Loper';
       if (keepSearchOpen) {
-        const activatedRunner = runners.find((runner) => runner.id === runnerId);
-        setActivationNotice(`${activatedRunner?.name || 'Loper'} staat bij opwarming.`);
+        setActivationNotice(`${name} staat bij opwarming.`);
         setQuery('');
         searchInputRef.current?.focus();
       } else {
-        onCheckedIn?.(runnerId);
+        onCheckedIn?.(runnerId, name);
         onClose();
       }
     } catch (err) {
@@ -220,7 +220,7 @@ export function RunnerAddModal({
   destination = 'warming_up',
 }: {
   onClose: () => void;
-  onAdded?: (runnerId: string) => void;
+  onAdded?: (runnerId: string, name: string) => void;
   destination?: 'warming_up' | 'registered';
 }) {
   const { labels } = useAppData(selectLabels);
@@ -297,7 +297,7 @@ export function RunnerAddModal({
         labels: selectedLabels,
         status: destination,
       });
-      onAdded?.(id);
+      onAdded?.(id, cleanName);
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Loper toevoegen mislukt');

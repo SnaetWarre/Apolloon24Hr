@@ -42,6 +42,36 @@
   }
 }
 
+/* A toast rises into the corner with a small settle. */
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* A toast slides out to the side. It is removed when this ends, so it may end hidden. */
+@keyframes toast-out {
+  to {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+}
+
+/* The time a toast has left, as a line that shrinks to nothing. */
+@keyframes toast-timer {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+
 /* A row slides from its old place in a list to its new one. Set --slide-from to the old offset. */
 @keyframes slide-from {
   from {

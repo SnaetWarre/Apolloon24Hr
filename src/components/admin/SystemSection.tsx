@@ -7,7 +7,7 @@ import { useConfirm } from '../ConfirmDialog';
 import { NetworkSetupPanel } from '../NetworkSetupPanel';
 import type { BackupStatus, ClusterMemberStatus, ClusterStatus, NearbyGroup, RaceState, Runner } from '../../types';
 import { AboutPanel } from './AboutPanel';
-import { AdminNoticeBanner, useAdminAction } from './AdminNotice';
+import { useAdminAction } from './useAdminAction';
 import { ClearRacePanel } from './ClearRacePanel';
 import { RestorePanel } from './RestorePanel';
 import { formatFileSize, formatRelativeAge } from './adminFormat';
@@ -68,12 +68,8 @@ function ClusterPanel({
 }) {
   const confirm = useConfirm();
   const { continueAlone, removeLaptop, joinGroup: rejoinGroup } = useAppActions();
-  const { pending: alonePending, notice: aloneNotice, run } = useAdminAction();
-  const {
-    join: joinGroup,
-    pending: joinPending,
-    notice: joinNotice,
-  } = useJoinGroup(runnerCount, cluster.changed, cluster);
+  const { pending: alonePending, run } = useAdminAction();
+  const { join: joinGroup, pending: joinPending } = useJoinGroup(runnerCount, cluster.changed, cluster);
   const [otherUrl, setOtherUrl] = React.useState('');
   const group = describeGroup(cluster);
   const pending = alonePending || joinPending;
@@ -286,8 +282,6 @@ function ClusterPanel({
           )}
         </>
       )}
-      <AdminNoticeBanner notice={joinNotice} />
-      <AdminNoticeBanner notice={aloneNotice} />
     </section>
   );
 }
@@ -331,7 +325,7 @@ function NearbyRow({
 
 function BackupPanel({ backup }: { backup: BackupStatus }) {
   const { createBackup } = useAppActions();
-  const { pending, notice, run } = useAdminAction();
+  const { pending, run } = useAdminAction();
   const busy = pending || backup.inProgress;
 
   return (
@@ -419,7 +413,6 @@ function BackupPanel({ backup }: { backup: BackupStatus }) {
         Download regelmatig een kopie naar een USB-stick. De gekoppelde laptops beschermen tegen een defect toestel;
         deze versies beschermen ook tegen een fout die naar alle laptops gekopieerd is.
       </p>
-      <AdminNoticeBanner notice={notice} />
     </section>
   );
 }

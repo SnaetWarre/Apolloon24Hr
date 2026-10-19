@@ -1051,3 +1051,13 @@ details.host-hint > summary {
 .about-help {
   margin-block-start: var(--space-3);
 }
+
+.import-problems {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.import-problems ul {
+  margin: 0;
+  padding-inline-start: 18px;
+}

@@ -2,7 +2,7 @@ import { Link } from '@tanstack/react-router';
 import { useAppActions } from '../../app/index';
 import { Icon } from '../Icon';
 import type { PublicRecordMode } from '../../types';
-import { AdminNoticeBanner, useAdminAction } from './AdminNotice';
+import { useAdminAction } from './useAdminAction';
 import { burgieGepaktMessage, publicRecordModeLabel } from './adminFormat';
 
 const RECORD_MODES: ReadonlyArray<[PublicRecordMode, string]> = [
@@ -14,7 +14,7 @@ const RECORD_MODES: ReadonlyArray<[PublicRecordMode, string]> = [
 
 export function PublicSection({ publicRecordMode }: { publicRecordMode: PublicRecordMode }) {
   const { burgieGepakt, updatePublicRecordMode } = useAppActions();
-  const { pending, notice, run } = useAdminAction();
+  const { pending, run } = useAdminAction();
 
   return (
     <section className="panel">
@@ -75,7 +75,6 @@ export function PublicSection({ publicRecordMode }: { publicRecordMode: PublicRe
           Competitiescherm openen
         </Link>
       </div>
-      <AdminNoticeBanner notice={notice} />
     </section>
   );
 }

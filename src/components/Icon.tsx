@@ -63,6 +63,7 @@ const PATHS = {
     </>
   ),
   check: <path d="M20 6 9 17l-5-5" />,
+  alert: <path d="M12 7v6m0 4h.01" />,
   search: (
     <>
       <circle cx="11" cy="11" r="7" />

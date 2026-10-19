@@ -3,7 +3,7 @@ import { useAppActions } from '../../app/index';
 import { buildEventReadiness, readinessSummary, type ReadinessCheck } from '../../lib/readiness';
 import { REGISTRATION_FILE_TYPES, readRegistrationFile, type RegistrationFile } from '../../lib/registrationFile';
 import type { ClusterStatus } from '../../types';
-import { AdminNoticeBanner, useAdminAction } from './AdminNotice';
+import { useAdminAction } from './useAdminAction';
 
 const READINESS_ORDER = { blocked: 0, warning: 1, ready: 2 } as const;
 
@@ -90,16 +90,28 @@ function ImportPanel() {
   const { importRunners } = useAppActions();
   const [registrationFile, setRegistrationFile] = React.useState<RegistrationFile | null>(null);
   const [fileName, setFileName] = React.useState('');
-  const { pending, notice, setNotice, run } = useAdminAction();
+  const { pending, run } = useAdminAction();
+  // Rows the import skipped or doubted stay on the panel, as a list to fix in the file.
+  const [problems, setProblems] = React.useState<string[]>([]);
 
   async function onFileChange(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     // Clear the input so picking the same file again after editing it fires `change` and is read fresh.
     event.target.value = '';
     if (!file) return;
-    setNotice(null);
+    setProblems([]);
     setFileName(file.name);
     setRegistrationFile(await readRegistrationFile(file));
+  }
+
+  async function importFile(file: RegistrationFile) {
+    setProblems([]);
+    const summary = await run(
+      () => importRunners(file),
+      ({ created, updated, skipped }) => `${created} aangemaakt, ${updated} bijgewerkt, ${skipped} overgeslagen`,
+      'Import mislukt'
+    );
+    if (summary) setProblems(summary.errors);
   }
 
   return (
@@ -119,19 +131,23 @@ function ImportPanel() {
         <button
           className="btn btn--primary btn--fixed"
           onClick={() => {
-            if (registrationFile)
-              void run(
-                () => importRunners(registrationFile),
-                (summary) => summary,
-                'Import mislukt'
-              );
+            if (registrationFile) void importFile(registrationFile);
           }}
           disabled={!registrationFile || pending}
         >
           {pending ? 'Importeren...' : 'Importeren'}
         </button>
       </div>
-      <AdminNoticeBanner notice={notice} />
+      {problems.length > 0 && (
+        <div className="warning-banner import-problems">
+          <strong>Nakijken in het bestand</strong>
+          <ul>
+            {problems.map((problem) => (
+              <li key={problem}>{problem}</li>
+            ))}
+          </ul>
+        </div>
+      )}
     </section>
   );
 }
