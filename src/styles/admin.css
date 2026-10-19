@@ -358,6 +358,10 @@
   gap: 1px;
 }
 
+.runner-hours__range {
+  white-space: nowrap;
+}
+
 .runner-hours__slot {
   inline-size: 5px;
   block-size: 14px;

@@ -1,3 +1,4 @@
+import { Fragment } from 'react';
 import { LabelBadge } from '../LabelBadge';
 import { SourceBadge } from '../RunnerEntryModals';
 import { summarizeHours } from '../../lib/availability';
@@ -102,7 +103,15 @@ function RunnerHours({ hours }: { hours: string[] }) {
           />
         ))}
       </span>
-      <span>{ranges.join(' · ')}</span>
+      {/* A narrow column wraps between stretches, never inside one. */}
+      <span>
+        {ranges.map((range, index) => (
+          <Fragment key={index}>
+            {index > 0 && ' · '}
+            <span className="runner-hours__range">{range}</span>
+          </Fragment>
+        ))}
+      </span>
     </div>
   );
 }
