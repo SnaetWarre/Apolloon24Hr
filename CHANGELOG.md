@@ -4,8 +4,28 @@ All notable changes to Apolloon Telsysteem will be documented in this file.
 
 ## [Unreleased]
 
+## [4.6.0] - 2026-10-19
+
+Laptops koppelen alleen met dezelfde versie: zet 4.6.0 op alle laptops.
+
 ### Added
 
+- Timing heeft een knop Burgie gepakt onderaan, naast Laatste wissel ongedaan
+  maken. Hij doet hetzelfde als de knop in Beheer › Publiek en heeft geen
+  sneltoets
+- Beheer › Systeem & herstel: Race wissen na een testrun. Het wist rondes,
+  wissels en race-events en zet de race terug op niet gestart. Lopers, labels,
+  logo's en instellingen blijven. Eerst maakt de hoofdlaptop een backup
+  (Vóór race wissen); die terugzetten maakt het wissen ongedaan
+- Beheer › Labels toont wie in elk label zit. Lopers toevoegen of uit een
+  label halen kan daar meteen, zonder elk profiel te openen
+- Het profiel van een loper heeft een knop Opwarmen
+- Bellen op Wachtrij › Nu beschikbaar en in het profiel toont een QR-code met
+  het gsm-nummer. Scan hem met een gsm om te bellen; de laptops kunnen zelf
+  niet bellen
+- Apolloon Wrapped: na de race maakt een script per loper met minstens één
+  ronde een story-afbeelding en mailt die. Het draait thuis op een backup van
+  de race, niet op de laptops op het event (zie `docs/wrapped.md`)
 - Competitiescherm (`/display/competitions`): kies zelf welke ploegen tegen
   elkaar strijden (bv. 1ste, 2de en 3de jaar) met Competitie toevoegen. Elke
   competitie is een staafdiagram met de leider bovenaan, het aantal rondes
@@ -24,6 +44,28 @@ All notable changes to Apolloon Telsysteem will be documented in this file.
   inschrijvingsgegevens: e-mail, gsm-nummer, uren en de andere antwoorden van
   het formulier. De uren noemen geen weekdag (`21-22u`), zodat Nu beschikbaar
   op Wachtrij op elke dag van de demo elk uur lopers toont
+- Een competitie die al op het Competitiescherm staat, kan niet nog eens
+  toegevoegd worden
+- Het Buitenscherm toont alleen labels van zusterverenigingen bij de loper,
+  met een groter logo en kleinere namen
+- Overzicht toont de racestatus niet meer in de kop
+- Na aanmelden op Wachtrij zegt het scherm welke loper naar Opwarming ging
+- Enter bewaart een nieuwe loper in Nieuwe loper. In Beheer › Rondes verplaatst
+  of splitst Enter een ronde na het typen van een lopernummer
+- Beheer › Rondes houdt de rijen op hun plaats zolang de muis op de tabel
+  staat, zodat een nieuwe ronde de knoppen niet verschuift
+- Pakketten met bekende beveiligingslekken bijgewerkt (onder andere
+  `proxy-addr`)
+
+### Fixed
+
+- Een klik op een Wachtrij-rij die net onder de muis schoof, doet niets meer.
+  Zo gaat geen verkeerde loper terug naar opwarming als Timing een wissel
+  klokt
+- Dubbel klikken op Opwarmen in Loper zoeken of in het profiel meldt één
+  loper aan en opent niet meer Uit de wachtrij halen
+- Rijen op het Competitiescherm springen niet meer weg als een competitie
+  toegevoegd of verwijderd wordt
 
 ## [4.5.0] - 2026-10-12
 
