@@ -4,6 +4,25 @@ All notable changes to Apolloon Telsysteem will be documented in this file.
 
 ## [Unreleased]
 
+## [5.2.0] - 2026-10-19
+
+Laptops koppelen alleen met dezelfde versie: zet 5.2.0 op alle laptops.
+
+### Changed
+
+- Wat een knop deed, staat nu in een melding rechtsonder in plaats van in een
+  groene balk die de pagina naar beneden duwt. Een groen vinkje betekent
+  gelukt; die melding verdwijnt na 7 seconden, of als je erop klikt. Een rood
+  uitroepteken betekent mislukt; die melding blijft staan tot je erop klikt.
+  Met de muis erop blijft ze ook staan. Dit geldt in heel Beheer, bij het
+  aanmelden in Wachtrij en in het lopersprofiel
+- Onder de Timing-knop staat de bevestiging als een groen vinkje met één
+  regel, zonder kader
+- Race wissen en Backup terugzetten tonen geen bestandsnaam meer, maar de naam
+  van de backup zoals de lijst hem toont (Vóór race wissen, Vóór terugzetten)
+- Bij het importeren van de inschrijvingen blijven de rijen met een fout op
+  het scherm staan, in een lijst onder Nakijken in het bestand
+
 ## [5.1.0] - 2026-10-19
 
 Laptops koppelen alleen met dezelfde versie: zet 5.1.0 op alle laptops.
