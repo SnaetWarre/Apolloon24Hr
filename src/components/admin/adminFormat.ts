@@ -1,3 +1,4 @@
+import { formatClockTimeMs } from '../../lib/time';
 import type { PublicRecordMode, Runner, RunnerStatus } from '../../types';
 
 export function formatFileSize(bytes: number): string {
@@ -49,4 +50,15 @@ export function compareRunnerIdentity(a: Runner, b: Runner) {
       numeric: true,
     }) || a.name.localeCompare(b.name)
   );
+}
+
+export function burgieGepaktMessage(event: {
+  occurredAt: number;
+  runnerName: string | null;
+  runnerNumber: string | null;
+}) {
+  const runner = event.runnerName
+    ? ` voor ${event.runnerNumber ? `${event.runnerNumber} ` : ''}${event.runnerName}`
+    : '';
+  return `Burgie gepakt opgeslagen om ${formatClockTimeMs(event.occurredAt)}${runner}.`;
 }

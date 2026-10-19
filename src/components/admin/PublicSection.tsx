@@ -1,10 +1,9 @@
 import { Link } from '@tanstack/react-router';
 import { useAppActions } from '../../app/index';
-import { formatClockTimeMs } from '../../lib/time';
 import { Icon } from '../Icon';
 import type { PublicRecordMode } from '../../types';
 import { AdminNoticeBanner, useAdminAction } from './AdminNotice';
-import { publicRecordModeLabel } from './adminFormat';
+import { burgieGepaktMessage, publicRecordModeLabel } from './adminFormat';
 
 const RECORD_MODES: ReadonlyArray<[PublicRecordMode, string]> = [
   ['off', 'Uit'],
@@ -31,18 +30,7 @@ export function PublicSection({ publicRecordMode }: { publicRecordMode: PublicRe
           <button
             className="btn btn--primary"
             disabled={pending}
-            onClick={() =>
-              void run(
-                burgieGepakt,
-                (event) =>
-                  `Burgie gepakt opgeslagen om ${formatClockTimeMs(event.occurredAt)}${
-                    event.runnerName
-                      ? ` voor ${event.runnerNumber ? `${event.runnerNumber} ` : ''}${event.runnerName}`
-                      : ''
-                  }.`,
-                'Burgie gepakt opslaan mislukt'
-              )
-            }
+            onClick={() => void run(burgieGepakt, burgieGepaktMessage, 'Burgie gepakt opslaan mislukt')}
           >
             {pending ? 'Opslaan...' : 'Burgie gepakt'}
           </button>

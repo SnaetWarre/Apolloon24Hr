@@ -14,6 +14,7 @@ import { useArrivals, usePulse } from '../lib/motion';
 import { forgetLapStart, rememberLapStart, timePress, tooShortLapMs, type PressTime } from '../lib/pressTiming';
 import { LIVE_MILLISECOND_INTERVAL_MS, useClockTick } from '../lib/useClockTick';
 import { isConnectionError } from '../lib/connectionError';
+import { burgieGepaktMessage } from './admin/adminFormat';
 
 const selectTimingData = ({ runners, race }: LiveAppSnapshot) => ({ runners, race });
 // Windows counts two clicks up to 500 ms apart as a double click.
@@ -28,10 +29,11 @@ export function TimingView() {
     refresh: refreshHistory,
   } = useRaceHistory({ scope: 'recent', limit: 10 });
   const { cluster } = useClusterStatus();
-  const { handoff, startNext, undoLastHandoff, finishRace } = useAppActions();
+  const { handoff, startNext, undoLastHandoff, finishRace, burgieGepakt } = useAppActions();
   const [actionError, setActionError] = React.useState<string | null>(null);
   const [handoffBusy, setHandoffBusy] = React.useState(false);
   const [lastAction, setLastAction] = React.useState<string | null>(null);
+  const [burgieBusy, setBurgieBusy] = React.useState(false);
   const [finishConfirmStep, setFinishConfirmStep] = React.useState<0 | 1 | 2>(0);
   // The first "Race beëindigen" click stops the clock; the confirmations only decide whether it counts.
   const [finishStop, setFinishStop] = React.useState<{ press: PressTime; activeStartedAt: number | null } | null>(null);
@@ -229,6 +231,26 @@ export function TimingView() {
       undoLastHandoff,
       reopen ? 'Race heropend. Beëindigen ongedaan gemaakt.' : 'Laatste wissel ongedaan gemaakt.'
     );
+  }
+
+  // Separate from the handoff lock, so a press right after Burgie gepakt still clocks.
+  async function saveBurgie() {
+    releaseFocus();
+    setBurgieBusy(true);
+    try {
+      setLastAction(burgieGepaktMessage(await burgieGepakt()));
+      setActionError(null);
+    } catch (err) {
+      setActionError(
+        isConnectionError(err)
+          ? 'Burgie gepakt niet opgeslagen: geen verbinding met de laptop. Druk opnieuw.'
+          : err instanceof Error
+            ? err.message
+            : 'Burgie gepakt opslaan mislukt'
+      );
+    } finally {
+      setBurgieBusy(false);
+    }
   }
 
   function startFinish(eventTime: number) {
@@ -431,7 +453,14 @@ export function TimingView() {
               <span className="muted-label">Race gestart</span>
               <strong>{race.raceStartedAt ? formatClockTimeMs(race.raceStartedAt).split('.')[0] : 'Nog niet'}</strong>
             </div>
-            <button className="btn timing-undo" onClick={undo} disabled={timingBlocked}>
+            <button
+              className="btn timing-burgie"
+              onClick={() => void saveBurgie()}
+              disabled={timingBlocked || burgieBusy}
+            >
+              {burgieBusy ? 'Opslaan...' : 'Burgie gepakt'}
+            </button>
+            <button className="btn" onClick={undo} disabled={timingBlocked}>
               Laatste wissel ongedaan maken
             </button>
           </div>
