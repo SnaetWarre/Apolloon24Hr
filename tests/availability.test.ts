@@ -12,6 +12,7 @@ import {
   parseHourBlock,
   searchableHourTexts,
   setHourBlock,
+  summarizeHours,
   toggleHourBlock,
 } from '../src/lib/availability.ts';
 import type { Runner, RunnerRegistration } from '../src/types.ts';
@@ -189,4 +190,20 @@ test('search finds a runner by every hour their form block covers, and keeps the
     '13-14u (woensdag)',
   ]);
   assert.deepEqual(searchableHourTexts([]), []);
+});
+
+test('hours read as stretches: blocks next to each other join, also across midnight', () => {
+  const night = ['20-21u (dinsdag)', '21-22u (dinsdag)', '22-23u (dinsdag)', '23-00u (dinsdag)', '00-02u (woensdag)'];
+  assert.deepEqual(summarizeHours([...night, '12-14u (woensdag)', '14-16u (woensdag)']).ranges, [
+    'di 20u – wo 2u',
+    'wo 12–16u',
+  ]);
+  assert.deepEqual(summarizeHours(['22-23u (dinsdag)', '23-00u (dinsdag)']).ranges, ['di 22–24u']);
+  const wholeRace = summarizeHours(
+    eventHourGrid().flatMap(({ weekday, hours }) => hours.map((hour) => formatMomentBlock({ hour, weekday })))
+  );
+  assert.deepEqual(wholeRace.ranges, ['Hele race']);
+  assert.equal(wholeRace.slots.length, 24);
+  // What matches no race hour stays as typed.
+  assert.deepEqual(summarizeHours(['18-20u (woensdag)', 'na de les']).ranges, ['wo 18–20u', 'na de les']);
 });

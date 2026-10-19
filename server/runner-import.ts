@@ -18,6 +18,15 @@ const FORM_CATEGORY_LABELS = new Map([
   ['ik ben alumni aan de faculteit faber', 'Anciens'],
 ]);
 
+/** The form's study phases; a first bachelor is a first-year student. Free text under "Andere" gets no label. */
+const STUDY_PHASE_LABELS = new Map([
+  ['1ste bach', '1ste jaar'],
+  ['2de bach', '2de bach'],
+  ['3de bach', '3de bach'],
+  ['1ste master', '1ste master'],
+  ['2de master', '2de master'],
+]);
+
 function text(value: unknown): string {
   return value === undefined || value === null ? '' : String(value).trim();
 }
@@ -73,7 +82,8 @@ function splitFormChoices(value: string): string[] {
 
 function registrationFromRow(row: Record<string, unknown>): RunnerRegistration {
   return {
-    submittedAt: formValue(row, 'Tijdstempel'),
+    // The 2026 form's sheet spells it "Tijdsstempel".
+    submittedAt: formValue(row, 'Tijdstempel') || formValue(row, 'Tijdsstempel'),
     email: formValue(row, 'E-mailadres'),
     phone: formValue(row, 'GSM-nummer'),
     studyPhase: formValue(row, 'Studiefase'),
@@ -89,8 +99,12 @@ function registrationFromRow(row: Record<string, unknown>): RunnerRegistration {
   };
 }
 
-function labelsFromFormCategories(categories: string[]): string[] {
-  return categories.flatMap((category) => FORM_CATEGORY_LABELS.get(category.trim().toLowerCase()) ?? []);
+function labelsFromForm(registration: RunnerRegistration): string[] {
+  const labels = registration.categories.flatMap(
+    (category) => FORM_CATEGORY_LABELS.get(category.trim().toLowerCase()) ?? []
+  );
+  const studyPhase = STUDY_PHASE_LABELS.get(registration.studyPhase.trim().toLowerCase());
+  return [...new Set(studyPhase ? [...labels, studyPhase] : labels)];
 }
 
 function runnerInputFromRow(
@@ -101,7 +115,7 @@ function runnerInputFromRow(
 ): RunnerInput {
   const base = { runnerNumber, name, status: 'registered', registrationSource: 'import' } as const;
   if (registration) {
-    return { ...base, labels: labelsFromFormCategories(registration.categories), registration };
+    return { ...base, labels: labelsFromForm(registration), registration };
   }
   const labels = splitLabels([
     columnValue(row, ['labels', 'label', 'categorie', 'categories', 'type']),

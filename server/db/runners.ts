@@ -278,14 +278,15 @@ export function updateRunner(id: string, fields: RunnerPatch): Runner | null {
 }
 
 /**
- * The form's time as a CSV export writes it (`10/4/2026 18:14:44`, as the
- * sheet shows it) or as read from the Excel file (`04/10/2026 18:14:44`).
+ * The form's time as a CSV export writes it (`10/4/2026 18:14:44` or
+ * `4-10-2026 18:14:44`, as the sheet shows it) or as read from the Excel file
+ * (`04/10/2026 18:14:44`).
  */
 function sameSubmissionTime(stored: string, incoming: string): boolean {
   const parts = (value: string) =>
     value
       .trim()
-      .match(/^(\d{1,2})\/(\d{1,2})\/(\d{4}) (\d{1,2}):(\d{2}):(\d{2})$/)
+      .match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4}) (\d{1,2}):(\d{2}):(\d{2})$/)
       ?.slice(1)
       .map(Number);
   const a = parts(stored);

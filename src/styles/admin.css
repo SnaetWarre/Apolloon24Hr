@@ -276,8 +276,101 @@
 
 .runner-admin-actions {
   display: flex;
+  justify-content: flex-end;
   gap: 4px;
   white-space: nowrap;
+}
+
+/* The runner list has many columns; it takes the full width instead of the other sections' reading width. */
+.management-content:has(.runner-admin-table) {
+  max-width: none;
+}
+
+.runner-admin-table td {
+  padding-block: 10px;
+}
+
+.runner-admin-table td.num {
+  font-variant-numeric: tabular-nums;
+}
+
+.runner-admin-table__muted {
+  color: var(--ink-3);
+}
+
+.runner-admin-table tbody tr {
+  position: relative;
+}
+
+.runner-admin-table__open {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-weight: 500;
+  text-align: start;
+  cursor: pointer;
+}
+
+.runner-admin-table__open::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+
+.runner-admin-table__open:focus-visible {
+  outline: 2px solid transparent;
+}
+
+.runner-admin-table tbody tr:has(.runner-admin-table__open:focus-visible) {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+.runner-admin-actions .btn {
+  position: relative;
+  z-index: 1;
+}
+
+/* Delete is rare: it shows on the row under the pointer, so 150 red buttons do not shout down the names. */
+@media (hover: hover) and (pointer: fine) {
+  .runner-admin-actions__remove {
+    opacity: 0;
+    transition: opacity var(--dur-1) var(--ease-out);
+  }
+
+  .runner-admin-table tbody tr:is(:hover, :focus-within) .runner-admin-actions__remove {
+    opacity: 1;
+  }
+}
+
+.runner-hours {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--ink-2);
+}
+
+.runner-hours__strip {
+  display: flex;
+  flex: none;
+  gap: 1px;
+}
+
+.runner-hours__slot {
+  inline-size: 5px;
+  block-size: 14px;
+  border-radius: 1.5px;
+  background: var(--surface-3);
+}
+
+.runner-hours__slot[data-new-day] {
+  margin-inline-start: 3px;
+}
+
+.runner-hours__slot[data-available] {
+  background: var(--brand);
 }
 
 .label-admin-list {

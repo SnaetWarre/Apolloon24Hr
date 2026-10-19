@@ -219,3 +219,39 @@ function weekdayIndex(weekday: string): number {
   const index = WEEKDAYS.indexOf(weekday);
   return index === -1 ? WEEKDAYS.length : index;
 }
+
+export type HourSummary = {
+  /** One entry per event hour, from Tuesday 20:00 on: whether the runner can run then. */
+  slots: Array<{ weekday: string; hour: number; available: boolean }>;
+  /** The hours as stretches, such as `di 20u – wo 2u` and `wo 10–20u`; text no event hour matches stays as typed. */
+  ranges: string[];
+};
+
+/** Joins the form's hour blocks into stretches, so a whole night reads as one range instead of a dozen blocks. */
+export function summarizeHours(hourTexts: string[]): HourSummary {
+  const slots = eventHourGrid().flatMap(({ weekday, hours }) =>
+    hours.map((hour) => ({ weekday, hour, available: hasHourBlock(hourTexts, weekday, hour) }))
+  );
+  const ranges: string[] = [];
+  if (slots.every((slot) => slot.available)) ranges.push('Hele race');
+  else {
+    for (let start = 0; start < slots.length; start += 1) {
+      if (!slots[start].available) continue;
+      let end = start;
+      while (slots[end + 1]?.available) end += 1;
+      ranges.push(formatStretch(slots[start], slots[end]));
+      start = end;
+    }
+  }
+  const unmatched = hourTexts.filter((text) => !slots.some((slot) => coversHour(text, slot.weekday, slot.hour)));
+  return { slots, ranges: [...ranges, ...unmatched] };
+}
+
+/** `wo 10–20u` within a day, `di 20u – wo 2u` across midnight; a stretch up to midnight ends at 24u. */
+function formatStretch(first: { weekday: string; hour: number }, last: { weekday: string; hour: number }): string {
+  const day = (weekday: string) => weekday.slice(0, 2);
+  const end = last.hour + 1;
+  return first.weekday === last.weekday
+    ? `${day(first.weekday)} ${first.hour}–${end}u`
+    : `${day(first.weekday)} ${first.hour}u – ${day(last.weekday)} ${end}u`;
+}
