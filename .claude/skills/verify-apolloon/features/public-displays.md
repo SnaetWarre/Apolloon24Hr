@@ -13,12 +13,13 @@ Binnenscherm (inside), Competitiescherm (competitions) and Buitenscherm (outside
 - `display-finished` takes over both screens once the race is finished in Timing. The outside screen shows `Race afgelopen` in the top band and `Bedankt aan alle lopers` in the bottom band, with no `Nu op de piste` or `Volgende racer`. The inside screen reads `Race afgelopen Bedankt aan alle lopers` where the runner and the next runner were; the rest of the inside screen stays. After `Race hervatten` both screens show runners again.
 - `display-outside-flash` shows a new fastest lap large for 8 seconds, set by the `Recordflits` choice in Beheer › Publiek: `Dagrecord` (the default, titled `Nieuw dagrecord`), `Per 2 uur` and `Per uur` (titled `Snelste ronde van deze 2 uur` and `Snelste ronde van dit uur`; a lap only has to beat the laps of that window), or `Uit`. A lap under 20 s (a double press counted with `Toch afklokken`) never flashes, and neither does either half of a lap split in Beheer › Rondes (a guess, `source: 'split'`). The next real lap only has to beat the laps of 20 s or more that are not such a half.
 - `display-look` sets the look of one screen. `Licht` and `Donker` on the Binnenscherm and the Competitiescherm write `?thema=licht|donker` into the address (and this browser's storage), so the look survives a move to another laptop. A `?thema=` already in the address wins over the stored choice, which wins over the default (dark inside, light outside).
-- `display-outside-burgie` shows `Burgie gepakt` and `ZINGEN` with the runner on the track for 8 seconds after `Burgie gepakt` is pressed in Beheer › Publiek. A press less than 5 s from the newest Burgie moment (a double click, or two laptops at once) saves nothing new: the server returns that moment, so Analyse counts it once and the flash does not restart. Beheer › Activiteit lists such a press as `Burgie gepakt opnieuw gedrukt, telt één keer`.
+- `display-outside-burgie` shows `Burgie gepakt` and `ZINGEN` with the runner on the track for 8 seconds after `Burgie gepakt` is pressed in Beheer › Publiek or on Timing. A press less than 5 s from the newest Burgie moment (a double click, or two laptops at once) saves nothing new: the server returns that moment, so Analyse counts it once and the flash does not restart. Beheer › Activiteit lists such a press as `Burgie gepakt opnieuw gedrukt, telt één keer`.
 
 ## How to get to it (user POV)
 
 - Sidebar links `Binnenscherm`, `Competitiescherm` and `Buitenscherm`, or open `/display/inside`, `/display/competitions` and `/display/outside`.
 - Beheer › Publiek (`/admin?section=public`, panel `Publieke momenten`): the `Buitenscherm openen`, `Binnenscherm openen` and `Competitiescherm openen` buttons, the `Burgie gepakt` button, and the `Recordflits` choice.
+- Timing: the `Burgie gepakt` button next to `Laatste wissel ongedaan maken`.
 - On a TV, the laptop's Event URL followed by the display path.
 
 ## Driving it with drive.mjs
