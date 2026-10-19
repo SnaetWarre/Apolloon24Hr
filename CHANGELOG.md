@@ -4,9 +4,9 @@ All notable changes to Apolloon Telsysteem will be documented in this file.
 
 ## [Unreleased]
 
-## [4.7.0] - 2026-10-19
+## [5.0.0] - 2026-10-19
 
-Laptops koppelen alleen met dezelfde versie: zet 4.7.0 op alle laptops.
+Laptops koppelen alleen met dezelfde versie: zet 5.0.0 op alle laptops.
 
 ### Added
 
@@ -24,6 +24,8 @@ Laptops koppelen alleen met dezelfde versie: zet 4.7.0 op alle laptops.
   van de 24 race-uren ervoor. Klik ergens op een rij om het profiel te
   openen; de knop Profiel is weg. Verwijder verschijnt pas op de rij onder de
   muis
+- Pakketten bijgewerkt, onder andere Electron 44.7.0, Express 5.3.0 en Vite
+  8.3.4
 
 ### Fixed
 
