@@ -2,6 +2,8 @@ import { EventEmitter, on } from 'node:events';
 import { TRPCError, initTRPC } from '@trpc/server';
 import { z } from 'zod';
 import {
+  type ClearRaceInput,
+  clearRaceSchema,
   importCsvSchema,
   importXlsxSchema,
   labelImageUploadSchema,
@@ -478,9 +480,9 @@ export const appRouter = t.router({
       })
     ),
     /** Empties the race after a test run on every laptop, keeping a backup of it first. */
-    clear: t.procedure.mutation(
+    clear: t.procedure.input(clearRaceSchema).mutation(
       write(
-        (_input: void, safety) => ({ ...clearRace(clusterNow()), ...safety }),
+        (input: ClearRaceInput, safety) => ({ ...clearRace(clusterNow(), { runners: input?.runners }), ...safety }),
         () => safetyBackup('pre-clear')
       )
     ),

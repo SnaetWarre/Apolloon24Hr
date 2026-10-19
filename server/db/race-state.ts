@@ -67,10 +67,12 @@ export function clearActiveRunner(runnerId?: string): void {
 /**
  * Takes the race back to before the start, for after a test run: laps, handoffs,
  * race events and the queue go; runners, labels and settings stay. Everyone is
- * registered again, so they are checked in anew for the real race.
+ * registered again, so they are checked in anew for the real race. With
+ * `runners`, the runners go too, for a laptop that starts over from an empty list.
  */
-export function clearRace(nowMs: number): { laps: number } {
+export function clearRace(nowMs: number, { runners = false } = {}): { laps: number; runners: number } {
   const laps = one<{ count: number }>('SELECT COUNT(*) AS count FROM laps')?.count ?? 0;
+  const runnerCount = runners ? (one<{ count: number }>('SELECT COUNT(*) AS count FROM runners')?.count ?? 0) : 0;
   for (const table of ['laps', 'handoff_history', 'race_events']) run(`DELETE FROM ${table}`);
   run(
     `UPDATE race_state
@@ -83,5 +85,6 @@ export function clearRace(nowMs: number): { laps: number } {
      WHERE status <> 'registered' OR queue_index IS NOT NULL OR hidden_at IS NOT NULL`,
     [nowMs]
   );
-  return { laps };
+  if (runners) for (const table of ['runner_labels', 'runners']) run(`DELETE FROM ${table}`);
+  return { laps, runners: runnerCount };
 }
