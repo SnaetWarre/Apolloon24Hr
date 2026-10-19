@@ -145,6 +145,44 @@ test('turning a label off and on again keeps laps without labels', () => {
   assert.deepEqual(fromNone, { enabledLabelIds: null });
 });
 
+test('the first lap of the race runs a longer course, so it never flashes and is no record to beat', () => {
+  const raceStartedAt = 1_000_000;
+  const race = {
+    id: 1,
+    activeRunnerId: null,
+    activeStartedAt: null,
+    raceStartedAt,
+    raceFinishedAt: null,
+    activeLabels: [],
+  } satisfies RaceState;
+  let finishedAt = raceStartedAt;
+  const lap = (id: string, durationMs: number): LapRecord => {
+    finishedAt += durationMs;
+    return {
+      id,
+      runnerId: 'runner-1',
+      runnerName: 'Runner',
+      runnerNumber: '1',
+      startedAt: finishedAt - durationMs,
+      finishedAt,
+      durationMs,
+      source: 'handoff',
+      createdAt: finishedAt,
+      labels: [],
+      lapNumber: 1,
+    };
+  };
+  const firstLap = lap('lap-1', 50_000);
+  const secondLap = lap('lap-2', 70_000);
+  const thirdLap = lap('lap-3', 75_000);
+
+  for (const mode of ['day', 'hour', 'two_hour'] as const) {
+    assert.equal(isFastestLapForRecordMode(firstLap, [], race, mode), false, mode);
+    assert.equal(isFastestLapForRecordMode(secondLap, [firstLap], race, mode), true, mode);
+    assert.equal(isFastestLapForRecordMode(thirdLap, [secondLap, firstLap], race, mode), false, mode);
+  }
+});
+
 test('a double press under 20 s never flashes as a record and is no record to beat', () => {
   const raceStartedAt = 1_000_000;
   const race = {

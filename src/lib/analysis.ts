@@ -324,11 +324,13 @@ export function isFastestLapForRecordMode(
   race: RaceState,
   mode: PublicRecordMode
 ): boolean {
-  if (mode === 'off' || !isMeasuredLap(latestLap)) return false;
-  const realLaps = previousLaps.filter(isMeasuredLap);
+  // The race's first lap runs a longer course, so it neither flashes nor is a record to beat.
+  const firstLapAt = oldestLapTimestamp([latestLap, ...previousLaps]);
+  if (mode === 'off' || !isMeasuredLap(latestLap) || latestLap.finishedAt === firstLapAt) return false;
+  const realLaps = previousLaps.filter((lap) => isMeasuredLap(lap) && lap.finishedAt !== firstLapAt);
   if (mode === 'day') return realLaps.every((lap) => latestLap.durationMs < lap.durationMs);
 
-  const startedAt = race.raceStartedAt ?? oldestLapTimestamp([latestLap, ...previousLaps]);
+  const startedAt = race.raceStartedAt ?? firstLapAt;
   if (startedAt == null) return false;
   const windowMs = recordWindowMs(mode);
   const latestWindow = recordWindowIndex(latestLap.finishedAt, startedAt, windowMs);
