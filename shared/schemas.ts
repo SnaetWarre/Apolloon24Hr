@@ -424,6 +424,10 @@ export const timingPressSchema = raceStateExpectationSchema.extend({
 });
 export type TimingPress = z.infer<typeof timingPressSchema>;
 
+/** Race wissen; with `runners`, Alles wissen also removes every runner. */
+export const clearRaceSchema = z.object({ runners: z.boolean().optional() }).optional();
+export type ClearRaceInput = z.infer<typeof clearRaceSchema>;
+
 export const importCsvSchema = z.object({
   csvText: z.string().min(1),
 });

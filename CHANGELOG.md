@@ -4,6 +4,18 @@ All notable changes to Apolloon Telsysteem will be documented in this file.
 
 ## [Unreleased]
 
+## [5.1.0] - 2026-10-19
+
+Laptops koppelen alleen met dezelfde versie: zet 5.1.0 op alle laptops.
+
+### Added
+
+- Beheer › Systeem & herstel: Alles wissen, naast Race wissen. Het doet wat
+  Race wissen doet en haalt ook alle lopers met hun inschrijvingen weg, op
+  alle gekoppelde laptops. Labels, logo's en instellingen blijven. Eerst maakt
+  de hoofdlaptop een backup (Vóór race wissen); die terugzetten maakt het
+  wissen ongedaan
+
 ## [5.0.0] - 2026-10-19
 
 Laptops koppelen alleen met dezelfde versie: zet 5.0.0 op alle laptops.

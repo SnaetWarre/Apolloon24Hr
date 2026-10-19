@@ -89,3 +89,32 @@ test('clearing the race after a test run keeps runners and labels, and a backup 
     db.closeDb();
   }
 });
+
+test('Alles wissen also removes the runners, keeps the labels, and keeps a backup', async () => {
+  const db = await import('../server/db.ts');
+  const backups = await import('../server/backups.ts');
+  const { appRouter } = await import('../server/router.ts');
+  try {
+    await db.initDb();
+    const first = db.insertRunner({ name: 'Wis runner', runnerNumber: '911', labels: ['HILOK'] });
+    const second = db.insertRunner({ name: 'Wis other', runnerNumber: '912' });
+    db.updateRunnerStatus({ id: first.id, status: 'waiting', statusSince: 900, queueIndex: 0 });
+    db.updateRunnerStatus({ id: second.id, status: 'waiting', statusSince: 900, queueIndex: 1 });
+    db.performHandoff(1_000);
+    db.performHandoff(80_000);
+    const labelCount = db.getLabels().length;
+    const runnerCount = db.getAllRunners().length;
+
+    const caller = appRouter.createCaller({ forwarded: true, requestId: 'clear-everything', origin: 'test' });
+    const result = await caller.race.clear({ runners: true });
+    assert.equal(result.laps, 1);
+    assert.equal(result.runners, runnerCount);
+    assert.ok(backups.listBackups().some((record) => record.fileName === result.safetyBackup));
+    assert.equal(db.getAllRunners().length, 0);
+    assert.deepEqual(db.raceProgress(), { raceStarted: false, raceRunning: false });
+    assert.equal(db.getLabels().length, labelCount);
+    assert.match(db.getActivity(1)[0]?.summary ?? '', /Alles gewist: race en lopers \(1 rondes, \d+ lopers\)/);
+  } finally {
+    db.closeDb();
+  }
+});
