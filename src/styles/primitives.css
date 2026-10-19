@@ -693,7 +693,6 @@ td .label-pill {
 
 /* ---------- Messages ---------- */
 .warning-banner,
-.success-banner,
 .host-hint {
   display: flex;
   flex-wrap: wrap;
@@ -709,14 +708,12 @@ td .label-pill {
 }
 
 .warning-banner > span,
-.success-banner > span,
 .host-hint > span {
   flex: 1 1 280px;
 }
 
 /* Feedback drops into place; it never just appears. */
-.warning-banner,
-.success-banner {
+.warning-banner {
   animation: notice-in var(--dur-2) var(--ease-out) backwards;
 }
 
@@ -731,13 +728,135 @@ td .label-pill {
   background: var(--stop-wash);
 }
 
-.success-banner {
-  border-color: var(--go-line);
-  background: var(--go-wash);
-}
-
 .host-hint {
   color: var(--ink-2);
+}
+
+/* A result that stays in view (under the Timing button, a finished update): a green
+   check and one line, no box. Results of a click elsewhere go to a toast. */
+.done-line {
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-start;
+  color: var(--ink-2);
+  font-size: 13.5px;
+  line-height: 1.5;
+  animation: notice-in var(--dur-2) var(--ease-out) backwards;
+}
+
+.done-line > .icon {
+  flex: none;
+  margin-block-start: 3px;
+  color: var(--go);
+  stroke-width: 2.5;
+}
+
+/* ---------- Toasts ----------
+   How an action went, in a card over the bottom right corner, so the page never
+   shifts. The green or red mark says the outcome before the words are read. */
+.toaster {
+  position: fixed;
+  inset-block-end: var(--space-5);
+  inset-inline-end: var(--space-5);
+  z-index: 70;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: min(400px, 100vw - 2 * var(--space-5));
+  pointer-events: none;
+}
+
+.toast {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: var(--space-3);
+  align-items: start;
+  padding: 12px 10px 12px 12px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-overlay);
+  cursor: pointer;
+  pointer-events: auto;
+  animation: toast-in var(--dur-3) var(--ease-spring) backwards;
+}
+
+.toast--error {
+  border-color: var(--stop-line);
+}
+
+.toast[data-leaving] {
+  pointer-events: none;
+  animation: toast-out var(--dur-2) var(--ease-in-out) forwards;
+}
+
+.toast__mark {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--go);
+  color: oklch(100% 0 none);
+}
+
+.toast--error .toast__mark {
+  background: var(--stop);
+}
+
+.toast__mark .icon {
+  stroke-width: 2.75;
+}
+
+.toast__body {
+  display: grid;
+  gap: 2px;
+  padding-block-start: 2px;
+  font-size: 13.5px;
+  line-height: 1.45;
+}
+
+.toast__body > span {
+  color: var(--ink-2);
+}
+
+.toast__close {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .toast:hover .toast__close {
+    background: var(--surface-3);
+    color: var(--ink);
+  }
+}
+
+/* Runs down while the toast waits to leave, and stops while the pointer is on it. */
+.toast__timer {
+  position: absolute;
+  inset-inline: 0;
+  inset-block-end: 0;
+  height: 2px;
+  background: var(--go);
+  opacity: 0.7;
+  transform: scaleX(0);
+  transform-origin: left;
+  animation: toast-timer var(--toast-ms) linear backwards;
+}
+
+.toast[data-held] .toast__timer {
+  animation-play-state: paused;
 }
 
 .host-hint strong {

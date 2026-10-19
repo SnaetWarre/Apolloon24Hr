@@ -4,7 +4,8 @@ import { useConfirm } from '../ConfirmDialog';
 import { RunnerProfileModal } from '../RunnerProfileModal';
 import { RunnerAddModal } from '../RunnerEntryModals';
 import type { Runner } from '../../types';
-import { AdminNoticeBanner, useAdminAction } from './AdminNotice';
+import { useToast } from '../Toaster';
+import { useAdminAction } from './useAdminAction';
 import { AdminRunnerTable } from './AdminRunnerTable';
 import { adminStatusText, foldSearchText, statusLabel } from '../../lib/runners';
 import { statusOrder } from './adminFormat';
@@ -16,7 +17,8 @@ export function RunnersSection({ runners }: { runners: Runner[] }) {
   const confirm = useConfirm();
   const registrations = useRegistrations();
   const { deleteRunner, unhideRunner } = useAppActions();
-  const { notice, setNotice, run } = useAdminAction();
+  const toast = useToast();
+  const { run } = useAdminAction();
   const [query, setQuery] = React.useState('');
   const [hour, setHour] = React.useState('');
   const [shown, setShown] = React.useState(MAX_VISIBLE_RUNNERS);
@@ -127,7 +129,6 @@ export function RunnersSection({ runners }: { runners: Runner[] }) {
           Beschikbaarheid komt uit de inschrijving. De status toont de huidige stap in de app, niet de fysieke locatie.
         </p>
       )}
-      <AdminNoticeBanner notice={notice} />
       <div className="table-wrap">
         <AdminRunnerTable
           runners={matchingRunners.slice(0, shown)}
@@ -147,7 +148,7 @@ export function RunnersSection({ runners }: { runners: Runner[] }) {
         <RunnerAddModal
           destination="registered"
           onClose={() => setAddOpen(false)}
-          onAdded={() => setNotice({ tone: 'success', text: 'Loper toegevoegd.' })}
+          onAdded={(_runnerId, name) => toast({ tone: 'success', text: `${name} toegevoegd.` })}
         />
       )}
     </section>

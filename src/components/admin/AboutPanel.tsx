@@ -138,13 +138,19 @@ function UpdateStatusRow({ cluster }: { cluster: ClusterStatus | null }) {
     setProblem((await getDesktop()?.update.install()) ?? null);
   }
 
-  const outcome = lastInstall && (
-    <div className={lastInstall.ok ? 'success-banner' : 'warning-banner'} role="status">
-      {lastInstall.ok
-        ? `Apolloon is bijgewerkt naar ${lastInstall.version}.`
-        : `De installatie van versie ${lastInstall.version} is niet gelukt. Probeer opnieuw, of download het installatiebestand zelf.`}
-    </div>
-  );
+  const outcome =
+    lastInstall &&
+    (lastInstall.ok ? (
+      <p className="done-line" role="status">
+        <Icon name="check" size={14} />
+        Apolloon is bijgewerkt naar {lastInstall.version}.
+      </p>
+    ) : (
+      <div className="warning-banner" role="status">
+        De installatie van versie {lastInstall.version} is niet gelukt. Probeer opnieuw, of download het
+        installatiebestand zelf.
+      </div>
+    ));
 
   if (!status) return outcome || null;
 

@@ -1,7 +1,6 @@
 import { useAppData, useClusterStatus } from '../app/index';
 import { useCopyText } from '../lib/clipboard';
 import type { ClusterStatus, LiveAppSnapshot } from '../types';
-import { AdminNoticeBanner } from './admin/AdminNotice';
 import { countLabel, laptopLabel, shortUrl, useJoinGroup } from './admin/useJoinGroup';
 import { describeAutoLinks } from '../lib/systemStatus';
 import { Icon } from './Icon';
@@ -133,7 +132,7 @@ export function WelcomeView({
 }
 
 function JoinChoice({ cluster, onOpenAdmin }: { cluster: ClusterStatus; onOpenAdmin: (section: 'system') => void }) {
-  const { join, pending, notice } = useJoinGroup(0, cluster.changed, { raceStarted: false, raceRunning: false });
+  const { join, pending } = useJoinGroup(0, cluster.changed, { raceStarted: false, raceRunning: false });
   const busy = pending || Boolean(cluster.busy);
   // Only laptops that hold runners are "already set up"; an empty one is pulled in from the laptop with the runners.
   const setUp = cluster.nearby.filter((found) => found.runners > 0);
@@ -141,11 +140,14 @@ function JoinChoice({ cluster, onOpenAdmin }: { cluster: ClusterStatus; onOpenAd
   if (cluster.members.length > 1) {
     const autoLinked = describeAutoLinks(cluster).find((link) => link.hostId === cluster.hostId);
     return (
-      <div className="success-banner" role="status">
-        {autoLinked ? `${autoLinked.text}.` : 'Gekoppeld.'} Deze laptop werkt samen met{' '}
-        {countLabel(cluster.members.length - 1, 'andere laptop', 'andere laptops')}. Importeer de inschrijvingen op één
-        van de laptops; ze verschijnen dan overal.
-      </div>
+      <p className="done-line" role="status">
+        <Icon name="check" size={14} />
+        <span>
+          {autoLinked ? `${autoLinked.text}.` : 'Gekoppeld.'} Deze laptop werkt samen met{' '}
+          {countLabel(cluster.members.length - 1, 'andere laptop', 'andere laptops')}. Importeer de inschrijvingen op
+          één van de laptops; ze verschijnen dan overal.
+        </span>
+      </p>
     );
   }
 
@@ -194,7 +196,6 @@ function JoinChoice({ cluster, onOpenAdmin }: { cluster: ClusterStatus; onOpenAd
           </span>
         </div>
       )}
-      <AdminNoticeBanner notice={notice} />
       <div className="welcome-choice__actions">
         <button type="button" className="btn btn--ghost btn--sm" onClick={() => onOpenAdmin('system')}>
           Adres zelf invullen

@@ -13,6 +13,7 @@ import { labelKindTitle } from './LabelBadge';
 import type { LiveAppSnapshot, Runner, RunnerRegistration, RunnerStatus } from '../types';
 import { LiveElapsed } from './LiveTime';
 import { useSecondClick } from '../lib/useSecondClick';
+import { useToast } from './Toaster';
 
 const selectRunnerProfileData = ({ runners, labels }: LiveAppSnapshot) => ({
   runners,
@@ -21,6 +22,7 @@ const selectRunnerProfileData = ({ runners, labels }: LiveAppSnapshot) => ({
 
 export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; onClose: () => void }) {
   const confirm = useConfirm();
+  const toast = useToast();
   const { runners, labels } = useAppData(selectRunnerProfileData);
   const { laps: allLaps } = useRaceHistory({ scope: 'runner', runnerId });
   const { setStatus, updateRunner } = useAppActions();
@@ -38,8 +40,6 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
   const [saving, setSaving] = React.useState(false);
   const [saveError, setSaveError] = React.useState<string | null>(null);
   const [queueActionBusy, setQueueActionBusy] = React.useState(false);
-  const [queueActionMessage, setQueueActionMessage] = React.useState<string | null>(null);
-  const [queueActionError, setQueueActionError] = React.useState<string | null>(null);
   const [draftBaseline, setDraftBaseline] = React.useState(runner);
   const [registrationBaseline, setRegistrationBaseline] = React.useState(registration);
   const editableRunnerKey = runner ? getEditableRunnerKey(runner, registration) : '';
@@ -89,8 +89,6 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
   }, [editableRunnerKey]);
 
   React.useEffect(() => {
-    setQueueActionMessage(null);
-    setQueueActionError(null);
     setQueueActionBusy(false);
     setSaveError(null);
   }, [runnerId]);
@@ -114,6 +112,7 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
         registrationDetails: { phone, email, availableHours },
         labels: selectedLabels,
       });
+      toast({ tone: 'success', text: `Profiel van ${name.trim()} opgeslagen.` });
       onClose();
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : 'Profiel opslaan mislukt');
@@ -148,13 +147,15 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
 
     const runnerName = runner.name;
     setQueueActionBusy(true);
-    setQueueActionMessage(null);
-    setQueueActionError(null);
     try {
       await setStatus(runner.id, 'registered');
-      setQueueActionMessage(`${runnerName} staat niet meer in de wachtrij of opwarming.`);
+      toast({ tone: 'success', text: `${runnerName} staat niet meer in de wachtrij of opwarming.` });
     } catch (err) {
-      setQueueActionError(err instanceof Error ? err.message : 'Loper terugzetten mislukt');
+      toast({
+        tone: 'error',
+        text: 'Loper terugzetten mislukt',
+        detail: err instanceof Error ? err.message : undefined,
+      });
     } finally {
       setQueueActionBusy(false);
     }
@@ -164,13 +165,11 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
     if (!runner || !canStartWarmup(runner.status)) return;
     const runnerName = runner.name;
     setQueueActionBusy(true);
-    setQueueActionMessage(null);
-    setQueueActionError(null);
     try {
       await setStatus(runner.id, 'warming_up');
-      setQueueActionMessage(`${runnerName} staat bij opwarming.`);
+      toast({ tone: 'success', text: `${runnerName} staat bij opwarming.` });
     } catch (err) {
-      setQueueActionError(err instanceof Error ? err.message : 'Loper activeren mislukt');
+      toast({ tone: 'error', text: 'Loper activeren mislukt', detail: err instanceof Error ? err.message : undefined });
     } finally {
       setQueueActionBusy(false);
     }
@@ -271,9 +270,6 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
             </section>
           )
         )}
-
-        {queueActionMessage && <div className="success-banner">{queueActionMessage}</div>}
-        {queueActionError && <div className="warning-banner">{queueActionError}</div>}
 
         <section className="profile-essentials" aria-label="Contact en beschikbaarheid">
           <h3>Contact en beschikbaarheid</h3>

@@ -8,7 +8,7 @@ import type { LapRecord, LiveAppSnapshot, Runner } from '../../types';
 import { useConfirm } from '../ConfirmDialog';
 import { ModalDialog } from '../ModalDialog';
 import { RunnerName } from '../RunnerName';
-import { AdminNoticeBanner, useAdminAction } from './AdminNotice';
+import { useAdminAction } from './useAdminAction';
 
 const PAGE_SIZE = 100;
 /** Runners offered in the picker before anything is typed or after a search. */
@@ -35,7 +35,7 @@ function LapsPanel() {
   const { runners } = useAppData(selectRunners);
   const actions = useAppActions();
   const confirm = useConfirm();
-  const { pending, notice, run } = useAdminAction();
+  const { pending, run } = useAdminAction();
   const [search, setSearch] = React.useState('');
   const [flaggedOnly, setFlaggedOnly] = React.useState(false);
   const [shown, setShown] = React.useState(PAGE_SIZE);
@@ -121,7 +121,6 @@ function LapsPanel() {
           {heldCount > 0 && `${heldCount} ${heldCount === 1 ? 'nieuwe ronde' : 'nieuwe rondes'}`}
         </span>
       </div>
-      <AdminNoticeBanner notice={notice} />
       {history.error ? (
         <div className="warning-banner" role="alert">
           De rondes konden niet geladen worden.

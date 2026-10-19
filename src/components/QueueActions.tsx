@@ -2,6 +2,7 @@ import React from 'react';
 import { setBoardSearch, useBoardSearch } from '../app/boardSearch';
 import { Icon } from './Icon';
 import { RunnerActivationModal, RunnerAddModal } from './RunnerEntryModals';
+import { useToast } from './Toaster';
 
 /** Queue page actions: filter the board, add a new runner, or check a runner in. */
 export function QueueActions({
@@ -11,6 +12,11 @@ export function QueueActions({
   onOpenProfile?: (runnerId: string) => void;
   onCheckedIn?: (runnerId: string) => void;
 }) {
+  const toast = useToast();
+  const checkedIn = (runnerId: string, name: string) => {
+    onCheckedIn?.(runnerId);
+    toast({ tone: 'success', text: `${name} staat bij opwarming.` });
+  };
   const search = useBoardSearch();
   const [activationOpen, setActivationOpen] = React.useState(false);
   const [addOpen, setAddOpen] = React.useState(false);
@@ -54,15 +60,15 @@ export function QueueActions({
           onClose={() => setActivationOpen(false)}
           onOpenProfile={onOpenProfile}
           onActivated={() => setBoardSearch('')}
-          onCheckedIn={onCheckedIn}
+          onCheckedIn={checkedIn}
         />
       )}
       {addOpen && (
         <RunnerAddModal
           onClose={() => setAddOpen(false)}
-          onAdded={(runnerId) => {
+          onAdded={(runnerId, name) => {
             setBoardSearch('');
-            onCheckedIn?.(runnerId);
+            checkedIn(runnerId, name);
           }}
         />
       )}

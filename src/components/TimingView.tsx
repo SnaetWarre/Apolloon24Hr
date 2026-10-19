@@ -1,4 +1,5 @@
 import { LiveDot } from './LiveDot';
+import { Icon } from './Icon';
 import React from 'react';
 import { Link } from '@tanstack/react-router';
 import { isModalDialogOpen, ModalDialog } from './ModalDialog';
@@ -428,9 +429,10 @@ export function TimingView() {
               </p>
             ) : (
               lastAction && (
-                <div key={startKey} className="success-banner" role="status">
+                <p key={startKey} className="done-line" role="status">
+                  <Icon name="check" size={14} />
                   {lastAction}
-                </div>
+                </p>
               )
             )}
             {!shownRunner && !shownNext && !finished && !timingBlocked && (

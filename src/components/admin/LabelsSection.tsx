@@ -3,7 +3,7 @@ import { useAppActions } from '../../app/index';
 import { useConfirm } from '../ConfirmDialog';
 import { labelKindTitle } from '../LabelBadge';
 import type { Label, Runner } from '../../types';
-import { AdminNoticeBanner, useAdminAction } from './AdminNotice';
+import { useAdminAction } from './useAdminAction';
 import { groupLabels } from '../../lib/labels';
 import { LabelAdminRow } from './LabelAdminRow';
 import { LabelImagePicker } from './LabelImagePicker';
@@ -11,7 +11,7 @@ import { LabelImagePicker } from './LabelImagePicker';
 export function LabelsSection({ labels, runners }: { labels: Label[]; runners: Runner[] }) {
   const confirm = useConfirm();
   const { createLabel, updateLabel, deleteLabel } = useAppActions();
-  const { pending, notice, run } = useAdminAction();
+  const { pending, run } = useAdminAction();
   const [name, setName] = React.useState('');
   const [color, setColor] = React.useState('#3b82f6');
   const [kind, setKind] = React.useState('andere');
@@ -81,8 +81,6 @@ export function LabelsSection({ labels, runners }: { labels: Label[]; runners: R
           {pending ? 'Toevoegen...' : 'Label toevoegen'}
         </button>
       </div>
-
-      <AdminNoticeBanner notice={notice} />
 
       <div className="label-admin-list">
         {groupLabels(labels).map(([labelKind, groupedLabels]) => (
