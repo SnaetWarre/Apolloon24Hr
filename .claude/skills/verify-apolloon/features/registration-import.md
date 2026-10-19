@@ -5,7 +5,7 @@ An operator imports the registration form's file (Excel `.xlsx` from Google Shee
 ## Sub-features
 
 - `import-plain-csv` imports a plain runner list (`runner_number,name,labels,historical_avg,historical_best`).
-- `import-form` imports the Google Form export, recognised by its e-mail column; row number becomes runner number.
+- `import-form` imports the Google Form export, recognised by its e-mail column; row number becomes runner number. The categories give labels (`Eerstejaars` is `1ste jaar`, `Vrouw` is `Dames`), and so does `Studiefase`: `1ste bach` is `1ste jaar`, and `2de bach`, `3de bach`, `1ste master`, `2de master` are labels of their own. Free text there gets no label. A label missing on the laptop is made with its built-in colour.
 - `import-xlsx` reads the first sheet of an `.xlsx` and imports it like a CSV.
 - `import-repeat` updates instead of duplicating, and keeps live statuses such as warm-up.
 - `import-repick` picks the same file again after it changed on disk and imports the new contents.

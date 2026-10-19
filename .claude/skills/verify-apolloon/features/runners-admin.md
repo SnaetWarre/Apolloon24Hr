@@ -1,6 +1,6 @@
 # Beheer › Lopers
 
-Beheer › Lopers lists every runner with their status, registration hours, source, labels, and laps. The operator searches the list, filters it by an hour the runner can run, adds a runner by hand, opens a profile, and removes runners without laps.
+Beheer › Lopers lists every runner with their status, registration hours, source, labels, and laps, across the full width of the page. The hours show as a strip of the 24 race hours plus a few stretches (`di 20u – wo 2u · wo 10–20u`). The operator searches the list, filters it by an hour the runner can run, adds a runner by hand, opens a profile by clicking anywhere on a row, and removes runners without laps.
 
 ## Sub-features
 
@@ -8,8 +8,9 @@ Beheer › Lopers lists every runner with their status, registration hours, sour
 - `runners-hour-filter` keeps the runners free during one event hour, picked in the `Beschikbaar tijdens` select. A form block like `12-14u (woensdag)` counts for both `12-13u` and `13-14u`.
 - `runners-show-more` lists the first 150 matching runners, with `· eerste 150 getoond` in the count line. The `Toon de volgende N lopers` button under the table adds the next 150 each time. A new search or hour filter goes back to the first 150.
 - `runners-new` adds a runner with `Nieuwe loper`, including hours from the hours picker. It is the same dialog as in Wachtrij, so the cursor starts in `Lopersnummer` and follows each fold-out opened (see `queue-autofocus`).
-- `runners-profile` opens a runner's profile with `Profiel`.
-- `runners-delete` removes a runner without laps with `Verwijder` and `Definitief verwijderen`.
+- `runners-hours` shows the form's hour blocks joined into stretches: blocks next to each other become one range, also across midnight; all 24 hours read `Hele race`; text that matches no race hour stays as typed. The strip in front fills the same hours.
+- `runners-profile` opens a runner's profile by clicking anywhere on the row. The name is the row's button, so Tab to it and Enter does the same.
+- `runners-delete` removes a runner without laps with `Verwijder` and `Definitief verwijderen`. With a mouse, `Verwijder` only shows on the row under the pointer or with keyboard focus.
 
 ## How to get to it (user POV)
 
@@ -28,11 +29,13 @@ Preconditions:
 - **Hour filter.** `page.getByRole('combobox', { name: 'Beschikbaar tijdens', exact: true }).selectOption('12-13u (woensdag)')`. Wait for `page.getByRole('status').filter({ hasText: 'voor 12-13u (woensdag)' })`, then read `page.getByRole('row').allInnerTexts()`.
 - **Search.** Fill `page.getByRole('textbox', { name: 'Lopers zoeken' })`; only matching rows stay. `Manueel` keeps only runners added by hand; `Ingeschreven` makes the count line read `N lopers gevonden · Ingeschreven: N`.
 - **Show more.** Import 180 runners in setup with free numbers (the `ready` runners use 101 to 140): `run.rpc().runners.importCsv.mutate({ csvText: 'runner_number,name\n1001,Bulk 1001\n…1180,Bulk 1180\n' })`. With the 40 seeded runners that makes 220, so the count line reads `220 lopers gevonden · eerste 150 getoond` and the button is `Toon de volgende 70 lopers` (the total minus 150). Click it: all 220 rows are listed and the count line no longer says `getoond`.
-- **Profile.** In a row click `Profiel`; dialog `Lopersprofiel` opens. Wait until its `Naam` field holds the runner's name before pressing Escape (see `queue.md`, Gotchas).
-- **Delete.** In the row of a runner without laps click `Verwijder`, then `Definitief verwijderen` in dialog `<naam> definitief verwijderen?`. The text `<naam> is definitief verwijderd.` appears and the runner is gone from `/api/state`.
+- **Hours.** `page.getByRole('row').filter({ hasText: '<naam>' })` holds the stretches, for example `di 20u – wo 2u · wo 10–20u`.
+- **Profile.** Click anywhere on a row, for example `page.mouse.click` on the middle of its hours cell (see Gotchas), or click `row.getByRole('button', { name: '<naam>', exact: true })`. Dialog `Lopersprofiel` opens. Wait until its `Naam` field holds the runner's name before pressing Escape (see `queue.md`, Gotchas).
+- **Delete.** Hover the row of a runner without laps, then click its `Verwijder`, then `Definitief verwijderen` in dialog `<naam> definitief verwijderen?`. The text `<naam> is definitief verwijderd.` appears and the runner is gone from `/api/state`.
 - **Proof.** `run.proof(page, 'runners-…')` after each filter change.
 
 ## Gotchas
 
 - The hour select lists one-hour slots in event order (Tuesday 20:00 onward), and only the slots some runner covers. It never offers the form's two-hour blocks.
+- The name button's overlay covers the whole row, so Playwright's `hover()` and `click()` on another cell fail with "intercepts pointer events". Use `page.mouse` on the cell's bounding box, or click the name button.
 - More than one element has role `status` (the count line and the `Loper toegevoegd.` notice). Filter by text.

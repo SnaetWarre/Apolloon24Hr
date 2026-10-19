@@ -1,98 +1,10 @@
-import { type LabelInput } from '../../shared/schemas.js';
 import { all, getDb, one, run, transaction } from './connection.js';
-import { createLabelRecord, findLabelByName } from './labels.js';
+import { DEFAULT_LABEL_CREATED_AT, DEFAULT_LABELS, createLabelRecord, findLabelByName } from './labels.js';
 import { type SchemaProblem, type TableShape, referenceSchema, schemaProblems } from './schema-check.js';
 import { RUNNER_QUEUE_INDEX_SQL, SCHEMA_SQL } from './schema-sql.js';
 import { setLocalSetting } from './settings.js';
 
 export const DATABASE_SCHEMA_VERSION = 17;
-
-type DefaultLabel = Required<LabelInput> & { id: string };
-
-const DEFAULT_LABEL_CREATED_AT = 1_700_000_000_000;
-
-const DEFAULT_LABELS: DefaultLabel[] = [
-  {
-    id: '00000000-0000-5000-8000-000000000001',
-    name: 'Speedteam White',
-    color: '#e5e7eb',
-    icon: 'SW',
-    kind: 'speedteam',
-    imageUrl: null,
-    targetLaps: null,
-    sortOrder: 10,
-  },
-  {
-    id: '00000000-0000-5000-8000-000000000002',
-    name: 'Speedteam Blue',
-    color: '#1d4ed8',
-    icon: 'SB',
-    kind: 'speedteam',
-    imageUrl: null,
-    targetLaps: null,
-    sortOrder: 20,
-  },
-  {
-    id: '00000000-0000-5000-8000-000000000003',
-    name: 'HILOK',
-    color: '#16a34a',
-    icon: 'HI',
-    kind: 'zustervereniging',
-    imageUrl: '/labels/hilok.png',
-    targetLaps: null,
-    sortOrder: 30,
-  },
-  {
-    id: '00000000-0000-5000-8000-000000000004',
-    name: 'Mesacosa',
-    color: '#f97316',
-    icon: 'ME',
-    kind: 'zustervereniging',
-    imageUrl: '/labels/mesacosa.jpg',
-    targetLaps: null,
-    sortOrder: 40,
-  },
-  {
-    id: '00000000-0000-5000-8000-000000000005',
-    name: 'Kinesia',
-    color: '#7c3aed',
-    icon: 'KI',
-    kind: 'zustervereniging',
-    imageUrl: '/labels/kinesia.png',
-    targetLaps: null,
-    sortOrder: 50,
-  },
-  {
-    id: '00000000-0000-5000-8000-000000000006',
-    name: '1ste jaar',
-    color: '#2563eb',
-    icon: '1J',
-    kind: 'andere',
-    imageUrl: null,
-    targetLaps: null,
-    sortOrder: 60,
-  },
-  {
-    id: '00000000-0000-5000-8000-000000000007',
-    name: 'Anciens',
-    color: '#64748b',
-    icon: 'AN',
-    kind: 'andere',
-    imageUrl: null,
-    targetLaps: null,
-    sortOrder: 70,
-  },
-  {
-    id: '00000000-0000-5000-8000-000000000008',
-    name: 'Dames',
-    color: '#db2777',
-    icon: 'DA',
-    kind: 'andere',
-    imageUrl: null,
-    targetLaps: null,
-    sortOrder: 80,
-  },
-];
 
 /** What a new NOT NULL column without a default gets when a table is rebuilt. */
 const COLUMN_FALLBACKS: Record<string, string> = {

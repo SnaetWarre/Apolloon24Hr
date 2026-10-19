@@ -7,6 +7,133 @@ import { LABEL_ORDER_SQL } from '../../shared/labelOrder.js';
 
 const DEFAULT_LABEL_COLOR = '#3b82f6';
 
+type DefaultLabel = Required<LabelInput> & { id: string };
+
+export const DEFAULT_LABEL_CREATED_AT = 1_700_000_000_000;
+
+export const DEFAULT_LABELS: DefaultLabel[] = [
+  {
+    id: '00000000-0000-5000-8000-000000000001',
+    name: 'Speedteam White',
+    color: '#e5e7eb',
+    icon: 'SW',
+    kind: 'speedteam',
+    imageUrl: null,
+    targetLaps: null,
+    sortOrder: 10,
+  },
+  {
+    id: '00000000-0000-5000-8000-000000000002',
+    name: 'Speedteam Blue',
+    color: '#1d4ed8',
+    icon: 'SB',
+    kind: 'speedteam',
+    imageUrl: null,
+    targetLaps: null,
+    sortOrder: 20,
+  },
+  {
+    id: '00000000-0000-5000-8000-000000000003',
+    name: 'HILOK',
+    color: '#16a34a',
+    icon: 'HI',
+    kind: 'zustervereniging',
+    imageUrl: '/labels/hilok.png',
+    targetLaps: null,
+    sortOrder: 30,
+  },
+  {
+    id: '00000000-0000-5000-8000-000000000004',
+    name: 'Mesacosa',
+    color: '#f97316',
+    icon: 'ME',
+    kind: 'zustervereniging',
+    imageUrl: '/labels/mesacosa.jpg',
+    targetLaps: null,
+    sortOrder: 40,
+  },
+  {
+    id: '00000000-0000-5000-8000-000000000005',
+    name: 'Kinesia',
+    color: '#7c3aed',
+    icon: 'KI',
+    kind: 'zustervereniging',
+    imageUrl: '/labels/kinesia.png',
+    targetLaps: null,
+    sortOrder: 50,
+  },
+  {
+    id: '00000000-0000-5000-8000-000000000006',
+    name: '1ste jaar',
+    color: '#2563eb',
+    icon: '1J',
+    kind: 'andere',
+    imageUrl: null,
+    targetLaps: null,
+    sortOrder: 60,
+  },
+  {
+    id: '00000000-0000-5000-8000-000000000007',
+    name: 'Anciens',
+    color: '#64748b',
+    icon: 'AN',
+    kind: 'andere',
+    imageUrl: null,
+    targetLaps: null,
+    sortOrder: 70,
+  },
+  {
+    id: '00000000-0000-5000-8000-000000000008',
+    name: 'Dames',
+    color: '#db2777',
+    icon: 'DA',
+    kind: 'andere',
+    imageUrl: null,
+    targetLaps: null,
+    sortOrder: 80,
+  },
+  {
+    id: '00000000-0000-5000-8000-000000000009',
+    name: '2de bach',
+    color: '#0d9488',
+    icon: '2B',
+    kind: 'andere',
+    imageUrl: null,
+    targetLaps: null,
+    sortOrder: 90,
+  },
+  {
+    id: '00000000-0000-5000-8000-00000000000a',
+    name: '3de bach',
+    color: '#dc2626',
+    icon: '3B',
+    kind: 'andere',
+    imageUrl: null,
+    targetLaps: null,
+    sortOrder: 100,
+  },
+  {
+    id: '00000000-0000-5000-8000-00000000000b',
+    name: '1ste master',
+    color: '#9333ea',
+    icon: '1M',
+    kind: 'andere',
+    imageUrl: null,
+    targetLaps: null,
+    sortOrder: 110,
+  },
+  {
+    id: '00000000-0000-5000-8000-00000000000c',
+    name: '2de master',
+    color: '#ea580c',
+    icon: '2M',
+    kind: 'andere',
+    imageUrl: null,
+    targetLaps: null,
+    sortOrder: 120,
+  },
+];
+
 const LABEL_COLUMNS = `
   l.id,
   l.name,
@@ -38,7 +165,9 @@ export function findLabelByName(name: string): Label | null {
 export function ensureLabel(name: string): Label | null {
   const labelName = canonicalLabelName(name);
   if (!labelName) return null;
-  return findLabelByName(labelName) ?? createLabel({ name: labelName });
+  // A built-in label missing here, such as a year label on an older database, gets its own colour.
+  const builtIn = DEFAULT_LABELS.find((label) => label.name.toLowerCase() === labelName.toLowerCase());
+  return findLabelByName(labelName) ?? createLabel(builtIn ? { ...builtIn, name: labelName } : { name: labelName });
 }
 
 export function createLabelRecord(input: LabelInput, id: string, now: number): Label {

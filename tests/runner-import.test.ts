@@ -556,3 +556,43 @@ test('two rows of one plain list with the same number both import', async () => 
     fs.rmSync(dataPath, { recursive: true, force: true });
   }
 });
+
+test('the study phase gives a year label, and the 2026 sheet’s "Tijdsstempel" column is read', async () => {
+  fs.rmSync(dataPath, { recursive: true, force: true });
+  const db = await import('../server/db.ts');
+  const { appRouter } = await import('../server/router.ts');
+  try {
+    await db.initDb();
+    const caller = appRouter.createCaller({});
+    // An older database without the year label: the import makes it in its own colour.
+    db.deleteLabel(db.getLabels().find((label) => label.name === '3de bach')!.id);
+    const answer = (email: string, name: string, studyPhase: string, second = 40) => ({
+      Tijdsstempel: `4-10-2026 18:06:${second}`,
+      'E-mailadres': email,
+      'Voornaam + naam': name,
+      Studiefase: studyPhase,
+    });
+    await caller.runners.importCsv({
+      csvText: Papa.unparse([
+        answer('an@example.be', 'An', '3de bach'),
+        answer('bo@example.be', 'Bo', '1ste master', 41),
+        answer('cas@example.be', 'Cas', 'werkende kine', 42),
+      ]),
+    });
+    const labelsOf = (name: string) =>
+      db
+        .getAllRunners()
+        .find((runner) => runner.name === name)!
+        .labels.map((label) => label.name);
+    assert.deepEqual(labelsOf('An'), ['3de bach']);
+    assert.deepEqual(labelsOf('Bo'), ['1ste master']);
+    assert.deepEqual(labelsOf('Cas'), []);
+    const thirdYear = db.getLabels().find((label) => label.name === '3de bach');
+    assert.deepEqual({ kind: thirdYear?.kind, color: thirdYear?.color }, { kind: 'andere', color: '#dc2626' });
+    const an = db.getAllRunners().find((runner) => runner.name === 'An')!;
+    assert.equal((await caller.runners.registrations())[an.id]?.submittedAt, '4-10-2026 18:06:40');
+  } finally {
+    db.closeDb();
+    fs.rmSync(dataPath, { recursive: true, force: true });
+  }
+});
