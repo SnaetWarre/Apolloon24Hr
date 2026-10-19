@@ -165,7 +165,8 @@
   font-weight: 500;
 }
 
-.timing-undo {
+/* Pushes Burgie gepakt and the undo button to the right. */
+.timing-burgie {
   margin-inline-start: auto;
 }
 
