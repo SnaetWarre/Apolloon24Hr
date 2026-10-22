@@ -103,6 +103,7 @@
   font: 70.55px/78.3px "Bebas Neue";
   letter-spacing: 0.035em;
   text-transform: uppercase;
+  text-wrap: pretty;
 }
 
 .wrapped-story__bar { fill: #eef0ff; }
