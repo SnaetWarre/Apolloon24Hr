@@ -6,6 +6,7 @@ import { clusterStatusKey } from './app/snapshot';
 import { useFailover } from './app/useFailover';
 import { setDocumentSurface } from './app/theme';
 import { AppShellFrame } from './components/Sidebar';
+import { StickyToast } from './components/Toaster';
 import type { ClusterStatus } from './types';
 
 const selectNothing = () => ({});
@@ -72,6 +73,7 @@ export function AppRoot() {
   return (
     <Shell switching={switching}>
       <GroupProblemBanner />
+      <AloneNotice />
       <a className="skip-link" href="#workspace">
         Naar inhoud
       </a>
@@ -148,5 +150,17 @@ function GroupProblemBanner() {
       <strong>Te weinig laptops bereikbaar.</strong> Je ziet de laatste gegevens, maar wijzigingen worden pas weer
       bewaard als een tweede laptop terug is. Zet die aan of controleer de netwerkkabel.
     </div>
+  );
+}
+
+/** On the Timing laptop that went on alone (by itself, or with Alleen verder), until the others are back. */
+function AloneNotice() {
+  const { cluster } = useClusterStatus();
+  if (!cluster?.timing?.self || cluster.members.length > 1 || cluster.split.rank === 0) return null;
+  return (
+    <StickyToast
+      text="Deze laptop werkt alleen verder."
+      detail="De andere laptops sluiten vanzelf weer aan zodra het netwerk terug is. De rondes van deze laptop blijven bewaard."
+    />
   );
 }

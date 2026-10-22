@@ -787,6 +787,15 @@ td .label-pill {
   border-color: var(--stop-line);
 }
 
+.toaster__sticky {
+  display: contents;
+}
+
+.toast--sticky {
+  grid-template-columns: auto minmax(0, 1fr);
+  cursor: default;
+}
+
 .toast[data-leaving] {
   pointer-events: none;
   animation: toast-out var(--dur-2) var(--ease-in-out) forwards;

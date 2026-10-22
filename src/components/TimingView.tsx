@@ -457,6 +457,11 @@ export function TimingView() {
                       Overnemen
                     </button>
                   </span>
+                ) : cluster?.timing?.self ? (
+                  <span>
+                    <strong>Timing staat even stil.</strong> Komt het netwerk niet binnen enkele seconden terug, dan
+                    werkt deze laptop vanzelf alleen verder en klok je gewoon door.
+                  </span>
                 ) : (
                   <span>
                     <strong>Timing staat stil.</strong> Klokken lukt weer zodra een tweede laptop terug is. Zijn de

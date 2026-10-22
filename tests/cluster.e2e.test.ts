@@ -665,6 +665,50 @@ test(
 );
 
 test(
+  'the Timing laptop goes on alone by itself when the router dies, and the others join it when it is back',
+  { timeout: 90_000 },
+  async () => {
+    const root = testRoot('auto-alone');
+    const servers: RunningServer[] = [];
+    try {
+      await startGroup(root, servers, { autoAloneMs: 3_000 });
+      const [timing, ...others] = servers;
+      await client(timing).cluster.openTiming.mutate({ takeOver: false });
+      await waitForSameState(timing, others[0]);
+
+      await Promise.all(servers.map((server) => isolate(server, true)));
+      await waitFor(async () => {
+        const status = await fetchStatus(timing);
+        return status.writable && status.members.length === 1;
+      }, 20_000);
+      await recordLaps(timing, 2, 'A');
+      // Only the Timing laptop goes on alone: the others still wait for the network.
+      for (const server of others) {
+        const status = await fetchStatus(server);
+        assert.deepEqual([status.writable, status.members.length], [false, 3]);
+      }
+      const activity = await client(timing).activity.list.query({ limit: 20, before: null });
+      const alone = activity.find((entry) => entry.action === 'cluster.continueAlone');
+      assert.match(alone?.summary ?? '', /^Alleen verder gewerkt op LAPTOP-A; /);
+      assert.match(alone?.origin ?? '', /^Vanzelf/);
+
+      await Promise.all(servers.map((server) => isolate(server, false)));
+      await waitFor(async () => {
+        const status = await fetchStatus(timing);
+        return status.state === 'healthy' && status.members.length === 3;
+      }, 20_000);
+      for (const server of others) await waitForSameState(timing, server, 10_000);
+      for (const server of servers) assert.equal((await fetchState(server)).laps.length, 2);
+    } catch (error) {
+      throw withServerOutput(error, ...servers);
+    } finally {
+      await Promise.all(servers.map(stopServer));
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
+);
+
+test(
   'Alleen verder works only on the Timing laptop, and its laps win when the network comes back',
   { timeout: 90_000 },
   async () => {
@@ -1399,10 +1443,15 @@ function client(server: RunningServer) {
 }
 
 /** Three laptops in one group, like at the event; pushed onto `servers` as they start so they are always stopped. */
-async function startGroup(root: string, servers: RunningServer[]): Promise<void> {
+async function startGroup(
+  root: string,
+  servers: RunningServer[],
+  options: Pick<Parameters<typeof startServer>[0], 'autoAloneMs'> = {}
+): Promise<void> {
   for (const name of ['a', 'b', 'c']) {
     servers.push(
       await startServer({
+        ...options,
         port: await freePort(),
         dataPath: path.join(root, name),
         name: `LAPTOP-${name.toUpperCase()}`,
@@ -1473,6 +1522,8 @@ async function startServer(options: {
   name?: string;
   /** Linking by itself; off in the other tests, which link with Koppelen. */
   autoLink?: boolean;
+  /** How long the Timing laptop waits without a majority before it goes on alone; too long to happen elsewhere. */
+  autoAloneMs?: number;
 }): Promise<RunningServer> {
   fs.mkdirSync(options.dataPath, { recursive: true });
   const chunks: string[] = [];
@@ -1498,6 +1549,7 @@ async function startServer(options: {
       CLUSTER_DISCOVERY_INTERVAL_MS: '200',
       CLUSTER_LAPTOP_NAME: options.name ?? '',
       CLUSTER_AUTO_LINK: String(options.autoLink === true),
+      CLUSTER_AUTO_ALONE_MS: String(options.autoAloneMs ?? 600_000),
       BACKUP_ENABLED: 'false',
       APOLLOON_RELEASE_ID: 'e2e-test-release',
       APOLLOON_APP_VERSION: options.appVersion || '1.0.0',

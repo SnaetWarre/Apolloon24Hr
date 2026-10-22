@@ -114,6 +114,8 @@ const UNREACHABLE_LISTED_AFTER_MS = 5_000;
 const REMOVABLE_AFTER_MS = readPositiveInt(process.env.CLUSTER_REMOVABLE_AFTER_MS, 30_000);
 /** How long to wait for the group to settle before a laptop is taken out of it. */
 const SETTLE_TIMEOUT_MS = 3_000;
+/** The Timing laptop without a majority this long goes on alone by itself; a short network hiccup heals first. */
+const AUTO_ALONE_AFTER_MS = readPositiveInt(process.env.CLUSTER_AUTO_ALONE_MS, 15_000);
 
 let joining = false;
 let lastError: string | null = null;
@@ -583,13 +585,15 @@ export function registerClusterRoutes(app: Express): void {
         url: z.string().min(1).max(2_048),
         clusterId: z.string().min(1).max(128),
         autoLinkedWith: z.string().max(256).optional(),
+        split: z.string().max(128).optional(),
       })
       .safeParse(req.body);
     if (!request.success) {
       sendPeerError(res, 400, 'invalid_request', 'Ongeldige koppelaanvraag.');
       return;
     }
-    acceptInvite(request.data.url, request.data.clusterId, request.data.autoLinkedWith).then(
+    const { url, clusterId, autoLinkedWith, split } = request.data;
+    acceptInvite(url, clusterId, autoLinkedWith, split).then(
       () => res.json({ ok: true }),
       (error: unknown) => sendPeerError(res, 409, 'refused', error instanceof Error ? error.message : String(error))
     );
@@ -813,8 +817,13 @@ export async function linkWith(rawUrl: string): Promise<{ backupFile: string | n
  * this laptop's group links by itself: this laptop joins that group, and its
  * own group follows. Only a laptop without runners can be asked.
  */
-async function acceptInvite(url: string, clusterId: string, autoLinkedWith?: string): Promise<void> {
+async function acceptInvite(url: string, clusterId: string, autoLinkedWith?: string, split?: string): Promise<void> {
   await waitWhileJoining();
+  // A laptop of this split joined another one: the others come along at once instead of waiting to notice.
+  if (split !== undefined) {
+    await followSplit(url);
+    return;
+  }
   if (hostIdentity().clusterId === clusterId) return;
   await joinOnce(url, clusterId, { emptyGroup: true, autoLinkedWith });
 }
@@ -858,6 +867,8 @@ async function otherLaptop(rawUrl: string): Promise<{ url: string; status: Clust
 type JoinOptions = {
   /** Only while this laptop holds no runners, checked as the join starts; the rest of its group follows. */
   emptyGroup?: boolean;
+  /** Set when joining another split of this group (followSplit); the rest of this split follows. */
+  split?: string;
   /** Set when the laptop links by itself: the laptop it linked with, which the group records. */
   autoLinkedWith?: string;
 };
@@ -878,7 +889,8 @@ export async function joinGroup(rawUrl: string, options: JoinOptions = {}): Prom
   }
   // Nothing joins this laptop's group from here on (busy), so these are all the laptops that follow.
   const self = hostIdentity().hostId;
-  const followers = options.emptyGroup ? members().filter((member) => member.hostId !== self) : [];
+  const followers =
+    options.emptyGroup || options.split !== undefined ? members().filter((member) => member.hostId !== self) : [];
   joining = true;
   startJoining();
   let joined: Parameters<typeof finishJoining>[0] = null;
@@ -910,7 +922,7 @@ export async function joinGroup(rawUrl: string, options: JoinOptions = {}): Prom
       for (const member of followers) {
         void peerFetch(`${member.url}/api/cluster/invite`, {
           method: 'POST',
-          body: { url, clusterId: status.clusterId, autoLinkedWith: options.autoLinkedWith },
+          body: { url, clusterId: status.clusterId, autoLinkedWith: options.autoLinkedWith, split: options.split },
           timeoutMs: INVITE_TIMEOUT_MS,
         }).catch(() => undefined);
       }
@@ -1081,26 +1093,42 @@ async function maintain(): Promise<void> {
   } else if (clusterStatus().state !== 'no-majority') return;
 
   const group = new Set(members().map((member) => member.hostId));
-  const identity = hostIdentity();
-  for (const url of new Set(Object.values(knownPeers()))) {
-    const status = await fetchStatus(url).catch(() => null);
-    if (!status?.enabled || status.clusterId !== identity.clusterId || status.role !== 'leader') continue;
-    if (status.split.id === getGroupSplit().id || busy() || !otherGroupWins(status)) continue;
-    const before = getLapIds();
-    try {
-      const { backupFile } = await joinGroup(url);
-      const kept = new Set(getLapIds());
-      lastError = rejoinedMessage(
-        status.hostName ?? shortUrl(url),
-        before.filter((id) => !kept.has(id)).length,
-        backupFile
-      );
-    } catch (error) {
-      lastError = error instanceof Error ? error.message : String(error);
-    }
-    return;
-  }
+  for (const url of new Set(Object.values(knownPeers()))) if (await followSplit(url)) return;
   if (isLeader()) await autoLink(group);
+  else if (timingWaitsAlone()) continueAlone();
+}
+
+/**
+ * Joins the laptop at `url` when it leads another split of this group that wins (otherGroupWins),
+ * giving up this laptop's own data to a backup; Beheer then says what went. True when it tried.
+ */
+async function followSplit(url: string): Promise<boolean> {
+  const status = await fetchStatus(url).catch(() => null);
+  if (!status?.enabled || status.clusterId !== hostIdentity().clusterId || status.role !== 'leader') return false;
+  if (status.split.id === getGroupSplit().id || busy() || !otherGroupWins(status)) return false;
+  const before = getLapIds();
+  try {
+    const { backupFile } = await joinGroup(url, { split: status.split.id });
+    const kept = new Set(getLapIds());
+    lastError = rejoinedMessage(
+      status.hostName ?? shortUrl(url),
+      before.filter((id) => !kept.has(id)).length,
+      backupFile
+    );
+  } catch (error) {
+    lastError = error instanceof Error ? error.message : String(error);
+  }
+  return true;
+}
+
+/**
+ * The Timing laptop goes on alone by itself once it has been without a majority for a while (the
+ * router died), so timing never waits for a person. Its data wins when the others come back.
+ */
+function timingWaitsAlone(): boolean {
+  if (getTimingLaptop()?.hostId !== hostIdentity().hostId || removedBy(ELECTING_GRACE_MS)) return false;
+  const since = Math.max(lastLeaderContact() ?? 0, startedAt);
+  return performance.now() - since >= AUTO_ALONE_AFTER_MS && clusterStatus().state === 'no-majority';
 }
 
 /** What Beheer says on a laptop that gave up its own data to follow the other split, with the laps that went. */

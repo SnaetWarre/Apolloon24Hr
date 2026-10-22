@@ -217,7 +217,10 @@ function ClusterPanel({
             ) : (
               <span>
                 Er zijn te weinig laptops bereikbaar om iets te bewaren. Zet de andere laptops aan of controleer de
-                kabel. Zijn ze echt kapot?{' '}
+                kabel.
+                {cluster.timing?.self &&
+                  ' Timing staat open op deze laptop: komt het netwerk niet snel terug, dan werkt ze vanzelf alleen verder.'}{' '}
+                Zijn ze echt kapot?{' '}
                 <button className="btn btn--secondary" onClick={() => void goOnAlone()} disabled={pending}>
                   Alleen verder werken
                 </button>
