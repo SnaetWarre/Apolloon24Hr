@@ -82,6 +82,7 @@ export function buildWrapped({ runners, laps, registrations, raceStartedAt }: Wr
   const lapRanks = ranks(stats.map((entry) => [entry.runner.id, entry.laps]));
   const timed = stats.filter((entry) => entry.fastest != null);
   const fastestRanks = ranks(timed.map((entry) => [entry.runner.id, -entry.fastest!.durationMs]));
+  const fewerLaps = (entry: RunnerStats) => stats.filter((other) => other.laps < entry.laps).length;
   const firstHour = hourStart(raceStartedAt ?? Math.min(...laps.map((lap) => lap.startedAt)));
 
   return stats.map((entry): WrappedRunner => {
@@ -103,12 +104,12 @@ export function buildWrapped({ runners, laps, registrations, raceStartedAt }: Wr
       emailValid: Boolean(mailHref(email)),
       refusedContact: /^\s*nee\b/i.test(registrations[runner.id]?.reuseConsent ?? ''),
       runnerType: runnerType(entry, {
-        laps: { place: lapRanks.get(runner.id)!, of: stats.length },
+        laps: { place: lapRanks.get(runner.id)!, of: stats.length, fewer: fewerLaps(entry) },
         fastestLap: fastest ? { place: fastestRanks.get(runner.id)!, of: timed.length } : null,
       }),
       laps: entry.laps,
       meters: entry.laps * LAP_METERS,
-      lapsBeatenPercent: Math.floor((100 * stats.filter((other) => other.laps < entry.laps).length) / stats.length),
+      lapsBeatenPercent: Math.floor((100 * fewerLaps(entry)) / stats.length),
       fastestLapMs: fastest?.durationMs ?? null,
       averageLapMs: entry.averageMs,
       fastestLap: fastest
@@ -147,7 +148,10 @@ function runnerStats(runner: Runner, lapList: LapRecord[]) {
 type Rank = { place: number; of: number };
 
 /** The first type that fits, from the rarest to the one everybody gets. */
-function runnerType(entry: RunnerStats, rank: { laps: Rank; fastestLap: Rank | null }): WrappedRunnerType {
+function runnerType(
+  entry: RunnerStats,
+  rank: { laps: Rank & { fewer: number }; fastestLap: Rank | null }
+): WrappedRunnerType {
   const topTenth = (of: number) => Math.max(1, Math.ceil(of * 0.1));
   const hours = entry.lapList.map((lap) => Number(BRUSSELS_HOUR.format(lap.finishedAt)));
   const spreadMs = entry.measured.length >= 3 ? Math.max(...entry.measured) - Math.min(...entry.measured) : null;
@@ -171,11 +175,16 @@ function runnerType(entry: RunnerStats, rank: { laps: Rank; fastestLap: Rank | n
       hours: null,
     };
   }
-  if (rank.laps.of >= 5 && rank.laps.place <= topTenth(rank.laps.of)) {
+  // Counted by who ran fewer laps, not by place, so a tie at the edge of the top 10% doesn't count.
+  if (rank.laps.of >= 5 && rank.laps.fewer >= rank.laps.of * 0.9) {
+    const more = rank.laps.place - 1;
     return {
       kind: 'kilometervreter',
       title: 'Kilometervreter',
-      text: 'Je liep meer rondes dan 90% van alle lopers',
+      text:
+        more === 0
+          ? 'Niemand liep meer rondes dan jij'
+          : `Maar ${more} ${more === 1 ? 'loper liep' : 'lopers liepen'} meer rondes dan jij`,
       hours: null,
     };
   }

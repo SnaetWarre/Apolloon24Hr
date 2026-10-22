@@ -177,9 +177,50 @@ test('runner types: sprinter, most laps, and a steady pace', () => {
   );
   assert.equal(types.get('sprint')?.title, 'Sprinter');
   assert.equal(types.get('many')?.title, 'Kilometervreter');
+  assert.equal(types.get('many')?.text, 'Niemand liep meer rondes dan jij');
   assert.equal(types.get('steady')?.title, 'Metronoom');
   assert.equal(types.get('steady')?.text, 'Je rondes lagen nooit meer dan 3 seconden uit elkaar');
   assert.equal(types.get('a')?.title, 'Teamspeler');
+});
+
+test('runner types: a tie at the edge of the top 10% is no Kilometervreter', () => {
+  const ids = [
+    'a',
+    'b',
+    'c',
+    'd',
+    'e',
+    'f',
+    'g',
+    'h',
+    'i',
+    'j',
+    'k',
+    'l',
+    'm',
+    'n',
+    'o',
+    'p',
+    'q',
+    'first',
+    'second',
+    'third',
+  ];
+  const lapCount: Record<string, number> = { first: 8, second: 6, third: 6 };
+  let at = RACE_START;
+  // Every runner has their own fastest lap, so only 'a' and 'b' are Sprinters.
+  const laps = ids.flatMap((id, runnerIndex) =>
+    Array.from({ length: lapCount[id] ?? 1 }, () => lap(id, (at += 90_000), 70_000 + runnerIndex * 1_000))
+  );
+  const types = new Map(
+    buildWrapped({ runners: ids.map((id) => runner(id, id)), laps, registrations: {}, raceStartedAt: RACE_START }).map(
+      (entry) => [entry.runnerId, entry.runnerType]
+    )
+  );
+  // 'second' is second of 20, but shares that place with 'third', so it ran more laps than only 85%.
+  assert.equal(types.get('first')?.title, 'Kilometervreter');
+  assert.notEqual(types.get('second')?.title, 'Kilometervreter');
+  assert.notEqual(types.get('third')?.title, 'Kilometervreter');
 });
 
 test('file names sort by number, are safe on Windows, and never collide', () => {
