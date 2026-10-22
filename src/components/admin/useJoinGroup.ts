@@ -36,7 +36,11 @@ export function useJoinGroup(
           ? `Op ${laptopLabel(found)} is de race al gestart. `
           : '';
     const follow =
-      others > 0 ? ` De ${countLabel(others, 'andere laptop', 'andere laptops')} van deze groep doen mee.` : '';
+      others === 0
+        ? ''
+        : others === 1
+          ? ' De andere laptop van deze groep doet mee.'
+          : ` De ${others} andere laptops van deze groep doen mee.`;
     const confirmed = await confirm(
       found?.link === 'invite'
         ? {
