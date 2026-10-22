@@ -418,6 +418,9 @@ export const lapIdSchema = z.object({ lapId: z.string().min(1) });
 /** Moving a lap to another runner, or giving the second half of a split lap to `runnerId`. */
 export const lapRunnerSchema = lapIdSchema.extend({ runnerId: z.string().min(1) });
 
+/** Moving the press that ended a lap from `from`, the moment the operator saw, to `to`. */
+export const handoffMoveSchema = lapIdSchema.extend({ from: z.number().int(), to: z.number().int() });
+
 export const runnerStatusUpdateSchema = runnerIdSchema.extend({
   status: runnerStatusSchema,
   statusSince: z.number().int().nonnegative().optional(),

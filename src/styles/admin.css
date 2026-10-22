@@ -224,9 +224,261 @@
   font-size: 13px;
 }
 
-.laps-table__actions {
+/* Beheer › Rondes: the list, and beside it the fixes for the lap clicked. They stack when the panel no longer fits. */
+.management-content:has(.laps-layout) {
+  max-width: 1720px;
+}
+
+.laps-layout {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.laps-list {
+  flex: 999 1 0;
+  min-inline-size: 58%;
+}
+
+.laps-fix {
+  position: sticky;
+  inset-block-start: var(--space-4);
+  flex: 1 1 400px;
+  display: grid;
+  gap: var(--space-3);
+}
+
+.laps-fix__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  gap: var(--space-3);
+}
+
+.laps-fix__header h2 {
+  margin: 0;
+}
+
+.laps-fix__header .panel-copy,
+.laps-fix__empty {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.laps-fix__empty {
+  color: var(--ink-3);
+}
+
+.laps-fix .segmented-control {
+  display: grid;
+  margin: 0;
+}
+
+.laps-fix .segmented-control button {
+  text-align: start;
+}
+
+/* The time is the row's button; its hit area covers the whole row. */
+.laps-table tbody tr {
+  position: relative;
+}
+
+.laps-table__open {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.laps-table__open::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: var(--radius-sm);
+}
+
+.laps-table__open:focus-visible {
+  outline-color: transparent;
+}
+
+.laps-table__open:focus-visible::after {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+.laps-table tbody tr:has(.laps-table__open):active td {
+  background: var(--surface-3);
+}
+
+.laps-table tbody tr.is-selected td {
+  background: var(--brand-wash);
+}
+
+/* A press that looks late or early sits on the line between its two laps. It is no row to click, so it keeps its colour under the mouse. */
+.laps-table tbody tr.laps-table__seam td {
+  padding-block: 2px;
+  border-block-end-color: transparent;
+  background:
+    linear-gradient(var(--warn-line), var(--warn-line)) center / 100% 1px no-repeat,
+    var(--warn-wash);
+}
+
+.laps-table__row--flagged:has(+ .laps-table__seam) td {
+  border-block-end-color: transparent;
+}
+
+.laps-seam {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-inline-start: 120px;
+  padding: 2px 3px 2px 10px;
+  border: 1px solid var(--warn-line);
+  border-radius: 999px;
+  background: var(--surface);
+  font-size: 13px;
+}
+
+.laps-seam strong {
+  color: var(--warn-ink);
+}
+
+.laps-seam .btn {
+  border-radius: 999px;
+}
+
+.laps-press {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.laps-press__moment {
+  margin: 0;
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.laps-press__bars {
+  display: flex;
+  block-size: 46px;
+  border-radius: var(--radius-md);
+  overflow: clip;
+}
+
+.laps-press__bars span {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  flex-basis: 0;
+  min-inline-size: 0;
+  padding-inline: 10px;
+  font-size: 13px;
   white-space: nowrap;
-  text-align: end;
+  background: var(--surface-3);
+}
+
+.laps-press__bars span:first-child {
+  background: color-mix(in oklch, var(--brand) 30%, var(--surface-2));
+  box-shadow: 2px 0 0 var(--brand-ink);
+  z-index: 1;
+}
+
+.laps-press__bars small {
+  color: var(--ink-2);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .laps-press__bars span {
+    transition: flex-grow var(--dur-2) var(--ease-out);
+  }
+}
+
+.laps-press__hint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: var(--brand-wash);
+}
+
+.laps-press__hint p {
+  flex: 1 1 240px;
+  margin: 0;
+  font-size: 13px;
+}
+
+.laps-press__nudge {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.laps-press__nudge span {
+  flex-basis: 100%;
+  color: var(--ink-2);
+}
+
+.laps-press__nudge .btn {
+  min-inline-size: 64px;
+  font-variant-numeric: tabular-nums;
+}
+
+.laps-press__result {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: baseline;
+  gap: var(--space-1) var(--space-4);
+  margin: 0;
+}
+
+.laps-press__result dd {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.laps-press__result s {
+  color: var(--ink-3);
+}
+
+.laps-press__result dd span {
+  color: var(--brand-ink);
+  font-size: 12px;
+}
+
+.laps-press__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.laps-fix__other {
+  padding-block-start: var(--space-3);
+  border-block-start: 1px solid var(--line);
+}
+
+.laps-fix__other h3 {
+  margin: 0 0 var(--space-2);
+  color: var(--ink-2);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.laps-fix__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
 }
 
 .laps-picker {

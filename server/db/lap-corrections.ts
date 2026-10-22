@@ -1,11 +1,15 @@
 import { randomUUID } from 'node:crypto';
+import { MAX_HANDOFF_SHIFT_MS, MIN_LAP_MS } from '../../shared/lapTimes.js';
+import { clusterNow } from '../clock.js';
 import { all, one, run } from './connection.js';
 import { getRunnerLabels } from './labels.js';
+import { getRaceState } from './race-state.js';
 import { serializeHistoricalLabels } from './values.js';
 
 /*
  * Fixing a lap after the fact, from Beheer › Rondes: a lap that went to the wrong
- * runner, one missed press that made two laps into one, or a press too many. Each
+ * runner, one missed press that made two laps into one, a press too many, or a press
+ * that came too late or too early. Each
  * runner's laps are numbered again by start time afterwards, so the numbers stay
  * 1, 2, 3 in the order they were run.
  */
@@ -119,5 +123,56 @@ export function deleteLap(lapId: string): { ok: true } {
   const lap = lapRow(lapId);
   run('DELETE FROM laps WHERE id = ?', [lapId]);
   renumberLaps(lap.runnerId);
+  return { ok: true };
+}
+
+/**
+ * Moves the press that ended a lap, for a press that came too late or too early. The lap
+ * ends at `to` instead of `from`, and the lap that started at that press, or the runner on
+ * the track now, starts at `to`. Their two times add up as before and no other lap changes.
+ * `from` is the press the operator saw, so a press someone else moved meanwhile is not moved twice.
+ */
+export function moveHandoff(lapId: string, from: number, to: number): { ok: true } {
+  const lap = lapRow(lapId);
+  if (lap.finishedAt !== from) throw new Error('Deze wissel is intussen veranderd. Bekijk hem opnieuw.');
+  const shift = to - from;
+  if (shift === 0) return { ok: true };
+  if (Math.abs(shift) > MAX_HANDOFF_SHIFT_MS) {
+    throw new Error(`Een wissel schuift hoogstens ${MAX_HANDOFF_SHIFT_MS / 1000} seconden.`);
+  }
+  const next = one<LapRow>(
+    `SELECT id, runner_id AS runnerId, started_at AS startedAt, finished_at AS finishedAt,
+       duration_ms AS durationMs, created_at AS createdAt, labels_json AS labelsJson
+     FROM laps WHERE started_at = ? AND id <> ? LIMIT 1`,
+    [from, lapId]
+  );
+  const race = getRaceState();
+  const runningId = !next && race.activeStartedAt === from ? race.activeRunnerId : null;
+  if (!next && !runningId) throw new Error('Na deze ronde begon niemand een nieuwe ronde.');
+  const nextMs = next ? next.durationMs : clusterNow() - from;
+  // A lap may not end up a double press, unless it already was one.
+  if (lap.durationMs + shift < Math.min(MIN_LAP_MS, lap.durationMs) || nextMs - shift < Math.min(MIN_LAP_MS, nextMs)) {
+    throw new Error(`Zo wordt een ronde korter dan ${MIN_LAP_MS / 1000} seconden.`);
+  }
+  run('UPDATE laps SET finished_at = ?, duration_ms = ? WHERE id = ?', [to, lap.durationMs + shift, lapId]);
+  if (next) run('UPDATE laps SET started_at = ?, duration_ms = ? WHERE id = ?', [to, next.durationMs - shift, next.id]);
+  else run('UPDATE race_state SET active_started_at = ? WHERE id = 1', [to]);
+  const nextRunnerId = next?.runnerId ?? runningId;
+  run('UPDATE runners SET status_since = ? WHERE status_since = ? AND id IN (?, ?)', [
+    to,
+    from,
+    lap.runnerId,
+    nextRunnerId,
+  ]);
+  // Undoing the handoff after this one puts its runner back on the track from the moved press.
+  for (const handoff of all<{ id: string; payloadJson: string }>(
+    `SELECT id, payload_json AS payloadJson FROM handoff_history WHERE undone = 0 AND payload_json LIKE ?`,
+    [`%"activeStartedAt":${from}%`]
+  )) {
+    const payload = JSON.parse(handoff.payloadJson) as { raceState?: { activeStartedAt?: number | null } };
+    if (payload.raceState?.activeStartedAt !== from) continue;
+    payload.raceState.activeStartedAt = to;
+    run('UPDATE handoff_history SET payload_json = ? WHERE id = ?', [JSON.stringify(payload), handoff.id]);
+  }
   return { ok: true };
 }

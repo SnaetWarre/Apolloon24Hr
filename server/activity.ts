@@ -64,6 +64,12 @@ export function describeWrite(path: string, input: unknown): ((result: unknown) 
           ? `${lap} gesplitst in twee rondes van ${runner}`
           : `${lap} gesplitst: de tweede helft is voor ${runner}`;
     }
+    case 'laps.moveHandoff': {
+      const lap = lapText(value.lapId);
+      const shift = Number(value.to) - Number(value.from);
+      const seconds = (Math.abs(shift) / 1000).toLocaleString('nl-BE', { maximumFractionDigits: 3 });
+      return () => `${lap}: wissel ${seconds} s ${shift < 0 ? 'vroeger' : 'later'} gezet`;
+    }
     case 'laps.delete': {
       const lap = lapText(value.lapId);
       return () => `${lap} verwijderd`;

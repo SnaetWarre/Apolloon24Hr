@@ -108,11 +108,19 @@ try {
   await typesInto('Beheer › Lopers › Nieuwe loper', newRunner.getByRole('textbox', { name: 'Lopersnummer' }), '8');
 
   await page.goto(`${baseUrl}/admin?section=laps`);
+  // A click on a lap opens its fixes beside the list.
+  const openNewestLapFix = async (button) => {
+    await page.locator('.laps-table tbody tr').first().locator('.laps-table__open').click();
+    await page
+      .getByRole('complementary', { name: 'Ronde verbeteren' })
+      .getByRole('button', { name: button, exact: true })
+      .click();
+  };
   for (const [button, dialogName] of [
     ['Andere loper', 'Ronde naar andere loper'],
     ['Splitsen', 'Ronde splitsen'],
   ]) {
-    await page.locator('.laps-table tbody tr').first().getByRole('button', { name: button, exact: true }).click();
+    await openNewestLapFix(button);
     const fix = page.getByRole('dialog', { name: dialogName, exact: true });
     await typesInto(`Beheer › Rondes › ${button}`, fix.getByRole('textbox', { name: 'Loper zoeken' }), 'ab');
     await page.keyboard.press('Escape');
@@ -129,7 +137,7 @@ try {
     (runner) =>
       runner.runnerNumber && others.filter((other) => searchText(other).includes(runner.runnerNumber)).length === 1
   );
-  await page.locator('.laps-table tbody tr').first().getByRole('button', { name: 'Andere loper', exact: true }).click();
+  await openNewestLapFix('Andere loper');
   const move = page.getByRole('dialog', { name: 'Ronde naar andere loper', exact: true });
   await typesInto(
     'Beheer › Rondes › Andere loper, nummer',

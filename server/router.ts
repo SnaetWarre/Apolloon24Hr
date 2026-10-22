@@ -10,6 +10,7 @@ import {
   labelMemberSchema,
   labelInputSchema,
   labelPatchSchema,
+  handoffMoveSchema,
   lapIdSchema,
   lapRunnerSchema,
   publicRecordModeUpdateSchema,
@@ -81,6 +82,7 @@ import {
   saveLabelImage,
   setPublicRecordMode,
   splitLap,
+  moveHandoff,
   touchForwardedWrite,
   undoLastHandoff,
   unhideRunnerInQueue,
@@ -525,6 +527,9 @@ export const appRouter = t.router({
     move: t.procedure.input(lapRunnerSchema).mutation(write((input) => moveLap(input.lapId, input.runnerId))),
     split: t.procedure.input(lapRunnerSchema).mutation(write((input) => splitLap(input.lapId, input.runnerId))),
     delete: t.procedure.input(lapIdSchema).mutation(write((input) => deleteLap(input.lapId))),
+    moveHandoff: t.procedure
+      .input(handoffMoveSchema)
+      .mutation(write((input) => moveHandoff(input.lapId, input.from, input.to))),
   }),
 
   events: t.router({
