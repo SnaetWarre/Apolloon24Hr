@@ -3,7 +3,14 @@ import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
 import type { Express, NextFunction, Request, Response } from 'express';
 import { z } from 'zod';
-import type { AutoLinkNote, ClusterMemberStatus, ClusterStatus, GroupState, NearbyGroup } from '../shared/schemas.js';
+import type {
+  AutoLinkNote,
+  ClusterMemberStatus,
+  ClusterStatus,
+  GroupState,
+  NearbyGroup,
+  TimingLaptopStatus,
+} from '../shared/schemas.js';
 import { describeAutomaticOrigin } from './activity.js';
 import { backupStatus } from './backups.js';
 import { clusterNow, setClusterClockOffset } from './clock.js';
@@ -38,12 +45,16 @@ import {
 } from './consensus.js';
 import {
   DATABASE_SCHEMA_VERSION,
+  countLaps,
   countRunners,
   getAutoLinks,
   getClusterMembers,
+  getGroupSplit,
+  getLapIds,
   getLogHead,
   getRemovedMembers,
   getSetting,
+  getTimingLaptop,
   hasEventChanges,
   getUnreachableMembers,
   hostIdentity,
@@ -55,10 +66,13 @@ import {
   saveAutoLink,
   saveClusterMember,
   serializeDatabase,
+  setGroupSplit,
   setLocalSetting,
   setRemovedMembers,
+  setTimingLaptop,
   setUnreachableMembers,
   type ClusterMember,
+  type TimingLaptop,
 } from './db.js';
 import { currentUrl, heardLaptops, startDiscovery, stopDiscovery } from './discovery.js';
 import { APP_VERSION, isClusterEnabled, readPositiveInt } from './env.js';
@@ -179,9 +193,30 @@ export function clusterStatus(): ClusterStatus {
       url: removedFrom.url,
       name: names.get(removedFrom.hostId) ?? group.find((member) => member.hostId === removedFrom.hostId)?.name ?? null,
     },
+    timing: enabled ? timingStatus(memberStatuses, writable) : null,
+    split: getGroupSplit(),
+    laps: countLaps(),
     lastError: lastError ?? lastResyncProblem(),
     backup: backupStatus(),
   };
+}
+
+/** The laptop where Timing is open; this group reaches it while it is this laptop or answers the leader. */
+function timingStatus(statuses: ClusterMemberStatus[], writable: boolean): TimingLaptopStatus | null {
+  const timing = getTimingLaptop();
+  if (!timing) return null;
+  const member = statuses.find((candidate) => candidate.hostId === timing.hostId);
+  return {
+    ...timing,
+    name: member?.name ?? timing.name,
+    self: timing.hostId === hostIdentity().hostId,
+    reachable: Boolean(member?.self || (writable && member?.reachable)),
+  };
+}
+
+/** The Timing laptop's name for a message. */
+function timingName(timing: TimingLaptop): string {
+  return heardNames().get(timing.hostId) ?? timing.name ?? 'de Timing-laptop';
 }
 
 /** A laptop the leader has not heard from for a while, which may be taken out of the group. */
@@ -572,6 +607,11 @@ export function handlePeerUpgrade(req: IncomingMessage, socket: Duplex, head: Bu
 }
 
 function answerPeer(type: unknown, body: unknown): PeerAnswer {
+  // A laptop of another split (one went on alone) is neither followed nor voted for, so the data of
+  // two splits never mixes; maintain() makes one join the other. A joining laptop takes everything.
+  if (!joining && splitOf(body) !== getGroupSplit().id) {
+    return refusal('other_split', 'Deze laptops werkten apart verder.');
+  }
   if (type === 'append') {
     const request = appendRequestSchema.safeParse(body);
     if (!request.success || request.data.clusterId !== hostIdentity().clusterId) {
@@ -590,6 +630,11 @@ function answerPeer(type: unknown, body: unknown): PeerAnswer {
     return { body: handleVoteRequest(request.data) };
   }
   return refusal('invalid_request', 'Onbekende aanvraag.');
+}
+
+function splitOf(body: unknown): string {
+  const parsed = z.object({ split: z.string() }).safeParse(body);
+  return parsed.success ? parsed.data.split : '';
 }
 
 function requireSameVersion(req: Request, res: Response, next: NextFunction): void {
@@ -688,9 +733,8 @@ function logReachability(): void {
 }
 
 /**
- * A laptop asking for votes while this one leads is either back after being
- * left out (for example after "continue alone") or has a new address. The
- * leader takes it (back) in; it then catches up or re-syncs by itself. A
+ * A laptop of this split asking for votes while this one leads has a new
+ * address, or is missing from the list. The leader takes it (back) in; it then catches up or re-syncs by itself. A
  * laptop the crew took out of the group on purpose never gets here
  * (answerPeer): it was broken, and taking it back in by itself would make the
  * group bigger again, so the next failure could stop all saving.
@@ -917,33 +961,80 @@ async function groupStatus(url: string, known: ClusterStatus): Promise<{ url: st
 
 /**
  * Makes this laptop a group of one when the others are gone for good. Only
- * allowed when no majority can be reached. Laptops that come back later are
- * taken in again by themselves; what they had that this one lacks stays in
- * their backup.
+ * allowed when no majority can be reached, and only on the Timing laptop, so
+ * two laptops never clock on their own; another laptop takes Timing over in
+ * the same step (`takeOverTiming`), as nothing can be saved for the others
+ * now. This starts a new split of the group: laptops that come back later
+ * join it by themselves when it holds the Timing laptop (maintain); what they
+ * had that this one lacks stays in their backup.
  */
-export function continueAlone(origin?: string): { ok: true } {
+export function continueAlone(origin?: string, takeOverTiming = false): { ok: true } {
   if (!enabled || isLeader()) throw new Error('Deze laptop werkt al.');
   if (clusterStatus().state !== 'no-majority') {
     throw new Error('Er zijn nog genoeg laptops bereikbaar; die kiezen zelf een hoofdlaptop.');
   }
   const selfId = hostIdentity().hostId;
+  const timing = getTimingLaptop();
+  const takesOver = timing !== null && timing.hostId !== selfId;
+  if (takesOver && !takeOverTiming) {
+    const name = timingName(timing);
+    throw new Error(
+      `Timing staat open op ${name}: alleen daar kan je alleen verder werken. Wacht tot het netwerk terug is, of klok verder op ${name}.`
+    );
+  }
   const others = members()
     .filter((member) => member.hostId !== selfId)
     .map((member) => member.name ?? shortUrl(member.url));
   takeOverAlone();
   recordWrite('cluster.continueAlone', () => {
     keepOnlyClusterMember(selfId);
+    setGroupSplit({ id: crypto.randomUUID(), rank: getGroupSplit().rank + 1 });
+    if (takesOver) setTimingLaptop({ hostId: selfId, name: LAPTOP_NAME, gen: timing.gen + 1 });
     const left = others.length
       ? `; ${listNames(others)} ${others.length === 1 ? 'is' : 'zijn'} uit de groep gehaald`
       : '';
-    logLaptopActivity('cluster.continueAlone', `Alleen verder gewerkt op ${LAPTOP_NAME}${left}`, origin);
+    const took = takesOver ? `; Timing overgenomen van ${timingName(timing)}` : '';
+    logLaptopActivity('cluster.continueAlone', `Alleen verder gewerkt op ${LAPTOP_NAME}${left}${took}`, origin);
   });
   lastError = null;
   return { ok: true };
 }
 
+export type TimingClaim = { hostId: string; name: string | null; takeOver: boolean };
+
+/**
+ * What opening Timing on this laptop saves: nothing when Timing is open here already, or on
+ * another laptop and not taken over (Overnemen); otherwise this laptop as the Timing laptop.
+ */
+export function timingClaim(takeOver: boolean): TimingClaim | null {
+  if (!enabled) return null;
+  const timing = getTimingLaptop();
+  const selfId = hostIdentity().hostId;
+  if (timing?.hostId === selfId || (timing && !takeOver)) return null;
+  // Opened while nothing can be saved: opening it again later claims it.
+  if (!timing && !leaderAlive()) return null;
+  return { hostId: selfId, name: LAPTOP_NAME, takeOver };
+}
+
+/** Saves the Timing laptop, in the leader's replicated write; Timing open on another laptop stays unless taken over. */
+export function saveTimingLaptop({ hostId, name, takeOver }: TimingClaim): TimingLaptop {
+  const current = getTimingLaptop();
+  if (current && (current.hostId === hostId || !takeOver)) return current;
+  const next = { hostId, name, gen: (current?.gen ?? 0) + 1 };
+  setTimingLaptop(next);
+  return next;
+}
+
+/** Clocking here while Timing is open on another laptop is refused, so no lap is pressed on two laptops. */
+export function assertTimingHere(): void {
+  const timing = enabled ? getTimingLaptop() : null;
+  if (timing && timing.hostId !== hostIdentity().hostId) {
+    throw new Error(`Timing staat open op ${timingName(timing)}. Neem Timing over om hier te klokken.`);
+  }
+}
+
 // Laptops that once belonged to the group are remembered, also after "continue alone", so two
-// groups that each went on alone find each other again: the smaller one re-syncs from the larger.
+// splits of the group find each other again and one joins the other (otherGroupWins).
 
 function knownPeers(): Record<string, string> {
   try {
@@ -970,38 +1061,58 @@ function rememberPeers(): void {
 
 async function maintain(): Promise<void> {
   rememberPeers();
-  if (!isLeader() || busy()) return;
-  const self = selfMember();
-  const stored = getClusterMembers();
-  // The leader's address or name changed (a new DHCP lease): tell the group.
-  const storedSelf = stored.find((member) => member.hostId === self.hostId);
-  if (stored.length && (storedSelf?.url !== self.url || storedSelf.name !== self.name)) addMember(self);
-  // Another laptop announces a new address or name: store it, so it also holds when announcements stop.
-  const names = heardNames();
-  for (const member of stored) {
-    if (member.hostId === self.hostId) continue;
-    const url = currentUrl(member.hostId, member.url);
-    const name = names.get(member.hostId) ?? member.name;
-    if (url !== member.url || name !== member.name) addMember({ hostId: member.hostId, url, name });
-  }
-  logReachability();
+  if (busy()) return;
+  // Without a leader, a laptop looks for another split only once its own cannot save anything.
+  if (isLeader()) {
+    const self = selfMember();
+    const stored = getClusterMembers();
+    // The leader's address or name changed (a new DHCP lease): tell the group.
+    const storedSelf = stored.find((member) => member.hostId === self.hostId);
+    if (stored.length && (storedSelf?.url !== self.url || storedSelf.name !== self.name)) addMember(self);
+    // Another laptop announces a new address or name: store it, so it also holds when announcements stop.
+    const names = heardNames();
+    for (const member of stored) {
+      if (member.hostId === self.hostId) continue;
+      const url = currentUrl(member.hostId, member.url);
+      const name = names.get(member.hostId) ?? member.name;
+      if (url !== member.url || name !== member.name) addMember({ hostId: member.hostId, url, name });
+    }
+    logReachability();
+  } else if (clusterStatus().state !== 'no-majority') return;
 
   const group = new Set(members().map((member) => member.hostId));
   const identity = hostIdentity();
-  for (const [hostId, url] of Object.entries(knownPeers())) {
-    if (group.has(hostId)) continue;
+  for (const url of new Set(Object.values(knownPeers()))) {
     const status = await fetchStatus(url).catch(() => null);
     if (!status?.enabled || status.clusterId !== identity.clusterId || status.role !== 'leader') continue;
-    if (!isLeader() || !otherGroupWins(status)) continue;
+    if (status.split.id === getGroupSplit().id || busy() || !otherGroupWins(status)) continue;
+    const before = getLapIds();
     try {
-      await joinGroup(url);
-      lastError = `Deze laptop werkte even apart en volgt nu weer de groep van ${status.hostName ?? url}. Wat ze apart bewaarde, staat in een backup.`;
+      const { backupFile } = await joinGroup(url);
+      const kept = new Set(getLapIds());
+      lastError = rejoinedMessage(
+        status.hostName ?? shortUrl(url),
+        before.filter((id) => !kept.has(id)).length,
+        backupFile
+      );
     } catch (error) {
       lastError = error instanceof Error ? error.message : String(error);
     }
     return;
   }
-  await autoLink(group);
+  if (isLeader()) await autoLink(group);
+}
+
+/** What Beheer says on a laptop that gave up its own data to follow the other split, with the laps that went. */
+function rejoinedMessage(name: string, lostLaps: number, backupFile: string | null): string {
+  const backup = backupFile ? `de backup ${backupFile}` : 'een backup';
+  const joined = `Deze laptop werkte even apart en volgt nu weer de groep van ${name}.`;
+  if (!lostLaps) return `${joined} Wat ze apart bewaarde, staat in ${backup}.`;
+  const laps =
+    lostLaps === 1
+      ? '1 ronde die alleen hier geklokt was, zit'
+      : `${lostLaps} rondes die alleen hier geklokt waren, zitten`;
+  return `${joined} Let op: ${laps} niet in de race. Je vindt ze in ${backup}; zet ze er zo nodig bij in Beheer › Rondes.`;
 }
 
 /**
@@ -1043,12 +1154,26 @@ function noteAutoLinkFailure(url: string, message: string): void {
   autoLinkFailure = { url, rounds, message };
 }
 
-/** Of two groups that went on separately, the one with more laptops, then the later term, carries on. */
+/**
+ * Of two splits of the group that meet again, which one carries on. The one that reaches the
+ * Timing laptop, so the laps clocked there stay in the race; when both do (Timing was taken over
+ * meanwhile), the one that took it over last. Otherwise the one with more laps, then the one that
+ * went on alone last, then the one with more laptops, the later term, and the host id. Both sides
+ * work it out alike, so exactly one of them joins the other.
+ */
 function otherGroupWins(other: ClusterStatus): boolean {
-  const own = members().length;
-  if (other.members.length !== own) return other.members.length > own;
-  if (other.term !== currentTerm()) return other.term > currentTerm();
-  return other.hostId > hostIdentity().hostId;
+  const own = clusterStatus();
+  const order = (status: ClusterStatus) => [
+    status.timing?.reachable ? status.timing.gen : 0,
+    status.laps,
+    status.split.rank,
+    status.members.length,
+    status.term,
+  ];
+  const ours = order(own);
+  const theirs = order(other);
+  const index = theirs.findIndex((value, at) => value !== ours[at]);
+  return index === -1 ? other.hostId > own.hostId : theirs[index] > ours[index];
 }
 
 async function fetchStatus(url: string): Promise<ClusterStatus> {

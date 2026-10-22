@@ -79,18 +79,30 @@ function ClusterPanel({
     if (await joinGroup(url, found)) setOtherUrl('');
   }
 
+  // Only the Timing laptop goes on alone, so two laptops never clock on their own.
+  const timingElsewhere = cluster.timing && !cluster.timing.self ? (cluster.timing.name ?? 'een andere laptop') : null;
+
   async function goOnAlone() {
     if (pending) return;
-    const confirmed = await confirm({
-      title: 'Alleen verder werken?',
-      message:
-        'Doe dit alleen als de andere laptops echt kapot of weg zijn. Staan ze nog aan, controleer dan de netwerkkabel: dan werkt alles vanzelf weer. Wijzigingen van de laatste seconden op de andere laptops kunnen ontbreken. Komen ze later terug, dan nemen ze de gegevens van deze laptop over en bewaren ze hun eigen gegevens in een backup.',
-      confirmLabel: 'Alleen verder werken',
-      tone: 'danger',
-    });
+    const confirmed = await confirm(
+      timingElsewhere
+        ? {
+            title: 'Timing overnemen en alleen verder werken?',
+            message: `Doe dit alleen als ${timingElsewhere} echt kapot is. Deze laptop werkt dan alleen verder en klokt de rondes. Komen de andere laptops terug, dan nemen ze de gegevens van deze laptop over en bewaren ze hun eigen gegevens in een backup.`,
+            confirmLabel: 'Overnemen en alleen verder werken',
+            tone: 'danger',
+          }
+        : {
+            title: 'Alleen verder werken?',
+            message:
+              'Doe dit alleen als de andere laptops echt kapot of weg zijn. Staan ze nog aan, controleer dan de netwerkkabel: dan werkt alles vanzelf weer. Wijzigingen van de laatste seconden op de andere laptops kunnen ontbreken. Komen ze later terug, dan nemen ze de gegevens van deze laptop over en bewaren ze hun eigen gegevens in een backup.',
+            confirmLabel: 'Alleen verder werken',
+            tone: 'danger',
+          }
+    );
     if (!confirmed) return;
     await run(
-      continueAlone,
+      () => continueAlone(Boolean(timingElsewhere)),
       'Deze laptop werkt alleen verder. Koppel de andere laptops opnieuw zodra dat kan.',
       'Mislukt'
     );
@@ -193,13 +205,24 @@ function ClusterPanel({
       ) : (
         cluster.state === 'no-majority' && (
           <div className="warning-banner" role="alert">
-            <span>
-              Er zijn te weinig laptops bereikbaar om iets te bewaren. Zet de andere laptops aan of controleer de kabel.
-              Zijn ze echt kapot?{' '}
-              <button className="btn btn--secondary" onClick={() => void goOnAlone()} disabled={pending}>
-                Alleen verder werken
-              </button>
-            </span>
+            {timingElsewhere ? (
+              <span>
+                Er zijn te weinig laptops bereikbaar om iets te bewaren. Wacht tot het netwerk terug is, of klok verder
+                op {timingElsewhere}: daar staat Timing open, en alleen die laptop kan alleen verder werken. Is{' '}
+                {timingElsewhere} echt kapot?{' '}
+                <button className="btn btn--secondary" onClick={() => void goOnAlone()} disabled={pending}>
+                  Timing overnemen en alleen verder werken
+                </button>
+              </span>
+            ) : (
+              <span>
+                Er zijn te weinig laptops bereikbaar om iets te bewaren. Zet de andere laptops aan of controleer de
+                kabel. Zijn ze echt kapot?{' '}
+                <button className="btn btn--secondary" onClick={() => void goOnAlone()} disabled={pending}>
+                  Alleen verder werken
+                </button>
+              </span>
+            )}
           </div>
         )
       )}

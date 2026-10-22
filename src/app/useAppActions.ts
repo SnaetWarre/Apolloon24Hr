@@ -160,7 +160,11 @@ export function useAppActions() {
         [appKey, clusterStatusKey, backupsKey]
       ),
       joinGroup: action((url: string) => trpc.cluster.join.mutate({ url }), [appKey, clusterStatusKey]),
-      continueAlone: action(() => trpc.cluster.continueAlone.mutate(), [appKey, clusterStatusKey]),
+      continueAlone: action(
+        (takeOverTiming: boolean) => trpc.cluster.continueAlone.mutate({ takeOverTiming }),
+        [appKey, clusterStatusKey]
+      ),
+      openTiming: action((takeOver: boolean) => trpc.cluster.openTiming.mutate({ takeOver }), [clusterStatusKey]),
       removeLaptop: action(
         (hostId: string) => trpc.cluster.removeMember.mutate({ hostId }),
         [appKey, clusterStatusKey]

@@ -629,6 +629,164 @@ test(
 );
 
 test(
+  'laps counted with Alleen verder on the Timing laptop stay in the race when the network comes back',
+  { timeout: 90_000 },
+  async () => {
+    const root = testRoot('alone-laps');
+    const servers: RunningServer[] = [];
+    try {
+      await startGroup(root, servers);
+      const [timing, ...others] = servers;
+      await client(timing).cluster.openTiming.mutate({ takeOver: false });
+      await client(timing).runners.create.mutate({ name: 'Before', runnerNumber: 'B-1' });
+      for (const server of others) await waitForSameState(timing, server);
+
+      // The router goes down: no laptop reaches another.
+      await Promise.all(servers.map((server) => isolate(server, true)));
+      await waitFor(async () => (await fetchStatus(timing)).state === 'no-majority', 15_000);
+      await client(timing).cluster.continueAlone.mutate();
+      await recordLaps(timing, 5, 'A');
+
+      // The router comes back, and the other two find each other before they find the Timing laptop.
+      await Promise.all(others.map((server) => isolate(server, false)));
+      await waitFor(async () => (await leaderOf(others)) !== null, 10_000);
+      await isolate(timing, false);
+
+      for (const server of others) await waitForSameState(timing, server, 30_000);
+      for (const server of servers) assert.equal((await fetchState(server)).laps.length, 5);
+      await waitFor(async () => (await fetchStatus(timing)).state === 'healthy', 20_000);
+    } catch (error) {
+      throw withServerOutput(error, ...servers);
+    } finally {
+      await Promise.all(servers.map(stopServer));
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
+);
+
+test(
+  'Alleen verder works only on the Timing laptop, and its laps win when the network comes back',
+  { timeout: 90_000 },
+  async () => {
+    const root = testRoot('alone-twice');
+    const servers: RunningServer[] = [];
+    try {
+      await startGroup(root, servers);
+      const [timing, other, third] = servers;
+      await client(timing).cluster.openTiming.mutate({ takeOver: false });
+
+      // Timing opened on a second laptop stays with the first one, and that laptop cannot clock.
+      await client(other).cluster.openTiming.mutate({ takeOver: false });
+      await waitFor(async () => (await fetchStatus(other)).timing?.name === 'LAPTOP-A');
+      assert.equal((await fetchStatus(other)).timing?.self, false);
+      await assert.rejects(
+        client(other).race.startNext.mutate({ activeRunnerId: null, activeStartedAt: null, pressedAt: Date.now() }),
+        /Timing staat open op LAPTOP-A/
+      );
+
+      // The router goes down and Alleen verder is pressed on two laptops: only the Timing laptop goes on.
+      await Promise.all(servers.map((server) => isolate(server, true)));
+      for (const server of [timing, other]) {
+        await waitFor(async () => (await fetchStatus(server)).state === 'no-majority', 15_000);
+      }
+      await assert.rejects(client(other).cluster.continueAlone.mutate(), /Timing staat open op LAPTOP-A: alleen daar/);
+      await client(timing).cluster.continueAlone.mutate();
+      await recordLaps(timing, 3, 'A');
+
+      await Promise.all(servers.map((server) => isolate(server, false)));
+      for (const server of [other, third]) await waitForSameState(timing, server, 30_000);
+      for (const server of servers) assert.equal((await fetchState(server)).laps.length, 3);
+      await waitFor(async () => (await fetchStatus(timing)).state === 'healthy', 20_000);
+    } catch (error) {
+      throw withServerOutput(error, ...servers);
+    } finally {
+      await Promise.all(servers.map(stopServer));
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
+);
+
+test(
+  'Timing is taken over when the Timing laptop breaks, also without a network, and the newest Timing laptop wins',
+  { timeout: 150_000 },
+  async () => {
+    const root = testRoot('timing-takeover');
+    const servers: RunningServer[] = [];
+    try {
+      await startGroup(root, servers);
+      const [a, b, c] = servers;
+      await client(a).cluster.openTiming.mutate({ takeOver: false });
+      await waitForSameState(a, b);
+
+      // The Timing laptop breaks; the other two still have a majority, and Overnemen moves Timing.
+      await killServer(a);
+      await client(b).cluster.openTiming.mutate({ takeOver: false });
+      assert.equal((await fetchStatus(b)).timing?.name, 'LAPTOP-A');
+      await client(b).cluster.openTiming.mutate({ takeOver: true });
+      assert.equal((await fetchStatus(b)).timing?.self, true);
+      await recordLaps(b, 2, 'B');
+
+      // It comes back, catches up, and knows Timing is open on another laptop now.
+      const restartedA = await startServer({ port: a.port, dataPath: a.dataPath, name: 'LAPTOP-A' });
+      servers[0] = restartedA;
+      await waitForSameState(b, restartedA, 15_000);
+      assert.equal((await fetchStatus(restartedA)).timing?.name, 'LAPTOP-B');
+      await assert.rejects(
+        client(restartedA).race.handoff.mutate({ activeRunnerId: null, activeStartedAt: null, pressedAt: Date.now() }),
+        /Timing staat open op LAPTOP-B/
+      );
+
+      // Now the router goes down and the Timing laptop breaks: the last laptop takes Timing over
+      // together with Alleen verder, as nothing can be saved for the others.
+      await killServer(b);
+      await Promise.all([isolate(restartedA, true), isolate(c, true)]);
+      await waitFor(async () => (await fetchStatus(c)).state === 'no-majority', 15_000);
+      await assert.rejects(client(c).cluster.continueAlone.mutate(), /Timing staat open op LAPTOP-B/);
+      await client(c).cluster.continueAlone.mutate({ takeOverTiming: true });
+      assert.equal((await fetchStatus(c)).timing?.self, true);
+      await recordLaps(c, 2, 'C');
+
+      // The broken laptop comes back next to the first one and, not knowing, clocks one more lap.
+      const restartedB = await startServer({ port: b.port, dataPath: b.dataPath, name: 'LAPTOP-B' });
+      servers[1] = restartedB;
+      await isolate(restartedA, false);
+      await waitFor(async () => (await leaderOf([restartedA, restartedB])) !== null, 15_000);
+      await recordLaps(restartedB, 1, 'D');
+
+      // The network is back: the laptop that took Timing over last wins, and the others say what they gave up.
+      await isolate(c, false);
+      for (const server of [restartedA, restartedB]) await waitForSameState(c, server, 30_000);
+      for (const server of servers) {
+        const state = await fetchState(server);
+        assert.equal(state.laps.length, 4);
+        assert.ok(!state.runners.some((runner) => runner.runnerNumber === 'D-1'));
+        assert.equal((await fetchStatus(server)).timing?.name, 'LAPTOP-C');
+      }
+      const warnings = await Promise.all(
+        [restartedA, restartedB].map(async (server) => (await fetchStatus(server)).lastError)
+      );
+      assert.ok(
+        warnings.some((warning) => /1 ronde die alleen hier geklokt was, zit niet in de race/.test(warning ?? '')),
+        warnings.join('\n')
+      );
+      const activity = await client(restartedA).activity.list.query({ limit: 100, before: null });
+      assert.ok(activity.some((entry) => entry.summary === 'Timing overgenomen op LAPTOP-B'));
+      assert.ok(
+        activity.some((entry) =>
+          /^Alleen verder gewerkt op LAPTOP-C; .*; Timing overgenomen van LAPTOP-B$/.test(entry.summary)
+        )
+      );
+      await waitFor(async () => (await fetchStatus(c)).state === 'healthy', 20_000);
+    } catch (error) {
+      throw withServerOutput(error, ...servers);
+    } finally {
+      await Promise.all(servers.map(stopServer));
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
+);
+
+test(
   'a laptop gone for good is taken out, a spare takes its place, and the group survives one more failure',
   { timeout: 90_000 },
   async () => {
@@ -1276,6 +1434,25 @@ async function leaderOf(servers: RunningServer[]): Promise<RunningServer | null>
   const statuses = await Promise.all(servers.map((server) => fetchStatus(server).catch(() => null)));
   const index = statuses.findIndex((status) => status?.role === 'leader' && status.writable);
   return index >= 0 ? servers[index] : null;
+}
+
+/** Counts `count` more laps on `server` the way Timing does, with new runners numbered `prefix`-1, -2, …. */
+async function recordLaps(server: RunningServer, count: number, prefix: string): Promise<void> {
+  for (let index = 1; index <= count + 1; index += 1) {
+    await client(server).runners.create.mutate({
+      name: `${prefix} ${index}`,
+      runnerNumber: `${prefix}-${index}`,
+      status: 'waiting',
+    });
+  }
+  const target = (await fetchState(server)).laps.length + count;
+  for (;;) {
+    const { race, laps } = await fetchState(server);
+    if (laps.length >= target) return;
+    const press = { activeRunnerId: race.activeRunnerId, activeStartedAt: race.activeStartedAt, pressedAt: Date.now() };
+    if (race.activeRunnerId) await client(server).race.handoff.mutate(press);
+    else await client(server).race.startNext.mutate(press);
+  }
 }
 
 /** Simulates a pulled network cable. */

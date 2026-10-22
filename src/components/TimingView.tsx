@@ -30,7 +30,7 @@ export function TimingView() {
     refresh: refreshHistory,
   } = useRaceHistory({ scope: 'recent', limit: 10 });
   const { cluster } = useClusterStatus();
-  const { handoff, startNext, undoLastHandoff, finishRace, burgieGepakt } = useAppActions();
+  const { handoff, startNext, undoLastHandoff, finishRace, burgieGepakt, openTiming, continueAlone } = useAppActions();
   const [actionError, setActionError] = React.useState<string | null>(null);
   const [handoffBusy, setHandoffBusy] = React.useState(false);
   const [lastAction, setLastAction] = React.useState<string | null>(null);
@@ -65,7 +65,15 @@ export function TimingView() {
   const [pressed, flashPress] = usePulse(240);
   // While the laptops choose who orders the changes a press waits and then counts; without a majority nothing is saved.
   const removedFromGroup = Boolean(cluster?.removedFrom);
-  const timingBlocked = cluster?.state === 'no-majority' || removedFromGroup;
+  // Only one laptop clocks: opening Timing makes this the Timing laptop, unless Timing is open on another one.
+  const timingElsewhere = cluster?.timing && !cluster.timing.self ? cluster.timing : null;
+  const timingElsewhereName = timingElsewhere?.name ?? 'een andere laptop';
+  const noMajority = cluster?.state === 'no-majority';
+  const timingBlocked = noMajority || removedFromGroup || Boolean(timingElsewhere);
+  const unclaimed = Boolean(cluster?.enabled && cluster.writable && !cluster.timing);
+  React.useEffect(() => {
+    if (unclaimed) void openTiming(false).catch(() => undefined);
+  }, [unclaimed, openTiming]);
 
   const activeRunner = runners.find((runner) => runner.id === race.activeRunnerId) || null;
   const waitingRunners = runners.filter((runner) => runner.status === 'waiting').sort(compareWaitingOrder);
@@ -234,6 +242,32 @@ export function TimingView() {
     );
   }
 
+  // Without a majority nothing can be saved for the others, so taking over means going on alone.
+  async function takeOverTiming() {
+    releaseFocus();
+    const name = timingElsewhereName;
+    const confirmed = await confirm(
+      noMajority
+        ? {
+            title: 'Timing overnemen en alleen verder werken?',
+            message: `Doe dit alleen als ${name} echt kapot is. Er zijn te weinig laptops bereikbaar, dus deze laptop werkt dan alleen verder en klokt de rondes. Komen de andere laptops terug, dan nemen ze de gegevens van deze laptop over en bewaren ze hun eigen gegevens in een backup.`,
+            confirmLabel: 'Overnemen en alleen verder werken',
+            tone: 'danger',
+          }
+        : {
+            title: 'Timing overnemen?',
+            message: `Doe dit alleen als Timing op ${name} niet meer werkt. Daarna klok je op deze laptop, en kan ${name} niet meer klokken.`,
+            confirmLabel: 'Timing overnemen',
+            tone: 'danger',
+          }
+    );
+    if (!confirmed) return;
+    await runExclusiveRaceAction(
+      () => (noMajority ? continueAlone(true) : openTiming(true)),
+      'Timing overgenomen. Je klokt nu op deze laptop.'
+    );
+  }
+
   // Separate from the handoff lock, so a press right after Burgie gepakt still clocks.
   async function saveBurgie() {
     releaseFocus();
@@ -307,17 +341,19 @@ export function TimingView() {
   const newUpcomingIds = useArrivals(upcomingRunners.map((runner) => runner.id));
 
   const waitingCount = shownQueue.length;
-  const handoffLabel = timingBlocked
-    ? 'Timing geblokkeerd'
-    : race.raceFinishedAt && !pending && nextRunner
-      ? `Race hervatten met ${shortRunnerName(nextRunner)}`
-      : shownRunner
-        ? shownNext
-          ? `Klok ${shortRunnerName(shownRunner)} af, start ${shortRunnerName(shownNext)}`
-          : `Klok ${shortRunnerName(shownRunner)} af`
-        : shownNext
-          ? `Start ${shortRunnerName(shownNext)}`
-          : 'Geen loper klaar';
+  const handoffLabel = timingElsewhere
+    ? `Timing staat open op ${timingElsewhereName}`
+    : timingBlocked
+      ? 'Timing geblokkeerd'
+      : race.raceFinishedAt && !pending && nextRunner
+        ? `Race hervatten met ${shortRunnerName(nextRunner)}`
+        : shownRunner
+          ? shownNext
+            ? `Klok ${shortRunnerName(shownRunner)} af, start ${shortRunnerName(shownNext)}`
+            : `Klok ${shortRunnerName(shownRunner)} af`
+          : shownNext
+            ? `Start ${shortRunnerName(shownNext)}`
+            : 'Geen loper klaar';
   const finished = Boolean(race.raceFinishedAt) && !pending;
 
   return (
@@ -407,6 +443,19 @@ export function TimingView() {
                       Beheer › Systeem &amp; herstel
                     </Link>{' '}
                     op Opnieuw koppelen.
+                  </span>
+                ) : timingElsewhere ? (
+                  <span>
+                    <strong>Timing staat open op {timingElsewhereName}.</strong>{' '}
+                    {noMajority
+                      ? `Er zijn te weinig laptops bereikbaar. Klok verder op ${timingElsewhereName}, of wacht tot het netwerk terug is.`
+                      : timingElsewhere.reachable
+                        ? `Klok daar verder: zo telt geen ronde dubbel.`
+                        : `${timingElsewhereName} antwoordt niet.`}{' '}
+                    Werkt {timingElsewhereName} niet meer?{' '}
+                    <button className="btn btn--sm" onClick={() => void takeOverTiming()} disabled={handoffBusy}>
+                      Overnemen
+                    </button>
                   </span>
                 ) : (
                   <span>

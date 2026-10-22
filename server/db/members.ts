@@ -111,3 +111,47 @@ export function saveAutoLink(hostId: string, linkedWith: string): void {
   ].slice(0, AUTO_LINKS_KEPT);
   run('INSERT OR REPLACE INTO settings(key, value) VALUES(?, ?)', ['cluster_auto_links_json', JSON.stringify(links)]);
 }
+
+/**
+ * The laptop where Timing is open, so only one laptop clocks; a replicated setting. `gen` goes
+ * up each time another laptop takes Timing over: of two groups that went on separately, the one
+ * holding the most recent Timing laptop carries on (cluster.ts).
+ */
+export type TimingLaptop = { hostId: string; name: string | null; gen: number };
+
+const timingLaptopSchema = z.object({ hostId: z.string(), name: z.string().nullable(), gen: z.number() });
+
+export function getTimingLaptop(): TimingLaptop | null {
+  try {
+    const parsed = timingLaptopSchema.safeParse(JSON.parse(getSetting('cluster_timing_json') || 'null'));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
+
+export function setTimingLaptop(laptop: TimingLaptop): void {
+  run('INSERT OR REPLACE INTO settings(key, value) VALUES(?, ?)', ['cluster_timing_json', JSON.stringify(laptop)]);
+}
+
+/**
+ * Which split of the group this laptop's data belongs to; a replicated setting. "Alleen verder"
+ * starts a new one with a higher `rank`. Laptops of different splits do not vote for or follow
+ * each other, so their data is never mixed; cluster.ts lets one split join the other.
+ */
+export type GroupSplit = { id: string; rank: number };
+
+const groupSplitSchema = z.object({ id: z.string(), rank: z.number() });
+
+export function getGroupSplit(): GroupSplit {
+  try {
+    const parsed = groupSplitSchema.safeParse(JSON.parse(getSetting('cluster_split_json') || 'null'));
+    return parsed.success ? parsed.data : { id: '', rank: 0 };
+  } catch {
+    return { id: '', rank: 0 };
+  }
+}
+
+export function setGroupSplit(split: GroupSplit): void {
+  run('INSERT OR REPLACE INTO settings(key, value) VALUES(?, ?)', ['cluster_split_json', JSON.stringify(split)]);
+}

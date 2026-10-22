@@ -44,6 +44,14 @@ export function getLapCount(runnerId: string): number {
   return one<{ count: number }>('SELECT COUNT(*) AS count FROM laps WHERE runner_id = ?', [runnerId])?.count ?? 0;
 }
 
+export function countLaps(): number {
+  return one<{ count: number }>('SELECT COUNT(*) AS count FROM laps')?.count ?? 0;
+}
+
+export function getLapIds(): string[] {
+  return all<{ id: string }>('SELECT id FROM laps').map((row) => row.id);
+}
+
 export function getAllLaps(): LapRecord[] {
   return all<LapRow>(`${LAP_SELECT_SQL} ORDER BY l.finished_at DESC`).map(lapFromRow);
 }
