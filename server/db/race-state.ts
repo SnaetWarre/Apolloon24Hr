@@ -25,17 +25,25 @@ export function getRaceState(): RaceState {
 }
 
 /**
- * Whether the race started (or a lap was counted) here, and whether it still
- * runs: started and not finished. Koppelen keeps the data of a laptop with the
- * running race, then of one with a started race.
+ * A race with fewer laps than this is a test: a start or a few laps to try
+ * the timing screen. At 70 to 85 s a lap, the real race passes it in about
+ * 13 minutes.
+ */
+export const RACE_COUNTS_FROM_LAPS = 10;
+
+/**
+ * Whether the race started here, and whether it still runs: started and not
+ * finished. It counts as started from RACE_COUNTS_FROM_LAPS laps on, so a test
+ * never decides which laptop keeps its data on Koppelen, and never stops two
+ * laptops from merging their runners.
  */
 export function raceProgress(): { raceStarted: boolean; raceRunning: boolean } {
-  const row = one<{ started: number; finished: number }>(
-    `SELECT (SELECT race_started_at FROM race_state WHERE id = 1) IS NOT NULL
-         OR EXISTS (SELECT 1 FROM laps) AS started,
-       (SELECT race_finished_at FROM race_state WHERE id = 1) IS NOT NULL AS finished`
+  const row = one<{ laps: number; finished: number }>(
+    `SELECT (SELECT COUNT(*) FROM (SELECT 1 FROM laps LIMIT ?)) AS laps,
+       (SELECT race_finished_at FROM race_state WHERE id = 1) IS NOT NULL AS finished`,
+    [RACE_COUNTS_FROM_LAPS]
   );
-  const raceStarted = Boolean(row?.started);
+  const raceStarted = (row?.laps ?? 0) >= RACE_COUNTS_FROM_LAPS;
   return { raceStarted, raceRunning: raceStarted && !row?.finished };
 }
 

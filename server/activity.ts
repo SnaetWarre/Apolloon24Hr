@@ -114,6 +114,15 @@ export function describeWrite(path: string, input: unknown): ((result: unknown) 
         const summary = result as { created?: number; updated?: number } | null;
         return `Inschrijvingen geïmporteerd: ${summary?.created ?? 0} nieuw, ${summary?.updated ?? 0} bijgewerkt`;
       };
+    case 'runners.merge':
+      return (result) => {
+        const merged = result as { added?: number; same?: number; labels?: number } | null;
+        const same = merged?.same ?? 0;
+        const labels = merged?.labels
+          ? `, ${merged.labels} ${merged.labels === 1 ? 'nieuw label' : 'nieuwe labels'}`
+          : '';
+        return `Lopers van ${String(value.from ?? '')} samengevoegd bij het koppelen: ${merged?.added ?? 0} nieuw, ${same} ${same === 1 ? 'stond' : 'stonden'} er al${labels}`;
+      };
     case 'labels.create':
       return () => `Label ${String(value.name ?? '')} toegevoegd`;
     case 'labels.update': {

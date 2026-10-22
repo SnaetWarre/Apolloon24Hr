@@ -69,6 +69,8 @@ import {
   hideRunnerInQueue,
   insertRunner,
   logActivity,
+  mergeDataSchema,
+  mergeEventData,
   moveLap,
   onAppDataChanged,
   performHandoff,
@@ -436,6 +438,8 @@ export const appRouter = t.router({
       .input(runnerIdSchema)
       .mutation(write((input) => unhideRunnerInQueue(input.id) ?? fail('NOT_FOUND', 'Loper niet gevonden'))),
     importCsv: t.procedure.input(importCsvSchema).mutation(importCsv),
+    /** Koppelen before the race: the runners and labels of a laptop that joins this group (cluster.ts). */
+    merge: t.procedure.input(mergeDataSchema).mutation(write((input) => mergeEventData(input, clusterNow()))),
     // Read here, then imported as CSV: the write itself must not wait, and the leader gets plain text.
     importXlsx: t.procedure.input(importXlsxSchema).mutation(async ({ input, ctx }) => {
       let csvText: string;

@@ -25,14 +25,17 @@ type StoredRunner = {
   registration_json: string | null;
 };
 
-function findRunnerIdByNumber(runnerNumber: string): string | null {
+export function findRunnerIdByNumber(runnerNumber: string): string | null {
   return one<{ id: string }>('SELECT id FROM runners WHERE runner_number = ?', [runnerNumber])?.id ?? null;
 }
 
-/** Names as typed in the form: case and spacing differ between two answers by the same person. */
+/** A name as typed in the form, without the case and spacing that differ between two answers by the same person. */
+export function canonicalName(name: string): string {
+  return name.trim().replace(/\s+/g, ' ').toLocaleLowerCase('nl');
+}
+
 function sameName(a: string, b: string): boolean {
-  const canonical = (name: string) => name.trim().replace(/\s+/g, ' ').toLocaleLowerCase('nl');
-  return canonical(a) === canonical(b);
+  return canonicalName(a) === canonicalName(b);
 }
 
 /** A club secretary or a parent registers several runners with one address, so the name must match too. */

@@ -189,19 +189,29 @@ and real timers; the simulation tests pass fakes.
   members use the announced addresses and names when theirs changed (the
   leader stores them); a laptop on its own lists other groups to join. An announcement changes nothing by itself.
 - Koppelen (`linkWith` in `server/cluster.ts`) links two groups the same way
-  whichever side it is pressed on: a group where the race does not run
-  takes the data of one where it runs (`raceRunning`, started and not
-  finished), then a group where the race has not started takes the data of
-  one where it has (`raceStarted`; both from `raceProgress` in
-  `server/db/race-state.ts`), then the group with fewer runners takes the
-  other's data (then a group nobody changed yet, `hasEventChanges` in
-  `server/db/replication.ts`, then the smaller group, then the group id). An
-  empty laptop is asked over (`/api/cluster/invite`); between two groups that
-  both hold runners, the one that keeps its data refuses and names the other
-  laptop. `joinGroup` refuses the wrong way too, except when a laptop rejoins
-  its own group.
+  whichever side it is pressed on (`linkDirection`). The race counts as
+  started from ten laps on (`raceStarted` and `raceRunning` from
+  `raceProgress` in `server/db/race-state.ts`); fewer are a test. While it
+  started on neither side, the joining side's runners and labels merge into
+  the other group first: `joinGroup` posts them (`exportMergeData`) to
+  `runners.merge` on that group, whose leader adds them in one replicated
+  write (`mergeEventData` in `server/db/merge.ts`; a runner is the same person
+  only when name, e-mail and phone all match, `personKey`). Then a group
+  nobody changed yet (`hasEventChanges` in `server/db/replication.ts`) joins
+  one someone prepared, then the smaller group joins the larger, then the
+  one with fewer runners, then the group id decides, and either side may ask
+  the other over (`/api/cluster/invite`). Once the race started somewhere,
+  nothing merges: a group where the race does not run takes the data of one
+  where it runs, then a group where it has not started takes the data of one
+  where it has, then the group with fewer runners takes the other's data. A
+  group with runners is then not asked over; it gets `there` and presses
+  Koppelen itself. A laptop that joins another group takes the rest of its
+  group along: it asks them to follow through `/api/cluster/invite` with
+  `follow`. `joinGroup` refuses the wrong way too, except when a laptop
+  rejoins its own group.
 - Linking by itself (`autoLink` in `server/cluster.ts`, from `maintain` every
-  five seconds): the leader of a group that holds no runners joins the group
+  five seconds): the leader of a group that holds no runners, or before the
+  race any group, joins the group
   `autoLinkPlan` picks from the announcements, and the rest of its group
   follows through `/api/cluster/invite`. A group with runners comes first;
   between empty groups `linkDirection` picks the same one on both sides, so
@@ -212,7 +222,7 @@ and real timers; the simulation tests pass fakes.
   third failed round in a row through the same laptop: its address does
   not answer (a firewall that lets the announcements through), or the join
   failed, with its error. The join itself checks again,
-  as it starts, that this laptop holds no runners. The leader records each
+  as it starts, that this laptop holds no runners or that they merge in. The leader records each
   such join in the replicated setting `cluster_auto_links_json`, so every
   laptop of the group can name the laptops that came over by themselves.
   `CLUSTER_AUTO_LINK=false` turns it off.

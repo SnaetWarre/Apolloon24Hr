@@ -34,7 +34,7 @@ const beaconSchema = z.object({
   runners: z.number().int().nonnegative(),
   /** Someone changed the event data in that group (hasEventChanges); older versions do not send it. */
   changed: z.boolean().default(false),
-  /** The race started or a lap was counted in that group (hasRaceStarted); older versions do not send it. */
+  /** The race started in that group: ten laps were counted (raceProgress); older versions do not send it. */
   raceStarted: z.boolean().default(false),
   /** The race started there and was not finished (raceProgress); older versions do not send it. */
   raceRunning: z.boolean().default(false),

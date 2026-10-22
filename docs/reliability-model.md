@@ -65,20 +65,40 @@ are therefore not enough: then losing either one stops saving.
 - A laptop whose group holds no runners links by itself, within about five
   seconds, with the other laptops it hears: with the group that holds runners,
   or between empty groups the way Koppelen would link them, so only one side
-  moves. A group that holds runners never links by itself; that stays a press
-  on Koppelen. An empty laptop that hears two groups with runners does not
-  guess: it says so and waits for a press. Beheer › Systeem & herstel and the
+  moves. Before the race (it started on neither side), a group that holds
+  runners links by itself too, because its runners merge in (see below).
+  Once the race started, a group with runners never links by itself; that
+  stays a press on Koppelen. A laptop that hears two groups with runners it
+  could join does not guess: it says so and waits for a press. Beheer › Systeem & herstel and the
   overview name the laptops that linked by themselves ("Automatisch gekoppeld
   met LAPTOP-TIJD, 3 minuten geleden"). `CLUSTER_AUTO_LINK=false` turns it
   off.
-- Koppelen links the same way whichever laptop it is pressed on. A group
-  where the race runs (started and not finished) keeps its data against one
-  where it does not, whatever the runner counts, so a spare laptop with the
+- The race counts as started from ten counted laps on. Fewer laps, or a
+  runner started without a lap, are a test of the timing screen: they never
+  decide which side keeps its data, and never stop a merge. At 70 to 85
+  seconds a lap, the real race passes ten laps in about 13 minutes.
+- Before the race, Koppelen merges. The joining side first sends its runners
+  and labels to the other group, whose leader adds them in one replicated
+  write (`runners.merge`), and then joins as usual. Two runners are the same
+  person only when name, e-mail and phone all match, ignoring case and the
+  spaces around them, and spaces, dots and dashes inside the phone number;
+  that person is kept once, as the group typed them. Every other runner is
+  added. A label with the same name as one in the group is that label. The
+  group keeps its own settings, logos and laps; a test race on the joining
+  side stays behind in its backup. Which side joins: a laptop nobody changed
+  yet joins one someone prepared, then the smaller group joins the larger,
+  then the side with fewer runners, then the group id decides.
+- Once the race started on either side, nothing merges. A group where the
+  race runs (started and not finished) keeps its data against one where it
+  does not, whatever the runner counts, so a spare laptop with the
   registration list, or with a practice race that was finished, takes the
   running race instead of replacing it. Then a group where the race started
-  (or a lap was counted) keeps its data against one where it did not.
-  Between two groups alike in both, the side with fewer runners takes the
-  other's data. The laptop that takes the data keeps a backup of its old database.
+  keeps its data against one where it did not. Between two groups alike in
+  both, the side with fewer runners takes the other's data.
+- Koppelen links the same way whichever laptop it is pressed on, and one side
+  of every pair always has the button. A laptop in a group can press it too:
+  its whole group goes along. The laptop that takes the data keeps a backup of
+  its old database.
 - Laptops only link when app version and database schema are identical.
 
 ```text
@@ -107,7 +127,7 @@ screen ──► own laptop ──► leader ──► other laptops
 | A laptop comes back | It catches up, or re-syncs after a backup of its own data. | Nothing. |
 | Two laptops are down | The last one shows "Te weinig laptops bereikbaar" and saves nothing. | Turn a second laptop on or fix the cable. Only if both others are truly gone: Beheer › Systeem › "Alleen verder werken". |
 | After "Alleen verder werken" the others return | They follow the laptop that went on alone and keep their own data in a `pre-resync` backup. | Nothing. |
-| One laptop is gone for good (broken, stolen, dropped) | The other two carry on, but a laptop that will never come back still counts. A spare linked next to it makes four laptops that need three for a majority, so it adds no safety. After 30 s without an answer, Beheer › Systeem offers "Uit de groep halen" next to it. | Click "Uit de groep halen" next to the dead laptop, then link a spare (an empty laptop links by itself; on a spare that holds runners or a finished practice race, press Koppelen, and it takes the group's race). The group is three laptops again and one more may fail. |
+| One laptop is gone for good (broken, stolen, dropped) | The other two carry on, but a laptop that will never come back still counts. A spare linked next to it makes four laptops that need three for a majority, so it adds no safety. After 30 s without an answer, Beheer › Systeem offers "Uit de groep halen" next to it. | Click "Uit de groep halen" next to the dead laptop, then link a spare (an empty laptop links by itself; on a spare that holds runners or a practice race, press Koppelen, and it takes the group's race). The group is three laptops again and one more may fail. |
 | A laptop taken out of the group comes back | It is not taken back in by itself. It saves nothing and Beheer › Systeem on it says "Deze laptop is uit de groep gehaald". | Only if it works again: click "Opnieuw koppelen" on it. It takes the group's data and keeps its own in a `pre-join` backup. |
 
 "Alleen verder werken" is the one decision left to a person, because only a
@@ -258,8 +278,9 @@ people who will sit at them watching.
 1. Link the laptops: start the app on the second and third laptop while they
    are still empty. They link with the first laptop by themselves within a few
    seconds; Beheer › Systeem › Laptops koppelen says "Automatisch gekoppeld
-   met" and the first laptop's name. A laptop that already holds runners does
-   not link by itself; on it, click Koppelen next to the first laptop. Beheer › Voorbereiding
+   met" and the first laptop's name. A laptop that already holds runners links
+   by itself too while the race has not started, and its runners join the
+   group's list. Beheer › Voorbereiding
    shows "Alle 3 laptops zijn bereikbaar en hebben alle gegevens."
 2. Open a TV page (`/display/outside`) in a browser on a fourth device.
 3. Start a practice race on the timing laptop and time a few laps.

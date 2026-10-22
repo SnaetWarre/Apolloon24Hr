@@ -168,7 +168,7 @@ export {
 export { countRunners, getAllRunners, getRunnerById, getRunnerRegistrations } from './db/runner-queries.js';
 export { insertRunner, updateRunner, upsertRunnerFromImport, deleteRunner } from './db/runners.js';
 export { hideRunnerInQueue, unhideRunnerInQueue, updateRunnerStatus, updateWaitingOrder } from './db/queue.js';
-export { clearRace, getRaceState, raceProgress } from './db/race-state.js';
+export { clearRace, getRaceState, raceProgress, RACE_COUNTS_FROM_LAPS } from './db/race-state.js';
 export {
   getAllLaps,
   countLaps,
@@ -190,3 +190,4 @@ export {
 } from './db/timing.js';
 export { getActivity, logActivity } from './db/activity.js';
 export { previewBackup, readRestoreData, replaceEventData, restoreDataSchema } from './db/restore.js';
+export { exportMergeData, mergeDataSchema, mergeEventData, personKey } from './db/merge.js';

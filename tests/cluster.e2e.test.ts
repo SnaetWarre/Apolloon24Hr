@@ -10,6 +10,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { createTRPCClient, httpBatchLink } from '@trpc/client';
 import WebSocket from 'ws';
+import { RACE_COUNTS_FROM_LAPS } from '../server/db/race-state.ts';
 import { PEER_SOCKET_PATH } from '../server/peer-socket.ts';
 import type { AppRouter } from '../server/router.ts';
 import type { AppSnapshot, ClusterStatus, LiveAppSnapshot, RaceHistory } from '../shared/schemas.ts';
@@ -242,7 +243,7 @@ test('three laptops form one group, every laptop writes, and each holds everythi
       name: 'LAPTOP-TWEE',
     });
     servers.push(second);
-    await client(second).runners.create.mutate({ name: 'Replaced by the join', runnerNumber: 'B-1' });
+    await client(second).runners.create.mutate({ name: 'Brought along by the join', runnerNumber: 'B-1' });
     // A laptop on its own lists the laptops it could join by their computer name, without anyone typing an address.
     await waitFor(async () =>
       (await fetchStatus(second)).nearby.some(
@@ -250,8 +251,10 @@ test('three laptops form one group, every laptop writes, and each holds everythi
           group.url === first.baseUrl && group.name === 'LAPTOP-EEN' && group.runners === 2 && group.link === 'join'
       )
     );
-    // The laptop with more runners keeps them: Koppelen there sends the operator to the other laptop.
-    await assert.rejects(client(first).cluster.join.mutate({ url: second.baseUrl }), /Druk op Koppelen op/);
+    // Before the race the other side can press Koppelen too: it asks this laptop over, runners and all.
+    await waitFor(async () =>
+      (await fetchStatus(first)).nearby.some((group) => group.url === second.baseUrl && group.link === 'invite')
+    );
     // A laptop of an older version announces itself without a name; it is still listed, by its address.
     const oldLaptop = 'http://127.0.0.1:1';
     await waitFor(async () => {
@@ -260,6 +263,7 @@ test('three laptops form one group, every laptop writes, and each holds everythi
     });
     const joined = await join(second, first);
     assert.match(joined.backupFile ?? '', /pre-join/);
+    assert.equal(joined.merged, true);
     const third = await startServer({
       port: await freePort(),
       dataPath: path.join(root, 'third'),
@@ -292,6 +296,7 @@ test('three laptops form one group, every laptop writes, and each holds everythi
     assert.deepEqual((await fetchState(third)).runners.map((runner) => runner.name).sort(), [
       'Also before the group',
       'Before the group',
+      'Brought along by the join',
       'Written on laptop 0',
       'Written on laptop 1',
       'Written on laptop 2',
@@ -1282,7 +1287,50 @@ test(
 );
 
 test(
-  'laptops with runners never link by themselves, and an empty laptop that hears two of them waits for a press',
+  'before the race, laptops with runners link by themselves and keep every runner once',
+  { timeout: 60_000 },
+  async () => {
+    const root = testRoot('auto-link-merge');
+    const servers: RunningServer[] = [];
+    try {
+      // Each gets its runners before linking by itself is on, so it was never an empty laptop with it on.
+      for (const name of ['P', 'Q']) {
+        const options = { port: await freePort(), dataPath: path.join(root, name), name: `LAPTOP-${name}` };
+        const setup = await startServer(options);
+        servers.push(setup);
+        const rpc = client(setup);
+        await rpc.runners.create.mutate({
+          name: name === 'P' ? 'Lien Claes' : ' lien claes',
+          registrationDetails: { email: 'lien@example.be', phone: name === 'P' ? '0470 11 22 33' : '0470.11.22.33' },
+        });
+        await rpc.runners.create.mutate({ name: `Loper ${name}`, runnerNumber: `${name}-1` });
+        await stopServer(setup);
+        servers.splice(servers.indexOf(setup), 1, await startServer({ ...options, autoLink: true }));
+      }
+      await waitFor(
+        async () => {
+          const statuses = await Promise.all(servers.map(fetchStatus));
+          return statuses.every(
+            (status) => status.clusterId === statuses[0].clusterId && status.members.length === 2 && status.writable
+          );
+        },
+        30_000,
+        200
+      );
+      await waitForSameState(servers[0], servers[1]);
+      const names = (await fetchState(servers[1])).runners.map((runner) => runner.name.trim().toLowerCase()).sort();
+      assert.deepEqual(names, ['lien claes', 'loper p', 'loper q']);
+    } catch (error) {
+      throw withServerOutput(error, ...servers);
+    } finally {
+      await Promise.all(servers.map(stopServer));
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
+);
+
+test(
+  'laptops where the race started never link by themselves, and an empty laptop that hears two of them waits for a press',
   { timeout: 60_000 },
   async () => {
     const root = testRoot('auto-link-runners');
@@ -1293,7 +1341,7 @@ test(
         const options = { port: await freePort(), dataPath: path.join(root, name), name: `LAPTOP-${name}` };
         const setup = await startServer(options);
         servers.push(setup);
-        await client(setup).runners.create.mutate({ name: `Loper ${name}`, runnerNumber: `${name}-1` });
+        await countLaps(setup, RACE_COUNTS_FROM_LAPS);
         await stopServer(setup);
         servers.splice(servers.indexOf(setup), 1, await startServer({ ...options, autoLink: true }));
       }
@@ -1322,9 +1370,154 @@ test(
       );
       assert.deepEqual(
         statuses.map((status) => status.runners),
-        [1, 1, 0]
+        [RACE_COUNTS_FROM_LAPS + 1, RACE_COUNTS_FROM_LAPS + 1, 0]
       );
       assert.ok(statuses[2].autoLink.waiting);
+    } catch (error) {
+      throw withServerOutput(error, ...servers);
+    } finally {
+      await Promise.all(servers.map(stopServer));
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
+);
+
+test(
+  'before the race, Koppelen on a group takes in a laptop with a test lap, with its runners and labels',
+  { timeout: 60_000 },
+  async () => {
+    const root = testRoot('link-merge');
+    const servers: RunningServer[] = [];
+    try {
+      for (const name of ['G1', 'G2', 'L']) {
+        servers.push(
+          await startServer({ port: await freePort(), dataPath: path.join(root, name), name: `LAPTOP-${name}` })
+        );
+      }
+      const [g1, g2, lone] = servers;
+      await join(g2, g1);
+      const group = client(g1);
+      await group.runners.create.mutate({
+        name: 'Ann Smets',
+        runnerNumber: '1',
+        registrationDetails: { email: 'ann@example.be', phone: '0470 11 22 33' },
+      });
+      await group.runners.create.mutate({ name: 'Bert', runnerNumber: '2' });
+
+      const own = client(lone);
+      // The same person, typed a little differently; then someone with the same name but another phone.
+      await own.runners.create.mutate({
+        name: 'ann smets ',
+        runnerNumber: '5',
+        registrationDetails: { email: 'ANN@example.be', phone: '0470.11.22.33' },
+      });
+      await own.runners.create.mutate({
+        name: 'Ann Smets',
+        registrationDetails: { email: 'ann@example.be', phone: '0470 99 99 99' },
+      });
+      const label = await own.labels.create.mutate({ name: 'Ploeg L', kind: 'andere' });
+      const tester = await own.runners.create.mutate({ name: 'Lone Runner', runnerNumber: '1', status: 'waiting' });
+      await own.labels.addRunner.mutate({ labelId: label.id, runnerId: tester.id });
+      // A test start and one lap, never cleared with Race wissen.
+      await own.race.startNext.mutate({ activeRunnerId: null, activeStartedAt: null });
+      const { race } = await fetchState(lone);
+      await own.race.handoff.mutate({ activeRunnerId: race.activeRunnerId, activeStartedAt: race.activeStartedAt });
+      assert.equal((await fetchState(lone)).laps.length, 1);
+
+      // Both sides have Koppelen: the lone laptop joins, the group asks it over.
+      await waitFor(
+        async () => {
+          const [there, here] = await Promise.all([fetchStatus(g1), fetchStatus(lone)]);
+          return (
+            there.nearby.some((found) => found.link === 'invite' && found.runners === 3) &&
+            here.nearby.some((found) => found.link === 'join' && found.laptops === 2)
+          );
+        },
+        10_000,
+        100
+      );
+      await join(g2, lone);
+      await waitFor(
+        async () => (await fetchStatus(lone)).members.length === 3 && (await fetchStatus(g1)).state === 'healthy',
+        15_000,
+        100
+      );
+      await waitForSameState(g1, lone);
+      await waitForSameState(g1, g2);
+
+      const state = await fetchState(lone);
+      assert.deepEqual(state.runners.map((runner) => [runner.name, runner.runnerNumber]).sort(), [
+        ['Ann Smets', null],
+        ['Ann Smets', '1'],
+        ['Bert', '2'],
+        ['Lone Runner', null],
+      ]);
+      assert.equal(state.laps.length, 0, 'the test lap stays behind');
+      assert.deepEqual(
+        state.runners.find((runner) => runner.name === 'Lone Runner')?.labels.map((candidate) => candidate.name),
+        ['Ploeg L']
+      );
+      const summaries = (await client(g2).activity.list.query({ limit: 20, before: null })).map(
+        (entry) => entry.summary
+      );
+      assert.ok(
+        summaries.includes('Lopers van LAPTOP-L samengevoegd bij het koppelen: 2 nieuw, 1 stond er al, 1 nieuw label'),
+        summaries.join('\n')
+      );
+    } catch (error) {
+      throw withServerOutput(error, ...servers);
+    } finally {
+      await Promise.all(servers.map(stopServer));
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
+);
+
+test(
+  'once the race started on a lone laptop, Koppelen on a laptop of a group takes the whole group over to it',
+  { timeout: 60_000 },
+  async () => {
+    const root = testRoot('link-group-over');
+    const servers: RunningServer[] = [];
+    try {
+      for (const name of ['G1', 'G2', 'R']) {
+        servers.push(
+          await startServer({ port: await freePort(), dataPath: path.join(root, name), name: `LAPTOP-${name}` })
+        );
+      }
+      const [g1, g2, racing] = servers;
+      await join(g2, g1);
+      await client(g1).runners.create.mutate({ name: 'Op de lijst', runnerNumber: '1' });
+      await countLaps(racing, RACE_COUNTS_FROM_LAPS);
+
+      // The race laptop keeps its data and sends the crew to the group; the group has the button.
+      await waitFor(
+        async () => {
+          const [there, here] = await Promise.all([fetchStatus(g2), fetchStatus(racing)]);
+          return (
+            there.nearby.some((found) => found.link === 'join' && found.raceRunning) &&
+            here.nearby.some((found) => found.link === 'there' && found.laptops === 2)
+          );
+        },
+        10_000,
+        100
+      );
+      await assert.rejects(join(racing, g1), /Druk op Koppelen op/);
+      await join(g2, racing);
+      await waitFor(
+        async () => {
+          const statuses = await Promise.all(servers.map(fetchStatus));
+          return statuses.every(
+            (status) => status.clusterId === statuses[0].clusterId && status.members.length === 3 && status.writable
+          );
+        },
+        20_000,
+        100
+      );
+      for (const copy of [g1, g2]) await waitForSameState(racing, copy);
+      const state = await fetchState(g1);
+      assert.equal(state.laps.length, RACE_COUNTS_FROM_LAPS);
+      assert.ok(!state.runners.some((runner) => runner.name === 'Op de lijst'), 'nothing merges once the race started');
     } catch (error) {
       throw withServerOutput(error, ...servers);
     } finally {
@@ -1367,6 +1560,7 @@ test(
           leader: true,
           groupSize: 1,
           runners: 40,
+          changed: true,
         }),
       200
     );
@@ -1390,6 +1584,7 @@ test(
         leader,
         members: [],
         runners: 40,
+        changed: true,
         busy: null,
       };
       const waiting = async (pattern: RegExp) => pattern.test((await fetchStatus(empty)).autoLink.waiting ?? '');
@@ -1476,6 +1671,19 @@ async function join(server: RunningServer, target: RunningServer) {
       if (!/Probeer het zo opnieuw/.test(String(error)) || Date.now() > deadline) throw error;
       await new Promise((resolve) => setTimeout(resolve, 200));
     }
+  }
+}
+
+/** Counts `laps` laps on `server` the way the timing screen does, each by a runner of its own. */
+async function countLaps(server: RunningServer, laps: number): Promise<void> {
+  const rpc = client(server);
+  for (let index = 0; index <= laps; index += 1) {
+    await rpc.runners.create.mutate({ name: `Testloper ${index}`, status: 'waiting' });
+  }
+  await rpc.race.startNext.mutate({ activeRunnerId: null, activeStartedAt: null });
+  for (let lap = 0; lap < laps; lap += 1) {
+    const { race } = await fetchState(server);
+    await rpc.race.handoff.mutate({ activeRunnerId: race.activeRunnerId, activeStartedAt: race.activeStartedAt });
   }
 }
 
