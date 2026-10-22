@@ -146,6 +146,9 @@ export function useAppActions() {
       moveLap: action((lapId: string, runnerId: string) => trpc.laps.move.mutate({ lapId, runnerId })),
       splitLap: action((lapId: string, runnerId: string) => trpc.laps.split.mutate({ lapId, runnerId })),
       deleteLap: action((lapId: string) => trpc.laps.delete.mutate({ lapId })),
+      moveHandoff: action((lapId: string, from: number, to: number) =>
+        trpc.laps.moveHandoff.mutate({ lapId, from, to })
+      ),
       burgieGepakt: action(() => trpc.events.burgieGepakt.mutate()),
       updatePublicRecordMode: action((publicRecordMode: PublicRecordMode) =>
         trpc.settings.updatePublicRecordMode.mutate({ publicRecordMode })

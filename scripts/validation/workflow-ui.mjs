@@ -456,14 +456,14 @@ try {
   }
   console.log('PASS searching the shown status and source finds those runners');
 
-  // Timing clocks a lap while an operator aims at Verwijderen in Beheer › Rondes: the row under the
+  // Timing clocks a lap while an operator aims at a lap in Beheer › Rondes: the row under the
   // mouse must stay the same lap, and the new lap shows on top once the mouse leaves the table.
   await page.goto(`${baseUrl}/admin?section=laps`);
   const lapRows = page.locator('.laps-table tbody tr');
   await lapRows.nth(5).waitFor();
   const aimedLap = await lapRows.nth(2).innerText();
-  const deleteBox = await lapRows.nth(2).getByRole('button', { name: 'Verwijderen', exact: true }).boundingBox();
-  const aim = { x: deleteBox.x + deleteBox.width / 2, y: deleteBox.y + deleteBox.height / 2 };
+  const lapBox = await lapRows.nth(2).locator('.laps-table__open').boundingBox();
+  const aim = { x: lapBox.x + lapBox.width / 2, y: lapBox.y + lapBox.height / 2 };
   await page.mouse.move(aim.x, aim.y);
   const nextLapRunner = (await snapshot()).runners.find(
     (runner) => runner.status === 'registered' || runner.status === 'warming_up'

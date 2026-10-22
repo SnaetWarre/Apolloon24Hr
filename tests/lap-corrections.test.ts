@@ -173,3 +173,60 @@ test('a deleted lap is gone and the runner’s other laps are numbered again', a
     assert.equal(db.getRunnerById(anna.id)?.lapCount, 2);
   });
 });
+
+test('a late press moved back shortens the lap before it and lengthens the lap after it, and nothing else', async () => {
+  await withDb((db) => {
+    const { laps } = race(db, ['Anna', 'Bert', 'Cas']);
+    const [anna, bert, cas] = laps();
+    const press = anna.finishedAt;
+
+    assert.deepEqual(db.moveHandoff(anna.id, press, press - 5_100), { ok: true });
+
+    const [annaAfter, bertAfter, casAfter] = laps();
+    assert.deepEqual([annaAfter.finishedAt, annaAfter.durationMs], [press - 5_100, 74_900]);
+    assert.deepEqual([bertAfter.startedAt, bertAfter.durationMs], [press - 5_100, 85_100]);
+    assert.deepEqual(casAfter, cas);
+    assert.equal(bertAfter.finishedAt, bert.finishedAt);
+    // Neither lap is a guess: both times stay measured, and records still count them.
+    assert.deepEqual([annaAfter.source, bertAfter.source], ['spacebar', 'spacebar']);
+  });
+});
+
+test('moving the press that started the runner on the track moves their start, also after an undo', async () => {
+  await withDb((db) => {
+    const runners = ['Anna', 'Bert', 'Cas'].map((name, index) =>
+      db.insertRunner({ name, runnerNumber: String(index + 1) })
+    );
+    runners.forEach((runner, index) =>
+      db.updateRunnerStatus({ id: runner.id, status: 'waiting', statusSince: index, queueIndex: index })
+    );
+    const start = Date.now() - 200_000;
+    db.performHandoff(start);
+    db.performHandoff(start + 80_000);
+    const [anna] = db.getAllLaps();
+    assert.equal(db.getRaceState().activeStartedAt, start + 80_000);
+
+    db.moveHandoff(anna.id, start + 80_000, start + 77_000);
+    assert.equal(db.getRaceState().activeStartedAt, start + 77_000);
+    assert.equal(db.getRunnerById(runners[1].id)?.statusSince, start + 77_000);
+
+    // Bert finishes, then that handoff is undone: Bert runs again from the moved press.
+    db.performHandoff(start + 160_000);
+    db.undoLastHandoff();
+    assert.equal(db.getRaceState().activeStartedAt, start + 77_000);
+  });
+});
+
+test('a press is not moved when someone moved it already, too far, or past a lap', async () => {
+  await withDb((db) => {
+    const { laps } = race(db, ['Anna', 'Bert', 'Cas'], 30_000);
+    const [anna, , cas] = laps();
+    const press = anna.finishedAt;
+    assert.throws(() => db.moveHandoff(anna.id, press - 1, press - 2_000), /intussen veranderd/);
+    assert.throws(() => db.moveHandoff(anna.id, press, press - 15_001), /hoogstens 15 seconden/);
+    assert.throws(() => db.moveHandoff(anna.id, press, press + 11_000), /korter dan 20 seconden/);
+    // Nobody ran after Cas: there is no handoff after the last lap.
+    assert.throws(() => db.moveHandoff(cas.id, cas.finishedAt, cas.finishedAt - 1_000), /niemand/);
+    assert.deepEqual(laps(), [anna, ...laps().slice(1)]);
+  });
+});

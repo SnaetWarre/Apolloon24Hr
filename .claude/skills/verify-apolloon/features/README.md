@@ -54,7 +54,7 @@ Each feature file starts with an H1 title and one paragraph describing the user-
 - [Public displays](./public-displays.md) covers the Binnenscherm, Competitiescherm and Buitenscherm TV pages.
 - [Linked laptops](./linked-laptops.md) covers linking three laptops and carrying on when one disappears.
 - [Desktop window](./desktop-window.md) covers what only the Electron window adds: the title bar and the preload bridge.
-- [Beheer › Rondes](./laps-admin.md) covers fixing laps after the fact: moving one to another runner, splitting one, deleting one, and the marked laps.
+- [Beheer › Rondes](./laps-admin.md) covers fixing laps after the fact: moving a press that came too late or too early, moving a lap to another runner, splitting one, deleting one, and the marked laps and presses.
 - [Activiteit](./activity.md) covers the change log in Beheer › Activiteit and the lines a runner profile save adds.
 - [Analyse › Exporteren](./analysis-export.md) covers the six export downloads in Analyse and checking them without a save dialog in the desktop window.
 - [Analyse › Grafieken](./analysis-charts.md) covers what the Analyse charts say when they have no laps to draw.

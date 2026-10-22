@@ -171,7 +171,7 @@ export {
   getAllRaceEvents,
   getRecentRaceEvents,
 } from './db/history.js';
-export { deleteLap, moveLap, splitLap } from './db/lap-corrections.js';
+export { deleteLap, moveHandoff, moveLap, splitLap } from './db/lap-corrections.js';
 export {
   createBurgieGepaktEvent,
   performHandoff,
