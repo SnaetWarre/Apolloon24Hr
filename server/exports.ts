@@ -3,7 +3,7 @@ import Papa from 'papaparse';
 import { formatDurationMs } from '../shared/time.js';
 import { appSnapshot } from './app-state.js';
 import type { LapRecord, Runner } from '../shared/schemas.js';
-import { getAllLaps, getAllRaceEvents, getAllRunners } from './db.js';
+import { getAllLaps, getAllRaceEvents, getAllRunners, getRunnerRegistrations } from './db.js';
 import { raceWorkbook } from './excel-export.js';
 
 type CsvRow = Record<string, string | number>;
@@ -88,7 +88,7 @@ function eventRows(): CsvRow[] {
 export function registerExportRoutes(app: Express): void {
   app.get('/api/export/race.xlsx', async (_req, res, next) => {
     try {
-      const workbook = await raceWorkbook(getAllLaps(), getAllRunners(), getAllRaceEvents());
+      const workbook = await raceWorkbook(getAllLaps(), getAllRunners(), getAllRaceEvents(), getRunnerRegistrations());
       res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
       res.setHeader('Content-Disposition', 'attachment; filename="apolloon-race.xlsx"');
       res.send(workbook);

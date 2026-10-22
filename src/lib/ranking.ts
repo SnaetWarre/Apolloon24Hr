@@ -1,6 +1,7 @@
 import type { Label, LapRecord, Runner } from '../types';
 import { compareLabels } from '../../shared/labelOrder';
-import { hasPlausibleDuration, isMeasuredLap } from './analysis';
+import { lapPoints } from '../../shared/points';
+import { hasPlausibleDuration } from './analysis';
 
 export type RankingMode = 'laps' | 'coefficient';
 
@@ -19,30 +20,6 @@ export type RecentLapSummary = {
   bestLapMs: number | null;
   averageLapMs: number | null;
 };
-
-const BASE_POINTS_PER_LAP = 20;
-const BASELINE_LAP_MS = 85_000;
-const COEFFICIENT_PER_MS = 0.125 / 1_000;
-const BRUSSELS_HOUR_FORMATTER = new Intl.DateTimeFormat('nl-BE', {
-  hour: '2-digit',
-  hourCycle: 'h23',
-  timeZone: 'Europe/Brussels',
-});
-
-// Each range starts at the listed hour and ends just before the next range.
-const DAYPART_FACTORS = [1.3, 1.8, 1.8, 1.3, 1, 1] as const;
-
-export function calculateLapCoefficient(durationMs: number): number {
-  if (!Number.isFinite(durationMs) || durationMs < 0) return 0;
-  return 1 + Math.max(0, BASELINE_LAP_MS - durationMs) * COEFFICIENT_PER_MS;
-}
-
-export function calculateLapPoints(lap: Pick<LapRecord, 'durationMs' | 'finishedAt' | 'source'>): number {
-  if (!Number.isFinite(lap.finishedAt)) return 0;
-  const hour = Number(BRUSSELS_HOUR_FORMATTER.format(lap.finishedAt));
-  const coefficient = isMeasuredLap(lap) ? calculateLapCoefficient(lap.durationMs) : 1;
-  return BASE_POINTS_PER_LAP * coefficient * DAYPART_FACTORS[Math.floor(hour / 4)];
-}
 
 export function buildRunnerRanking(
   runners: Runner[],
@@ -68,7 +45,7 @@ export function buildRunnerRanking(
       totalLapMs: 0,
     };
     rankingEntry.lapCount += 1;
-    rankingEntry.coefficientTotal += calculateLapPoints(lap);
+    rankingEntry.coefficientTotal += lapPoints(lap);
     if (hasPlausibleDuration(lap)) {
       rankingEntry.timedLapCount += 1;
       rankingEntry.totalLapMs += lap.durationMs;

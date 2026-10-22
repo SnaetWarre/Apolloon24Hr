@@ -7,7 +7,8 @@ import { formatClockTimeMs, formatDurationMs, formatElapsedSeconds } from '../li
 import { getNextWaitingRunner, lapRunnerLabel, runnerLabel } from '../lib/runners';
 import { observeDisplayHistory } from '../lib/displayHistory';
 import { useArrivals } from '../lib/motion';
-import { buildRecentLapSummaries, buildRunnerRanking, calculateLapPoints, collectRankingLabels } from '../lib/ranking';
+import { lapPoints } from '../../shared/points';
+import { buildRecentLapSummaries, buildRunnerRanking, collectRankingLabels } from '../lib/ranking';
 import type { Label, LapRecord, LiveAppSnapshot, PublicRecordMode, RaceEvent, Runner } from '../types';
 import { Icon } from './Icon';
 import { compareLabels, LabelBadge, labelKindTitle } from './LabelBadge';
@@ -250,7 +251,7 @@ export function InsideDisplay() {
                       <span className="recent-lap-number">ronde {lap.lapNumber}</span>
                     </td>
                     <td className="recent-lap-time recent-lap-time--current">{formatDurationMs(lap.durationMs)}</td>
-                    <td className="recent-lap-points">{formatPoints(calculateLapPoints(lap))}</td>
+                    <td className="recent-lap-points">{formatPoints(lapPoints(lap))}</td>
                     <td className="recent-lap-time">{formatDurationMs(bestLapMs)}</td>
                     <td className="recent-lap-time">{formatDurationMs(averageLapMs)}</td>
                   </tr>

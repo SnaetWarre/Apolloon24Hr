@@ -4,6 +4,22 @@ All notable changes to Apolloon Telsysteem will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Analyse › Exporteren › Excel heeft nu alles voor na de race in één
+  bestand. Naast Rondes en Gebeurtenissen staan er vier nieuwe bladen:
+  Lopers (elke loper, ook zonder rondes, met de antwoorden uit het
+  inschrijvingsformulier zoals ze getypt zijn), Puntenlijst, Punten per ronde
+  en Puntenregels. De punten zijn formules op Puntenregels: verander daar een
+  factor en alle punten rekenen opnieuw. Het bestand bevat e-mailadressen en
+  telefoonnummers en staat daarom niet op de publieke schermen
+
+### Changed
+
+- Het dagdeel van een ronde hangt nu af van het uur waarop de ronde startte,
+  niet meer van het uur waarop ze eindigde. Zo rekenen het Binnenscherm en de
+  Excel hetzelfde als het prijzensysteem
+
 ## [5.2.0] - 2026-10-19
 
 Laptops koppelen alleen met dezelfde versie: zet 5.2.0 op alle laptops.
