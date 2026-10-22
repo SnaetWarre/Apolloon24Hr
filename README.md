@@ -219,7 +219,7 @@ The same panel shows the version and data folder, opens the log folder, and copi
 Analyse › Exporteren offers an Excel workbook for the teachers and plain files for scripts:
 
 ```text
-/api/export/race.xlsx           Excel: laps and events, Dutch headers, local time, lap times as time values
+/api/export/race.xlsx           Excel: laps, events, runners with registration answers, points; Dutch headers, local time
 /api/export/laps.csv
 /api/export/laps.json
 /api/export/events.csv
@@ -227,4 +227,4 @@ Analyse › Exporteren offers an Excel workbook for the teachers and plain files
 /api/export/current-state.json
 ```
 
-The CSV files use commas and UTC timestamps, which suits MATLAB and R; open the Excel workbook in Excel. All endpoints are local and work from any laptop on the event network.
+The CSV files use commas and UTC timestamps, which suits MATLAB and R; open the Excel workbook in Excel. The workbook holds the runners' e-mail addresses and phone numbers, so the link stays in Analyse and off the public screens. Its points are formulas on the `Puntenregels` sheet: change a factor there and every total follows. The point rules themselves live in `shared/points.ts`, shared with the Binnenscherm. All endpoints are local and work from any laptop on the event network.

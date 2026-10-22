@@ -4,7 +4,8 @@
  * component draws them, so the design can change without touching the numbers.
  */
 import type { LapRecord, Runner, RunnerRegistration } from '../types';
-import { hasPlausibleDuration, isMeasuredLap } from './analysis';
+import { isMeasuredLap } from '../../shared/points';
+import { hasPlausibleDuration } from './analysis';
 import { mailHref } from './contact';
 import { formatDurationMs } from './time';
 

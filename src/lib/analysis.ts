@@ -1,6 +1,7 @@
 import type { Label, LapRecord, PublicRecordMode, RaceState, Runner } from '../types';
 import { compareLabels } from '../../shared/labelOrder';
 import { MAX_PLAUSIBLE_LAP_MS, MIN_LAP_MS } from '../../shared/lapTimes';
+import { isMeasuredLap } from '../../shared/points';
 
 export type AnalysisFilters = {
   enabledLabelIds: string[] | null;
@@ -337,12 +338,6 @@ export function isFastestLapForRecordMode(
   return realLaps
     .filter((lap) => recordWindowIndex(lap.finishedAt, startedAt, windowMs) === latestWindow)
     .every((lap) => latestLap.durationMs < lap.durationMs);
-}
-
-// A lap under MIN_LAP_MS is a double press, and the second half of a split lap is a guess,
-// so neither flashes, is a record to beat, nor earns a speed bonus.
-export function isMeasuredLap(lap: Pick<LapRecord, 'durationMs' | 'source'>): boolean {
-  return lap.durationMs >= MIN_LAP_MS && lap.source !== 'split';
 }
 
 export function publicRecordModeTitle(mode: PublicRecordMode): string {

@@ -158,7 +158,7 @@ export function AnalysisView() {
             <div className="analysis-export__menu">
               <p>Exports bevatten altijd de volledige wedstrijd. De labelfilters op dit scherm tellen niet mee.</p>
               <a className="btn btn--sm" href="/api/export/race.xlsx" download>
-                Excel: rondes en gebeurtenissen
+                Excel: lopers, punten en rondes
               </a>
               <p className="analysis-export__group">Voor MATLAB, R of andere scripts</p>
               <a className="btn btn--quiet btn--sm" href="/api/export/laps.csv" download>
