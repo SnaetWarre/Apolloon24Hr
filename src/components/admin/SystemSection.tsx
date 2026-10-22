@@ -103,7 +103,7 @@ function ClusterPanel({
     if (!confirmed) return;
     await run(
       () => continueAlone(Boolean(timingElsewhere)),
-      'Deze laptop werkt alleen verder. Koppel de andere laptops opnieuw zodra dat kan.',
+      'Deze laptop werkt alleen verder. De andere laptops sluiten vanzelf weer aan zodra het netwerk terug is.',
       'Mislukt'
     );
   }
