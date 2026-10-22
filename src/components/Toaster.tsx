@@ -14,8 +14,6 @@ const SUCCESS_MS = 7_000;
 const MAX_SHOWN = 3;
 
 const ToastContext = React.createContext<((toast: ToastInput) => void) | null>(null);
-/** Where a notice that stays (StickyToast) goes: above the toasts in the same corner. */
-const StickyHostContext = React.createContext<HTMLElement | null>(null);
 
 /**
  * Says how an action went in a card at the bottom right, so feedback never pushes the page around.
@@ -23,7 +21,6 @@ const StickyHostContext = React.createContext<HTMLElement | null>(null);
  */
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = React.useState<ToastEntry[]>([]);
-  const [stickyHost, setStickyHost] = React.useState<HTMLElement | null>(null);
   const nextIdRef = React.useRef(0);
   const [host] = React.useState(() => {
     const element = document.createElement('div');
@@ -65,10 +62,9 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <ToastContext.Provider value={toast}>
-      <StickyHostContext.Provider value={stickyHost}>{children}</StickyHostContext.Provider>
+      {children}
       {createPortal(
         <section className="toaster" aria-label="Meldingen">
-          <div ref={setStickyHost} className="toaster__sticky" />
           {toasts.map((entry) => (
             <Toast key={entry.id} toast={entry} onDismiss={dismiss} onRemove={remove} />
           ))}
@@ -139,22 +135,4 @@ export function useToast() {
   const toast = React.useContext(ToastContext);
   if (!toast) throw new Error('useToast must be used inside ToastProvider');
   return toast;
-}
-
-/** A notice in the toast corner that stays as long as it is rendered: it has no close button and no timer. */
-export function StickyToast({ text, detail }: ToastMessage) {
-  const host = React.useContext(StickyHostContext);
-  if (!host) return null;
-  return createPortal(
-    <div className="toast toast--success toast--sticky" role="status">
-      <span className="toast__mark" aria-hidden="true">
-        <Icon name="check" size={14} />
-      </span>
-      <span className="toast__body">
-        <strong>{text}</strong>
-        {detail && <span>{detail}</span>}
-      </span>
-    </div>,
-    host
-  );
 }
