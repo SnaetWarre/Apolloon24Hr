@@ -144,8 +144,14 @@ export {
   setUnreachableMembers,
   getRemovedMembers,
   setRemovedMembers,
+  getTimingLaptop,
+  setTimingLaptop,
+  getGroupSplit,
+  setGroupSplit,
   type AutoLink,
   type ClusterMember,
+  type GroupSplit,
+  type TimingLaptop,
 } from './db/members.js';
 export { findForwardedWrite, saveForwardedWrite, touchForwardedWrite } from './db/forwarded-writes.js';
 export {
@@ -165,6 +171,8 @@ export { hideRunnerInQueue, unhideRunnerInQueue, updateRunnerStatus, updateWaiti
 export { clearRace, getRaceState, raceProgress } from './db/race-state.js';
 export {
   getAllLaps,
+  countLaps,
+  getLapIds,
   getLapById,
   getRecentLaps,
   getLapsForRunner,

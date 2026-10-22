@@ -21,6 +21,8 @@ export const REPLICATED_SETTING_KEYS: readonly string[] = [
   'cluster_auto_links_json',
   'cluster_unreachable_json',
   'cluster_removed_json',
+  'cluster_timing_json',
+  'cluster_split_json',
 ];
 
 export function getSetting(key: string): string | null {

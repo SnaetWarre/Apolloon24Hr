@@ -63,7 +63,13 @@ export function describeGroup(cluster: ClusterStatus): SystemStatus {
   }
   switch (cluster.state) {
     case 'solo':
-      return { tone: 'warning', title: 'Alleen deze laptop', detail: 'Koppel de andere laptops in Beheer' };
+      return {
+        tone: 'warning',
+        title: 'Alleen deze laptop',
+        // After Alleen verder the others join again by themselves once the network is back.
+        detail:
+          cluster.split.rank > 0 ? 'De andere laptops sluiten vanzelf weer aan' : 'Koppel de andere laptops in Beheer',
+      };
     case 'electing':
       return { tone: 'warning', title: 'Laptops nemen over', detail: 'Even geduld, dit duurt enkele seconden' };
     case 'no-majority':

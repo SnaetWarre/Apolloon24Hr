@@ -29,6 +29,7 @@ import { backupFile, createVerifiedBackup, listBackups } from './backups.js';
 import { clusterNow } from './clock.js';
 import {
   NOT_CONFIRMED_MESSAGE,
+  assertTimingHere,
   assertWritable,
   continueAlone,
   forwardWrite,
@@ -37,8 +38,11 @@ import {
   newRequestId,
   noLeaderMessage,
   removeLaptop,
+  saveTimingLaptop,
+  timingClaim,
   writeDeadline,
   writeTarget,
+  type TimingClaim,
 } from './cluster.js';
 import { clusterStatusUpdates } from './cluster-feed.js';
 import { currentTerm, waitForCommit } from './consensus.js';
@@ -141,6 +145,7 @@ function write<I, T, P = undefined>(action: (input: I, prepared: P) => T, prepar
     const origin = ctx.origin || 'onbekend';
     const change = { type: path, input, origin, action: (prepared: P) => action(input, prepared), prepare };
     if (ctx.forwarded) return commitHere(change, ctx.requestId, ctx.reportLogSeq);
+    if (TIMING_PRESSES.has(path)) assertTiming();
     const deadline = writeDeadline();
     let requestId: string | undefined;
     for (;;) {
@@ -158,6 +163,17 @@ function write<I, T, P = undefined>(action: (input: I, prepared: P) => T, prepar
       throw new TRPCError({ code, message: outcome.message });
     }
   };
+}
+
+/** Presses on the Timing screen, refused on the laptop they were made on while Timing is open on another one. */
+const TIMING_PRESSES = new Set(['race.startNext', 'race.handoff', 'race.undoLastHandoff', 'race.finish']);
+
+function assertTiming(): void {
+  try {
+    assertTimingHere();
+  } catch (error) {
+    fail('CONFLICT', (error as Error).message);
+  }
 }
 
 type Change<T, P> = {
@@ -297,6 +313,13 @@ const removeMember = write(
   }
 );
 
+const saveTiming = write((input: TimingClaim) => saveTimingLaptop(input));
+const timingClaimSchema = z.object({
+  hostId: z.string().min(1).max(128),
+  name: z.string().max(256).nullable(),
+  takeOver: z.boolean(),
+});
+
 const importCsv = write((input: z.infer<typeof importCsvSchema>) => {
   try {
     return importRunnersFromCsv(input.csvText);
@@ -323,7 +346,17 @@ export const appRouter = t.router({
     join: t.procedure
       .input(z.object({ url: z.string().trim().min(1).max(2_048) }))
       .mutation(({ input }) => linkWith(input.url)),
-    continueAlone: t.procedure.mutation(({ ctx }) => continueAlone(ctx.origin)),
+    continueAlone: t.procedure
+      .input(z.object({ takeOverTiming: z.boolean() }).optional())
+      .mutation(({ input, ctx }) => continueAlone(ctx.origin, input?.takeOverTiming)),
+    /** Timing opened on this laptop: it becomes the Timing laptop unless Timing is open on another one. */
+    openTiming: t.procedure.input(z.object({ takeOver: z.boolean() })).mutation(async ({ input, ctx }) => {
+      const claim = timingClaim(input.takeOver);
+      if (claim) await saveTiming({ input: claim, path: 'cluster.saveTiming', ctx });
+      return { ok: true };
+    }),
+    /** The replicated half of `openTiming`; also what a laptop forwards to the leader. */
+    saveTiming: t.procedure.input(timingClaimSchema).mutation(saveTiming),
     removeMember: t.procedure.input(z.object({ hostId: z.string().min(1).max(128) })).mutation(removeMember),
   }),
 

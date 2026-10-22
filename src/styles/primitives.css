@@ -890,6 +890,12 @@ td .label-pill {
   animation: notice-in var(--dur-3) var(--ease-out) backwards;
 }
 
+/* The Timing laptop that went on alone: calm, as nothing is lost. */
+.group-banner--alone {
+  border-block-end-color: var(--go-line);
+  background: var(--go-wash);
+}
+
 .warning-inline {
   grid-column: 1 / -1;
   color: var(--warn-ink);

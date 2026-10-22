@@ -7,6 +7,7 @@ import {
   canContinueFrom,
   getClusterEpoch,
   getClusterMembers,
+  getGroupSplit,
   getLogEntriesAfter,
   getLogEntryId,
   getLogHead,
@@ -127,9 +128,11 @@ const raft = createRaft({
     canContinueFrom,
     appendFromLeader,
   },
-  sendAppend: (member, request) => send(member, 'append', request, appendResponseSchema),
+  // The split travels along, so laptops of another split refuse (cluster.ts answerPeer).
+  sendAppend: (member, request) =>
+    send(member, 'append', { ...request, split: getGroupSplit().id }, appendResponseSchema),
   async sendVote(member, request) {
-    const answer = await send(member, 'vote', request, voteResponseSchema);
+    const answer = await send(member, 'vote', { ...request, split: getGroupSplit().id }, voteResponseSchema);
     if (answer?.removed) lastRemovedAnswer = { member, at: performance.now() };
     return answer;
   },

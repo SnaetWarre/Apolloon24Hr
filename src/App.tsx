@@ -139,9 +139,20 @@ function ConnectionBanner({ connectionLost, switching }: { connectionLost: boole
   );
 }
 
-/** Says so on every screen when changes cannot be saved, because too few laptops are reachable. */
+/**
+ * Says so on every screen when changes cannot be saved, because too few laptops are reachable, and
+ * on the Timing laptop that went on alone, until the others are back.
+ */
 function GroupProblemBanner() {
   const { cluster } = useClusterStatus();
+  if (cluster?.timing?.self && cluster.state === 'solo' && cluster.split.rank > 0) {
+    return (
+      <div className="group-banner group-banner--alone" role="status">
+        <strong>Deze laptop werkt alleen verder.</strong> De andere laptops sluiten vanzelf weer aan zodra het netwerk
+        terug is. De rondes van deze laptop blijven bewaard.
+      </div>
+    );
+  }
   if (cluster?.state !== 'no-majority') return null;
   return (
     <div className="group-banner" role="alert">

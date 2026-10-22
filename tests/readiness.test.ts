@@ -46,6 +46,9 @@ function threeLaptops(overrides: Partial<ClusterStatus> = {}): ClusterStatus {
     nearby: [],
     autoLink: { enabled: true, waiting: null, linked: [] },
     removedFrom: null,
+    timing: null,
+    split: { id: '', rank: 0 },
+    laps: 0,
     lastError: null,
     backup: {
       enabled: true,

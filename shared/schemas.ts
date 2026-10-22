@@ -290,8 +290,22 @@ export type ClusterStatus = {
   };
   /** Set on a laptop the group took out with "Uit de groep halen": a laptop of that group, to link with again. */
   removedFrom: { url: string; name: string | null } | null;
+  /** The laptop where Timing is open; only that one clocks. Null before Timing was opened in this group. */
+  timing: TimingLaptopStatus | null;
+  /** Which split of the group this data belongs to; "Alleen verder" starts a new one with a higher rank. */
+  split: { id: string; rank: number };
+  laps: number;
   lastError: string | null;
   backup: BackupStatus;
+};
+
+/** `gen` goes up each time another laptop takes Timing over; `reachable` is false while this group cannot reach it. */
+export type TimingLaptopStatus = {
+  hostId: string;
+  name: string | null;
+  gen: number;
+  self: boolean;
+  reachable: boolean;
 };
 
 /** A laptop of the group that linked by itself, and the laptop (`with`) it linked with. */

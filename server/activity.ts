@@ -133,6 +133,8 @@ export function describeWrite(path: string, input: unknown): ((result: unknown) 
     case 'settings.updatePublicRecordMode':
       return () =>
         `Records op de publieke schermen: ${RECORD_MODE_TEXT[value.publicRecordMode as PublicRecordMode] ?? ''}`;
+    case 'cluster.saveTiming':
+      return value.takeOver ? () => `Timing overgenomen op ${String(value.name ?? 'een andere laptop')}` : null;
     case 'cluster.removeMember':
       return (result) => `${(result as { name?: string } | null)?.name ?? 'Laptop'} uit de groep gehaald`;
     case 'backups.applyRestore': {
