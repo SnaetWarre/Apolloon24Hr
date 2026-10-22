@@ -69,7 +69,7 @@ function ClusterPanel({
   const confirm = useConfirm();
   const { continueAlone, removeLaptop, joinGroup: rejoinGroup } = useAppActions();
   const { pending: alonePending, run } = useAdminAction();
-  const { join: joinGroup, pending: joinPending } = useJoinGroup(runnerCount, cluster.changed, cluster);
+  const { join: joinGroup, pending: joinPending } = useJoinGroup(cluster);
   const [otherUrl, setOtherUrl] = React.useState('');
   const group = describeGroup(cluster);
   const pending = alonePending || joinPending;
@@ -239,7 +239,7 @@ function ClusterPanel({
           <p className="panel-copy">Laptops op dit netwerk waarmee deze laptop kan samenwerken:</p>
           {cluster.nearby.length ? (
             cluster.nearby.map((found) => (
-              <NearbyRow key={found.url} found={found} canJoin busy={busy} onJoin={() => void join(found.url, found)} />
+              <NearbyRow key={found.url} found={found} busy={busy} onJoin={() => void join(found.url, found)} />
             ))
           ) : (
             <div className="host-hint">
@@ -282,21 +282,16 @@ function ClusterPanel({
         <>
           {cluster.nearby.length > 0 && <p className="panel-copy">Andere laptops op dit netwerk:</p>}
           {cluster.nearby.map((found) => (
-            <NearbyRow
-              key={found.url}
-              found={found}
-              canJoin={false}
-              busy={busy}
-              onJoin={() => void join(found.url, found)}
-            />
+            <NearbyRow key={found.url} found={found} busy={busy} onJoin={() => void join(found.url, found)} />
           ))}
           {!cluster.removedFrom && (
             <p className="panel-copy">
               {cluster.autoLink.enabled ? (
                 <>
-                  Nog een laptop toevoegen? Start Apolloon op een lege laptop aan hetzelfde netwerk: die koppelt
-                  vanzelf. Lukt dat niet, open dan op die laptop Beheer › Systeem & herstel en klik op Koppelen naast
-                  deze groep (adres <strong>{hostUrl}</strong>).
+                  Nog een laptop toevoegen? Start Apolloon op die laptop aan hetzelfde netwerk: een lege laptop koppelt
+                  vanzelf, en zolang de race nog niet gestart is ook een laptop met lopers; zijn lopers komen erbij.
+                  Lukt dat niet, open dan op die laptop Beheer › Systeem & herstel en klik op Koppelen naast deze groep
+                  (adres <strong>{hostUrl}</strong>).
                 </>
               ) : (
                 <>
@@ -313,22 +308,11 @@ function ClusterPanel({
 }
 
 /**
- * A laptop or group heard on the network, with Koppelen when pressing it here goes the right way:
- * the side without the running race, else without a started race, else the one with fewer
- * runners, takes the other's data. A laptop in a group only takes in empty laptops (`canJoin`
- * false); it never leaves its group from this list.
+ * A laptop or group heard on the network, with Koppelen when pressing it here goes the right way
+ * (`found.link`, see useJoinGroup). One side always has the button: a laptop in a group that
+ * joins another group takes its whole group along.
  */
-function NearbyRow({
-  found,
-  canJoin,
-  busy,
-  onJoin,
-}: {
-  found: NearbyGroup;
-  canJoin: boolean;
-  busy: boolean;
-  onJoin: () => void;
-}) {
+function NearbyRow({ found, busy, onJoin }: { found: NearbyGroup; busy: boolean; onJoin: () => void }) {
   return (
     <div className="host-hint cluster-peer-row">
       <strong>{laptopLabel(found)}</strong>
@@ -338,7 +322,7 @@ function NearbyRow({
       </span>
       {!found.compatible ? (
         <span>andere versie ({found.appVersion}): installeer overal dezelfde versie</span>
-      ) : found.link === 'invite' || (found.link === 'join' && canJoin) ? (
+      ) : found.link !== 'there' ? (
         <button className="btn btn--primary" onClick={onJoin} disabled={busy}>
           {busy ? 'Bezig...' : 'Koppelen'}
         </button>

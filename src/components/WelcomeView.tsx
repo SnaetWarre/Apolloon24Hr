@@ -132,7 +132,7 @@ export function WelcomeView({
 }
 
 function JoinChoice({ cluster, onOpenAdmin }: { cluster: ClusterStatus; onOpenAdmin: (section: 'system') => void }) {
-  const { join, pending } = useJoinGroup(0, cluster.changed, { raceStarted: false, raceRunning: false });
+  const { join, pending } = useJoinGroup(cluster);
   const busy = pending || Boolean(cluster.busy);
   // Only laptops that hold runners are "already set up"; an empty one is pulled in from the laptop with the runners.
   const setUp = cluster.nearby.filter((found) => found.runners > 0);

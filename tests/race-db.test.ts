@@ -62,12 +62,11 @@ test('undo after finishing reopens the race and keeps the laps', async () => {
     db.performHandoff(1_000);
     const handoff = db.performHandoff(90_000);
     assert.equal(handoff.ok && handoff.startedRunnerId, arne.id);
-    assert.deepEqual(db.raceProgress(), { raceStarted: true, raceRunning: true });
+    // One lap is a test run: it does not count as the race for Koppelen.
+    assert.deepEqual(db.raceProgress(), { raceStarted: false, raceRunning: false });
 
     db.finishRace(120_000);
-    assert.deepEqual(db.raceProgress(), { raceStarted: true, raceRunning: false });
     assert.deepEqual(db.undoLastHandoff(), { ok: true, deletedLapIds: [] });
-    assert.deepEqual(db.raceProgress(), { raceStarted: true, raceRunning: true });
 
     assert.deepEqual(db.getRaceState(), {
       id: 1,
@@ -89,6 +88,37 @@ test('undo after finishing reopens the race and keeps the laps', async () => {
     assert.equal(db.getRunnerById(arne.id)?.status, 'waiting');
   } finally {
     // Windows cannot delete a database file that is still open.
+    db.closeDb();
+    fs.rmSync(dataPath, { recursive: true, force: true });
+  }
+});
+
+test('the race counts as started from ten laps on, and as running until it is finished', async () => {
+  fs.rmSync(dataPath, { recursive: true, force: true });
+  const db = await import('../server/db.ts');
+
+  try {
+    await db.initDb();
+    const [zoe, arne] = ['Zoë', 'Arne'].map((name, index) =>
+      db.insertRunner({ name, runnerNumber: String(index + 1) })
+    );
+    let next = zoe;
+    const handoff = (at: number) => {
+      db.updateRunnerStatus({ id: next.id, status: 'waiting', statusSince: at });
+      assert.ok(db.performHandoff(at).ok);
+      next = next === zoe ? arne : zoe;
+    };
+    handoff(1_000);
+    for (let lap = 1; lap < db.RACE_COUNTS_FROM_LAPS; lap += 1) handoff(1_000 + lap * 80_000);
+    assert.deepEqual(db.raceProgress(), { raceStarted: false, raceRunning: false });
+
+    handoff(1_000 + db.RACE_COUNTS_FROM_LAPS * 80_000);
+    assert.deepEqual(db.raceProgress(), { raceStarted: true, raceRunning: true });
+    db.finishRace(1_000_000);
+    assert.deepEqual(db.raceProgress(), { raceStarted: true, raceRunning: false });
+    assert.deepEqual(db.undoLastHandoff(), { ok: true, deletedLapIds: [] });
+    assert.deepEqual(db.raceProgress(), { raceStarted: true, raceRunning: true });
+  } finally {
     db.closeDb();
     fs.rmSync(dataPath, { recursive: true, force: true });
   }

@@ -85,3 +85,37 @@ test('with the race running on both sides, runners decide as before', () => {
   assert.equal(linkDirection(fewer, more), 'join');
   assert.equal(linkDirection(more, fewer), 'there');
 });
+
+test('before the race, a lone laptop joins the group and brings its runners, whoever has more', () => {
+  // The lone laptop has a test run on it: fewer than ten laps, so raceStarted stays false.
+  const lone = { ...prepared, clusterId: 'a', runners: 70 };
+  const group = { ...prepared, clusterId: 'z', runners: 60, laptops: 2 };
+  assert.equal(linkDirection(lone, group), 'join');
+  // Its runners merge in, so the group may also ask it over, runners and all.
+  assert.equal(linkDirection(group, lone), 'invite');
+});
+
+test('every pair of groups has one side that can press Koppelen', () => {
+  const races = [
+    { raceStarted: false, raceRunning: false },
+    { raceStarted: true, raceRunning: false },
+    { raceStarted: true, raceRunning: true },
+  ];
+  const groups = races.flatMap((race) =>
+    [0, 5, 6].flatMap((runners) =>
+      [false, true].flatMap((changed) =>
+        [1, 2].flatMap((laptops) => ['a', 'b'].map((clusterId) => ({ clusterId, ...race, runners, changed, laptops })))
+      )
+    )
+  );
+  for (const own of groups) {
+    for (const other of groups) {
+      if (own.clusterId === other.clusterId) continue;
+      const both = [linkDirection(own, other), linkDirection(other, own)];
+      // `join` always has a button, also on a laptop in a group; so does `invite`.
+      assert.equal(both.filter((link) => link === 'join').length, 1, JSON.stringify({ own, other, both }));
+      if (!own.raceStarted && !other.raceStarted)
+        assert.ok(both.includes('invite'), 'before the race both sides can press');
+    }
+  }
+});

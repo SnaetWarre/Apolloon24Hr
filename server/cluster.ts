@@ -47,6 +47,7 @@ import {
   DATABASE_SCHEMA_VERSION,
   countLaps,
   countRunners,
+  exportMergeData,
   getAutoLinks,
   getClusterMembers,
   getGroupSplit,
@@ -98,7 +99,11 @@ import {
  */
 
 const enabled = isClusterEnabled();
-/** A group without runners links with the others on the network by itself; `CLUSTER_AUTO_LINK=false` leaves it to Koppelen. */
+/**
+ * A group links with the others on the network by itself while that loses nothing: it holds no
+ * runners, or the race started on neither side so its runners merge in. `CLUSTER_AUTO_LINK=false`
+ * leaves it to Koppelen.
+ */
 const autoLinkEnabled = enabled && process.env.CLUSTER_AUTO_LINK !== 'false';
 /** How long a write may take while the laptops choose a new leader. */
 const WRITE_DEADLINE_MS = readPositiveInt(process.env.CLUSTER_WRITE_DEADLINE_MS, 12_000);
@@ -298,51 +303,68 @@ function otherGroup(status: ClusterStatus): GroupData {
     raceStarted: status.raceStarted === true,
     raceRunning: status.raceRunning === true,
     runners: status.runners,
-    changed: status.changed,
+    changed: status.changed === true,
     laptops: status.members.length,
   };
 }
 
 /**
- * Which way Koppelen links two groups. A group where the race runs (started,
- * not finished) keeps its data against one where it does not, so a spare
- * laptop with the registration list, or with a practice race that was
- * finished, never replaces a running race. Then a group where the race
- * started (or a lap was counted) keeps its data against one where it did
- * not. Otherwise
- * the one with fewer runners takes the other's data; with as many runners, a
- * group nobody changed yet takes the data of one that someone prepared
- * (labels, logos, settings); then the smaller group does, and then the group
- * id decides. Both sides work this out alike, so a press on both at once
- * links them one way. The other side is only asked to come over (`invite`)
- * while it holds no runners.
+ * Which way Koppelen links two groups. Before the race (it started on
+ * neither side, see raceProgress: a test does not count), the joining side's
+ * runners and labels merge into the other group, so only the rest is taken
+ * over: settings, logos, a test race. Then a group nobody changed yet takes
+ * the data of one that someone prepared, then the smaller group joins the
+ * larger, then the one with fewer runners joins, and then the group id
+ * decides. Either side can then start it: `invite` asks the other side over.
+ *
+ * Once the race started somewhere, nothing merges. A group where the race
+ * runs (started, not finished) keeps its data against one where it does not,
+ * so a spare laptop with the registration list, or with a practice race that
+ * was finished, never replaces a running race. Then a group where the race
+ * started keeps its data against one where it did not. Otherwise the one with
+ * fewer runners takes the other's data; with as many runners, the rules from
+ * before the race decide. The other side is only asked to come over while it
+ * holds no runners; else it is pressed there (`there`), where it is `join`.
+ *
+ * Both sides work this out alike, so a press on both at once links them one way.
  */
 export function linkDirection(own: GroupData, other: GroupData): NearbyGroup['link'] {
-  const otherKeeps =
-    other.raceRunning !== own.raceRunning
+  const merging = !own.raceStarted && !other.raceStarted;
+  const beforeRace = () =>
+    other.changed !== own.changed
+      ? other.changed
+      : other.laptops !== own.laptops
+        ? other.laptops > own.laptops
+        : other.runners !== own.runners
+          ? other.runners > own.runners
+          : other.clusterId < own.clusterId;
+  const otherKeeps = merging
+    ? beforeRace()
+    : other.raceRunning !== own.raceRunning
       ? other.raceRunning
       : other.raceStarted !== own.raceStarted
         ? other.raceStarted
         : other.runners !== own.runners
           ? other.runners > own.runners
-          : other.changed !== own.changed
-            ? other.changed
-            : other.laptops !== own.laptops
-              ? other.laptops > own.laptops
-              : other.clusterId < own.clusterId;
+          : beforeRace();
   if (otherKeeps) return 'join';
-  return other.runners === 0 ? 'invite' : 'there';
+  return merging || other.runners === 0 ? 'invite' : 'there';
 }
 
 /**
- * Which group this laptop links with by itself: none while its group holds
- * runners. A group that holds runners comes first; between empty groups,
- * linkDirection picks the same one on both sides, so only one of them moves.
- * Two groups that hold runners are left to a person.
+ * Which group this laptop links with by itself. A laptop with runners only
+ * links while the race started on neither side, so its runners merge in. A
+ * group that holds runners comes first; linkDirection picks the same way on
+ * both sides, so only one of them moves. More than one group with runners to
+ * join is left to a person.
  */
 function autoLinkPlan(nearby: NearbyGroup[]): { target: NearbyGroup | null; waiting: string | null } {
-  if (!autoLinkEnabled || countRunners() > 0) return { target: null, waiting: null };
-  const candidates = nearby.filter((group) => group.compatible && group.link === 'join');
+  if (!autoLinkEnabled) return { target: null, waiting: null };
+  const own = ownGroup();
+  const candidates = nearby.filter(
+    (group) =>
+      group.compatible && group.link === 'join' && (own.runners === 0 || (!own.raceStarted && !group.raceStarted))
+  );
   const withRunners = candidates.filter((group) => group.runners > 0);
   if (withRunners.length > 1) {
     const names = withRunners.map((group) => group.name ?? shortUrl(group.url));
@@ -586,14 +608,16 @@ export function registerClusterRoutes(app: Express): void {
         clusterId: z.string().min(1).max(128),
         autoLinkedWith: z.string().max(256).optional(),
         split: z.string().max(128).optional(),
+        /** Set when a laptop of this group joined another group: the group it left, which follows it. */
+        follow: z.string().max(128).optional(),
       })
       .safeParse(req.body);
     if (!request.success) {
       sendPeerError(res, 400, 'invalid_request', 'Ongeldige koppelaanvraag.');
       return;
     }
-    const { url, clusterId, autoLinkedWith, split } = request.data;
-    acceptInvite(url, clusterId, autoLinkedWith, split).then(
+    const { url, clusterId, autoLinkedWith, split, follow } = request.data;
+    acceptInvite(url, clusterId, { autoLinkedWith, split, follow }).then(
       () => res.json({ ok: true }),
       (error: unknown) => sendPeerError(res, 409, 'refused', error instanceof Error ? error.message : String(error))
     );
@@ -786,17 +810,19 @@ export function removeLaptop(hostId: string): { name: string } {
 }
 
 /**
- * Koppelen, pressed on this laptop next to the laptop at `rawUrl`: the side
- * without the running race, else without a started race, else the one with
- * fewer runners, takes the other's data (linkDirection), so pressing it never
- * empties the laptop with the race or the registrations.
+ * Koppelen, pressed on this laptop next to the laptop at `rawUrl`. Before the
+ * race, the side that joins brings its runners and labels along; once it
+ * started somewhere, the side without the running race, else without a
+ * started race, else the one with fewer runners, takes the other's data
+ * (linkDirection), so pressing it never empties the laptop with the race.
+ * This laptop's whole group comes along.
  */
-export async function linkWith(rawUrl: string): Promise<{ backupFile: string | null }> {
+export async function linkWith(rawUrl: string): Promise<JoinResult> {
   await waitWhileJoining();
   const { url, status } = await otherLaptop(rawUrl);
   if (status.clusterId === hostIdentity().clusterId) {
     // Already linked, for example because Koppelen was pressed on the other laptop too.
-    if (status.members.some((member) => member.hostId === hostIdentity().hostId)) return { backupFile: null };
+    if (status.members.some((member) => member.hostId === hostIdentity().hostId)) return NOT_JOINED;
     // Taken out of that group: it takes this laptop back in, with the group's data.
     return joinGroup(url);
   }
@@ -809,15 +835,21 @@ export async function linkWith(rawUrl: string): Promise<{ backupFile: string | n
     timeoutMs: INVITE_TIMEOUT_MS,
   });
   if (!response.ok) throw new Error((await readPeerError(response)).error || 'Koppelen mislukt.');
-  return { backupFile: null };
+  return NOT_JOINED;
 }
 
 /**
- * Another laptop pressed Koppelen next to this one and holds more runners, or
- * this laptop's group links by itself: this laptop joins that group, and its
- * own group follows. Only a laptop without runners can be asked.
+ * Another laptop pressed Koppelen next to this one and keeps its data, or a
+ * laptop of this group joined another group (`follow`) or another split of
+ * this group (`split`): this laptop joins that group, and when asked by the
+ * other laptop, its own group follows. Asked, it only goes while it holds no
+ * runners or its runners merge in.
  */
-async function acceptInvite(url: string, clusterId: string, autoLinkedWith?: string, split?: string): Promise<void> {
+async function acceptInvite(
+  url: string,
+  clusterId: string,
+  { autoLinkedWith, split, follow }: { autoLinkedWith?: string; split?: string; follow?: string }
+): Promise<void> {
   await waitWhileJoining();
   // A laptop of this split joined another one: the others come along at once instead of waiting to notice.
   if (split !== undefined) {
@@ -825,7 +857,8 @@ async function acceptInvite(url: string, clusterId: string, autoLinkedWith?: str
     return;
   }
   if (hostIdentity().clusterId === clusterId) return;
-  await joinOnce(url, clusterId, { emptyGroup: true, autoLinkedWith });
+  const following = follow !== undefined && follow === hostIdentity().clusterId;
+  await joinOnce(url, clusterId, following ? { follow: true, autoLinkedWith } : { asked: true, autoLinkedWith });
 }
 
 /**
@@ -833,12 +866,12 @@ async function acceptInvite(url: string, clusterId: string, autoLinkedWith?: str
  * once starts two joins here (one through acceptInvite); the second one waits
  * for the first instead of failing.
  */
-async function joinOnce(url: string, clusterId: string, options?: JoinOptions): Promise<{ backupFile: string | null }> {
+async function joinOnce(url: string, clusterId: string, options?: JoinOptions): Promise<JoinResult> {
   try {
     return await joinGroup(url, options);
   } catch (error) {
     await waitWhileJoining();
-    if (hostIdentity().clusterId === clusterId) return { backupFile: null };
+    if (hostIdentity().clusterId === clusterId) return NOT_JOINED;
     throw error;
   }
 }
@@ -865,36 +898,56 @@ async function otherLaptop(rawUrl: string): Promise<{ url: string; status: Clust
 }
 
 type JoinOptions = {
-  /** Only while this laptop holds no runners, checked as the join starts; the rest of its group follows. */
-  emptyGroup?: boolean;
+  /**
+   * Not pressed here (an invite, or linking by itself): only while this laptop holds no runners
+   * or its runners merge in, checked as the join starts.
+   */
+  asked?: boolean;
+  /** A laptop of this group joined that group already, runners and all: this one follows it. */
+  follow?: boolean;
   /** Set when joining another split of this group (followSplit); the rest of this split follows. */
   split?: string;
   /** Set when the laptop links by itself: the laptop it linked with, which the group records. */
   autoLinkedWith?: string;
 };
 
+/** `merged`: this laptop's runners and labels were added to the group it joined. */
+type JoinResult = { backupFile: string | null; merged: boolean };
+
+const NOT_JOINED: JoinResult = { backupFile: null, merged: false };
+
 /**
  * Joins the group of the laptop at `rawUrl`, replacing this laptop's data
  * with the group's. A group this laptop never belonged to is only joined the
- * way linkDirection allows; rejoining its own group (maintain) is not limited.
+ * way linkDirection allows, and before the race this laptop's runners and
+ * labels go into that group first; the rest of this laptop's group follows.
+ * Rejoining its own group (maintain) is not limited.
  */
-export async function joinGroup(rawUrl: string, options: JoinOptions = {}): Promise<{ backupFile: string | null }> {
+export async function joinGroup(rawUrl: string, options: JoinOptions = {}): Promise<JoinResult> {
   const { url, status } = await otherLaptop(rawUrl);
-  if (status.clusterId !== hostIdentity().clusterId && linkDirection(ownGroup(), otherGroup(status)) !== 'join') {
+  const own = ownGroup();
+  const there = otherGroup(status);
+  const otherCluster = status.clusterId !== own.clusterId;
+  if (otherCluster && !options.follow && linkDirection(own, there) !== 'join') {
     throw new Error(pressThereMessage(url, status));
   }
   if (busy()) throw new Error('Deze laptop wordt al gekoppeld of bijgewerkt.');
-  if (options.emptyGroup && countRunners() > 0) {
+  const merging =
+    otherCluster && !options.follow && !own.raceStarted && !there.raceStarted && (own.runners > 0 || own.changed);
+  if (options.asked && !merging && countRunners() > 0) {
     throw new Error('Op die laptop staan intussen lopers. Druk daar op Koppelen.');
   }
   // Nothing joins this laptop's group from here on (busy), so these are all the laptops that follow.
   const self = hostIdentity().hostId;
   const followers =
-    options.emptyGroup || options.split !== undefined ? members().filter((member) => member.hostId !== self) : [];
+    (otherCluster && !options.follow) || options.split !== undefined
+      ? members().filter((member) => member.hostId !== self)
+      : [];
   joining = true;
   startJoining();
   let joined: Parameters<typeof finishJoining>[0] = null;
   try {
+    if (merging) await mergeInto(url);
     // A takeover in that group (a laptop just broke) is waited out like a write, then the join goes to the new leader.
     const deadline = writeDeadline();
     let group: { url: string; status: ClusterStatus } | null = { url, status };
@@ -906,7 +959,7 @@ export async function joinGroup(rawUrl: string, options: JoinOptions = {}): Prom
         if (term !== null) {
           joined = { term, leader: { hostId: leader.hostId, url: leaderUrl } };
           lastError = null;
-          return { backupFile: backupStatus().latest?.fileName ?? null };
+          return { backupFile: backupStatus().latest?.fileName ?? null, merged: merging };
         }
       }
       if (performance.now() >= deadline) {
@@ -922,11 +975,35 @@ export async function joinGroup(rawUrl: string, options: JoinOptions = {}): Prom
       for (const member of followers) {
         void peerFetch(`${member.url}/api/cluster/invite`, {
           method: 'POST',
-          body: { url, clusterId: status.clusterId, autoLinkedWith: options.autoLinkedWith, split: options.split },
+          body: {
+            url,
+            clusterId: status.clusterId,
+            autoLinkedWith: options.autoLinkedWith,
+            split: options.split,
+            follow: otherCluster ? own.clusterId : undefined,
+          },
           timeoutMs: INVITE_TIMEOUT_MS,
         }).catch(() => undefined);
       }
     }
+  }
+}
+
+/**
+ * Sends this laptop's runners and labels to the group of the laptop at `url`,
+ * which adds them as one write of its leader (`runners.merge`, router.ts) and
+ * answers once a majority of that group holds them.
+ */
+async function mergeInto(url: string): Promise<void> {
+  const response = await peerFetch(`${url}/trpc/runners.merge`, {
+    method: 'POST',
+    body: exportMergeData(LAPTOP_NAME ?? shortUrl(selfUrl())),
+    timeoutMs: WRITE_DEADLINE_MS + COMMIT_TIMEOUT_MS + 1_000,
+  }).catch(() => null);
+  const payload = (await response?.json().catch(() => null)) as { error?: { message?: string } } | null;
+  if (!response?.ok || payload?.error) {
+    const reason = payload?.error?.message ?? `${shortUrl(url)} antwoordt niet`;
+    throw new Error(`De lopers van deze laptop konden niet mee naar die groep: ${reason}`);
   }
 }
 
@@ -1144,8 +1221,8 @@ function rejoinedMessage(name: string, lostLaps: number, backupFile: string | nu
 }
 
 /**
- * The leader of a group without runners links it with the group autoLinkPlan
- * picks, the way Koppelen would, and the rest of its group follows. A laptop
+ * The leader of a group links it with the group autoLinkPlan picks, the way
+ * Koppelen would, and the rest of its group follows. A laptop
  * that is busy or has no leader is tried again next round.
  */
 async function autoLink(group: Set<string>): Promise<void> {
@@ -1167,7 +1244,7 @@ async function autoLink(group: Set<string>): Promise<void> {
   if (!status.leader || status.busy || !isLeader() || busy()) return;
   try {
     await joinOnce(target.url, status.clusterId, {
-      emptyGroup: true,
+      asked: true,
       autoLinkedWith: status.hostName ?? shortUrl(target.url),
     });
     autoLinkFailure = null;

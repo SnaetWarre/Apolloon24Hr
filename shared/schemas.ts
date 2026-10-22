@@ -235,17 +235,18 @@ export type NearbyGroup = {
   runners: number;
   /** Someone changed the event data there (labels, logos, settings); a fresh laptop says false. */
   changed: boolean;
-  /** The race started or a lap was counted there. */
+  /** The race started there: ten laps were counted (fewer are a test, see raceProgress). */
   raceStarted: boolean;
   /** The race started there and was not finished. */
   raceRunning: boolean;
   appVersion: string;
   compatible: boolean;
   /**
-   * What Koppelen does with it, so the running race, then a started one, then the most runners stay:
-   * `join` makes this laptop take that group's data, `invite` makes that empty
-   * group take this laptop's data, and `there` means Koppelen must be pressed on
-   * that laptop, because this one keeps its own data and that one holds runners.
+   * What Koppelen does with it (linkDirection in server/cluster.ts): `join` makes this laptop's
+   * group take that group's data, `invite` makes that group take this laptop's data, and `there`
+   * means Koppelen must be pressed on that laptop, because this one keeps its own data and that
+   * one holds runners while the race started somewhere. Before the race, the side that takes the
+   * other's data brings its runners and labels along.
    */
   link: 'join' | 'invite' | 'there';
 };
@@ -273,17 +274,17 @@ export type ClusterStatus = {
   runners: number;
   /** Someone changed the event data in this group; a laptop untouched since its first start says false. */
   changed: boolean;
-  /** The race started or a lap was counted in this group. */
+  /** The race started in this group: ten laps were counted (fewer are a test). */
   raceStarted: boolean;
   /** The race started in this group and was not finished. */
   raceRunning: boolean;
   /** Other laptops in the group, so browsers can switch when this one goes away. */
   memberUrls: string[];
   nearby: NearbyGroup[];
-  /** A group without runners links with the others on the network by itself. */
+  /** A group without runners, or before the race any group, links with the others on the network by itself. */
   autoLink: {
     enabled: boolean;
-    /** Why this empty laptop does not link by itself now, in words for the screen. */
+    /** Why this laptop does not link by itself now, in words for the screen. */
     waiting: string | null;
     /** Laptops of this group that linked by themselves, newest first. */
     linked: AutoLinkNote[];
