@@ -62,10 +62,8 @@ async function freshDb(): Promise<void> {
   await db.initDb();
 }
 
-test.after(() => {
-  db.closeDb();
-  fs.rmSync(dataPath, { recursive: true, force: true });
-});
+// Windows cannot delete a database file that is still open, so each test closes it before the folder goes.
+test.afterEach(() => db.closeDb());
 
 test('a runner is the same person only when name, e-mail and phone all match', async () => {
   await freshDb();
