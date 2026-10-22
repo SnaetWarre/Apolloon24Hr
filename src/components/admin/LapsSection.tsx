@@ -420,9 +420,8 @@ function PressEditor({
       {hint && shiftMs !== hint.shiftMs && (
         <div className="laps-press__hint">
           <p>
-            {beforeName} loopt meestal {formatDurationMs(hint.usualBeforeMs)}, {nextRunner.name} meestal{' '}
-            {formatDurationMs(hint.usualAfterMs)}. Waarschijnlijk werd de spatie {shiftText(hint.shiftMs, true)}{' '}
-            ingedrukt.
+            {beforeName} loopt meestal {formatTenths(hint.usualBeforeMs)}, {nextRunner.name} meestal{' '}
+            {formatTenths(hint.usualAfterMs)}. Waarschijnlijk werd de spatie {shiftText(hint.shiftMs, true)} ingedrukt.
           </p>
           <button className="btn" onClick={() => setShiftMs(hint.shiftMs)}>
             Wissel {shiftText(hint.shiftMs, false)}
@@ -607,6 +606,11 @@ function signedSeconds(ms: number): string {
 
 function formatSeconds(ms: number, digits = 3): string {
   return `${(Math.abs(ms) / 1000).toLocaleString('nl-BE', { maximumFractionDigits: digits })} s`;
+}
+
+/** A usual lap time, to the tenth: "1:19.4". */
+function formatTenths(ms: number): string {
+  return formatDurationMs(Math.round(ms / 100) * 100).slice(0, -2);
 }
 
 function offUsualText(offMs: number): string {

@@ -309,12 +309,6 @@
   outline-offset: -2px;
 }
 
-@media (hover: hover) and (pointer: fine) {
-  .laps-table tbody tr:has(.laps-table__open):not(.is-selected):hover td {
-    background: var(--surface-2);
-  }
-}
-
 .laps-table tbody tr:has(.laps-table__open):active td {
   background: var(--surface-3);
 }
@@ -323,8 +317,8 @@
   background: var(--brand-wash);
 }
 
-/* A press that looks late or early sits on the line between its two laps. */
-.laps-table__seam td {
+/* A press that looks late or early sits on the line between its two laps. It is no row to click, so it keeps its colour under the mouse. */
+.laps-table tbody tr.laps-table__seam td {
   padding-block: 2px;
   border-block-end-color: transparent;
   background:
