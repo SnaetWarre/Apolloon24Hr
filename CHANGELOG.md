@@ -4,8 +4,24 @@ All notable changes to Apolloon Telsysteem will be documented in this file.
 
 ## [Unreleased]
 
+## [5.3.0] - 2026-10-22
+
+Laptops koppelen alleen met dezelfde versie: zet 5.3.0 op alle laptops.
+
 ### Added
 
+- Timing staat op één laptop tegelijk open. Op een andere laptop staat
+  "Timing staat open op LAPTOP-A" met de knop Overnemen, voor als die laptop
+  niet meer werkt. Zo telt geen ronde dubbel
+- Valt het netwerk weg, dan werkt de Timing-laptop na 15 seconden vanzelf
+  alleen verder, zodat je kan blijven klokken. Een groene balk bovenaan zegt
+  dat zolang. Komt het netwerk terug, dan sluiten de andere laptops vanzelf
+  weer aan en nemen ze de rondes van de Timing-laptop over
+- Beheer › Rondes: klik op een ronde om een wissel te verschuiven met −1 s,
+  −0,1 s, +0,1 s of +1 s, voor een wissel die een paar seconden te laat of te
+  vroeg gedrukt werd ("Mitras −4, Wout +4"). Ziet het ernaar uit dat een
+  wissel te laat gedrukt werd, dan staat dat tussen de rijen en kan het in één
+  klik. Andere loper, Splitsen en Verwijderen staan nu in hetzelfde paneel
 - Analyse › Exporteren › Excel heeft nu alles voor na de race in één
   bestand. Naast Rondes en Gebeurtenissen staan er vier nieuwe bladen:
   Lopers (elke loper, ook zonder rondes, met de antwoorden uit het
@@ -16,6 +32,19 @@ All notable changes to Apolloon Telsysteem will be documented in this file.
 
 ### Changed
 
+- Alleen verder werken kan alleen op de Timing-laptop. Is die kapot, dan kan
+  een andere laptop Timing overnemen en in dezelfde stap alleen verder werken
+- Komen twee delen van de groep weer samen, dan houdt het deel met de
+  Timing-laptop zijn gegevens, niet meer het deel met de meeste laptops.
+  Rondes die met Alleen verder geteld werden, gaan zo niet meer verloren. Een
+  laptop die toch eigen rondes moet opgeven, zegt in Beheer › Systeem hoeveel
+  en in welke backup ze staan
+- Een laptop met lopers koppelt nu ook voor de race: zijn lopers en labels
+  komen bij die van de groep, in plaats van in een backup te verdwijnen.
+  Dezelfde persoon (zelfde naam, e-mail en telefoon) staat er één keer in. Ook
+  vanzelf koppelen werkt zo, en een laptop in een groep heeft nu ook Koppelen
+- De race telt pas als gestart vanaf 10 rondes. Een paar testrondes beslissen
+  dus niet meer welke laptop zijn gegevens houdt bij het koppelen
 - Het dagdeel van een ronde hangt nu af van het uur waarop de ronde startte,
   niet meer van het uur waarop ze eindigde. Zo rekenen het Binnenscherm en de
   Excel hetzelfde als het prijzensysteem
