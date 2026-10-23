@@ -28,7 +28,7 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../
 const serverEntry = path.join(repoRoot, 'dist-server/server/index.js');
 const MAIL_TEXT_FILE = 'mail.txt';
 // The numbers are from the 2026 race; change them before the next one.
-const DEFAULT_MAIL_TEXT = `Onderwerp: 1115
+const DEFAULT_MAIL_TEXT = `Onderwerp: 24u Wrapped
 
 Hey,
 
