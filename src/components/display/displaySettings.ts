@@ -1,5 +1,6 @@
 import React from 'react';
 import { useNavigate, useRouterState } from '@tanstack/react-router';
+import { MAX_ZOOM, MIN_ZOOM, nextZoom, useZoomKeys } from '../../lib/zoom';
 import type { Label } from '../../types';
 
 export type DisplayPresentation = 'light' | 'dark';
@@ -26,6 +27,22 @@ export function useDisplayPresentation(
     document.documentElement.dataset.displayTone = presentation;
   }, [presentation]);
   return [presentation, (next) => setValue(next === 'light' ? 'licht' : 'donker')];
+}
+
+/**
+ * Ctrl +, Ctrl − and Ctrl 0 zoom a display, kept as `?zoom=125` (percent) like its other
+ * choices. 100% is the normal size and leaves the address alone. The zoom goes on the
+ * display's root as --display-zoom; displays.css keeps the page the size of the screen.
+ */
+export function useDisplayZoom(display: DisplayName): React.CSSProperties {
+  const [value, setValue] = useDisplaySetting(display, 'zoom');
+  const percent = Number(value);
+  const zoom = percent >= MIN_ZOOM * 100 && percent <= MAX_ZOOM * 100 ? percent / 100 : 1;
+  useZoomKeys((step) => {
+    const next = nextZoom(zoom, step);
+    setValue(next === 1 ? null : String(Math.round(next * 100)));
+  });
+  return { '--display-zoom': zoom } as React.CSSProperties;
 }
 
 export const MAX_COMPETITIONS = 6;
@@ -65,8 +82,11 @@ export function useDisplayCompetitions(labels: Label[]): [Label[][], (next: Labe
 function useDisplaySetting(display: DisplayName, param: string): [string | null, (next: string | null) => void] {
   const storageKey = param === 'thema' ? `apolloon.display.${display}` : `apolloon.display.${display}.${param}`;
   const navigate = useNavigate();
-  const searchString = useRouterState({ select: (state) => state.location.searchStr });
-  const requested = new URLSearchParams(searchString).get(param);
+  // The router reads `?zoom=125` as a number, and quotes a string that looks like one.
+  const requestedValue = useRouterState({
+    select: (state) => (state.location.search as Record<string, unknown>)[param],
+  });
+  const requested = requestedValue == null ? null : String(requestedValue);
   const [stored, setStored] = React.useState<string | null>(() => {
     try {
       return window.localStorage.getItem(storageKey);

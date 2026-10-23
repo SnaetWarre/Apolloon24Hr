@@ -8,7 +8,13 @@ import type { Label, LapRecord } from '../../types';
 import { Icon } from '../Icon';
 import { CompetitionPicker } from './CompetitionPicker';
 import { DisplayBrand, DisplayTotals, PresentationSwitch, selectInsideDisplayData } from './displayParts';
-import { competitionKey, MAX_COMPETITIONS, useDisplayCompetitions, useDisplayPresentation } from './displaySettings';
+import {
+  competitionKey,
+  MAX_COMPETITIONS,
+  useDisplayCompetitions,
+  useDisplayPresentation,
+  useDisplayZoom,
+} from './displaySettings';
 
 // The runners on the Competities screen.
 const COMPETITION_RANKING_LENGTH = 20;
@@ -16,6 +22,7 @@ const COMPETITION_RANKING_LENGTH = 20;
 export function CompetitionDisplay() {
   const { runners, labels, race } = useAppData(selectInsideDisplayData);
   const [presentation, setPresentation] = useDisplayPresentation('competitions', 'dark');
+  const zoomStyle = useDisplayZoom('competitions');
   const [competitions, setCompetitions] = useDisplayCompetitions(labels);
   const [picking, setPicking] = React.useState(false);
   const { laps } = useRaceHistory({ scope: 'full' });
@@ -24,7 +31,7 @@ export function CompetitionDisplay() {
   const canAdd = competitions.length < MAX_COMPETITIONS && labels.length >= 2;
 
   return (
-    <main className={`display-root display-root--competitions display-root--${presentation}`}>
+    <main className={`display-root display-root--competitions display-root--${presentation}`} style={zoomStyle}>
       <header className="inside-header">
         <DisplayBrand />
         <h1 className="competitions-title">Competities</h1>

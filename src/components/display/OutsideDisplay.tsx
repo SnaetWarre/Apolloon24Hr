@@ -9,7 +9,7 @@ import type { Label, LapRecord, LiveAppSnapshot, PublicRecordMode, RaceEvent, Ru
 import { LabelBadge } from '../LabelBadge';
 import { LiveDot } from '../LiveDot';
 import { DisplayBrand } from './displayParts';
-import { useDisplayPresentation } from './displaySettings';
+import { useDisplayPresentation, useDisplayZoom } from './displaySettings';
 
 const OUTSIDE_ALERT_VISIBLE_MS = 8_000;
 const selectOutsideDisplayData = ({ runners, race, settings }: LiveAppSnapshot) => ({
@@ -108,13 +108,14 @@ export function OutsideDisplay() {
   }, []);
 
   const [presentation] = useDisplayPresentation('outside', 'light');
+  const zoomStyle = useDisplayZoom('outside');
   const activeKey = activeRunner?.id ?? 'none';
   const nextKey = nextRunner?.id ?? 'none';
   // A runner who takes over after the screen opened rises in; the first one is simply there.
   const changed = useArrivals([`active:${activeKey}`, `next:${nextKey}`]);
 
   return (
-    <main className={`display-root display-root--outside display-root--${presentation}`}>
+    <main className={`display-root display-root--outside display-root--${presentation}`} style={zoomStyle}>
       <DisplayBrand />
       <section className="outside-band outside-band--current">
         {!finished && (
