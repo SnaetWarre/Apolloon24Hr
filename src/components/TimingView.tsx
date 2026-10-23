@@ -35,9 +35,13 @@ export function TimingView() {
   const [handoffBusy, setHandoffBusy] = React.useState(false);
   const [lastAction, setLastAction] = React.useState<string | null>(null);
   const [burgieBusy, setBurgieBusy] = React.useState(false);
-  const [finishConfirmStep, setFinishConfirmStep] = React.useState<0 | 1 | 2>(0);
   // The first "Race beëindigen" click stops the clock; the confirmations only decide whether it counts.
-  const [finishStop, setFinishStop] = React.useState<{ press: PressTime; activeStartedAt: number | null } | null>(null);
+  // The stopped time and the step of the dialog start and end together.
+  const [finishFlow, setFinishFlow] = React.useState<{
+    step: 1 | 2;
+    stop: { press: PressTime; activeStartedAt: number | null };
+  } | null>(null);
+  const finishConfirmStep = finishFlow?.step ?? 0;
   // The final confirm sits where "Verder" was, so it waits out the second click of a double click.
   const [finishConfirmReady, setFinishConfirmReady] = React.useState(false);
   React.useEffect(() => {
@@ -291,13 +295,14 @@ export function TimingView() {
   function startFinish(eventTime: number) {
     if (handoffBusyRef.current) return;
     releaseFocus();
-    setFinishStop({ press: timePress(eventTime, race.activeStartedAt), activeStartedAt: race.activeStartedAt });
-    setFinishConfirmStep(1);
+    setFinishFlow({
+      step: 1,
+      stop: { press: timePress(eventTime, race.activeStartedAt), activeStartedAt: race.activeStartedAt },
+    });
   }
 
   function cancelFinish() {
-    setFinishStop(null);
-    setFinishConfirmStep(0);
+    setFinishFlow(null);
   }
 
   async function finish() {
@@ -314,7 +319,7 @@ export function TimingView() {
     }
   }
 
-  const finishPress = finishStop?.activeStartedAt === race.activeStartedAt ? finishStop.press : null;
+  const finishPress = finishFlow?.stop.activeStartedAt === race.activeStartedAt ? finishFlow.stop.press : null;
   // Until the server answers a press, show the runner it started; its answer carries the same start time.
   const pending = handoffBusy && pressedHandoff?.fromStartedAt === race.activeStartedAt ? pressedHandoff : null;
   const shownRunner = pending ? (runners.find((runner) => runner.id === pending.runnerId) ?? null) : activeRunner;
@@ -625,7 +630,10 @@ export function TimingView() {
                   <button className="btn" onClick={cancelFinish} disabled={handoffBusy}>
                     Annuleer
                   </button>
-                  <button className="btn btn--primary" onClick={() => setFinishConfirmStep(2)}>
+                  <button
+                    className="btn btn--primary"
+                    onClick={() => setFinishFlow((current) => current && { ...current, step: 2 })}
+                  >
                     Verder
                   </button>
                 </div>
