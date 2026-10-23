@@ -149,10 +149,15 @@ async function mail() {
   for (const card of mailed) {
     counts.set(card.email.toLowerCase(), (counts.get(card.email.toLowerCase()) ?? 0) + 1);
   }
+  const sent = manifest.cards
+    .filter((card) => card.sentAt)
+    .sort((a, b) => a.sentAt! - b.sentAt! || a.files[0].localeCompare(b.files[0], 'nl-BE'));
+  const time = (at: number) =>
+    new Date(at).toLocaleString('nl-BE', { dateStyle: 'short', timeStyle: 'short', timeZone: 'Europe/Brussels' });
   console.log(`Map: ${out}\nOnderwerp: ${subject}`);
-  console.log(
-    `\n${toMail.length} lopers krijgen een mail; ${manifest.cards.filter((card) => card.sentAt).length} kregen hem al.`
-  );
+  console.log(`\n${toMail.length} lopers krijgen een mail; ${sent.length} kregen hem al.`);
+  list('Kregen hun Wrapped al', sent, (card) => `${label(card)}: ${card.email} (${time(card.sentAt!)})`);
+  list('Krijgen nog een mail', toMail, (card) => `${label(card)}: ${card.email}`);
   list(
     'Geen geldig e-mailadres, stuur hun beelden zelf door',
     manifest.cards.filter((card) => !card.emailValid),
@@ -177,7 +182,7 @@ async function mail() {
   const testOnly = options.test === 'true';
   if (!testOnly && options.send !== 'true') {
     console.log(
-      '\nNog niets verstuurd. Eerst een testmail naar jezelf: --test --from=<gmail-adres>. Daarna iedereen: --send --from=<gmail-adres>.'
+      '\nNu niets verstuurd. Eerst een testmail naar jezelf: --test --from=<gmail-adres>. Daarna iedereen: --send --from=<gmail-adres>.'
     );
     return;
   }
@@ -196,15 +201,16 @@ async function mail() {
     { folder: out, from, password, subject, text, testOnly },
     {
       server: testServer() ?? GMAIL,
-      onProgress: ({ done, total, current }) => {
-        if (current) process.stdout.write(`\r${done + 1}/${total} ${current}`.padEnd(60));
+      onProgress: ({ done, total, card, to, error }) => {
+        const line = `${String(done).padStart(String(total).length)}/${total}  ${label(card)} → ${to}`;
+        console.log(error ? `  MISLUKT ${line}: ${error}` : `  verstuurd ${line}`);
       },
     }
   );
   console.log(
     testOnly
       ? `\nTestmail verstuurd naar ${from}. Kijk of de beelden goed aankomen.`
-      : `\n${result.sent} verstuurd, ${result.left} over.`
+      : `\n${result.sent} verstuurd, ${result.left} over. De hele lijst van wie hem kreeg: npm run wrapped:mail -- --out="${out}"`
   );
   for (const failure of result.failed) console.log(`  Mislukt: ${failure.name}: ${failure.error}`);
   if (result.stopped) throw new Error(`${result.stopped}\nOpnieuw starten verstuurt alleen naar wie nog niets kreeg.`);
