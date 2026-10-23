@@ -27,13 +27,24 @@ import {
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const serverEntry = path.join(repoRoot, 'dist-server/server/index.js');
 const MAIL_TEXT_FILE = 'mail.txt';
-const DEFAULT_MAIL_TEXT = (year: number) => `Onderwerp: Jouw 24u Wrapped ${year}, Apolloon edition
+// The numbers are from the 2026 race; change them before the next one.
+const DEFAULT_MAIL_TEXT = `Onderwerp: 1115
 
-Hey!
+Hey,
 
-Bedankt om mee te lopen voor Apolloon! Hieronder staat jouw 24u Wrapped, Apolloon edition.
+Wat we op de laatste 24 urenloop gedaan hebben, is ongezien.
 
-Sla ze op en zet ze in je Instagram-story!
+Als organisatie hadden we het zotte idee om 1111 toeren te lopen. Het begon eigenlijk als grap, want we wisten dat we daarvoor gemiddeld 1:17.7 per toer moesten lopen.
+
+Maar jij en de rest van het team hebben dat gewoon volledig omver geblazen.
+
+1115 toeren, bijna 580 kilometer.
+
+Dat is allemaal aan jullie te danken. We zijn zo trots op iedereen.
+
+Hieronder zie je hoeveel van die toeren van jou waren.
+
+Volgend jaar staan we er opnieuw, en dan willen we nog zottere records breken. Zien we jou daar terug?
 `;
 
 const [command, ...rest] = process.argv.slice(2);
@@ -123,7 +134,7 @@ async function makeCards() {
     }
     await writeManifest(out, mergeManifest(await readManifest(out), made, Date.now()));
     const textFile = path.join(out, MAIL_TEXT_FILE);
-    if (!fs.existsSync(textFile)) fs.writeFileSync(textFile, DEFAULT_MAIL_TEXT(year));
+    if (!fs.existsSync(textFile)) fs.writeFileSync(textFile, DEFAULT_MAIL_TEXT);
 
     console.log(`\n\nWrapped gemaakt voor ${made.length} lopers in ${out}`);
     if (failed.length) console.log(`Mislukt (${failed.length}):\n  ${failed.join('\n  ')}`);

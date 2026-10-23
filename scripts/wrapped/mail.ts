@@ -136,7 +136,7 @@ function message(input: WrappedMailInput, card: WrappedManifestEntry, to: string
 <tr><td style="padding:28px 28px 8px;font-size:16px;line-height:1.5;color:${LIGHT}">${paragraphs}</td></tr>
 <tr><td align="center" style="padding:4px 20px 20px"><table role="presentation" cellpadding="0" cellspacing="0">${pages}</table></td></tr>
 <tr><td align="center" style="padding:0 28px 28px"><a href="https://www.instagram.com/" style="display:inline-block;background:${ORANGE};color:#ffffff;text-decoration:none;font-weight:bold;padding:12px 24px;border-radius:999px">Open Instagram</a></td></tr>
-<tr><td style="padding:0 28px 28px;font-size:16px;line-height:1.5;color:${LIGHT}">Sportieve groeten,<br><strong style="color:${ORANGE}">Apolloon</strong></td></tr>
+<tr><td style="padding:0 28px 28px;font-size:16px;line-height:1.5;color:${LIGHT}">Met trotse groeten,<br><strong style="color:${ORANGE}">Het hele Apolloon-team</strong></td></tr>
 </table>
 <p style="margin:16px 0 0;font-family:Helvetica,Arial,sans-serif;font-size:12px;color:#6f7aa8">Apolloon, 24 Urenloop</p>
 </td></tr></table>
@@ -145,7 +145,7 @@ function message(input: WrappedMailInput, card: WrappedManifestEntry, to: string
     from: input.from,
     to,
     subject: input.subject,
-    text: `${input.text}\n\nSportieve groeten,\nApolloon`,
+    text: `${input.text}\n\nMet trotse groeten,\nHet hele Apolloon-team`,
     html,
     // The pages show in the mail and are attached once more, so they save to a phone in one tap.
     attachments: [
