@@ -15,11 +15,10 @@ import { useArrivals, usePulse } from '../lib/motion';
 import { forgetLapStart, rememberLapStart, timePress, tooShortLapMs, type PressTime } from '../lib/pressTiming';
 import { LIVE_MILLISECOND_INTERVAL_MS, useClockTick } from '../lib/useClockTick';
 import { isConnectionError } from '../lib/connectionError';
+import { useSecondClick } from '../lib/useSecondClick';
 import { burgieGepaktMessage } from './admin/adminFormat';
 
 const selectTimingData = ({ runners, race }: LiveAppSnapshot) => ({ runners, race });
-// Windows counts two clicks up to 500 ms apart as a double click.
-const FINISH_CONFIRM_DELAY_MS = 500;
 
 export function TimingView() {
   const { runners, race } = useAppData(selectTimingData);
@@ -42,16 +41,8 @@ export function TimingView() {
     stop: { press: PressTime; activeStartedAt: number | null };
   } | null>(null);
   const finishConfirmStep = finishFlow?.step ?? 0;
-  // The final confirm sits where "Verder" was, so it waits out the second click of a double click.
-  const [finishConfirmReady, setFinishConfirmReady] = React.useState(false);
-  React.useEffect(() => {
-    if (finishConfirmStep !== 2) return;
-    const timer = window.setTimeout(() => setFinishConfirmReady(true), FINISH_CONFIRM_DELAY_MS);
-    return () => {
-      window.clearTimeout(timer);
-      setFinishConfirmReady(false);
-    };
-  }, [finishConfirmStep]);
+  // The final confirm sits where "Verder" was, so the second click of a double click on "Verder" would land on it.
+  const isSecondClick = useSecondClick();
   // The screen shows a handoff the moment it is pressed; the server's answer then confirms it.
   const [pressedHandoff, setPressedHandoff] = React.useState<{
     fromStartedAt: number | null;
@@ -632,7 +623,10 @@ export function TimingView() {
                   </button>
                   <button
                     className="btn btn--primary"
-                    onClick={() => setFinishFlow((current) => current && { ...current, step: 2 })}
+                    onClick={(event) => {
+                      isSecondClick(event);
+                      setFinishFlow((current) => current && { ...current, step: 2 });
+                    }}
                   >
                     Verder
                   </button>
@@ -650,8 +644,10 @@ export function TimingView() {
                   </button>
                   <button
                     className="btn btn--danger"
-                    onClick={() => void finish()}
-                    disabled={handoffBusy || !finishConfirmReady}
+                    onClick={(event) => {
+                      if (!isSecondClick(event)) void finish();
+                    }}
+                    disabled={handoffBusy}
                   >
                     Race definitief beëindigen
                   </button>
