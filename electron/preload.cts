@@ -1,5 +1,5 @@
 // Sandboxed preload: only the small bridge the renderer needs from the desktop app.
-const { contextBridge, ipcRenderer } = require('electron') as typeof import('electron');
+const { contextBridge, ipcRenderer, webFrame } = require('electron') as typeof import('electron');
 
 type WindowState = { maximized: boolean; fullscreen: boolean; focused: boolean };
 /** See UpdateStatus in electron/update-check.ts. */
@@ -14,6 +14,8 @@ contextBridge.exposeInMainWorld('apolloonDesktop', {
   openDataFolder: () => ipcRenderer.invoke('apolloon:open-data-folder'),
   /** Version, operating system, data folder and the end of server.log, for "Diagnose kopiëren". */
   getDiagnostics: () => ipcRenderer.invoke('apolloon:diagnostics'),
+  /** Zooms the whole page like a browser does; the frameless window has no menu that would. */
+  setZoom: (factor: number) => webFrame.setZoomFactor(factor),
   /** Whether a newer version is published; checked a few seconds after start and every six hours. */
   update: {
     getStatus: (): Promise<UpdateStatus> => ipcRenderer.invoke('apolloon:update-status'),

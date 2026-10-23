@@ -7,7 +7,7 @@ import { getNextWaitingRunner, lapRunnerLabel, runnerLabel } from '../../lib/run
 import { formatClockTimeMs, formatDurationMs } from '../../lib/time';
 import { LiveDot } from '../LiveDot';
 import { DisplayBrand, DisplayTotals, PresentationSwitch, selectInsideDisplayData } from './displayParts';
-import { useDisplayPresentation } from './displaySettings';
+import { useDisplayPresentation, useDisplayZoom } from './displaySettings';
 
 // The rows of both lists on the Binnenscherm.
 const INSIDE_LIST_LENGTH = 25;
@@ -15,6 +15,7 @@ const INSIDE_LIST_LENGTH = 25;
 export function InsideDisplay() {
   const { runners, labels, race } = useAppData(selectInsideDisplayData);
   const [presentation, setPresentation] = useDisplayPresentation('inside', 'dark');
+  const zoomStyle = useDisplayZoom('inside');
   const finished = Boolean(race.raceFinishedAt);
   const activeRunner = finished ? null : runners.find((runner) => runner.id === race.activeRunnerId) || null;
   const nextRunner = finished ? null : getNextWaitingRunner(runners);
@@ -35,7 +36,7 @@ export function InsideDisplay() {
   );
 
   return (
-    <main className={`display-root display-root--inside display-root--${presentation}`}>
+    <main className={`display-root display-root--inside display-root--${presentation}`} style={zoomStyle}>
       <header className="inside-header">
         <DisplayBrand />
         <h1 className="visually-hidden">24 urenloop, live standen</h1>

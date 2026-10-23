@@ -36,6 +36,7 @@ export type DesktopBridge = {
   pickImage: () => Promise<{ name: string; bytes: Uint8Array } | null>;
   openDataFolder: () => Promise<string | null>;
   getDiagnostics: () => Promise<DesktopDiagnostics>;
+  setZoom: (factor: number) => void;
   update: {
     getStatus: () => Promise<DesktopUpdateStatus>;
     check: () => Promise<DesktopUpdateStatus>;
