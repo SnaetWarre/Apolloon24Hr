@@ -1581,11 +1581,16 @@ test(
         clusterId: 'other-group',
         appVersion: own.appVersion,
         schemaVersion: own.schemaVersion,
+        role: 'leader',
+        term: 1,
         leader,
         members: [],
         runners: 40,
         changed: true,
         busy: null,
+        timing: null,
+        split: { id: 'other-split', rank: 0 },
+        laps: 0,
       };
       const waiting = async (pattern: RegExp) => pattern.test((await fetchStatus(empty)).autoLink.waiting ?? '');
 
