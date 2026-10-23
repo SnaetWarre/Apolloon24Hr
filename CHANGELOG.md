@@ -4,6 +4,19 @@ All notable changes to Apolloon Telsysteem will be documented in this file.
 
 ## [Unreleased]
 
+## [5.3.1] - 2026-10-23
+
+Laptops koppelen alleen met dezelfde versie: zet 5.3.1 op alle laptops.
+
+### Fixed
+
+- Een laptop kijkt nu elk bericht van een andere laptop na voor hij het
+  gebruikt. Een kapot of vreemd bericht wordt genegeerd en komt in het
+  logboek, in plaats van een stap te laten vastlopen of verkeerde gegevens
+  door te geven bij koppelen, de klok of een doorgestuurde ronde
+- Race afsluiten gebruikt nu dezelfde controle tegen dubbelklikken als de rest
+  van de app. Een dubbelklik op Verder beëindigt de race nog steeds niet
+
 ## [5.3.0] - 2026-10-22
 
 Laptops koppelen alleen met dezelfde versie: zet 5.3.0 op alle laptops.
