@@ -94,23 +94,11 @@ export async function sendWrappedMails(
 }
 
 // Mail apps ignore stylesheets and modern CSS, so the mail is tables with inline styles.
-// Dark, in the colours of the Wrapped pages.
-const NIGHT = '#0a1037';
-const DEEP = '#05081f';
-const LIGHT = '#e2e6ff';
-const ORANGE = '#eb6c1d';
-const LOGO = fileURLToPath(new URL('./apolloon-logo-white.png', import.meta.url));
-/** The checkered strip from page 4, as table cells because mail apps drop background images. */
-const CHECKERS = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0">${[0, 1]
-  .map(
-    (row) =>
-      `<tr>${Array.from(
-        { length: 26 },
-        (_, index) =>
-          `<td height="10" style="height:10px;line-height:10px;font-size:0;background:${(index + row) % 2 ? NIGHT : LIGHT}">&nbsp;</td>`
-      ).join('')}</tr>`
-  )
-  .join('')}</table>`;
+// White with one dark blue, so the colourful Wrapped pages stand out.
+const NAVY = '#0a1037';
+const TEXT = '#262a3b';
+const GREY = '#f2f3f7';
+const LOGO = fileURLToPath(new URL('./apolloon-logo.png', import.meta.url));
 
 function message(input: WrappedMailInput, card: WrappedManifestEntry, to: string) {
   const paragraphs = input.text
@@ -120,25 +108,24 @@ function message(input: WrappedMailInput, card: WrappedManifestEntry, to: string
   // Two pages per row, each as wide as fits next to the other on a phone.
   const cells = card.files.map(
     (_, index) =>
-      `<td style="padding:6px"><img src="cid:wrapped-${index + 1}" alt="Jouw 24u Wrapped, deel ${index + 1}" width="220" style="display:block;width:220px;max-width:100%;height:auto;border:0;border-radius:10px"></td>`
+      `<td style="padding:6px"><img src="cid:wrapped-${index + 1}" alt="Jouw 24u Wrapped, deel ${index + 1}" width="220" style="display:block;width:220px;max-width:100%;height:auto;border:0;border-radius:8px"></td>`
   );
   const pages = Array.from(
     { length: Math.ceil(cells.length / 2) },
     (_, row) => `<tr>${cells.slice(row * 2, row * 2 + 2).join('')}</tr>`
   ).join('');
   const html = `<!doctype html>
-<html lang="nl"><head><meta name="color-scheme" content="dark"><meta name="supported-color-schemes" content="dark"></head>
-<body style="margin:0;padding:0;background:${DEEP}">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${DEEP}"><tr><td align="center" style="padding:24px 12px">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:${NIGHT};border-radius:16px;overflow:hidden;font-family:Helvetica,Arial,sans-serif;color:${LIGHT}">
-<tr><td style="padding:26px 28px 22px"><img src="cid:apolloon-logo" alt="Apolloon" width="140" style="display:block;border:0;width:140px;height:auto"></td></tr>
-<tr><td style="padding:0">${CHECKERS}</td></tr>
-<tr><td style="padding:28px 28px 8px;font-size:16px;line-height:1.5;color:${LIGHT}">${paragraphs}</td></tr>
-<tr><td align="center" style="padding:4px 20px 20px"><table role="presentation" cellpadding="0" cellspacing="0">${pages}</table></td></tr>
-<tr><td align="center" style="padding:0 28px 28px"><a href="https://www.instagram.com/" style="display:inline-block;background:${ORANGE};color:#ffffff;text-decoration:none;font-weight:bold;padding:12px 24px;border-radius:999px">Open Instagram</a></td></tr>
-<tr><td style="padding:0 28px 28px;font-size:16px;line-height:1.5;color:${LIGHT}">Met trotse groeten,<br><strong style="color:${ORANGE}">Het hele Apolloon-team</strong></td></tr>
+<html lang="nl"><head><meta name="color-scheme" content="light"><meta name="supported-color-schemes" content="light"></head>
+<body style="margin:0;padding:0;background:${GREY}">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${GREY}"><tr><td align="center" style="padding:24px 12px">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border-radius:12px;font-family:Helvetica,Arial,sans-serif;color:${TEXT}">
+<tr><td style="padding:28px 28px 6px"><img src="cid:apolloon-logo" alt="Apolloon" width="130" style="display:block;border:0;width:130px;height:auto"></td></tr>
+<tr><td style="padding:20px 28px 4px;font-size:16px;line-height:1.55;color:${TEXT}">${paragraphs}</td></tr>
+<tr><td align="center" style="padding:0 22px 18px"><table role="presentation" cellpadding="0" cellspacing="0">${pages}</table></td></tr>
+<tr><td style="padding:0 28px 28px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" bgcolor="${NAVY}" style="background:${NAVY};border-radius:8px"><a href="https://www.instagram.com/" style="display:block;padding:13px 24px;color:#ffffff;text-decoration:none;font-weight:bold;font-size:16px">Open Instagram</a></td></tr></table></td></tr>
+<tr><td style="padding:0 28px 30px;font-size:16px;line-height:1.55;color:${TEXT}">Met trotse groeten,<br><strong style="color:${NAVY}">Het hele Apolloon-team</strong></td></tr>
 </table>
-<p style="margin:16px 0 0;font-family:Helvetica,Arial,sans-serif;font-size:12px;color:#6f7aa8">Apolloon, 24 Urenloop</p>
+<p style="margin:16px 0 0;font-family:Helvetica,Arial,sans-serif;font-size:12px;color:#8a8fa3">Apolloon, 24 Urenloop</p>
 </td></tr></table>
 </body></html>`;
   return {
