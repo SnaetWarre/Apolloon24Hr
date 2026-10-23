@@ -20,37 +20,32 @@ import {
   summarizeHistoricalTeams,
   summarizeHistoricalWindow,
 } from '../../lib/tacticsDeepDive';
+import { formatSeconds, formatSignedSeconds, percentage, signedNumber, teamColor } from './deepdive/deepdiveFormat';
+import { DeepStat, NumberControl, SectionHeader } from './deepdive/deepdiveWidgets';
+import { DurationDistributionChart, TeamLapTimelineChart } from './deepdive/overviewCharts';
 import {
-  BreakEvenChart,
   ConsistencyChart,
-  CumulativeRaceChart,
-  DeepStat,
-  DiagnosticTable,
-  DiagnosticTimelineChart,
   DistributionRow,
-  DraftingProximityChart,
-  DraftingResultsTable,
-  DraftingScatterChart,
-  DurationDistributionChart,
   HalfHourDifferenceChart,
-  HourlyGainChart,
   NightPenaltyStat,
-  NumberControl,
-  PaceChangeTable,
   PaceComparisonChart,
+  StandardDeviationChart,
+  WindowFrequencyChart,
+} from './deepdive/tempoCharts';
+import {
+  CumulativeRaceChart,
+  HourlyGainChart,
   RaceLeadChart,
   SameLapGapChart,
-  SectionHeader,
-  StandardDeviationChart,
-  TeamLapTimelineChart,
   TimeGapChart,
-  WindowFrequencyChart,
-  formatSeconds,
-  formatSignedSeconds,
-  percentage,
-  signedNumber,
-  teamColor,
-} from './deepdiveCharts';
+} from './deepdive/raceCharts';
+import {
+  BreakEvenChart,
+  DiagnosticTable,
+  DiagnosticTimelineChart,
+  PaceChangeTable,
+} from './deepdive/diagnosticsCharts';
+import { DraftingProximityChart, DraftingResultsTable, DraftingScatterChart } from './deepdive/draftingCharts';
 import { NumberInput } from './NumberInput';
 
 type DeepDiveSection = 'overview' | 'tempo' | 'race' | 'diagnostics' | 'drafting';

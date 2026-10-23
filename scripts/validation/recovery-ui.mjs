@@ -8,7 +8,7 @@ const page = await browser.newPage();
 try {
   let blocked = true;
   let requests = 0;
-  await page.route('**/assets/DisplayViews-*.js', async (route) => {
+  await page.route('**/assets/OutsideDisplay-*.js', async (route) => {
     requests += 1;
     if (blocked) await route.abort();
     else await route.continue();
