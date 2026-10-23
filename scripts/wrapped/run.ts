@@ -207,7 +207,9 @@ async function mail() {
     if (answer.toLowerCase() !== 'ja') return console.log('Niets verstuurd.');
   }
   // An app password from the Google account (Beveiliging › App-wachtwoorden); never written anywhere.
-  const password = process.env.WRAPPED_GMAIL_PASSWORD ?? (await ask('App-wachtwoord van Google: ', true));
+  const password =
+    process.env.WRAPPED_GMAIL_PASSWORD ??
+    (await ask('App-wachtwoord van Google (je ziet niet wat je typt, druk daarna op Enter): ', true));
   const result = await sendWrappedMails(
     { folder: out, from, password, subject, text, testOnly },
     {
@@ -323,11 +325,20 @@ function ask(question: string, hidden = false): Promise<string> {
       if (text.includes(question)) process.stdout.write(text);
     };
   }
-  return new Promise((resolve) =>
+  // Ctrl+C or Ctrl+D closes the question without an answer: stop and say so.
+  prompt.on('SIGINT', () => prompt.close());
+  return new Promise((resolve, reject) => {
+    let answered = false;
+    prompt.once('close', () => {
+      if (answered) return;
+      process.stdout.write('\n');
+      reject(new Error('Gestopt. Er is niets verstuurd.'));
+    });
     prompt.question(question, (answer) => {
+      answered = true;
       prompt.close();
       if (hidden) process.stdout.write('\n');
       resolve(answer.trim());
-    })
-  );
+    });
+  });
 }
