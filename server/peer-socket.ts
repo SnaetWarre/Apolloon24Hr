@@ -1,6 +1,7 @@
 import http, { type IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
 import WebSocket, { WebSocketServer } from 'ws';
+import { peerSocketAnswerSchema, peerSocketRequestSchema, readPeerMessage } from './peer-messages.js';
 import { isIsolated, PEER_REQUEST_TIMEOUT_MS, versionHeaders } from './peers.js';
 
 /*
@@ -93,10 +94,10 @@ function connect(url: string): Link {
   });
   socket.on('message', (data) => {
     link.lastHeardAt = performance.now();
-    const answer = parse(data) as { id?: unknown; body?: unknown; refused?: unknown } | null;
-    const request = typeof answer?.id === 'number' ? link.pending.get(answer.id) : undefined;
-    if (!request || !answer) return;
-    link.pending.delete(answer.id as number);
+    const answer = readPeerMessage(peerSocketAnswerSchema, parse(data), 'an answer', url);
+    const request = answer ? link.pending.get(answer.id) : undefined;
+    if (!answer || !request) return;
+    link.pending.delete(answer.id);
     clearTimeout(request.timer);
     request.resolve(answer.refused ? null : answer.body);
   });
@@ -124,12 +125,13 @@ export function acceptPeerSocket(
   req: IncomingMessage,
   socket: Duplex,
   head: Buffer,
-  answer: (type: unknown, body: unknown) => PeerAnswer
+  answer: (type: PeerRequestType, body: unknown) => PeerAnswer
 ): void {
+  const from = req.socket.remoteAddress ?? 'another laptop';
   server.handleUpgrade(req, socket, head, (peer) => {
     peer.on('message', (data) => {
-      const request = parse(data) as { id?: unknown; type?: unknown; body?: unknown } | null;
-      if (typeof request?.id !== 'number') return;
+      const request = readPeerMessage(peerSocketRequestSchema, parse(data), 'a request', from);
+      if (!request) return;
       let reply: PeerAnswer;
       try {
         reply = isIsolated() ? refusal('isolated', 'isolated') : answer(request.type, request.body);

@@ -20,6 +20,7 @@ import {
 } from './db.js';
 import { isClusterEnabled, readPositiveInt } from './env.js';
 import { currentUrl } from './discovery.js';
+import { peerTimeSchema, readPeerMessage } from './peer-messages.js';
 import { peerRequest, type PeerRequestType } from './peer-socket.js';
 import { peerFetch, readPeerError, selfUrl } from './peers.js';
 import {
@@ -107,7 +108,11 @@ let lastRemovedAnswer: { member: ClusterMember; at: number } | null = null;
 
 async function send<T>(member: ClusterMember, type: PeerRequestType, body: unknown, schema: z.ZodType<T>) {
   const answer = await peerRequest(member.url, type, body);
-  return answer === null ? null : schema.parse(answer);
+  if (answer === null) return null;
+  const parsed = readPeerMessage(schema, answer, `an answer to ${type}`, member.url);
+  // Like no answer at all: the raft loop counts the laptop as unreachable for now.
+  if (parsed === null) throw new Error(`unexpected answer to ${type}`);
+  return parsed;
 }
 
 const raft = createRaft({
@@ -158,7 +163,9 @@ const raft = createRaft({
     const response = await peerFetch(`${target.url}/api/time`);
     const receivedAt = Date.now();
     if (!response.ok) return;
-    const { serverNowMs } = (await response.json()) as { serverNowMs: number };
+    const time = readPeerMessage(peerTimeSchema, await response.json().catch(() => null), 'a time', target.url);
+    if (!time) return;
+    const { serverNowMs } = time;
     if (observeReferenceClock(serverNowMs, sentAt, receivedAt)) {
       setLocalSetting('cluster_clock_offset_ms', String(clusterClockOffset()));
     }
