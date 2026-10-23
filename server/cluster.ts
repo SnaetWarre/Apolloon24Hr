@@ -78,6 +78,14 @@ import {
 import { currentUrl, heardLaptops, startDiscovery, stopDiscovery } from './discovery.js';
 import { APP_VERSION, isClusterEnabled, readPositiveInt } from './env.js';
 import { hostInfo, LAPTOP_NAME, laptopName } from './host.js';
+import {
+  joinAnswerSchema,
+  PeerVersionError,
+  readPeerMessage,
+  readPeerStatus,
+  trpcAnswerSchema,
+  type PeerStatus,
+} from './peer-messages.js';
 import { acceptPeerSocket, closePeerSockets, refusal, refuseUpgrade, type PeerAnswer } from './peer-socket.js';
 import {
   isIsolated,
@@ -296,7 +304,7 @@ function ownGroup(): GroupData {
 }
 
 /** The group of the laptop that answered with `status`. */
-function otherGroup(status: ClusterStatus): GroupData {
+function otherGroup(status: PeerStatus): GroupData {
   return {
     clusterId: status.clusterId,
     // An older version does not send these. It then counts as no race, so this laptop never gives up its own race for it.
@@ -393,7 +401,7 @@ function autoLinkNotes(statuses: ClusterMemberStatus[]): AutoLinkNote[] {
   });
 }
 
-function pressThereMessage(url: string, status: ClusterStatus): string {
+function pressThereMessage(url: string, status: PeerStatus): string {
   const other = shortUrl(url);
   const own = raceProgress();
   const there = otherGroup(status);
@@ -516,10 +524,8 @@ export async function forwardWrite<T>(
   }
   // A tRPC error is the leader's answer to the write; a laptop that no longer leads answers
   // with a plain `{ code, error }` instead, and the write goes to the next leader.
-  const payload = (await response.json().catch(() => null)) as {
-    result?: { data?: T };
-    error?: { message?: string; data?: { code?: string } } | string;
-  } | null;
+  const body: unknown = await response.json().catch(() => null);
+  const payload = body === null ? null : readPeerMessage(trpcAnswerSchema, body, 'an answer to a write', leader.url);
   if (payload?.error && typeof payload.error === 'object') {
     const code = payload.error.data?.code ?? 'INTERNAL_SERVER_ERROR';
     const message = payload.error.message ?? 'Opslaan mislukt';
@@ -527,6 +533,7 @@ export async function forwardWrite<T>(
   }
   if (!response.ok || !payload?.result) return retry(NO_LEADER_MESSAGE);
   await waitForLocalSeq(Number(response.headers.get('x-apolloon-log-seq') || 0));
+  // The leader runs the same version (versionRefusal), so its procedure answers with this one's output type.
   return { ok: true, data: payload.result.data as T };
 }
 
@@ -882,11 +889,12 @@ async function waitWhileJoining(): Promise<void> {
 }
 
 /** The laptop at `rawUrl`, checked to be another laptop that can be linked with this one. */
-async function otherLaptop(rawUrl: string): Promise<{ url: string; status: ClusterStatus }> {
+async function otherLaptop(rawUrl: string): Promise<{ url: string; status: PeerStatus }> {
   if (!enabled) throw new Error('Laptops koppelen staat uit op deze installatie.');
   const url = joinUrl(rawUrl);
   if (!url || url === selfUrl()) throw new Error('Vul het adres van een andere laptop in.');
-  const status = await fetchStatus(url).catch(() => {
+  const status = await fetchStatus(url).catch((error: unknown) => {
+    if (error instanceof PeerVersionError) throw error;
     throw new Error(`${url} is niet bereikbaar. Controleer het adres en de kabel.`);
   });
   if (!status.enabled) throw new Error('Op die laptop staat laptops koppelen uit.');
@@ -950,7 +958,7 @@ export async function joinGroup(rawUrl: string, options: JoinOptions = {}): Prom
     if (merging) await mergeInto(url);
     // A takeover in that group (a laptop just broke) is waited out like a write, then the join goes to the new leader.
     const deadline = writeDeadline();
-    let group: { url: string; status: ClusterStatus } | null = { url, status };
+    let group: { url: string; status: PeerStatus } | null = { url, status };
     for (;;) {
       const leader = group?.status.leader;
       if (group && leader) {
@@ -1000,9 +1008,11 @@ async function mergeInto(url: string): Promise<void> {
     body: exportMergeData(LAPTOP_NAME ?? shortUrl(selfUrl())),
     timeoutMs: WRITE_DEADLINE_MS + COMMIT_TIMEOUT_MS + 1_000,
   }).catch(() => null);
-  const payload = (await response?.json().catch(() => null)) as { error?: { message?: string } } | null;
+  const body: unknown = await response?.json().catch(() => null);
+  const payload = body == null ? null : readPeerMessage(trpcAnswerSchema, body, 'an answer to a merge', url);
   if (!response?.ok || payload?.error) {
-    const reason = payload?.error?.message ?? `${shortUrl(url)} antwoordt niet`;
+    const message = typeof payload?.error === 'object' ? payload.error.message : undefined;
+    const reason = message ?? `${shortUrl(url)} antwoordt niet`;
     throw new Error(`De lopers van deze laptop konden niet mee naar die groep: ${reason}`);
   }
 }
@@ -1025,7 +1035,9 @@ async function joinThrough(leaderUrl: string, autoLinkedWith?: string): Promise<
     if (refusal.code === 'not_leader') return null;
     throw new Error(refusal.error || 'Koppelen mislukt.');
   }
-  const { term } = z.object({ term: z.number().int().nonnegative() }).parse(await response.json());
+  const answer = readPeerMessage(joinAnswerSchema, await response.json().catch(() => null), 'a join answer', leaderUrl);
+  if (!answer) throw new Error('Koppelen mislukt: onverwacht antwoord van de hoofdlaptop.');
+  const { term } = answer;
   try {
     await resyncFrom(leaderUrl, 'pre-join');
   } catch (error) {
@@ -1038,7 +1050,7 @@ async function joinThrough(leaderUrl: string, autoLinkedWith?: string): Promise<
 }
 
 /** The status of the group `known` belongs to, from the laptop at `url` or else another laptop of that group. */
-async function groupStatus(url: string, known: ClusterStatus): Promise<{ url: string; status: ClusterStatus } | null> {
+async function groupStatus(url: string, known: PeerStatus): Promise<{ url: string; status: PeerStatus } | null> {
   const self = hostIdentity().hostId;
   const others = known.members.filter((member) => member.hostId !== self && member.url !== url);
   for (const candidate of [url, ...others.map((member) => member.url)]) {
@@ -1266,9 +1278,9 @@ function noteAutoLinkFailure(url: string, message: string): void {
  * went on alone last, then the one with more laptops, the later term, and the host id. Both sides
  * work it out alike, so exactly one of them joins the other.
  */
-function otherGroupWins(other: ClusterStatus): boolean {
+function otherGroupWins(other: PeerStatus): boolean {
   const own = clusterStatus();
-  const order = (status: ClusterStatus) => [
+  const order = (status: PeerStatus) => [
     status.timing?.reachable ? status.timing.gen : 0,
     status.laps,
     status.split.rank,
@@ -1281,10 +1293,10 @@ function otherGroupWins(other: ClusterStatus): boolean {
   return index === -1 ? other.hostId > own.hostId : theirs[index] > ours[index];
 }
 
-async function fetchStatus(url: string): Promise<ClusterStatus> {
+async function fetchStatus(url: string): Promise<PeerStatus> {
   const response = await peerFetch(`${url}/api/cluster/status`);
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  return (await response.json()) as ClusterStatus;
+  return readPeerStatus(await response.json(), url);
 }
 
 export function startClusterService(): void {
