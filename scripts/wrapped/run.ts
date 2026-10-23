@@ -42,7 +42,7 @@ Maar jij en de rest van het team hebben dat gewoon volledig omver geblazen.
 
 Dat is allemaal aan jullie te danken. We zijn zo trots op iedereen.
 
-Hieronder zie je hoeveel van die toeren van jou waren.
+Hieronder zie je hoeveel van die toeren van jou waren. Deel ze zeker op je socials!
 
 Volgend jaar staan we er opnieuw, en dan willen we nog zottere records breken. Zien we jou daar terug?
 `;
