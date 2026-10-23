@@ -19,7 +19,14 @@ export type WrappedMailInput = {
   testOnly: boolean;
 };
 
-export type WrappedMailProgress = { done: number; total: number; current: string | null };
+/** One mail tried: `error` is null when it went out. */
+export type WrappedMailProgress = {
+  done: number;
+  total: number;
+  card: WrappedManifestEntry;
+  to: string;
+  error: string | null;
+};
 
 export type WrappedMailResult = {
   sent: number;
@@ -52,10 +59,10 @@ export async function sendWrappedMails(
   const result: WrappedMailResult = { sent: 0, left: queue.length, failed: [], stopped: null };
   try {
     for (const [index, card] of queue.entries()) {
-      onProgress?.({ done: index, total: queue.length, current: card.name });
+      const to = input.testOnly ? input.from : card.email;
       if (index > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
       try {
-        await transport.sendMail(message(input, card, input.testOnly ? input.from : card.email));
+        await transport.sendMail(message(input, card, to));
       } catch (error) {
         const stop = stoppingReason(error);
         if (stop) {
@@ -68,6 +75,7 @@ export async function sendWrappedMails(
           card.error = reason;
           await writeManifest(input.folder, manifest);
         }
+        onProgress?.({ done: index + 1, total: queue.length, card, to, error: reason });
         continue;
       }
       result.sent += 1;
@@ -76,12 +84,12 @@ export async function sendWrappedMails(
         card.error = null;
         await writeManifest(input.folder, manifest);
       }
+      onProgress?.({ done: index + 1, total: queue.length, card, to, error: null });
     }
   } finally {
     transport.close();
   }
   result.left = input.testOnly ? 0 : mailableCards(manifest).length;
-  onProgress?.({ done: queue.length, total: queue.length, current: null });
   return result;
 }
 

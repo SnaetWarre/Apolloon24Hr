@@ -37,7 +37,7 @@ The boxes, checkered flags and the car are the design's own drawings, taken from
    npm run wrapped:mail
    ```
 
-   This sends nothing. It lists who has no valid e-mail address (send those images yourself), who answered "Nee" to being contacted again (they get no mail), and runners who share an address.
+   This sends nothing. It lists who already got their Wrapped (with the address and time), who still gets a mail, who has no valid e-mail address (send those images yourself), who answered "Nee" to being contacted again (they get no mail), and runners who share an address. Run it again at any time to see the full list of who got one.
 5. Make a Google app password for the sending Gmail account: Google account › Security › 2-Step Verification must be on, then App passwords. Send yourself a test mail, then everyone:
 
    ```sh
@@ -45,7 +45,7 @@ The boxes, checkered flags and the car are the design's own drawings, taken from
    npm run wrapped:mail -- --send --from=club@gmail.com
    ```
 
-   It asks for the app password and never stores it (or set `WRAPPED_GMAIL_PASSWORD`). It sends one mail every 2 seconds, with the pages shown in the mail and attached once more so they save to a phone in one tap. After each mail it writes `sentAt` to `manifest.json`, so if it stops (no internet, wrong password, Gmail's limit of about 500 mails a day), running it again only sends to the people still left. Nobody gets two mails.
+   It asks for the app password and never stores it (or set `WRAPPED_GMAIL_PASSWORD`). It sends one mail every 2 seconds and prints a line per mail with the runner and the address (`verstuurd 12/300  146 Jan Peeters → jan@…`, or `MISLUKT` with the reason), with the pages shown in the mail and attached once more so they save to a phone in one tap. After each mail it writes `sentAt` to `manifest.json`, so if it stops (no internet, wrong password, Gmail's limit of about 500 mails a day), running it again only sends to the people still left. Nobody gets two mails.
 
 Nothing here costs money: Playwright makes the images and a normal Gmail account sends the mails.
 
