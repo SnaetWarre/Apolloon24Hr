@@ -150,10 +150,12 @@ async function mail() {
   if (!manifest) throw new Error(`Geen kaarten in ${out}. Maak ze eerst met npm run wrapped:cards, of geef --out mee.`);
   const { subject, text } = readMailText(path.join(out, MAIL_TEXT_FILE));
 
+  const testOnly = options.test === 'true';
   const toMail = mailableCards(manifest);
   const label = (card: WrappedCard) => `${card.runnerNumber ? `${card.runnerNumber} ` : ''}${card.name}`;
   const list = (title: string, cards: WrappedManifestEntry[], detail: (card: WrappedManifestEntry) => string) => {
-    if (cards.length) console.log(`\n${title} (${cards.length}):\n  ${cards.map(detail).join('\n  ')}`);
+    // A test mail goes to the sender only, so the lists of runners would only confuse.
+    if (cards.length && !testOnly) console.log(`\n${title} (${cards.length}):\n  ${cards.map(detail).join('\n  ')}`);
   };
   const counts = new Map<string, number>();
   const mailed = manifest.cards.filter((card) => card.emailValid && !card.refusedContact);
@@ -166,7 +168,11 @@ async function mail() {
   const time = (at: number) =>
     new Date(at).toLocaleString('nl-BE', { dateStyle: 'short', timeStyle: 'short', timeZone: 'Europe/Brussels' });
   console.log(`Map: ${out}\nOnderwerp: ${subject}`);
-  console.log(`\n${toMail.length} lopers krijgen een mail; ${sent.length} kregen hem al.`);
+  console.log(
+    testOnly
+      ? `\nTestmail: één mail met de Wrapped van ${label(manifest.cards[0])}, alleen naar ${options.from}. De lopers krijgen niets.`
+      : `\n${toMail.length} lopers krijgen een mail; ${sent.length} kregen hem al.`
+  );
   list('Kregen hun Wrapped al', sent, (card) => `${label(card)}: ${card.email} (${time(card.sentAt!)})`);
   list('Krijgen nog een mail', toMail, (card) => `${label(card)}: ${card.email}`);
   list(
@@ -190,7 +196,6 @@ async function mail() {
     (card) => `${label(card)}: ${card.error}`
   );
 
-  const testOnly = options.test === 'true';
   if (!testOnly && options.send !== 'true') {
     console.log(
       '\nNu niets verstuurd. Eerst een testmail naar jezelf: --test --from=<gmail-adres>. Daarna iedereen: --send --from=<gmail-adres>.'
