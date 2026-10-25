@@ -9,7 +9,7 @@ import type { Label, LapRecord, LiveAppSnapshot, PublicRecordMode, RaceEvent, Ru
 import { LabelBadge } from '../LabelBadge';
 import { LiveDot } from '../LiveDot';
 import { DisplayBrand } from './displayParts';
-import { useDisplayPresentation } from './displaySettings';
+import { useDisplayPresentation, useDisplayZoom } from './displaySettings';
 
 const OUTSIDE_ALERT_VISIBLE_MS = 8_000;
 const selectOutsideDisplayData = ({ runners, race, settings }: LiveAppSnapshot) => ({
@@ -108,13 +108,14 @@ export function OutsideDisplay() {
   }, []);
 
   const [presentation] = useDisplayPresentation('outside', 'light');
+  const zoomStyle = useDisplayZoom('outside');
   const activeKey = activeRunner?.id ?? 'none';
   const nextKey = nextRunner?.id ?? 'none';
   // A runner who takes over after the screen opened rises in; the first one is simply there.
   const changed = useArrivals([`active:${activeKey}`, `next:${nextKey}`]);
 
   return (
-    <main className={`display-root display-root--outside display-root--${presentation}`}>
+    <main className={`display-root display-root--outside display-root--${presentation}`} style={zoomStyle}>
       <DisplayBrand />
       <section className="outside-band outside-band--current">
         {!finished && (
@@ -152,9 +153,11 @@ export function OutsideDisplay() {
   );
 }
 
-// Steps a long name down until every word fits on a line and the name fits in two lines.
+// Steps a long name down until it fits on one line. A name that only fits on one line below
+// ONE_LINE_MIN_SCALE gets two lines, as long as every word fits on a line.
 // "Marie-Christine Van den Broeck-Vandevelde" was cut to "Van den…" at full size.
 const RUNNER_NAME_SCALES = [1, 0.85, 0.68, 0.6, 0.5];
+const ONE_LINE_MIN_SCALE = 0.68;
 
 function DisplayRunner({ runner, empty }: { runner: Runner | null; empty: string }) {
   const rowRef = React.useRef<HTMLDivElement>(null);
@@ -166,12 +169,18 @@ function DisplayRunner({ runner, empty }: { runner: Runner | null; empty: string
     const fit = () => {
       // Without breaking inside words, a word that is too wide shows up as horizontal overflow.
       nameNode.style.overflowWrap = 'normal';
-      for (const scale of RUNNER_NAME_SCALES) {
+      const fits = (scale: number, maxLines: number) => {
         row.style.setProperty('--runner-name-scale', String(scale));
         const lineHeight = parseFloat(getComputedStyle(nameNode).fontSize);
         const hiddenHeight = nameNode.scrollHeight - nameNode.clientHeight;
-        if (nameNode.scrollWidth <= nameNode.clientWidth && hiddenHeight < lineHeight / 2) break;
-      }
+        return (
+          nameNode.scrollWidth <= nameNode.clientWidth &&
+          hiddenHeight < lineHeight / 2 &&
+          nameNode.scrollHeight < lineHeight * (maxLines + 0.5)
+        );
+      };
+      const oneLine = RUNNER_NAME_SCALES.find((scale) => scale >= ONE_LINE_MIN_SCALE && fits(scale, 1));
+      if (oneLine === undefined) RUNNER_NAME_SCALES.find((scale) => fits(scale, 2));
       nameNode.style.overflowWrap = '';
     };
     fit();

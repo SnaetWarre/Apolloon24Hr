@@ -46,8 +46,14 @@ html[data-display-tone="light"] body {
   background: oklch(100% 0 none);
 }
 
+/*
+ * Ctrl + and Ctrl − zoom a display (useDisplayZoom sets --display-zoom). Zoom grows
+ * everything inside, the screen-relative sizes too, so every height taken from the
+ * screen is divided by it and the page still fills the screen exactly.
+ */
 .display-root {
-  min-height: calc(100vh - var(--titlebar-h));
+  zoom: var(--display-zoom, 1);
+  min-height: calc((100vh - var(--titlebar-h)) / var(--display-zoom, 1));
   background: var(--d-bg);
   color: var(--d-ink);
   font-family: var(--font-body);
@@ -142,8 +148,8 @@ html[data-display-tone="light"] body {
 .display-root--outside {
   position: relative;
   display: grid;
-  grid-template-rows: minmax(0, 58fr) minmax(0, 42fr);
-  height: calc(100vh - var(--titlebar-h));
+  grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+  height: calc((100vh - var(--titlebar-h)) / var(--display-zoom, 1));
   min-height: 0;
   overflow: clip;
 }
@@ -154,10 +160,12 @@ html[data-display-tone="light"] body {
   inset-inline-end: 4vw;
   z-index: 2;
   color: oklch(100% 0 none);
+  /* Ctrl + is for the runner names; the logo keeps its size so it never pushes a name onto a second line. */
+  zoom: calc(1 / var(--display-zoom, 1));
 }
 
 .display-root--outside > .display-brand .brand-mark {
-  width: clamp(276px, 24.15vw, 42.55vh);
+  width: clamp(200px, 17vw, 30vh);
   height: auto;
   aspect-ratio: 560 / 169;
 }
@@ -221,7 +229,6 @@ html[data-display-tone="light"] body {
   align-items: baseline;
   gap: 0.35em;
   min-width: 0;
-  padding-inline-end: 12vw;
   font-size: calc(var(--runner-name-scale, 1) * clamp(46px, 6.04vw, max(128px, min(6.63vw, 11.77vh))));
 }
 
@@ -257,15 +264,6 @@ html[data-display-tone="light"] body {
   font-size: clamp(20px, 1.6vw, max(34px, min(1.7708vw, 3.1481vh)));
 }
 
-.outside-band--next .display-runner {
-  font-size: clamp(32px, 3.91vw, max(84px, min(4.37vw, 7.76vh)));
-}
-
-.outside-band--next .display-runner-name {
-  color: var(--d-ink-2);
-  font-size: clamp(32px, 3.91vw, max(84px, min(4.37vw, 7.76vh)));
-}
-
 /*
  * The flash is the loudest moment on the public screens, on purpose: a record or
  * "Burgie gepakt" pulses between Apolloon blue and night blue inside a thick frame,
@@ -275,6 +273,8 @@ html[data-display-tone="light"] body {
  * Sizes follow the smaller of width and height so three lines always fit a tv.
  */
 .outside-record-flash {
+  /* Already as big as the screen allows; zooming in would push its lines off. */
+  zoom: calc(1 / var(--display-zoom, 1));
   position: fixed;
   inset: var(--titlebar-h) 0 0;
   z-index: 20;
@@ -387,7 +387,7 @@ html[data-display-tone="light"] body {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   gap: 1.6vh;
-  height: calc(100vh - var(--titlebar-h));
+  height: calc((100vh - var(--titlebar-h)) / var(--display-zoom, 1));
   padding: 2.2vh 2vw;
   overflow: clip;
   border-block-start: 0.6vh solid var(--apolloon-blue);
@@ -1245,7 +1245,7 @@ html[data-display-tone="light"] body {
   .display-root--inside,
   .display-root--competitions {
     height: auto;
-    min-height: calc(100vh - var(--titlebar-h));
+    min-height: calc((100vh - var(--titlebar-h)) / var(--display-zoom, 1));
     overflow: visible;
   }
 }

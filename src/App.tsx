@@ -6,6 +6,7 @@ import { clusterStatusKey } from './app/snapshot';
 import { useFailover } from './app/useFailover';
 import { setDocumentSurface } from './app/theme';
 import { AppShellFrame } from './components/Sidebar';
+import { useDesktopZoom } from './lib/zoom';
 import type { ClusterStatus } from './types';
 
 const selectNothing = () => ({});
@@ -21,6 +22,7 @@ export function AppRoot() {
   // A Wrapped card is saved as an image, so it shows nothing but the card.
   const cardRoute = pathname.startsWith('/wrapped/');
   const displayRoute = cardRoute || pathname.startsWith('/display/');
+  useDesktopZoom(displayRoute);
 
   React.useLayoutEffect(() => {
     setDocumentSurface(displayRoute ? 'display' : 'operator');
