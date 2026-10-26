@@ -27,4 +27,5 @@ export const emptyRace: RaceState = {
 
 export const defaultSettings: AppSettings = {
   publicRecordMode: 'day',
+  competitions: [],
 };

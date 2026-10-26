@@ -3,29 +3,33 @@ import type { Label } from '../../types';
 import { Icon } from '../Icon';
 import { compareLabels, labelKindTitle } from '../LabelBadge';
 import { ModalDialog } from '../ModalDialog';
-import { competitionKey } from './displaySettings';
+import { competitionKey } from '../../../shared/competitions';
 
 /** Tick the teams of one competition, then add it. */
 export function CompetitionPicker({
   labels,
   taken,
+  error,
   onCancel,
   onAdd,
 }: {
   labels: Label[];
   /** Keys of the competitions already on the screen. */
   taken: Set<string>;
+  /** Why the last add failed, for example when no laptop can save it. */
+  error: string | null;
   onCancel: () => void;
-  onAdd: (teams: Label[]) => void;
+  onAdd: (teams: Label[]) => Promise<void>;
 }) {
   const [picked, setPicked] = React.useState<string[]>([]);
+  const [saving, setSaving] = React.useState(false);
   const sorted = [...labels].sort(compareLabels);
   const groups = new Map<string, Label[]>();
   for (const label of sorted) {
     const title = labelKindTitle(label.kind);
     groups.set(title, [...(groups.get(title) ?? []), label]);
   }
-  const duplicate = taken.has(competitionKey(picked.map((id) => ({ id }))));
+  const duplicate = taken.has(competitionKey(picked));
   const toggle = (id: string) =>
     setPicked((current) => (current.includes(id) ? current.filter((other) => other !== id) : [...current, id]));
 
@@ -59,6 +63,11 @@ export function CompetitionPicker({
             </div>
           </div>
         ))}
+        {error && (
+          <p className="competition-picker__error" role="alert">
+            {error}
+          </p>
+        )}
         <div className="competition-picker__actions">
           <button type="button" className="inside-control-button" onClick={onCancel}>
             Annuleer
@@ -66,14 +75,19 @@ export function CompetitionPicker({
           <button
             type="button"
             className="inside-control-button is-primary"
-            disabled={picked.length < 2 || duplicate}
-            onClick={() => onAdd(sorted.filter((label) => picked.includes(label.id)))}
+            disabled={picked.length < 2 || duplicate || saving}
+            onClick={() => {
+              setSaving(true);
+              void onAdd(sorted.filter((label) => picked.includes(label.id))).finally(() => setSaving(false));
+            }}
           >
-            {picked.length < 2
-              ? 'Kies minstens 2 ploegen'
-              : duplicate
-                ? 'Deze competitie staat er al op'
-                : `Toevoegen met ${picked.length} ploegen`}
+            {saving
+              ? 'Opslaan...'
+              : picked.length < 2
+                ? 'Kies minstens 2 ploegen'
+                : duplicate
+                  ? 'Deze competitie staat er al op'
+                  : `Toevoegen met ${picked.length} ploegen`}
           </button>
         </div>
       </div>

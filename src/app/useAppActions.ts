@@ -153,6 +153,8 @@ export function useAppActions() {
       updatePublicRecordMode: action((publicRecordMode: PublicRecordMode) =>
         trpc.settings.updatePublicRecordMode.mutate({ publicRecordMode })
       ),
+      addCompetition: action((labelIds: string[]) => trpc.settings.addCompetition.mutate({ labelIds })),
+      removeCompetition: action((labelIds: string[]) => trpc.settings.removeCompetition.mutate({ labelIds })),
       createBackup: action(() => trpc.backups.create.mutate(), [clusterStatusKey, backupsKey]),
       clearRace: action(
         (options?: { runners?: boolean }) => trpc.race.clear.mutate(options),

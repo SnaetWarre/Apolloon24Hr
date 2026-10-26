@@ -1132,6 +1132,13 @@ html[data-display-tone="light"] body {
   background: var(--d-line);
 }
 
+.competition-picker__error {
+  margin: 18px 0 0;
+  color: var(--stop);
+  font-size: 15px;
+  font-weight: 600;
+}
+
 .competition-picker__actions {
   display: flex;
   justify-content: flex-end;

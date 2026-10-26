@@ -53,8 +53,12 @@ export type RaceEvent = z.infer<typeof raceEventSchema>;
 export const publicRecordModeSchema = z.enum(['off', 'day', 'two_hour', 'hour']);
 export type PublicRecordMode = z.infer<typeof publicRecordModeSchema>;
 
+/** The label ids of each competition on the Competitiescherm, in the order they were added. */
+const competitionSchema = z.array(z.string().min(1)).min(2);
+
 export const appSettingsSchema = z.object({
   publicRecordMode: publicRecordModeSchema,
+  competitions: z.array(competitionSchema),
 });
 export type AppSettings = z.infer<typeof appSettingsSchema>;
 
@@ -345,6 +349,10 @@ const optionalText = z
 
 export const publicRecordModeUpdateSchema = z.object({
   publicRecordMode: publicRecordModeSchema,
+});
+
+export const competitionInputSchema = z.object({
+  labelIds: competitionSchema.max(100),
 });
 
 export const runnerInputSchema = z.object({

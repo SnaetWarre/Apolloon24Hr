@@ -76,14 +76,17 @@ test('replaying the log on another database reproduces the leader exactly', asyn
   write(() => db.undoLastHandoff());
   write(() => db.createBurgieGepaktEvent(71_000));
   write(() => db.setPublicRecordMode('hour'));
+  const [first, second] = db.getLabels();
+  write(() => db.addCompetition([first.id, second.id]));
 
   const comparable = () => {
     const { revision: _revision, host: _host, ...snapshot } = appSnapshot();
     return snapshot;
   };
   const expected = comparable();
+  assert.deepEqual(expected.settings.competitions, [[first.id, second.id]]);
   const entries = db.getLogEntriesAfter(0)!;
-  assert.equal(entries.length, 9);
+  assert.equal(entries.length, 10);
 
   db.closeDb();
   fs.rmSync(dataPath, { recursive: true, force: true });

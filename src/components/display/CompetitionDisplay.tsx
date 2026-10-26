@@ -1,30 +1,45 @@
 import React from 'react';
-import { useAppData, useRaceHistory } from '../../app/index';
+import { useAppActions, useAppData, useRaceHistory } from '../../app/index';
+import { competitionKey, MAX_COMPETITIONS } from '../../../shared/competitions';
 import { useArrivals } from '../../lib/motion';
 import { buildRunnerRanking } from '../../lib/ranking';
 import { lapRunnerLabel } from '../../lib/runners';
 import { formatDurationMs } from '../../lib/time';
-import type { Label, LapRecord } from '../../types';
+import type { Label, LapRecord, LiveAppSnapshot } from '../../types';
 import { Icon } from '../Icon';
 import { CompetitionPicker } from './CompetitionPicker';
-import { DisplayBrand, DisplayTotals, PresentationSwitch, selectInsideDisplayData } from './displayParts';
-import {
-  competitionKey,
-  MAX_COMPETITIONS,
-  useDisplayCompetitions,
-  useDisplayPresentation,
-  useDisplayZoom,
-} from './displaySettings';
+import { DisplayBrand, DisplayTotals, PresentationSwitch } from './displayParts';
+import { useDisplayPresentation, useDisplayZoom } from './displaySettings';
 
 // The runners on the Competities screen.
 const COMPETITION_RANKING_LENGTH = 20;
 
+const selectCompetitionDisplayData = ({ runners, labels, race, settings }: LiveAppSnapshot) => ({
+  runners,
+  labels,
+  race,
+  competitions: settings.competitions,
+});
+
 export function CompetitionDisplay() {
-  const { runners, labels, race } = useAppData(selectInsideDisplayData);
+  const { runners, labels, race, competitions: competitionIds } = useAppData(selectCompetitionDisplayData);
+  const { addCompetition, removeCompetition } = useAppActions();
   const [presentation, setPresentation] = useDisplayPresentation('competitions', 'dark');
   const zoomStyle = useDisplayZoom('competitions');
-  const [competitions, setCompetitions] = useDisplayCompetitions(labels);
+  // The server keeps them, so every laptop in the group shows the same competitions.
+  const labelsById = new Map(labels.map((label) => [label.id, label]));
+  const competitions = competitionIds.map((ids) => ({
+    key: competitionKey(ids),
+    ids,
+    teams: ids.flatMap((id) => labelsById.get(id) ?? []),
+  }));
   const [picking, setPicking] = React.useState(false);
+  const [addError, setAddError] = React.useState<string | null>(null);
+  // A new dialog starts without the error of an earlier try.
+  const openPicker = () => {
+    setAddError(null);
+    setPicking(true);
+  };
   const { laps } = useRaceHistory({ scope: 'full' });
   const lapsByLabel = countLapsByLabel(laps);
   const ranking = buildRunnerRanking(runners, laps, 'laps', null).slice(0, COMPETITION_RANKING_LENGTH);
@@ -43,26 +58,23 @@ export function CompetitionDisplay() {
           <div
             className="competitions-list"
             // Each competition gets height for its teams plus its title.
-            style={{ gridTemplateRows: competitions.map((teams) => `minmax(0, ${teams.length + 1.4}fr)`).join(' ') }}
+            style={{
+              gridTemplateRows: competitions.map(({ teams }) => `minmax(0, ${teams.length + 1.4}fr)`).join(' '),
+            }}
           >
-            {competitions.map((teams, index) => (
+            {competitions.map(({ key, ids, teams }) => (
               <CompetitionBars
-                key={competitionKey(teams)}
+                key={key}
                 teams={teams}
                 lapsByLabel={lapsByLabel}
-                onRemove={() => setCompetitions(competitions.filter((_, other) => other !== index))}
+                onRemove={() => void removeCompetition(ids).catch(() => undefined)}
               />
             ))}
           </div>
         ) : (
           <div className="competitions-empty">
             <p>Kies welke ploegen tegen elkaar strijden, bijvoorbeeld 1ste, 2de en 3de jaar.</p>
-            <button
-              type="button"
-              className="competitions-empty__add"
-              onClick={() => setPicking(true)}
-              disabled={!canAdd}
-            >
+            <button type="button" className="competitions-empty__add" onClick={openPicker} disabled={!canAdd}>
               <Icon name="plus" size={20} />
               Competitie toevoegen
             </button>
@@ -99,7 +111,7 @@ export function CompetitionDisplay() {
           <button
             type="button"
             className="inside-control-button"
-            onClick={() => setPicking(true)}
+            onClick={openPicker}
             disabled={!canAdd}
             title={canAdd ? undefined : `Er passen ${MAX_COMPETITIONS} competities op dit scherm`}
           >
@@ -112,12 +124,15 @@ export function CompetitionDisplay() {
       {picking && (
         <CompetitionPicker
           labels={labels}
-          taken={new Set(competitions.map(competitionKey))}
+          taken={new Set(competitions.map(({ key }) => key))}
+          error={addError}
           onCancel={() => setPicking(false)}
-          onAdd={(teams) => {
-            setCompetitions([...competitions, teams]);
-            setPicking(false);
-          }}
+          onAdd={(teams) =>
+            addCompetition(teams.map((team) => team.id)).then(
+              () => setPicking(false),
+              (error: unknown) => setAddError(error instanceof Error ? error.message : 'Toevoegen mislukt')
+            )
+          }
         />
       )}
     </main>
