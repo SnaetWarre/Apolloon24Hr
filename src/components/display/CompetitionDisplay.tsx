@@ -28,11 +28,18 @@ export function CompetitionDisplay() {
   const zoomStyle = useDisplayZoom('competitions');
   // The server keeps them, so every laptop in the group shows the same competitions.
   const labelsById = new Map(labels.map((label) => [label.id, label]));
-  const competitions = competitionIds
-    .map((ids) => ({ key: competitionKey(ids), ids, teams: ids.flatMap((id) => labelsById.get(id) ?? []) }))
-    .filter(({ teams }) => teams.length >= 2);
+  const competitions = competitionIds.map((ids) => ({
+    key: competitionKey(ids),
+    ids,
+    teams: ids.flatMap((id) => labelsById.get(id) ?? []),
+  }));
   const [picking, setPicking] = React.useState(false);
   const [addError, setAddError] = React.useState<string | null>(null);
+  // An answer that comes after Annuleer must not show in the next dialog.
+  const openPicker = () => {
+    setAddError(null);
+    setPicking(true);
+  };
   const { laps } = useRaceHistory({ scope: 'full' });
   const lapsByLabel = countLapsByLabel(laps);
   const ranking = buildRunnerRanking(runners, laps, 'laps', null).slice(0, COMPETITION_RANKING_LENGTH);
@@ -67,12 +74,7 @@ export function CompetitionDisplay() {
         ) : (
           <div className="competitions-empty">
             <p>Kies welke ploegen tegen elkaar strijden, bijvoorbeeld 1ste, 2de en 3de jaar.</p>
-            <button
-              type="button"
-              className="competitions-empty__add"
-              onClick={() => setPicking(true)}
-              disabled={!canAdd}
-            >
+            <button type="button" className="competitions-empty__add" onClick={openPicker} disabled={!canAdd}>
               <Icon name="plus" size={20} />
               Competitie toevoegen
             </button>
@@ -109,7 +111,7 @@ export function CompetitionDisplay() {
           <button
             type="button"
             className="inside-control-button"
-            onClick={() => setPicking(true)}
+            onClick={openPicker}
             disabled={!canAdd}
             title={canAdd ? undefined : `Er passen ${MAX_COMPETITIONS} competities op dit scherm`}
           >
@@ -124,16 +126,10 @@ export function CompetitionDisplay() {
           labels={labels}
           taken={new Set(competitions.map(({ key }) => key))}
           error={addError}
-          onCancel={() => {
-            setPicking(false);
-            setAddError(null);
-          }}
+          onCancel={() => setPicking(false)}
           onAdd={(teams) =>
             addCompetition(teams.map((team) => team.id)).then(
-              () => {
-                setPicking(false);
-                setAddError(null);
-              },
+              () => setPicking(false),
               (error: unknown) => setAddError(error instanceof Error ? error.message : 'Toevoegen mislukt')
             )
           }

@@ -67,19 +67,31 @@ export function setPublicRecordMode(mode: PublicRecordMode): AppSettings {
  * A deleted label drops out, and so does a competition left with one team.
  */
 function getCompetitions(): string[][] {
-  const parsed = appSettingsSchema.shape.competitions.safeParse(JSON.parse(getSetting('competitions_json') || '[]'));
+  let stored: unknown = [];
+  try {
+    stored = JSON.parse(getSetting('competitions_json') || '[]');
+  } catch {
+    // A damaged value leaves the screen empty instead of breaking every screen.
+  }
+  const parsed = appSettingsSchema.shape.competitions.safeParse(stored);
   if (!parsed.success) return [];
-  const labelIds = new Set(all<{ id: string }>('SELECT id FROM labels').map((label) => label.id));
   const keys = new Set<string>();
   const competitions: string[][] = [];
+  const existing = existingTeams();
   for (const competition of parsed.data) {
-    const teams = [...new Set(competition)].filter((id) => labelIds.has(id));
+    const teams = existing(competition);
     const key = competitionKey(teams);
     if (teams.length < 2 || keys.has(key)) continue;
     keys.add(key);
     competitions.push(teams);
   }
   return competitions.slice(0, MAX_COMPETITIONS);
+}
+
+/** Leaves out labels that were deleted, and a label picked twice. */
+function existingTeams() {
+  const labelIds = new Set(all<{ id: string }>('SELECT id FROM labels').map((label) => label.id));
+  return (competition: string[]) => [...new Set(competition)].filter((id) => labelIds.has(id));
 }
 
 function setCompetitions(competitions: string[][]): AppSettings {
@@ -89,12 +101,14 @@ function setCompetitions(competitions: string[][]): AppSettings {
 
 export function addCompetition(labelIds: string[]): AppSettings {
   const competitions = getCompetitions();
-  const key = competitionKey(labelIds);
+  const teams = existingTeams()(labelIds);
+  if (teams.length < 2) throw new Error('Een competitie heeft minstens twee bestaande ploegen nodig.');
+  const key = competitionKey(teams);
   if (competitions.some((competition) => competitionKey(competition) === key)) return getAppSettings();
   if (competitions.length >= MAX_COMPETITIONS) {
     throw new Error(`Er passen ${MAX_COMPETITIONS} competities op het Competitiescherm.`);
   }
-  return setCompetitions([...competitions, [...new Set(labelIds)]]);
+  return setCompetitions([...competitions, teams]);
 }
 
 export function removeCompetition(labelIds: string[]): AppSettings {

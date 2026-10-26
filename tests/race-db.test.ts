@@ -581,6 +581,40 @@ test('label names are unique regardless of capitalization', async () => {
   }
 });
 
+test('competitions keep each set of teams once, at most six, and lose deleted labels', async () => {
+  fs.rmSync(dataPath, { recursive: true, force: true });
+  const db = await import('../server/db.ts');
+
+  try {
+    await db.initDb();
+    const [a, b, c, d] = ['A', 'B', 'C', 'D'].map((name) => db.createLabel({ name: `Ploeg ${name}` }).id);
+    db.addCompetition([a, b]);
+    db.addCompetition([b, a]);
+    assert.deepEqual(db.getAppSettings().competitions, [[a, b]]);
+    db.addCompetition([a, b, c]);
+    db.deleteLabel(c);
+    assert.deepEqual(
+      db.getAppSettings().competitions,
+      [[a, b]],
+      'a competition left with A and B is the first one again'
+    );
+    assert.throws(() => db.addCompetition([a, c]), /minstens twee/);
+
+    const others = db
+      .getLabels()
+      .map((label) => label.id)
+      .filter((id) => id !== a && id !== b && id !== d);
+    for (const id of others.slice(0, 5)) db.addCompetition([d, id]);
+    assert.equal(db.getAppSettings().competitions.length, 6);
+    assert.throws(() => db.addCompetition([a, d]), /Er passen 6/);
+    db.removeCompetition([b, a]);
+    assert.equal(db.getAppSettings().competitions.length, 5);
+  } finally {
+    db.closeDb();
+    fs.rmSync(dataPath, { recursive: true, force: true });
+  }
+});
+
 test('operational SQLite access paths stay indexed and runner lookups agree', async () => {
   fs.rmSync(dataPath, { recursive: true, force: true });
   const db = await import('../server/db.ts');
