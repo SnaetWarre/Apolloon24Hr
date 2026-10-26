@@ -14,7 +14,7 @@ try {
   const startButton = page.getByRole('button', { name: /^Start / });
   await startButton.waitFor();
   const firstName = (await startButton.innerText()).split('\n')[0].trim();
-  await run.proof(page, 'timing-before-start');
+  await run.proof(page, 'timing-before-start', { mark: [startButton] });
 
   run.note(`press Space on /timing (button reads "${firstName}")`);
   await page.keyboard.press('Space');
@@ -30,7 +30,9 @@ try {
   await page.keyboard.press('Space');
   const prompt = page.getByRole('dialog', { name: 'Toch afklokken?', exact: true });
   await prompt.waitFor();
-  await run.proof(page, 'timing-short-lap-question');
+  await run.proof(page, 'timing-short-lap-question', {
+    mark: [prompt.getByRole('button', { name: 'Toch afklokken', exact: true })],
+  });
   await prompt.getByRole('button', { name: 'Toch afklokken', exact: true }).click();
   await page.getByText(/^Ronde opgeslagen\./).waitFor();
   await run.proof(page, 'timing-after-handoff');

@@ -84,8 +84,12 @@ export async function openRun(runName = process.env.APOLLOON_VERIFY_RUN) {
       fs.appendFileSync(notes, `${new Date().toISOString()} ${line}\n`);
       console.log(line);
     },
-    /** Saves NN-name.png, NN-name.aria.yml, and NN-name.state.json for the given page. */
-    async proof(page, name, { laptop = 0, fullPage = false } = {}) {
+    /**
+     * Saves NN-name.png, NN-name.aria.yml, and NN-name.state.json for the given page. With `mark`, a list
+     * of locators or { x, y, width, height } boxes, it also saves NN-name.marked.png with a numbered red
+     * ring around each one, in list order, for the PR's before and after table.
+     */
+    async proof(page, name, { laptop = 0, fullPage = false, mark = [] } = {}) {
       proofCount += 1;
       const base = path.join(state.evidenceDir, `${String(proofCount).padStart(2, '0')}-${name}`);
       // Dialogs fade in; wait for finite animations so the screenshot shows the settled screen.
@@ -107,6 +111,7 @@ export async function openRun(runName = process.env.APOLLOON_VERIFY_RUN) {
       fs.writeFileSync(`${base}.aria.yml`, `# ${page.url()}\n${await page.locator('body').ariaSnapshot()}\n`);
       const appState = await run.api('/api/state', laptop);
       fs.writeFileSync(`${base}.state.json`, `${JSON.stringify(appState, null, 2)}\n`);
+      if (mark.length) await markScreenshot(page, `${base}.marked.png`, mark, fullPage, run.note);
       run.note(`proof ${path.basename(base)} at ${page.url()}`);
       return base;
     },
@@ -159,6 +164,43 @@ export async function openRun(runName = process.env.APOLLOON_VERIFY_RUN) {
     `open run=${state.run} commit=${state.commit.slice(0, 7)} laptops=${state.laptops.map((l) => l.url).join(',')}`
   );
   return run;
+}
+
+// The rings are page elements that live only for this one screenshot. They sit in a popover, because only
+// the top layer draws above an open dialog. Red with a white edge reads on both themes; the number sits
+// outside the ring so it never covers what it points at.
+async function markScreenshot(page, file, mark, fullPage, note) {
+  if (fullPage) throw new Error('mark draws on the visible screen; leave fullPage off');
+  const boxes = [];
+  for (const [index, target] of mark.entries()) {
+    // On the base run the new element is often missing; skip it instead of waiting for it.
+    const isLocator = typeof target.boundingBox === 'function';
+    const box = isLocator ? (await target.count()) && (await target.boundingBox()) : target;
+    if (box) boxes.push({ ...box, number: index + 1 });
+    else note(`mark ${index + 1} in ${path.basename(file)}: not on screen, no ring drawn`);
+  }
+  await page.evaluate((rings) => {
+    const layer = document.createElement('div');
+    layer.id = 'verify-marks';
+    layer.popover = 'manual';
+    layer.style.cssText =
+      'position:fixed;inset:0;width:auto;height:auto;margin:0;padding:0;border:0;background:none;overflow:visible;pointer-events:none';
+    for (const ring of rings) {
+      const pad = 6;
+      const left = ring.x - pad;
+      const top = ring.y - pad;
+      const outline = document.createElement('div');
+      outline.style.cssText = `position:absolute;left:${left}px;top:${top}px;width:${ring.width + 2 * pad}px;height:${ring.height + 2 * pad}px;border:4px solid #e0102f;border-radius:12px;box-sizing:border-box;box-shadow:0 0 0 2px #fff,inset 0 0 0 2px #fff`;
+      const badge = document.createElement('div');
+      badge.textContent = String(ring.number);
+      badge.style.cssText = `position:absolute;left:${Math.max(0, left - 14)}px;top:${Math.max(0, top - 14)}px;width:28px;height:28px;border-radius:50%;background:#e0102f;color:#fff;font:700 16px/28px system-ui,sans-serif;text-align:center;box-shadow:0 0 0 2px #fff`;
+      layer.append(outline, badge);
+    }
+    document.body.append(layer);
+    layer.showPopover();
+  }, boxes);
+  await page.screenshot({ path: file });
+  await page.evaluate(() => document.getElementById('verify-marks')?.remove());
 }
 
 function readRun(runName) {
