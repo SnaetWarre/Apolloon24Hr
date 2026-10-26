@@ -129,7 +129,7 @@ Evidence for a run goes to `.tmp-verify-evidence/<run>/` (gitignored by `/.tmp-*
 - `NN-name.aria.yml`, the page's ARIA tree with its URL on the first line.
 - `NN-name.state.json`, `/api/state` from the server at that moment.
 
-`run.proof(page, name, { mark: [locator, { x, y, width, height }] })` also saves `NN-name.marked.png`: the same screen with a numbered red ring around each locator or box, in list order. The rings sit in the top layer, so they show over open dialogs too. A locator that matches nothing draws no ring and adds a line to `actions.log`. It works on the visible screen only, so leave `fullPage` off. Use it for screenshots a person will look at, such as a PR's before and after table.
+`run.proof(page, name, { mark: [locator, { x, y, width, height }] })` also saves `NN-name.marked.png`: the same screen with a numbered red ring around each locator or box, in list order. The rings sit in the top layer, so they show over open dialogs too. A locator rings its first visible match; one that matches nothing visible draws no ring and adds a line to `actions.log`. It works on the visible screen only, so leave `fullPage` off. Use it for screenshots a person will look at, such as a PR's before and after table.
 
 `actions.log` records what was done and when, including uncaught page errors.
 

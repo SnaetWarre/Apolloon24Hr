@@ -23,7 +23,11 @@ export const ELECTRON_USER_AGENT = 'Mozilla/5.0 Chrome/140.0 Electron/44.3.0 Saf
 export async function openRun(runName = process.env.APOLLOON_VERIFY_RUN) {
   const state = readRun(runName);
   const browser = await chromium.launch({ headless: true });
-  let proofCount = fs.readdirSync(state.evidenceDir).filter((name) => name.endsWith('.png')).length;
+  // Continue after the highest NN- already in the folder; one proof can write several .png files.
+  let proofCount = Math.max(
+    0,
+    ...fs.readdirSync(state.evidenceDir).map((file) => Number(/^(\d+)-/.exec(file)?.[1] ?? 0))
+  );
   const notes = path.join(state.evidenceDir, 'actions.log');
   const cdpConnections = [];
   const filmStarts = new WeakMap();
@@ -92,6 +96,10 @@ export async function openRun(runName = process.env.APOLLOON_VERIFY_RUN) {
     async proof(page, name, { laptop = 0, fullPage = false, mark: marks = [] } = {}) {
       const mark = [marks].flat();
       if (fullPage && mark.length) throw new Error('mark draws on the visible screen; leave fullPage off');
+      const wrong = mark.find((target) => !isBox(target) && typeof target?.evaluate !== 'function');
+      if (wrong !== undefined) {
+        throw new Error(`mark takes locators, element handles, or { x, y, width, height } boxes, not ${wrong}`);
+      }
       proofCount += 1;
       const base = path.join(state.evidenceDir, `${String(proofCount).padStart(2, '0')}-${name}`);
       // Dialogs fade in; wait for finite animations so the screenshot shows the settled screen.
@@ -112,7 +120,11 @@ export async function openRun(runName = process.env.APOLLOON_VERIFY_RUN) {
       // Measure the rings first, so the plain and the marked screenshot are taken back to back.
       const rings = mark.length ? await findRings(page, mark, name, run.note) : null;
       await page.screenshot({ path: `${base}.png`, fullPage });
-      if (rings) await drawRings(page, `${base}.marked.png`, rings);
+      if (rings) {
+        await drawRings(page, `${base}.marked.png`, rings).catch((error) =>
+          run.note(`proof ${name}: no marked screenshot, ${error.message}`)
+        );
+      }
       fs.writeFileSync(`${base}.aria.yml`, `# ${page.url()}\n${await page.locator('body').ariaSnapshot()}\n`);
       const appState = await run.api('/api/state', laptop);
       fs.writeFileSync(`${base}.state.json`, `${JSON.stringify(appState, null, 2)}\n`);
@@ -170,15 +182,27 @@ export async function openRun(runName = process.env.APOLLOON_VERIFY_RUN) {
   return run;
 }
 
+const isBox = (target) => Number.isFinite(target?.x) && Number.isFinite(target?.width);
+
 // On the base run the new element is often missing; skip it instead of waiting for it.
 async function findRings(page, mark, name, note) {
-  // A page from run.electronPage() has no fixed viewport.
-  const screen = page.viewportSize() ?? (await page.evaluate(() => ({ width: innerWidth, height: innerHeight })));
+  const screen = await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
   const boxes = await Promise.all(
     mark.map(async (target) => {
-      if (typeof target.boundingBox !== 'function') return target;
-      const element = typeof target.first === 'function' ? target.first() : target;
-      return element.boundingBox({ timeout: 1_000 }).catch(() => null);
+      if (isBox(target)) return target;
+      // The first visible match, measured in the same CSS pixels the rings are drawn in (the desktop
+      // window can be zoomed).
+      const element = typeof target.filter === 'function' ? target.filter({ visible: true }).first() : target;
+      return element
+        .evaluate(
+          (node) => {
+            const { x, y, width, height } = node.getBoundingClientRect();
+            return width || height ? { x, y, width, height } : null;
+          },
+          null,
+          { timeout: 1_000 }
+        )
+        .catch(() => null);
     })
   );
   return boxes.flatMap((box, index) => {
@@ -217,7 +241,9 @@ async function drawRings(page, file, rings) {
     }, rings);
     await page.screenshot({ path: file });
   } finally {
-    await page.evaluate(() => document.querySelectorAll('.verify-marks').forEach((layer) => layer.remove()));
+    await page
+      .evaluate(() => document.querySelectorAll('.verify-marks').forEach((layer) => layer.remove()))
+      .catch(() => {});
   }
 }
 

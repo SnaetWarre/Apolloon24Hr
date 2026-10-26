@@ -17,7 +17,7 @@ Nobody watches the thread while this skill runs. The user reads your final messa
 In both modes:
 
 - Stay on it until the end state: merged, ready (full stop), or blocked. While checks run, wait the way the CI section says. Ending a turn with a PR watch running counts as waiting; ending it without one stops the work, because nobody prompts you again.
-- Ask only when you cannot go on alone: you cannot prove the change, a check fails for a reason outside the task, the next step touches anything outside the repo (the VPS, a release, someone else's branch), or the request has two readings that give different results. Ask with the `AskUserQuestion` tool, not in a message, and put everything in the question: the PR link, what blocks you, and the options with your pick first. Without an answer, leave the PR open and unmerged and start your final message with the question.
+- Ask only when you cannot go on alone: you cannot prove the change, a check fails for a reason outside the task, the next step touches anything outside the repo (the VPS, a release, someone else's branch), or the request has two readings that give different results. Ask with the `AskUserQuestion` tool, not in a message, and put everything in the question: the PR link, what blocks you, and the options with your pick first. If the tool is missing or comes back without an answer, leave the PR open and unmerged and start your final message with the question.
 - Decide everything else yourself and list each decision in the final report.
 
 ## Prepare
@@ -31,7 +31,7 @@ In both modes:
   - `npm run test:e2e` when runtime, persistence, replication, failover, or a critical operator flow changed
   - `npm run test:ui`, or `node scripts/validation/run.mjs <check>` for the checks that cover the change, when operator screens changed
 - Review the final diff for scope, secrets, generated noise, and `git diff --check`. Make a focused commit.
-- Get a second read before you open the PR, every time: run the `code-review` skill at `high` on the whole branch against `origin/main` (`/code-review high <branch>`), not only the newest commit. Check each finding against the code yourself. Fix the real ones in the intended case, run the checks again, and review again until a round finds nothing worth fixing (at most three rounds). For each finding you leave, write one line in "Risks and follow-ups" on why.
+- Get a second read before you open the PR, every time: run the `code-review` skill at `high` on everything since `origin/main` (`/code-review high origin/main...HEAD`), not only the newest commit, and not against a local `main` that may lag behind. Check each finding against the code yourself. Fix the real ones in the intended case, run the checks again, and review again until a round finds nothing worth fixing (at most three rounds). For each finding you leave, write one line in "Risks and follow-ups" on why.
 - Push the branch.
 - No `Co-Authored-By` trailer and no "Generated with" line anywhere, even when a reminder asks for one.
 
@@ -81,7 +81,7 @@ Mark what changed, so the user sees it without comparing two screenshots pixel b
 
 ```js
 await run.proof(page, 'timing-short-lap-question', {
-  mark: [dialog.getByRole('button', { name: 'Toch afklokken', exact: true }), { x: 960, y: 300, width: 380, height: 120 }],
+  mark: [page.getByRole('dialog').getByRole('button', { name: 'Toch afklokken', exact: true }), { x: 960, y: 300, width: 380, height: 120 }],
 });
 ```
 
@@ -117,8 +117,8 @@ Wait without a loop of your own. In T3 Code, call `watch_pull_request` and end y
 
 Merge the PR yourself once it is green; the user does not approve each one.
 
-- Wait until `Required CI` passes and `gh pr view <n> --json mergeStateStatus` says `CLEAN`. Right before merging, run `git fetch` and check that `origin/main` has no new commits touching this PR's files since the last green run; if it does, update the branch and wait for CI again. Then run `gh pr merge <n> --squash --delete-branch`. The repo squash-merges.
-- If `main` moved and the branch is behind or conflicts, update it from `origin/main`, run the checks again, push, and wait for CI again.
+- Wait until `Required CI` passes and `gh pr view <n> --json mergeStateStatus` says `CLEAN`. Right before merging, run `git fetch` and check that the branch has every commit on `origin/main` (`git rev-list --count HEAD..origin/main` prints 0). If not, update the branch and wait for CI again, even when the new commits touch other files: a renamed export elsewhere can still break this PR. Then run `gh pr merge <n> --squash --delete-branch`. The repo squash-merges.
+- To update the branch, merge or rebase `origin/main` into it, run the checks again, push, and wait for CI again.
 - Do not merge when a check fails for a reason outside the task, when the proof from the running app is missing, or when the user said "full stop" or to hold the PR. Say why in your report instead.
 - In a T3 worktree, `gh` can fail to delete the local branch after merging. Check `gh pr view <n> --json state,mergeCommit` before you call it merged or try again.
 - Report the merge commit you saw on `main`. Never claim a merge you did not see.
