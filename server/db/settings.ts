@@ -112,7 +112,8 @@ export function addCompetition(labelIds: string[]): AppSettings {
 }
 
 export function removeCompetition(labelIds: string[]): AppSettings {
-  const key = competitionKey(labelIds);
+  // A screen that has not seen a label deletion yet still sends the deleted id.
+  const key = competitionKey(existingTeams()(labelIds));
   return setCompetitions(getCompetitions().filter((competition) => competitionKey(competition) !== key));
 }
 

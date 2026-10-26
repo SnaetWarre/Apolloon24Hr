@@ -599,6 +599,9 @@ test('competitions keep each set of teams once, at most six, and lose deleted la
       'a competition left with A and B is the first one again'
     );
     assert.throws(() => db.addCompetition([a, c]), /minstens twee/);
+    db.removeCompetition([a, b, c]);
+    assert.deepEqual(db.getAppSettings().competitions, []);
+    db.addCompetition([a, b]);
 
     const others = db
       .getLabels()
