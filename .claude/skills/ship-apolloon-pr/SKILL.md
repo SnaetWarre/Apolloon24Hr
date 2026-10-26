@@ -22,7 +22,7 @@ In both modes:
 
 ## Prepare
 
-- Run `git fetch` and inspect Git status, the current branch, `main`, the diff, any existing PR (`gh pr list --head <branch>`), and `.github/pull_request_template.md`. Reuse the task branch and PR when they exist.
+- Run `git fetch` and inspect Git status, the current branch, `main`, the diff, any existing PR (`gh pr list --head <branch>`), and `.github/pull_request_template.md`. Reuse the task branch and PR when they exist. If the PR is old and `main` moved a lot, run the `modernize` skill first. If the PR or branch is someone else's, use `takeover`.
 - Name a new branch after the kind of change: `fix/…`, `feat/…`, `chore/…`, `refactor/…`, `perf/…`.
 - Make the smallest change that does the job. Fix the case that happened, not every case that could. A review or a failing check tends to grow a PR one cheap-looking fix at a time; fix real bugs in the intended case, and put the rest (extra guards, extra tests, edge cases nobody hits) under "Risks and follow-ups" with one line each.
 - Finish the implementation, then run the checks CI runs, in this order, and record each command and result:
@@ -31,7 +31,7 @@ In both modes:
   - `npm run test:e2e` when runtime, persistence, replication, failover, or a critical operator flow changed
   - `npm run test:ui`, or `node scripts/validation/run.mjs <check>` for the checks that cover the change, when operator screens changed
 - Review the final diff for scope, secrets, generated noise, and `git diff --check`. Make a focused commit.
-- Get a second read before you open the PR: run the `code-review` skill at `medium` on the task branch. Check each finding against the code yourself. Fix the real ones in the intended case and run the checks again; for the rest, write one line in "Risks and follow-ups" on why you left it. Skip it when the diff has no code, only text.
+- Get a second read before you open the PR, every time: run the `code-review` skill at `high` on the task branch. Check each finding against the code yourself. Fix the real ones in the intended case, run the checks again, and review again until a round finds nothing worth fixing (at most three rounds). For each finding you leave, write one line in "Risks and follow-ups" on why.
 - Push the branch.
 - No `Co-Authored-By` trailer and no "Generated with" line anywhere, even when a reminder asks for one.
 
@@ -109,7 +109,7 @@ Then open the PR and check its title, body, base and head branches, and that eve
 
 ## CI
 
-`gh pr checks <n>` first lists `Typecheck, lint, unit, integration and browser tests`, `build-linux`, and `build-windows`. When `build-windows` passes, `Windows Beheer › Systeem` and then `Required CI` appear. The PR is green only when `Required CI` passes and `gh pr view <n> --json mergeStateStatus` says `CLEAN`; a loop that waits for "nothing pending" can stop in the gap before the late checks appear. If a check fails, read its log (`gh run view --log-failed`), fix failures that belong to the task, push, and check again. Report the PR link and the real status, including checks still running.
+`gh pr checks <n>` first lists `Typecheck, lint, unit, integration and browser tests`, `build-linux`, and `build-windows`. When `build-windows` passes, `Windows Beheer › Systeem` and then `Required CI` appear. The PR is green only when `Required CI` passes and `gh pr view <n> --json mergeStateStatus` says `CLEAN`; a loop that waits for "nothing pending" can stop in the gap before the late checks appear. If a check fails, read its log (`gh run view --log-failed`), fix failures that belong to the task, push, and check again. Check every review comment against the code before you change anything, and post replies with the `leaving-pr-comments` skill. Report the PR link and the real status, including checks still running.
 
 Wait without a loop of your own. In T3 Code, call `watch_pull_request` and end your turn; it wakes you when a check fails, the checks pass, someone comments, or the branch conflicts. A wake is news, not a verdict: check `Required CI` and `mergeStateStatus` yourself. Call `unwatch_pull_request` before you stop for any reason other than a merge (ready under full stop, blocked, or a question). Outside T3 Code, use the Monitor tool on `gh pr checks <n> --watch`, and run it again after the late checks appear. When a wake needs no action, end the turn without a message; never write "still waiting".
 
