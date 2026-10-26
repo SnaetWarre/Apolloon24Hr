@@ -20,8 +20,17 @@ const CHECKS = [
 const discoveryPort = 20_000 + (process.pid % 20_000);
 
 // `node scripts/validation/run.mjs failover-ui` runs only the named checks.
-const selected = process.argv.slice(2);
-for (const check of CHECKS.filter((candidate) => !selected.length || selected.includes(candidate.name))) {
+// `--shard=1/2` runs every second check, starting with the first, so CI can split them over machines.
+const args = process.argv.slice(2);
+const shard = args.find((arg) => arg.startsWith('--shard='));
+const [shardIndex, shardCount] = shard ? shard.slice('--shard='.length).split('/').map(Number) : [1, 1];
+const selected = args.filter((arg) => arg !== shard);
+const checks = CHECKS.filter((candidate, index) => index % shardCount === shardIndex - 1).filter(
+  (candidate) => !selected.length || selected.includes(candidate.name)
+);
+// A typo in a name or shard must not pass by running nothing.
+if (!checks.length) throw new Error(`No browser checks match: ${args.join(' ')}`);
+for (const check of checks) {
   const laptops = [];
   try {
     for (let index = 0; index < check.laptops; index += 1) {

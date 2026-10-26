@@ -1,20 +1,33 @@
 name: Build App
 
 # Pull requests verify installers; tagged releases distribute them.
+# The slow parts run side by side on their own machines; "All checks" waits for all of them.
 
 on:
   pull_request:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+# A new push to a pull request stops the run for the old commit.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 env:
   electron_config_cache: ${{ github.workspace }}/.cache/electron
   ELECTRON_BUILDER_CACHE: ${{ github.workspace }}/.cache/electron-builder
 
 jobs:
-  tests:
-    name: Typecheck, lint, unit, integration and browser tests
+  checks:
+    name: Typecheck, lint and unit tests
     runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    # The test jobs never start Electron, so they skip its download; only the build jobs package it.
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -26,12 +39,62 @@ jobs:
       - run: npm run lint
       - run: npm run format:check
       - run: npm test
+
+  integration:
+    name: Integration tests
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --include=optional
       - run: npm run test:e2e
+
+  browser:
+    name: Browser checks (${{ matrix.shard }}/2)
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --include=optional
+      - run: npm run build
       - run: npx playwright install --with-deps chromium
-      - run: npm run test:ui
+      - run: npm run test:ui -- --shard=${{ matrix.shard }}/2
+
+  # The release runs these on Windows too; find a Windows-only failure here first.
+  windows-tests:
+    name: Unit tests on Windows
+    runs-on: windows-latest
+    timeout-minutes: 15
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --include=optional
+      - run: npm test
 
   build-windows:
     runs-on: windows-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
 
@@ -54,60 +117,23 @@ jobs:
       - name: Install dependencies
         run: npm ci --include=optional
 
-      # The release runs these on Windows too; find a Windows-only failure here first.
-      - name: Run regression tests
-        run: npm test
-
       - name: Build Windows app
         run: npm run electron:build:win
 
       - name: Smoke test Windows package
         run: node scripts/package-smoke.mjs
 
-      - name: Check the installer opens and closes the firewall
-        run: node scripts/package-firewall.mjs
-
-      - name: Keep the unpacked app for the Windows system check
-        uses: actions/upload-artifact@v7
-        with:
-          name: windows-unpacked
-          path: release/win-unpacked
-          retention-days: 1
-          if-no-files-found: error
-
-  # The Windows-only paths: Beheer › Systeem reads the network profile through PowerShell
-  # while the packaged app leads a second laptop.
-  windows-system-ui:
-    name: Windows Beheer › Systeem
-    needs: build-windows
-    runs-on: windows-latest
-    timeout-minutes: 15
-    env:
-      # Only Playwright is needed here; the packaged app brings its own Electron.
-      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: '24'
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci --include=optional
-
-      - name: Get the unpacked app
-        uses: actions/download-artifact@v8
-        with:
-          name: windows-unpacked
-          path: release/win-unpacked
-
+      # The Windows-only paths: Beheer › Systeem reads the network profile through PowerShell
+      # while the packaged app leads a second laptop.
       - name: Open Beheer › Systeem in the packaged app
         run: node scripts/package-system-ui.mjs
 
+      - name: Check the installer opens and closes the firewall
+        run: node scripts/package-firewall.mjs
+
   build-linux:
     runs-on: ubuntu-26.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
 
@@ -136,13 +162,15 @@ jobs:
       - name: Smoke test Linux AppImage
         run: xvfb-run -a node scripts/package-smoke.mjs
 
-  required-ci:
-    name: Required CI
+  # The one check the main branch requires, so jobs can be added or renamed without touching
+  # the repository rules. It runs even when a job fails, and fails with it.
+  all-checks:
+    name: All checks
     if: always()
-    needs: [tests, build-windows, windows-system-ui, build-linux]
+    needs: [checks, integration, browser, windows-tests, build-windows, build-linux]
     runs-on: ubuntu-26.04
+    timeout-minutes: 2
     steps:
-      - name: Require all checks to pass
-        env:
-          RESULTS: ${{ join(needs.*.result, ',') }}
-        run: test "$RESULTS" = 'success,success,success,success'
+      - name: Fail when a job failed, was cancelled or was skipped
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped')
+        run: exit 1

@@ -62,7 +62,7 @@ Rules to put in every thread prompt (the thread runs in another worktree and doe
 - No attribution in commits or PRs. User-facing text is Dutch. No left accent borders.
 - Headless GUI only; `unset ELECTRON_RUN_AS_NODE` before launching Electron by hand; never `pkill -f`.
 - Call `link_pull_request` after creating the PR.
-- You are authorized to merge: once the `Required CI` check succeeds (it appears only after `build-windows` finishes) and `mergeStateStatus` is `CLEAN`, run `gh pr merge --squash --delete-branch`. On conflicts, rebase on `origin/main`, re-run the checks, and wait for CI again.
+- You are authorized to merge: once the `All checks` check succeeds and `mergeStateStatus` is `CLEAN`, run `gh pr merge --squash --delete-branch`. On conflicts, rebase on `origin/main`, re-run the checks, and wait for CI again.
 
 When two fixes touch the same file, say so in both prompts so each keeps its diff focused.
 
