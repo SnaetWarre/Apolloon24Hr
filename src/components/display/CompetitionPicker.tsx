@@ -3,18 +3,21 @@ import type { Label } from '../../types';
 import { Icon } from '../Icon';
 import { compareLabels, labelKindTitle } from '../LabelBadge';
 import { ModalDialog } from '../ModalDialog';
-import { competitionKey } from './displaySettings';
+import { competitionKey } from '../../../shared/competitions';
 
 /** Tick the teams of one competition, then add it. */
 export function CompetitionPicker({
   labels,
   taken,
+  error,
   onCancel,
   onAdd,
 }: {
   labels: Label[];
   /** Keys of the competitions already on the screen. */
   taken: Set<string>;
+  /** Why the last add failed, for example when no laptop can save it. */
+  error: string | null;
   onCancel: () => void;
   onAdd: (teams: Label[]) => void;
 }) {
@@ -25,7 +28,7 @@ export function CompetitionPicker({
     const title = labelKindTitle(label.kind);
     groups.set(title, [...(groups.get(title) ?? []), label]);
   }
-  const duplicate = taken.has(competitionKey(picked.map((id) => ({ id }))));
+  const duplicate = taken.has(competitionKey(picked));
   const toggle = (id: string) =>
     setPicked((current) => (current.includes(id) ? current.filter((other) => other !== id) : [...current, id]));
 
@@ -59,6 +62,11 @@ export function CompetitionPicker({
             </div>
           </div>
         ))}
+        {error && (
+          <p className="competition-picker__error" role="alert">
+            {error}
+          </p>
+        )}
         <div className="competition-picker__actions">
           <button type="button" className="inside-control-button" onClick={onCancel}>
             Annuleer

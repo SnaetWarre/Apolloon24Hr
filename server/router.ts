@@ -14,6 +14,7 @@ import {
   lapIdSchema,
   lapRunnerSchema,
   publicRecordModeUpdateSchema,
+  competitionInputSchema,
   queueReorderSchema,
   raceStateExpectationSchema,
   runnerIdSchema,
@@ -83,6 +84,8 @@ import {
   saveForwardedWrite,
   saveLabelImage,
   setPublicRecordMode,
+  addCompetition,
+  removeCompetition,
   splitLap,
   moveHandoff,
   touchForwardedWrite,
@@ -544,6 +547,12 @@ export const appRouter = t.router({
     updatePublicRecordMode: t.procedure
       .input(publicRecordModeUpdateSchema)
       .mutation(write((input) => setPublicRecordMode(input.publicRecordMode))),
+    addCompetition: t.procedure
+      .input(competitionInputSchema)
+      .mutation(write((input) => addCompetition(input.labelIds))),
+    removeCompetition: t.procedure
+      .input(competitionInputSchema)
+      .mutation(write((input) => removeCompetition(input.labelIds))),
   }),
 });
 

@@ -50,7 +50,7 @@ function snapshot(runners: Runner[]): LiveAppSnapshot {
       raceFinishedAt: null,
       activeLabels: [],
     },
-    settings: { publicRecordMode: 'day' },
+    settings: { publicRecordMode: 'day', competitions: [] },
     revision: 1,
     host: { hostIpHint: '', port: 1, url: '' },
   };

@@ -148,6 +148,10 @@ export function describeWrite(path: string, input: unknown): ((result: unknown) 
     case 'settings.updatePublicRecordMode':
       return () =>
         `Records op de publieke schermen: ${RECORD_MODE_TEXT[value.publicRecordMode as PublicRecordMode] ?? ''}`;
+    case 'settings.addCompetition':
+      return () => `Competitie ${competitionTitle(value.labelIds)} op het Competitiescherm gezet`;
+    case 'settings.removeCompetition':
+      return () => `Competitie ${competitionTitle(value.labelIds)} van het Competitiescherm gehaald`;
     case 'cluster.saveTiming':
       return value.takeOver ? () => `Timing overgenomen op ${String(value.name ?? 'een andere laptop')}` : null;
     case 'cluster.removeMember':
@@ -235,6 +239,10 @@ function lapText(lapId: unknown): string {
 
 function labelName(id: string): string {
   return getLabels().find((label) => label.id === id)?.name ?? '';
+}
+
+function competitionTitle(labelIds: unknown): string {
+  return (Array.isArray(labelIds) ? labelIds : []).map((id) => labelName(String(id))).join(' vs ');
 }
 
 /** Belgian time, as the operators read it. */

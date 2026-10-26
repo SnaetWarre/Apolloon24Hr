@@ -111,6 +111,8 @@ export { databaseReadiness, databaseFileBytes } from './db/storage.js';
 export {
   getAppSettings,
   setPublicRecordMode,
+  addCompetition,
+  removeCompetition,
   hostIdentity,
   getSetting,
   setLocalSetting,

@@ -1,7 +1,6 @@
 import React from 'react';
 import { useNavigate, useRouterState } from '@tanstack/react-router';
 import { MAX_ZOOM, MIN_ZOOM, nextZoom, useZoomKeys } from '../../lib/zoom';
-import type { Label } from '../../types';
 
 export type DisplayPresentation = 'light' | 'dark';
 type DisplayName = 'inside' | 'outside' | 'competitions';
@@ -43,35 +42,6 @@ export function useDisplayZoom(display: DisplayName): React.CSSProperties {
     setValue(next === 1 ? null : String(Math.round(next * 100)));
   });
   return { '--display-zoom': zoom } as React.CSSProperties;
-}
-
-export const MAX_COMPETITIONS = 6;
-
-/** The same teams give the same key, whatever order they were picked in. */
-export function competitionKey(teams: Array<{ id: string }>) {
-  return teams
-    .map((team) => team.id)
-    .sort()
-    .join('.');
-}
-
-/**
- * The competitions on the Competitiescherm, as `?competities=id.id.id,id.id`.
- * A label that was deleted drops out, and so does a competition left with one team.
- */
-export function useDisplayCompetitions(labels: Label[]): [Label[][], (next: Label[][]) => void] {
-  const [value, setValue] = useDisplaySetting('competitions', 'competities');
-  const labelsById = new Map(labels.map((label) => [label.id, label]));
-  const competitions = (value ?? '')
-    .split(',')
-    .map((competition) => [...new Set(competition.split('.').flatMap((id) => labelsById.get(id) ?? []))])
-    .filter((teams) => teams.length >= 2)
-    .filter((teams, index, all) => all.findIndex((other) => competitionKey(other) === competitionKey(teams)) === index)
-    .slice(0, MAX_COMPETITIONS);
-  return [
-    competitions,
-    (next) => setValue(next.length ? next.map((teams) => teams.map((team) => team.id).join('.')).join(',') : null),
-  ];
 }
 
 /**

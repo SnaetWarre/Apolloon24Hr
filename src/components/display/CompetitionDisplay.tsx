@@ -1,30 +1,38 @@
 import React from 'react';
-import { useAppData, useRaceHistory } from '../../app/index';
+import { useAppActions, useAppData, useRaceHistory } from '../../app/index';
+import { competitionKey, MAX_COMPETITIONS } from '../../../shared/competitions';
 import { useArrivals } from '../../lib/motion';
 import { buildRunnerRanking } from '../../lib/ranking';
 import { lapRunnerLabel } from '../../lib/runners';
 import { formatDurationMs } from '../../lib/time';
-import type { Label, LapRecord } from '../../types';
+import type { Label, LapRecord, LiveAppSnapshot } from '../../types';
 import { Icon } from '../Icon';
 import { CompetitionPicker } from './CompetitionPicker';
-import { DisplayBrand, DisplayTotals, PresentationSwitch, selectInsideDisplayData } from './displayParts';
-import {
-  competitionKey,
-  MAX_COMPETITIONS,
-  useDisplayCompetitions,
-  useDisplayPresentation,
-  useDisplayZoom,
-} from './displaySettings';
+import { DisplayBrand, DisplayTotals, PresentationSwitch } from './displayParts';
+import { useDisplayPresentation, useDisplayZoom } from './displaySettings';
 
 // The runners on the Competities screen.
 const COMPETITION_RANKING_LENGTH = 20;
 
+const selectCompetitionDisplayData = ({ runners, labels, race, settings }: LiveAppSnapshot) => ({
+  runners,
+  labels,
+  race,
+  competitions: settings.competitions,
+});
+
 export function CompetitionDisplay() {
-  const { runners, labels, race } = useAppData(selectInsideDisplayData);
+  const { runners, labels, race, competitions: competitionIds } = useAppData(selectCompetitionDisplayData);
+  const { addCompetition, removeCompetition } = useAppActions();
   const [presentation, setPresentation] = useDisplayPresentation('competitions', 'dark');
   const zoomStyle = useDisplayZoom('competitions');
-  const [competitions, setCompetitions] = useDisplayCompetitions(labels);
+  // The server keeps them, so every laptop in the group shows the same competitions.
+  const labelsById = new Map(labels.map((label) => [label.id, label]));
+  const competitions = competitionIds
+    .map((ids) => ({ key: competitionKey(ids), ids, teams: ids.flatMap((id) => labelsById.get(id) ?? []) }))
+    .filter(({ teams }) => teams.length >= 2);
   const [picking, setPicking] = React.useState(false);
+  const [addError, setAddError] = React.useState<string | null>(null);
   const { laps } = useRaceHistory({ scope: 'full' });
   const lapsByLabel = countLapsByLabel(laps);
   const ranking = buildRunnerRanking(runners, laps, 'laps', null).slice(0, COMPETITION_RANKING_LENGTH);
@@ -43,14 +51,16 @@ export function CompetitionDisplay() {
           <div
             className="competitions-list"
             // Each competition gets height for its teams plus its title.
-            style={{ gridTemplateRows: competitions.map((teams) => `minmax(0, ${teams.length + 1.4}fr)`).join(' ') }}
+            style={{
+              gridTemplateRows: competitions.map(({ teams }) => `minmax(0, ${teams.length + 1.4}fr)`).join(' '),
+            }}
           >
-            {competitions.map((teams, index) => (
+            {competitions.map(({ key, ids, teams }) => (
               <CompetitionBars
-                key={competitionKey(teams)}
+                key={key}
                 teams={teams}
                 lapsByLabel={lapsByLabel}
-                onRemove={() => setCompetitions(competitions.filter((_, other) => other !== index))}
+                onRemove={() => void removeCompetition(ids).catch(() => undefined)}
               />
             ))}
           </div>
@@ -112,12 +122,21 @@ export function CompetitionDisplay() {
       {picking && (
         <CompetitionPicker
           labels={labels}
-          taken={new Set(competitions.map(competitionKey))}
-          onCancel={() => setPicking(false)}
-          onAdd={(teams) => {
-            setCompetitions([...competitions, teams]);
+          taken={new Set(competitions.map(({ key }) => key))}
+          error={addError}
+          onCancel={() => {
             setPicking(false);
+            setAddError(null);
           }}
+          onAdd={(teams) =>
+            addCompetition(teams.map((team) => team.id)).then(
+              () => {
+                setPicking(false);
+                setAddError(null);
+              },
+              (error: unknown) => setAddError(error instanceof Error ? error.message : 'Toevoegen mislukt')
+            )
+          }
         />
       )}
     </main>
