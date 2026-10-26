@@ -89,7 +89,8 @@ export async function openRun(runName = process.env.APOLLOON_VERIFY_RUN) {
      * of locators or { x, y, width, height } boxes, it also saves NN-name.marked.png with a numbered red
      * ring around each one, in list order, for the PR's before and after table.
      */
-    async proof(page, name, { laptop = 0, fullPage = false, mark = [] } = {}) {
+    async proof(page, name, { laptop = 0, fullPage = false, mark: marks = [] } = {}) {
+      const mark = [marks].flat();
       if (fullPage && mark.length) throw new Error('mark draws on the visible screen; leave fullPage off');
       proofCount += 1;
       const base = path.join(state.evidenceDir, `${String(proofCount).padStart(2, '0')}-${name}`);
@@ -108,9 +109,10 @@ export async function openRun(runName = process.env.APOLLOON_VERIFY_RUN) {
           { timeout: 3_000 }
         )
         .catch(() => run.note(`proof ${name}: animations still running after 3 s`));
+      // Measure the rings first, so the plain and the marked screenshot are taken back to back.
+      const rings = mark.length ? await findRings(page, mark, name, run.note) : null;
       await page.screenshot({ path: `${base}.png`, fullPage });
-      // Right after the plain screenshot, so both show the same moment.
-      if (mark.length) await markScreenshot(page, `${base}.marked.png`, mark, run.note);
+      if (rings) await drawRings(page, `${base}.marked.png`, rings);
       fs.writeFileSync(`${base}.aria.yml`, `# ${page.url()}\n${await page.locator('body').ariaSnapshot()}\n`);
       const appState = await run.api('/api/state', laptop);
       fs.writeFileSync(`${base}.state.json`, `${JSON.stringify(appState, null, 2)}\n`);
@@ -168,50 +170,54 @@ export async function openRun(runName = process.env.APOLLOON_VERIFY_RUN) {
   return run;
 }
 
+// On the base run the new element is often missing; skip it instead of waiting for it.
+async function findRings(page, mark, name, note) {
+  // A page from run.electronPage() has no fixed viewport.
+  const screen = page.viewportSize() ?? (await page.evaluate(() => ({ width: innerWidth, height: innerHeight })));
+  const boxes = await Promise.all(
+    mark.map(async (target) => {
+      if (typeof target.boundingBox !== 'function') return target;
+      const element = typeof target.first === 'function' ? target.first() : target;
+      return element.boundingBox({ timeout: 1_000 }).catch(() => null);
+    })
+  );
+  return boxes.flatMap((box, index) => {
+    const visible =
+      box && box.x < screen.width && box.y < screen.height && box.x + box.width > 0 && box.y + box.height > 0;
+    if (visible) return [{ ...box, number: index + 1 }];
+    note(`mark ${index + 1} in ${name}: not on screen, no ring drawn`);
+    return [];
+  });
+}
+
 // The rings are page elements that live only for this one screenshot. They sit in a popover, because only
 // the top layer draws above an open dialog. Red with a white edge reads on both themes; the number sits
 // outside the ring so it never covers what it points at.
-async function markScreenshot(page, file, mark, note) {
-  const screen = page.viewportSize();
-  const boxes = [];
-  for (const [index, target] of mark.entries()) {
-    // On the base run the new element is often missing; skip it instead of waiting for it.
-    const box =
-      typeof target.boundingBox === 'function'
-        ? await target
-            .first()
-            .boundingBox({ timeout: 1_000 })
-            .catch(() => null)
-        : target;
-    const visible =
-      box && box.x < screen.width && box.y < screen.height && box.x + box.width > 0 && box.y + box.height > 0;
-    if (visible) boxes.push({ ...box, number: index + 1 });
-    else note(`mark ${index + 1} in ${path.basename(file)}: not on screen, no ring drawn`);
-  }
-  await page.evaluate((rings) => {
-    const layer = document.createElement('div');
-    layer.id = 'verify-marks';
-    layer.popover = 'manual';
-    layer.style.cssText =
-      'position:fixed;inset:0;width:auto;height:auto;margin:0;padding:0;border:0;background:none;overflow:visible;pointer-events:none';
-    for (const ring of rings) {
-      const pad = 6;
-      const left = ring.x - pad;
-      const top = ring.y - pad;
-      const outline = document.createElement('div');
-      outline.style.cssText = `position:absolute;left:${left}px;top:${top}px;width:${ring.width + 2 * pad}px;height:${ring.height + 2 * pad}px;border:4px solid #e0102f;border-radius:12px;box-sizing:border-box;box-shadow:0 0 0 2px #fff,inset 0 0 0 2px #fff`;
-      const badge = document.createElement('div');
-      badge.textContent = String(ring.number);
-      badge.style.cssText = `position:absolute;left:${Math.max(0, left - 14)}px;top:${Math.max(0, top - 14)}px;width:28px;height:28px;border-radius:50%;background:#e0102f;color:#fff;font:700 16px/28px system-ui,sans-serif;text-align:center;box-shadow:0 0 0 2px #fff`;
-      layer.append(outline, badge);
-    }
-    document.body.append(layer);
-    layer.showPopover();
-  }, boxes);
+async function drawRings(page, file, rings) {
   try {
+    await page.evaluate((list) => {
+      const layer = document.createElement('div');
+      layer.className = 'verify-marks';
+      layer.popover = 'manual';
+      layer.style.cssText =
+        'position:fixed;inset:0;width:auto;height:auto;margin:0;padding:0;border:0;background:none;overflow:visible;pointer-events:none';
+      for (const ring of list) {
+        const pad = 6;
+        const left = ring.x - pad;
+        const top = ring.y - pad;
+        const outline = document.createElement('div');
+        outline.style.cssText = `position:absolute;left:${left}px;top:${top}px;width:${ring.width + 2 * pad}px;height:${ring.height + 2 * pad}px;border:4px solid #e0102f;border-radius:12px;box-sizing:border-box;box-shadow:0 0 0 2px #fff,inset 0 0 0 2px #fff`;
+        const badge = document.createElement('div');
+        badge.textContent = String(ring.number);
+        badge.style.cssText = `position:absolute;left:${Math.max(0, left - 14)}px;top:${Math.max(0, top - 14)}px;width:28px;height:28px;border-radius:50%;background:#e0102f;color:#fff;font:700 16px/28px system-ui,sans-serif;text-align:center;box-shadow:0 0 0 2px #fff`;
+        layer.append(outline, badge);
+      }
+      document.body.append(layer);
+      layer.showPopover();
+    }, rings);
     await page.screenshot({ path: file });
   } finally {
-    await page.evaluate(() => document.getElementById('verify-marks')?.remove());
+    await page.evaluate(() => document.querySelectorAll('.verify-marks').forEach((layer) => layer.remove()));
   }
 }
 

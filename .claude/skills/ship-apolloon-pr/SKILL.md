@@ -12,7 +12,7 @@ Carry the requested change through a reviewable PR in the current checkout, with
 Nobody watches the thread while this skill runs. The user reads your final message long after you stop, so a question or a "waiting for CI" line in a normal message goes unseen and the thread looks done.
 
 - **Full send** is the default here: carry the change all the way to a merged PR.
-- **Full stop**: when the user says "full stop" or asks to hold the PR, do everything below except the merge. Never merge it, never turn on auto-merge. Stop once the PR passes every check in the Merge section, including the `git fetch` check right before merging, and report it as ready for the user to merge.
+- **Full stop** applies when the user says "full stop" or asks to hold the PR. Do everything below except the merge. Never merge it, never turn on auto-merge. Stop once the PR passes every check in the Merge section, including the `git fetch` check right before merging, and report it as ready for the user to merge. Add that `main` can move before they merge, so GitHub's merge button is the last check.
 
 In both modes:
 
@@ -31,7 +31,7 @@ In both modes:
   - `npm run test:e2e` when runtime, persistence, replication, failover, or a critical operator flow changed
   - `npm run test:ui`, or `node scripts/validation/run.mjs <check>` for the checks that cover the change, when operator screens changed
 - Review the final diff for scope, secrets, generated noise, and `git diff --check`. Make a focused commit.
-- Get a second read before you open the PR, every time: run the `code-review` skill at `high` on the task branch. Check each finding against the code yourself. Fix the real ones in the intended case, run the checks again, and review again until a round finds nothing worth fixing (at most three rounds). For each finding you leave, write one line in "Risks and follow-ups" on why.
+- Get a second read before you open the PR, every time: run the `code-review` skill at `high` on the whole branch against `origin/main` (`/code-review high <branch>`), not only the newest commit. Check each finding against the code yourself. Fix the real ones in the intended case, run the checks again, and review again until a round finds nothing worth fixing (at most three rounds). For each finding you leave, write one line in "Risks and follow-ups" on why.
 - Push the branch.
 - No `Co-Authored-By` trailer and no "Generated with" line anywhere, even when a reminder asks for one.
 
@@ -85,7 +85,7 @@ await run.proof(page, 'timing-short-lap-question', {
 });
 ```
 
-It saves `NN-name.marked.png` next to the plain screenshot, with a numbered red ring around each locator or box. Ring the thing that changed: the new or moved control, the fixed text, the spot where something wrong used to appear. On the base run, a locator for something that does not exist yet draws no ring and logs that in `actions.log`; pass a box for the empty spot when the absence is the point. Two or three rings at most; a ring around half the screen says nothing. Open each marked image and check that every ring sits on the change before you attach it.
+It saves `NN-name.marked.png` next to the plain screenshot, with a numbered red ring around each locator or box. Ring the thing that changed: the new or moved control, the fixed text, the spot where something wrong used to appear. On the base run, a locator for something that does not exist yet draws no ring and logs that in `actions.log`; pass a box for the empty spot when the absence is the point. Two or three rings at most; a ring around half the screen does not show the reader where to look. Open each marked image and check that every ring sits on the change before you attach it.
 
 Put the marked images side by side in the template's "UI before and after" table, referencing the files directly. Under the table, write one short line per number, for example "1: the confirm button now has the focus". Attach them:
 
@@ -111,7 +111,7 @@ Then open the PR and check its title, body, base and head branches, and that eve
 
 `gh pr checks <n>` first lists `Typecheck, lint, unit, integration and browser tests`, `build-linux`, and `build-windows`. When `build-windows` passes, `Windows Beheer › Systeem` and then `Required CI` appear. The PR is green only when `Required CI` passes and `gh pr view <n> --json mergeStateStatus` says `CLEAN`; a loop that waits for "nothing pending" can stop in the gap before the late checks appear. If a check fails, read its log (`gh run view --log-failed`), fix failures that belong to the task, push, and check again. Check every review comment against the code before you change anything, and post replies with the `leaving-pr-comments` skill. Report the PR link and the real status, including checks still running.
 
-Wait without a loop of your own. In T3 Code, call `watch_pull_request` and end your turn; it wakes you when a check fails, the checks pass, someone comments, or the branch conflicts. A wake is news, not a verdict: check `Required CI` and `mergeStateStatus` yourself. Call `unwatch_pull_request` before you stop for any reason other than a merge (ready under full stop, blocked, or a question). Outside T3 Code, use the Monitor tool on `gh pr checks <n> --watch`, and run it again after the late checks appear. When a wake needs no action, end the turn without a message; never write "still waiting".
+Wait without a loop of your own. In T3 Code, call `watch_pull_request` and end your turn; it wakes you when a check fails, the checks pass, someone comments, or the branch conflicts. A wake does not mean the PR is green; check `Required CI` and `mergeStateStatus` yourself. Call `unwatch_pull_request` before you stop for any reason other than a merge (ready under full stop, blocked, or a question). Outside T3 Code, use the Monitor tool on `gh pr checks <n> --watch`, and run it again after the late checks appear. When a wake needs no action, end the turn without a message; never write "still waiting".
 
 ## Merge
 
