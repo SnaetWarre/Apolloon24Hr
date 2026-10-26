@@ -90,6 +90,7 @@ export async function openRun(runName = process.env.APOLLOON_VERIFY_RUN) {
      * ring around each one, in list order, for the PR's before and after table.
      */
     async proof(page, name, { laptop = 0, fullPage = false, mark = [] } = {}) {
+      if (fullPage && mark.length) throw new Error('mark draws on the visible screen; leave fullPage off');
       proofCount += 1;
       const base = path.join(state.evidenceDir, `${String(proofCount).padStart(2, '0')}-${name}`);
       // Dialogs fade in; wait for finite animations so the screenshot shows the settled screen.
@@ -108,10 +109,11 @@ export async function openRun(runName = process.env.APOLLOON_VERIFY_RUN) {
         )
         .catch(() => run.note(`proof ${name}: animations still running after 3 s`));
       await page.screenshot({ path: `${base}.png`, fullPage });
+      // Right after the plain screenshot, so both show the same moment.
+      if (mark.length) await markScreenshot(page, `${base}.marked.png`, mark, run.note);
       fs.writeFileSync(`${base}.aria.yml`, `# ${page.url()}\n${await page.locator('body').ariaSnapshot()}\n`);
       const appState = await run.api('/api/state', laptop);
       fs.writeFileSync(`${base}.state.json`, `${JSON.stringify(appState, null, 2)}\n`);
-      if (mark.length) await markScreenshot(page, `${base}.marked.png`, mark, fullPage, run.note);
       run.note(`proof ${path.basename(base)} at ${page.url()}`);
       return base;
     },
@@ -169,14 +171,21 @@ export async function openRun(runName = process.env.APOLLOON_VERIFY_RUN) {
 // The rings are page elements that live only for this one screenshot. They sit in a popover, because only
 // the top layer draws above an open dialog. Red with a white edge reads on both themes; the number sits
 // outside the ring so it never covers what it points at.
-async function markScreenshot(page, file, mark, fullPage, note) {
-  if (fullPage) throw new Error('mark draws on the visible screen; leave fullPage off');
+async function markScreenshot(page, file, mark, note) {
+  const screen = page.viewportSize();
   const boxes = [];
   for (const [index, target] of mark.entries()) {
     // On the base run the new element is often missing; skip it instead of waiting for it.
-    const isLocator = typeof target.boundingBox === 'function';
-    const box = isLocator ? (await target.count()) && (await target.boundingBox()) : target;
-    if (box) boxes.push({ ...box, number: index + 1 });
+    const box =
+      typeof target.boundingBox === 'function'
+        ? await target
+            .first()
+            .boundingBox({ timeout: 1_000 })
+            .catch(() => null)
+        : target;
+    const visible =
+      box && box.x < screen.width && box.y < screen.height && box.x + box.width > 0 && box.y + box.height > 0;
+    if (visible) boxes.push({ ...box, number: index + 1 });
     else note(`mark ${index + 1} in ${path.basename(file)}: not on screen, no ring drawn`);
   }
   await page.evaluate((rings) => {
@@ -199,8 +208,11 @@ async function markScreenshot(page, file, mark, fullPage, note) {
     document.body.append(layer);
     layer.showPopover();
   }, boxes);
-  await page.screenshot({ path: file });
-  await page.evaluate(() => document.getElementById('verify-marks')?.remove());
+  try {
+    await page.screenshot({ path: file });
+  } finally {
+    await page.evaluate(() => document.getElementById('verify-marks')?.remove());
+  }
 }
 
 function readRun(runName) {

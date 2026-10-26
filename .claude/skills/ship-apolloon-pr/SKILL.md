@@ -12,11 +12,11 @@ Carry the requested change through a reviewable PR in the current checkout, with
 Nobody watches the thread while this skill runs. The user reads your final message long after you stop, so a question or a "waiting for CI" line in a normal message goes unseen and the thread looks done.
 
 - **Full send** is the default here: carry the change all the way to a merged PR.
-- **Full stop**: when the user says "full stop" or asks to hold the PR, do everything below except the merge. Never merge it, never turn on auto-merge. Stop once `Required CI` is green and `mergeStateStatus` is `CLEAN`, and report the PR as ready for the user to merge.
+- **Full stop**: when the user says "full stop" or asks to hold the PR, do everything below except the merge. Never merge it, never turn on auto-merge. Stop once the PR passes every check in the Merge section, including the `git fetch` check right before merging, and report it as ready for the user to merge.
 
 In both modes:
 
-- Stay active until the end state: merged, ready (full stop), or blocked. Do not end your turn while checks are still running; see CI below for how to wait.
+- Stay on it until the end state: merged, ready (full stop), or blocked. While checks run, wait the way the CI section says. Ending a turn with a PR watch running counts as waiting; ending it without one stops the work, because nobody prompts you again.
 - Ask only when you cannot go on alone: you cannot prove the change, a check fails for a reason outside the task, the next step touches anything outside the repo (the VPS, a release, someone else's branch), or the request has two readings that give different results. Ask with the `AskUserQuestion` tool, not in a message, and put everything in the question: the PR link, what blocks you, and the options with your pick first. Without an answer, leave the PR open and unmerged and start your final message with the question.
 - Decide everything else yourself and list each decision in the final report.
 
