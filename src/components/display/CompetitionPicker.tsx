@@ -19,9 +19,10 @@ export function CompetitionPicker({
   /** Why the last add failed, for example when no laptop can save it. */
   error: string | null;
   onCancel: () => void;
-  onAdd: (teams: Label[]) => void;
+  onAdd: (teams: Label[]) => Promise<void>;
 }) {
   const [picked, setPicked] = React.useState<string[]>([]);
+  const [saving, setSaving] = React.useState(false);
   const sorted = [...labels].sort(compareLabels);
   const groups = new Map<string, Label[]>();
   for (const label of sorted) {
@@ -74,14 +75,19 @@ export function CompetitionPicker({
           <button
             type="button"
             className="inside-control-button is-primary"
-            disabled={picked.length < 2 || duplicate}
-            onClick={() => onAdd(sorted.filter((label) => picked.includes(label.id)))}
+            disabled={picked.length < 2 || duplicate || saving}
+            onClick={() => {
+              setSaving(true);
+              void onAdd(sorted.filter((label) => picked.includes(label.id))).finally(() => setSaving(false));
+            }}
           >
-            {picked.length < 2
-              ? 'Kies minstens 2 ploegen'
-              : duplicate
-                ? 'Deze competitie staat er al op'
-                : `Toevoegen met ${picked.length} ploegen`}
+            {saving
+              ? 'Opslaan...'
+              : picked.length < 2
+                ? 'Kies minstens 2 ploegen'
+                : duplicate
+                  ? 'Deze competitie staat er al op'
+                  : `Toevoegen met ${picked.length} ploegen`}
           </button>
         </div>
       </div>

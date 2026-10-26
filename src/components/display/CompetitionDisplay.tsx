@@ -35,7 +35,7 @@ export function CompetitionDisplay() {
   }));
   const [picking, setPicking] = React.useState(false);
   const [addError, setAddError] = React.useState<string | null>(null);
-  // An answer that comes after Annuleer must not show in the next dialog.
+  // A new dialog starts without the error of an earlier try.
   const openPicker = () => {
     setAddError(null);
     setPicking(true);
