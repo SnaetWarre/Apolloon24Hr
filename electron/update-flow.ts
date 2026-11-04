@@ -38,9 +38,9 @@ export type Updater = {
 export const QUIT_TIMEOUT_MS = 30_000;
 
 export const RACE_RUNNING = 'De wedstrijd loopt. Installeer de update pas na de wedstrijd.';
-// electron-updater ignores a second quitAndInstall once it started the installer, so only a restart helps.
-const NOT_CLOSED =
-  'Apolloon sloot niet af, dus de update is nog niet geïnstalleerd. Start Apolloon opnieuw en probeer het dan nog eens.';
+// The installer may have started already (Windows) or swapped the app file (AppImage), and
+// electron-updater ignores a second quitAndInstall: only a restart finishes or retries it.
+const NOT_CLOSED = 'Apolloon sloot niet af, dus de installatie is niet afgerond. Start Apolloon opnieuw.';
 
 export function createUpdateFlow({
   currentVersion,
