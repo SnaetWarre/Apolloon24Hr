@@ -22,7 +22,19 @@ import type { ReplicationLogEntry } from './db/types.js';
  * the simulation tests run it on a fake network and a fake clock.
  */
 
+/**
+ * What this laptop does in the group. Every change goes through `changeRole`, which allows only
+ * the moves in ROLE_CHANGES: a follower stands for election (candidate) or, as the only laptop,
+ * leads; a candidate leads once it wins; anyone steps back to follower. A laptop that is joining
+ * another group or copying a leader's data only follows, since its log is about to be replaced.
+ */
 export type Role = 'leader' | 'follower' | 'candidate';
+
+const ROLE_CHANGES: Record<Role, readonly Role[]> = {
+  follower: ['follower', 'candidate', 'leader'],
+  candidate: ['follower', 'leader'],
+  leader: ['follower'],
+};
 
 /**
  * What a leader tells its followers about the group, so every laptop can show it. `silentMs`
@@ -138,11 +150,14 @@ export function createRaft(deps: RaftDeps) {
   /** The last entry this leader knows a majority holds. */
   let committedSeq = 0;
   let lastClockSyncAt = Number.NEGATIVE_INFINITY;
-  let resyncing = false;
-  /** The laptop a re-sync copies from, and how to give up on it. */
-  let resyncSource: { url: string; abort: AbortController } | null = null;
+  /**
+   * The full copy of a leader's data this laptop is taking, if any. A re-sync can be given up on
+   * (`abort`) when that leader goes quiet; a copy made while joining runs until it ends.
+   */
+  let copying: { url: string; abort: AbortController | null } | null = null;
   /** Set while this laptop joins another group: it neither leads, votes, nor stores appends. */
   let joining = false;
+  /** Why the last copy failed. It ends once this laptop holds the leader's log again or leads. */
   let resyncProblem: string | null = null;
   let groupView: GroupView = [];
   let stopTicking: (() => void) | null = null;
@@ -191,40 +206,57 @@ export function createRaft(deps: RaftDeps) {
     electionDeadline = deps.now() + electionTimeoutMs * (1 + deps.random());
   }
 
-  function becomeFollower(term: number, nextLeader: ClusterMember | null): void {
-    const wasLeader = role === 'leader';
-    setTerm(term);
-    role = 'follower';
-    if (nextLeader) {
+  function roleChangeAllowed(next: Role): boolean {
+    if (next !== 'follower' && (joining || copying)) return false;
+    return ROLE_CHANGES[role].includes(next);
+  }
+
+  /**
+   * The one place the role changes; false when ROLE_CHANGES or a join or copy forbids it. Becoming
+   * leader does not call `leaderChanged`: the leader's own clock is the group's clock, so it takes
+   * no samples, and following anyone after that is a change of leader again.
+   */
+  function changeRole(next: Role, nextLeader: ClusterMember | null = null): boolean {
+    if (!roleChangeAllowed(next)) return false;
+    const was = role;
+    role = next;
+    if (next === 'leader') {
+      leader = deps.self();
+      lastLeaderContactAt = deps.now();
+      lastQuorumAt = deps.now();
+      committedSeq = 0;
+      // Only a laptop with the most complete log wins, so it lacks nothing a copy would bring.
+      resyncProblem = null;
+      progress.clear();
+      groupView = [];
+      replicateToAll();
+      return true;
+    }
+    if (next === 'follower' && nextLeader) {
       if (leader?.hostId !== nextLeader.hostId) deps.leaderChanged();
       leader = nextLeader;
       lastLeaderContactAt = deps.now();
     } else {
       leader = null;
     }
-    resetElectionDeadline();
-    if (wasLeader) {
+    if (next === 'follower') resetElectionDeadline();
+    if (was === 'leader') {
       progress.clear();
       settleCommitWaiters(false);
     }
+    return true;
   }
 
-  function becomeLeader(): void {
-    role = 'leader';
-    leader = deps.self();
-    lastLeaderContactAt = deps.now();
-    lastQuorumAt = deps.now();
-    committedSeq = 0;
-    progress.clear();
-    groupView = [];
-    replicateToAll();
+  function becomeFollower(term: number, nextLeader: ClusterMember | null): void {
+    setTerm(term);
+    changeRole('follower', nextLeader);
   }
 
   // The loop: leaders send appends (which double as heartbeats); followers watch for a silent leader.
 
   function start(): void {
     resetElectionDeadline();
-    if (deps.members().length === 1) becomeLeader();
+    if (deps.members().length === 1) changeRole('leader');
     stopTicking = deps.every(deps.heartbeatMs, tick);
   }
 
@@ -253,18 +285,22 @@ export function createRaft(deps: RaftDeps) {
       return;
     }
     if (deps.members().length === 1) {
-      becomeLeader();
+      changeRole('leader');
       return;
     }
     // A copy from a leader that went quiet would never arrive; give up, so this laptop can vote and follow again.
-    if (resyncSource && (!leaderAlive() || leader?.url !== resyncSource.url)) {
-      resyncSource.abort.abort(new Error('de hoofdlaptop is niet meer bereikbaar'));
+    if (copying?.abort && (!leaderAlive() || leader?.url !== copying.url)) {
+      copying.abort.abort(new Error('de hoofdlaptop is niet meer bereikbaar'));
     }
     if (leader && leaderAlive() && now - lastClockSyncAt > CLOCK_SYNC_MS) {
       lastClockSyncAt = now;
       void deps.syncClock(leader).catch(() => undefined);
     }
-    if (now >= electionDeadline && !electing && !resyncing) void runElection();
+    if (now >= electionDeadline && !electing && roleChangeAllowed('candidate')) void runElection();
+  }
+
+  function isCandidateIn(term: number): boolean {
+    return role === 'candidate' && currentTerm() === term;
   }
 
   async function runElection(): Promise<void> {
@@ -282,16 +318,17 @@ export function createRaft(deps: RaftDeps) {
       });
       // The pre-vote changes nothing: it only asks whether a real election could win.
       const preVotes = await askForVotes(request(true, currentTerm() + 1));
-      if (role !== 'follower' || leaderAlive() || preVotes + 1 < majority()) return;
+      // A join may have started meanwhile; roleChangeAllowed checks that again after every wait.
+      if (role !== 'follower' || leaderAlive() || preVotes + 1 < majority() || !roleChangeAllowed('candidate')) return;
 
       const term = currentTerm() + 1;
       setTerm(term);
       storage.recordVote(term, deps.self().hostId);
-      role = 'candidate';
-      leader = null;
+      changeRole('candidate');
       const votes = await askForVotes(request(false, term));
-      if (role === 'candidate' && currentTerm() === term && votes + 1 >= majority()) becomeLeader();
-      else if (role === 'candidate') role = 'follower';
+      // An answer, a join or a newer term may have ended this candidacy while the votes came in.
+      const won = isCandidateIn(term) && votes + 1 >= majority() && changeRole('leader');
+      if (!won && isCandidateIn(term)) changeRole('follower');
     } finally {
       electing = false;
       if (role !== 'leader') resetElectionDeadline();
@@ -466,57 +503,71 @@ export function createRaft(deps: RaftDeps) {
     if (role !== 'follower' || leader?.hostId !== nextLeader.hostId || request.term > currentTerm()) {
       becomeFollower(request.term, nextLeader);
     }
+    // The same leader, perhaps at a new address.
     leader = nextLeader;
     lastLeaderContactAt = deps.now();
     groupView = request.group;
     resetElectionDeadline();
 
-    if (resyncing) return { term: currentTerm(), ok: false, reason: 'resyncing', head: head() };
+    if (copying) return { term: currentTerm(), ok: false, reason: 'resyncing', head: head() };
     if (request.resync) {
       startResync(nextLeader.url);
       return { term: currentTerm(), ok: false, reason: 'resyncing', head: head() };
     }
     const outcome = storage.appendFromLeader(request.prevSeq, request.prevId, request.entries);
+    // This laptop holds the leader's log again, so an earlier failed copy no longer matters.
+    if (outcome.ok) resyncProblem = null;
     if (!outcome.ok && outcome.reason === 'diverged') startResync(nextLeader.url);
     return { term: currentTerm(), ok: outcome.ok, reason: outcome.ok ? undefined : outcome.reason, head: head() };
   }
 
   function startResync(url: string): void {
-    if (resyncing) return;
-    const abort = new AbortController();
-    resyncSource = { url, abort };
-    resyncFrom(url, 'pre-resync', abort.signal).catch((error: unknown) => {
+    if (copying) return;
+    copyFrom(url, 'pre-resync', new AbortController()).catch((error: unknown) => {
       resyncProblem = `Bijwerken vanaf de hoofdlaptop mislukt: ${error instanceof Error ? error.message : String(error)}`;
       deps.warn(resyncProblem);
     });
   }
 
   /** Replaces this laptop's data with a full copy from `url`, after a backup of what it had. */
-  async function resyncFrom(url: string, backupReason = 'pre-resync', signal?: AbortSignal): Promise<void> {
-    if (resyncing) return;
-    resyncing = true;
+  async function copyFrom(url: string, backupReason: string, abort: AbortController | null): Promise<void> {
+    if (copying) throw new Error('Deze laptop haalt al een kopie op.');
+    copying = { url, abort };
     try {
-      const term = await deps.installCopyFrom(url, backupReason, signal ?? new AbortController().signal);
+      const term = await deps.installCopyFrom(url, backupReason, abort?.signal ?? new AbortController().signal);
       if (Number.isSafeInteger(term) && term > currentTerm()) setTerm(term);
       resyncProblem = null;
     } finally {
-      resyncing = false;
-      resyncSource = null;
+      copying = null;
     }
   }
 
-  /** Becomes leader of a group of one; used only when the operator confirms the others are gone. */
-  function takeOverAlone(): void {
+  /** The copy a join takes from the leader of the group it joins. */
+  function resyncFrom(url: string, backupReason: string): Promise<void> {
+    return copyFrom(url, backupReason, null);
+  }
+
+  /**
+   * Becomes leader of a group of one; used only when the operator confirms the others are gone.
+   * False while this laptop joins another group or copies data: it then leads nothing.
+   */
+  function takeOverAlone(): boolean {
+    if (!roleChangeAllowed('leader')) return false;
     const term = currentTerm() + 1;
     setTerm(term);
     storage.recordVote(term, deps.self().hostId);
-    becomeLeader();
+    return changeRole('leader');
   }
 
-  /** Stops leading this laptop's own group while it joins another one. */
-  function startJoining(): void {
+  /**
+   * Stops taking part in this laptop's own group while it joins another one. False while a join
+   * or a copy runs already, so only one change of group runs at a time.
+   */
+  function startJoining(): boolean {
+    if (joining || copying) return false;
     joining = true;
-    if (role === 'leader') becomeFollower(currentTerm(), null);
+    if (role !== 'follower') becomeFollower(currentTerm(), null);
+    return true;
   }
 
   /** After joining, follow the leader the copy came from; after a failed join, carry on as before. */
@@ -544,8 +595,9 @@ export function createRaft(deps: RaftDeps) {
     leader: () => leader,
     /** When this laptop last knew of a working leader (itself included), on the `now()` clock. */
     lastLeaderContact: () => lastLeaderContactAt,
-    isResyncing: () => resyncing,
-    /** Why the last re-sync failed, until one succeeds. */
+    isJoining: () => joining,
+    isResyncing: () => copying !== null,
+    /** Why the last copy failed, until this laptop holds the leader's log again or leads. */
     resyncProblem: () => resyncProblem,
     /** True while this laptop leads and a majority holds its whole log, so a change to the group can follow. */
     logSettled: () => role === 'leader' && (deps.members().length === 1 || committedSeq >= storage.head().seq),

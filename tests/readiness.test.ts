@@ -50,6 +50,7 @@ function threeLaptops(overrides: Partial<ClusterStatus> = {}): ClusterStatus {
     split: { id: '', rank: 0 },
     laps: 0,
     lastError: null,
+    notice: null,
     backup: {
       enabled: true,
       inProgress: false,
@@ -74,6 +75,12 @@ test('three linked laptops with a fresh backup are ready', () => {
   const status = deriveSystemStatus(threeLaptops(), null, now);
   assert.equal(status?.tone, 'healthy');
   assert.equal(status?.detail, 'Gegevens op 3 laptops');
+});
+
+test('a laptop that followed another split again says so, but the group counts as safe', () => {
+  const rejoined = threeLaptops({ notice: 'Deze laptop werkte even apart en volgt nu weer de groep van HOST-B.' });
+  assert.equal(readinessSummary(buildEventReadiness(rejoined, now)), 'ready');
+  assert.equal(deriveSystemStatus(rejoined, null, now)?.title, 'Alles veilig');
 });
 
 test('real safety failures block the event and a standalone installation only warns', () => {

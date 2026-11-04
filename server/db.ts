@@ -147,6 +147,7 @@ export {
   getRemovedMembers,
   setRemovedMembers,
   getTimingLaptop,
+  getTimingRecord,
   setTimingLaptop,
   getGroupSplit,
   setGroupSplit,
@@ -154,6 +155,7 @@ export {
   type ClusterMember,
   type GroupSplit,
   type TimingLaptop,
+  type TimingRecord,
 } from './db/members.js';
 export { findForwardedWrite, saveForwardedWrite, touchForwardedWrite } from './db/forwarded-writes.js';
 export {
