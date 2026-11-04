@@ -19,6 +19,19 @@ const selectLapData = ({ runners, race }: LiveAppSnapshot) => ({ runners, race }
 
 type Fix = { kind: 'move' | 'split'; lap: LapRecord };
 
+/** What keeps the table still: the mouse on it, the delete question, or an open fix dialog (which lives here). */
+type HoldReasons = { pointer: boolean; confirming: boolean; fix: Fix | null };
+/** While held, laps that finish after `since` wait, so no row moves under the mouse. */
+type Hold = { kind: 'idle' } | ({ kind: 'held'; since: number } & HoldReasons);
+const NO_HOLD_REASONS: HoldReasons = { pointer: false, confirming: false, fix: null };
+
+/** A hold starts at the newest lap on screen and keeps that moment until the last reason ends. */
+function nextHold(hold: Hold, change: Partial<HoldReasons>, newest: number): Hold {
+  const { pointer, confirming, fix } = { ...(hold.kind === 'held' ? hold : NO_HOLD_REASONS), ...change };
+  if (!pointer && !confirming && !fix) return { kind: 'idle' };
+  return { kind: 'held', since: hold.kind === 'held' ? hold.since : newest, pointer, confirming, fix };
+}
+
 /**
  * Every lap run, newest first, with the fixes a race needs: a press that came too
  * late or too early, a lap that went to the wrong runner, a missed press that made
@@ -41,29 +54,24 @@ function LapsPanel() {
   const [search, setSearch] = React.useState('');
   const [flaggedOnly, setFlaggedOnly] = React.useState(false);
   const [shown, setShown] = React.useState(PAGE_SIZE);
-  const [fix, setFix] = React.useState<Fix | null>(null);
   // The lap clicked, and the lap that ends at the press the panel moves.
   const [selected, setSelected] = React.useState<{ lapId: string; pressLapId: string | null } | null>(null);
-  const [confirming, setConfirming] = React.useState(false);
-  const [pointerInside, setPointerInside] = React.useState(false);
-  // While the operator works on the table, laps that finish later wait, so no row moves under the mouse.
-  const [holdAfter, setHoldAfter] = React.useState(Number.POSITIVE_INFINITY);
-  const holding = pointerInside || fix !== null || confirming;
-
-  const enterTable = () => {
-    if (!holding) setHoldAfter(history.laps.reduce((newest, lap) => Math.max(newest, lap.finishedAt), 0));
-    setPointerInside(true);
+  const [hold, setHold] = React.useState<Hold>({ kind: 'idle' });
+  const fix = hold.kind === 'held' ? hold.fix : null;
+  const updateHold = (change: Partial<HoldReasons>) => {
+    const newest = history.laps.reduce((latest, lap) => Math.max(latest, lap.finishedAt), 0);
+    setHold((current) => nextHold(current, change, newest));
   };
 
   const removeLap = async (lap: LapRecord) => {
-    setConfirming(true);
+    updateHold({ confirming: true });
     const confirmed = await confirm({
       title: 'Ronde verwijderen?',
       message: `${lapText(lap)} telt dan niet meer mee. Terugkrijgen kan alleen met een backup.`,
       confirmLabel: 'Verwijderen',
       tone: 'danger',
     });
-    setConfirming(false);
+    updateHold({ confirming: false });
     if (!confirmed) return;
     await run(() => actions.deleteLap(lap.id), `${lapText(lap)} is verwijderd.`, 'Verwijderen mislukt.');
   };
@@ -80,7 +88,7 @@ function LapsPanel() {
   };
 
   const applyFix = async (current: Fix, runner: Runner) => {
-    setFix(null);
+    updateHold({ fix: null });
     const name = runnerText(runner);
     if (current.kind === 'move') {
       await run(
@@ -123,7 +131,7 @@ function LapsPanel() {
   const selectedLap = selected ? history.laps.find((lap) => lap.id === selected.lapId) : undefined;
   const pressLap = selected?.pressLapId ? history.laps.find((lap) => lap.id === selected.pressLapId) : undefined;
   // Split halves and moved laps finish no later than the lap they came from, so the operator's own fixes still show.
-  const laps = holding ? history.laps.filter((lap) => lap.finishedAt <= holdAfter) : history.laps;
+  const laps = hold.kind === 'held' ? history.laps.filter((lap) => lap.finishedAt <= hold.since) : history.laps;
   const heldCount = history.laps.length - laps.length;
   const newLapIds = useArrivals(
     laps.map((lap) => lap.id),
@@ -167,7 +175,11 @@ function LapsPanel() {
             De rondes konden niet geladen worden.
           </div>
         ) : (
-          <div className="table-wrap" onPointerEnter={enterTable} onPointerLeave={() => setPointerInside(false)}>
+          <div
+            className="table-wrap"
+            onPointerEnter={() => updateHold({ pointer: true })}
+            onPointerLeave={() => updateHold({ pointer: false })}
+          >
             <table className="laps-table">
               <thead>
                 <tr>
@@ -298,10 +310,18 @@ function LapsPanel() {
             <div className="laps-fix__other">
               <h3>Iets anders mis met deze ronde?</h3>
               <div className="laps-fix__buttons">
-                <button className="btn" disabled={pending} onClick={() => setFix({ kind: 'move', lap: selectedLap })}>
+                <button
+                  className="btn"
+                  disabled={pending}
+                  onClick={() => updateHold({ fix: { kind: 'move', lap: selectedLap } })}
+                >
                   Andere loper
                 </button>
-                <button className="btn" disabled={pending} onClick={() => setFix({ kind: 'split', lap: selectedLap })}>
+                <button
+                  className="btn"
+                  disabled={pending}
+                  onClick={() => updateHold({ fix: { kind: 'split', lap: selectedLap } })}
+                >
                   Splitsen
                 </button>
                 <button className="btn" disabled={pending} onClick={() => void removeLap(selectedLap)}>
@@ -322,7 +342,7 @@ function LapsPanel() {
           fix={fix}
           laps={history.laps}
           runners={runners}
-          onClose={() => setFix(null)}
+          onClose={() => updateHold({ fix: null })}
           onPick={(runner) => void applyFix(fix, runner)}
         />
       )}

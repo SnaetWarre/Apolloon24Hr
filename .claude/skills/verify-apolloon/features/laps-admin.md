@@ -11,7 +11,7 @@ Beheer › Rondes lists every lap run, newest first, so an operator can fix what
 - `laps-move` gives a lap to another runner, with that runner's labels. The dialog's `Loper zoeken` box uses the same search, labels included, and has the cursor when the dialog opens. The split dialog's box has it too. Enter in that box works like Enter in Wachtrij's `Loper zoeken`: with exactly one runner found it takes that runner, otherwise it takes the selected one, and the hint `Enter: ronde naar #… …` (split: `Enter: tweede helft naar #… …`) says which. With several runners found and none selected, Enter does nothing.
 - `laps-split` splits a lap in two halves; the first stays with its runner, the second goes to the runner picked (the same one by default). Both halves are a guess (`source: 'split'`), so neither flashes as a record on the Buitenscherm or counts as a record to beat. Split for the same runner, the second half keeps the labels the lap was recorded with, even after the runner's labels changed.
 - `laps-delete` removes a lap after a confirmation.
-- `laps-hold` keeps the rows in place while the mouse is on the table or a fix dialog is open: laps that finish later wait, and the toolbar reads `1 nieuwe ronde` or `N nieuwe rondes`. Halves of a split and moved laps still show. Once the mouse leaves, the waiting laps rise in on top with a fading wash.
+- `laps-hold` keeps the rows in place while the mouse is on the table, or the delete question or a fix dialog is open. Laps that finish after the hold began wait, laps already on screen stay, and the toolbar reads `1 nieuwe ronde` or `N nieuwe rondes`. Halves of a split and moved laps still show. Once the mouse leaves, the waiting laps rise in on top with a fading wash.
 
 ## How to get to it (user POV)
 

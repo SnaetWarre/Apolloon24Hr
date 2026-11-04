@@ -9,6 +9,7 @@ An operator imports the registration form's file (Excel `.xlsx` from Google Shee
 - `import-xlsx` reads the first sheet of an `.xlsx` and imports it like a CSV.
 - `import-repeat` updates instead of duplicating, and keeps live statuses such as warm-up.
 - `import-repick` picks the same file again after it changed on disk and imports the new contents.
+- `import-read-error` a file the laptop cannot read (one Excel still holds open) shows `<name> kon niet gelezen worden. …` under the picker and keeps `Importeren` off. When two files are picked quickly, the panel imports the last one, even if an earlier, slower read finishes after it.
 - `import-welcome` the welcome screen on a laptop without runners has an `Inschrijvingen importeren` button that opens the same panel.
 
 ## How to get to it (user POV)

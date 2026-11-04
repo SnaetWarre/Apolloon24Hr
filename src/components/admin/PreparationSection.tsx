@@ -86,22 +86,36 @@ function sortByLevel(checks: ReadinessCheck[]): ReadinessCheck[] {
     .map(({ check }) => check);
 }
 
+/** The file the operator picked. Only a read that finished for the file still shown makes it `ready`. */
+type PickedFile =
+  | { kind: 'empty' }
+  | { kind: 'reading'; source: File }
+  | { kind: 'ready'; name: string; file: RegistrationFile }
+  | { kind: 'failed'; name: string };
+
 function ImportPanel() {
   const { importRunners } = useAppActions();
-  const [registrationFile, setRegistrationFile] = React.useState<RegistrationFile | null>(null);
-  const [fileName, setFileName] = React.useState('');
+  const [picked, setPicked] = React.useState<PickedFile>({ kind: 'empty' });
   const { pending, run } = useAdminAction();
   // Rows the import skipped or doubted stay on the panel, as a list to fix in the file.
   const [problems, setProblems] = React.useState<string[]>([]);
+  const fileName = picked.kind === 'empty' ? '' : picked.kind === 'reading' ? picked.source.name : picked.name;
 
   async function onFileChange(event: React.ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
+    const source = event.target.files?.[0];
     // Clear the input so picking the same file again after editing it fires `change` and is read fresh.
     event.target.value = '';
-    if (!file) return;
+    if (!source) return;
     setProblems([]);
-    setFileName(file.name);
-    setRegistrationFile(await readRegistrationFile(file));
+    setPicked({ kind: 'reading', source });
+    let next: PickedFile;
+    try {
+      next = { kind: 'ready', name: source.name, file: await readRegistrationFile(source) };
+    } catch {
+      next = { kind: 'failed', name: source.name };
+    }
+    // A slower read of a file picked earlier finishes too late to count.
+    setPicked((current) => (current.kind === 'reading' && current.source === source ? next : current));
   }
 
   async function importFile(file: RegistrationFile) {
@@ -131,13 +145,18 @@ function ImportPanel() {
         <button
           className="btn btn--primary btn--fixed"
           onClick={() => {
-            if (registrationFile) void importFile(registrationFile);
+            if (picked.kind === 'ready') void importFile(picked.file);
           }}
-          disabled={!registrationFile || pending}
+          disabled={picked.kind !== 'ready' || pending}
         >
           {pending ? 'Importeren...' : 'Importeren'}
         </button>
       </div>
+      {picked.kind === 'failed' && (
+        <div className="warning-banner" role="alert">
+          {picked.name} kon niet gelezen worden. Staat het nog open in Excel? Sluit het en kies het opnieuw.
+        </div>
+      )}
       {problems.length > 0 && (
         <div className="warning-banner import-problems">
           <strong>Nakijken in het bestand</strong>
