@@ -95,17 +95,25 @@ export function readRestoreData(filePath: string, fileName: string, backupCreate
   }
 }
 
-/** A race state no version of Apolloon writes would leave Timing without a press that works. */
-function assertRacePhase(row: Record<string, string | number | null> | undefined): void {
-  if (!row) return;
-  const at = (column: string) => (typeof row[column] === 'number' ? row[column] : null);
+/**
+ * A race state no version of Apolloon writes, or a runner on the track other than the
+ * active one, would leave Timing without a press that works, so such a backup is refused.
+ */
+function assertRacePhase(data: RestoreData): void {
+  const row = data.tables.race_state[0];
+  const at = (column: string) => (typeof row?.[column] === 'number' ? row[column] : null);
+  const activeRunnerId = typeof row?.active_runner_id === 'string' ? row.active_runner_id : null;
   const problem = raceStateProblem({
-    activeRunnerId: typeof row.active_runner_id === 'string' ? row.active_runner_id : null,
+    activeRunnerId,
     activeStartedAt: at('active_started_at'),
     raceStartedAt: at('race_started_at'),
     raceFinishedAt: at('race_finished_at'),
   });
   if (problem) throw new Error(`Deze backup is beschadigd: de race heeft ${problem}.`);
+  const onTrack = data.tables.runners.filter((runner) => runner.status === 'running').map((runner) => runner.id);
+  if (onTrack.length !== (activeRunnerId ? 1 : 0) || (activeRunnerId && onTrack[0] !== activeRunnerId)) {
+    throw new Error('Deze backup is beschadigd: de loper op de piste klopt niet met de race.');
+  }
 }
 
 /**
@@ -114,7 +122,7 @@ function assertRacePhase(row: Record<string, string | number | null> | undefined
  * version knows are written, so the table and column names in the SQL never come from input.
  */
 export function replaceEventData(data: RestoreData): { runners: number; laps: number } {
-  assertRacePhase(data.tables.race_state[0]);
+  assertRacePhase(data);
   for (const table of [...RESTORED_TABLES].reverse()) run(`DELETE FROM "${table}"`);
   for (const table of RESTORED_TABLES) {
     const columns = all<{ name: string }>(`PRAGMA table_info("${table}")`).map((column) => column.name);

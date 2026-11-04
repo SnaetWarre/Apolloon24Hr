@@ -25,7 +25,7 @@ import {
   type RaceStateExpectation,
   type TimingPress,
 } from '../shared/schemas.js';
-import { undoRefusal } from '../shared/lifecycle.js';
+import { raceMoveRefusal, undoRefusal } from '../shared/lifecycle.js';
 import { activityPageSchema, backupFileSchema } from '../shared/schemas.js';
 import { describeWrite } from './activity.js';
 import { backupFile, createVerifiedBackup, listBackups } from './backups.js';
@@ -283,9 +283,7 @@ function handoffResult<T extends { ok: true }>(result: T | { ok: false; error: '
   if (result.ok) return result;
   return fail(
     'CONFLICT',
-    result.error === 'finished'
-      ? 'De race is afgesloten. Bevestig eerst dat je de race hervat.'
-      : 'Niemand staat klaar in de wachtrij'
+    result.error === 'finished' ? raceMoveRefusal(getRaceState(), 'start') : 'Niemand staat klaar in de wachtrij'
   );
 }
 

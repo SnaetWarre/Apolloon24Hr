@@ -60,11 +60,19 @@ export function canMoveRace(race: RaceColumns, move: RaceMove): boolean {
   return RACE_MOVES[racePhase(race)].includes(move);
 }
 
+/** The press the spacebar or the big Timing button makes in each phase. */
+export function timingPress(race: RaceColumns): Exclude<RaceMove, 'finish'> {
+  const phase = racePhase(race);
+  return phase === 'running' ? 'handoff' : phase === 'finished' ? 'resume' : 'start';
+}
+
 /** Why the race cannot make `move` now, in words for the operator. */
 export function raceMoveRefusal(race: RaceColumns, move: RaceMove): string {
   const phase = racePhase(race);
   if (phase === 'finished') {
-    return move === 'finish' ? 'De race is al afgesloten.' : 'De race is afgesloten. Hervat de race eerst.';
+    return move === 'finish'
+      ? 'De race is al afgesloten.'
+      : 'De race is afgesloten. Bevestig eerst dat je de race hervat.';
   }
   if (phase === 'not_started' && move === 'finish') return 'De race is nog niet gestart.';
   if (move === 'resume') return 'De race is niet afgesloten.';
@@ -127,6 +135,11 @@ export const RUNNER_MOVES: Record<RunnerStatus, readonly QueueStatus[]> = {
 /** Timing's own moves, from the lane each one starts in: onto the track from the queue, off it after the lap. */
 export const TIMING_RUNNER_MOVES = { running: 'waiting', ran: 'running' } as const;
 export type TimingStatus = keyof typeof TIMING_RUNNER_MOVES;
+
+/** Checking in, from Loper zoeken or a runner's profile: a runner outside the queue's lanes starts warming up. */
+export function canCheckIn(status: RunnerStatus): boolean {
+  return status === 'registered' || status === 'ran';
+}
 
 /** Whether an operator may move a runner from `from` to `to`. The same lane is no move. */
 export function canMoveRunner(from: RunnerStatus, to: RunnerStatus): to is QueueStatus {

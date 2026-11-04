@@ -57,7 +57,7 @@ export function updateRunnerStatus({
   }
   if (current.status === status) return getRunnerById(id);
   if (!canMoveRunner(current.status, status)) {
-    throw new Error('Alleen het timingscherm zet een loper op de piste of bij de gelopen lopers.');
+    throw new Error('Een loper die gelopen heeft, gaat terug naar opwarming of naar de wachtrij.');
   }
   run('UPDATE runners SET status = ?, queue_index = ?, status_since = ?, hidden_at = NULL WHERE id = ?', [
     status,

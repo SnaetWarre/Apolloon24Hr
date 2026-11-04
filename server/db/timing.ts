@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { type UndoKind, canUndo } from '../../shared/lifecycle.js';
+import { type UndoKind, canUndo, timingPress } from '../../shared/lifecycle.js';
 import { type RaceEvent, type RaceState } from '../../shared/schemas.js';
 import { one, run, transaction } from './connection.js';
 import { getLapCount, getRaceEventById, getRecentRaceEvents } from './history.js';
@@ -78,7 +78,7 @@ export function performHandoff(
   const raceState = getRaceState();
   const activeRunnerId = raceState.activeRunnerId;
   const nextRunner = getNextWaitingRunner();
-  const move = activeRunnerId ? 'handoff' : raceState.raceFinishedAt !== null ? 'resume' : 'start';
+  const move = timingPress(raceState);
 
   if (move === 'resume' && !resume) return { ok: false, error: 'finished' };
   if (!activeRunnerId && !nextRunner) {
@@ -95,6 +95,7 @@ export function performHandoff(
   };
 
   transaction(() => {
+    moveRace(move, nowMs, nextRunner?.id ?? null);
     run(
       `INSERT INTO handoff_history (id, created_at, payload_json, undone)
        VALUES (?, ?, ?, 0)`,
@@ -138,7 +139,6 @@ export function performHandoff(
     }
 
     if (nextRunner) setRaceStatus(nextRunner.id, 'running', nowMs);
-    moveRace(move, nowMs, nextRunner?.id ?? null);
   });
 
   return { ok: true, lapId, startedRunnerId: nextRunner?.id ?? null };

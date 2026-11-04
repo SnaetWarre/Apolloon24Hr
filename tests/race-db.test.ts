@@ -441,7 +441,7 @@ test('only Timing puts a runner on the track or among the runners who ran', asyn
     db.performHandoff(1_000);
     db.performHandoff(61_000);
     assert.equal(db.getRunnerById(first.id)?.status, 'ran');
-    assert.throws(() => db.updateRunnerStatus({ id: first.id, status: 'registered' }), /timingscherm/);
+    assert.throws(() => db.updateRunnerStatus({ id: first.id, status: 'registered' }), /terug naar opwarming/);
     assert.equal(db.updateRunnerStatus({ id: first.id, status: 'warming_up' })?.status, 'warming_up');
   } finally {
     // Windows cannot delete a database file that is still open.

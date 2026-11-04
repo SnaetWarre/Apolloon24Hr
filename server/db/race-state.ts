@@ -36,10 +36,12 @@ export function getRaceState(): RaceState {
 
 /** The race as linking laptops count it: see countedRaceProgress. */
 export function raceProgress(): { raceStarted: boolean; raceRunning: boolean } {
-  const laps = one<{ laps: number }>('SELECT COUNT(*) AS laps FROM (SELECT 1 FROM laps LIMIT ?)', [
-    RACE_COUNTS_FROM_LAPS,
-  ]);
-  return countedRaceProgress(laps?.laps ?? 0, getRaceState());
+  const row = one<{ laps: number; raceFinishedAt: number | null }>(
+    `SELECT (SELECT COUNT(*) FROM (SELECT 1 FROM laps LIMIT ?)) AS laps,
+       (SELECT race_finished_at FROM race_state WHERE id = 1) AS raceFinishedAt`,
+    [RACE_COUNTS_FROM_LAPS]
+  );
+  return countedRaceProgress(row?.laps ?? 0, { raceFinishedAt: row?.raceFinishedAt ?? null });
 }
 
 type RaceFields = Omit<RaceState, 'id'>;
@@ -87,7 +89,7 @@ export function moveRace(move: RaceMove, nowMs: number, nextRunnerId: string | n
   } else if (move === 'handoff') {
     writeRaceState({ ...race, activeRunnerId: null, activeStartedAt: null, activeLabels: [] });
   } else {
-    throw new Error('Niemand staat klaar in de wachtrij');
+    throw new Error(`A ${move} needs a runner to start`);
   }
 }
 

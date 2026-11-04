@@ -1,5 +1,5 @@
 import React from 'react';
-import { canMoveRunner } from '../../shared/lifecycle';
+import { canCheckIn, canMoveRunner } from '../../shared/lifecycle';
 import { ModalDialog } from './ModalDialog';
 import { CallQrDialog } from './CallQrDialog';
 import { useConfirm } from './ConfirmDialog';
@@ -516,7 +516,7 @@ function isQueueRemovalStatus(status: RunnerStatus) {
 }
 
 function canStartWarmup(status: RunnerStatus) {
-  return canMoveRunner(status, 'warming_up');
+  return canCheckIn(status);
 }
 
 function queueRemovalButtonLabel(status: RunnerStatus) {

@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import test from 'node:test';
 import {
   RUNNER_MOVES,
+  canCheckIn,
   canMoveRace,
   canMoveRunner,
   canUndo,
@@ -98,6 +99,8 @@ test('the lanes an operator moves runners between', () => {
     'ran>waiting',
   ]);
   assert.deepEqual(RUNNER_MOVES.running, []);
+  // Checking in only takes a runner who is not in the queue's lanes yet.
+  assert.deepEqual(statuses.filter(canCheckIn), ['registered', 'ran']);
   assert.deepEqual(statuses.map(nextLane), ['warming_up', 'waiting', 'warming_up', null, 'warming_up']);
 });
 
@@ -201,6 +204,22 @@ test('a restore refuses a backup whose race is in no phase at all', async () => 
           settings: [],
         }),
       /beschadigd: de race heeft een loper op de piste na het einde/
+    );
+    // A runner on the track that is not the race's active runner is refused too.
+    const running = { id: 'bert', name: 'Bert', status: 'running', created_at: 0, updated_at: 0 };
+    assert.throws(
+      () =>
+        db.replaceEventData({
+          fileName: 'damaged.sqlite',
+          backupCreatedAt: 0,
+          tables: {
+            ...empty,
+            runners: [running],
+            race_state: [{ ...raceRow, active_runner_id: null, active_started_at: null, race_finished_at: null }],
+          },
+          settings: [],
+        }),
+      /de loper op de piste klopt niet met de race/
     );
     assert.equal(db.getRunnerById(anna.id)?.name, 'Anna');
   });
