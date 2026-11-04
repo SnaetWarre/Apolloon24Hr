@@ -1,4 +1,5 @@
 import React from 'react';
+import { canMoveRunner } from '../../shared/lifecycle';
 import { ModalDialog } from './ModalDialog';
 import { CallQrDialog } from './CallQrDialog';
 import { useConfirm } from './ConfirmDialog';
@@ -511,11 +512,11 @@ function RegistrationField({ label, value }: { label: string; value: string }) {
 }
 
 function isQueueRemovalStatus(status: RunnerStatus) {
-  return status === 'warming_up' || status === 'waiting';
+  return canMoveRunner(status, 'registered');
 }
 
 function canStartWarmup(status: RunnerStatus) {
-  return status === 'registered' || status === 'ran';
+  return canMoveRunner(status, 'warming_up');
 }
 
 function queueRemovalButtonLabel(status: RunnerStatus) {

@@ -1,8 +1,9 @@
 import { closestCenter, pointerWithin, type Collision, type CollisionDetection } from '@dnd-kit/core';
+import { canMoveRunner, type QueueStatus } from '../../shared/lifecycle';
 import type { Runner, RunnerStatus } from '../types';
 
 export type KanbanDropAction =
-  | { type: 'set-status'; runnerId: string; status: RunnerStatus }
+  | { type: 'set-status'; runnerId: string; status: QueueStatus }
   | { type: 'move-in-queue'; runnerId: string; targetRunnerId: string };
 
 function isColumnId(id: string): boolean {
@@ -40,7 +41,7 @@ export function resolveKanbanDrop(
 
   if (isColumnId(overId)) {
     const targetStatus = overId.slice('column-'.length) as RunnerStatus;
-    if (targetStatus === 'ran' || activeRunner.status === targetStatus) return null;
+    if (!canMoveRunner(activeRunner.status, targetStatus)) return null;
     return { type: 'set-status', runnerId: activeId, status: targetStatus };
   }
 
@@ -52,7 +53,8 @@ export function resolveKanbanDrop(
     return { type: 'move-in-queue', runnerId: activeId, targetRunnerId: overId };
   }
 
-  if (activeRunner.status !== overRunner.status && overRunner.status !== 'ran') {
+  // Dropped on a runner in another lane: that lane, when the move is allowed.
+  if (canMoveRunner(activeRunner.status, overRunner.status)) {
     return { type: 'set-status', runnerId: activeId, status: overRunner.status };
   }
 

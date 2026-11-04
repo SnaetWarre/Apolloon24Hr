@@ -192,7 +192,7 @@ test('undo reverts the latest handoff when two share the same moment', async () 
 
     // A finish on that same moment is also the latest step, so undo reopens the race.
     db.finishRace(61_000);
-    assert.equal(db.canUndoFinish(), true);
+    assert.equal(db.nextUndo(), 'finish');
     assert.deepEqual(db.undoLastHandoff(), { ok: true, deletedLapIds: [] });
     assert.equal(db.getRaceState().raceFinishedAt, null);
     assert.equal(db.getRaceState().activeRunnerId, b.id);
@@ -350,7 +350,7 @@ test('a finished race cannot be finished again, so its finish time stays', async
     );
     assert.deepEqual(db.getRaceState(), finished);
     // One undo still reopens the race, because the refused finish left no undo step.
-    assert.equal(db.canUndoFinish(), true);
+    assert.equal(db.nextUndo(), 'finish');
   } finally {
     // Windows cannot delete a database file that is still open.
     db.closeDb();
@@ -417,22 +417,32 @@ test('a double click or two laptops at once save one Burgie gepakt moment', asyn
   }
 });
 
-test('only one runner can be marked as running', async () => {
+test('only Timing puts a runner on the track or among the runners who ran', async () => {
   fs.rmSync(dataPath, { recursive: true, force: true });
   const db = await import('../server/db.ts');
+  const { appRouter } = await import('../server/router.ts');
 
   try {
     await db.initDb();
     const first = db.insertRunner({ name: 'First runner', runnerNumber: '1' });
-    const second = db.insertRunner({ name: 'Second runner', runnerNumber: '2' });
+    const caller = appRouter.createCaller({});
 
-    db.updateRunnerStatus({ id: first.id, status: 'running', statusSince: 1_000 });
-    assert.throws(
-      () => db.updateRunnerStatus({ id: second.id, status: 'running', statusSince: 2_000 }),
-      /Er loopt al een loper/
-    );
-    assert.equal(db.getRaceState().activeRunnerId, first.id);
-    assert.equal(db.getRunnerById(second.id)?.status, 'registered');
+    for (const status of ['running', 'ran']) {
+      await assert.rejects(
+        caller.runners.setStatus({ id: first.id, status: status as 'waiting' }),
+        (error: Error & { code?: string }) => error.code === 'BAD_REQUEST'
+      );
+    }
+    assert.equal(db.getRaceState().raceStartedAt, null);
+    assert.equal(db.getRunnerById(first.id)?.status, 'registered');
+
+    // A runner who ran goes back to a lane, but not straight to Ingeschreven.
+    db.updateRunnerStatus({ id: first.id, status: 'waiting' });
+    db.performHandoff(1_000);
+    db.performHandoff(61_000);
+    assert.equal(db.getRunnerById(first.id)?.status, 'ran');
+    assert.throws(() => db.updateRunnerStatus({ id: first.id, status: 'registered' }), /timingscherm/);
+    assert.equal(db.updateRunnerStatus({ id: first.id, status: 'warming_up' })?.status, 'warming_up');
   } finally {
     // Windows cannot delete a database file that is still open.
     db.closeDb();
@@ -459,7 +469,7 @@ test('a stale queue click cannot take the active runner off the track', async ()
       /Deze loper is net gestart op Timing/
     );
     const caller = appRouter.createCaller({});
-    for (const status of ['registered', 'warming_up', 'waiting', 'ran'] as const) {
+    for (const status of ['registered', 'warming_up', 'waiting'] as const) {
       await assert.rejects(caller.runners.setStatus({ id: first.id, status }), (error: Error & { code?: string }) => {
         assert.equal(error.code, 'CONFLICT');
         assert.match(error.message, /Wissel via het timingscherm/);

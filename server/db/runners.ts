@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { isQueueStatus, queueIndexAfterMove } from '../../shared/lifecycle.js';
 import {
   runnerRegistrationSchema,
   type Runner,
@@ -173,12 +174,13 @@ export function insertRunner(input: RunnerInput): Runner {
   if (!name) throw new Error('Een loper heeft een naam nodig');
 
   const initialStatus = input.status ?? 'registered';
-  if (initialStatus === 'running') {
+  // A new runner starts in one of the operator's lanes; only Timing starts or clocks a runner.
+  if (!isQueueStatus(initialStatus)) {
     throw new Error('Start een nieuwe loper via het timingscherm');
   }
   const now = clusterNow();
   const id = input.id || randomUUID();
-  const initialQueueIndex = initialStatus === 'waiting' ? getMaxQueueIndex() + 1 : null;
+  const initialQueueIndex = queueIndexAfterMove(initialStatus, getMaxQueueIndex());
   transaction(() => {
     run(
       `INSERT INTO runners (

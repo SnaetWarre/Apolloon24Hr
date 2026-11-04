@@ -188,7 +188,7 @@ export {
   lapsToUndo,
   undoLastHandoff,
   finishRace,
-  canUndoFinish,
+  nextUndo,
 } from './db/timing.js';
 export { getActivity, logActivity } from './db/activity.js';
 export { previewBackup, readRestoreData, replaceEventData, restoreDataSchema } from './db/restore.js';

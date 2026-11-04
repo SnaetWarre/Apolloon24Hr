@@ -43,6 +43,8 @@ Preconditions:
 
 ## Gotchas
 
+- The lanes an operator can move a runner between are in `RUNNER_MOVES` (`shared/lifecycle.ts`). `runners.setStatus` refuses `running` and `ran`, a runner who ran goes back to Opwarming or Klaar om te lopen but not to Ingeschreven, and the same lane again changes nothing (a runner who already waits keeps their place).
+
 - Queue moves show at once and reach the server in click order. The board is not proof; wait until `/api/state` shows the new status.
 - A row leaves its lane on the first click of `Naar wachtrij`, `Opwarmen`, or `Verberg`, and the next runner's row slides up under the mouse. The board ignores a second click on these buttons at the same spot (8 px) within 500 ms, so a double click moves one runner. It also ignores a mouse click on a row that moved in the last 600 ms, whatever moved it (a handoff on Timing, a move on another laptop, the operator's own click), and the moved rows slide to their new place. To move two runners from the same spot, wait more than 600 ms between clicks. Playwright's `dblclick()` sends both clicks before React redraws, so to test a double click use `page.mouse.click` twice with a 150 ms gap.
 - The profile's `Wachtrij` button turns into the opposite action (`Opwarmen` into `Uit opwarmen halen` and back) once the first click is saved. The profile ignores a second click on it at the same spot within 500 ms the same way, so a double click on `Opwarmen` checks the runner in once and does not open `Uit de wachtrij halen?`.

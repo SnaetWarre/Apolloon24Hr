@@ -30,6 +30,7 @@ const emptySnapshot: LiveAppSnapshot = {
   runners: [],
   labels: [],
   race: emptyRace,
+  nextUndo: null,
   settings: defaultSettings,
   revision: 0,
   host: { hostIpHint: '', port: 1, url: '' },

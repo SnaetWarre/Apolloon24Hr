@@ -1,5 +1,6 @@
+import { canMoveRunner, queueIndexAfterMove, type QueueStatus } from '../../shared/lifecycle';
 import { compareWaitingOrder } from '../lib/runners';
-import type { LiveAppSnapshot, RunnerStatus } from '../types';
+import type { LiveAppSnapshot } from '../types';
 
 /**
  * Queue changes show on this screen the moment they are clicked, before the server confirms them.
@@ -42,11 +43,14 @@ export function waitingOrder(snapshot: LiveAppSnapshot): string[] {
     .map((runner) => runner.id);
 }
 
-/** Moves a runner to a lane the way the server does: waiting goes to the back, other lanes have no position. */
-export function statusPatch(id: string, status: RunnerStatus, statusSince: number): Patch {
+/**
+ * Moves a runner to a lane the way the server does (RUNNER_MOVES): waiting goes to the back, other
+ * lanes have no position, and the same lane or a move the server refuses changes nothing.
+ */
+export function statusPatch(id: string, status: QueueStatus, statusSince: number): Patch {
   return (snapshot) => {
     const runner = snapshot.runners.find((candidate) => candidate.id === id);
-    if (!runner || runner.status === status) return snapshot;
+    if (!runner || !canMoveRunner(runner.status, status)) return snapshot;
     const lastIndex = Math.max(
       -1,
       ...snapshot.runners.filter((other) => other.status === 'waiting').map((other) => other.queueIndex ?? -1)
@@ -59,7 +63,7 @@ export function statusPatch(id: string, status: RunnerStatus, statusSince: numbe
               ...other,
               status,
               statusSince,
-              queueIndex: status === 'waiting' ? lastIndex + 1 : null,
+              queueIndex: queueIndexAfterMove(status, lastIndex),
               hiddenFromQueue: false,
               queueHiddenAt: null,
             }

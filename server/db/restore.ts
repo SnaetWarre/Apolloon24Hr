@@ -1,5 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
+import { raceStateProblem } from '../../shared/lifecycle.js';
 import type { BackupPreview } from '../../shared/schemas.js';
 import { all, run } from './connection.js';
 import { schemaProblems } from './schema-check.js';
@@ -94,12 +95,26 @@ export function readRestoreData(filePath: string, fileName: string, backupCreate
   }
 }
 
+/** A race state no version of Apolloon writes would leave Timing without a press that works. */
+function assertRacePhase(row: Record<string, string | number | null> | undefined): void {
+  if (!row) return;
+  const at = (column: string) => (typeof row[column] === 'number' ? row[column] : null);
+  const problem = raceStateProblem({
+    activeRunnerId: typeof row.active_runner_id === 'string' ? row.active_runner_id : null,
+    activeStartedAt: at('active_started_at'),
+    raceStartedAt: at('race_started_at'),
+    raceFinishedAt: at('race_finished_at'),
+  });
+  if (problem) throw new Error(`Deze backup is beschadigd: de race heeft ${problem}.`);
+}
+
 /**
  * Replaces the event data with the backup's, as one replicated write: every statement is
  * captured, so the other laptops end up with exactly the same data. Only columns this
  * version knows are written, so the table and column names in the SQL never come from input.
  */
 export function replaceEventData(data: RestoreData): { runners: number; laps: number } {
+  assertRacePhase(data.tables.race_state[0]);
   for (const table of [...RESTORED_TABLES].reverse()) run(`DELETE FROM "${table}"`);
   for (const table of RESTORED_TABLES) {
     const columns = all<{ name: string }>(`PRAGMA table_info("${table}")`).map((column) => column.name);

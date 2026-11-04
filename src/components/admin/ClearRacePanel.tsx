@@ -1,3 +1,4 @@
+import { raceIsOpen } from '../../../shared/lifecycle';
 import { useAppActions } from '../../app/index';
 import { useConfirm } from '../ConfirmDialog';
 import type { RaceState } from '../../types';
@@ -13,7 +14,7 @@ export function ClearRacePanel({ race }: { race: RaceState }) {
   const confirm = useConfirm();
   const { clearRace } = useAppActions();
   const { pending, run } = useAdminAction();
-  const running = race.raceStartedAt !== null && race.raceFinishedAt === null;
+  const running = raceIsOpen(race);
 
   async function clear(runners: boolean) {
     if (pending) return;

@@ -24,6 +24,7 @@ import { hostInfo, LAPTOP_NAME, SERVER_PORT } from './host.js';
 import { sendJson } from './http-json.js';
 import { getNetProfile, isLoopbackAddress, requestMakeStatic, requestRevertDhcp } from './net-setup.js';
 import { PEER_SOCKET_PATH } from './peer-socket.js';
+import { raceIsOpen } from '../shared/lifecycle.js';
 import { appRouter } from './router.js';
 import { registerStaticFrontend } from './static-files.js';
 import { clusterNow } from './clock.js';
@@ -191,7 +192,7 @@ app.get('/api/health', (_req, res) => {
       uptimeSeconds: Math.floor(process.uptime()),
       database: databaseReadiness(),
       // The desktop app keeps the laptop awake and asks before closing while this is true.
-      race: { active: race.raceStartedAt !== null && race.raceFinishedAt === null },
+      race: { active: raceIsOpen(race) },
       backup: {
         enabled: backup.enabled,
         latestCreatedAt: backup.latest?.createdAt ?? null,

@@ -3,7 +3,7 @@ import { MAX_HANDOFF_SHIFT_MS, MIN_LAP_MS } from '../../shared/lapTimes.js';
 import { clusterNow } from '../clock.js';
 import { all, one, run } from './connection.js';
 import { getRunnerLabels } from './labels.js';
-import { getRaceState } from './race-state.js';
+import { getRaceState, writeRaceState } from './race-state.js';
 import { serializeHistoricalLabels } from './values.js';
 
 /*
@@ -156,7 +156,7 @@ export function moveHandoff(lapId: string, from: number, to: number): { ok: true
   }
   run('UPDATE laps SET finished_at = ?, duration_ms = ? WHERE id = ?', [to, lap.durationMs + shift, lapId]);
   if (next) run('UPDATE laps SET started_at = ?, duration_ms = ? WHERE id = ?', [to, next.durationMs - shift, next.id]);
-  else run('UPDATE race_state SET active_started_at = ? WHERE id = 1', [to]);
+  else writeRaceState({ ...race, activeStartedAt: to });
   const nextRunnerId = next?.runnerId ?? runningId;
   run('UPDATE runners SET status_since = ? WHERE status_since = ? AND id IN (?, ?)', [
     to,

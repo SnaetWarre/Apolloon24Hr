@@ -1,3 +1,4 @@
+import { raceIsOpen } from '../../shared/lifecycle';
 import React from 'react';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { useAppData, useClusterStatus, useRaceHistory } from '../app/index';
@@ -202,7 +203,7 @@ export function RolePicker() {
                 <dd>{ranCount}</dd>
               </div>
             </dl>
-            {waitingCount < 3 && race.raceStartedAt && !race.raceFinishedAt && (
+            {waitingCount < 3 && raceIsOpen(race) && (
               <p className="overview-warning">
                 Nog maar {waitingCount} {waitingCount === 1 ? 'loper' : 'lopers'} klaar. Zet lopers klaar in Wachtrij.
               </p>

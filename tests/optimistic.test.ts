@@ -50,6 +50,7 @@ function snapshot(runners: Runner[]): LiveAppSnapshot {
       raceFinishedAt: null,
       activeLabels: [],
     },
+    nextUndo: null,
     settings: { publicRecordMode: 'day', competitions: [] },
     revision: 1,
     host: { hostIpHint: '', port: 1, url: '' },
@@ -106,7 +107,8 @@ test('settling a queue move restores a runner started elsewhere and preserves ot
     server.race.activeRunnerId = 'a';
     server.race.activeStartedAt = 700;
     server.revision = 3;
-    assert.deepEqual(waitingOrder(withPendingChanges(server)), ['a', 'b']);
+    // The server refuses to queue a runner on the track, so the screen does not show it queued either.
+    assert.deepEqual(waitingOrder(withPendingChanges(server)), ['b']);
 
     const settled = removeA();
     assert.ok(settled);
