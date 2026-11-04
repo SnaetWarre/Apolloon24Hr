@@ -395,7 +395,10 @@ try {
     .filter((runner) => runner.runnerNumber && runner.id !== raceState.race.activeRunnerId)
     .sort((a, b) => Number(a.runnerNumber) - Number(b.runnerNumber))
     .slice(0, 6);
-  for (const runner of lowestNumbers) await rpc.runners.setStatus.mutate({ id: runner.id, status: 'registered' });
+  // A runner who ran can already check in again; the rest go back to Ingeschreven.
+  for (const runner of lowestNumbers.filter((runner) => runner.status !== 'ran')) {
+    await rpc.runners.setStatus.mutate({ id: runner.id, status: 'registered' });
+  }
   const searchedRunner = (await snapshot()).runners.find(
     (runner) =>
       runner.status === 'registered' && runner.runnerNumber && !lowestNumbers.some(({ id }) => id === runner.id)

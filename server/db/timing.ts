@@ -12,7 +12,7 @@ import { clusterNow } from '../clock.js';
 
 /** An entry on the undo stack (`handoff_history`): what the step replaced, so undo can put it back. */
 type HandoffSnapshot = {
-  /** Entries stored before 2026-11 have none; see undoKind. */
+  /** Entries stored before 2026-11 have none; see topEntry. */
   kind?: UndoKind;
   raceState: RaceState;
   /** Stored as `queueEntries` since before the queue lived on `runners`. */
@@ -144,33 +144,33 @@ export function performHandoff(
   return { ok: true, lapId, startedRunnerId: nextRunner?.id ?? null };
 }
 
-function lastHandoff() {
-  return one<{ id: string; createdAt: number; payloadJson: string }>(
-    `SELECT id, created_at AS createdAt, payload_json AS payloadJson
+/**
+ * The newest entry that is not undone, and what it takes back. Entries stored before the
+ * kind was saved are a finish only when they are the step that finished the current race:
+ * the same moment as its end.
+ */
+function topEntry(): { id: string; payloadJson: string; kind: UndoKind } | null {
+  const row = one<{ id: string; payloadJson: string; kind: UndoKind | null; isFinish: number }>(
+    `SELECT id, payload_json AS payloadJson, json_extract(payload_json, '$.kind') AS kind,
+       created_at = (SELECT race_finished_at FROM race_state WHERE id = 1) AS isFinish
      FROM handoff_history
      WHERE undone = 0
      ORDER BY created_at DESC, rowid DESC
      LIMIT 1`
   );
-}
-
-/**
- * What an entry takes back. Entries stored before the kind was saved are a finish only
- * when they are the step that finished the current race: the same moment as its end.
- */
-function undoKind(row: { createdAt: number }, payload: Partial<HandoffSnapshot>): UndoKind {
-  return payload.kind ?? (row.createdAt === getRaceState().raceFinishedAt ? 'finish' : 'handoff');
+  return row
+    ? { id: row.id, payloadJson: row.payloadJson, kind: row.kind ?? (row.isFinish ? 'finish' : 'handoff') }
+    : null;
 }
 
 /** What the next undo takes back, or null when there is nothing to undo. */
 export function nextUndo(): UndoKind | null {
-  const row = lastHandoff();
-  return row ? undoKind(row, JSON.parse(row.payloadJson) as Partial<HandoffSnapshot>) : null;
+  return topEntry()?.kind ?? null;
 }
 
 /** The laps the next undo removes, including halves a split added. */
 export function lapsToUndo(): string[] {
-  const row = lastHandoff();
+  const row = topEntry();
   return row ? ((JSON.parse(row.payloadJson) as Partial<HandoffSnapshot>).lapIds ?? []) : [];
 }
 
@@ -178,11 +178,10 @@ export function lapsToUndo(): string[] {
 export function undoLastHandoff():
   | { ok: true; deletedLapIds: string[] }
   | { ok: false; error: 'nothing_to_undo' | 'finished' } {
-  const row = lastHandoff();
-  const payload = row ? (JSON.parse(row.payloadJson) as Partial<HandoffSnapshot>) : null;
-  const kind = row && payload ? undoKind(row, payload) : null;
-  if (!row || !payload || !kind) return { ok: false, error: 'nothing_to_undo' };
-  if (!canUndo(getRaceState(), kind)) return { ok: false, error: 'finished' };
+  const row = topEntry();
+  if (!row) return { ok: false, error: 'nothing_to_undo' };
+  if (!canUndo(getRaceState(), row.kind)) return { ok: false, error: 'finished' };
+  const payload = JSON.parse(row.payloadJson) as Partial<HandoffSnapshot>;
 
   const deletedLapIds = payload.lapIds ?? [];
   const snapshotState: Partial<RaceState> = payload.raceState ?? {};

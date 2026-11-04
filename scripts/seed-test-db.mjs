@@ -194,11 +194,10 @@ function seedRunners(count, nowMs) {
 
     const existing = existingByNumber.get(runnerNumber);
     const runner = existing ? db.updateRunner(existing.id, input) : db.insertRunner(input);
-    db.updateRunnerStatus({
-      id: runner.id,
-      status: 'registered',
-      statusSince: nowMs - statusAgeMsForIndex(index, scenario),
-    });
+    const statusSince = nowMs - statusAgeMsForIndex(index, scenario);
+    // A runner who ran reaches Ingeschreven through Opwarming, the way the queue moves them.
+    if (runner.status === 'ran') db.updateRunnerStatus({ id: runner.id, status: 'warming_up', statusSince });
+    db.updateRunnerStatus({ id: runner.id, status: 'registered', statusSince });
     runners.push(db.getRunnerById(runner.id));
   }
 

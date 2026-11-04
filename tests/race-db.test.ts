@@ -514,7 +514,13 @@ test('new runners cannot bypass timing state and waiting runners join the back o
 
     assert.equal(db.getRunnerById(first.id)?.queueIndex, 0);
     assert.equal(db.getRunnerById(second.id)?.queueIndex, 1);
-    assert.throws(() => db.insertRunner({ name: 'Invalid active runner', status: 'running' }), /timingscherm/);
+    // The schema only takes the operator's lanes; the database refuses the rest from an untyped caller too.
+    for (const status of ['running', 'ran']) {
+      assert.throws(
+        () => db.insertRunner({ name: 'Invalid active runner', status: status as 'waiting' }),
+        /timingscherm/
+      );
+    }
     assert.equal(db.getRaceState().activeRunnerId, null);
     assert.equal(db.getAllRunners().length, 2);
   } finally {

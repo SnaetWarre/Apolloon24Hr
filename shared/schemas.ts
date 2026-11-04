@@ -371,7 +371,8 @@ export const runnerInputSchema = z.object({
   registrationDetails: runnerRegistrationDetailsSchema.optional(),
   /** Label ids or names; unknown names become new labels. */
   labels: z.array(z.string().trim().min(1)).optional(),
-  status: runnerStatusSchema.optional(),
+  /** A new runner starts in one of the operator's lanes; only Timing starts or clocks a runner. */
+  status: z.enum(QUEUE_STATUSES).optional(),
   statusSince: z.number().int().nonnegative().optional(),
 });
 /** What the server works with after validation; clients send `z.input` of the schema. */
