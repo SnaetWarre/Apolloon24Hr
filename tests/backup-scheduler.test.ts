@@ -5,6 +5,12 @@ import { after, before, test } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { temporaryDataPath } from './temporary-data.ts';
 
+// Registered before the data folder exists, so the database closes before the folder is removed:
+// Windows refuses to delete a folder that holds an open file, and `after` hooks run in order.
+after(async () => {
+  await backups.stopBackupService();
+  db.closeDb();
+});
 const dataPath = temporaryDataPath('backup-scheduler');
 process.env.DATA_PATH = dataPath;
 process.env.NODE_ENV = 'test';
@@ -18,10 +24,6 @@ const backups = await import('../server/backups.ts');
 const backupDirectory = path.join(dataPath, 'backups');
 
 before(() => db.initDb());
-after(async () => {
-  await backups.stopBackupService();
-  db.closeDb();
-});
 
 async function until(check: () => boolean, what: string): Promise<void> {
   const deadline = Date.now() + 10_000;
