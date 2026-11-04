@@ -6,16 +6,14 @@ import path from 'path';
 import {
   canInstallInApp,
   checkForUpdate,
-  compareVersions,
   installOutcome,
   isReleaseUrl,
-  releasePage,
   RELEASES_PAGE,
   updaterCacheDirName,
-  type AvailableUpdate,
   type InstallOutcome,
   type UpdateStatus,
 } from './update-check.js';
+import { createUpdateFlow, errorText } from './update-flow.js';
 
 /**
  * Newer versions, from finding one to running it.
@@ -31,8 +29,6 @@ import {
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 /** Not right at startup: the first seconds belong to opening the database and the window. */
 const FIRST_CHECK_DELAY_MS = 10_000;
-
-const RACE_RUNNING = 'De wedstrijd loopt. Installeer de update pas na de wedstrijd.';
 
 export function setUpUpdates({
   log,
@@ -55,15 +51,7 @@ export function setUpUpdates({
   const notePath = path.join(app.getPath('userData'), 'update-install.json');
   const lastInstall = readLastInstall();
 
-  let status: UpdateStatus = { state: 'checking', checkedAt: null };
-  let timer: NodeJS.Timeout | null = null;
-  let running: Promise<UpdateStatus> | null = null;
   let updaterInstance: AppUpdater | null = null;
-
-  function setStatus(next: UpdateStatus) {
-    status = next;
-    send(status);
-  }
 
   /**
    * Created on first use: the getter builds the platform's updater. Loaded then too, because
@@ -89,105 +77,27 @@ export function setUpUpdates({
     if (process.env.APOLLOON_UPDATE_FEED) {
       instance.setFeedURL({ provider: 'generic', url: process.env.APOLLOON_UPDATE_FEED });
     }
-    let lastPercent = -1;
-    instance.on('download-progress', (progress) => {
-      const percent = Math.floor(progress.percent);
-      if (status.state !== 'downloading' || percent === lastPercent) return;
-      lastPercent = percent;
-      setStatus({ ...status, percent });
-    });
+    instance.on('download-progress', (progress) => flow.progress(progress.percent));
+    instance.on('error', (error) => flow.updaterError(error));
     updaterInstance = instance;
     return instance;
   }
 
-  function check(): Promise<UpdateStatus> {
-    // A download in progress or waiting to be installed is not replaced by a new check.
-    if (status.state === 'downloading' || status.state === 'ready' || status.state === 'installing') {
-      return Promise.resolve(status);
-    }
-    running ??= (async () => {
-      const previous = status;
-      setStatus({ state: 'checking', checkedAt: previous.checkedAt });
-      if (inApp) {
-        try {
-          const result = await (await updater()).checkForUpdates();
-          const info = result?.updateInfo;
-          if (info && compareVersions(info.version, app.getVersion()) > 0) {
-            const releasedAt = Date.parse(info.releaseDate);
-            const update: AvailableUpdate = {
-              version: info.version,
-              pageUrl: releasePage(info.version),
-              downloadUrl: null,
-              publishedAt: Number.isFinite(releasedAt) ? releasedAt : null,
-            };
-            log(`Update available: ${update.version}; downloading`);
-            void download(update);
-            return status;
-          }
-          if (info) {
-            setStatus({ state: 'current', checkedAt: Date.now() });
-            return status;
-          }
-        } catch (error) {
-          log(`Updater check failed (${errorText(error)}); asking the release page instead`);
-        }
-      }
-      const result = await checkForUpdate({
-        currentVersion: app.getVersion(),
-        platform: process.platform,
-        arch: process.arch,
-      });
-      // Offline at the event: keep showing an update found earlier instead of forgetting it.
-      setStatus(result.state === 'unreachable' && previous.state === 'available' ? previous : result);
-      if (status.state === 'available') log(`Update available: ${status.update.version}`);
-      return status;
-    })().finally(() => {
-      running = null;
-    });
-    return running;
-  }
-
-  async function download(update: AvailableUpdate) {
-    setStatus({ state: 'downloading', checkedAt: Date.now(), update, percent: 0 });
-    try {
-      await (await updater()).downloadUpdate();
-      log(`Update ${update.version} downloaded and ready to install`);
-      setStatus({ state: 'ready', checkedAt: Date.now(), update });
-    } catch (error) {
-      log(`Update download failed: ${errorText(error)}`);
-      setStatus({
-        state: 'available',
-        checkedAt: Date.now(),
-        update,
-        problem: 'Automatisch downloaden lukte niet. Download het installatiebestand zelf, of probeer later opnieuw.',
-      });
-    }
-  }
-
-  /** Resolves to null when the app is about to restart, or to the reason it did not. */
-  async function install(): Promise<string | null> {
-    if (status.state !== 'ready') return 'Er is geen update klaar om te installeren.';
-    if (isRaceActive()) return RACE_RUNNING;
-    const ready = status;
-    setStatus({ state: 'installing', checkedAt: ready.checkedAt, update: ready.update });
-    try {
-      await makeBackup();
-    } catch (error) {
-      setStatus(ready);
-      return `De backup vooraf mislukte, dus de update is niet geïnstalleerd: ${errorText(error)}`;
-    }
-    // The race may have started during the backup.
-    if (isRaceActive()) {
-      setStatus(ready);
-      return RACE_RUNNING;
-    }
-    const instance = await updater();
-    fs.writeFileSync(notePath, JSON.stringify({ version: ready.update.version, from: app.getVersion() }));
-    log(`Installing update ${ready.update.version} and restarting`);
-    // Silent, then start the new version. Closing goes through the normal quit, which stops the server.
-    setImmediate(() => instance.quitAndInstall(true, true));
-    return null;
-  }
+  const flow = createUpdateFlow({
+    currentVersion: app.getVersion(),
+    inApp,
+    updater,
+    checkRelease: () =>
+      checkForUpdate({ currentVersion: app.getVersion(), platform: process.platform, arch: process.arch }),
+    log,
+    send,
+    isRaceActive,
+    makeBackup,
+    beforeInstall: (version) => {
+      fs.writeFileSync(notePath, JSON.stringify({ version, from: app.getVersion() }));
+    },
+  });
+  let timer: NodeJS.Timeout | null = null;
 
   /** After an update from the app: whether it took, and the installer it no longer needs. */
   function readLastInstall(): InstallOutcome | null {
@@ -225,9 +135,9 @@ export function setUpUpdates({
     }
   }
 
-  ipcMain.handle('apolloon:update-status', () => status);
-  ipcMain.handle('apolloon:check-update', () => check());
-  ipcMain.handle('apolloon:install-update', () => install());
+  ipcMain.handle('apolloon:update-status', () => flow.status());
+  ipcMain.handle('apolloon:check-update', () => flow.check());
+  ipcMain.handle('apolloon:install-update', () => flow.install());
   ipcMain.handle('apolloon:last-install', () => lastInstall);
   ipcMain.handle('apolloon:open-release', (_event, url: unknown) => {
     void shell.openExternal(typeof url === 'string' && isReleaseUrl(url) ? url : RELEASES_PAGE);
@@ -238,7 +148,7 @@ export function setUpUpdates({
     start() {
       if (timer || process.env.APOLLOON_UPDATE_CHECK === '0') return;
       timer = setTimeout(function next() {
-        void check();
+        void flow.check();
         timer = setTimeout(next, CHECK_INTERVAL_MS);
       }, FIRST_CHECK_DELAY_MS);
     },
@@ -254,8 +164,4 @@ function cacheBase(): string {
   if (process.platform === 'win32') return process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local');
   if (process.platform === 'darwin') return path.join(os.homedir(), 'Library', 'Caches');
   return process.env.XDG_CACHE_HOME || path.join(os.homedir(), '.cache');
-}
-
-function errorText(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
