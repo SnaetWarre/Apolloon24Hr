@@ -1,4 +1,4 @@
-import { execFile, spawn } from 'node:child_process';
+import { type ChildProcess, execFile, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -284,36 +284,61 @@ type NetProfile = {
   lastElevation: ElevationOutcome | null;
 };
 
+const ELEVATION_BUSY =
+  'Er wacht al een netwerkwijziging op toestemming. Bevestig of weiger die eerst op deze laptop en probeer het daarna opnieuw.';
+
+/**
+ * The elevated change's state machine. Nothing or a settled change moves to
+ * `waiting` when a new one starts; `waiting` moves to `finished` or `failed`
+ * once, when its helper process exits or cannot start. A new change is refused
+ * while one waits, from any browser tab. Only `startElevation` and
+ * `settleElevation` change it.
+ */
 let lastElevation: ElevationOutcome | null = null;
 
-function beginElevation(): ElevationOutcome {
-  lastElevation = {
+export function currentElevation(): ElevationOutcome | null {
+  return lastElevation;
+}
+
+function settleElevation(id: string, state: 'finished' | 'failed', message: string | null): void {
+  if (lastElevation?.id !== id || lastElevation.state !== 'waiting') return;
+  lastElevation = { ...lastElevation, state, message };
+}
+
+/**
+ * Starts one elevated change with `launch` and follows its helper process, so
+ * a refused or impossible password prompt is reported instead of silently waited on.
+ */
+export function startElevation(launch: () => ChildProcess): ElevationOutcome {
+  if (lastElevation?.state === 'waiting') throw new Error(ELEVATION_BUSY);
+  const outcome: ElevationOutcome = {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     state: 'waiting',
     message: null,
     startedAt: Date.now(),
   };
-  return lastElevation;
-}
-
-/** Follows the helper process so a refused or impossible password prompt is reported instead of silently waited on. */
-function trackElevation(outcome: ElevationOutcome, launcher: ReturnType<typeof spawn>): void {
+  lastElevation = outcome;
+  let launcher: ChildProcess;
+  try {
+    launcher = launch();
+  } catch (error) {
+    settleElevation(outcome.id, 'failed', `Kon de toestemming niet vragen: ${(error as Error).message}`);
+    throw error;
+  }
   let stderr = '';
   launcher.stderr?.setEncoding('utf8');
   launcher.stderr?.on('data', (chunk: string) => {
     stderr = (stderr + chunk).slice(-2_000);
   });
-  launcher.on('error', (error) => {
-    if (lastElevation?.id !== outcome.id) return;
-    lastElevation = { ...outcome, state: 'failed', message: `Kon de toestemming niet vragen: ${error.message}` };
-  });
-  launcher.on('exit', (exitCode) => {
-    if (lastElevation?.id !== outcome.id) return;
-    lastElevation =
-      exitCode === 0
-        ? { ...outcome, state: 'finished', message: null }
-        : { ...outcome, state: 'failed', message: describeElevationFailure(process.platform, exitCode, stderr) };
-  });
+  launcher.on('error', (error) =>
+    settleElevation(outcome.id, 'failed', `Kon de toestemming niet vragen: ${error.message}`)
+  );
+  launcher.on('exit', (exitCode) =>
+    exitCode === 0
+      ? settleElevation(outcome.id, 'finished', null)
+      : settleElevation(outcome.id, 'failed', describeElevationFailure(process.platform, exitCode, stderr))
+  );
+  return outcome;
 }
 
 /**
@@ -639,30 +664,29 @@ export function buildWindowsLauncherCommand(encodedCommand: string): string {
 }
 
 function launchElevatedWindows(script: string): ElevationOutcome {
-  const outcome = beginElevation();
-  const launcher = spawn(
-    'powershell.exe',
-    [
-      '-NoProfile',
-      '-NonInteractive',
-      '-ExecutionPolicy',
-      'Bypass',
-      '-Command',
-      buildWindowsLauncherCommand(toEncodedCommand(script)),
-    ],
-    { detached: true, stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true }
+  return startElevation(() =>
+    spawn(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-Command',
+        buildWindowsLauncherCommand(toEncodedCommand(script)),
+      ],
+      { detached: true, stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true }
+    )
   );
-  trackElevation(outcome, launcher);
-  return outcome;
 }
 
 function launchElevatedLinuxScript(scriptText: string): ElevationOutcome {
   // One password prompt: pkexec runs the whole recipe from a temporary script.
   const tmpFile = path.join(os.tmpdir(), `apolloon-net-${Date.now()}-${process.pid}.sh`);
-  fs.writeFileSync(tmpFile, `#!/bin/sh\nset -eu\n${scriptText}\n`, { mode: 0o700 });
-  const outcome = beginElevation();
-  const launcher = spawn('pkexec', ['sh', tmpFile], { detached: true, stdio: ['ignore', 'ignore', 'pipe'] });
-  trackElevation(outcome, launcher);
+  const outcome = startElevation(() => {
+    fs.writeFileSync(tmpFile, `#!/bin/sh\nset -eu\n${scriptText}\n`, { mode: 0o700 });
+    return spawn('pkexec', ['sh', tmpFile], { detached: true, stdio: ['ignore', 'ignore', 'pipe'] });
+  });
   // Remove once pkexec has read it; harmless if it lingers (0700, in tmp).
   setTimeout(() => {
     try {
@@ -676,10 +700,9 @@ function launchElevatedLinuxScript(scriptText: string): ElevationOutcome {
 
 function launchElevatedMacOs(innerCommand: string): ElevationOutcome {
   const appleScript = `do shell script "${escapeAppleScriptString(innerCommand)}" with administrator privileges`;
-  const outcome = beginElevation();
-  const launcher = spawn('osascript', ['-e', appleScript], { detached: true, stdio: ['ignore', 'ignore', 'pipe'] });
-  trackElevation(outcome, launcher);
-  return outcome;
+  return startElevation(() =>
+    spawn('osascript', ['-e', appleScript], { detached: true, stdio: ['ignore', 'ignore', 'pipe'] })
+  );
 }
 
 export function buildLinuxSetStaticScript(
