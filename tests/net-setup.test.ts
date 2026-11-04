@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { type ChildProcess, execFileSync } from 'node:child_process';
+import { EventEmitter } from 'node:events';
 import { readFileSync } from 'node:fs';
-import test from 'node:test';
+import test, { mock } from 'node:test';
 import {
   buildLinuxRevertDhcpScript,
   buildLinuxSetStaticScript,
@@ -30,6 +31,9 @@ import {
   isWirelessMacService,
   createWindowsNetReader,
   parseWindowsNetReadout,
+  currentElevation,
+  ELEVATION_WAIT_MS,
+  startElevation,
 } from '../server/net-setup.ts';
 
 test('only real loopback callers may change host networking', () => {
@@ -343,4 +347,82 @@ test('calls during a Windows read share it instead of starting more PowerShell p
   finish(WINDOWS_READOUT);
   await third;
   assert.equal(starts, 2, 'a read after the shared one finished starts a new process');
+});
+
+/** Stands in for the password-prompt helper, so no test ever asks for admin rights. */
+function fakeLauncher(): ChildProcess {
+  return new EventEmitter() as ChildProcess;
+}
+
+test('an elevated network change waits, then finishes or fails once, and blocks a second one meanwhile', () => {
+  const first = fakeLauncher();
+  const outcome = startElevation(() => first);
+  assert.equal(currentElevation()?.state, 'waiting');
+
+  let secondLaunched = false;
+  assert.throws(
+    () =>
+      startElevation(() => {
+        secondLaunched = true;
+        return fakeLauncher();
+      }),
+    /Er wacht al een netwerkwijziging op toestemming/
+  );
+  assert.equal(secondLaunched, false, 'no second password prompt while one waits');
+  assert.equal(currentElevation()?.id, outcome.id);
+
+  first.emit('exit', 0);
+  assert.deepEqual({ ...currentElevation(), startedAt: 0 }, { ...outcome, startedAt: 0, state: 'finished' });
+  first.emit('exit', 1);
+  assert.equal(currentElevation()?.state, 'finished', 'a settled change stays settled');
+
+  const refused = fakeLauncher();
+  const next = startElevation(() => refused);
+  assert.notEqual(next.id, outcome.id, 'a new change may start once the last one settled');
+  refused.emit('error', new Error('spawn osascript ENOENT'));
+  refused.emit('exit', null);
+  assert.equal(currentElevation()?.state, 'failed');
+  assert.equal(currentElevation()?.message, 'Kon de toestemming niet vragen: spawn osascript ENOENT');
+
+  const late = fakeLauncher();
+  startElevation(() => late);
+  first.emit('exit', 1);
+  refused.emit('exit', 1);
+  assert.equal(currentElevation()?.state, 'waiting', 'an older helper exiting does not settle the new change');
+  late.emit('exit', 1);
+  assert.equal(currentElevation()?.state, 'failed');
+});
+
+test('a helper that cannot even start leaves the change failed, not waiting', () => {
+  assert.throws(() =>
+    startElevation(() => {
+      throw new Error('EACCES');
+    })
+  );
+  assert.equal(currentElevation()?.state, 'failed');
+  assert.equal(currentElevation()?.message, 'Kon de toestemming niet vragen: EACCES');
+  const after = fakeLauncher();
+  startElevation(() => after);
+  after.emit('exit', 0);
+  assert.equal(currentElevation()?.state, 'finished');
+});
+
+test('a prompt nobody answers stops blocking new changes once the panel has given up on it', () => {
+  mock.timers.enable({ apis: ['Date'], now: Date.now() });
+  try {
+    const forgotten = fakeLauncher();
+    const outcome = startElevation(() => forgotten);
+    mock.timers.tick(ELEVATION_WAIT_MS - 1);
+    assert.throws(() => startElevation(fakeLauncher), /Er wacht al een netwerkwijziging/);
+    mock.timers.tick(1);
+    const retry = fakeLauncher();
+    const next = startElevation(() => retry);
+    assert.notEqual(next.id, outcome.id);
+    forgotten.emit('exit', 0);
+    assert.equal(currentElevation()?.state, 'waiting', 'the forgotten prompt no longer decides anything');
+    retry.emit('exit', 0);
+    assert.equal(currentElevation()?.state, 'finished');
+  } finally {
+    mock.timers.reset();
+  }
 });

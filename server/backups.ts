@@ -31,10 +31,23 @@ const verifyWorkerUrl = new URL(
 let records: BackupRecord[] = [];
 let queue: Promise<unknown> = Promise.resolve();
 let pending = 0;
-let scheduleHandle: NodeJS.Timeout | null = null;
-let nextScheduledAt: number | null = null;
-let lastFailureAt: number | null = null;
-let lastError: string | null = null;
+/** Set when a backup fails, cleared when a later one succeeds. */
+let lastFailure: { at: number; error: string } | null = null;
+
+type SchedulerState =
+  | { name: 'stopped' }
+  | { name: 'waiting'; at: number; timer: NodeJS.Timeout }
+  | { name: 'running' };
+type SchedulerEvent = 'start' | 'due' | 'finished' | 'stop';
+
+/** The state each event leads to. An event missing from a state's row changes nothing. */
+const SCHEDULER_MOVES: Record<SchedulerState['name'], Partial<Record<SchedulerEvent, SchedulerState['name']>>> = {
+  stopped: { start: 'waiting' },
+  waiting: { due: 'running', stop: 'stopped' },
+  running: { finished: 'waiting', stop: 'stopped' },
+};
+
+let scheduler: SchedulerState = { name: 'stopped' };
 
 export function backupStatus(): BackupStatus {
   const diskFreeBytes = freeDiskBytes();
@@ -42,11 +55,11 @@ export function backupStatus(): BackupStatus {
     enabled,
     inProgress: pending > 0,
     intervalMs,
-    nextScheduledAt,
+    nextScheduledAt: scheduler.name === 'waiting' ? scheduler.at : null,
     retainedCount: records.length,
     latest: records[0] ?? null,
-    lastError,
-    lastFailureAt,
+    lastError: lastFailure?.error ?? null,
+    lastFailureAt: lastFailure?.at ?? null,
     diskFreeBytes,
     minimumFreeBytes,
     diskLow: diskFreeBytes !== null && diskFreeBytes < minimumFreeBytes,
@@ -57,13 +70,11 @@ export function backupStatus(): BackupStatus {
 
 export function startBackupService(): void {
   refreshInventory();
-  if (enabled && !scheduleHandle) scheduleNext(initialDelayMs);
+  if (enabled) moveScheduler('start');
 }
 
 export async function stopBackupService(): Promise<void> {
-  if (scheduleHandle) clearTimeout(scheduleHandle);
-  scheduleHandle = null;
-  nextScheduledAt = null;
+  moveScheduler('stop');
   await queue.catch(() => undefined);
 }
 
@@ -74,8 +85,7 @@ export function createVerifiedBackup(reason = 'manual'): Promise<BackupRecord> {
     .catch(() => undefined)
     .then(() => performBackup(safeReason(reason)))
     .catch((error: unknown) => {
-      lastFailureAt = Date.now();
-      lastError = error instanceof Error ? error.message : String(error);
+      lastFailure = { at: Date.now(), error: error instanceof Error ? error.message : String(error) };
       throw error;
     })
     .finally(() => {
@@ -149,7 +159,7 @@ async function performBackup(reason: string): Promise<BackupRecord> {
   if (!record) throw new Error('De backup verdween meteen na het schrijven.');
   records = [record, ...records.filter((item) => item.fileName !== fileName)];
   await pruneBackups();
-  lastError = null;
+  lastFailure = null;
   return record;
 }
 
@@ -202,20 +212,30 @@ async function pruneBackups(): Promise<void> {
   await removeFiles(...removed.map((record) => path.join(backupDirectory, record.fileName)));
 }
 
-function scheduleNext(delayMs: number): void {
-  nextScheduledAt = Date.now() + delayMs;
-  scheduleHandle = setTimeout(() => {
-    scheduleHandle = null;
-    nextScheduledAt = null;
+/** The only place the scheduler changes state, so a backup that ends after a stop schedules nothing. */
+function moveScheduler(event: SchedulerEvent): void {
+  const next = SCHEDULER_MOVES[scheduler.name][event];
+  if (!next) return;
+  if (scheduler.name === 'waiting') clearTimeout(scheduler.timer);
+  if (next === 'waiting') {
+    const delayMs = event === 'start' ? initialDelayMs : intervalMs;
+    const timer = setTimeout(() => moveScheduler('due'), delayMs);
+    timer.unref();
+    scheduler = { name: 'waiting', at: Date.now() + delayMs, timer };
+    return;
+  }
+  const state: SchedulerState = { name: next };
+  scheduler = state;
+  if (next === 'running') {
     void createVerifiedBackup('scheduled')
       .catch((error) => {
         console.warn('Scheduled database backup failed:', error instanceof Error ? error.message : String(error));
       })
+      // Only this run may finish it: after a stop and start, a newer run owns the scheduler.
       .finally(() => {
-        if (enabled) scheduleNext(intervalMs);
+        if (scheduler === state) moveScheduler('finished');
       });
-  }, delayMs);
-  scheduleHandle.unref();
+  }
 }
 
 async function syncFile(filePath: string): Promise<void> {

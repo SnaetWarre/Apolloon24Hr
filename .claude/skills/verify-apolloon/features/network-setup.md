@@ -7,6 +7,7 @@ Vast netwerkadres, at the top of Beheer › Systeem & herstel, pins the laptop's
 - `net-profile` reads the adapter, its address, prefix length and address source from `/api/net/profile`. The `Nu:` line shows the address, adapter, address source and the address the screens connect to; the prefix length shows only on the confirm button.
 - `net-make-static` sends the address, the prefix length the laptop has now (the profile's suggestion, else the adapter's, else 24) and the gateway to `/api/net/make-static`, after `Ja, maak <adres>/<prefix> nu vast`.
 - `net-revert` sends `{ eventOver: true, confirmText: 'VOORBIJ' }` to `/api/net/revert-dhcp` after the event: a checkbox, the typed word `VOORBIJ`, and two buttons.
+- `net-busy`: while one change waits for its password prompt (`lastElevation.state` is `waiting`), the server refuses a new one from any tab for 90 seconds. That tab shows the toast `Vastzetten mislukt` (or `Terugzetten mislukt`) with `Er wacht al een netwerkwijziging op toestemming. …`.
 
 ## How to get to it (user POV)
 
@@ -24,6 +25,7 @@ Preconditions:
 - **No suggestion.** With `suggestion: null` the address box is empty; type it in `Vast adres voor deze laptop` before clicking. The prefix then comes from `primary.prefixLength`, so the button still reads `Ja, maak 10.20.5.18/16 nu vast`.
 - **Revert.** Click the summary `Na het evenement: adres weer automatisch maken`, check `Het evenement is helemaal voorbij (echt waar).`, fill `Typ VOORBIJ om te bewijzen dat je het meent` with `VOORBIJ`, click `Zet terug op automatisch`, then `Ja, zet terug op automatisch`. The aborted request body is `{ eventOver: true, confirmText: 'VOORBIJ' }`.
 - Each aborted request leaves `Failed to fetch` in the panel. That comes from the abort, not the app.
+- **Busy (macOS only).** To let the request reach the server, start the run with a folder first on `PATH` that holds a fake `osascript` (answers `-e 'return 1'` with `1`, otherwise logs one line and sleeps) and a fake `networksetup` (answers `-version`, `-listallhardwareports` with `Hardware Port: Ethernet` / `Device: en0`, and `-getinfo` with `DHCP Configuration`). Pin in one tab, then pin in a second tab: the second gets the busy toast and the fake's log has one launch. Check `command -v osascript` names the fake before `up`.
 
 ## Gotchas
 
