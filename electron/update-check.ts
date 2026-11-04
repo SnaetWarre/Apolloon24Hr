@@ -21,6 +21,8 @@ export type AvailableUpdate = {
 };
 
 export type UpdateStatus =
+  /** Before the first check: it runs a few seconds after start, and never with APOLLOON_UPDATE_CHECK=0. */
+  | { state: 'idle'; checkedAt: null }
   | { state: 'checking'; checkedAt: number | null }
   | { state: 'current'; checkedAt: number }
   /** No internet, which is normal at the event, or the release source did not answer. */
@@ -28,8 +30,8 @@ export type UpdateStatus =
   /** A newer version to download and install by hand; `problem` says why the app did not do it. */
   | { state: 'available'; checkedAt: number; update: AvailableUpdate; problem: string | null }
   | { state: 'downloading'; checkedAt: number; update: AvailableUpdate; percent: number }
-  /** Downloaded and checked: one click installs it and reopens the app. */
-  | { state: 'ready'; checkedAt: number; update: AvailableUpdate }
+  /** Downloaded and checked: one click installs it and reopens the app. `problem` says why the last try did not. */
+  | { state: 'ready'; checkedAt: number; update: AvailableUpdate; problem: string | null }
   | { state: 'installing'; checkedAt: number; update: AvailableUpdate };
 
 /** How the last update installed from the app went, told once after the restart. */

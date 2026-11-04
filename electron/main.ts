@@ -288,6 +288,7 @@ function confirmQuitDuringRace(): Promise<boolean> {
     const { response } = owner ? await dialog.showMessageBox(owner, options) : await dialog.showMessageBox(options);
     quitConfirmed = response === 1;
     if (quitConfirmed) desktopLog('Closed during the race after confirmation');
+    else updates?.quitCancelled();
     return quitConfirmed;
   })().finally(() => {
     quitQuestion = null;

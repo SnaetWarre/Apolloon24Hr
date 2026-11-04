@@ -194,7 +194,9 @@ function UpdateStatusRow({ cluster }: { cluster: ClusterStatus | null }) {
                   ? 'De wedstrijd loopt: installeer pas na de wedstrijd.'
                   : SAME_VERSION}
             </span>
-            {status.state === 'available' && status.problem && <span>{status.problem}</span>}
+            {(status.state === 'available' || status.state === 'ready') && status.problem && (
+              <span>{status.problem}</span>
+            )}
           </div>
           <div className="update-notice__actions">
             {status.state === 'ready' || status.state === 'installing' ? (
@@ -251,9 +253,11 @@ function UpdateStatusRow({ cluster }: { cluster: ClusterStatus | null }) {
 }
 
 function describeUpdateStatus(
-  status: Extract<DesktopUpdateStatus, { state: 'checking' | 'current' | 'unreachable' }>
+  status: Extract<DesktopUpdateStatus, { state: 'idle' | 'checking' | 'current' | 'unreachable' }>
 ): string {
   switch (status.state) {
+    case 'idle':
+      return 'Nog niet gecontroleerd op een nieuwere versie.';
     case 'checking':
       return 'Controleren op een nieuwere versie…';
     case 'current':

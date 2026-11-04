@@ -13,12 +13,13 @@ export type DesktopUpdate = {
 
 /** Mirrors UpdateStatus in electron/update-check.ts. */
 export type DesktopUpdateStatus =
+  | { state: 'idle'; checkedAt: null }
   | { state: 'checking'; checkedAt: number | null }
   | { state: 'current'; checkedAt: number }
   | { state: 'unreachable'; checkedAt: number }
   | { state: 'available'; checkedAt: number; update: DesktopUpdate; problem: string | null }
   | { state: 'downloading'; checkedAt: number; update: DesktopUpdate; percent: number }
-  | { state: 'ready'; checkedAt: number; update: DesktopUpdate }
+  | { state: 'ready'; checkedAt: number; update: DesktopUpdate; problem: string | null }
   | { state: 'installing'; checkedAt: number; update: DesktopUpdate };
 
 export type DesktopDiagnostics = {
