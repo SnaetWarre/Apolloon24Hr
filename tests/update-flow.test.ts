@@ -43,6 +43,7 @@ function setUp({
   release = { state: 'current', checkedAt: 1 } as UpdateStatus,
   raceActive = (): boolean => false,
   makeBackup = async (): Promise<void> => {},
+  beforeInstall = (_version: string): void => {},
 } = {}) {
   const updater = new FakeUpdater();
   const sent: string[] = [];
@@ -56,7 +57,10 @@ function setUp({
     send: (status) => sent.push(status.state),
     isRaceActive: raceActive,
     makeBackup,
-    beforeInstall: (version) => notes.push(version),
+    beforeInstall: (version) => {
+      beforeInstall(version);
+      notes.push(version);
+    },
   });
   return { flow, updater, sent, notes };
 }
@@ -143,6 +147,7 @@ test('a newer version downloads with progress and ends ready', async () => {
   updater.downloading = new Promise((resolve) => (finish = resolve));
   await flow.check();
   assert.equal(flow.status().state, 'downloading');
+  assert.equal((await flow.check()).state, 'downloading', 'no new check during a download');
   flow.progress(41.7);
   flow.progress(41.9);
   const status = flow.status();
@@ -231,7 +236,7 @@ test('quitAndInstall that throws goes back to ready', async (t) => {
 
 test('"Blijven" to the race question on closing goes back to ready right away (stuck case 2)', async (t) => {
   const tick = mockTimers(t);
-  const { flow } = await readyFlow();
+  const { flow, updater } = await readyFlow();
   flow.quitCancelled();
   assert.equal(flow.status().state, 'ready', 'a "Blijven" with no install running changes nothing');
   await flow.install();
@@ -242,6 +247,10 @@ test('"Blijven" to the race question on closing goes back to ready right away (s
   // The timer is gone too: nothing happens when it would have fired.
   tick(QUIT_TIMEOUT_MS);
   assert.equal(flow.status().state, 'ready');
+  // The installer may already run: only a restart installs it again.
+  assert.match((await flow.install()) ?? '', /Start Apolloon opnieuw/);
+  tick(0);
+  assert.equal(updater.quitCalls, 1);
 });
 
 test('an app still open 30 s after quitAndInstall goes back to ready (stuck case 2)', async (t) => {
@@ -257,27 +266,14 @@ test('an app still open 30 s after quitAndInstall goes back to ready (stuck case
 });
 
 test('a note that cannot be written stops the install before closing', async () => {
-  const setup = setUp();
-  await setup.flow.check();
-  await settle(setup.flow, 'ready');
-  const flow = createUpdateFlow({
-    currentVersion: '5.3.1',
-    inApp: true,
-    updater: async () => setup.updater,
-    checkRelease: async () => ({ state: 'current', checkedAt: 1 }),
-    log: () => {},
-    send: () => {},
-    isRaceActive: () => false,
-    makeBackup: async () => {},
+  const { flow, updater } = await readyFlow({
     beforeInstall: () => {
       throw new Error('EACCES');
     },
   });
-  await flow.check();
-  await settle(flow, 'ready');
   assert.match((await flow.install()) ?? '', /niet geïnstalleerd: EACCES/);
   assert.equal(flow.status().state, 'ready');
-  assert.equal(setup.updater.quitCalls, 0);
+  assert.equal(updater.quitCalls, 0);
 });
 
 test('updater errors outside installing leave the status alone', async () => {

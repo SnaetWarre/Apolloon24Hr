@@ -10,7 +10,8 @@ type State = UpdateStatus['state'];
 /** Which state may follow which. Every change of the status goes through this table. */
 export const NEXT_STATES: Record<State, readonly State[]> = {
   idle: ['checking'],
-  checking: ['current', 'unreachable', 'available', 'downloading'],
+  // A check that threw halfway may start again.
+  checking: ['checking', 'current', 'unreachable', 'available', 'downloading'],
   current: ['checking'],
   unreachable: ['checking'],
   // A download that failed lands here; a new check may then start it again.
@@ -68,6 +69,8 @@ export function createUpdateFlow({
   let status: UpdateStatus = { state: 'idle', checkedAt: null };
   let running: Promise<UpdateStatus> | null = null;
   let quitTimer: NodeJS.Timeout | null = null;
+  /** The installer may have started already; installing again could break the install. */
+  let needsRestart = false;
 
   function setStatus(next: UpdateStatus) {
     if (!canMove(status.state, next.state)) {
@@ -155,6 +158,7 @@ export function createUpdateFlow({
   /** Resolves to null when the app is about to restart, or to the reason it did not. */
   async function install(): Promise<string | null> {
     if (status.state !== 'ready') return 'Er is geen update klaar om te installeren.';
+    if (needsRestart) return NOT_CLOSED;
     if (isRaceActive()) return RACE_RUNNING;
     const { update, checkedAt } = status;
     setStatus({ state: 'installing', checkedAt, update });
@@ -183,7 +187,7 @@ export function createUpdateFlow({
     // the app open ends here: the status must not stay at installing.
     quitTimer = setTimeout(() => {
       log('Still running after quitAndInstall; the update did not install');
-      installStopped(NOT_CLOSED);
+      notClosed();
     }, QUIT_TIMEOUT_MS);
     quitTimer.unref?.();
     // Silent, then start the new version. Closing goes through the normal quit, which stops the server.
@@ -201,6 +205,11 @@ export function createUpdateFlow({
   function quitCancelled() {
     if (!quitTimer) return;
     log('Closing to install was cancelled; the update did not install');
+    notClosed();
+  }
+
+  function notClosed() {
+    needsRestart = true;
     installStopped(NOT_CLOSED);
   }
 
