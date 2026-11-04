@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { type ChildProcess, execFileSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { readFileSync } from 'node:fs';
-import test from 'node:test';
+import test, { mock } from 'node:test';
 import {
   buildLinuxRevertDhcpScript,
   buildLinuxSetStaticScript,
@@ -32,6 +32,7 @@ import {
   createWindowsNetReader,
   parseWindowsNetReadout,
   currentElevation,
+  ELEVATION_WAIT_MS,
   startElevation,
 } from '../server/net-setup.ts';
 
@@ -404,4 +405,24 @@ test('a helper that cannot even start leaves the change failed, not waiting', ()
   startElevation(() => after);
   after.emit('exit', 0);
   assert.equal(currentElevation()?.state, 'finished');
+});
+
+test('a prompt nobody answers stops blocking new changes once the panel has given up on it', () => {
+  mock.timers.enable({ apis: ['Date'], now: Date.now() });
+  try {
+    const forgotten = fakeLauncher();
+    const outcome = startElevation(() => forgotten);
+    mock.timers.tick(ELEVATION_WAIT_MS - 1);
+    assert.throws(() => startElevation(fakeLauncher), /Er wacht al een netwerkwijziging/);
+    mock.timers.tick(1);
+    const retry = fakeLauncher();
+    const next = startElevation(() => retry);
+    assert.notEqual(next.id, outcome.id);
+    forgotten.emit('exit', 0);
+    assert.equal(currentElevation()?.state, 'waiting', 'the forgotten prompt no longer decides anything');
+    retry.emit('exit', 0);
+    assert.equal(currentElevation()?.state, 'finished');
+  } finally {
+    mock.timers.reset();
+  }
 });

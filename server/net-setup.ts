@@ -286,12 +286,16 @@ type NetProfile = {
 
 const ELEVATION_BUSY =
   'Er wacht al een netwerkwijziging op toestemming. Bevestig of weiger die eerst op deze laptop en probeer het daarna opnieuw.';
+/** As long as the panel waits before it says nothing changed and to try again. */
+export const ELEVATION_WAIT_MS = 90_000;
 
 /**
  * The elevated change's state machine. Nothing or a settled change moves to
  * `waiting` when a new one starts; `waiting` moves to `finished` or `failed`
  * once, when its helper process exits or cannot start. A new change is refused
- * while one waits, from any browser tab. Only `startElevation` and
+ * while one waits, from any browser tab, unless it has waited longer than
+ * `ELEVATION_WAIT_MS`: then a prompt nobody answers cannot block every later
+ * change, and the new one replaces it. Only `startElevation` and
  * `settleElevation` change it.
  */
 let lastElevation: ElevationOutcome | null = null;
@@ -310,7 +314,9 @@ function settleElevation(id: string, state: 'finished' | 'failed', message: stri
  * a refused or impossible password prompt is reported instead of silently waited on.
  */
 export function startElevation(launch: () => ChildProcess): ElevationOutcome {
-  if (lastElevation?.state === 'waiting') throw new Error(ELEVATION_BUSY);
+  if (lastElevation?.state === 'waiting' && Date.now() - lastElevation.startedAt < ELEVATION_WAIT_MS) {
+    throw new Error(ELEVATION_BUSY);
+  }
   const outcome: ElevationOutcome = {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     state: 'waiting',

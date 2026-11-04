@@ -224,13 +224,17 @@ function moveScheduler(event: SchedulerEvent): void {
     scheduler = { name: 'waiting', at: Date.now() + delayMs, timer };
     return;
   }
-  scheduler = { name: next };
+  const state: SchedulerState = { name: next };
+  scheduler = state;
   if (next === 'running') {
     void createVerifiedBackup('scheduled')
       .catch((error) => {
         console.warn('Scheduled database backup failed:', error instanceof Error ? error.message : String(error));
       })
-      .finally(() => moveScheduler('finished'));
+      // Only this run may finish it: after a stop and start, a newer run owns the scheduler.
+      .finally(() => {
+        if (scheduler === state) moveScheduler('finished');
+      });
   }
 }
 
