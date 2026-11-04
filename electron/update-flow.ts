@@ -37,7 +37,9 @@ export type Updater = {
 export const QUIT_TIMEOUT_MS = 30_000;
 
 export const RACE_RUNNING = 'De wedstrijd loopt. Installeer de update pas na de wedstrijd.';
-const NOT_CLOSED = 'Apolloon sloot niet af, dus de update is niet geïnstalleerd. Probeer het opnieuw.';
+// electron-updater ignores a second quitAndInstall once it started the installer, so only a restart helps.
+const NOT_CLOSED =
+  'Apolloon sloot niet af, dus de update is nog niet geïnstalleerd. Start Apolloon opnieuw en probeer het dan nog eens.';
 
 export function createUpdateFlow({
   currentVersion,
@@ -67,20 +69,20 @@ export function createUpdateFlow({
   let running: Promise<UpdateStatus> | null = null;
   let quitTimer: NodeJS.Timeout | null = null;
 
-  function setStatus(next: UpdateStatus): boolean {
+  function setStatus(next: UpdateStatus) {
     if (!canMove(status.state, next.state)) {
       log(`Update status ${status.state} cannot become ${next.state}; kept ${status.state}`);
-      return false;
+      return;
     }
     status = next;
     send(status);
-    return true;
   }
 
   function check(): Promise<UpdateStatus> {
+    if (running) return running;
     // A download in progress, waiting to be installed or installing is not replaced by a new check.
     if (!canMove(status.state, 'checking')) return Promise.resolve(status);
-    running ??= (async () => {
+    running = (async () => {
       const previous = status;
       setStatus({ state: 'checking', checkedAt: previous.checkedAt });
       if (inApp) {
@@ -167,12 +169,18 @@ export function createUpdateFlow({
       installStopped(null);
       return RACE_RUNNING;
     }
-    const instance = await updater();
-    beforeInstall(update.version);
+    let instance: Updater;
+    try {
+      instance = await updater();
+      beforeInstall(update.version);
+    } catch (error) {
+      installStopped(null);
+      return `De update is niet geïnstalleerd: ${errorText(error)}`;
+    }
     log(`Installing update ${update.version} and restarting`);
-    // The updater reports a failure as an error event (see updaterError), and the app stays
-    // open when someone answers "Blijven" to the race question on closing. Either way the
-    // status must not stay at installing.
+    // The updater reports a failure as an error event (updaterError), main.ts reports a
+    // "Blijven" to the race question on closing (quitCancelled), and anything else that keeps
+    // the app open ends here: the status must not stay at installing.
     quitTimer = setTimeout(() => {
       log('Still running after quitAndInstall; the update did not install');
       installStopped(NOT_CLOSED);
@@ -189,6 +197,13 @@ export function createUpdateFlow({
     return null;
   }
 
+  /** Someone kept the app open when it closed to install. */
+  function quitCancelled() {
+    if (!quitTimer) return;
+    log('Closing to install was cancelled; the update did not install');
+    installStopped(NOT_CLOSED);
+  }
+
   /** The updater's error event: only one while closing to install changes the status. */
   function updaterError(error: unknown) {
     if (!quitTimer) return;
@@ -202,6 +217,7 @@ export function createUpdateFlow({
     install,
     progress,
     updaterError,
+    quitCancelled,
   };
 }
 

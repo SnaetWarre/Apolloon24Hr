@@ -156,6 +156,8 @@ export function setUpUpdates({
       if (timer) clearTimeout(timer);
       timer = null;
     },
+    /** The race question on closing was answered "Blijven". */
+    quitCancelled: () => flow.quitCancelled(),
   };
 }
 

@@ -105,6 +105,14 @@ test('before any check the status is idle, and a check from there runs (stuck ca
   assert.deepEqual(sent, ['checking', 'current']);
 });
 
+test('a second check while one runs waits for the same result', async () => {
+  const { flow, updater } = setUp();
+  updater.latest = { version: '5.3.1', releaseDate: '' };
+  const [first, second] = await Promise.all([flow.check(), flow.check()]);
+  assert.equal(first.state, 'current');
+  assert.equal(second, first);
+});
+
 test('the updater finds no newer version: current', async () => {
   const { flow, updater, sent } = setUp();
   updater.latest = { version: '5.3.1', releaseDate: '' };
@@ -221,7 +229,22 @@ test('quitAndInstall that throws goes back to ready', async (t) => {
   assert.ok(status.state === 'ready' && status.problem?.includes('installer missing'));
 });
 
-test('an app that stays open after quitAndInstall goes back to ready (stuck case 2, "Blijven")', async (t) => {
+test('"Blijven" to the race question on closing goes back to ready right away (stuck case 2)', async (t) => {
+  const tick = mockTimers(t);
+  const { flow } = await readyFlow();
+  flow.quitCancelled();
+  assert.equal(flow.status().state, 'ready', 'a "Blijven" with no install running changes nothing');
+  await flow.install();
+  tick(0);
+  flow.quitCancelled();
+  const status = flow.status();
+  assert.ok(status.state === 'ready' && status.problem?.startsWith('Apolloon sloot niet af'));
+  // The timer is gone too: nothing happens when it would have fired.
+  tick(QUIT_TIMEOUT_MS);
+  assert.equal(flow.status().state, 'ready');
+});
+
+test('an app still open 30 s after quitAndInstall goes back to ready (stuck case 2)', async (t) => {
   const tick = mockTimers(t);
   const { flow } = await readyFlow();
   await flow.install();
@@ -230,7 +253,31 @@ test('an app that stays open after quitAndInstall goes back to ready (stuck case
   assert.equal(flow.status().state, 'installing');
   tick(1);
   const status = flow.status();
-  assert.ok(status.state === 'ready' && status.problem?.startsWith('Apolloon sloot niet af'));
+  assert.ok(status.state === 'ready' && status.problem?.includes('Start Apolloon opnieuw'));
+});
+
+test('a note that cannot be written stops the install before closing', async () => {
+  const setup = setUp();
+  await setup.flow.check();
+  await settle(setup.flow, 'ready');
+  const flow = createUpdateFlow({
+    currentVersion: '5.3.1',
+    inApp: true,
+    updater: async () => setup.updater,
+    checkRelease: async () => ({ state: 'current', checkedAt: 1 }),
+    log: () => {},
+    send: () => {},
+    isRaceActive: () => false,
+    makeBackup: async () => {},
+    beforeInstall: () => {
+      throw new Error('EACCES');
+    },
+  });
+  await flow.check();
+  await settle(flow, 'ready');
+  assert.match((await flow.install()) ?? '', /niet geïnstalleerd: EACCES/);
+  assert.equal(flow.status().state, 'ready');
+  assert.equal(setup.updater.quitCalls, 0);
 });
 
 test('updater errors outside installing leave the status alone', async () => {
