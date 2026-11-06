@@ -64,3 +64,5 @@ Each feature file starts with an H1 title and one paragraph describing the user-
 - [Tactiek](./tactics.md) covers the goal, valid-lap, and hourly pace fields in the live section and the number fields in Analyse vorig jaar.
 
 Not mapped yet: the rest of the Analyse charts, the charts in Tactiek.
+
+- [Wrapped from Excel](./wrapped-export.md) covers remaking one runner's images from an exported race workbook.
