@@ -1,6 +1,13 @@
+import {
+  type QueueStatus,
+  type TimingStatus,
+  TIMING_RUNNER_MOVES,
+  canHideRunner,
+  canMoveRunner,
+  queueIndexAfterMove,
+} from '../../shared/lifecycle.js';
 import { type Runner, type RunnerStatus } from '../../shared/schemas.js';
 import { all, one, run, transaction } from './connection.js';
-import { getRaceState, startActiveRunner } from './race-state.js';
 import { getRunnerById } from './runner-queries.js';
 import { clusterNow } from '../clock.js';
 
@@ -14,6 +21,9 @@ export type QueueState = {
 };
 
 export function hideRunnerInQueue(id: string, now = clusterNow()): Runner | null {
+  const runner = one<{ status: RunnerStatus }>('SELECT status FROM runners WHERE id = ?', [id]);
+  if (!runner) return null;
+  if (!canHideRunner(runner.status)) throw new Error('Alleen gelopen lopers kunnen verborgen worden');
   run('UPDATE runners SET hidden_at = ? WHERE id = ?', [now, id]);
   return getRunnerById(id);
 }
@@ -23,6 +33,11 @@ export function unhideRunnerInQueue(id: string): Runner | null {
   return getRunnerById(id);
 }
 
+/**
+ * An operator's move from Wachtrij or a runner's profile, checked against RUNNER_MOVES.
+ * The same lane again is no move: a repeated click or a second laptop keeps the runner's
+ * place. A runner moved to the queue joins at the back unless `queueIndex` says where.
+ */
 export function updateRunnerStatus({
   id,
   status,
@@ -30,42 +45,37 @@ export function updateRunnerStatus({
   queueIndex,
 }: {
   id: string;
-  status: RunnerStatus;
+  status: QueueStatus;
   statusSince?: number | null;
   queueIndex?: number | null;
 }): Runner | null {
-  if (!one<{ id: string }>('SELECT id FROM runners WHERE id = ?', [id])) return null;
-  const activeRunnerId = getRaceState().activeRunnerId;
-  if (status === 'running' && activeRunnerId && activeRunnerId !== id) {
-    throw new Error('Er loopt al een loper');
-  }
+  const current = one<{ status: RunnerStatus }>('SELECT status FROM runners WHERE id = ?', [id]);
+  if (!current) return null;
   // A screen that has not seen the start yet would drop the live lap; only Timing takes a runner off the track.
-  if (status !== 'running' && activeRunnerId === id) {
+  if (current.status === 'running') {
     throw new Error('Deze loper is net gestart op Timing. Wissel via het timingscherm.');
   }
-  const now = statusSince ?? clusterNow();
-  const nextQueueIndex = status !== 'waiting' ? null : (queueIndex ?? getMaxQueueIndex() + 1);
-
-  transaction(() => {
-    run('UPDATE runners SET status = ?, queue_index = ?, status_since = ?, hidden_at = NULL WHERE id = ?', [
-      status,
-      nextQueueIndex,
-      now,
-      id,
-    ]);
-    if (status === 'running') startActiveRunner(id, now);
-  });
-
+  if (current.status === status) return getRunnerById(id);
+  if (!canMoveRunner(current.status, status)) {
+    throw new Error('Een loper die gelopen heeft, gaat terug naar opwarming of naar de wachtrij.');
+  }
+  run('UPDATE runners SET status = ?, queue_index = ?, status_since = ?, hidden_at = NULL WHERE id = ?', [
+    status,
+    status === 'waiting' && queueIndex != null ? queueIndex : queueIndexAfterMove(status, getMaxQueueIndex()),
+    statusSince ?? clusterNow(),
+    id,
+  ]);
   return getRunnerById(id);
 }
 
-/** Moves a runner out of the waiting order into `running` or `ran`. */
-export function setRaceStatus(runnerId: string, status: 'running' | 'ran', nowMs: number): void {
-  run('UPDATE runners SET status = ?, queue_index = NULL, status_since = ?, hidden_at = NULL WHERE id = ?', [
-    status,
-    nowMs,
-    runnerId,
-  ]);
+/** Timing's half of the runner moves: the next runner goes on the track, the one who ran comes off it. */
+export function setRaceStatus(runnerId: string, status: TimingStatus, nowMs: number): void {
+  const moved = run(
+    'UPDATE runners SET status = ?, queue_index = NULL, status_since = ?, hidden_at = NULL WHERE id = ? AND status = ?',
+    [status, nowMs, runnerId, TIMING_RUNNER_MOVES[status]]
+  );
+  if (moved.changes !== 1)
+    throw new Error('Timingstatus is gewijzigd. Controleer de huidige loper en probeer opnieuw.');
 }
 
 export function updateWaitingOrder(idOrder: string[]): void {

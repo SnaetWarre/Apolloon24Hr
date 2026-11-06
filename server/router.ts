@@ -25,6 +25,7 @@ import {
   type RaceStateExpectation,
   type TimingPress,
 } from '../shared/schemas.js';
+import { raceMoveRefusal, undoRefusal } from '../shared/lifecycle.js';
 import { activityPageSchema, backupFileSchema } from '../shared/schemas.js';
 import { describeWrite } from './activity.js';
 import { backupFile, createVerifiedBackup, listBackups } from './backups.js';
@@ -57,7 +58,6 @@ import {
   deleteLabel,
   deleteLap,
   deleteRunner,
-  canUndoFinish,
   clearRace,
   finishRace,
   findForwardedWrite,
@@ -278,6 +278,15 @@ function assertExpectedRaceState(expected: RaceStateExpectation): void {
   }
 }
 
+/** A refused press says why: nobody waiting, or the race was finished and the press did not mean to resume it. */
+function handoffResult<T extends { ok: true }>(result: T | { ok: false; error: 'empty_queue' | 'finished' }): T {
+  if (result.ok) return result;
+  return fail(
+    'CONFLICT',
+    result.error === 'finished' ? raceMoveRefusal(getRaceState(), 'start') : 'Niemand staat klaar in de wachtrij'
+  );
+}
+
 /** A press may wait this long during a takeover (the write deadline) and still keep its own time. */
 const PRESS_MAX_AGE_MS = 20_000;
 /** Finishing stops the clock at the first click; the confirmations after it may take a while. */
@@ -430,13 +439,11 @@ export const appRouter = t.router({
         return { ok: true };
       })
     ),
-    hide: t.procedure.input(runnerIdSchema).mutation(
-      write((input) => {
-        const current = getRunnerById(input.id) ?? fail('NOT_FOUND', 'Loper niet gevonden');
-        if (current.status !== 'ran') fail('CONFLICT', 'Alleen gelopen lopers kunnen verborgen worden');
-        return hideRunnerInQueue(input.id, clusterNow()) ?? fail('NOT_FOUND', 'Loper niet gevonden');
-      })
-    ),
+    hide: t.procedure
+      .input(runnerIdSchema)
+      .mutation(
+        write((input) => hideRunnerInQueue(input.id, clusterNow()) ?? fail('NOT_FOUND', 'Loper niet gevonden'))
+      ),
     unhide: t.procedure
       .input(runnerIdSchema)
       .mutation(write((input) => unhideRunnerInQueue(input.id) ?? fail('NOT_FOUND', 'Loper niet gevonden'))),
@@ -489,33 +496,24 @@ export const appRouter = t.router({
       write((input) => {
         assertExpectedRaceState(input);
         if (input.activeRunnerId) fail('CONFLICT', 'Er loopt al een loper');
-        const result = performHandoff(pressMoment(input));
-        return result.ok ? result : fail('CONFLICT', 'Niemand staat klaar in de wachtrij');
+        return handoffResult(performHandoff(pressMoment(input), undefined, { resume: input.resume }));
       })
     ),
     handoff: t.procedure.input(timingPressSchema).mutation(
       write((input) => {
         assertExpectedRaceState(input);
-        const result = performHandoff(pressMoment(input), input.measuredDurationMs);
-        return result.ok ? result : fail('CONFLICT', 'Niemand staat klaar in de wachtrij');
+        return handoffResult(performHandoff(pressMoment(input), input.measuredDurationMs, { resume: input.resume }));
       })
     ),
     undoLastHandoff: t.procedure.input(raceStateExpectationSchema).mutation(
       write((input) => {
         assertExpectedRaceState(input);
-        // A finish without its own undo step would make undo take back the handoff before it.
-        if (getRaceState().raceFinishedAt && !canUndoFinish()) {
-          fail('CONFLICT', 'De race is afgesloten. Hervat de race eerst om een wissel ongedaan te maken.');
-        }
         const result = undoLastHandoff();
-        return result.ok ? result : fail('CONFLICT', 'Er is geen wissel om ongedaan te maken');
+        return result.ok ? result : fail('CONFLICT', undoRefusal(getRaceState()));
       })
     ),
     finish: t.procedure.input(timingPressSchema).mutation(
       write((input) => {
-        const race = getRaceState();
-        if (!race.raceStartedAt) fail('CONFLICT', 'De race is nog niet gestart.');
-        if (race.raceFinishedAt) fail('CONFLICT', 'De race is al afgesloten.');
         assertExpectedRaceState(input);
         finishRace(pressMoment(input, FINISH_PRESS_MAX_AGE_MS));
         return { ok: true };

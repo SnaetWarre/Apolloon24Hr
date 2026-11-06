@@ -10,6 +10,7 @@ import {
   getRaceState,
   getRecentLaps,
   getRecentRaceEvents,
+  nextUndo,
 } from './db.js';
 import { boundedHistoryLimit } from './db/values.js';
 import { createDeltaStore } from './deltas.js';
@@ -22,6 +23,7 @@ export function liveAppSnapshot(): LiveAppSnapshot {
     runners: getAllRunners(),
     labels: getLabels(),
     race: getRaceState(),
+    nextUndo: nextUndo(),
     settings: getAppSettings(),
     revision: getAppDataRevision(),
     host: hostInfo(),

@@ -1,3 +1,4 @@
+import { raceIsOpen } from '../../../shared/lifecycle';
 import React from 'react';
 import { useAppData } from '../../app/index';
 import { copyText } from '../../lib/clipboard';
@@ -120,7 +121,7 @@ function UpdateStatusRow({ cluster }: { cluster: ClusterStatus | null }) {
     };
   }, []);
 
-  const raceRunning = Boolean(race.raceStartedAt && !race.raceFinishedAt);
+  const raceRunning = raceIsOpen(race);
   const otherLaptops = (cluster?.members.length ?? 1) - 1;
 
   async function install(version: string) {

@@ -194,11 +194,10 @@ function seedRunners(count, nowMs) {
 
     const existing = existingByNumber.get(runnerNumber);
     const runner = existing ? db.updateRunner(existing.id, input) : db.insertRunner(input);
-    db.updateRunnerStatus({
-      id: runner.id,
-      status: 'registered',
-      statusSince: nowMs - statusAgeMsForIndex(index, scenario),
-    });
+    const statusSince = nowMs - statusAgeMsForIndex(index, scenario);
+    // A runner who ran reaches Ingeschreven through Opwarming, the way the queue moves them.
+    if (runner.status === 'ran') db.updateRunnerStatus({ id: runner.id, status: 'warming_up', statusSince });
+    db.updateRunnerStatus({ id: runner.id, status: 'registered', statusSince });
     runners.push(db.getRunnerById(runner.id));
   }
 
@@ -376,14 +375,15 @@ function seedLapHistory({ runners, lapCount, nowMs, activeElapsedMs, recycleDela
   }
 
   const activeRunnerId = db.getRaceState().activeRunnerId;
+  // Only a runner who ran and was not sent back to the queue can be hidden.
   const hiddenCandidates = runners
-    .filter((runner) => runner.id !== activeRunnerId && ranRunnerIds.has(runner.id))
+    .filter(
+      (runner) =>
+        runner.id !== activeRunnerId && ranRunnerIds.has(runner.id) && db.getRunnerById(runner.id)?.status === 'ran'
+    )
     .slice(0, hiddenRanCount);
 
-  for (const runner of hiddenCandidates) {
-    db.updateRunnerStatus({ id: runner.id, status: 'ran', statusSince: nowMs - minutes(15) });
-    db.hideRunnerInQueue(runner.id, nowMs - minutes(10));
-  }
+  for (const runner of hiddenCandidates) db.hideRunnerInQueue(runner.id, nowMs - minutes(10));
 }
 
 function setStatuses(runners, status, statusSince) {
@@ -416,10 +416,15 @@ function seedLargeFinalStatuses(runners, nowMs, lapTargets) {
             ? 'warming_up'
             : 'waiting';
 
+    const statusSince = nowMs - randomInt(2_000, minutes(lapCount > 0 ? 70 : 25));
+    // A runner who ran reaches Ingeschreven through Opwarming, the way the queue moves them.
+    if (status === 'registered' && db.getRunnerById(runner.id)?.status === 'ran') {
+      db.updateRunnerStatus({ id: runner.id, status: 'warming_up', statusSince });
+    }
     db.updateRunnerStatus({
       id: runner.id,
       status,
-      statusSince: nowMs - randomInt(2_000, minutes(lapCount > 0 ? 70 : 25)),
+      statusSince,
       queueIndex: status === 'waiting' ? waitingIndex : undefined,
     });
 

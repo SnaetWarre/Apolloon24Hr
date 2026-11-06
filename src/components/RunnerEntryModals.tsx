@@ -1,4 +1,5 @@
 import React from 'react';
+import { canCheckIn } from '../../shared/lifecycle';
 import { ModalDialog } from './ModalDialog';
 import { useConfirm } from './ConfirmDialog';
 import { AvailableHoursPicker } from './AvailableHoursPicker';
@@ -510,7 +511,7 @@ function StatusBadge({ runner }: { runner: Runner }) {
 }
 
 function isAvailableForActivation(runner: Runner) {
-  return runner.status !== 'warming_up' && runner.status !== 'waiting' && runner.status !== 'running';
+  return canCheckIn(runner.status);
 }
 
 function runnerStatusLabel(runner: Runner) {

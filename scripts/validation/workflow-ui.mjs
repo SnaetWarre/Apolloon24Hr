@@ -323,10 +323,13 @@ try {
   // Teachers double-click out of habit. The first click moves the row out of its lane, so the second
   // must not land on the next runner's button that slid up under the mouse.
   const spare = (await snapshot()).runners.filter((runner) => runner.status === 'registered');
-  assert.ok(spare.length >= 6, 'Requires six registered runners');
-  for (const [index, runner] of spare.slice(0, 6).entries()) {
-    await rpc.runners.setStatus.mutate({ id: runner.id, status: ['warming_up', 'waiting', 'ran'][index % 3] });
+  assert.ok(spare.length >= 4, 'Requires four registered runners');
+  for (const [index, runner] of spare.slice(0, 4).entries()) {
+    await rpc.runners.setStatus.mutate({ id: runner.id, status: ['warming_up', 'waiting'][index % 2] });
   }
+  // Only Timing moves a runner to Heeft gelopen; the laps above left plenty there.
+  const ranShown = (await snapshot()).runners.filter((runner) => runner.status === 'ran' && !runner.hiddenFromQueue);
+  assert.ok(ranShown.length >= 2, 'Requires two runners in Heeft gelopen');
   await page.goto(`${baseUrl}/queue`);
   await page.locator('.queue-completed > summary').click();
   for (const [lane, button, changed] of [
@@ -392,7 +395,10 @@ try {
     .filter((runner) => runner.runnerNumber && runner.id !== raceState.race.activeRunnerId)
     .sort((a, b) => Number(a.runnerNumber) - Number(b.runnerNumber))
     .slice(0, 6);
-  for (const runner of lowestNumbers) await rpc.runners.setStatus.mutate({ id: runner.id, status: 'registered' });
+  // A runner who ran can already check in again; the rest go back to Ingeschreven.
+  for (const runner of lowestNumbers.filter((runner) => runner.status !== 'ran')) {
+    await rpc.runners.setStatus.mutate({ id: runner.id, status: 'registered' });
+  }
   const searchedRunner = (await snapshot()).runners.find(
     (runner) =>
       runner.status === 'registered' && runner.runnerNumber && !lowestNumbers.some(({ id }) => id === runner.id)

@@ -1,3 +1,4 @@
+import { raceIsOpen } from '../../shared/lifecycle';
 import { LiveDot } from './LiveDot';
 import React from 'react';
 import { useQuery } from '@tanstack/react-query';
@@ -66,7 +67,7 @@ export function TacticsView() {
   // Chart configurations are built during render; re-render them with the new theme colours.
   useChartTheme();
   const { race } = useAppData(selectTacticsData);
-  const now = useClockTick(30_000, race.raceStartedAt != null && race.raceFinishedAt == null);
+  const now = useClockTick(30_000, raceIsOpen(race));
   const { laps, loading: historyLoading, error: historyError } = useRaceHistory({ scope: 'full' });
   const [section, setSection] = React.useState<TacticsSection>('live');
   const storedHistoricalRace = React.useMemo(loadStoredHistoricalRace, []);

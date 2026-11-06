@@ -11,6 +11,7 @@ Owns every validated write, plus queries that need input validation or should st
 - `runners.registrations`: registration answers with contact details. Screens read the same answers from `GET /api/registrations`, which can answer `304`.
 - Payloads are validated with Zod. Every laptop accepts writes; the leader commits them once a majority stored them, and the other laptops pass them on to it.
 - Timing commands carry the race state the operator saw.
+- The race, a runner's lane, and Timing's undo stack follow the rules in `shared/lifecycle.ts`; the server refuses any other move. `runners.setStatus` only moves runners between `registered`, `warming_up` and `waiting`; only Timing puts a runner on the track or among those who ran. After Race beëindigen, `race.startNext` only starts the next runner with `resume: true`, which Timing sends after `Race hervatten?`. The live snapshot's `nextUndo` says what the next undo takes back (`handoff` or `finish`).
 - Client entrypoint: `src/api.ts` (`trpc`), actions composed in `src/app/useAppActions.ts`.
 
 Rule: if the client sends data that changes state, it goes through tRPC. Do not add POST/PUT/DELETE under `/api` for application writes; the network setup is the deliberate exception because it changes the laptop, not event data.

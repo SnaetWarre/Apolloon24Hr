@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { QUEUE_STATUSES, type UndoKind } from './lifecycle.js';
 
 export const runnerStatusSchema = z.enum(['registered', 'warming_up', 'waiting', 'running', 'ran']);
 export type RunnerStatus = z.infer<typeof runnerStatusSchema>;
@@ -323,6 +324,8 @@ export type LiveAppSnapshot = {
   runners: Runner[];
   labels: Label[];
   race: RaceState;
+  /** What Timing's next undo takes back, or null when there is nothing to undo. */
+  nextUndo: UndoKind | null;
   settings: AppSettings;
   revision: number;
   host: HostInfo;
@@ -371,7 +374,8 @@ export const runnerInputSchema = z.object({
   registrationDetails: runnerRegistrationDetailsSchema.optional(),
   /** Label ids or names; unknown names become new labels. */
   labels: z.array(z.string().trim().min(1)).optional(),
-  status: runnerStatusSchema.optional(),
+  /** A new runner starts in one of the operator's lanes; only Timing starts or clocks a runner. */
+  status: z.enum(QUEUE_STATUSES).optional(),
   statusSince: z.number().int().nonnegative().optional(),
 });
 /** What the server works with after validation; clients send `z.input` of the schema. */
@@ -433,8 +437,9 @@ export const lapRunnerSchema = lapIdSchema.extend({ runnerId: z.string().min(1) 
 /** Moving the press that ended a lap from `from`, the moment the operator saw, to `to`. */
 export const handoffMoveSchema = lapIdSchema.extend({ from: z.number().int(), to: z.number().int() });
 
+/** An operator's move to another lane; only Timing puts a runner on the track or among those who ran. */
 export const runnerStatusUpdateSchema = runnerIdSchema.extend({
-  status: runnerStatusSchema,
+  status: z.enum(QUEUE_STATUSES),
   statusSince: z.number().int().nonnegative().optional(),
 });
 
@@ -450,6 +455,8 @@ export const timingPressSchema = raceStateExpectationSchema.extend({
   pressedAt: z.number().int().nonnegative().optional(),
   /** Time since this screen's previous press, on one monotonic clock. */
   measuredDurationMs: z.number().int().nonnegative().optional(),
+  /** The operator confirmed Race hervatten: after Race beëindigen, a press only starts the next runner with this. */
+  resume: z.boolean().optional(),
 });
 export type TimingPress = z.infer<typeof timingPressSchema>;
 

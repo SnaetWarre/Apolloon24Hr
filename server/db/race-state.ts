@@ -1,7 +1,17 @@
+import {
+  type RaceMove,
+  RACE_COUNTS_FROM_LAPS,
+  canMoveRace,
+  countedRaceProgress,
+  raceMoveRefusal,
+  raceStateProblem,
+} from '../../shared/lifecycle.js';
 import { type RaceState } from '../../shared/schemas.js';
 import { one, run } from './connection.js';
 import { getRunnerLabels } from './labels.js';
 import { parseLabelsJson } from './values.js';
+
+export { RACE_COUNTS_FROM_LAPS };
 
 export function getRaceState(): RaceState {
   const row = one<Omit<RaceState, 'id' | 'activeLabels'> & { activeLabelsJson: string | null }>(
@@ -24,52 +34,82 @@ export function getRaceState(): RaceState {
   };
 }
 
-/**
- * A race with fewer laps than this is a test: a start or a few laps to try
- * the timing screen. At 70 to 85 s a lap, the real race passes it in about
- * 13 minutes.
- */
-export const RACE_COUNTS_FROM_LAPS = 10;
-
-/**
- * Whether the race started here, and whether it still runs: started and not
- * finished. It counts as started from RACE_COUNTS_FROM_LAPS laps on, so a test
- * never decides which laptop keeps its data on Koppelen, and never stops two
- * laptops from merging their runners.
- */
+/** The race as linking laptops count it: see countedRaceProgress. */
 export function raceProgress(): { raceStarted: boolean; raceRunning: boolean } {
-  const row = one<{ laps: number; finished: number }>(
+  const row = one<{ laps: number; raceFinishedAt: number | null }>(
     `SELECT (SELECT COUNT(*) FROM (SELECT 1 FROM laps LIMIT ?)) AS laps,
-       (SELECT race_finished_at FROM race_state WHERE id = 1) IS NOT NULL AS finished`,
+       (SELECT race_finished_at FROM race_state WHERE id = 1) AS raceFinishedAt`,
     [RACE_COUNTS_FROM_LAPS]
   );
-  const raceStarted = (row?.laps ?? 0) >= RACE_COUNTS_FROM_LAPS;
-  return { raceStarted, raceRunning: raceStarted && !row?.finished };
+  return countedRaceProgress(row?.laps ?? 0, { raceFinishedAt: row?.raceFinishedAt ?? null });
 }
 
-/** Starts the runner's live lap, starting (or reopening) the race if needed. The lap keeps the labels of this moment. */
-export function startActiveRunner(runnerId: string, nowMs: number): void {
+type RaceFields = Omit<RaceState, 'id'>;
+
+/** The only write to `race_state` (besides a restore): refuses columns that are no phase of the race. */
+export function writeRaceState(next: RaceFields): void {
+  const problem = raceStateProblem(next);
+  if (problem) throw new Error(`Ongeldige racetoestand: ${problem}`);
   run(
     `UPDATE race_state
      SET active_runner_id = ?,
          active_started_at = ?,
-         race_started_at = COALESCE(race_started_at, ?),
-         race_finished_at = NULL,
+         race_started_at = ?,
+         race_finished_at = ?,
          active_labels_json = ?
      WHERE id = 1`,
-    [runnerId, nowMs, nowMs, JSON.stringify(getRunnerLabels(runnerId))]
+    [
+      next.activeRunnerId,
+      next.activeStartedAt,
+      next.raceStartedAt,
+      next.raceFinishedAt,
+      next.activeRunnerId === null ? null : JSON.stringify(next.activeLabels),
+    ]
   );
 }
 
-/** Clears the live lap; with a runner id, only when that runner is the active one. */
-export function clearActiveRunner(runnerId?: string): void {
-  const sql = `UPDATE race_state
-     SET active_runner_id = NULL,
-         active_started_at = NULL,
-         active_labels_json = NULL
-     WHERE id = 1`;
-  if (runnerId) run(`${sql} AND active_runner_id = ?`, [runnerId]);
-  else run(sql);
+/**
+ * Makes a Timing press, after checking the race allows it (RACE_MOVES). `start`, `resume`
+ * and `handoff` put `nextRunnerId` on the track at `nowMs`, with the labels of this moment
+ * for the lap; a handoff without a next runner leaves the track empty.
+ */
+export function moveRace(move: RaceMove, nowMs: number, nextRunnerId: string | null = null): void {
+  const race = getRaceState();
+  if (!canMoveRace(race, move)) throw new Error(raceMoveRefusal(race, move));
+  if (move === 'finish') {
+    writeRaceState({ ...race, activeRunnerId: null, activeStartedAt: null, activeLabels: [], raceFinishedAt: nowMs });
+  } else if (nextRunnerId) {
+    writeRaceState({
+      activeRunnerId: nextRunnerId,
+      activeStartedAt: nowMs,
+      raceStartedAt: race.raceStartedAt ?? nowMs,
+      raceFinishedAt: null,
+      activeLabels: getRunnerLabels(nextRunnerId),
+    });
+  } else if (move === 'handoff') {
+    writeRaceState({ ...race, activeRunnerId: null, activeStartedAt: null, activeLabels: [] });
+  } else {
+    throw new Error(`A ${move} needs a runner to start`);
+  }
+}
+
+/** Takes a deleted runner off the track; the race goes on with nobody running. */
+export function clearActiveRunner(runnerId: string): void {
+  const race = getRaceState();
+  if (race.activeRunnerId === runnerId) {
+    writeRaceState({ ...race, activeRunnerId: null, activeStartedAt: null, activeLabels: [] });
+  }
+}
+
+/** Back to before the start: for Race wissen and the demo race. */
+export function resetRaceState(): void {
+  writeRaceState({
+    activeRunnerId: null,
+    activeStartedAt: null,
+    raceStartedAt: null,
+    raceFinishedAt: null,
+    activeLabels: [],
+  });
 }
 
 /**
@@ -82,12 +122,7 @@ export function clearRace(nowMs: number, { runners = false } = {}): { laps: numb
   const laps = one<{ count: number }>('SELECT COUNT(*) AS count FROM laps')?.count ?? 0;
   const runnerCount = runners ? (one<{ count: number }>('SELECT COUNT(*) AS count FROM runners')?.count ?? 0) : 0;
   for (const table of ['laps', 'handoff_history', 'race_events']) run(`DELETE FROM ${table}`);
-  run(
-    `UPDATE race_state
-     SET active_runner_id = NULL, active_started_at = NULL, race_started_at = NULL,
-         race_finished_at = NULL, active_labels_json = NULL
-     WHERE id = 1`
-  );
+  resetRaceState();
   run(
     `UPDATE runners SET status = 'registered', queue_index = NULL, status_since = ?, hidden_at = NULL
      WHERE status <> 'registered' OR queue_index IS NOT NULL OR hidden_at IS NOT NULL`,

@@ -118,3 +118,23 @@ test('Alles wissen also removes the runners, keeps the labels, and keeps a backu
     db.closeDb();
   }
 });
+
+test('a backup finished during setup by an old version still restores, with its start repaired', async () => {
+  const db = await import('../server/db.ts');
+  try {
+    await db.initDb();
+    const backupPath = path.join(dataPath, 'legacy-finish.sqlite');
+    await db.backupDatabase(backupPath);
+    const data = db.readRestoreData(backupPath, 'apolloon-legacy-finish.sqlite', Date.now());
+    // Before #152, "Race beëindigen" worked before the start, so a real 4.1.0 backup can hold this.
+    const row = data.tables.race_state[0];
+    row.race_started_at = null;
+    row.race_finished_at = 5_000;
+    db.recordWrite('backups.applyRestore', () => db.replaceEventData(data));
+    const race = db.getRaceState();
+    assert.equal(race.raceFinishedAt, 5_000);
+    assert.equal(race.raceStartedAt, 5_000, 'the finished race is given the start it never had');
+  } finally {
+    db.closeDb();
+  }
+});

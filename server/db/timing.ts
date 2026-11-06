@@ -1,15 +1,19 @@
 import { randomUUID } from 'node:crypto';
+import { type UndoKind, canUndo, timingPress } from '../../shared/lifecycle.js';
 import { type RaceEvent, type RaceState } from '../../shared/schemas.js';
 import { one, run, transaction } from './connection.js';
 import { getLapCount, getRaceEventById, getRecentRaceEvents } from './history.js';
 import { getRunnerLabels } from './labels.js';
 import { type QueueState, getNextWaitingRunner, getQueueStates, restoreQueueState, setRaceStatus } from './queue.js';
-import { clearActiveRunner, getRaceState, startActiveRunner } from './race-state.js';
+import { getRaceState, moveRace, writeRaceState } from './race-state.js';
 import { getRunnerById } from './runner-queries.js';
 import { serializeHistoricalLabels } from './values.js';
 import { clusterNow } from '../clock.js';
 
+/** An entry on the undo stack (`handoff_history`): what the step replaced, so undo can put it back. */
 type HandoffSnapshot = {
+  /** Entries stored before 2026-11 have none; see topEntry. */
+  kind?: UndoKind;
   raceState: RaceState;
   /** Stored as `queueEntries` since before the queue lived on `runners`. */
   queueEntries: QueueState[];
@@ -56,7 +60,9 @@ const MAX_MEASUREMENT_DIFFERENCE_MS = 250;
 
 /**
  * The spacebar action: records the active runner's lap and starts the next
- * waiting runner. Stores what it replaced so the handoff can be undone.
+ * waiting runner. Stores what it replaced so the handoff can be undone. After
+ * Race beëindigen it only starts the next runner when the press says it means to
+ * resume the race (`resume`).
  *
  * `nowMs` is the moment of the press. `measuredDurationMs`, when the timing
  * screen measured the lap between its own two presses, is used as the lap
@@ -64,12 +70,17 @@ const MAX_MEASUREMENT_DIFFERENCE_MS = 250;
  */
 export function performHandoff(
   nowMs = clusterNow(),
-  measuredDurationMs?: number
-): { ok: true; lapId: string | null; startedRunnerId: string | null } | { ok: false; error: 'empty_queue' } {
+  measuredDurationMs?: number,
+  { resume = false } = {}
+):
+  | { ok: true; lapId: string | null; startedRunnerId: string | null }
+  | { ok: false; error: 'empty_queue' | 'finished' } {
   const raceState = getRaceState();
   const activeRunnerId = raceState.activeRunnerId;
   const nextRunner = getNextWaitingRunner();
+  const move = timingPress(raceState);
 
+  if (move === 'resume' && !resume) return { ok: false, error: 'finished' };
   if (!activeRunnerId && !nextRunner) {
     return { ok: false, error: 'empty_queue' };
   }
@@ -77,12 +88,14 @@ export function performHandoff(
   const lapId = activeRunnerId ? randomUUID() : null;
   const affectedIds = [activeRunnerId, nextRunner?.id].filter((id): id is string => Boolean(id));
   const snapshot: HandoffSnapshot = {
+    kind: 'handoff',
     raceState,
     queueEntries: getQueueStates(affectedIds),
     lapIds: lapId ? [lapId] : [],
   };
 
   transaction(() => {
+    moveRace(move, nowMs, nextRunner?.id ?? null);
     run(
       `INSERT INTO handoff_history (id, created_at, payload_json, undone)
        VALUES (?, ?, ?, 0)`,
@@ -125,40 +138,51 @@ export function performHandoff(
       setRaceStatus(activeRunnerId, 'ran', nowMs);
     }
 
-    if (nextRunner) {
-      setRaceStatus(nextRunner.id, 'running', nowMs);
-      startActiveRunner(nextRunner.id, nowMs);
-    } else {
-      clearActiveRunner();
-    }
+    if (nextRunner) setRaceStatus(nextRunner.id, 'running', nowMs);
   });
 
   return { ok: true, lapId, startedRunnerId: nextRunner?.id ?? null };
 }
 
-function lastHandoff() {
-  return one<{ id: string; createdAt: number; payloadJson: string }>(
-    `SELECT id, created_at AS createdAt, payload_json AS payloadJson
+/**
+ * The newest entry that is not undone, and what it takes back. Entries stored before the
+ * kind was saved are a finish only when they are the step that finished the current race:
+ * the same moment as its end.
+ */
+function topEntry(): { id: string; payloadJson: string; kind: UndoKind } | null {
+  const row = one<{ id: string; payloadJson: string; kind: UndoKind | null; isFinish: number }>(
+    `SELECT id, payload_json AS payloadJson, json_extract(payload_json, '$.kind') AS kind,
+       created_at = (SELECT race_finished_at FROM race_state WHERE id = 1) AS isFinish
      FROM handoff_history
      WHERE undone = 0
      ORDER BY created_at DESC, rowid DESC
      LIMIT 1`
   );
+  return row
+    ? { id: row.id, payloadJson: row.payloadJson, kind: row.kind ?? (row.isFinish ? 'finish' : 'handoff') }
+    : null;
+}
+
+/** What the next undo takes back, or null when there is nothing to undo. */
+export function nextUndo(): UndoKind | null {
+  return topEntry()?.kind ?? null;
 }
 
 /** The laps the next undo removes, including halves a split added. */
 export function lapsToUndo(): string[] {
-  const row = lastHandoff();
+  const row = topEntry();
   return row ? ((JSON.parse(row.payloadJson) as Partial<HandoffSnapshot>).lapIds ?? []) : [];
 }
 
-export function undoLastHandoff(): { ok: true; deletedLapIds: string[] } | { ok: false; error: 'nothing_to_undo' } {
-  const row = lastHandoff();
-  if (!row) {
-    return { ok: false, error: 'nothing_to_undo' };
-  }
-
+/** Puts back what the newest entry replaced, after checking the race allows it (canUndo). */
+export function undoLastHandoff():
+  | { ok: true; deletedLapIds: string[] }
+  | { ok: false; error: 'nothing_to_undo' | 'finished' } {
+  const row = topEntry();
+  if (!row) return { ok: false, error: 'nothing_to_undo' };
+  if (!canUndo(getRaceState(), row.kind)) return { ok: false, error: 'finished' };
   const payload = JSON.parse(row.payloadJson) as Partial<HandoffSnapshot>;
+
   const deletedLapIds = payload.lapIds ?? [];
   const snapshotState: Partial<RaceState> = payload.raceState ?? {};
   // Beheer › Lopers may have deleted that runner since; then nobody goes back on the track.
@@ -175,22 +199,15 @@ export function undoLastHandoff(): { ok: true; deletedLapIds: string[] } | { ok:
       if (getRunnerById(state.runnerId)) restoreQueueState(state);
     }
 
-    run(
-      `UPDATE race_state
-       SET active_runner_id = ?,
-           active_started_at = ?,
-           race_started_at = ?,
-           race_finished_at = ?,
-           active_labels_json = ?
-       WHERE id = 1`,
-      [
-        raceState.activeRunnerId ?? null,
-        raceState.activeStartedAt ?? null,
-        raceState.raceStartedAt ?? null,
-        raceState.raceFinishedAt ?? null,
-        JSON.stringify(raceState.activeLabels ?? []),
-      ]
-    );
+    writeRaceState({
+      activeRunnerId: raceState.activeRunnerId ?? null,
+      activeStartedAt: raceState.activeStartedAt ?? null,
+      // Before #152 a race could be finished during setup, then resumed. Its saved
+      // undo snapshot has a finish but no start, just like an old restored backup.
+      raceStartedAt: raceState.raceStartedAt ?? (raceState.activeRunnerId ? null : raceState.raceFinishedAt) ?? null,
+      raceFinishedAt: raceState.raceFinishedAt ?? null,
+      activeLabels: raceState.activeLabels ?? [],
+    });
     run('UPDATE handoff_history SET undone = 1 WHERE id = ?', [row.id]);
   });
 
@@ -205,32 +222,18 @@ export function finishRace(nowMs = clusterNow()): void {
   const raceState = getRaceState();
   const activeRunnerId = raceState.activeRunnerId;
   const snapshot: HandoffSnapshot = {
+    kind: 'finish',
     raceState,
     queueEntries: getQueueStates(activeRunnerId ? [activeRunnerId] : []),
     lapIds: [],
   };
   transaction(() => {
+    moveRace('finish', nowMs);
     run(
       `INSERT INTO handoff_history (id, created_at, payload_json, undone)
        VALUES (?, ?, ?, 0)`,
       [randomUUID(), nowMs, JSON.stringify(snapshot)]
     );
     if (activeRunnerId) setRaceStatus(activeRunnerId, 'ran', nowMs);
-    run(
-      `UPDATE race_state
-       SET active_runner_id = NULL,
-           active_started_at = NULL,
-           active_labels_json = NULL,
-           race_finished_at = ?
-       WHERE id = 1`,
-      [nowMs]
-    );
   });
-}
-
-/** Whether the last undo step is this finish. Races finished before finishing stored one have none. */
-export function canUndoFinish(): boolean {
-  const { raceFinishedAt } = getRaceState();
-  const row = lastHandoff();
-  return raceFinishedAt !== null && row?.createdAt === raceFinishedAt;
 }

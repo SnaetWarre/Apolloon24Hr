@@ -1,4 +1,5 @@
 import React from 'react';
+import { canHideRunner, nextLane } from '../../shared/lifecycle';
 import {
   DndContext,
   DragOverlay,
@@ -250,7 +251,8 @@ export const KanbanBoard: React.FC<{
         onOpenProfile={onOpenProfile}
         onAdvance={(event) => {
           if (isSecondClick(event) || rowJustMoved(event)) return;
-          void runQueueAction(() => setStatus(runner.id, runner.status === 'warming_up' ? 'waiting' : 'warming_up'));
+          const to = nextLane(runner.status);
+          if (to) void runQueueAction(() => setStatus(runner.id, to));
         }}
         onToggleHidden={(event) => {
           if (isSecondClick(event) || rowJustMoved(event)) return;
@@ -413,7 +415,7 @@ function QueueRunnerRow({
 }) {
   const { attributes, listeners, setNodeRef: setDragRef, isDragging } = useDraggable({ id: runner.id });
   const { setNodeRef: setDropRef } = useDroppable({ id: runner.id, disabled: isDragging });
-  const isCompleted = runner.status === 'ran';
+  const toQueue = nextLane(runner.status) === 'waiting';
   return (
     <div
       ref={setDropRef}
@@ -462,10 +464,10 @@ function QueueRunnerRow({
         </button>
         <TimerBadge runner={runner} />
         <div className="queue-row-actions" onPointerDown={(event) => event.stopPropagation()}>
-          <button className={`btn btn--sm${runner.status === 'warming_up' ? ' btn--advance' : ''}`} onClick={onAdvance}>
-            {runner.status === 'warming_up' ? 'Naar wachtrij' : 'Opwarmen'}
+          <button className={`btn btn--sm${toQueue ? ' btn--advance' : ''}`} onClick={onAdvance}>
+            {toQueue ? 'Naar wachtrij' : 'Opwarmen'}
           </button>
-          {isCompleted && (
+          {canHideRunner(runner.status) && (
             <button className="btn btn--quiet btn--sm" onClick={onToggleHidden}>
               {runner.hiddenFromQueue ? 'Terug tonen' : 'Verberg'}
             </button>

@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
-import { all, markAppDataChanged, run, transaction } from './db/connection.js';
-import { getRaceState } from './db/race-state.js';
+import { all, markAppDataChanged, transaction } from './db/connection.js';
+import { clearRace, getRaceState } from './db/race-state.js';
 import { insertRunner } from './db/runners.js';
-import { getNextWaitingRunner, getMaxQueueIndex } from './db/queue.js';
+import { getNextWaitingRunner, updateRunnerStatus } from './db/queue.js';
 import { performHandoff } from './db/timing.js';
 import { isClusterEnabled } from './env.js';
 import type { RunnerRegistration } from '../shared/schemas.js';
@@ -156,15 +156,7 @@ export function latestDemoRaceStart(nowMs: number): number {
 }
 
 function resetRace(startedAt: number): void {
-  for (const table of ['laps', 'handoff_history', 'race_events', 'runner_labels', 'runners']) {
-    run(`DELETE FROM ${table}`);
-  }
-  run(
-    `UPDATE race_state
-     SET active_runner_id = NULL, active_started_at = NULL, race_started_at = NULL,
-         race_finished_at = NULL, active_labels_json = NULL
-     WHERE id = 1`
-  );
+  clearRace(startedAt, { runners: true });
   RUNNER_NAMES.forEach((name, index) => {
     const labels = LABEL_PATTERNS[index % LABEL_PATTERNS.length];
     insertRunner({
@@ -195,15 +187,7 @@ function fillQueue(nowMs: number): void {
      LIMIT ?`,
     [missing]
   );
-  let queueIndex = getMaxQueueIndex() + 1;
-  for (const { id } of rested) {
-    run("UPDATE runners SET status = 'waiting', queue_index = ?, status_since = ?, hidden_at = NULL WHERE id = ?", [
-      queueIndex,
-      nowMs,
-      id,
-    ]);
-    queueIndex += 1;
-  }
+  for (const { id } of rested) updateRunnerStatus({ id, status: 'waiting', statusSince: nowMs });
 }
 
 /** Brings the race up to `nowMs`; returns whether anything changed. */

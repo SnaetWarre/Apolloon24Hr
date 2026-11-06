@@ -1,3 +1,4 @@
+import { raceIsOpen } from '../../shared/lifecycle';
 import React from 'react';
 import { Link, useRouterState } from '@tanstack/react-router';
 import { useAppData, useClusterStatus } from '../app/index';
@@ -147,7 +148,7 @@ function RaceClock() {
 function UpdateRow() {
   const { race } = useAppData(selectRaceClockData);
   const { status } = useDesktopUpdate();
-  const raceRunning = Boolean(race.raceStartedAt && !race.raceFinishedAt);
+  const raceRunning = raceIsOpen(race);
   if (!status || !('update' in status) || raceRunning) return null;
   const label = `Update ${status.update.version} ${status.state === 'ready' ? 'klaar' : 'beschikbaar'}`;
   return (

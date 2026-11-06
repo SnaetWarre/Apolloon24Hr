@@ -1,6 +1,7 @@
 import { LiveDot } from './LiveDot';
 import { Icon } from './Icon';
 import React from 'react';
+import { canMoveRace, canUndo, racePhase, undoRefusal } from '../../shared/lifecycle';
 import { Link } from '@tanstack/react-router';
 import { isModalDialogOpen, ModalDialog } from './ModalDialog';
 import { useConfirm } from './ConfirmDialog';
@@ -18,10 +19,10 @@ import { isConnectionError } from '../lib/connectionError';
 import { useSecondClick } from '../lib/useSecondClick';
 import { burgieGepaktMessage } from './admin/adminFormat';
 
-const selectTimingData = ({ runners, race }: LiveAppSnapshot) => ({ runners, race });
+const selectTimingData = ({ runners, race, nextUndo }: LiveAppSnapshot) => ({ runners, race, nextUndo });
 
 export function TimingView() {
-  const { runners, race } = useAppData(selectTimingData);
+  const { runners, race, nextUndo } = useAppData(selectTimingData);
   const {
     laps,
     loading: historyLoading,
@@ -105,14 +106,15 @@ export function TimingView() {
 
   async function runHandoff(eventTime: number) {
     if (handoffBusyRef.current || timingBlocked || finishConfirmStep > 0 || (!activeRunner && !nextRunner)) return;
-    if (race.raceFinishedAt) {
-      const resume = await confirm({
+    const resume = racePhase(race) === 'finished';
+    if (resume) {
+      const confirmed = await confirm({
         title: 'Race hervatten?',
         message: 'De race is afgesloten. Hervatten start de volgende loper.',
         confirmLabel: 'Race hervatten',
         tone: 'danger',
       });
-      if (!resume) return;
+      if (!confirmed) return;
       // The lap starts at the confirmation, not at the press that opened it.
       eventTime = performance.now();
     }
@@ -139,7 +141,7 @@ export function TimingView() {
       startedAt: press.pressedAt,
     });
     await runExclusiveRaceAction(async () => {
-      const handoffResult = await (activeRunner ? handoff(press) : startNext(press));
+      const handoffResult = await (activeRunner ? handoff(press) : startNext(press, resume));
       if (handoffResult.startedRunnerId) rememberLapStart(press, eventTime);
       else forgetLapStart();
       setLastAction(
@@ -174,7 +176,7 @@ export function TimingView() {
       isTextEntryTarget(target) ||
       finishConfirmStep > 0 ||
       timingBlocked ||
-      race.raceFinishedAt ||
+      racePhase(race) === 'finished' ||
       isModalDialogOpen()
     )
       return;
@@ -209,8 +211,12 @@ export function TimingView() {
     if (handoffBusyRef.current) return;
     // The dialog hands focus back to its opener; a focused undo button would take the next Enter.
     releaseFocus();
-    // After "Race beëindigen" the last step is the finish itself: undoing it reopens the race.
-    const reopen = Boolean(race.raceFinishedAt);
+    // The server says what the next undo takes back; after "Race beëindigen" that is the finish itself.
+    if (!canUndo(race, nextUndo)) {
+      setActionError(undoRefusal(race));
+      return;
+    }
+    const reopen = nextUndo === 'finish';
     if (
       !(await confirm(
         reopen
@@ -341,7 +347,7 @@ export function TimingView() {
     ? `Timing staat open op ${timingElsewhereName}`
     : timingBlocked
       ? 'Timing geblokkeerd'
-      : race.raceFinishedAt && !pending && nextRunner
+      : racePhase(race) === 'finished' && !pending && nextRunner
         ? `Race hervatten met ${shortRunnerName(nextRunner)}`
         : shownRunner
           ? shownNext
@@ -350,7 +356,7 @@ export function TimingView() {
           : shownNext
             ? `Start ${shortRunnerName(shownNext)}`
             : 'Geen loper klaar';
-  const finished = Boolean(race.raceFinishedAt) && !pending;
+  const finished = racePhase(race) === 'finished' && !pending;
 
   return (
     <>
@@ -591,7 +597,7 @@ export function TimingView() {
             <button
               className="btn btn--danger-outline btn--sm"
               onClick={(event) => startFinish(event.timeStamp)}
-              disabled={timingBlocked || !race.raceStartedAt || Boolean(race.raceFinishedAt)}
+              disabled={timingBlocked || !canMoveRace(race, 'finish')}
             >
               Race beëindigen
             </button>

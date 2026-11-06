@@ -1,3 +1,4 @@
+import { raceIsOpen } from '../../../shared/lifecycle';
 import React from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { trpc } from '../../api';
@@ -53,7 +54,7 @@ export function RestorePanel({ runnerCount }: { runnerCount: number }) {
             Alles wat na {formatMoment(record.createdAt)} gebeurde, verdwijnt. De huidige toestand wordt eerst als
             backup bewaard, dus ook dit terugzetten kan je nog ongedaan maken.
           </p>
-          {preview.raceStartedAt !== null && preview.raceFinishedAt === null && (
+          {raceIsOpen(preview) && (
             <p>
               <strong>De wedstrijd liep toen.</strong> De loper die toen op de piste stond, staat er weer, met de
               starttijd van toen. Controleer de timing meteen na het terugzetten.

@@ -191,7 +191,7 @@ and real timers; the simulation tests pass fakes.
 - Koppelen (`linkWith` in `server/cluster.ts`) links two groups the same way
   whichever side it is pressed on (`linkDirection`). The race counts as
   started from ten laps on (`raceStarted` and `raceRunning` from
-  `raceProgress` in `server/db/race-state.ts`); fewer are a test. While it
+  `countedRaceProgress` in `shared/lifecycle.ts`); fewer are a test. While it
   started on neither side, the joining side's runners and labels merge into
   the other group first: `joinGroup` posts them (`exportMergeData`) to
   `runners.merge` on that group, whose leader adds them in one replicated
@@ -228,6 +228,7 @@ and real timers; the simulation tests pass fakes.
   `CLUSTER_AUTO_LINK=false` turns it off.
 - `server/static-files.ts`: packaged frontend, never outside the build root.
 - `shared/schemas.ts`: client/server contracts.
+- `shared/lifecycle.ts`: the race phases, a runner's lanes, and Timing's undo stack, with the moves each one allows. `race_state` is written only through `writeRaceState` and `moveRace` in `server/db/race-state.ts`.
 
 ## Write Path
 

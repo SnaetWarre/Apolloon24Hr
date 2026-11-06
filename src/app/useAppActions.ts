@@ -11,8 +11,8 @@ import type {
   RaceStateExpectation,
   RunnerInput,
   RunnerPatch,
-  RunnerStatus,
 } from '../types';
+import type { QueueStatus } from '../../shared/lifecycle';
 import type { PressTime } from '../lib/pressTiming';
 import type { RegistrationFile } from '../lib/registrationFile';
 import { nowMs } from '../lib/time';
@@ -95,7 +95,7 @@ export function useAppActions() {
     return {
       addRunner: action((input: RunnerInput) => trpc.runners.create.mutate(input)),
       updateRunner: action((id: string, fields: RunnerPatch) => trpc.runners.update.mutate({ id, fields })),
-      setStatus: (id: string, status: RunnerStatus) => {
+      setStatus: (id: string, status: QueueStatus) => {
         // The server only takes whole milliseconds; the clock offset can be fractional.
         const statusSince = Math.round(nowMs());
         return optimistic(statusPatch(id, status, statusSince), () =>
@@ -138,7 +138,10 @@ export function useAppActions() {
       removeRunnerFromLabel: action((member: LabelMember) => trpc.labels.removeRunner.mutate(member)),
       uploadLabelImage: action((input: LabelImageUpload) => trpc.labels.uploadImage.mutate(input), []),
       handoff: action((press: PressTime) => trpc.race.handoff.mutate({ ...raceExpectation(), ...press })),
-      startNext: action((press: PressTime) => trpc.race.startNext.mutate({ ...raceExpectation(), ...press })),
+      /** With `resume`, the operator confirmed Race hervatten; the server refuses a start after the end without it. */
+      startNext: action((press: PressTime, resume?: boolean) =>
+        trpc.race.startNext.mutate({ ...raceExpectation(), ...press, resume })
+      ),
       undoLastHandoff: action(() => trpc.race.undoLastHandoff.mutate(raceExpectation())),
       finishRace: action((press: PressTime) =>
         trpc.race.finish.mutate({ ...raceExpectation(), pressedAt: press.pressedAt })
