@@ -93,6 +93,36 @@ test('undo after finishing reopens the race and keeps the laps', async () => {
   }
 });
 
+test('undoing a legacy resume restores a finish made during setup', async () => {
+  fs.rmSync(dataPath, { recursive: true, force: true });
+  const db = await import('../server/db.ts');
+  try {
+    await db.initDb();
+    const runner = db.insertRunner({ name: 'Runner' });
+    db.updateRunnerStatus({ id: runner.id, status: 'waiting', statusSince: 1 });
+    db.performHandoff(1_000);
+    db.finishRace(2_000);
+    db.updateRunnerStatus({ id: runner.id, status: 'waiting', statusSince: 2_001 });
+    assert.ok(db.performHandoff(3_000, undefined, { resume: true }).ok);
+    const file = new DatabaseSync(path.join(dataPath, 'data', 'app.db'));
+    try {
+      file
+        .prepare(
+          "UPDATE handoff_history SET payload_json = json_set(payload_json, '$.raceState.raceStartedAt', NULL) WHERE created_at = 3000"
+        )
+        .run();
+    } finally {
+      file.close();
+    }
+    assert.deepEqual(db.undoLastHandoff(), { ok: true, deletedLapIds: [] });
+    assert.equal(db.getRaceState().raceStartedAt, 2_000);
+    assert.equal(db.getRaceState().raceFinishedAt, 2_000);
+  } finally {
+    db.closeDb();
+    fs.rmSync(dataPath, { recursive: true, force: true });
+  }
+});
+
 test('the race counts as started from ten laps on, and as running until it is finished', async () => {
   fs.rmSync(dataPath, { recursive: true, force: true });
   const db = await import('../server/db.ts');

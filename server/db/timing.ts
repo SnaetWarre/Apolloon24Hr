@@ -202,7 +202,9 @@ export function undoLastHandoff():
     writeRaceState({
       activeRunnerId: raceState.activeRunnerId ?? null,
       activeStartedAt: raceState.activeStartedAt ?? null,
-      raceStartedAt: raceState.raceStartedAt ?? null,
+      // Before #152 a race could be finished during setup, then resumed. Its saved
+      // undo snapshot has a finish but no start, just like an old restored backup.
+      raceStartedAt: raceState.raceStartedAt ?? (raceState.activeRunnerId ? null : raceState.raceFinishedAt) ?? null,
       raceFinishedAt: raceState.raceFinishedAt ?? null,
       activeLabels: raceState.activeLabels ?? [],
     });
