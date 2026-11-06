@@ -811,12 +811,16 @@ test(
         assert.ok(!state.runners.some((runner) => runner.runnerNumber === 'D-1'));
         assert.equal((await fetchStatus(server)).timing?.name, 'LAPTOP-C');
       }
-      const warnings = await Promise.all(
-        [restartedA, restartedB].map(async (server) => (await fetchStatus(server)).lastError)
-      );
+      // A notice, not an error: the group works again, so the screens do not call it a problem.
+      const statuses = await Promise.all([restartedA, restartedB].map(fetchStatus));
+      const notices = statuses.map((status) => status.notice);
       assert.ok(
-        warnings.some((warning) => /1 ronde die alleen hier geklokt was, zit niet in de race/.test(warning ?? '')),
-        warnings.join('\n')
+        notices.some((notice) => /1 ronde die alleen hier geklokt was, zit niet in de race/.test(notice ?? '')),
+        notices.join('\n')
+      );
+      assert.deepEqual(
+        statuses.map((status) => status.lastError),
+        [null, null]
       );
       const activity = await client(restartedA).activity.list.query({ limit: 100, before: null });
       assert.ok(activity.some((entry) => entry.summary === 'Timing overgenomen op LAPTOP-B'));
@@ -850,7 +854,10 @@ test(
       const followerId = await hostIdOf(follower);
       const leaderId = await hostIdOf(leader);
       await client(leader).runners.create.mutate({ name: 'Before', runnerNumber: 'P-1' });
+      // Timing is open on the laptop that breaks.
+      await client(dead).cluster.openTiming.mutate({ takeOver: false });
       await waitForSameState(leader, dead);
+      await waitFor(async () => (await fetchStatus(follower)).timing?.hostId === deadId);
       await killServer(dead);
 
       // A laptop that answers cannot be taken out, and the one that broke only after a while.
@@ -872,6 +879,11 @@ test(
       const activity = await client(leader).activity.list.query({ limit: 50, before: null });
       const removal = activity.find((entry) => entry.action === 'cluster.removeMember');
       assert.equal(removal?.summary, 'LAPTOP-C uit de groep gehaald');
+      // Taking it out freed Timing: opening Timing on another laptop makes that the Timing laptop, without Overnemen.
+      assert.equal((await fetchStatus(follower)).timing, null);
+      await client(follower).cluster.openTiming.mutate({ takeOver: false });
+      await waitFor(async () => (await fetchStatus(leader)).timing?.hostId === followerId);
+      assert.equal((await fetchStatus(leader)).timing?.gen, 2);
 
       // The spare links in its place: three laptops again, so one more may fail.
       const spare = await startServer({ port: await freePort(), dataPath: path.join(root, 'd'), name: 'LAPTOP-D' });

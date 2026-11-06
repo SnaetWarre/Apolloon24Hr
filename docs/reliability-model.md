@@ -152,6 +152,9 @@ again, and taking it back in by itself would make the group bigger without
 the crew knowing, so the next failure could stop all saving. Koppelen on that
 laptop ("Opnieuw koppelen") brings it back on purpose and takes it off the
 list. Beheer › Activiteit lists the removal with the screen it came from.
+When the removed laptop was the Timing laptop, removing it frees Timing: the
+next laptop where Timing is open becomes the Timing laptop without
+"Overnemen", and it goes on alone by itself again when the network fails.
 
 ### Laptop addresses
 

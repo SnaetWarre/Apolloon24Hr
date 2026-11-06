@@ -11,6 +11,7 @@ import type {
   NearbyGroup,
   TimingLaptopStatus,
 } from '../shared/schemas.js';
+import { linkDirection, raceKeeps, runnersMerge, type LinkSide } from '../shared/linking.js';
 import { describeAutomaticOrigin } from './activity.js';
 import { backupStatus } from './backups.js';
 import { clusterNow, setClusterClockOffset } from './clock.js';
@@ -22,6 +23,7 @@ import {
   finishJoining,
   handleAppend,
   handleVoteRequest,
+  isJoining,
   isLeader,
   isResyncing,
   lastLeaderContact,
@@ -56,6 +58,7 @@ import {
   getRemovedMembers,
   getSetting,
   getTimingLaptop,
+  getTimingRecord,
   hasEventChanges,
   getUnreachableMembers,
   hostIdentity,
@@ -74,6 +77,7 @@ import {
   setUnreachableMembers,
   type ClusterMember,
   type TimingLaptop,
+  type TimingRecord,
 } from './db.js';
 import { currentUrl, heardLaptops, startDiscovery, stopDiscovery } from './discovery.js';
 import { APP_VERSION, isClusterEnabled, readPositiveInt } from './env.js';
@@ -130,8 +134,20 @@ const SETTLE_TIMEOUT_MS = 3_000;
 /** The Timing laptop without a majority this long goes on alone by itself; a short network hiccup heals first. */
 const AUTO_ALONE_AFTER_MS = readPositiveInt(process.env.CLUSTER_AUTO_ALONE_MS, 15_000);
 
-let joining = false;
-let lastError: string | null = null;
+/*
+ * What Beheer says about this laptop's place in the group, besides the live state. Two messages,
+ * each with its own end:
+ * - rejoinedNotice: this laptop gave up its own data to follow another split (followSplit). A
+ *   notice, shown in Beheer › Systeem only and never as a problem, since the group works again. It
+ *   names the laps that went to a backup, so it stays until the next join, going on alone, or a restart.
+ * - followError: following another split failed. An error; it ends when a join succeeds, when this
+ *   laptop goes on alone, when a maintenance round finds no other split to follow, or when this
+ *   laptop follows a working leader (that leader then does the following).
+ * A failed copy from the leader is raft's resyncProblem, an error that ends once this laptop holds
+ * the leader's log again or leads.
+ */
+let rejoinedNotice: string | null = null;
+let followError: string | null = null;
 /** Rounds in a row that linking by itself through the laptop at `url` failed, and why the last one did. */
 let autoLinkFailure: { url: string; rounds: number; message: string } | null = null;
 /**
@@ -149,9 +165,18 @@ function selfMember(): ClusterMember {
   return { hostId: hostIdentity().hostId, url: selfUrl(), name: LAPTOP_NAME };
 }
 
+/**
+ * What this laptop is doing to its own data, if anything: joining another group (a copy
+ * included), or copying the leader's data to catch up (`resyncing`). Raft holds both and refuses
+ * a second one (startJoining, takeOverAlone). While busy, this laptop saves nothing, starts no
+ * other join, does not go on alone, and its group state never says no-majority: it waits for
+ * itself, not for the other laptops.
+ */
 function busy(): ClusterStatus['busy'] {
-  return joining ? 'joining' : isResyncing() ? 'resyncing' : null;
+  return isJoining() ? 'joining' : isResyncing() ? 'resyncing' : null;
 }
+
+const BUSY_MESSAGE = 'Deze laptop wordt al gekoppeld of bijgewerkt. Probeer het zo opnieuw.';
 
 export function clusterStatus(): ClusterStatus {
   const identity = hostIdentity();
@@ -211,7 +236,8 @@ export function clusterStatus(): ClusterStatus {
     timing: enabled ? timingStatus(memberStatuses, writable) : null,
     split: getGroupSplit(),
     laps: countLaps(),
-    lastError: lastError ?? lastResyncProblem(),
+    lastError: followError ?? lastResyncProblem(),
+    notice: rejoinedNotice,
     backup: backupStatus(),
   };
 }
@@ -284,14 +310,7 @@ function nearbyGroups(ownMembers: Set<string>): NearbyGroup[] {
     .sort((a, b) => b.runners - a.runners || a.url.localeCompare(b.url));
 }
 
-type GroupData = {
-  clusterId: string;
-  raceStarted: boolean;
-  raceRunning: boolean;
-  runners: number;
-  changed: boolean;
-  laptops: number;
-};
+type GroupData = LinkSide;
 
 function ownGroup(): GroupData {
   return {
@@ -316,48 +335,8 @@ function otherGroup(status: PeerStatus): GroupData {
   };
 }
 
-/**
- * Which way Koppelen links two groups. Before the race (it started on
- * neither side, see raceProgress: a test does not count), the joining side's
- * runners and labels merge into the other group, so only the rest is taken
- * over: settings, logos, a test race. Then a group nobody changed yet takes
- * the data of one that someone prepared, then the smaller group joins the
- * larger, then the one with fewer runners joins, and then the group id
- * decides. Either side can then start it: `invite` asks the other side over.
- *
- * Once the race started somewhere, nothing merges. A group where the race
- * runs (started, not finished) keeps its data against one where it does not,
- * so a spare laptop with the registration list, or with a practice race that
- * was finished, never replaces a running race. Then a group where the race
- * started keeps its data against one where it did not. Otherwise the one with
- * fewer runners takes the other's data; with as many runners, the rules from
- * before the race decide. The other side is only asked to come over while it
- * holds no runners; else it is pressed there (`there`), where it is `join`.
- *
- * Both sides work this out alike, so a press on both at once links them one way.
- */
-export function linkDirection(own: GroupData, other: GroupData): NearbyGroup['link'] {
-  const merging = !own.raceStarted && !other.raceStarted;
-  const beforeRace = () =>
-    other.changed !== own.changed
-      ? other.changed
-      : other.laptops !== own.laptops
-        ? other.laptops > own.laptops
-        : other.runners !== own.runners
-          ? other.runners > own.runners
-          : other.clusterId < own.clusterId;
-  const otherKeeps = merging
-    ? beforeRace()
-    : other.raceRunning !== own.raceRunning
-      ? other.raceRunning
-      : other.raceStarted !== own.raceStarted
-        ? other.raceStarted
-        : other.runners !== own.runners
-          ? other.runners > own.runners
-          : beforeRace();
-  if (otherKeeps) return 'join';
-  return merging || other.runners === 0 ? 'invite' : 'there';
-}
+/** Which way Koppelen links two groups; the rule lives in shared/linking.ts, so the screens use it too. */
+export { linkDirection };
 
 /**
  * Which group this laptop links with by itself. A laptop with runners only
@@ -370,8 +349,7 @@ function autoLinkPlan(nearby: NearbyGroup[]): { target: NearbyGroup | null; wait
   if (!autoLinkEnabled) return { target: null, waiting: null };
   const own = ownGroup();
   const candidates = nearby.filter(
-    (group) =>
-      group.compatible && group.link === 'join' && (own.runners === 0 || (!own.raceStarted && !group.raceStarted))
+    (group) => group.compatible && group.link === 'join' && (own.runners === 0 || runnersMerge(own, group))
   );
   const withRunners = candidates.filter((group) => group.runners > 0);
   if (withRunners.length > 1) {
@@ -403,12 +381,11 @@ function autoLinkNotes(statuses: ClusterMemberStatus[]): AutoLinkNote[] {
 
 function pressThereMessage(url: string, status: PeerStatus): string {
   const other = shortUrl(url);
-  const own = raceProgress();
-  const there = otherGroup(status);
+  const race = raceKeeps(raceProgress(), otherGroup(status));
   const why =
-    own.raceRunning && !there.raceRunning
+    race === 'running'
       ? `Op deze laptop loopt de race, op ${other} niet.`
-      : own.raceStarted && !there.raceStarted
+      : race === 'started'
         ? `Op deze laptop is de race al gestart, op ${other} nog niet.`
         : `Op deze laptop staan ${runnerLabel(countRunners())}, op ${other} ${runnerLabel(status.runners)}.`;
   return `${why} Druk op Koppelen op ${other}: die neemt dan de gegevens van deze laptop over.`;
@@ -430,6 +407,8 @@ function runnerLabel(count: number): string {
 
 function groupState(writable: boolean, statuses: ClusterMemberStatus[]): GroupState {
   if (!enabled || statuses.length === 1) return writable ? 'solo' : 'electing';
+  // A laptop that joins or copies cannot save because of that, not because the others are gone (busy).
+  if (busy()) return 'electing';
   if (!writable) {
     const since = Math.max(lastLeaderContact() ?? 0, startedAt);
     return performance.now() - since < ELECTING_GRACE_MS ? 'electing' : 'no-majority';
@@ -644,7 +623,7 @@ export function handlePeerUpgrade(req: IncomingMessage, socket: Duplex, head: Bu
 function answerPeer(type: unknown, body: unknown): PeerAnswer {
   // A laptop of another split (one went on alone) is neither followed nor voted for, so the data of
   // two splits never mixes; maintain() makes one join the other. A joining laptop takes everything.
-  if (!joining && splitOf(body) !== getGroupSplit().id) {
+  if (!isJoining() && splitOf(body) !== getGroupSplit().id) {
     return refusal('other_split', 'Deze laptops werkten apart verder.');
   }
   if (type === 'append') {
@@ -700,6 +679,7 @@ function addMember(member: ClusterMember, autoLinkedWith?: string): void {
     for (const old of members()) {
       if (old.url === member.url && old.hostId !== member.hostId && old.hostId !== self.hostId) {
         removeClusterMember(old.hostId);
+        releaseTiming(old.hostId);
       }
     }
     saveClusterMember(member);
@@ -811,6 +791,7 @@ export function removeLaptop(hostId: string): { name: string } {
     throw new Error('Deze laptop is niet lang genoeg onbereikbaar om uit de groep te halen.');
   }
   removeClusterMember(hostId);
+  releaseTiming(hostId);
   setRemovedMembers([hostId, ...getRemovedMembers().filter((removed) => removed !== hostId)]);
   setUnreachableMembers(getUnreachableMembers().filter((unreachable) => unreachable !== hostId));
   return { name: heardNames().get(hostId) ?? member.name ?? shortUrl(member.url) };
@@ -939,20 +920,17 @@ export async function joinGroup(rawUrl: string, options: JoinOptions = {}): Prom
   if (otherCluster && !options.follow && linkDirection(own, there) !== 'join') {
     throw new Error(pressThereMessage(url, status));
   }
-  if (busy()) throw new Error('Deze laptop wordt al gekoppeld of bijgewerkt.');
-  const merging =
-    otherCluster && !options.follow && !own.raceStarted && !there.raceStarted && (own.runners > 0 || own.changed);
+  const merging = otherCluster && !options.follow && runnersMerge(own, there) && (own.runners > 0 || own.changed);
   if (options.asked && !merging && countRunners() > 0) {
     throw new Error('Op die laptop staan intussen lopers. Druk daar op Koppelen.');
   }
+  if (!startJoining()) throw new Error(BUSY_MESSAGE);
   // Nothing joins this laptop's group from here on (busy), so these are all the laptops that follow.
   const self = hostIdentity().hostId;
   const followers =
     (otherCluster && !options.follow) || options.split !== undefined
       ? members().filter((member) => member.hostId !== self)
       : [];
-  joining = true;
-  startJoining();
   let joined: Parameters<typeof finishJoining>[0] = null;
   try {
     if (merging) await mergeInto(url);
@@ -966,7 +944,8 @@ export async function joinGroup(rawUrl: string, options: JoinOptions = {}): Prom
         const term = await joinThrough(leaderUrl, options.autoLinkedWith);
         if (term !== null) {
           joined = { term, leader: { hostId: leader.hostId, url: leaderUrl } };
-          lastError = null;
+          rejoinedNotice = null;
+          followError = null;
           return { backupFile: backupStatus().latest?.fileName ?? null, merged: merging };
         }
       }
@@ -978,7 +957,6 @@ export async function joinGroup(rawUrl: string, options: JoinOptions = {}): Prom
     }
   } finally {
     finishJoining(joined);
-    joining = false;
     if (joined) {
       for (const member of followers) {
         void peerFetch(`${member.url}/api/cluster/invite`, {
@@ -1071,6 +1049,7 @@ async function groupStatus(url: string, known: PeerStatus): Promise<{ url: strin
  */
 export function continueAlone(origin?: string, takeOverTiming = false): { ok: true } {
   if (!enabled || isLeader()) throw new Error('Deze laptop werkt al.');
+  if (busy()) throw new Error(BUSY_MESSAGE);
   if (clusterStatus().state !== 'no-majority') {
     throw new Error('Er zijn nog genoeg laptops bereikbaar; die kiezen zelf een hoofdlaptop.');
   }
@@ -1086,19 +1065,55 @@ export function continueAlone(origin?: string, takeOverTiming = false): { ok: tr
   const others = members()
     .filter((member) => member.hostId !== selfId)
     .map((member) => member.name ?? shortUrl(member.url));
-  takeOverAlone();
+  if (!takeOverAlone()) throw new Error(BUSY_MESSAGE);
   recordWrite('cluster.continueAlone', () => {
     keepOnlyClusterMember(selfId);
     setGroupSplit({ id: crypto.randomUUID(), rank: getGroupSplit().rank + 1 });
-    if (takesOver) setTimingLaptop({ hostId: selfId, name: LAPTOP_NAME, gen: timing.gen + 1 });
+    if (takesOver) changeTiming({ type: 'take-over', hostId: selfId, name: LAPTOP_NAME });
     const left = others.length
       ? `; ${listNames(others)} ${others.length === 1 ? 'is' : 'zijn'} uit de groep gehaald`
       : '';
     const took = takesOver ? `; Timing overgenomen van ${timingName(timing)}` : '';
     logLaptopActivity('cluster.continueAlone', `Alleen verder gewerkt op ${LAPTOP_NAME}${left}${took}`, origin);
   });
-  lastError = null;
+  rejoinedNotice = null;
+  followError = null;
   return { ok: true };
+}
+
+/*
+ * The Timing laptop: the one laptop that clocks, a replicated setting (TimingRecord). It is held
+ * by one laptop of the group, or by none (`hostId` null) before Timing was first opened and after
+ * its laptop left the group. Every change goes through nextTiming:
+ * - claim: Timing opened while no laptop holds it. That laptop holds it.
+ * - take-over: Overnemen, or going on alone while another laptop holds it. This laptop holds it.
+ * - release: the laptop that holds it leaves the group (Uit de groep halen, or replaced by itself
+ *   after its data was wiped). No laptop holds it, so the next one where Timing is open claims it
+ *   and the automatic going on alone works again.
+ * Claims and take-overs raise `gen`, and a release keeps it, so of two splits that meet again the
+ * one that took Timing last still wins (otherGroupWins).
+ */
+type TimingEvent =
+  | { type: 'claim' | 'take-over'; hostId: string; name: string | null }
+  | { type: 'release'; hostId: string };
+
+/** The Timing laptop after `event`, or null when the event changes nothing. */
+function nextTiming(current: TimingRecord | null, event: TimingEvent): TimingRecord | null {
+  const gen = current?.gen ?? 0;
+  const holder = current?.hostId ?? null;
+  if (event.type === 'release') return holder === event.hostId ? { hostId: null, name: null, gen } : null;
+  if (holder === event.hostId || (holder !== null && event.type === 'claim')) return null;
+  return { hostId: event.hostId, name: event.name, gen: gen + 1 };
+}
+
+/** Applies `event` inside a replicated write. */
+function changeTiming(event: TimingEvent): void {
+  const next = nextTiming(getTimingRecord(), event);
+  if (next) setTimingLaptop(next);
+}
+
+function releaseTiming(hostId: string): void {
+  changeTiming({ type: 'release', hostId });
 }
 
 export type TimingClaim = { hostId: string; name: string | null; takeOver: boolean };
@@ -1109,21 +1124,18 @@ export type TimingClaim = { hostId: string; name: string | null; takeOver: boole
  */
 export function timingClaim(takeOver: boolean): TimingClaim | null {
   if (!enabled) return null;
-  const timing = getTimingLaptop();
   const selfId = hostIdentity().hostId;
-  if (timing?.hostId === selfId || (timing && !takeOver)) return null;
+  const current = getTimingRecord();
+  if (!nextTiming(current, { type: takeOver ? 'take-over' : 'claim', hostId: selfId, name: LAPTOP_NAME })) return null;
   // Opened while nothing can be saved: opening it again later claims it.
-  if (!timing && !leaderAlive()) return null;
+  if (!current?.hostId && !leaderAlive()) return null;
   return { hostId: selfId, name: LAPTOP_NAME, takeOver };
 }
 
 /** Saves the Timing laptop, in the leader's replicated write; Timing open on another laptop stays unless taken over. */
-export function saveTimingLaptop({ hostId, name, takeOver }: TimingClaim): TimingLaptop {
-  const current = getTimingLaptop();
-  if (current && (current.hostId === hostId || !takeOver)) return current;
-  const next = { hostId, name, gen: (current?.gen ?? 0) + 1 };
-  setTimingLaptop(next);
-  return next;
+export function saveTimingLaptop({ hostId, name, takeOver }: TimingClaim): TimingLaptop | null {
+  changeTiming({ type: takeOver ? 'take-over' : 'claim', hostId, name });
+  return getTimingLaptop();
 }
 
 /** Clocking here while Timing is open on another laptop is refused, so no lap is pressed on two laptops. */
@@ -1179,10 +1191,15 @@ async function maintain(): Promise<void> {
       if (url !== member.url || name !== member.name) addMember({ hostId: member.hostId, url, name });
     }
     logReachability();
-  } else if (clusterStatus().state !== 'no-majority') return;
+  } else if (clusterStatus().state !== 'no-majority') {
+    // Following a working leader: that leader follows other splits now.
+    if (leaderAlive()) followError = null;
+    return;
+  }
 
   const group = new Set(members().map((member) => member.hostId));
   for (const url of new Set(Object.values(knownPeers()))) if (await followSplit(url)) return;
+  followError = null;
   if (isLeader()) await autoLink(group);
   else if (timingWaitsAlone()) continueAlone();
 }
@@ -1199,13 +1216,13 @@ async function followSplit(url: string): Promise<boolean> {
   try {
     const { backupFile } = await joinGroup(url, { split: status.split.id });
     const kept = new Set(getLapIds());
-    lastError = rejoinedMessage(
+    rejoinedNotice = rejoinedMessage(
       status.hostName ?? shortUrl(url),
       before.filter((id) => !kept.has(id)).length,
       backupFile
     );
   } catch (error) {
-    lastError = error instanceof Error ? error.message : String(error);
+    followError = error instanceof Error ? error.message : String(error);
   }
   return true;
 }

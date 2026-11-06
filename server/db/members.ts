@@ -114,23 +114,31 @@ export function saveAutoLink(hostId: string, linkedWith: string): void {
 
 /**
  * The laptop where Timing is open, so only one laptop clocks; a replicated setting. `gen` goes
- * up each time another laptop takes Timing over: of two groups that went on separately, the one
- * holding the most recent Timing laptop carries on (cluster.ts).
+ * up each time a laptop claims Timing or takes it over: of two groups that went on separately,
+ * the one holding the most recent Timing laptop carries on (cluster.ts). `hostId` is null while
+ * no laptop holds it: its laptop left the group, and `gen` stays for the next claim.
  */
-export type TimingLaptop = { hostId: string; name: string | null; gen: number };
+export type TimingRecord = { hostId: string | null; name: string | null; gen: number };
+export type TimingLaptop = TimingRecord & { hostId: string };
 
-const timingLaptopSchema = z.object({ hostId: z.string(), name: z.string().nullable(), gen: z.number() });
+const timingRecordSchema = z.object({ hostId: z.string().nullable(), name: z.string().nullable(), gen: z.number() });
 
-export function getTimingLaptop(): TimingLaptop | null {
+export function getTimingRecord(): TimingRecord | null {
   try {
-    const parsed = timingLaptopSchema.safeParse(JSON.parse(getSetting('cluster_timing_json') || 'null'));
+    const parsed = timingRecordSchema.safeParse(JSON.parse(getSetting('cluster_timing_json') || 'null'));
     return parsed.success ? parsed.data : null;
   } catch {
     return null;
   }
 }
 
-export function setTimingLaptop(laptop: TimingLaptop): void {
+/** The laptop that holds Timing; null while none does. */
+export function getTimingLaptop(): TimingLaptop | null {
+  const record = getTimingRecord();
+  return record?.hostId ? { ...record, hostId: record.hostId } : null;
+}
+
+export function setTimingLaptop(laptop: TimingRecord): void {
   run('INSERT OR REPLACE INTO settings(key, value) VALUES(?, ?)', ['cluster_timing_json', JSON.stringify(laptop)]);
 }
 
