@@ -165,3 +165,13 @@ test('the test mail goes to the sender and marks nobody as mailed', async () => 
     await mail.close();
   }
 });
+
+test('an Excel remake preserves the original runner ID and mailing history', () => {
+  const original = { ...card('original', 'een@example.be'), runnerNumber: '12' };
+  const previous = mergeManifest(null, [original], 1);
+  previous.cards[0].sentAt = 123;
+  const remade = mergeManifest(previous, [{ ...original, runnerId: 'export-12' }], 2, true);
+  assert.equal(remade.cards.length, 1);
+  assert.equal(remade.cards[0].runnerId, 'original');
+  assert.equal(remade.cards[0].sentAt, 123);
+});

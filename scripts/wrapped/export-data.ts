@@ -213,6 +213,7 @@ function text(value: Cell): string {
 }
 
 function whole(value: Cell): number | null {
+  if (!text(value)) return null;
   const number = typeof value === 'number' ? value : Number(text(value));
   return Number.isInteger(number) ? number : null;
 }

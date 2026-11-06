@@ -42,7 +42,12 @@ async function remake() {
     const { writeExportDatabase } = await import('./export-database.ts');
     const database = await writeExportDatabase(race);
     console.log('');
-    await makeCards({ db: database, only: runner.id, ...(options.out ? { out: options.out } : {}) });
+    await makeCards({
+      db: database,
+      only: runner.id,
+      'match-runner-identity': 'true',
+      ...(options.out ? { out: options.out } : {}),
+    });
   } finally {
     fs.rmSync(dataRoot, { recursive: true, force: true });
   }

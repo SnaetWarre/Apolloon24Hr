@@ -51,7 +51,7 @@ Nothing here costs money: Playwright makes the images and a normal Gmail account
 
 ## Remaking one card from an exported Excel
 
-When the race database is gone and all that is left is the workbook from Analyse › Exporteren › Excel, one runner's pages can still be rebuilt. The workbook has every lap in "Rondes" (finish time, number, name, lap, lap time) and the registration answers in "Lopers", which is everything `buildWrapped` reads.
+When the race database is gone and all that is left is the workbook from Analyse › Exporteren › Excel, one runner's pages can still be rebuilt. The workbook has every lap in "Rondes" (finish time, number, name, lap, lap time) and the registration answers in "Lopers", which provides the runner and lap data needed to rebuild the cards, subject to the limits below.
 
 ```sh
 npm run wrapped:from-export -- --xlsx=/path/to/apolloon-race.xlsx --runner=146 --out="$HOME/Documents/Apolloon Wrapped 2026"

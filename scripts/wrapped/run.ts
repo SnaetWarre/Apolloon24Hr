@@ -136,7 +136,10 @@ export async function makeCards(options: Options) {
     } finally {
       await browser.close();
     }
-    await writeManifest(out, mergeManifest(await readManifest(out), made, Date.now()));
+    await writeManifest(
+      out,
+      mergeManifest(await readManifest(out), made, Date.now(), options['match-runner-identity'] === 'true')
+    );
     const textFile = path.join(out, MAIL_TEXT_FILE);
     if (!fs.existsSync(textFile)) fs.writeFileSync(textFile, DEFAULT_MAIL_TEXT);
 

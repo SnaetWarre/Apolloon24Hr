@@ -14,8 +14,8 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const START = Date.UTC(2026, 9, 17, 18, 0, 0);
 const MINUTE = 60_000;
 
-type SourceLap = { number: number; name: string; lap: number; finishedAt: number; durationMs: number };
-type Loper = [number, string, string, string, string];
+type SourceLap = { number: number | null; name: string; lap: number; finishedAt: number; durationMs: number };
+type Loper = [number | null, string, string, string, string];
 
 const source: SourceLap[] = [
   { number: 12, name: 'Jan Peeters', lap: 1, finishedAt: START + 1 * MINUTE, durationMs: 100_000 },
@@ -142,4 +142,24 @@ test('a runner is found by number or by name, and an unknown name lists who is i
   assert.equal(findExportRunner(race.runners, 'lotte').runnerNumber, '7');
   assert.throws(() => findExportRunner(race.runners, 'Jurian'), /Geen loper "Jurian"/);
   assert.throws(() => findExportRunner(race.runners, 'peeters'), /meer lopers/);
+});
+
+test('unnumbered runners keep separate laps and registration answers', async () => {
+  const race = await readWorkbook(
+    [
+      { ...source[0], number: null, name: 'Alice' },
+      { ...source[1], number: null, name: 'Bob' },
+    ],
+    [
+      [null, 'Alice', 'alice@example.be', 'Ja', ''],
+      [null, 'Bob', 'bob@example.be', 'Nee', ''],
+    ]
+  );
+  assert.equal(race.runners.length, 2);
+  for (const runner of race.runners) {
+    assert.equal(runner.runnerNumber, null);
+    assert.equal(race.laps.filter((lap) => lap.runnerId === runner.id).length, 1);
+    assert.equal(runner.registration?.email, runner.name.toLowerCase() + '@example.be');
+    assert.equal(runner.registration?.reuseConsent, runner.name === 'Bob' ? 'Nee' : 'Ja');
+  }
 });

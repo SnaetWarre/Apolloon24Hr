@@ -49,10 +49,28 @@ export async function writeManifest(folder: string, manifest: WrappedManifest): 
  * Adds the cards just made to the list. Making a card again keeps whether it was mailed,
  * so nobody gets a second mail, and cards made in an earlier run stay on the list.
  */
-export function mergeManifest(previous: WrappedManifest | null, cards: WrappedCard[], madeAt: number): WrappedManifest {
+export function mergeManifest(
+  previous: WrappedManifest | null,
+  cards: WrappedCard[],
+  madeAt: number,
+  matchRunnerIdentity = false
+): WrappedManifest {
   const byRunner = new Map(previous?.cards.map((card) => [card.runnerId, card]) ?? []);
   for (const card of cards) {
-    byRunner.set(card.runnerId, { ...card, sentAt: byRunner.get(card.runnerId)?.sentAt ?? null, error: null });
+    const matches = matchRunnerIdentity
+      ? (previous?.cards.filter((entry) =>
+          card.runnerNumber
+            ? entry.runnerNumber === card.runnerNumber
+            : entry.runnerNumber == null && entry.name === card.name
+        ) ?? [])
+      : [];
+    if (matches.length > 1)
+      throw new Error(
+        `Meerdere kaarten met lopernummer ${card.runnerNumber ?? card.name}. Gebruik een nieuwe uitvoermap.`
+      );
+    const existing = byRunner.get(card.runnerId) ?? matches[0];
+    const runnerId = existing?.runnerId ?? card.runnerId;
+    byRunner.set(runnerId, { ...card, runnerId, sentAt: existing?.sentAt ?? null, error: existing?.error ?? null });
   }
   return { madeAt, cards: [...byRunner.values()].sort((a, b) => a.files[0].localeCompare(b.files[0], 'nl-BE')) };
 }
