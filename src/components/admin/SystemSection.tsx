@@ -83,7 +83,7 @@ function ClusterPanel({
   const timingElsewhere = cluster.timing && !cluster.timing.self ? (cluster.timing.name ?? 'een andere laptop') : null;
 
   async function goOnAlone() {
-    if (pending) return;
+    if (busy) return;
     const confirmed = await confirm(
       timingElsewhere
         ? {
@@ -210,7 +210,7 @@ function ClusterPanel({
                 Er zijn te weinig laptops bereikbaar om iets te bewaren. Wacht tot het netwerk terug is, of klok verder
                 op {timingElsewhere}: daar staat Timing open, en alleen die laptop kan alleen verder werken. Is{' '}
                 {timingElsewhere} echt kapot?{' '}
-                <button className="btn btn--secondary" onClick={() => void goOnAlone()} disabled={pending}>
+                <button className="btn btn--secondary" onClick={() => void goOnAlone()} disabled={busy}>
                   Timing overnemen en alleen verder werken
                 </button>
               </span>
@@ -221,7 +221,7 @@ function ClusterPanel({
                 {cluster.timing?.self &&
                   ' Timing staat open op deze laptop: komt het netwerk niet snel terug, dan werkt ze vanzelf alleen verder.'}{' '}
                 Zijn ze echt kapot?{' '}
-                <button className="btn btn--secondary" onClick={() => void goOnAlone()} disabled={pending}>
+                <button className="btn btn--secondary" onClick={() => void goOnAlone()} disabled={busy}>
                   Alleen verder werken
                 </button>
               </span>
@@ -232,6 +232,11 @@ function ClusterPanel({
       {cluster.lastError && (
         <div className="warning-banner" role="alert">
           {cluster.lastError}
+        </div>
+      )}
+      {cluster.notice && (
+        <div className="host-hint cluster-notice" role="status">
+          {cluster.notice}
         </div>
       )}
       {cluster.members.length === 1 ? (

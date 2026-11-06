@@ -202,6 +202,7 @@ export const startJoining = raft.startJoining;
 export const finishJoining = raft.finishJoining;
 export const currentRole = raft.role;
 export const currentLeader = raft.leader;
+export const isJoining = raft.isJoining;
 export const isResyncing = raft.isResyncing;
 export const lastResyncProblem = raft.resyncProblem;
 export const lastLeaderContact = raft.lastLeaderContact;

@@ -246,7 +246,7 @@ export type NearbyGroup = {
   appVersion: string;
   compatible: boolean;
   /**
-   * What Koppelen does with it (linkDirection in server/cluster.ts): `join` makes this laptop's
+   * What Koppelen does with it (linkDirection in shared/linking.ts): `join` makes this laptop's
    * group take that group's data, `invite` makes that group take this laptop's data, and `there`
    * means Koppelen must be pressed on that laptop, because this one keeps its own data and that
    * one holds runners while the race started somewhere. Before the race, the side that takes the
@@ -300,7 +300,10 @@ export type ClusterStatus = {
   /** Which split of the group this data belongs to; "Alleen verder" starts a new one with a higher rank. */
   split: { id: string; rank: number };
   laps: number;
+  /** A problem with the group that needs a look: following another split or copying from the main laptop failed. */
   lastError: string | null;
+  /** Something to know that is not a problem: this laptop gave up its data to follow another split, and where it went. */
+  notice: string | null;
   backup: BackupStatus;
 };
 
