@@ -60,7 +60,7 @@ export function mergeManifest(
     const matches = matchRunnerIdentity
       ? (previous?.cards.filter((entry) =>
           card.runnerNumber
-            ? entry.runnerNumber === card.runnerNumber
+            ? exportedNumber(entry.runnerNumber) === exportedNumber(card.runnerNumber)
             : entry.runnerNumber == null && entry.name === card.name
         ) ?? [])
       : [];
@@ -78,4 +78,9 @@ export function mergeManifest(
 /** Who gets a mail: a real address, no "no" to contact, and not mailed yet. */
 export function mailableCards(manifest: WrappedManifest): WrappedManifestEntry[] {
   return manifest.cards.filter((card) => card.emailValid && !card.refusedContact && card.sentAt == null);
+}
+
+// Excel exports numeric runner numbers as numbers, dropping leading zeroes.
+function exportedNumber(value: string | null): string | null {
+  return value != null && /^\d+$/.test(value) ? String(Number(value)) : value;
 }

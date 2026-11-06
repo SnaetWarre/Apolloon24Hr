@@ -183,10 +183,7 @@ function runnerFor(byKey: Map<string, ExportRunner>, runnerNumber: string | null
   const known = byKey.get(key);
   if (known) return known;
   const runner: ExportRunner = {
-    id: `export-${key
-      .replace(/[^a-z0-9]+/gi, '-')
-      .replace(/^-|-$/g, '')
-      .toLowerCase()}`,
+    id: `export-${encodeURIComponent(key)}`,
     runnerNumber,
     name: name.trim(),
     registration: null,

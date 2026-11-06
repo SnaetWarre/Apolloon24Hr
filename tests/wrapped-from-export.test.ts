@@ -163,3 +163,12 @@ test('unnumbered runners keep separate laps and registration answers', async () 
     assert.equal(runner.registration?.reuseConsent, runner.name === 'Bob' ? 'Nee' : 'Ja');
   }
 });
+
+test('punctuation in unnumbered names does not produce duplicate IDs', async () => {
+  const race = await readWorkbook([
+    { ...source[0], number: null, name: 'Anne-Marie' },
+    { ...source[1], number: null, name: 'Anne Marie' },
+  ]);
+  assert.equal(new Set(race.runners.map((runner) => runner.id)).size, 2);
+  assert.equal(new Set(race.laps.map((lap) => lap.runnerId)).size, 2);
+});
