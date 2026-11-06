@@ -98,11 +98,17 @@ export function readRestoreData(filePath: string, fileName: string, backupCreate
 /**
  * A race state no version of Apolloon writes, or a runner on the track other than the
  * active one, would leave Timing without a press that works, so such a backup is refused.
+ * One old state is repaired instead: before #152 Race beëindigen worked during setup, so a
+ * backup can hold a finished race with no start. Its start becomes the finish, which is what
+ * that race looked like to everyone at the time.
  */
 function assertRacePhase(data: RestoreData): void {
   const row = data.tables.race_state[0];
   const at = (column: string) => (typeof row?.[column] === 'number' ? row[column] : null);
   const activeRunnerId = typeof row?.active_runner_id === 'string' ? row.active_runner_id : null;
+  if (at('race_started_at') === null && at('race_finished_at') !== null && activeRunnerId === null && row) {
+    row.race_started_at = row.race_finished_at;
+  }
   const problem = raceStateProblem({
     activeRunnerId,
     activeStartedAt: at('active_started_at'),
