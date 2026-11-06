@@ -47,24 +47,28 @@ Hieronder zie je hoeveel van die toeren van jou waren. Deel ze zeker op je socia
 Volgend jaar staan we er opnieuw, en dan willen we nog zottere records breken. Zien we jou daar terug?
 `;
 
-const [command, ...rest] = process.argv.slice(2);
-const options = Object.fromEntries(
-  rest.map((arg) => {
-    const [key, ...value] = arg.replace(/^--/, '').split('=');
-    return [key, value.length ? value.join('=') : 'true'];
-  })
-);
+/** `--key=value` or `--flag`, as the commands below read them. */
+export type Options = Record<string, string>;
 
-try {
-  if (command === 'cards') await makeCards();
-  else if (command === 'mail') await mail();
-  else throw new Error('Gebruik: run.ts cards --db=<backup.sqlite> | run.ts mail [--test | --send]');
-} catch (error) {
-  console.error(`\n${error instanceof Error ? error.message : String(error)}`);
-  process.exitCode = 1;
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const [command, ...rest] = process.argv.slice(2);
+  const options = Object.fromEntries(
+    rest.map((arg) => {
+      const [key, ...value] = arg.replace(/^--/, '').split('=');
+      return [key, value.length ? value.join('=') : 'true'];
+    })
+  );
+  try {
+    if (command === 'cards') await makeCards(options);
+    else if (command === 'mail') await mail(options);
+    else throw new Error('Gebruik: run.ts cards --db=<backup.sqlite> | run.ts mail [--test | --send]');
+  } catch (error) {
+    console.error(`\n${error instanceof Error ? error.message : String(error)}`);
+    process.exitCode = 1;
+  }
 }
 
-async function makeCards() {
+export async function makeCards(options: Options) {
   if (!options.db) throw new Error('Geef de backup mee: --db=<pad naar apolloon-….sqlite of app.db>');
   if (!fs.existsSync(serverEntry)) throw new Error('Geen build gevonden. Draai eerst `npm run build`.');
   const app = await startApp(path.resolve(options.db));
@@ -81,7 +85,7 @@ async function makeCards() {
       );
     }
     const year = new Date(state.race.raceFinishedAt ?? state.race.raceStartedAt ?? Date.now()).getFullYear();
-    const out = outputFolder(year);
+    const out = outputFolder(year, options);
     const wrapped = buildWrapped({
       runners: state.runners,
       laps: history.laps,
@@ -144,8 +148,8 @@ async function makeCards() {
   }
 }
 
-async function mail() {
-  const out = outputFolder(new Date().getFullYear());
+export async function mail(options: Options) {
+  const out = outputFolder(new Date().getFullYear(), options);
   const manifest = await readManifest(out);
   if (!manifest) throw new Error(`Geen kaarten in ${out}. Maak ze eerst met npm run wrapped:cards, of geef --out mee.`);
   const { subject, text } = readMailText(path.join(out, MAIL_TEXT_FILE));
@@ -243,7 +247,7 @@ function readMailText(file: string) {
   return { subject, text: lines.join('\n').trim() };
 }
 
-function outputFolder(year: number): string {
+function outputFolder(year: number, options: Options): string {
   if (options.out) return path.resolve(options.out);
   const documents = path.join(os.homedir(), 'Documents');
   return path.join(fs.existsSync(documents) ? documents : os.homedir(), `Apolloon Wrapped ${year}`);

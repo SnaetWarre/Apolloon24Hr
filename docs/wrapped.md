@@ -49,6 +49,24 @@ The boxes, checkered flags and the car are the design's own drawings, taken from
 
 Nothing here costs money: Playwright makes the images and a normal Gmail account sends the mails.
 
+## Remaking one card from an exported Excel
+
+When the race database is gone and all that is left is the workbook from Analyse › Exporteren › Excel, one runner's pages can still be rebuilt. The workbook has every lap in "Rondes" (finish time, number, name, lap, lap time) and the registration answers in "Lopers", which is everything `buildWrapped` reads.
+
+```sh
+npm run wrapped:from-export -- --xlsx=/path/to/apolloon-race.xlsx --runner=146 --out="$HOME/Documents/Apolloon Wrapped 2026"
+```
+
+`--runner` takes a runner number or a name. The script lists the numbers it read (laps, fastest lap, average, distance, share, runner type, which lap was the fastest) and then writes that runner's pages through the same flow as `wrapped:cards`, so the design and the calculations are the ones from the race. The workbook goes into a throwaway database in the temp folder, which is removed afterwards; the original file is never changed. The manifest in `--out` is updated, so `wrapped:mail` will not mail that card again.
+
+What the export cannot say, and so cannot be rebuilt exactly:
+
+- The screenshot is not the same as the original card when a lap was **split**: the workbook has no lap `source`, so a split half can show up as the fastest lap or pull the average down. Laps under 20 seconds and over 10 minutes are still left out, because the duration is in the file.
+- The race start is not in the workbook. The earliest lap start is used, which is the same moment for a race that started with its first runner but shifts the hourly chart if the real race started earlier.
+- The race finish is the last lap's finish, not the moment the operator ended the race. Only the year on the pages comes from it.
+
+Nothing in the app changes: this only reads the workbook and makes images.
+
 ## Tests
 
-`tests/wrapped.test.ts` checks the numbers, places and runner types on a made-up race. `tests/wrapped-mail.test.ts` sends through a local fake SMTP server (`smtp-server`) and checks the attachments, the resume after a stop, the stop on a wrong password, and that the test mail marks nobody as mailed.
+`tests/wrapped.test.ts` checks the numbers, places and runner types on a made-up race. `tests/wrapped-from-export.test.ts` writes an exported workbook, reads it back, and checks that the numbers match `buildWrapped` on the same laps, including a double press, a forgotten handoff and a clock change. `tests/wrapped-mail.test.ts` sends through a local fake SMTP server (`smtp-server`) and checks the attachments, the resume after a stop, the stop on a wrong password, and that the test mail marks nobody as mailed.

@@ -64,7 +64,8 @@ export type WrappedRunner = {
 };
 
 export type WrappedInput = {
-  runners: Runner[];
+  /** Only these three fields are read, so a card can also be built from an exported workbook. */
+  runners: Array<Pick<Runner, 'id' | 'runnerNumber' | 'name'>>;
   laps: LapRecord[];
   registrations: Record<string, RunnerRegistration>;
   raceStartedAt: number | null;
@@ -127,7 +128,7 @@ export function buildWrapped({ runners, laps, registrations, raceStartedAt }: Wr
 
 type RunnerStats = ReturnType<typeof runnerStats>;
 
-function runnerStats(runner: Runner, lapList: LapRecord[]) {
+function runnerStats(runner: WrappedInput['runners'][number], lapList: LapRecord[]) {
   // A double press, a guessed split half, or a forgotten handoff counts as a lap but not as a lap time.
   const measured = lapList.filter((lap) => isMeasuredLap(lap) && hasPlausibleDuration(lap));
   const fastest = measured.reduce<LapRecord | null>(
