@@ -70,6 +70,7 @@ const cluster: ClusterStatus = {
   split: { id: '', rank: 0 },
   laps: 0,
   lastError: 'Laptop 10.0.0.2 antwoordt niet',
+  notice: null,
   backup: {
     enabled: true,
     inProgress: false,

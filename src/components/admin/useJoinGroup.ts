@@ -1,16 +1,14 @@
+import { raceKeeps, runnersMerge } from '../../../shared/linking';
 import { useAppActions } from '../../app/index';
 import type { ClusterStatus, NearbyGroup } from '../../types';
 import { useConfirm } from '../ConfirmDialog';
 import { useAdminAction } from './useAdminAction';
 
 /**
- * Koppelen: links this laptop's group with another one, after saying what happens to whose data
- * (the server decides; `found.link` says which way for a laptop from the list). Before the race
- * (it started on neither side; a test of fewer than ten laps does not count), the side that takes
- * the other's data brings its runners and labels along. Once it started, a laptop where the race
- * does not run takes the data of one where it runs (started, not finished), and then a laptop
- * where it has not started takes the data of one where it has; otherwise the laptop with fewer
- * runners. Used by Beheer › Systeem and by the welcome screen of a laptop that is still empty.
+ * Koppelen: links this laptop's group with another one, after saying what happens to whose data.
+ * The server decides which way (`found.link` for a laptop from the list); the words come from the
+ * same rule in shared/linking.ts. Used by Beheer › Systeem and by the welcome screen of a laptop
+ * that is still empty.
  */
 export function useJoinGroup(
   own: Pick<ClusterStatus, 'runners' | 'changed' | 'raceStarted' | 'raceRunning' | 'members'>
@@ -21,7 +19,7 @@ export function useJoinGroup(
 
   async function join(url: string, found?: NearbyGroup) {
     if (!url || pending) return null;
-    const merging = found ? !found.raceStarted && !own.raceStarted : false;
+    const merging = found ? runnersMerge(found, own) : false;
     const others = own.members.length - 1;
     const kept =
       own.runners > 0
@@ -29,10 +27,11 @@ export function useJoinGroup(
         : own.changed
           ? 'Wat al op deze laptop is ingesteld, wordt eerst als backup bewaard.'
           : 'Op deze laptop staat nog niets, dus er gaat niets verloren.';
+    const race = found ? raceKeeps(found, own) : null;
     const raceThere =
-      found?.raceRunning && !own.raceRunning
+      found && race === 'running'
         ? `Op ${laptopLabel(found)} loopt de race. `
-        : found?.raceStarted && !own.raceStarted
+        : found && race === 'started'
           ? `Op ${laptopLabel(found)} is de race al gestart. `
           : '';
     const follow =

@@ -62,6 +62,7 @@ export function buildDiagnosticsText({
       lines.push('Groep: koppelen staat uit op deze installatie');
     }
     if (cluster.lastError) lines.push(`Laatste fout: ${cluster.lastError}`);
+    if (cluster.notice) lines.push(`Melding: ${cluster.notice}`);
     const backup = cluster.backup;
     lines.push(
       `Backup: ${backup.latest ? `laatste ${new Date(backup.latest.createdAt).toLocaleString('nl-BE', { timeZone: 'Europe/Brussels' })}` : 'nog geen'}` +
