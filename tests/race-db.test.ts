@@ -704,3 +704,31 @@ test('operational SQLite access paths stay indexed and runner lookups agree', as
     fs.rmSync(dataPath, { recursive: true, force: true });
   }
 });
+
+test('a malformed undo snapshot is rejected before it changes the race or deletes laps', async () => {
+  fs.rmSync(dataPath, { recursive: true, force: true });
+  const db = await import('../server/db.ts');
+  try {
+    await db.initDb();
+    const runner = db.insertRunner({ name: 'Snapshot runner' });
+    db.updateRunnerStatus({ id: runner.id, status: 'waiting' });
+    db.performHandoff(1_000);
+    db.performHandoff(80_000);
+    const before = { race: db.getRaceState(), laps: db.getAllLaps(), runners: db.getAllRunners() };
+    const file = new DatabaseSync(path.join(dataPath, 'data', 'app.db'));
+    try {
+      file
+        .prepare(
+          "UPDATE handoff_history SET payload_json = json_set(payload_json, '$.lapIds', 42) WHERE created_at = 80000"
+        )
+        .run();
+    } finally {
+      file.close();
+    }
+    assert.throws(() => db.undoLastHandoff());
+    assert.deepEqual({ race: db.getRaceState(), laps: db.getAllLaps(), runners: db.getAllRunners() }, before);
+  } finally {
+    db.closeDb();
+    fs.rmSync(dataPath, { recursive: true, force: true });
+  }
+});

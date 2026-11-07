@@ -27,7 +27,7 @@ function relay(order: string[], usual: Record<string, number>, extra: Record<num
       startedAt: at,
       finishedAt: at + durationMs,
       durationMs,
-      source: 'spacebar',
+      source: 'spacebar' as const,
     };
     at += durationMs;
     return lap;

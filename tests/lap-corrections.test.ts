@@ -137,7 +137,7 @@ test('a lap split for a runner who ran twice keeps the labels it was recorded wi
       startedAt: 301_000,
       finishedAt: 361_000,
       durationMs: 60_000,
-      source: 'spacebar',
+      source: 'spacebar' as const,
     };
     for (const mode of ['day', 'hour', 'two_hour'] as const) {
       assert.equal(isFastestLapForRecordMode(measured, db.getAllLaps(), race, mode), true, mode);

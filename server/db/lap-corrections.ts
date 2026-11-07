@@ -1,3 +1,4 @@
+import { handoffSnapshotSchema } from './handoff-snapshot.js';
 import { randomUUID } from 'node:crypto';
 import { MAX_HANDOFF_SHIFT_MS, MIN_LAP_MS } from '../../shared/lapTimes.js';
 import { clusterNow } from '../clock.js';
@@ -89,6 +90,10 @@ export function splitLap(lapId: string, runnerId: string): { ok: true; lapIds: [
   if (lap.durationMs < 2) throw new Error('Deze ronde is te kort om te splitsen.');
   const firstMs = Math.round(lap.durationMs / 2);
   const middle = lap.startedAt + firstMs;
+  const handoffs = all<{ id: string; payloadJson: string }>(
+    `SELECT id, payload_json AS payloadJson FROM handoff_history WHERE undone = 0 AND payload_json LIKE ?`,
+    [`%${lapId}%`]
+  ).map(({ id, payloadJson }) => ({ id, payload: handoffSnapshotSchema.parse(JSON.parse(payloadJson)) }));
   const secondId = randomUUID();
   run("UPDATE laps SET finished_at = ?, duration_ms = ?, source = 'split' WHERE id = ?", [middle, firstMs, lapId]);
   run(
@@ -104,14 +109,10 @@ export function splitLap(lapId: string, runnerId: string): { ok: true; lapIds: [
       secondHalfLabels(lap, runnerId),
     ]
   );
-  for (const handoff of all<{ id: string; payloadJson: string }>(
-    `SELECT id, payload_json AS payloadJson FROM handoff_history WHERE undone = 0 AND payload_json LIKE ?`,
-    [`%${lapId}%`]
-  )) {
-    const payload = JSON.parse(handoff.payloadJson) as { lapIds?: string[] };
-    if (!payload.lapIds?.includes(lapId)) continue;
+  for (const { id, payload } of handoffs) {
+    if (!payload.lapIds.includes(lapId)) continue;
     payload.lapIds.push(secondId);
-    run('UPDATE handoff_history SET payload_json = ? WHERE id = ?', [JSON.stringify(payload), handoff.id]);
+    run('UPDATE handoff_history SET payload_json = ? WHERE id = ?', [JSON.stringify(payload), id]);
   }
   renumberLaps(lap.runnerId);
   if (runnerId !== lap.runnerId) renumberLaps(runnerId);
@@ -135,6 +136,10 @@ export function deleteLap(lapId: string): { ok: true } {
 export function moveHandoff(lapId: string, from: number, to: number): { ok: true } {
   const lap = lapRow(lapId);
   if (lap.finishedAt !== from) throw new Error('Deze wissel is intussen veranderd. Bekijk hem opnieuw.');
+  const handoffs = all<{ id: string; payloadJson: string }>(
+    `SELECT id, payload_json AS payloadJson FROM handoff_history WHERE undone = 0 AND payload_json LIKE ?`,
+    [`%"activeStartedAt":${from}%`]
+  ).map(({ id, payloadJson }) => ({ id, payload: handoffSnapshotSchema.parse(JSON.parse(payloadJson)) }));
   const shift = to - from;
   if (shift === 0) return { ok: true };
   if (Math.abs(shift) > MAX_HANDOFF_SHIFT_MS) {
@@ -165,14 +170,10 @@ export function moveHandoff(lapId: string, from: number, to: number): { ok: true
     nextRunnerId,
   ]);
   // Undoing the handoff after this one puts its runner back on the track from the moved press.
-  for (const handoff of all<{ id: string; payloadJson: string }>(
-    `SELECT id, payload_json AS payloadJson FROM handoff_history WHERE undone = 0 AND payload_json LIKE ?`,
-    [`%"activeStartedAt":${from}%`]
-  )) {
-    const payload = JSON.parse(handoff.payloadJson) as { raceState?: { activeStartedAt?: number | null } };
-    if (payload.raceState?.activeStartedAt !== from) continue;
+  for (const { id, payload } of handoffs) {
+    if (payload.raceState.activeStartedAt !== from) continue;
     payload.raceState.activeStartedAt = to;
-    run('UPDATE handoff_history SET payload_json = ? WHERE id = ?', [JSON.stringify(payload), handoff.id]);
+    run('UPDATE handoff_history SET payload_json = ? WHERE id = ?', [JSON.stringify(payload), id]);
   }
   return { ok: true };
 }

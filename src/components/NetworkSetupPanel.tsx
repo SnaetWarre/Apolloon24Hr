@@ -1,28 +1,6 @@
+import { netProfileResponseSchema, netActionResultSchema, type NetProfile } from '../../shared/network';
 import React from 'react';
 import { useToast, type ToastMessage } from './Toaster';
-
-type NetAdapterProfile = {
-  name: string;
-  address: string;
-  prefixLength: number | null;
-  dhcp: boolean | null;
-  connection: string | null;
-};
-
-type NetProfile = {
-  platform: string;
-  windows: boolean;
-  elevateMethod: 'uac' | 'pkexec' | 'osascript' | null;
-  elevateHint: string | null;
-  manager: string | null;
-  adapters: NetAdapterProfile[];
-  primary: NetAdapterProfile | null;
-  apipa: boolean;
-  suggestion: { ip: string; prefixLength: number; gateway: string | null } | null;
-  eventUrl: string | null;
-  primaryWired: boolean | null;
-  lastElevation: { id: string; state: 'waiting' | 'finished' | 'failed'; message: string | null } | null;
-};
 
 type Phase = 'idle' | 'confirm-make' | 'waiting-make' | 'confirm-revert' | 'waiting-revert';
 
@@ -31,8 +9,10 @@ const UNDO_PHRASE = 'VOORBIJ';
 async function fetchProfile(): Promise<NetProfile> {
   const response = await fetch('/api/net/profile', { cache: 'no-store' });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  const body = (await response.json()) as { ok: boolean; profile?: NetProfile; error?: string };
-  if (!body.ok || !body.profile) throw new Error(body.error || 'Netwerkprofiel mislukt.');
+  const parsed = netProfileResponseSchema.safeParse(await response.json());
+  if (!parsed.success) throw new Error('Het netwerkprofiel bevat ongeldige gegevens. Probeer opnieuw.');
+  const body = parsed.data;
+  if (!body.ok) throw new Error(body.error || 'Netwerkprofiel mislukt.');
   return body.profile;
 }
 
@@ -158,7 +138,10 @@ export function NetworkSetupPanel() {
           gateway: gatewayInput.trim() || null,
         }),
       });
-      const body = (await response.json()) as { ok: boolean; error?: string; elevationId?: string | null };
+      const parsed = netActionResultSchema.safeParse(await response.json());
+      if (!parsed.success)
+        throw new Error('De netwerkwijziging gaf een ongeldig antwoord. Controleer het netwerkprofiel.');
+      const body = parsed.data;
       if (!body.ok) {
         fail('Vastzetten mislukt', body.error);
         setPhase('idle');
@@ -204,7 +187,10 @@ export function NetworkSetupPanel() {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ eventOver: true, confirmText: undoText.trim().toUpperCase() }),
       });
-      const body = (await response.json()) as { ok: boolean; error?: string; elevationId?: string | null };
+      const parsed = netActionResultSchema.safeParse(await response.json());
+      if (!parsed.success)
+        throw new Error('De netwerkwijziging gaf een ongeldig antwoord. Controleer het netwerkprofiel.');
+      const body = parsed.data;
       if (!body.ok) {
         fail('Terugzetten mislukt', body.error);
         setPhase('idle');
