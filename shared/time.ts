@@ -64,6 +64,18 @@ const BRUSSELS_PARTS = new Intl.DateTimeFormat('en-GB', {
 /** How far Brussels clock time is ahead of UTC at that moment: 1 h in winter, 2 h in summer. */
 export function brusselsOffsetMs(atMs: number): number {
   const parts = Object.fromEntries(BRUSSELS_PARTS.formatToParts(atMs).map((part) => [part.type, part.value]));
-  const asUtc = Date.UTC(+parts.year, +parts.month - 1, +parts.day, +parts.hour, +parts.minute, +parts.second);
+  const number = (key: string) => {
+    const value = parts[key];
+    if (value === undefined) throw new Error(`Missing Brussels date part: ${key}`);
+    return Number(value);
+  };
+  const asUtc = Date.UTC(
+    number('year'),
+    number('month') - 1,
+    number('day'),
+    number('hour'),
+    number('minute'),
+    number('second')
+  );
   return asUtc - Math.floor(atMs / 1000) * 1000;
 }

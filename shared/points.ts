@@ -1,3 +1,4 @@
+import type { LapSource } from './schemas.js';
 import { MIN_LAP_MS } from './lapTimes.js';
 
 /**
@@ -22,7 +23,7 @@ export const POINTS_RULES = {
 
 export type Daypart = (typeof POINTS_RULES.dayparts)[number];
 
-type ScoredLap = { durationMs: number; startedAt: number; source: string };
+type ScoredLap = { durationMs: number; startedAt: number; source: LapSource };
 
 const BRUSSELS_HOUR_FORMATTER = new Intl.DateTimeFormat('nl-BE', {
   hour: '2-digit',

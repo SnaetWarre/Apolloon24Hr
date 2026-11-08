@@ -1,7 +1,8 @@
 import { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
 import { raceStateProblem } from '../../shared/lifecycle.js';
-import type { BackupPreview } from '../../shared/schemas.js';
+import { lapSourceSchema, type BackupPreview } from '../../shared/schemas.js';
+import { handoffSnapshotSchema } from './handoff-snapshot.js';
 import { all, run } from './connection.js';
 import { schemaProblems } from './schema-check.js';
 import { EVENT_SETTING_KEYS } from './settings.js';
@@ -129,6 +130,11 @@ function assertRacePhase(data: RestoreData): void {
  */
 export function replaceEventData(data: RestoreData): { runners: number; laps: number } {
   assertRacePhase(data);
+  // Validate stored values before replacing any live rows.
+  for (const lap of data.tables.laps) lapSourceSchema.parse(lap.source);
+  for (const entry of data.tables.handoff_history) {
+    handoffSnapshotSchema.parse(JSON.parse(z.string().parse(entry.payload_json)));
+  }
   for (const table of [...RESTORED_TABLES].reverse()) run(`DELETE FROM "${table}"`);
   for (const table of RESTORED_TABLES) {
     const columns = all<{ name: string }>(`PRAGMA table_info("${table}")`).map((column) => column.name);

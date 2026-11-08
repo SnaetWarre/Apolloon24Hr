@@ -72,6 +72,11 @@ try {
   await page.keyboard.press('Escape');
   await savePrompt.waitFor({ state: 'detached' });
   assert.equal(await profileDialog.count(), 1);
+  assert.equal(
+    await profileDialog.getByRole('textbox', { name: 'Naam', exact: true }).inputValue(),
+    '',
+    'opening the profile must not overwrite an edit made immediately'
+  );
   await page.keyboard.press('Escape');
   await savePrompt.getByRole('button', { name: 'Opslaan', exact: true }).click();
   await savePrompt.getByRole('alert').waitFor();

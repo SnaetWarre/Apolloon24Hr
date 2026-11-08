@@ -1,24 +1,15 @@
 import { randomUUID } from 'node:crypto';
 import { type UndoKind, canUndo, timingPress } from '../../shared/lifecycle.js';
 import { type RaceEvent, type RaceState } from '../../shared/schemas.js';
+import { handoffSnapshotSchema, type HandoffSnapshot } from './handoff-snapshot.js';
 import { one, run, transaction } from './connection.js';
 import { getLapCount, getRaceEventById, getRecentRaceEvents } from './history.js';
 import { getRunnerLabels } from './labels.js';
-import { type QueueState, getNextWaitingRunner, getQueueStates, restoreQueueState, setRaceStatus } from './queue.js';
+import { getNextWaitingRunner, getQueueStates, restoreQueueState, setRaceStatus } from './queue.js';
 import { getRaceState, moveRace, writeRaceState } from './race-state.js';
 import { getRunnerById } from './runner-queries.js';
 import { serializeHistoricalLabels } from './values.js';
 import { clusterNow } from '../clock.js';
-
-/** An entry on the undo stack (`handoff_history`): what the step replaced, so undo can put it back. */
-type HandoffSnapshot = {
-  /** Entries stored before 2026-11 have none; see topEntry. */
-  kind?: UndoKind;
-  raceState: RaceState;
-  /** Stored as `queueEntries` since before the queue lived on `runners`. */
-  queueEntries: QueueState[];
-  lapIds: string[];
-};
 
 /** A press this close to the last Burgie is the same Burgie: a double click, or two laptops at once. */
 const BURGIE_REPEAT_MS = 5_000;
@@ -149,18 +140,18 @@ export function performHandoff(
  * kind was saved are a finish only when they are the step that finished the current race:
  * the same moment as its end.
  */
-function topEntry(): { id: string; payloadJson: string; kind: UndoKind } | null {
-  const row = one<{ id: string; payloadJson: string; kind: UndoKind | null; isFinish: number }>(
-    `SELECT id, payload_json AS payloadJson, json_extract(payload_json, '$.kind') AS kind,
+function topEntry(): { id: string; payload: HandoffSnapshot; kind: UndoKind } | null {
+  const row = one<{ id: string; payloadJson: string; isFinish: number }>(
+    `SELECT id, payload_json AS payloadJson,
        created_at = (SELECT race_finished_at FROM race_state WHERE id = 1) AS isFinish
      FROM handoff_history
      WHERE undone = 0
      ORDER BY created_at DESC, rowid DESC
      LIMIT 1`
   );
-  return row
-    ? { id: row.id, payloadJson: row.payloadJson, kind: row.kind ?? (row.isFinish ? 'finish' : 'handoff') }
-    : null;
+  if (!row) return null;
+  const payload = handoffSnapshotSchema.parse(JSON.parse(row.payloadJson));
+  return { id: row.id, payload, kind: payload.kind ?? (row.isFinish ? 'finish' : 'handoff') };
 }
 
 /** What the next undo takes back, or null when there is nothing to undo. */
@@ -171,7 +162,7 @@ export function nextUndo(): UndoKind | null {
 /** The laps the next undo removes, including halves a split added. */
 export function lapsToUndo(): string[] {
   const row = topEntry();
-  return row ? ((JSON.parse(row.payloadJson) as Partial<HandoffSnapshot>).lapIds ?? []) : [];
+  return row?.payload.lapIds ?? [];
 }
 
 /** Puts back what the newest entry replaced, after checking the race allows it (canUndo). */
@@ -181,10 +172,10 @@ export function undoLastHandoff():
   const row = topEntry();
   if (!row) return { ok: false, error: 'nothing_to_undo' };
   if (!canUndo(getRaceState(), row.kind)) return { ok: false, error: 'finished' };
-  const payload = JSON.parse(row.payloadJson) as Partial<HandoffSnapshot>;
+  const payload = row.payload;
 
-  const deletedLapIds = payload.lapIds ?? [];
-  const snapshotState: Partial<RaceState> = payload.raceState ?? {};
+  const deletedLapIds = payload.lapIds;
+  const snapshotState: Partial<RaceState> = payload.raceState;
   // Beheer › Lopers may have deleted that runner since; then nobody goes back on the track.
   const raceState =
     snapshotState.activeRunnerId && !getRunnerById(snapshotState.activeRunnerId)
@@ -195,7 +186,7 @@ export function undoLastHandoff():
       run('DELETE FROM laps WHERE id = ?', [lapId]);
     }
 
-    for (const state of payload.queueEntries ?? []) {
+    for (const state of payload.queueEntries) {
       if (getRunnerById(state.runnerId)) restoreQueueState(state);
     }
 

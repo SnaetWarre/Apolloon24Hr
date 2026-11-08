@@ -122,8 +122,12 @@ test('a lap of exactly 85 s earns the base points, and a slower lap earns no les
 
 test('the daypart follows the hour a lap started, not the hour it finished', () => {
   // 01:59 and 02:00 UTC are 03:59 and 04:00 in Brussels summer time.
-  const beforeFour = { source: 'handoff', durationMs: 85_000, startedAt: Date.parse('2026-10-21T01:59:59.999Z') };
-  const atFour = { source: 'handoff', durationMs: 85_000, startedAt: Date.parse('2026-10-21T02:00:00.000Z') };
+  const beforeFour = {
+    source: 'handoff' as const,
+    durationMs: 85_000,
+    startedAt: Date.parse('2026-10-21T01:59:59.999Z'),
+  };
+  const atFour = { source: 'handoff' as const, durationMs: 85_000, startedAt: Date.parse('2026-10-21T02:00:00.000Z') };
   assert.equal(lapDaypart(beforeFour.startedAt)?.name, '00-04u');
   assert.equal(lapDaypart(atFour.startedAt)?.name, '04-08u');
   assertClose(lapPoints(beforeFour), 26);

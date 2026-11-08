@@ -279,3 +279,9 @@ version mismatches, and backups.
 `npm test` also runs the consensus simulation (`tests/raft-sim.test.ts`), and
 `npm run rehearse` puts three real servers through random failures; see
 `docs/codebase-map.md`.
+
+## Runtime data and stricter type checks
+
+`shared/network.ts` defines the network profile and action responses for the server and the control panel. Read network responses through these schemas. Stored undo entries use `server/db/handoff-snapshot.ts`; validate them before undoing, correcting laps, or replacing live event data with a backup. Older entries may omit fields, but present fields must match their schema. Lap sources are defined by `lapSourceSchema`, including the historical sources still present in older race databases.
+
+`npm run typecheck:domain`, included in `npm run check`, enables `noUncheckedIndexedAccess` and `exactOptionalPropertyTypes` for the shared contracts and realtime connection module. The rest of the application retains its existing strict checks. Extend this configuration as lookup assumptions are resolved; avoid assertions added only to silence the compiler. Explicit `any` types fail lint.

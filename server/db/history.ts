@@ -1,8 +1,8 @@
-import { type LapRecord, type RaceEvent } from '../../shared/schemas.js';
+import { lapRecordSchema, type LapRecord, type RaceEvent } from '../../shared/schemas.js';
 import { all, one } from './connection.js';
 import { boundedHistoryLimit, parseLabelsJson } from './values.js';
 
-type LapRow = Omit<LapRecord, 'labels'> & { labelsJson: string };
+type LapRow = Omit<LapRecord, 'labels' | 'source'> & { source: unknown; labelsJson: string };
 
 const LAP_SELECT_SQL = `
   SELECT
@@ -37,7 +37,7 @@ const RACE_EVENT_SELECT_SQL = `
 const RACE_EVENT_ORDER = 'ORDER BY occurred_at DESC, created_at DESC';
 
 function lapFromRow({ labelsJson, ...lap }: LapRow): LapRecord {
-  return { ...lap, labels: parseLabelsJson(labelsJson) };
+  return lapRecordSchema.parse({ ...lap, labels: parseLabelsJson(labelsJson) });
 }
 
 export function getLapCount(runnerId: string): number {

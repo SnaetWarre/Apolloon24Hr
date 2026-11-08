@@ -1,3 +1,10 @@
+import type {
+  ElevateMethod,
+  ElevationOutcome,
+  NetAdapterProfile,
+  NetProfile,
+  NetActionResult,
+} from '../shared/network.js';
 import { type ChildProcess, execFile, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -245,44 +252,6 @@ export function validateStaticRequest(input: {
 }
 
 // Live profile (best effort; never throws).
-
-type NetAdapterProfile = {
-  name: string;
-  address: string;
-  prefixLength: number | null;
-  dhcp: boolean | null;
-  /** System name of the connection (NetworkManager connection or macOS service), for actions. */
-  connection: string | null;
-};
-
-type ElevateMethod = 'uac' | 'pkexec' | 'osascript' | null;
-
-type ElevationOutcome = {
-  id: string;
-  state: 'waiting' | 'finished' | 'failed';
-  message: string | null;
-  startedAt: number;
-};
-
-type NetProfile = {
-  platform: NodeJS.Platform;
-  windows: boolean;
-  /** How the button asks for permission (null = manual steps only). */
-  elevateMethod: ElevateMethod;
-  /** Short explanation for the UI, e.g. "Windows vraagt om toestemming (klik op Ja)". */
-  elevateHint: string | null;
-  /** What manages the address, e.g. "NetworkManager: Bekabeld". */
-  manager: string | null;
-  adapters: NetAdapterProfile[];
-  primary: NetAdapterProfile | null;
-  apipa: boolean;
-  suggestion: { ip: string; prefixLength: number; gateway: string | null } | null;
-  eventUrl: string | null;
-  /** Whether the primary adapter is a cable (true), wifi (false) or unknown (null). */
-  primaryWired: boolean | null;
-  /** Outcome of the latest elevated network change started from this server. */
-  lastElevation: ElevationOutcome | null;
-};
 
 const ELEVATION_BUSY =
   'Er wacht al een netwerkwijziging op toestemming. Bevestig of weiger die eerst op deze laptop en probeer het daarna opnieuw.';
@@ -803,8 +772,6 @@ async function resolvePrimaryConnection(): Promise<{ kind: 'nm' | 'macos'; name:
   }
   return null;
 }
-
-type NetActionResult = { ok: true; elevated: true; elevationId: string | null } | { ok: false; error: string };
 
 function failed(error: string): NetActionResult {
   return { ok: false, error };

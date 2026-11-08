@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { temporaryDataPath } from './temporary-data.ts';
@@ -134,6 +135,36 @@ test('a backup finished during setup by an old version still restores, with its 
     const race = db.getRaceState();
     assert.equal(race.raceFinishedAt, 5_000);
     assert.equal(race.raceStartedAt, 5_000, 'the finished race is given the start it never had');
+  } finally {
+    db.closeDb();
+  }
+});
+
+test('restore refuses invalid lap sources and undo payloads before replacing live data', async () => {
+  fs.rmSync(dataPath, { recursive: true, force: true });
+  const db = await import('../server/db.ts');
+  try {
+    await db.initDb();
+    const runner = db.insertRunner({ name: 'Keep live runner' });
+    db.updateRunnerStatus({ id: runner.id, status: 'waiting' });
+    db.performHandoff(1_000);
+    db.performHandoff(80_000);
+    const backupPath = path.join(dataPath, 'invalid-values.sqlite');
+    await db.backupDatabase(backupPath);
+    const before = { race: db.getRaceState(), runners: db.getAllRunners(), laps: db.getAllLaps() };
+    for (const corrupt of [
+      (data: ReturnType<typeof db.readRestoreData>) => {
+        data.tables.laps[0].source = 'spcebar';
+      },
+      (data: ReturnType<typeof db.readRestoreData>) => {
+        data.tables.handoff_history[0].payload_json = '{"raceState":false}';
+      },
+    ]) {
+      const data = db.readRestoreData(backupPath, 'invalid-values.sqlite', Date.now());
+      corrupt(data);
+      assert.throws(() => db.recordWrite('backups.applyRestore', () => db.replaceEventData(data)));
+      assert.deepEqual({ race: db.getRaceState(), runners: db.getAllRunners(), laps: db.getAllLaps() }, before);
+    }
   } finally {
     db.closeDb();
   }

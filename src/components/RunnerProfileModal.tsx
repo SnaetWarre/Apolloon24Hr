@@ -21,6 +21,8 @@ const selectRunnerProfileData = ({ runners, labels }: LiveAppSnapshot) => ({
   labels,
 });
 
+type SaveState = { status: 'idle' } | { status: 'saving' } | { status: 'failed'; message: string };
+
 export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; onClose: () => void }) {
   const confirm = useConfirm();
   const toast = useToast();
@@ -38,8 +40,9 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
   const [selectedLabels, setSelectedLabels] = React.useState<string[]>([]);
   const [closePromptOpen, setClosePromptOpen] = React.useState(false);
   const [calling, setCalling] = React.useState(false);
-  const [saving, setSaving] = React.useState(false);
-  const [saveError, setSaveError] = React.useState<string | null>(null);
+  const [saveState, setSaveState] = React.useState<SaveState>({ status: 'idle' });
+  const saving = saveState.status === 'saving';
+  const saveError = saveState.status === 'failed' ? saveState.message : null;
   const [queueActionBusy, setQueueActionBusy] = React.useState(false);
   const [draftBaseline, setDraftBaseline] = React.useState(runner);
   const [registrationBaseline, setRegistrationBaseline] = React.useState(registration);
@@ -82,7 +85,8 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
     setSelectedLabels(runner.labels.map((label) => label.id));
   }
 
-  React.useEffect(() => {
+  React.useLayoutEffect(() => {
+    // Initialize before the dialog accepts input, so a late effect cannot replace a new edit.
     // Refresh untouched profiles, but never replace an operator's unsaved draft.
     if (initializedRunnerId.current !== runnerId || !dirty) loadLatestProfile();
     // Only a change to the stored profile should reload the form, not every keystroke.
@@ -91,7 +95,7 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
 
   React.useEffect(() => {
     setQueueActionBusy(false);
-    setSaveError(null);
+    setSaveState({ status: 'idle' });
   }, [runnerId]);
 
   const laps = React.useMemo(() => allLaps.filter((lap) => lap.runnerId === runnerId), [allLaps, runnerId]);
@@ -100,11 +104,10 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
     if (saving || profileChangedElsewhere) return;
     const validationError = runnerFormError(name);
     if (validationError) {
-      setSaveError(validationError);
+      setSaveState({ status: 'failed', message: validationError });
       return;
     }
-    setSaving(true);
-    setSaveError(null);
+    setSaveState({ status: 'saving' });
     try {
       await updateRunner(runnerId, {
         runnerNumber,
@@ -116,9 +119,7 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
       toast({ tone: 'success', text: `Profiel van ${name.trim()} opgeslagen.` });
       onClose();
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : 'Profiel opslaan mislukt');
-    } finally {
-      setSaving(false);
+      setSaveState({ status: 'failed', message: err instanceof Error ? err.message : 'Profiel opslaan mislukt' });
     }
   }
 

@@ -21,6 +21,9 @@ export const labelSchema = z.object({
 });
 export type Label = z.infer<typeof labelSchema>;
 
+export const lapSourceSchema = z.enum(['spacebar', 'split', 'manual', 'handoff', 'import', 'timing']);
+export type LapSource = z.infer<typeof lapSourceSchema>;
+
 export const lapRecordSchema = z.object({
   id: z.string(),
   runnerId: z.string(),
@@ -30,7 +33,7 @@ export const lapRecordSchema = z.object({
   startedAt: z.number(),
   finishedAt: z.number(),
   durationMs: z.number().int().nonnegative(),
-  source: z.string(),
+  source: lapSourceSchema,
   createdAt: z.number(),
   labels: z.array(labelSchema),
 });

@@ -11,14 +11,7 @@ import { all, one, run, transaction } from './connection.js';
 import { getRunnerById } from './runner-queries.js';
 import { clusterNow } from '../clock.js';
 
-/** A runner's place in the flow, as stored with a handoff so it can be undone. */
-export type QueueState = {
-  runnerId: string;
-  status: RunnerStatus;
-  queueIndex: number | null;
-  statusSince: number | null;
-  hiddenAt: number | null;
-};
+import { queueStateSchema, type QueueState } from './handoff-snapshot.js';
 
 export function hideRunnerInQueue(id: string, now = clusterNow()): Runner | null {
   const runner = one<{ status: RunnerStatus }>('SELECT status FROM runners WHERE id = ?', [id]);
@@ -112,7 +105,7 @@ export function getQueueStates(ids: string[]): QueueState[] {
        WHERE id = ?`,
       [id]
     );
-    return state ? [state] : [];
+    return state ? [queueStateSchema.parse(state)] : [];
   });
 }
 

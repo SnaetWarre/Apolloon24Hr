@@ -32,7 +32,7 @@ test('analysis hour buckets use Brussels clock hours from the race start', () =>
     startedAt: finishedAt - 60_000,
     finishedAt,
     durationMs: 60_000,
-    source: 'test',
+    source: 'spacebar',
     createdAt: finishedAt,
     labels: [],
   });
@@ -114,7 +114,7 @@ test('turning a label off and on again keeps laps without labels', () => {
     startedAt: 0,
     finishedAt: 60_000,
     durationMs: 60_000,
-    source: 'test',
+    source: 'spacebar',
     createdAt: 60_000,
     labels,
   });
@@ -301,7 +301,7 @@ test('the guessed second half of a split lap never flashes as a record and is no
     activeLabels: [],
   } satisfies RaceState;
   let finishedAt = raceStartedAt;
-  const lap = (id: string, durationMs: number, source = 'handoff'): LapRecord => {
+  const lap = (id: string, durationMs: number, source: LapRecord['source'] = 'handoff'): LapRecord => {
     finishedAt += durationMs;
     return {
       id,
