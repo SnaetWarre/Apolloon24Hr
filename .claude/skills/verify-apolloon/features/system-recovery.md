@@ -27,6 +27,8 @@ Preconditions:
 - **Restore.** Click `Naar Systeem & herstel`, then in the `Handmatig` row (`getByRole('row').filter({ hasText: 'Handmatig' })`) click `Terugzetten`, and `Terugzetten` again in the dialog. Wait for `getByText(/Teruggezet naar .*: 40 lopers/)`; poll `/api/state` until it has 40 runners.
 - **Practice race.** Start with `--laptops=3 --scenario=live --auto-link` and poll `/api/cluster/status` on laptop 0 until `state` is `healthy` and laptop 2 has the laps. On laptop 1's Systeem tab, in `section.panel` with heading `Race wissen na een testrun`, click `Race wissen`, then `Race wissen` in the dialog, and wait for `Race gewist:`. For laptops 0, 1, and 2, poll `/api/state` and `/api/history?scope=full` until there are no laps and `raceStartedAt` and `activeRunnerId` are `null`; all 60 runners are `registered`. Then check `/` and `/timing` on laptop 2, and on the leader's Systeem tab restore the `Vóór race wissen` row: laptop 2 has its laps again.
 
+A restore checks stored lap sources and undo snapshot fields before replacing live rows. The regression test in `tests/restore.test.ts` confirms that an invalid source or undo payload leaves the current race, runners, and laps unchanged.
+
 ## Gotchas
 
 - The panels sit below the fold at 1366x768. The page scrolls inside the app shell, so call `scrollIntoView` on the `Herstelbackups` heading before `run.proof`.
