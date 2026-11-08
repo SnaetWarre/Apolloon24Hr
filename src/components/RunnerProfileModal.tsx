@@ -85,7 +85,8 @@ export function RunnerProfileModal({ runnerId, onClose }: { runnerId: string; on
     setSelectedLabels(runner.labels.map((label) => label.id));
   }
 
-  React.useEffect(() => {
+  React.useLayoutEffect(() => {
+    // Initialize before the dialog accepts input, so a late effect cannot replace a new edit.
     // Refresh untouched profiles, but never replace an operator's unsaved draft.
     if (initializedRunnerId.current !== runnerId || !dirty) loadLatestProfile();
     // Only a change to the stored profile should reload the form, not every keystroke.
