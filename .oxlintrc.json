@@ -9,7 +9,17 @@
     "browser": true,
     "node": true
   },
-  "ignorePatterns": ["dist", "dist-server", "dist-electron", "release", "public", ".vite-cache"],
+  "ignorePatterns": [
+    "dist",
+    "dist-server",
+    "dist-electron",
+    "release",
+    "public",
+    ".vite-cache",
+    "native/vendor",
+    "native/web-dist",
+    "native/target"
+  ],
   "rules": {
     "typescript/no-explicit-any": "error",
     "react/react-in-jsx-scope": "off",

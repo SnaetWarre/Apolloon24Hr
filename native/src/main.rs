@@ -1,0 +1,70 @@
+mod activity;
+mod backup_service;
+mod backups;
+mod db;
+mod exports;
+mod host;
+mod labels;
+mod lap_shift;
+#[cfg(test)]
+mod linking;
+mod logo;
+mod management;
+mod queries;
+mod recovery;
+mod runner_import;
+mod runner_profile;
+mod server;
+mod settings;
+mod startup;
+#[cfg(feature = "desktop")]
+mod theme;
+#[cfg(feature = "desktop")]
+mod ui;
+mod workbook;
+use std::{
+    path::PathBuf,
+    sync::{Arc, Mutex},
+};
+fn database() -> db::Result<Arc<Mutex<db::Db>>> {
+    let path = std::env::var_os("APOLLOON_NATIVE_DATA")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(".native-data/app.db"));
+    startup::open(&path).map(|db| Arc::new(Mutex::new(db)))
+}
+fn port() -> db::Result<u16> {
+    std::env::var("PORT")
+        .unwrap_or_else(|_| "5174".into())
+        .parse()
+        .map_err(|_| "PORT moet een geldig poortnummer zijn".into())
+}
+fn app() -> db::Result<()> {
+    let server_only = std::env::args().any(|s| s == "--server");
+    if server_only {
+        return server::serve(database()?, port()?);
+    }
+    #[cfg(feature = "desktop")]
+    {
+        let headless = std::env::args().any(|arg| {
+            [
+                "--snap", "--tree", "--script", "--trace", "--strip", "--video", "--help",
+            ]
+            .contains(&arg.as_str())
+        });
+        let _server = if std::env::var_os("APOLLOON_NATIVE_URL").is_none() && !headless {
+            Some(server::start(database()?, port()?)?)
+        } else {
+            None
+        };
+        ui::run();
+        Ok(())
+    }
+    #[cfg(not(feature = "desktop"))]
+    Err("Build with the desktop feature or pass --server".into())
+}
+fn main() {
+    if let Err(error) = app() {
+        eprintln!("Apolloon: {error}");
+        std::process::exit(1);
+    }
+}

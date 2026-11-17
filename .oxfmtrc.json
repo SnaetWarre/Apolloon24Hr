@@ -13,7 +13,10 @@
     "package-lock.json",
     "*.md",
     "*.html",
-    "*.css"
+    "*.css",
+    "native/vendor",
+    "native/web-dist",
+    "native/target"
   ],
   "sortPackageJson": false
 }
