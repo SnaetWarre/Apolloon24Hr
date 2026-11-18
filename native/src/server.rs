@@ -11,13 +11,16 @@ use std::sync::{Arc, Mutex};
 pub struct Host {
     pub db: Arc<Mutex<Db>>,
     pub port: u16,
+    discovery: Arc<crate::discovery::Discovery>,
     pub backups: Arc<crate::backup_service::Service>,
 }
 impl Host {
     fn new(db: Arc<Mutex<Db>>, port: u16) -> Self {
         let path = crate::backups::database_path(&db.lock().unwrap()).ok();
+        let discovery = crate::discovery::Discovery::start(&db, port);
         Self {
             db,
+            discovery,
             port,
             backups: Arc::new(crate::backup_service::Service::new(path)),
         }
@@ -113,8 +116,11 @@ async fn label_image(State(host): State<Host>, Path(id): Path<String>) -> axum::
 async fn health() -> Json<Value> {
     Json(json!({"ok":true,"runtime":"rust","schemaVersion":17}))
 }
-async fn clock() -> Json<Value> {
-    Json(json!({"serverNowMs":now()}))
+async fn clock() -> impl axum::response::IntoResponse {
+    (
+        [(axum::http::header::CACHE_CONTROL, "no-store")],
+        Json(json!({"serverNowMs":now()})),
+    )
 }
 async fn action(host: Host, method: String, input: Value, origin: String) -> Result<Value> {
     tokio::task::spawn_blocking(move || match method.as_str() {
@@ -152,7 +158,9 @@ async fn action(host: Host, method: String, input: Value, origin: String) -> Res
 /// server cannot pin the address yet, so `elevateMethod` stays null and the address source unknown.
 fn system_info(host: &Host) -> Value {
     let primary = crate::host::addresses().into_iter().next();
-    let apipa = primary.as_ref().is_some_and(|(_, ip, _)| ip.is_link_local());
+    let apipa = primary
+        .as_ref()
+        .is_some_and(|(_, ip, _)| ip.is_link_local());
     let data = crate::backups::database_path(&host.db.lock().unwrap())
         .ok()
         .and_then(|p| p.parent().map(|d| d.display().to_string()));
@@ -170,6 +178,7 @@ fn system_info(host: &Host) -> Value {
         "appVersion": env!("CARGO_PKG_VERSION"),
         "schemaVersion": 17,
         "dataPath": data,
+        "nearbyLaptops": host.discovery.nearby(),
     })
 }
 async fn mutation(

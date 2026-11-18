@@ -2,11 +2,11 @@ mod activity;
 mod backup_service;
 mod backups;
 mod db;
+mod discovery;
 mod exports;
 mod host;
 mod labels;
 mod lap_shift;
-#[cfg(test)]
 mod linking;
 mod logo;
 mod management;

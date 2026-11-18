@@ -181,7 +181,7 @@ fn base_input(s: &State, pressed: i64) -> Value {
     if let Some((instant, started)) = s.last_press
         && race["activeStartedAt"].as_i64() == Some(started)
     {
-        let measured = instant.elapsed().as_millis() as i64 - (now() - pressed).max(0);
+        let measured = instant.elapsed().as_millis() as i64 - (s.server_now() - pressed).max(0);
         input["measuredDurationMs"] = json!(measured.max(0));
     }
     input
@@ -229,7 +229,7 @@ pub(super) fn press(s: &mut State) {
         s.timing_page.dialog = Some(Dialog::Resume);
         return;
     }
-    let input = base_input(s, now());
+    let input = base_input(s, s.server_now());
     let lap_ms = input["measuredDurationMs"].as_i64().or_else(|| {
         race["activeStartedAt"]
             .as_i64()
@@ -275,7 +275,7 @@ fn start_finish(s: &mut State) {
     if s.busy {
         return;
     }
-    s.timing_page.finish_stop = Some((now(), s.snapshot["race"]["activeStartedAt"].clone()));
+    s.timing_page.finish_stop = Some((s.server_now(), s.snapshot["race"]["activeStartedAt"].clone()));
     s.timing_page.dialog = Some(Dialog::Finish(1));
 }
 fn close(s: &mut State) {
@@ -298,7 +298,7 @@ fn confirm(s: &mut State) {
                 return;
             }
             // The lap starts at the confirmation, not at the press that opened it.
-            let mut input = base_input(s, now());
+            let mut input = base_input(s, s.server_now());
             input["resume"] = json!(true);
             send_handoff(s, input);
         }
@@ -314,7 +314,7 @@ fn confirm(s: &mut State) {
         Dialog::Undo { reopen } => {
             s.timing_page.dialog = None;
             s.timing_page.reopen = reopen;
-            let input = base_input(s, now());
+            let input = base_input(s, s.server_now());
             s.send("race.undoLastHandoff", input);
         }
         Dialog::Finish(1) => {

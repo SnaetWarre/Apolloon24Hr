@@ -382,11 +382,11 @@ pub(super) fn send(s: &mut State, method: &str, input: Value, pending: Pending) 
     }
 }
 pub(super) fn toast(s: &mut State, text: impl Into<String>) {
-    s.admin.toast = Some(Toast { text: text.into(), detail: String::new(), error: false, at: now() });
+    s.admin.toast = Some(Toast { text: text.into(), detail: String::new(), error: false, at: s.server_now() });
 }
 fn toast_error(s: &mut State, text: &str) {
     let detail = std::mem::take(&mut s.error);
-    s.admin.toast = Some(Toast { text: text.into(), detail, error: true, at: now() });
+    s.admin.toast = Some(Toast { text: text.into(), detail, error: true, at: s.server_now() });
 }
 pub(super) fn owns(s: &State) -> bool {
     s.admin.pending.is_some()

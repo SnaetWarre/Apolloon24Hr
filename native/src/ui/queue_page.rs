@@ -879,7 +879,7 @@ fn send(s: &mut State, method: &str, input: Value, pending: Pending) {
     }
 }
 fn set_status(s: &mut State, id: &str, to: &str, pending: Pending) {
-    send(s, "runners.setStatus", json!({"id":id,"status":to,"statusSince":now()}), pending);
+    send(s, "runners.setStatus", json!({"id":id,"status":to,"statusSince":s.server_now()}), pending);
 }
 
 /// Whether this page sent the action that just came back.
@@ -928,7 +928,7 @@ pub(super) fn succeeded(s: &mut State, method: &str, result: &Value) {
             } else {
                 s.queue_page.dialog = None;
             }
-            s.queue_page.toast = Some((format!("{name} staat bij opwarming."), now()));
+            s.queue_page.toast = Some((format!("{name} staat bij opwarming."), s.server_now()));
         }
         Some(Pending::Added { name }) => {
             if matches!(&s.queue_page.dialog, Some(Dialog::Add(a)) if a.registered) {
@@ -938,7 +938,7 @@ pub(super) fn succeeded(s: &mut State, method: &str, result: &Value) {
             }
             s.queue_page.filter = TextEdit::new("");
             s.queue_page.dialog = None;
-            s.queue_page.toast = Some((format!("{name} staat bij opwarming."), now()));
+            s.queue_page.toast = Some((format!("{name} staat bij opwarming."), s.server_now()));
         }
         Some(Pending::Board) | None => {}
     }
@@ -956,7 +956,7 @@ pub(super) fn failed(s: &mut State, method: &str) {
             }
         }
         Some(Pending::CheckIn { .. }) => {
-            s.queue_page.toast = Some((format!("Loper activeren mislukt: {}", std::mem::take(&mut s.error)), now()));
+            s.queue_page.toast = Some((format!("Loper activeren mislukt: {}", std::mem::take(&mut s.error)), s.server_now()));
         }
         Some(Pending::Board) => s.queue_page.error = std::mem::take(&mut s.error),
         None => {}
@@ -1944,8 +1944,8 @@ fn add_dialog(s: &State, a: &Add) -> El {
                 row()
                     .gap(12.0)
                     .my(16.0)
-                    .child(labelled(s, "Telefoon", add_field!(s, a, phone, "add-phone", "Telefoon", "")))
-                    .child(labelled(s, "E-mail", add_field!(s, a, email, "add-email", "E-mail", ""))),
+                    .child(labelled(s, "Telefoon", add_field!(s, a, phone, "add-phone", "Telefoon", "")).w(0.0))
+                    .child(labelled(s, "E-mail", add_field!(s, a, email, "add-email", "E-mail", "")).w(0.0)),
             )
             .child(labelled(
                 s,
@@ -1965,7 +1965,7 @@ fn add_dialog(s: &State, a: &Add) -> El {
         },
     ));
     if a.extra_open {
-        let pair = |m: El, sec: El| row().gap(8.0).child(m).child(sec);
+        let pair = |m: El, sec: El| row().gap(8.0).child(m.w(0.0).grow(1.0)).child(sec.w(0.0).grow(1.0));
         extra = extra
             .child(
                 row()

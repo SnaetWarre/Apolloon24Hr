@@ -28,6 +28,7 @@ rune = { path = "vendor/rune", optional = true, default-features = false, featur
 fs2 = "0.4"
 if-addrs = "0.15"
 hostname = "0.4"
+socket2 = "0.6"
 sha2 = "0.10"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp", "ico"] }
 resvg = { version = "0.45", default-features = false }

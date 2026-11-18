@@ -236,6 +236,27 @@ pub(super) fn panel(s: &State) -> El {
     if cluster(s)["enabled"] == true {
         page = page.child(card(cluster_panel(s)));
     }
+    if let Some(nearby) = s.recovery["system"]["nearbyLaptops"]
+        .as_array()
+        .filter(|laptops| !laptops.is_empty())
+    {
+        let mut detected = section("Gevonden laptops", s.dark);
+        for laptop in nearby {
+            let name = laptop["name"].as_str().filter(|name| !name.is_empty()).unwrap_or("Laptop");
+            let state = if laptop["raceRunning"] == true {
+                "Race loopt"
+            } else if laptop["raceStarted"] == true {
+                "Race gestart"
+            } else {
+                "Race nog niet gestart"
+            };
+            detected = detected.child(kit::copy(
+                format!("{name} · {} · {state}", st(laptop, "url")),
+                s.dark,
+            ));
+        }
+        page = page.child(card(detected));
+    }
     page.child(card(network_panel(s)))
         .child(card(backup_panel(s)))
         .child(card(restore_panel(s)))
@@ -1291,7 +1312,7 @@ fn about_panel(s: &State) -> El {
         )
         .on_press_tx(|s: &mut State, tx: &mut Tx| {
             tx.copy(&diagnostics(s));
-            s.system.copied_at = Some(now());
+            s.system.copied_at = Some(s.server_now());
         }),
     );
     out = out.child(actions);
@@ -1494,7 +1515,7 @@ mod tests {
     }
     fn reveal(rt: &mut Runtime<State>, key: &str) {
         for _ in 0..30 {
-            rt.frame(1.0 / 60.0);
+            rt.frame(0.2);
             if rt.find(key).is_some_and(|(_, y)| y > 60.0 && y < 720.0) {
                 return;
             }
@@ -1607,8 +1628,8 @@ mod tests {
         // Race wissen asks first, in the reference's words; Annuleer keeps everything.
         reveal(&mut rt, "clear-race");
         press(&mut rt, "clear-race");
+        assert_eq!(rt.state.confirm.as_ref().map(|c| c.method.as_str()), Some("race.clear"), "clear button at {:?}, busy={}", rt.find("clear-race"), rt.state.busy);
         assert!(rt.find("confirmation").is_some());
-        assert_eq!(rt.state.confirm.as_ref().map(|c| c.method.as_str()), Some("race.clear"));
         press(&mut rt, "cancel");
         assert!(rt.state.confirm.is_none());
         reveal(&mut rt, "clear-everything");

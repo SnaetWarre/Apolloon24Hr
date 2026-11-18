@@ -163,6 +163,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "socket2",
  "tokio",
  "tower-http",
  "unicode-normalization",

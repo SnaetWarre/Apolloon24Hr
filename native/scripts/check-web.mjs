@@ -37,6 +37,31 @@ try {
   });
   assert(created.ok);
   const runner = await created.json();
+  const peerRegistrations = {
+    from: 'Second laptop',
+    runners: [
+      { id: 'peer-duplicate', name: 'browser runner', registration_source: 'manual', created_at: 1 },
+      { id: 'peer-runner', name: 'Second laptop runner', registration_source: 'import', created_at: 1 },
+    ],
+    labels: [],
+    labelImages: [],
+    runnerLabels: [],
+  };
+  const merge = () =>
+    fetch(url + '/api/action/runners.merge', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(peerRegistrations),
+    });
+  const merged = await merge();
+  assert(merged.ok);
+  assert.deepEqual(await merged.json(), { added: 1, same: 1, labels: 0 });
+  const backup = await fetch(url + '/api/action/backups.create', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: '{}',
+  });
+  assert(backup.ok, await backup.text());
   const home = await fetch(url);
   assert(home.ok, 'WASM index must be served');
   assert((await home.text()).includes('app.js'));
@@ -47,7 +72,11 @@ try {
   page.on('console', (m) => {
     if (m.type() === 'error') errors.push(m.text());
   });
-  await page.addInitScript(() => Object.defineProperty(navigator, 'gpu', { get: () => undefined, configurable: true }));
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'gpu', { get: () => undefined, configurable: true });
+    const localNow = Date.now.bind(Date);
+    Date.now = () => localNow() + 45_000;
+  });
   const stateRequest = page.waitForResponse((r) => r.url().endsWith('/api/state') && r.ok(), { timeout: 90000 });
   await page.goto(url);
   await stateRequest;
@@ -58,11 +87,16 @@ try {
   await page.mouse.click(80, 178);
   await page.screenshot({ path: path.join(dir, 'timing-before.png') });
   const press = page.waitForResponse((r) => r.url().endsWith('/api/action/race.handoff'), { timeout: 10000 });
-  await page.mouse.click(780, 230);
+  await page.mouse.click(780, 335);
   const response = await press;
   assert(response.ok(), await response.text());
+  const { pressedAt } = response.request().postDataJSON();
+  assert(Math.abs(pressedAt - Date.now()) < 3000, 'Timing uses the server clock even when the browser clock is 45 seconds fast');
+
   const persisted = await (await fetch(url + '/api/state')).json();
   assert.equal(persisted.race.activeRunnerId, runner.id, 'Browser click must start the waiting runner');
+  const blockedMerge = await merge();
+  assert.equal(blockedMerge.status, 409, 'An active first lap blocks merging even with no recorded laps');
   await writeFile(path.join(dir, 'state-after.json'), JSON.stringify(persisted, null, 2));
   await page.screenshot({ path: path.join(dir, 'webgl.png') });
   const recoveryRequest = page.waitForResponse((r) => r.url().endsWith('/api/recovery') && r.ok());
@@ -75,7 +109,7 @@ try {
   await page.waitForResponse((r) => r.url().endsWith('/api/state') && r.ok());
   await page.screenshot({ path: path.join(dir, 'import-before.png') });
   const picker = page.waitForEvent('filechooser');
-  await page.mouse.click(307, 557);
+  await page.mouse.click(307, 586);
   const chooser = await picker.catch(async (e) => {
     await page.screenshot({ path: path.join(dir, 'import-click-failed.png') });
     throw e;
@@ -88,7 +122,7 @@ try {
   await page.waitForTimeout(250);
   await page.screenshot({ path: path.join(dir, 'import-picked.png') });
   const importing = page.waitForResponse((r) => r.url().endsWith('/api/action/runners.importCsv'));
-  await page.mouse.click(1279, 557);
+  await page.mouse.click(1279, 586);
   const imported = await importing;
   assert(imported.ok(), await imported.text());
   assert.deepEqual(await imported.json(), {
@@ -104,7 +138,7 @@ try {
   await writeFile(path.join(dir, 'browser-errors.json'), JSON.stringify(errors, null, 2));
   assert.equal(errors.length, 0, errors.join('\n'));
   console.log(
-    'PASS: WebGL2 Rune UI renders without WebGPU starts a runner, and imports a CSV with row warnings through real Rust HTTP/SQLite'
+    'PASS: WebGL2 timing and CSV import, plus pre-race merge and first-lap protection over Rust HTTP/SQLite'
   );
 } finally {
   if (browser) await browser.close();

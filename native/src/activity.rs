@@ -247,6 +247,20 @@ impl Prepared {
                 }
                 .into()
             }
+            "runners.merge" => {
+                let same = result["same"].as_u64().unwrap_or(0);
+                let labels = result["labels"].as_u64().unwrap_or(0);
+                let added_labels = match labels {
+                    0 => String::new(),
+                    1 => ", 1 nieuw label".into(),
+                    _ => format!(", {labels} nieuwe labels"),
+                };
+                let verb = if same == 1 { "stond" } else { "stonden" };
+                format!(
+                    "Lopers van {} samengevoegd bij het koppelen: {} nieuw, {same} {verb} er al{added_labels}",
+                    s(&v["from"]), result["added"]
+                )
+            }
             "runners.create" => format!("{} toegevoegd", runner_text(result)),
             "runners.update" => {
                 let after = profile(db, s(&v["id"]));

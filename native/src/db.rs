@@ -161,18 +161,22 @@ impl Db {
         )
     }
     pub fn mutation_from(&mut self, method: &str, input: &Value, origin: &str) -> Result<Value> {
+        let transaction = rusqlite::Transaction::new_unchecked(
+            &self.conn,
+            rusqlite::TransactionBehavior::Immediate,
+        )
+        .map_err(err)?;
         // Existing group databases require the replicated runtime, never silently operate solo.
         if !self
-            .rows("SELECT host_id FROM cluster_members", &[])?
+            .rows("SELECT 1 FROM cluster_members LIMIT 1", &[])?
             .is_empty()
         {
             return Err("Gekoppelde database: de Rust replicatie moet actief zijn voordat wijzigingen zijn toegestaan.".into());
         }
-        self.conn.execute_batch("BEGIN IMMEDIATE").map_err(err)?;
         let audit = crate::activity::Prepared::new(self, method, input);
-        let result = self.apply(method, input).and_then(|result| {
-            if let Some(summary) = audit.summary(self, &result) {
-                self.exec(
+        let result = self.apply(method, input)?;
+        if let Some(summary) = audit.summary(self, &result) {
+            self.exec(
                 "INSERT INTO activity_log(id,occurred_at,action,summary,origin) VALUES(?,?,?,?,?)",
                 &[
                     json!(id()),
@@ -182,25 +186,16 @@ impl Db {
                     json!(origin),
                 ],
             )?;
-            }
-            Ok(result)
-        });
-        match result {
-            Ok(value) => {
-                self.conn.execute_batch("COMMIT").map_err(err)?;
-                self.revision += 1;
-                Ok(value)
-            }
-            Err(e) => {
-                let _ = self.conn.execute_batch("ROLLBACK");
-                Err(e)
-            }
         }
+        transaction.commit().map_err(err)?;
+        self.revision += 1;
+        Ok(result)
     }
     fn apply(&self, method: &str, input: &Value) -> Result<Value> {
         match method {
             "backups.applyRestore" => self.restore_event_data(input),
             "race.clear" => self.clear_race(input),
+            "runners.merge" => self.merge_registrations(input),
             "runners.create" => self.create_runner(input),
             "runners.importCsv" | "runners.importXlsx" => self.import_runners(method, input),
             "runners.setStatus" => {

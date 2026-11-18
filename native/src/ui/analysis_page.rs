@@ -1482,8 +1482,9 @@ mod tests {
         for (number, name) in [("1", "Mitras"), ("2", "Wout")] {
             ids.push(db.mutation("runners.create", &json!({"runnerNumber":number,"name":name})).unwrap()["id"].clone());
         }
-        let blue = r##"[{"id":"blue","name":"Speedteam Blue","kind":"speedteam","color":"#2563eb"}]"##;
-        let first = r##"[{"id":"first","name":"1ste jaar","kind":"andere","color":"#16a34a"}]"##;
+        db.exec("DELETE FROM labels", &[]).unwrap();
+        let blue = r##"[{"id":"blue","icon":"SB","name":"Speedteam Blue","kind":"speedteam","color":"#2563eb"}]"##;
+        let first = r##"[{"id":"first","icon":"1J","name":"1ste jaar","kind":"andere","color":"#16a34a"}]"##;
         let start = 1_700_000_000_000_i64;
         let mut t = start;
         for (i, (runner, ms, labels)) in [(0, 80_000, blue), (1, 70_000, first), (0, 90_000, blue)].into_iter().enumerate() {

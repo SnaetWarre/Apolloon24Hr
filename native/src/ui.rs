@@ -63,6 +63,7 @@ struct Update {
     outcome: Option<(String, Result<Value, String>)>,
     recovery: Value,
     images: Vec<(String, Vec<u8>)>,
+    clock_offset: Option<i64>,
 }
 pub struct State {
     page: usize,
@@ -106,6 +107,7 @@ pub struct State {
     confirm: Option<Command>,
     last_press: Option<(Instant, i64)>,
     clock: i64,
+    clock_offset: i64,
     public_screens: public_screens::Screen,
     fixture: bool,
     #[cfg(target_arch = "wasm32")]
@@ -246,6 +248,7 @@ fn init_with_url(url: String) -> State {
         confirm: None,
         last_press: None,
         clock: now(),
+        clock_offset: 0,
         public_screens: Default::default(),
         fixture: false,
         #[cfg(target_arch = "wasm32")]
@@ -270,6 +273,10 @@ fn init_with_url(url: String) -> State {
     state
 }
 impl State {
+    fn server_now(&self) -> i64 {
+        now().saturating_add(self.clock_offset)
+    }
+
     fn send(&mut self, method: &str, input: Value) {
         if self.busy || !self.connected {
             return;
@@ -295,7 +302,7 @@ impl State {
             return;
         }
         let race = &self.snapshot["race"];
-        let pressed = now();
+        let pressed = self.server_now();
         let mut input = json!({"activeRunnerId":race["activeRunnerId"],"activeStartedAt":race["activeStartedAt"],"pressedAt":pressed});
         if method == "race.handoff" && !race["raceFinishedAt"].is_null() {
             input["resume"] = json!(true);
@@ -343,6 +350,11 @@ fn poll(s: &mut State, _: f64, tx: &mut Tx) -> bool {
         }
     }
     while let Ok(update) = s.rx.try_recv() {
+        if let Some(offset) = update.clock_offset
+            && s.clock_offset.abs_diff(offset) >= 16
+        {
+            s.clock_offset = offset;
+        }
         s.connected = !update.snapshot.is_null();
         if s.connected {
             s.snapshot = update.snapshot;
@@ -464,7 +476,7 @@ fn poll(s: &mut State, _: f64, tx: &mut Tx) -> bool {
     admin_base::refresh(s);
     laps_panel::sync_hold(s);
     tactics_page::refresh(s);
-    s.clock = now();
+    s.clock = s.server_now();
     true
 }
 fn button(
@@ -769,7 +781,11 @@ fn choose_file(s: &mut State, _: &mut Tx, purpose: FilePurpose) {
         let sender = s.file_tx.clone();
         let source = input.clone();
         let change = Closure::once_into_js(move |_: web_sys::Event| {
-            let Some(file) = source.files().and_then(|f| f.get(0)) else {
+            let file = source.files().and_then(|f| f.get(0));
+            source.set_onchange(None);
+            source.set_oncancel(None);
+            source.remove();
+            let Some(file) = file else {
                 return;
             };
             wasm_bindgen_futures::spawn_local(async move {
@@ -784,7 +800,13 @@ fn choose_file(s: &mut State, _: &mut Tx, purpose: FilePurpose) {
                 let _ = sender.send(result);
             });
         });
+        input.set_hidden(true);
         input.set_onchange(Some(change.unchecked_ref()));
+        input.set_oncancel(Some(change.unchecked_ref()));
+        document
+            .body()
+            .ok_or(wasm_bindgen::JsValue::NULL)?
+            .append_child(&input)?;
         input.click();
         Ok(())
     })();
@@ -1440,12 +1462,13 @@ mod tests {
             },
         );
         rt.frame(0.0);
-        update(&mut rt, |s| s.connected);
+        update(&mut rt, |s| s.connected && !s.busy);
         click(&mut rt, "label-name");
         rt.paste("Native label");
         // The kind select opens its options; Speedteam is the first.
         click(&mut rt, "label-kind");
         click(&mut rt, "label-kind-option-0");
+        assert!(rt.state.admin.select.is_none());
         click(&mut rt, "label-logo");
         rt.resolve_file_dialog(Some(
             std::env::current_dir()
@@ -1540,14 +1563,14 @@ mod tests {
         let mut rt = Runtime::new(
             state,
             view,
-            (1366.0, 768.0),
+            (1366.0, 1080.0),
             Env {
                 system_dark: true,
                 scale: 1.0,
             },
         );
         rt.frame(0.0);
-        update(&mut rt, |s| s.connected);
+        update(&mut rt, |s| s.connected && !s.busy);
         // Nieuwe loper opens the same dialog as in Wachtrij, but the runner is only registered.
         click(&mut rt, "new-runner");
         rt.paste("18");
@@ -1555,13 +1578,17 @@ mod tests {
         click(&mut rt, "add-name");
         rt.paste("Zoë Native");
         click(&mut rt, "add-contact");
+        rt.frame(0.2);
         click(&mut rt, "add-email");
+        assert!(rt.elements().iter().any(|el| el.key.as_deref() == Some("add-email") && el.focused));
         rt.paste("zoe@example.be");
         click(&mut rt, "add-phone");
         rt.paste("0471");
         click(&mut rt, "add-hours");
         rt.paste("20-21u (dinsdag); 22-23u (dinsdag)");
         click(&mut rt, "add-extra");
+        rt.wheel(700.0, 670.0, -450.0);
+        rt.frame(0.2);
         click(&mut rt, "add-avg-min");
         rt.paste("1");
         click(&mut rt, "add-avg-sec");
@@ -1584,10 +1611,12 @@ mod tests {
         update(&mut rt, |s| s.admin.registrations[&rid].is_object());
         click(&mut rt, &format!("profile-{rid}"));
         assert!(rt.state.profile.is_some());
+        // Select the hour near the top, then scroll down to the notes and save button.
+        click(&mut rt, "profile-hour-woensdag-0");
+        rt.wheel(700.0, 670.0, -550.0);
+        rt.frame(0.2);
         click(&mut rt, "profile-notes");
         rt.paste(" updated");
-        // An extra hour from the picker, and Opslaan.
-        click(&mut rt, "profile-hour-woensdag-0");
         click(&mut rt, "profile-save");
         update(&mut rt, |s| !s.busy && s.profile.is_none());
         assert!(
@@ -1596,7 +1625,7 @@ mod tests {
                 .unwrap()
                 .contains("updated")
         );
-        let registration = &db.lock().unwrap().registrations().unwrap()[&rid];
+        let registration = db.lock().unwrap().registrations().unwrap()[&rid].clone();
         assert_eq!(registration["email"], "zoe@example.be");
         assert_eq!(
             registration["availableHours"],
@@ -1604,9 +1633,14 @@ mod tests {
         );
         // Closing with unsaved edits asks first; Niet opslaan drops them.
         click(&mut rt, &format!("profile-{rid}"));
+        rt.wheel(700.0, 670.0, 900.0);
+        rt.frame(0.2);
         click(&mut rt, "profile-name");
+        assert!(rt.elements().iter().any(|el| el.key.as_deref() == Some("profile-name") && el.focused),
+            "profile-name at {:?}", rt.find("profile-name"));
         rt.paste(" X");
-        click(&mut rt, "profile-cancel");
+        rt.frame(0.2);
+        click(&mut rt, "profile-close");
         assert!(rt.find("profile-discard").is_some(), "unsaved edits ask before closing");
         click(&mut rt, "profile-discard");
         assert!(rt.state.profile.is_none());
@@ -1617,12 +1651,12 @@ mod tests {
         click(&mut rt, "profile-queue-action");
         click(&mut rt, "admin-confirm-ok");
         update(&mut rt, |s| !s.busy && s.snapshot["runners"][0]["status"] == "registered");
-        click(&mut rt, "profile-cancel");
+        click(&mut rt, "profile-close");
         // Verwijder asks, then deletes the runner without laps.
         click(&mut rt, &format!("delete-{rid}"));
         assert_eq!(rt.state.admin.confirm.as_ref().unwrap().title, "Zoë Native definitief verwijderen?");
         click(&mut rt, "admin-confirm-ok");
-        update(&mut rt, |s| !s.busy && runners(s).is_empty());
+        update(&mut rt, |s| !s.busy && super::runners(s).is_empty());
         assert!(db.lock().unwrap().runners().unwrap().is_empty());
     }
     #[test]
@@ -1991,6 +2025,15 @@ fn label_badge(value: &Value, s: &State) -> El {
             .color(tok::theme(s.dark).text),
     )
 }
+/// Estimate the server clock at the midpoint of the fastest request.
+fn clock_offset(samples: impl IntoIterator<Item = (i64, i64, i64)>) -> Option<i64> {
+    samples
+        .into_iter()
+        .filter(|&(before, after, server)| server > 0 && (0..=1000).contains(&(after - before)))
+        .min_by_key(|&(before, after, _)| after - before)
+        .map(|(before, after, server)| server - (before + (after - before) / 2))
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 fn start_transport(url: String, commands: Receiver<Command>, updates: Sender<Update>) {
     std::thread::spawn(move || {
@@ -1999,6 +2042,7 @@ fn start_transport(url: String, commands: Receiver<Command>, updates: Sender<Upd
             .build()
             .unwrap();
         let mut seen_images = std::collections::HashSet::new();
+        let mut next_clock_sync = Instant::now();
         loop {
             let outcome = match commands.recv_timeout(Duration::from_millis(350)) {
                 Ok(command) => {
@@ -2035,6 +2079,22 @@ fn start_transport(url: String, commands: Receiver<Command>, updates: Sender<Upd
                     .unwrap_or(Value::Null)
             };
             let snapshot = fetch("/api/state");
+            let offset = if !snapshot.is_null() && Instant::now() >= next_clock_sync {
+                let mut samples = Vec::new();
+                for _ in 0..3 {
+                    let before = now();
+                    let time = fetch("/api/clock");
+                    if let Some(server) = time["serverNowMs"].as_i64() {
+                        samples.push((before, now(), server));
+                    }
+                }
+                let offset = clock_offset(samples);
+                next_clock_sync =
+                    Instant::now() + Duration::from_secs(if offset.is_some() { 60 } else { 5 });
+                offset
+            } else {
+                None
+            };
             let history = fetch("/api/history?scope=full");
             let recovery = fetch("/api/recovery");
             let mut images = Vec::new();
@@ -2071,6 +2131,7 @@ fn start_transport(url: String, commands: Receiver<Command>, updates: Sender<Upd
                     history,
                     recovery,
                     images,
+                    clock_offset: offset,
                     outcome,
                 })
                 .is_err()
@@ -2085,6 +2146,7 @@ fn start_transport(url: String, commands: Receiver<Command>, updates: Sender<Upd
     wasm_bindgen_futures::spawn_local(async move {
         let client = reqwest::Client::new();
         let mut seen_images = std::collections::HashSet::new();
+        let mut next_clock_sync = Instant::now();
         loop {
             let outcome = match commands.try_recv() {
                 Ok(command) => {
@@ -2122,6 +2184,22 @@ fn start_transport(url: String, commands: Receiver<Command>, updates: Sender<Upd
                 }
             }
             let snapshot = fetch(&client, &url, "/api/state").await;
+            let offset = if !snapshot.is_null() && Instant::now() >= next_clock_sync {
+                let mut samples = Vec::new();
+                for _ in 0..3 {
+                    let before = now();
+                    let time = fetch(&client, &url, "/api/clock").await;
+                    if let Some(server) = time["serverNowMs"].as_i64() {
+                        samples.push((before, now(), server));
+                    }
+                }
+                let offset = clock_offset(samples);
+                next_clock_sync =
+                    Instant::now() + Duration::from_secs(if offset.is_some() { 60 } else { 5 });
+                offset
+            } else {
+                None
+            };
             let history = fetch(&client, &url, "/api/history?scope=full").await;
             let recovery = fetch(&client, &url, "/api/recovery").await;
             let mut images = Vec::new();
@@ -2155,6 +2233,7 @@ fn start_transport(url: String, commands: Receiver<Command>, updates: Sender<Upd
                     history,
                     recovery,
                     images,
+                    clock_offset: offset,
                     outcome,
                 })
                 .is_err()
