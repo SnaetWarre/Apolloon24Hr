@@ -39,7 +39,7 @@ jobs:
           mkdir assets
           gh release download "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --dir assets \
             --pattern '*.exe' --pattern '*.AppImage' --pattern '*.dmg' --pattern '*.zip' --pattern 'SHA256SUMS.txt' \
-            --pattern 'latest*.yml'
+            --pattern 'latest*.yml' --pattern 'apolloon-native-*.tar.gz'
           gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --json body --jq .body > notes.md
           ls -l assets
 
@@ -48,8 +48,13 @@ jobs:
           GH_TOKEN: ${{ secrets.PUBLIC_RELEASES_TOKEN }}
         run: |
           # The app reads "latest", so copying an older version again must not make it the latest.
-          newest=$( { gh release list --repo "${PUBLIC_REPO}" --limit 100 --json tagName --jq '.[].tagName'; echo "${RELEASE_TAG}"; } | sort -V | tail -n 1)
-          if [ "${newest}" = "${RELEASE_TAG}" ]; then latest=--latest; else latest=--latest=false; fi
+          # Installed Electron apps still use GitHub's latest release. Native apps select
+          # their platform's native assets from the release list.
+          latest=--latest=false
+          if [[ "$RELEASE_TAG" != native-v* ]]; then
+            newest=$( { gh release list --repo "${PUBLIC_REPO}" --limit 100 --json tagName --jq '.[].tagName'; echo "${RELEASE_TAG}"; } | awk '!/^native-v/' | sort -V | tail -n 1)
+            if [ "${newest}" = "${RELEASE_TAG}" ]; then latest=--latest; fi
+          fi
           if gh release view "${RELEASE_TAG}" --repo "${PUBLIC_REPO}" >/dev/null 2>&1; then
             gh release edit "${RELEASE_TAG}" --repo "${PUBLIC_REPO}" --notes-file notes.md "${latest}"
             gh release upload "${RELEASE_TAG}" assets/* --repo "${PUBLIC_REPO}" --clobber

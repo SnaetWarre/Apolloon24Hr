@@ -10,13 +10,14 @@
 #   remove        needs admin
 param(
   [Parameter(Mandatory = $true)][ValidateSet('check', 'present', 'add', 'remove')][string]$Action,
-  [string]$Program
+  [string]$Program,
+  [ValidateSet('Apolloon', 'Apolloon Native')][string]$RulePrefix = 'Apolloon'
 )
 
 $ErrorActionPreference = 'Stop'
 $rules = @(
-  @{ Name = 'Apolloon TCP 5173'; Protocol = 'TCP'; Port = 5173 },
-  @{ Name = 'Apolloon UDP 45737'; Protocol = 'UDP'; Port = 45737 }
+  @{ Name = "$RulePrefix TCP 5173"; Protocol = 'TCP'; Port = 5173 },
+  @{ Name = "$RulePrefix UDP 45737"; Protocol = 'UDP'; Port = 45737 }
 )
 
 # Windows' own "Allow access?" question blocks the app on every network type left unticked

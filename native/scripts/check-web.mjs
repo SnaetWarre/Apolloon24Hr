@@ -66,7 +66,7 @@ try {
   assert(home.ok, 'WASM index must be served');
   assert((await home.text()).includes('app.js'));
   browser = await chromium.launch({ headless: true, args: ['--enable-unsafe-swiftshader'] });
-  const page = await browser.newPage({ viewport: { width: 1366, height: 768 } });
+  const page = await browser.newPage({ viewport: { width: 1366, height: 768 }, colorScheme: 'dark' });
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
   page.on('console', (m) => {
@@ -91,6 +91,19 @@ try {
   const gl = await page.evaluate(() => document.querySelectorAll('canvas').length);
   assert.equal(gl, 1, 'After the hand-over only the WebGL2 canvas remains');
   console.log('Rune draws through WebGL2 (web.handover.done)');
+  const frame = await page.screenshot();
+  const color = await page.evaluate(async (base64) => {
+    const image = new Image();
+    image.src = 'data:image/png;base64,' + base64;
+    await image.decode();
+    const canvas = document.createElement('canvas');
+    canvas.width = image.width;
+    canvas.height = image.height;
+    const context = canvas.getContext('2d');
+    context.drawImage(image, 0, 0);
+    return Array.from(context.getImageData(1330, 710, 1, 1).data);
+  }, frame.toString('base64'));
+  assert.deepEqual(color, [26, 26, 26, 255], 'WebGL2 retains the reference dark background after handover');
   await page.mouse.click(80, 178);
   await page.screenshot({ path: path.join(dir, 'timing-before.png') });
   const press = page.waitForResponse((r) => r.url().endsWith('/api/action/race.handoff'), { timeout: 10000 });

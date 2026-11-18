@@ -62,6 +62,10 @@ pub fn run<S: 'static>(mut spec: AppSpec<S>) {
         rune::run(spec);
         return;
     }
+    #[cfg(any(windows, target_os = "macos"))]
+    if let Err(error) = rune::set_app_icon(&include_bytes!("../../../build/icon.png")[..]) {
+        supervisor::desktop_log(&format!("App icon: {error}"));
+    }
     spec.size = window_state::DEFAULT_WINDOW_SIZE;
     spec.min_size = Some((
         window_state::MIN_WINDOW_SIZE.0 as f32,

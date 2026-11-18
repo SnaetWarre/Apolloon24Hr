@@ -226,7 +226,7 @@ async fn invite(
             );
         }
         match node.accept_invite(&request) {
-            Ok(()) => Json(json!({"ok": true})).into_response(),
+            Ok(merged) => Json(json!({"ok": true, "merged": merged})).into_response(),
             Err(error) => refusal(StatusCode::CONFLICT, "refused", &error),
         }
     })

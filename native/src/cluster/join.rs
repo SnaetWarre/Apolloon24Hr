@@ -207,23 +207,23 @@ impl Node {
                         .unwrap_or("Koppelen mislukt.")
                         .into());
                 }
-                Ok(Self::not_joined())
+                Ok(json!({"backupFile": null, "merged": answer.body["merged"] == true}))
             }
         }
     }
 
     /// Another laptop pressed Koppelen next to this one and keeps its data, or a laptop of this
     /// group joined another group (`follow`) or another split (`split`): this laptop joins too.
-    pub fn accept_invite(&self, request: &Value) -> Result<()> {
+    pub fn accept_invite(&self, request: &Value) -> Result<bool> {
         self.wait_while_joining();
         let url = request["url"].as_str().unwrap_or("");
         let cluster_id = request["clusterId"].as_str().unwrap_or("");
         if request["split"].is_string() {
             self.follow_split(url);
-            return Ok(());
+            return Ok(false);
         }
         if self.cluster_id() == cluster_id {
-            return Ok(());
+            return Ok(false);
         }
         let following = request["follow"].as_str() == Some(&self.cluster_id());
         let options = Options {
@@ -232,7 +232,8 @@ impl Node {
             split: None,
             auto_linked_with: request["autoLinkedWith"].as_str().map(str::to_owned),
         };
-        self.join_once(url, cluster_id, options).map(|_| ())
+        self.join_once(url, cluster_id, options)
+            .map(|result| result["merged"] == true)
     }
 
     /// A press on both laptops at once starts two joins; the second waits for the first.

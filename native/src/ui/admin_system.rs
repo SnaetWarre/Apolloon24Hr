@@ -241,6 +241,7 @@ pub(super) fn succeeded(s: &mut State, method: &str, result: &Value) {
         "cluster.joinGroup" => {
             s.system.other_url = TextEdit::new("");
             s.notice = match result["backupFile"].as_str() {
+                _ if result["merged"] == true => "Gekoppeld. De inschrijvingen en labels van beide laptops zijn samengevoegd.".into(),
                 Some(file) => format!("Opnieuw gekoppeld. De vorige gegevens staan in de backup {file}."),
                 None => "Gekoppeld.".into(),
             };

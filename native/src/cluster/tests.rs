@@ -453,6 +453,24 @@ fn a_lost_laptop_is_taken_out_and_a_spare_takes_its_place() {
 }
 
 #[test]
+fn the_retaining_laptop_reports_the_registration_merge() {
+    let _serial = serial();
+    let dir = Dir::new();
+    let a = TestServer::start(&dir.db("a"), free_port(), "Laptop A");
+    let b = TestServer::start(&dir.db("b"), free_port(), "Laptop B");
+    for name in ["Zoë", "Jan"] {
+        a.act("runners.create", json!({"name":name})).unwrap();
+    }
+    b.act("runners.create", json!({"name":"Fien"})).unwrap();
+    let answer = a.act("cluster.joinGroup", json!({"url":b.url})).unwrap();
+    assert_eq!(answer["merged"], true);
+    assert!(answer["backupFile"].is_null());
+    wait_until("merged registrations", Duration::from_secs(10), || {
+        [&a, &b].iter().all(|s| s.count("SELECT COUNT(*) AS n FROM runners") == 3)
+    });
+}
+
+#[test]
 fn simultaneous_presses_on_both_laptops_link_once_and_merge_the_registrations() {
     let _serial = serial();
     let dir = Dir::new();

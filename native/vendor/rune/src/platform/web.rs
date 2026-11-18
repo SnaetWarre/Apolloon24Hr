@@ -181,6 +181,7 @@ struct GpuSide {
     renderer: Renderer,
     /// The adapter is WebGL2's.
     gl: bool,
+    cpu_srgb_blend: bool,
 }
 
 /// Who draws the page's frames, and how far the GPU is (the native CPU-first window's
@@ -430,10 +431,12 @@ fn gpu_side<S: 'static>(gpu: Gpu, surface: wgpu::Surface<'static>, size: (u32, u
     surface.configure(&gpu.device, &config);
     health::watch(&gpu.device, lost);
     let mut renderer = Renderer::new(&gpu.device, format);
-    renderer.set_srgb_blend(!format.is_srgb());
-    renderer.attach_text(&mut rt.text.atlas);
     let gl = gpu.adapter.get_info().backend == wgpu::Backend::Gl;
-    Ok(GpuSide { gpu, surface, config, renderer, gl })
+    let cpu_srgb_blend = rt.srgb_blend();
+    rt.set_srgb_blend(!format.is_srgb());
+    renderer.set_srgb_blend(rt.srgb_blend());
+    renderer.attach_text(&mut rt.text.atlas);
+    Ok(GpuSide { gpu, surface, config, renderer, gl, cpu_srgb_blend })
 }
 
 /// The canvas's configuration for `size`, and the format the renderer draws in: the canvas's,
@@ -443,14 +446,19 @@ fn canvas_config(gpu: &Gpu, surface: &wgpu::Surface<'static>, size: (u32, u32), 
     let mut config = surface.get_default_config(&gpu.adapter, size.0.clamp(1, max_dim), size.1.clamp(1, max_dim))?;
     config.present_mode = wgpu::PresentMode::Fifo;
     let caps = surface.get_capabilities(&gpu.adapter);
+    let is_gl = gpu.adapter.get_info().backend == wgpu::Backend::Gl;
+    // GLES presents its sRGB surface after sampling it as linear, so the instances
+    // must be linear as well. Passing the CPU's sRGB instances through it encodes twice.
+    if is_gl && caps.formats.contains(&wgpu::TextureFormat::Rgba8UnormSrgb) {
+        config.format = wgpu::TextureFormat::Rgba8UnormSrgb;
+    }
     config.usage |= caps.usages & wgpu::TextureUsages::COPY_SRC;
     // A WebGPU canvas can be copied into (wgpu names only its render use): a loop-only step's
     // frame is the last one, kept, with its dots redrawn (`Renderer::arm_cycle`).
-    if gpu.adapter.get_info().backend == wgpu::Backend::BrowserWebGpu { config.usage |= wgpu::TextureUsages::COPY_DST; }
+    if !is_gl { config.usage |= wgpu::TextureUsages::COPY_DST; }
     // A canvas can always be copied from; the hand-over's drift count needs that.
     if drift_wanted() { config.usage |= wgpu::TextureUsages::COPY_SRC; }
     let wanted = if srgb_blend { config.format.remove_srgb_suffix() } else { config.format.add_srgb_suffix() };
-    let is_gl = gpu.adapter.get_info().backend == wgpu::Backend::Gl;
     let format = if wanted != config.format && !is_gl {
         config.view_formats.push(wanted);
         wanted
@@ -639,6 +647,7 @@ impl<S: 'static> Browser<S> {
         web_sys::console::warn_1(&format!("rune: the GPU device was lost ({why}); the page draws on the CPU").into());
         crate::marks::mark("web.gpu.lost");
         side.gpu.device.destroy();
+        r.rt.set_srgb_blend(side.cpu_srgb_blend);
         crate::render::cpu_boot::attach_text(&mut r.rt.text.atlas);
         r.rt.text.atlas.refill_gpu_masks();
         if let Some(c) = &canvas { let _ = c.style().set_property("opacity", "0"); }
@@ -818,6 +827,7 @@ impl<S: 'static> Browser<S> {
             web_sys::console::warn_1(&"rune: the GPU didn't finish its first frame; the page draws on the CPU".into());
             crate::marks::mark("web.handover.failed");
             side.gpu.device.destroy();
+            r.rt.set_srgb_blend(side.cpu_srgb_blend);
             crate::render::cpu_boot::attach_text(&mut r.rt.text.atlas);
             r.rt.text.atlas.refill_gpu_masks();
             r.draw = Draw::Cpu { cpu, failed: true };

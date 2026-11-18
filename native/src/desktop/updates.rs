@@ -10,8 +10,8 @@ use std::cmp::Ordering;
 
 pub const RELEASES_REPO: &str = "SnaetWarre/apolloon-releases";
 pub const RELEASES_PAGE: &str = "https://github.com/SnaetWarre/apolloon-releases/releases";
-const LATEST_RELEASE_API: &str =
-    "https://api.github.com/repos/SnaetWarre/apolloon-releases/releases/latest";
+const RELEASES_API: &str =
+    "https://api.github.com/repos/SnaetWarre/apolloon-releases/releases?per_page=100";
 pub const CHECK_INTERVAL_SECS: u64 = 6 * 60 * 60;
 pub const FIRST_CHECK_DELAY_SECS: u64 = 10;
 pub const RACE_RUNNING: &str = "De wedstrijd loopt. Installeer de update pas na de wedstrijd.";
@@ -159,29 +159,6 @@ fn assets(release: &Value) -> Vec<(String, String)> {
         .unwrap_or_default()
 }
 
-/// The installer electron-builder makes for this platform ("win32", "darwin", "linux").
-pub fn pick_installer(assets: &[(String, String)], platform: &str, arch: &str) -> Option<String> {
-    let extension = match platform {
-        "win32" => ".exe",
-        "darwin" => ".dmg",
-        _ => ".AppImage",
-    };
-    let installers: Vec<_> = assets
-        .iter()
-        .filter(|(name, _)| name.ends_with(extension))
-        .collect();
-    let names: Vec<&str> = if arch == "x64" {
-        vec!["x64", "x86_64", "amd64"]
-    } else {
-        vec![arch]
-    };
-    installers
-        .iter()
-        .find(|(name, _)| names.iter().any(|n| name.contains(n)))
-        .or(installers.first())
-        .map(|(_, url)| url.clone())
-}
-
 /// The native package from .github/workflows/native-packages.yml for this platform.
 pub fn pick_native_package(
     assets: &[(String, String)],
@@ -195,9 +172,13 @@ pub fn pick_native_package(
     assets.iter().find(|(n, _)| n == name).cloned()
 }
 
-/// Reads GitHub's "latest release" answer; None when it is not a usable release.
-pub fn read_release(release: &Value, platform: &str, arch: &str) -> Option<AvailableUpdate> {
+/// Reads a stable release with assets for this native build's platform.
+fn read_release(release: &Value, platform: &str) -> Option<AvailableUpdate> {
+    if release["draft"] == true || release["prerelease"] == true {
+        return None;
+    }
     let tag = release["tag_name"].as_str()?;
+    let tag = tag.strip_prefix("native-").unwrap_or(tag);
     let bare = tag.strip_prefix(['v', 'V']).unwrap_or(tag);
     let mut parts = bare.splitn(3, '.');
     let numeric = |p: Option<&str>, whole: bool| {
@@ -220,11 +201,21 @@ pub fn read_release(release: &Value, platform: &str, arch: &str) -> Option<Avail
         .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
         .map(|t| t.timestamp_millis());
     let all = assets(release);
+    let package = pick_native_package(&all, platform);
+    let installer_name = match platform {
+        "win32" => Some("apolloon-native-windows-setup.exe"),
+        "darwin" => Some("apolloon-native-macos.dmg"),
+        _ => None,
+    };
+    let installer = installer_name.and_then(|installer| {
+        all.iter().find(|(name, _)| name == installer).map(|(_, url)| url.clone())
+    });
+    let download_url = installer.or_else(|| package.as_ref().map(|(_, url)| url.clone()))?;
     Some(AvailableUpdate {
         version: bare.to_string(),
         page_url,
-        download_url: pick_installer(&all, platform, arch),
-        package: pick_native_package(&all, platform),
+        download_url: Some(download_url),
+        package,
         sums_url: all
             .iter()
             .find(|(n, _)| n == "SHA256SUMS.txt")
@@ -272,14 +263,6 @@ pub fn platform() -> &'static str {
         "linux"
     }
 }
-pub fn arch() -> &'static str {
-    match std::env::consts::ARCH {
-        "x86_64" => "x64",
-        "aarch64" => "arm64",
-        other => other,
-    }
-}
-
 /// Which state may follow which. Every change of the status goes through this table.
 pub fn can_move(from: &str, to: &str) -> bool {
     let next: &[&str] = match from {
@@ -300,13 +283,20 @@ pub fn can_move(from: &str, to: &str) -> bool {
     next.contains(&to)
 }
 
+fn newest_native_release(releases: &[Value], platform: &str) -> Option<AvailableUpdate> {
+    releases
+        .iter()
+        .filter_map(|release| read_release(release, platform))
+        .max_by(|left, right| compare_versions(&left.version, &right.version))
+}
+
 /// One request to the release feed, with the platform's installers picked out.
 pub fn check_release(current: &str, now: i64) -> Status {
     let response = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
         .build()
         .and_then(|c| {
-            c.get(LATEST_RELEASE_API)
+            c.get(RELEASES_API)
                 .header("Accept", "application/vnd.github+json")
                 .header("User-Agent", format!("Apolloon-Telsysteem/{current}"))
                 .send()
@@ -314,14 +304,12 @@ pub fn check_release(current: &str, now: i64) -> Status {
     let Ok(response) = response.and_then(|r| r.error_for_status()) else {
         return Status::Unreachable { checked_at: now };
     };
-    let Some(update) = response
-        .json::<Value>()
-        .ok()
-        .and_then(|v| read_release(&v, platform(), arch()))
-    else {
+    let Ok(releases) = response.json::<Vec<Value>>() else {
         return Status::Unreachable { checked_at: now };
     };
-    if compare_versions(&update.version, current) == Ordering::Greater {
+    if let Some(update) = newest_native_release(&releases, platform())
+        .filter(|update| compare_versions(&update.version, current) == Ordering::Greater)
+    {
         Status::Available {
             checked_at: now,
             update,
@@ -531,17 +519,18 @@ mod tests {
             {"name":"Apolloon-4.4.0-arm64.AppImage","browser_download_url":"https://github.com/a/arm.AppImage"},
             {"name":"Apolloon-4.4.0-x86_64.AppImage","browser_download_url":"https://github.com/a/x64.AppImage"},
             {"name":"Apolloon Setup 4.4.0.exe","browser_download_url":"https://github.com/a/setup.exe"},
+            {"name":"apolloon-native-windows-setup.exe","browser_download_url":"https://github.com/a/native-setup.exe"},
             {"name":"evil.dmg","browser_download_url":"https://evil.example/x.dmg"},
             {"name":"apolloon-native-linux.tar.gz","browser_download_url":"https://github.com/a/linux.tar.gz"},
             {"name":"SHA256SUMS.txt","browser_download_url":"https://github.com/a/SHA256SUMS.txt"}]})
     }
     #[test]
     fn release_picks_the_installer_for_this_platform() {
-        let linux = read_release(&release(), "linux", "x64").unwrap();
+        let linux = read_release(&release(), "linux").unwrap();
         assert_eq!(linux.version, "4.4.0");
         assert_eq!(
             linux.download_url.as_deref(),
-            Some("https://github.com/a/x64.AppImage")
+            Some("https://github.com/a/linux.tar.gz")
         );
         assert_eq!(
             linux.package.unwrap().1,
@@ -549,16 +538,27 @@ mod tests {
         );
         assert_eq!(linux.published_at, Some(1_793_527_200_000));
         assert_eq!(
-            read_release(&release(), "win32", "x64")
+            read_release(&release(), "win32")
                 .unwrap()
                 .download_url
                 .as_deref(),
-            Some("https://github.com/a/setup.exe")
+            Some("https://github.com/a/native-setup.exe")
         );
-        let mac = read_release(&release(), "darwin", "arm64").unwrap();
-        assert_eq!((mac.download_url, mac.package), (None, None));
-        assert!(read_release(&json!({"tag_name":"latest"}), "linux", "x64").is_none());
-        assert!(read_release(&json!({}), "linux", "x64").is_none());
+        assert!(read_release(&release(), "darwin").is_none());
+        assert!(read_release(&json!({"tag_name":"latest"}), "linux").is_none());
+        assert!(read_release(&json!({}), "linux").is_none());
+        let mut native = release();
+        native["tag_name"] = json!("native-v4.4.1");
+        let electron = json!({"tag_name":"v9.0.0","assets":[
+            {"name":"Apolloon-9.0.0-x86_64.AppImage","browser_download_url":"https://github.com/a/newer.AppImage"}
+        ]});
+        let mut preview = native.clone();
+        preview["tag_name"] = json!("native-v10.0.0");
+        preview["prerelease"] = json!(true);
+        assert_eq!(
+            newest_native_release(&[electron, preview, native, release()], "linux").unwrap().version,
+            "4.4.1"
+        );
     }
     #[test]
     fn helpers_match_the_electron_rules() {
@@ -593,7 +593,7 @@ mod tests {
     }
     #[test]
     fn flow_downloads_installs_and_refuses_during_the_race() {
-        let update = read_release(&release(), "linux", "x64").unwrap();
+        let update = read_release(&release(), "linux").unwrap();
         let available = Status::Available {
             checked_at: 1,
             update: update.clone(),
