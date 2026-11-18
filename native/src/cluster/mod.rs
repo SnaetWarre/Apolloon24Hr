@@ -24,7 +24,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-pub const APP_VERSION: &str = concat!("native-", env!("CARGO_PKG_VERSION"));
+pub const APP_VERSION: &str = env!("APOLLOON_PEER_VERSION");
 pub const SCHEMA_VERSION: i64 = 17;
 
 pub const NO_LEADER_MESSAGE: &str = "Niet opgeslagen: er zijn te weinig laptops bereikbaar. Controleer of de andere laptops aan staan en aan het netwerk hangen.";

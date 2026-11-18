@@ -2378,17 +2378,21 @@ fn start_transport(url: String, commands: Receiver<Command>, updates: Sender<Upd
             (client.clone(), url.clone(), synced.clone(), updates.clone());
         std::thread::spawn(move || {
             while let Ok(command) = commands.recv() {
-                let result = client
-                    .post(format!("{url}/api/action/{}", command.method))
-                    .header("x-apolloon-screen", &command.screen)
-                    .json(&command.input)
-                    .send()
-                    .map_err(|e| e.to_string())
-                    .and_then(|response| {
-                        let status = response.status();
-                        let value: Value = response.json().map_err(|e| e.to_string())?;
-                        if status.is_success() { Ok(value) } else { Err(action_error(&value)) }
-                    });
+                let local = crate::desktop::with(|_| ())
+                    .and_then(|_| crate::desktop::control(&command.method, &command.input));
+                let result = local.unwrap_or_else(|| {
+                    client
+                        .post(format!("{url}/api/action/{}", command.method))
+                        .header("x-apolloon-screen", &command.screen)
+                        .json(&command.input)
+                        .send()
+                        .map_err(|error| error.to_string())
+                        .and_then(|response| {
+                            let status = response.status();
+                            let value: Value = response.json().map_err(|error| error.to_string())?;
+                            if status.is_success() { Ok(value) } else { Err(action_error(&value)) }
+                        })
+                });
                 let image = result.as_ref().ok().and_then(|r| r["imageUrl"].as_str()).map(str::to_owned);
                 let mut update = refresh(&client, &url, &synced, !reads_only(&command.method), !reads_only(&command.method), image);
                 update.outcome = Some((command.method, result));

@@ -19,7 +19,7 @@ use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 
 pub fn version() -> &'static str {
-    option_env!("APOLLOON_APP_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"))
+    env!("APOLLOON_VERSION")
 }
 
 /// Where the database, `.env`, `server.log`, `window-state.json` and backups live.
@@ -353,6 +353,45 @@ pub fn update_status() -> Value {
     with(|d| d.updates.status.to_json()).unwrap_or_else(|| json!({"state":"idle","checkedAt":null}))
 }
 
+/// Handles the actions owned by the desktop process. The updater's state lives with the window,
+/// while the HTTP server can run in a separate process.
+pub fn control(method: &str, input: &Value) -> Option<Result<Value, String>> {
+    Some(match method {
+        "update.status" => Ok(json!({
+            "status": update_status(),
+            "lastInstall": with(|d| d.last_install.clone()).flatten()
+                .map(|(version, ok)| json!({"version":version,"ok":ok})),
+        })),
+        "update.check" if DESKTOP.get().is_some() => {
+            std::thread::spawn(check_for_update);
+            Ok(json!({"started":true}))
+        }
+        #[cfg(feature = "desktop")]
+        "update.install" if DESKTOP.get().is_some() => Ok(json!({"problem": install_update()})),
+        "update.check" | "update.install" => Err("Open deze actie in de desktopapp op deze laptop.".into()),
+        "desktop.diagnostics" => Ok(diagnostics()),
+        "desktop.openUrl" => {
+            open_folder(std::path::Path::new(input["url"].as_str().unwrap_or("")))
+                .map(|_| json!({"ok":true}))
+        }
+        _ => return None,
+    })
+}
+
+#[cfg(feature = "desktop")]
+fn create_update_backup(url: &str) -> Result<(), String> {
+    let response = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(60))
+        .build()
+        .and_then(|client| client.post(format!("{url}/api/action/backups.create")).json(&json!({})).send())
+        .map_err(|error| error.to_string())?;
+    if response.status().is_success() {
+        Ok(())
+    } else {
+        Err(format!("server antwoordde {}", response.status().as_u16()))
+    }
+}
+
 /// Beheer › Systeem "Installeren" (apolloon:install-update): null when the app restarts into
 /// the new version, else the reason it did not.
 #[cfg(feature = "desktop")]
@@ -366,24 +405,7 @@ pub fn install_update() -> Option<String> {
     let data = data_dir().unwrap_or_default();
     let result = flow.install(
         &race_guard::is_race_active,
-        || {
-            reqwest::blocking::Client::builder()
-                .timeout(std::time::Duration::from_secs(60))
-                .build()
-                .and_then(|c| {
-                    c.post(format!("{url}/trpc/backups.create"))
-                        .header("Content-Type", "application/json")
-                        .send()
-                })
-                .map_err(|e| e.to_string())
-                .and_then(|r| {
-                    if r.status().is_success() {
-                        Ok(())
-                    } else {
-                        Err(format!("server antwoordde {}", r.status().as_u16()))
-                    }
-                })
-        },
+        || create_update_backup(&url),
         |update| {
             let staged = staged.ok_or("het pakket is niet gedownload")?;
             let exe = std::env::current_exe().map_err(|e| e.to_string())?;
@@ -402,7 +424,8 @@ pub fn install_update() -> Option<String> {
     });
     request(Request::Wake);
     if result.is_none() {
-        // Quit first: the new process then waits for this one (rune::single_instance) and opens.
+        // The executable on disk was replaced. Wait for this process to release the instance
+        // before Rune lets the new executable open.
         let exe = std::env::current_exe().ok().map(|e| {
             e.with_file_name(if cfg!(windows) {
                 "apolloon-native.exe"
@@ -410,11 +433,17 @@ pub fn install_update() -> Option<String> {
                 "apolloon-native"
             })
         });
+        let relaunch = exe.ok_or_else(|| std::io::Error::other("geen installatiepad")).and_then(|exe| {
+            std::process::Command::new(exe)
+                .env("RUNE_RELAUNCH_AFTER", std::process::id().to_string())
+                .spawn()
+        });
+        if let Err(error) = relaunch {
+            supervisor::desktop_log(&format!("Relaunch failed: {error}"));
+            return Some("De update is geplaatst. Sluit Apolloon en open het opnieuw om ze te gebruiken.".into());
+        }
         shut_down();
         request(Request::Quit);
-        if let Some(exe) = exe {
-            let _ = std::process::Command::new(exe).spawn();
-        }
     }
     result
 }
@@ -425,4 +454,26 @@ pub fn quit_cancelled() {
         d.updates.quit_cancelled();
         flush_update_log(&mut d.updates);
     });
+}
+
+#[cfg(all(test, feature = "desktop"))]
+#[test]
+fn updater_backup_request_creates_a_verified_copy() {
+    let dir = std::env::temp_dir().join(format!("apolloon-update-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let database = dir.join("app.db");
+    let db = std::sync::Arc::new(Mutex::new(crate::db::Db::open(&database).unwrap()));
+    let socket = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = socket.local_addr().unwrap().port();
+    drop(socket);
+    {
+        let _server = crate::server::start(db, port).unwrap();
+        create_update_backup(&format!("http://127.0.0.1:{port}")).unwrap();
+        let files = crate::backups::list(&database).unwrap();
+        let backups = files.as_array().unwrap();
+        assert_eq!(backups.len(), 1);
+        let name = backups[0]["fileName"].as_str().unwrap();
+        assert!(crate::backups::preview(&database, name).is_ok());
+    }
+    std::fs::remove_dir_all(dir).unwrap();
 }

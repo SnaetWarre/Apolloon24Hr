@@ -230,7 +230,7 @@ fn system_info(host: &Host) -> Value {
             "manager": null,
             "suggestion": null,
         },
-        "appVersion": env!("CARGO_PKG_VERSION"),
+        "appVersion": crate::desktop::version(),
         "schemaVersion": 17,
         "dataPath": data,
         "nearbyLaptops": host.discovery.nearby(),
@@ -254,19 +254,7 @@ async fn desktop_action(method: &str, input: &Value, loopback: bool) -> Option<R
             "net.profile" => Ok(d::net_setup::profile()),
             "net.makeStatic" => net(d::net_setup::make_static(&input)),
             "net.revertDhcp" => net(d::net_setup::revert_dhcp(&input)),
-            "update.status" => Ok(json!({
-                "status": d::update_status(),
-                "lastInstall": d::with(|d| d.last_install.clone()).flatten().map(|(version, ok)| json!({"version":version,"ok":ok})),
-            })),
-            "update.check" => {
-                std::thread::spawn(d::check_for_update);
-                Ok(json!({"started":true}))
-            }
-            #[cfg(feature = "desktop")]
-            "update.install" => Ok(json!({"problem": d::install_update()})),
-            "desktop.diagnostics" => Ok(d::diagnostics()),
-            "desktop.openUrl" => d::open_folder(std::path::Path::new(input["url"].as_str().unwrap_or(""))).map(|_| json!({"ok":true})),
-            _ => Err("Onbekende actie".into()),
+            _ => d::control(&method, &input).unwrap_or_else(|| Err("Onbekende actie".into())),
         }
     });
     Some(run.await.unwrap_or_else(|_| Err("Mislukt".into())))

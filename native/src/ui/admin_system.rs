@@ -170,6 +170,7 @@ pub(super) fn owns(s: &State, method: &str) -> bool {
             | "update.install"
             | "desktop.diagnostics"
             | "desktop.openUrl"
+            | "cluster.joinGroup"
     ) || (s.page == 8 && (method == "events.burgieGepakt" || method.starts_with("cluster.")))
 }
 

@@ -10,7 +10,6 @@ use std::{
 };
 
 const INTERVAL: Duration = Duration::from_secs(2);
-const VERSION: &str = concat!("native-", env!("CARGO_PKG_VERSION"));
 
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -110,7 +109,7 @@ impl Discovery {
                                 name: Some(crate::host::name()),
                                 cluster_id: state["cluster_id"].as_str().unwrap_or(&own_id).to_owned(),
                                 url: String::new(),
-                                app_version: VERSION.into(),
+                                app_version: crate::cluster::APP_VERSION.into(),
                                 schema_version: 17,
                                 leader: discovery.leader.load(std::sync::atomic::Ordering::Relaxed),
                                 group_size: state["group_size"].as_u64().unwrap_or(1) as u32,
