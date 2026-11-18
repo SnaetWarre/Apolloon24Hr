@@ -75,6 +75,10 @@ impl Db {
             capture: Default::default(),
         };
         if tables == 0 {
+            db.exec(
+                "INSERT INTO settings(key,value) VALUES('schema_version','17')",
+                &[],
+            )?;
             let labels: Vec<Value> =
                 serde_json::from_str(include_str!("default-labels.json")).map_err(err)?;
             for label in labels {

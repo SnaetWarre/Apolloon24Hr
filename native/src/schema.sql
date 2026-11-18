@@ -141,3 +141,6 @@
 
     CREATE INDEX IF NOT EXISTS idx_runner_labels_label
       ON runner_labels(label_id, runner_id);
+
+    CREATE INDEX IF NOT EXISTS idx_runners_queue_order
+      ON runners(status, queue_index, status_since);
