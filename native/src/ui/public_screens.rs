@@ -2350,19 +2350,6 @@ fn display_runner(
 mod tests {
     use super::*;
 
-    fn fixture() -> (Vec<Value>, Vec<Value>) {
-        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("..")
-            .join(".tmp-verify-evidence/native-reference");
-        let state: Value =
-            std::fs::read_to_string(dir.join("13-reference-light-inside.state.json"))
-                .ok()
-                .and_then(|s| serde_json::from_str(&s).ok())
-                .unwrap_or(Value::Null);
-        let runners = state["runners"].as_array().cloned().unwrap_or_default();
-        (runners, Vec::new())
-    }
-
     fn lap(
         id: &str,
         runner: &str,
@@ -2489,8 +2476,11 @@ mod tests {
             ["noor", "sara", "fien"]
         );
         // Current runner names win over the name on the lap.
-        let (runners, _) = fixture();
-        let _ = runner_ranking(&runners, &laps, true, None);
+        let runners = [json!({"id":"noor", "runnerNumber":"101", "name":"Noor Janssens"})];
+        assert_eq!(
+            runner_ranking(&runners, &laps, true, None)[0].label(),
+            "101 Noor Janssens"
+        );
     }
 
     #[test]

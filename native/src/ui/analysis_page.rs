@@ -1929,14 +1929,17 @@ mod live_tests {
 
     #[test]
     fn analysis_opened_directly_shows_live_laps() {
-        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../.tmp-native-evidence/native-reference/app.db");
-        if !src.exists() {
-            return;
-        }
-        let copy = std::env::temp_dir().join(format!("apolloon-analysis-{}.db", crate::db::id()));
-        std::fs::copy(&src, &copy).unwrap();
-        let db = Arc::new(Mutex::new(crate::db::Db::open(&copy).unwrap()));
+        let mut db = crate::db::Db::open(std::path::Path::new(":memory:")).unwrap();
+        let runner = db
+            .mutation("runners.create", &json!({"name": "Analyse Loper", "runnerNumber": "113"}))
+            .unwrap();
+        db.exec(
+            "INSERT INTO laps (id, runner_id, lap_number, started_at, finished_at, duration_ms, source, created_at)
+             VALUES ('first-lap', ?, 1, 0, 75000, 75000, 'spacebar', 75000)",
+            &[runner["id"].clone()],
+        )
+        .unwrap();
+        let db = Arc::new(Mutex::new(db));
         let socket = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
         let port = socket.local_addr().unwrap().port();
         drop(socket);
@@ -1960,10 +1963,7 @@ mod live_tests {
             rt.frame(1.0 / 60.0);
             std::thread::sleep(Duration::from_millis(10));
         }
-        assert_eq!(
-            rt.state.history["laps"].as_array().map_or(0, |a| a.len()),
-            35
-        );
+        assert_eq!(rt.state.history["laps"][0]["id"], "first-lap");
         // Exporteren opens the six export routes; each one downloads from the Rust server.
         rt.frame(1.0 / 60.0);
         let (x, y) = rt.find("analysis-export").expect("Exporteren");
