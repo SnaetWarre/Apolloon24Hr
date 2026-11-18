@@ -510,6 +510,7 @@ pub fn router(host: Host) -> Router {
             tower_http::services::ServeDir::new(
                 crate::desktop::config::current_web_dir(),
             )
+            .precompressed_gzip()
             .fallback(tower_http::services::ServeFile::new(
                 std::path::Path::new(
                     &crate::desktop::config::current_web_dir(),

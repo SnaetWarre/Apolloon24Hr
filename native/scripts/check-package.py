@@ -1,4 +1,5 @@
 """Check that a staged native package can serve its browser client outside the checkout."""
+import gzip
 import json
 import os
 from pathlib import Path
@@ -7,7 +8,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 
 def check(binary: Path) -> None:
@@ -42,6 +43,12 @@ def check(binary: Path) -> None:
             with urlopen(url + "/app_bg.wasm", timeout=5) as response:
                 assert response.headers.get_content_type() == "application/wasm"
                 assert response.read(4) == b"\x00asm"
+            request = Request(url + "/app_bg.wasm", headers={"Accept-Encoding": "gzip"})
+            with urlopen(request, timeout=5) as response:
+                assert response.headers.get_content_type() == "application/wasm"
+                assert response.headers["Content-Encoding"] == "gzip"
+                with gzip.GzipFile(fileobj=response) as wasm:
+                    assert wasm.read(4) == b"\x00asm"
             assert db.is_file()
         finally:
             if process.poll() is None:

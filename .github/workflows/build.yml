@@ -190,6 +190,7 @@ jobs:
       - run: cargo build --manifest-path native/Cargo.toml --bin apolloon-native
       - run: npx playwright install --with-deps chromium
       - run: node native/scripts/check-web.mjs
+      - run: node native/scripts/check-web.mjs --cpu
       - run: node native/scripts/check-failover.mjs
       - name: Recover crashed and frozen Timing windows while the server stays online
         run: |

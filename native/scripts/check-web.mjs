@@ -1,4 +1,4 @@
-// Isolated browser smoke check: force WebGPU unavailable and run Rune through WebGL2.
+// Isolated browser smoke check with WebGPU unavailable. Pass --cpu to disable WebGL2 too.
 import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
@@ -6,7 +6,9 @@ import { once } from 'node:events';
 import { mkdir, writeFile } from 'node:fs/promises';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-const dir = path.resolve('.tmp-native-evidence/webgl');
+const cpuOnly = process.argv.includes('--cpu');
+const renderer = cpuOnly ? 'CPU' : 'WebGL2';
+const dir = path.resolve('.tmp-native-evidence', cpuOnly ? 'web-cpu' : 'webgl');
 await mkdir(dir, { recursive: true });
 const socket = createServer();
 socket.listen(0, '127.0.0.1');
@@ -72,25 +74,30 @@ try {
   page.on('console', (m) => {
     if (m.type() === 'error') errors.push(m.text());
   });
-  await page.addInitScript(() => {
+  await page.addInitScript((cpuOnly) => {
     Object.defineProperty(navigator, 'gpu', { get: () => undefined, configurable: true });
+    if (cpuOnly) {
+      const getContext = HTMLCanvasElement.prototype.getContext;
+      HTMLCanvasElement.prototype.getContext = function (kind, ...options) {
+        if (kind === 'webgl2' || kind === 'webgl' || kind === 'experimental-webgl') return null;
+        return getContext.call(this, kind, ...options);
+      };
+    }
     const localNow = Date.now.bind(Date);
     Date.now = () => localNow() + 45_000;
-  });
+  }, cpuOnly);
   const stateRequest = page.waitForResponse((r) => r.url().endsWith('/api/state') && r.ok(), { timeout: 90000 });
   await page.goto(url);
   await stateRequest;
-  await page.waitForFunction(() => document.querySelector('canvas') && !document.querySelector('#status'), {
+  await page.waitForFunction(() => document.querySelector('canvas') && !document.querySelector('#status'), null, {
     timeout: 90000,
   });
   await page.waitForResponse((r) => r.url().endsWith('/api/state') && r.ok());
-  // Rune paints the first frames on the CPU, then hands over to WebGL2 (no WebGPU here).
-  await page.waitForFunction(() => performance.getEntriesByName('web.handover.done').length > 0, null, {
-    timeout: 30000,
-  });
-  const gl = await page.evaluate(() => document.querySelectorAll('canvas').length);
-  assert.equal(gl, 1, 'After the hand-over only the WebGL2 canvas remains');
-  console.log('Rune draws through WebGL2 (web.handover.done)');
+  const mark = cpuOnly ? 'web.gpu.failed' : 'web.handover.done';
+  await page.waitForFunction((mark) => performance.getEntriesByName(mark).length > 0, mark, { timeout: 30000 });
+  const canvases = await page.evaluate(() => document.querySelectorAll('canvas').length);
+  assert(cpuOnly ? canvases >= 1 : canvases === 1, `${renderer} leaves a visible canvas`);
+  console.log(`Rune draws with ${renderer} (${mark})`);
   const frame = await page.screenshot();
   const color = await page.evaluate(async (base64) => {
     const image = new Image();
@@ -103,7 +110,7 @@ try {
     context.drawImage(image, 0, 0);
     return Array.from(context.getImageData(1330, 710, 1, 1).data);
   }, frame.toString('base64'));
-  assert.deepEqual(color, [26, 26, 26, 255], 'WebGL2 retains the reference dark background after handover');
+  assert.deepEqual(color, [26, 26, 26, 255], `${renderer} retains the reference dark background`);
   await page.mouse.click(80, 178);
   await page.screenshot({ path: path.join(dir, 'timing-before.png') });
   const press = page.waitForResponse((r) => r.url().endsWith('/api/action/race.handoff'), { timeout: 10000 });
@@ -132,9 +139,7 @@ try {
   await page.goto(url + '/admin?section=preparation');
   await page.waitForResponse((r) => r.url().endsWith('/api/recovery') && r.ok());
   await page.waitForResponse((r) => r.url().endsWith('/api/state') && r.ok());
-  await page.waitForFunction(() => performance.getEntriesByName('web.handover.done').length > 0, null, {
-    timeout: 30000,
-  });
+  await page.waitForFunction((mark) => performance.getEntriesByName(mark).length > 0, mark, { timeout: 30000 });
   await page.screenshot({ path: path.join(dir, 'import-before.png') });
   // The page fades in after navigation. Let the button finish entering before pressing it.
   await page.mouse.move(307, 586);
@@ -168,7 +173,9 @@ try {
   await page.screenshot({ path: path.join(dir, 'import-after.png') });
   await writeFile(path.join(dir, 'browser-errors.json'), JSON.stringify(errors, null, 2));
   assert.equal(errors.length, 0, errors.join('\n'));
-  console.log('PASS: WebGL2 timing and CSV import, plus pre-race merge and first-lap protection over Rust HTTP/SQLite');
+  console.log(
+    `PASS: ${renderer} timing and CSV import, plus pre-race merge and first-lap protection over Rust HTTP/SQLite`
+  );
 } finally {
   if (browser) await browser.close();
   child.kill('SIGTERM');

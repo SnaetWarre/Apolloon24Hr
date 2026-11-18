@@ -73,6 +73,11 @@ try {
   await page.goto(a.url + section);
   assert.equal((await (await remembered).json()).memberUrls.length, 2);
   await page.waitForFunction(() => !!document.querySelector('canvas'));
+  await page.keyboard.press('F11');
+  await page.waitForFunction(() => !!document.fullscreenElement);
+  await page.keyboard.press('F11');
+  await page.waitForFunction(() => !document.fullscreenElement);
+  console.log('PASS: F11 enters and leaves browser fullscreen on the public display');
   a.child.kill('SIGTERM');
   await once(a.child, 'exit');
   await page.waitForURL((url) => url.origin !== a.url, { timeout: 45000 });

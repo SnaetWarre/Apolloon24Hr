@@ -16,9 +16,12 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $rules = @(
-  @{ Name = "$RulePrefix TCP 5173"; Protocol = 'TCP'; Port = 5173 },
-  @{ Name = "$RulePrefix UDP 45737"; Protocol = 'UDP'; Port = 45737 }
+  @{ Name = 'Apolloon TCP 5173'; Protocol = 'TCP'; Port = 5173 },
+  @{ Name = 'Apolloon UDP 45737'; Protocol = 'UDP'; Port = 45737 }
 )
+if ($RulePrefix -ne 'Apolloon') {
+  foreach ($rule in $rules) { $rule.Name = "$RulePrefix $($rule.Protocol) $($rule.Port)" }
+}
 
 # Windows' own "Allow access?" question blocks the app on every network type left unticked
 # (public, by default), and a block rule wins over every allow rule. Windows writes that path in

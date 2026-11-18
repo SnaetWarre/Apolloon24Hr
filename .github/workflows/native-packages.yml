@@ -3,7 +3,16 @@ name: Native packages
 on:
   workflow_dispatch:
   pull_request:
-    paths: ['native/**', '.github/workflows/native-packages.yml', 'public/**', 'src/styles/wrapped.css', 'build/apolloon-firewall.ps1', 'build/icon.ico', 'build/icon.png']
+    paths:
+      [
+        'native/**',
+        '.github/workflows/native-packages.yml',
+        'public/**',
+        'src/styles/wrapped.css',
+        'build/apolloon-firewall.ps1',
+        'build/icon.ico',
+        'build/icon.png',
+      ]
   push:
     tags: ['native-v*']
 
