@@ -52,7 +52,7 @@ pub(super) struct Panel {
     event_over: bool,
     pub(super) phase: NetPhase,
     revert_open: bool,
-    manual_open: bool,
+    pub(super) manual_open: bool,
     other_url: TextEdit,
     show_all: bool,
     copied_at: Option<i64>,
@@ -640,6 +640,38 @@ pub(super) fn nearby_row(s: &State, found: &Value, busy: bool) -> El {
     ))
 }
 
+pub(super) fn manual_join_form(s: &State, busy: bool) -> El {
+    let ready = !s.system.other_url.text.trim().is_empty() && !busy;
+    row()
+        .w_full()
+        .gap(8.0)
+        .center_y()
+        .child(
+            kit::input(
+                s,
+                &s.system.other_url,
+                "cluster-url",
+                "Adres van een andere laptop",
+                "http://192.168.1.20:5173",
+            )
+            .grow(1.0)
+            .on_edit(|s: &mut State| &mut s.system.other_url),
+        )
+        .child(kit::btn(
+            s,
+            "cluster-manual-join",
+            if busy { "Bezig..." } else { "Koppelen" },
+            Kind::Primary,
+            false,
+            None,
+            !ready,
+            |s| {
+                let url = s.system.other_url.text.trim().to_string();
+                confirm_cluster(s, "cluster.joinGroup", json!({"url":url}))
+            },
+        ))
+}
+
 fn cluster_panel(s: &State) -> El {
     let c = cluster(s);
     let members = c["members"].as_array().cloned().unwrap_or_default();
@@ -825,7 +857,6 @@ fn cluster_panel(s: &State) -> El {
                 .as_str()
                 .map(|n| format!(" heet **{n}** en"))
                 .unwrap_or_default();
-            let ready = !s.system.other_url.text.trim().is_empty() && !busy;
             details = details
                 .child(
                     kit::strong_text(
@@ -836,36 +867,7 @@ fn cluster_panel(s: &State) -> El {
                     .wrap()
                     .max_w(kit::COPY_MAX),
                 )
-                .child(
-                    row()
-                        .w_full()
-                        .gap(8.0)
-                        .center_y()
-                        .child(
-                            kit::input(
-                                s,
-                                &s.system.other_url,
-                                "cluster-url",
-                                "Adres van een andere laptop",
-                                "http://192.168.1.20:5173",
-                            )
-                            .grow(1.0)
-                            .on_edit(|s: &mut State| &mut s.system.other_url),
-                        )
-                        .child(kit::btn(
-                            s,
-                            "cluster-manual-join",
-                            if busy { "Bezig..." } else { "Koppelen" },
-                            Kind::Primary,
-                            false,
-                            None,
-                            !ready,
-                            |s| {
-                                let url = s.system.other_url.text.trim().to_string();
-                                confirm_cluster(s, "cluster.joinGroup", json!({"url":url}))
-                            },
-                        )),
-                );
+                .child(manual_join_form(s, busy));
         }
         p = p.child(spaced(kit::notice(s, Tone::Hint, details)));
     } else {

@@ -582,6 +582,7 @@ pub(super) fn header_meta(s: &State) -> Option<El> {
     let c = tok::tones(s.dark);
     let meta = |v: &str| Some(text(v.to_string()).font(type_::BODY).color(c.ink3));
     match s.page {
+        0 if super::overview::show_welcome(s) => meta("Nog niet ingesteld"),
         3 => Some(super::analysis_page::header_meta(s)),
         2 => meta("Spatie of Enter klokt de huidige loper af en start de volgende."),
         4 => Some(header_tag(
@@ -629,7 +630,7 @@ pub(super) fn header_tag(value: &str, partial: bool, live: bool, dark: bool) -> 
 /// Buttons on the right of the header (`PageHeader` actions). Page modules add theirs here.
 pub(super) fn header_actions(s: &State) -> Vec<El> {
     match s.page {
-        0 if !s.snapshot["host"]["url"].is_null() => {
+        0 if !super::overview::show_welcome(s) && !s.snapshot["host"]["url"].is_null() => {
             let done = copied(2, s);
             vec![
                 header_button(

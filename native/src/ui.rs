@@ -1543,6 +1543,14 @@ mod tests {
         assert_eq!(confirmation.method, "cluster.joinGroup");
         assert_eq!(confirmation.input["url"], url);
         rt.update(|s, _| s.confirm = None);
+        click(&mut rt, "welcome-system");
+        assert_eq!(rt.state.page, 0);
+        rt.paste(url);
+        click(&mut rt, "cluster-manual-join");
+        let confirmation = rt.state.confirm.as_ref().unwrap();
+        assert_eq!(confirmation.method, "cluster.joinGroup");
+        assert_eq!(confirmation.input["url"], url);
+        rt.update(|s, _| s.confirm = None);
         click(&mut rt, "welcome-import");
         assert_eq!((rt.state.page, rt.state.admin_section), (8, 0));
     }

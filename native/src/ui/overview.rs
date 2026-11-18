@@ -76,6 +76,10 @@ pub(super) fn welcome_skipped() -> bool {
     public_screens::settings::read(WELCOME_KEY).as_deref() == Some("skipped")
 }
 
+pub(super) fn show_welcome(s: &State) -> bool {
+    runners(s).is_empty() && s.snapshot["race"]["raceStartedAt"].is_null() && !s.welcome_skipped
+}
+
 fn open_admin(section: usize) -> impl Fn(&mut State) {
     move |s| {
         s.page = 8;
@@ -164,9 +168,19 @@ fn welcome(s: &State) -> El {
                         true,
                         false,
                     )
-                    .on_press(open_admin(6)),
+                    .on_press_tx(|s: &mut State, tx: &mut Tx| {
+                        s.system.manual_open = !s.system.manual_open;
+                        if s.system.manual_open {
+                            tx.focus_when_shown("cluster-url", true);
+                        }
+                    }),
                 ),
             );
+            if s.system.manual_open {
+                second = second
+                    .child(copy(s, "Het adres staat onderaan de zijbalk op de andere laptop."))
+                    .child(admin_system::manual_join_form(s, busy));
+            }
         }
         row().gap(16.0).flex_wrap().child(first).child(second)
     } else {
@@ -200,7 +214,7 @@ fn welcome(s: &State) -> El {
                         tx.copy(url);
                     }
                 }))
-                .child(copy(s, "in de browser van de tv’s en kies Binnenscherm, Competitiescherm of Buitenscherm.")),
+                .child(copy(s, "in een browser. Zet het venster op het tweede scherm en kies Binnenscherm, Competitiescherm of Buitenscherm.")),
         );
     }
     welcome.child(choices).child(next).child(
@@ -224,8 +238,7 @@ fn welcome(s: &State) -> El {
 }
 
 pub(super) fn overview(s: &State) -> El {
-    if runners(s).is_empty() && s.snapshot["race"]["raceStartedAt"].is_null() && !s.welcome_skipped
-    {
+    if show_welcome(s) {
         return welcome(s);
     }
     let t = tok::theme(s.dark);

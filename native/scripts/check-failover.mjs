@@ -10,6 +10,7 @@ import { tmpdir } from 'node:os';
 
 const directory = await mkdtemp(join(tmpdir(), 'apolloon-browser-failover-'));
 const laptops = [];
+const browserStatus = [];
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 async function eventually(fn) {
   const expires = Date.now() + 20000;
@@ -60,11 +61,35 @@ let browser;
 try {
   const [a, b, c] = await Promise.all(['A', 'B', 'C'].map(laptop));
   await action(b, 'cluster.joinGroup', { url: a.url });
-  await eventually(async () => (await status(a)).members?.length === 2);
+  await eventually(async () => {
+    const group = await Promise.all([a, b].map(status));
+    return group.every((member) => member.members?.length === 2 && member.writable && !member.busy);
+  });
   await action(c, 'cluster.joinGroup', { url: a.url });
-  await eventually(async () => (await status(a)).members?.length === 3);
+  await eventually(async () => {
+    const group = await Promise.all(laptops.map(status));
+    return group.every(
+      (member) =>
+        member.members?.length === 3 && member.clusterId === group[0].clusterId && member.writable && !member.busy
+    );
+  });
   browser = await chromium.launch({ args: ['--enable-unsafe-swiftshader'] });
-  const page = await browser.newPage();
+  const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
+  function recordStatus(message) {
+    browserStatus.push(message);
+    if (browserStatus.length > 24) browserStatus.shift();
+  }
+  page.on('pageerror', (error) => recordStatus(error.message));
+  page.on('requestfailed', (request) => {
+    if (request.url().endsWith('/api/cluster/status')) {
+      recordStatus(`${request.url()} ${request.failure()?.errorText}`);
+    }
+  });
+  page.on('response', (response) => {
+    if (response.url().endsWith('/api/cluster/status')) {
+      recordStatus(`${response.url()} HTTP ${response.status()}`);
+    }
+  });
   await page.addInitScript(() => Object.defineProperty(navigator, 'gpu', { get: () => undefined }));
   const remembered = page.waitForResponse((r) => r.url() === a.url + '/api/cluster/status' && r.ok(), {
     timeout: 60000,
@@ -72,7 +97,7 @@ try {
   const section = '/display/outside?thema=donker&zoom=125';
   await page.goto(a.url + section);
   assert.equal((await (await remembered).json()).memberUrls.length, 2);
-  await page.waitForFunction(() => !!document.querySelector('canvas'));
+  await page.waitForFunction(() => document.querySelector('canvas') && !document.querySelector('#status'));
   await page.keyboard.press('F11');
   await page.waitForFunction(() => !!document.fullscreenElement);
   await page.keyboard.press('F11');
@@ -80,15 +105,22 @@ try {
   console.log('PASS: F11 enters and leaves browser fullscreen on the public display');
   a.child.kill('SIGTERM');
   await once(a.child, 'exit');
-  await page.waitForURL((url) => url.origin !== a.url, { timeout: 45000 });
+  await page.waitForURL((url) => url.origin !== a.url, { timeout: 45000, waitUntil: 'commit' });
   const next = new URL(page.url());
   assert([b.url, c.url].includes(next.origin));
   assert.equal(next.pathname + next.search, section);
-  await page.waitForFunction(() => !!document.querySelector('canvas'), null, { timeout: 45000 });
+  await page.waitForFunction(() => document.querySelector('canvas') && !document.querySelector('#status'), null, {
+    timeout: 45000,
+  });
   const evidence = resolve('.tmp-native-evidence/failover');
   await mkdir(evidence, { recursive: true });
   await page.screenshot({ path: join(evidence, 'public-failover.png') });
   console.log('PASS: live public browser moved to a surviving Rust laptop and kept display, theme and zoom');
+} catch (error) {
+  const surviving = laptops.filter((laptop) => laptop.child.exitCode === null && laptop.child.signalCode === null);
+  console.error('Recent browser cluster requests:', browserStatus);
+  console.error('Surviving cluster state:', await Promise.allSettled(surviving.map(status)));
+  throw error;
 } finally {
   await browser?.close();
   for (const laptop of laptops) {
