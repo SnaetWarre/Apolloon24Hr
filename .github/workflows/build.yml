@@ -190,6 +190,7 @@ jobs:
       - run: cargo build --manifest-path native/Cargo.toml --bin apolloon-native
       - run: npx playwright install --with-deps chromium
       - run: node native/scripts/check-web.mjs
+      - run: node native/scripts/check-failover.mjs
 
   # The one check the main branch requires, so jobs can be added or renamed without touching
   # the repository rules. It runs even when a job fails, and fails with it.

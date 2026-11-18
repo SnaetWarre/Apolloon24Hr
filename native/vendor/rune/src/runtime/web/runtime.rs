@@ -275,7 +275,7 @@ impl<S: 'static> Runtime<S> {
             "Home" => crate::Key::Home, "End" => crate::Key::End,
             "PageUp" => crate::Key::PageUp, "PageDown" => crate::Key::PageDown,
             "Backspace" => crate::Key::Backspace, "Delete" => crate::Key::Delete,
-            "ContextMenu" => crate::Key::ContextMenu,
+            "ContextMenu" => crate::Key::ContextMenu, " " => crate::Key::Text(" ".into()),
             "Insert" => crate::Key::Insert, "PrintScreen" => crate::Key::PrintScreen,
             "ScrollLock" => crate::Key::ScrollLock, "Pause" => crate::Key::Pause,
             name if name.chars().count() == 1 && mods.cmd => crate::Key::Command(name.chars().next().unwrap().to_ascii_lowercase()),

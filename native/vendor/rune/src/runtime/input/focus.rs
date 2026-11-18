@@ -670,10 +670,12 @@ impl<S: 'static> Runtime<S> {
             if let Some(f) = self.nodes[i].handlers.on_press.clone() { f(states!(self), tx); }
             return true;
         }
-        // Space presses the focused control. Return presses only rows and links; for a button
-        // it goes on to the default button (`default_button_key`, which ran first) or `on_key`.
+        // Space presses the focused control. Return presses rows and links, and a control the
+        // keyboard focused when no default button took it (`default_button_key` ran first), as
+        // an HTML button does; else it goes on to `on_key`.
         let space = ev.key == Key::Text(" ".into());
-        if self.nodes[i].input.is_none() && (space || (ev.key == Key::Enter && self.takes_return(i))) {
+        let enter = ev.key == Key::Enter && (self.takes_return(i) || (self.focus.keyboard() && self.nodes[i].handlers.on_press.is_some()));
+        if self.nodes[i].input.is_none() && (space || enter) {
             // A row the user cannot see highlighted (the pointer left it) chooses nothing.
             if self.nodes[i].focus.highlight.is_some() && !shown { self.focus.step(focus_machine::FocusEvent::Pointed); return true; }
             if repeat { return true; }

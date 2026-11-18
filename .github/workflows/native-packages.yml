@@ -2,6 +2,8 @@ name: Native packages
 
 on:
   workflow_dispatch:
+  pull_request:
+    paths: ['native/**', '.github/workflows/native-packages.yml', 'public/**', 'src/styles/wrapped.css']
   push:
     tags: ['native-v*']
 
@@ -39,6 +41,10 @@ jobs:
       - name: Install wasm-bindgen CLI matching native/Cargo.lock
         run: cargo install wasm-bindgen-cli --version 0.2.130 --locked
       - run: bash native/scripts/build-web.sh
+      - name: Set tagged build version
+        if: startsWith(github.ref, 'refs/tags/native-v')
+        shell: bash
+        run: echo "APOLLOON_APP_VERSION=${GITHUB_REF_NAME#native-v}" >> "$GITHUB_ENV"
       - run: cargo build --release --manifest-path native/Cargo.toml --bin apolloon-native
       - name: Stage package
         shell: bash
@@ -53,8 +59,24 @@ jobs:
       - name: Archive Unix package
         if: runner.os != 'Windows'
         run: tar -czf apolloon-native-${{ matrix.platform }}.tar.gz -C package .
+      - name: Start the packaged server and open the browser entry point
+        run: python native/scripts/check-package.py package/${{ matrix.binary }}
       - uses: actions/upload-artifact@v6
         with:
           name: apolloon-native-${{ matrix.platform }}
           path: apolloon-native-${{ matrix.platform }}.*
           if-no-files-found: error
+
+  checksums:
+    needs: package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: apolloon-native-*
+          merge-multiple: true
+      - run: sha256sum apolloon-native-*.tar.gz apolloon-native-*.zip > SHA256SUMS.txt
+      - uses: actions/upload-artifact@v6
+        with:
+          name: native-sha256sums
+          path: SHA256SUMS.txt

@@ -1,8 +1,6 @@
 //! Desktop integrations of the native app, ported from electron/*.ts: start screen and start
 //! errors, the supervised local server, single instance, window state, keep-awake and close
 //! confirmation during the race, logs and diagnostics, network setup and updates.
-// The hooks for Beheer › Systeem (diagnostics, update check and install, the last install's
-// outcome) wait for the operator UI's System section to call them.
 #![allow(dead_code)]
 #[cfg(feature = "desktop")]
 pub mod chrome;

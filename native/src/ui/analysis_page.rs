@@ -1528,43 +1528,17 @@ fn legend(items: &[(&str, Color, Color)], p: &Pal) -> El {
 }
 fn axis_title(v: &str, h: f32, p: &Pal, clockwise: bool) -> El {
     let title = row().w(h).h(16.0).center();
-    let title = if cfg!(target_arch = "wasm32") {
-        // Browsers without WebGPU paint on the CPU, which can't draw a turned layer: the whole
-        // frame would stay stale. Stack the letters there instead.
-        return el()
-            .w(16.0)
-            .h(h)
-            .center()
-            .child(upright(v, 12.0, 500.0, p.chart_muted));
+    let title = title.rotate(if clockwise {
+        std::f32::consts::FRAC_PI_2
     } else {
-        title.rotate(if clockwise {
-            std::f32::consts::FRAC_PI_2
-        } else {
-            -std::f32::consts::FRAC_PI_2
-        })
-    };
+        -std::f32::consts::FRAC_PI_2
+    });
     el().w(16.0).h(h).center().child(title.child(chart_text(
         v.to_string(),
         12.0,
         500.0,
         p.chart_muted,
     )))
-}
-/// A vertical title as a column of upright letters (the CPU-safe stand-in for turned text).
-pub(super) fn upright(v: &str, size: f32, weight: f32, color: Color) -> El {
-    let mut c = col().items_center();
-    for ch in v.chars() {
-        c = c.child(
-            text(if ch == ' ' {
-                "\u{a0}".to_string()
-            } else {
-                ch.to_string()
-            })
-            .font(rune::TextStyle::new(size, weight).lh(size * 0.92))
-            .color(color),
-        );
-    }
-    c
 }
 /// Tick labels on a vertical axis, top to bottom, with an 8px tick mark toward the plot.
 fn y_ticks(labels: Vec<String>, h: f32, p: &Pal, right: bool) -> El {

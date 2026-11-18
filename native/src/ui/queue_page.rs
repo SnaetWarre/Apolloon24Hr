@@ -37,6 +37,10 @@ pub(super) struct Add {
     confirm_close: bool,
     /// Opened from Beheer › Lopers: the runner is only registered, not sent to warm up.
     registered: bool,
+    /// What a drag over the hour grid paints (the opposite of the slot it started on).
+    paint: Option<bool>,
+    /// The pointer already toggled the slot on Down, so its press must not toggle it back.
+    painted: bool,
 }
 pub(super) enum Dialog {
     Search(Search),
@@ -2433,8 +2437,44 @@ fn event_hour_grid() -> Vec<(&'static str, Vec<u32>)> {
 }
 fn toggle_hour(s: &mut State, weekday: &'static str, hour: u32) {
     let a = add_mut(s);
+    if std::mem::take(&mut a.painted) {
+        return;
+    }
     let on = !has_hour(&a.hours, weekday, hour);
     a.hours = set_hour(&a.hours, weekday, hour, on);
+}
+/// Press and drag across slots to set them all (AvailableHoursPicker startPaint/continuePaint).
+fn paint_hours(s: &mut State, weekday: &'static str, hour: u32, d: &rune::Drag) {
+    // Layout space of the slot rects: this slot's own origin plus the pointer within it.
+    let own = s.queue_page.rects.get(&format!("hour-{weekday}-{hour}"));
+    let at = own.map_or([f32::NAN; 2], |r| [r[0] + d.x, r[1] + d.y]);
+    let under = event_hour_grid().into_iter().find_map(|(wd, hs)| {
+        hs.into_iter()
+            .find(|h| {
+                s.queue_page
+                    .rects
+                    .get(&format!("hour-{wd}-{h}"))
+                    .is_some_and(|r| hit(r, at))
+            })
+            .map(|h| (wd, h))
+    });
+    let a = add_mut(s);
+    match d.phase {
+        rune::Phase::Down => {
+            let on = !has_hour(&a.hours, weekday, hour);
+            a.paint = Some(on);
+            a.painted = true;
+            a.hours = set_hour(&a.hours, weekday, hour, on);
+        }
+        rune::Phase::Move => {
+            if let (Some(on), Some((wd, h))) = (a.paint, under)
+                && has_hour(&a.hours, wd, h) != on
+            {
+                a.hours = set_hour(&a.hours, wd, h, on);
+            }
+        }
+        rune::Phase::Up => a.paint = None,
+    }
 }
 fn hours_picker(s: &State, hours: &[String]) -> El {
     let p = pal(s.dark);
@@ -2473,6 +2513,16 @@ fn hours_picker(s: &State, hours: &[String]) -> El {
                     )
                     .hover(if on { p.brand_wash } else { p.t.surface2 })
                     .on_press(move |s: &mut State| toggle_hour(s, weekday, h))
+                    .on_drag(move |s: &mut State, d: &mut rune::Drag, _: &mut Tx| {
+                        paint_hours(s, weekday, h, d)
+                    })
+                    .on_layout_tx({
+                        let k = format!("hour-{weekday}-{h}");
+                        move |s: &mut State, rect, tx: &mut Tx| {
+                            s.queue_page.rects.insert(k.clone(), rect);
+                            tx.live_only();
+                        }
+                    })
                     .child(
                         text(format!("{h:02}–{:02}", (h + 1) % 24))
                             .font(rune::TextStyle::new(13.0, 500.0))
@@ -3100,6 +3150,36 @@ mod tests {
             .unwrap();
         let reg: Value = serde_json::from_str(row["r"].as_str().unwrap()).unwrap();
         assert_eq!(reg["availableHours"], json!(["21-22u (dinsdag)"]));
+    }
+
+    #[test]
+    fn dragging_across_hour_slots_sets_them_all() {
+        let (mut rt, _db) = start();
+        click(&mut rt, "queue-add");
+        click(&mut rt, "add-contact");
+        rt.frame(1.0 / 60.0);
+        let (x0, y0) = rt.find("add-hour-dinsdag-21").unwrap();
+        let (x1, y1) = rt.find("add-hour-dinsdag-22").unwrap();
+        let (x2, y2) = rt.find("add-hour-dinsdag-23").unwrap();
+        rt.pointer_down(x0, y0);
+        rt.pointer_move(x1, y1);
+        rt.pointer_move(x2, y2);
+        rt.pointer_up(x2, y2);
+        rt.frame(1.0 / 60.0);
+        let hours = add_mut(&mut rt.state).hours.clone();
+        assert_eq!(
+            hours,
+            vec!["21-22u (dinsdag)", "22-23u (dinsdag)", "23-00u (dinsdag)"]
+        );
+        // Starting on a set slot clears instead, and the release doesn't toggle it back.
+        rt.pointer_down(x1, y1);
+        rt.pointer_move(x2, y2);
+        rt.pointer_up(x2, y2);
+        rt.frame(1.0 / 60.0);
+        assert_eq!(add_mut(&mut rt.state).hours, vec!["21-22u (dinsdag)"]);
+        click(&mut rt, "add-hour-dinsdag-21");
+
+        assert!(add_mut(&mut rt.state).hours.is_empty());
     }
 
     #[test]

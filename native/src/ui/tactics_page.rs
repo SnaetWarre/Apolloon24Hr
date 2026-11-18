@@ -435,7 +435,16 @@ const T_FROM: usize = 5;
 const T_TO: usize = 6;
 const N_FROM: usize = 7;
 const N_TO: usize = 8;
-const HOUR: usize = 9;
+const DIAG_SLOW: usize = 9;
+const DIAG_JUMP: usize = 10;
+const DIAG_IMPROVEMENT: usize = 11;
+const DRAFT_FROM: usize = 12;
+const DRAFT_TO: usize = 13;
+const DRAFT_CLOSE: usize = 14;
+const DRAFT_FAR: usize = 15;
+const DRAFT_MIN: usize = 16;
+const DRAFT_MAX: usize = 17;
+const HOUR: usize = 18;
 const FIELDS: usize = HOUR + HOURS;
 
 #[derive(Clone, Copy, PartialEq)]
@@ -471,13 +480,17 @@ pub(super) struct Page {
     second: i64,
     deep: u8,
     detail: Option<i64>,
+    improving_second: bool,
 }
 
 impl Default for Page {
     fn default() -> Self {
         let own = bundled().as_ref().ok().and_then(|r| r.team(APOLLOON));
         let target = own.map(|t| t.cum.len() as f64).unwrap_or(800.0);
-        let vals = [target, 20.0, 55.0, 140.0, 530.0, 0.0, 24.0, 3.0, 9.0];
+        let vals = [
+            target, 20.0, 55.0, 140.0, 530.0, 0.0, 24.0, 3.0, 9.0, 90.0, 8.0, 15.0, 0.0, 24.0, 8.0,
+            15.0, 55.0, 140.0,
+        ];
         let mut edits: Vec<TextEdit> = vals.iter().map(|v| TextEdit::new(fmt_num(*v))).collect();
         edits.extend((0..HOURS).map(|_| TextEdit::new("")));
         Page {
@@ -506,6 +519,7 @@ impl Default for Page {
             second: VTK,
             deep: 0,
             detail: None,
+            improving_second: false,
         }
     }
 }
@@ -552,6 +566,14 @@ fn target_paces(p: &Page) -> Vec<f64> {
 fn bounds(p: &Page, id: usize) -> (f64, f64) {
     match id {
         TARGET | LAP_LEN => (1.0, f64::INFINITY),
+        DRAFT_FROM => (0.0, p.vals[DRAFT_TO] - 1.0),
+        DRAFT_TO => (p.vals[DRAFT_FROM] + 1.0, 24.0),
+        DRAFT_CLOSE => (1.0, p.vals[DRAFT_FAR] - 1.0),
+        DRAFT_FAR => (p.vals[DRAFT_CLOSE] + 1.0, 120.0),
+        DRAFT_MIN => (1.0, p.vals[DRAFT_MAX] - 1.0),
+        DRAFT_MAX => (p.vals[DRAFT_MIN] + 1.0, 300.0),
+        DIAG_SLOW => (10.0, 300.0),
+        DIAG_JUMP | DIAG_IMPROVEMENT => (1.0, 60.0),
         RECENT => (5.0, 100.0),
         MIN_S => (10.0, p.vals[MAX_S]),
         MAX_S => (p.vals[MIN_S], 300.0),
@@ -643,14 +665,93 @@ pub(super) fn load_file(s: &mut State, name: String, bytes: Vec<u8>) {
     let text = String::from_utf8_lossy(&bytes).to_string();
     match parse_race(&text) {
         Ok(race) => {
+            if let Err(error) = store_reference(Some((&name, &text))) {
+                s.tactics.error = Some(format!("Het bronbestand kon niet worden bewaard: {error}"));
+                return;
+            }
             s.tactics.custom = Some((race, name));
             s.tactics.error = None;
+            reset_diagnostics(&mut s.tactics);
             if !s.tactics.scenario_edited {
                 apply_reference_default(&mut s.tactics);
             }
         }
         Err(e) => s.tactics.error = Some(e),
     }
+}
+
+pub(super) fn restore_reference(p: &mut Page) {
+    if let Some((name, source)) = stored_reference()
+        && let Ok(race) = parse_race(&source)
+    {
+        p.custom = Some((race, name));
+        apply_reference_default(p);
+        reset_diagnostics(p);
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn reference_path() -> std::path::PathBuf {
+    crate::desktop::paths().data.join("historical-race.json")
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn stored_reference() -> Option<(String, String)> {
+    serde_json::from_slice(&std::fs::read(reference_path()).ok()?).ok()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn store_reference(reference: Option<(&str, &str)>) -> Result<(), String> {
+    let path = reference_path();
+    if let Some(reference) = reference {
+        let data = serde_json::to_vec(&reference).map_err(|e| e.to_string())?;
+        let folder = path.parent().expect("reference path has a parent");
+        std::fs::create_dir_all(folder).map_err(|e| e.to_string())?;
+        let temp = path.with_extension("tmp");
+        std::fs::write(&temp, data)
+            .and_then(|_| std::fs::rename(temp, path))
+            .map_err(|e| e.to_string())
+    } else {
+        match std::fs::remove_file(path) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error.to_string()),
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+const REFERENCE_KEY: &str = "apolloon.kobe-tactics.historical-race.v1";
+#[cfg(target_arch = "wasm32")]
+const REFERENCE_NAME_KEY: &str = "apolloon.kobe-tactics.historical-race-name.v1";
+
+#[cfg(target_arch = "wasm32")]
+fn stored_reference() -> Option<(String, String)> {
+    let storage = web_sys::window()?.local_storage().ok()??;
+    let source = storage.get_item(REFERENCE_KEY).ok()??;
+    let name = storage
+        .get_item(REFERENCE_NAME_KEY)
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| "Geïmporteerde resultaten".into());
+    Some((name, source))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn store_reference(reference: Option<(&str, &str)>) -> Result<(), String> {
+    let storage = web_sys::window()
+        .and_then(|w| w.local_storage().ok().flatten())
+        .ok_or("Browseropslag is niet beschikbaar.")?;
+    let result = if let Some((name, source)) = reference {
+        storage
+            .set_item(REFERENCE_KEY, source)
+            .and_then(|_| storage.set_item(REFERENCE_NAME_KEY, name))
+    } else {
+        storage
+            .remove_item(REFERENCE_KEY)
+            .and_then(|_| storage.remove_item(REFERENCE_NAME_KEY))
+    };
+    result.map_err(|_| "Browseropslag is niet beschikbaar of zit vol.".into())
 }
 
 fn apply_reference_default(p: &mut Page) {
@@ -665,8 +766,15 @@ fn apply_reference_default(p: &mut Page) {
 }
 
 fn clear_reference(s: &mut State) {
+    if let Err(error) = store_reference(None) {
+        s.tactics.error = Some(format!(
+            "Het bronbestand kon niet worden verwijderd: {error}"
+        ));
+        return;
+    }
     s.tactics.custom = None;
     s.tactics.error = None;
+    reset_diagnostics(&mut s.tactics);
     if !s.tactics.scenario_edited {
         apply_reference_default(&mut s.tactics);
     }
@@ -785,7 +893,14 @@ fn section_header(k: &Ink, title: &str, body: &str) -> El {
     col()
         .min_w(0.0)
         .mb(12.0)
-        .child(t(title, 14.0, 600.0, k.text).wrap().min_w(0.0).mb(4.0))
+        .child(
+            text(title.to_string())
+                .font(font(14.0, 600.0).lh(17.5))
+                .color(k.text)
+                .wrap()
+                .min_w(0.0)
+                .mb(4.0),
+        )
         .child(
             text(body.to_string())
                 .font(font(14.0, 400.0).lh(21.0))
@@ -808,7 +923,8 @@ fn segmented(
         .role("group")
         .label(label.to_string())
         .gap(2.0)
-        .padding(2.0)
+        // 2 px inside the 1 px border (a border here takes no room of its own).
+        .padding(3.0)
         .radius(6.0)
         .border(1.0, k.line)
         .fill(k.surface2);
@@ -922,11 +1038,15 @@ fn select(
 /// `NumberInput` with the `.input` look.
 fn num_input(s: &State, k: &Ink, id: usize, label: &str, style: TextStyle, h: f32) -> El {
     let focused = s.tactics.edits[id].focused;
-    text_input(&s.tactics.edits[id], style)
+    // `.input`: 10 px across, the line centred in the control.
+    let line = (style.size * 1.2).round();
+    text_input(&s.tactics.edits[id], style.lh(line))
+        .single_line()
         .key(format!("tac-num-{id}"))
         .label(label.to_string())
         .h(h)
-        .px(14.0)
+        .py(((h - line) / 2.0).max(0.0))
+        .px(10.0)
         .radius(6.0)
         .fill(k.card)
         .color(k.text)
@@ -941,7 +1061,13 @@ fn field(k: &Ink, label: &str, control: El) -> El {
     col()
         .gap(6.0)
         .min_w(0.0)
-        .child(t(label, 13.5, 600.0, k.ink2).wrap().min_w(0.0))
+        .child(
+            text(label.to_string())
+                .font(font(13.5, 600.0).lh(20.25))
+                .color(k.ink2)
+                .wrap()
+                .min_w(0.0),
+        )
         .child(control)
 }
 
@@ -987,13 +1113,14 @@ fn stat(
         Some(false) => k.stop_ink,
         None => k.text,
     };
-    let mut v = row()
-        .h(30.0)
-        .center_y()
-        .gap(5.0)
-        .child(t(value, 23.2, 550.0, color));
+    // `strong`: 2 px down, clamp(20px, 1.7vw, 24px) on a 1.2 line; the unit sits on its baseline.
+    let mut v = row().mt(2.0).items_end().gap(5.0).child(
+        text(value.to_string())
+            .font(font(23.2, 550.0).lh(27.84))
+            .color(color),
+    );
     if let Some(u) = unit {
-        v = v.child(t(u, 14.0, 500.0, k.ink3).mt(5.0));
+        v = v.child(t(u, 14.0, 500.0, k.ink3).mb(4.0));
     }
     col()
         .grow(1.0)
@@ -1001,12 +1128,20 @@ fn stat(
         .min_w(0.0)
         .gap(2.0)
         .px(16.0)
-        .py(12.0)
-        .child(t(label, 12.5, 400.0, k.ink3).truncate().min_w(0.0))
+        // 12 px padding; the label's first line sits 2 px lower in a 1.5 line box than here.
+        .pt(14.0)
+        .pb(13.0)
+        .child(
+            text(label.to_string())
+                .font(font(12.5, 400.0).lh(18.75))
+                .color(k.ink3)
+                .truncate()
+                .min_w(0.0),
+        )
         .child(v)
         .child(
             text(detail.to_string())
-                .font(font(12.5, 400.0).lh(18.0))
+                .font(font(12.5, 400.0).lh(18.75))
                 .color(k.ink3)
                 .wrap()
                 .min_w(0.0),
@@ -1302,13 +1437,13 @@ fn chart(s: &State, k: &Ink, spec: ChartSpec) -> El {
                 .iter()
                 .map(|p| [p[0].clamp(left, left + pw), p[1]])
                 .collect();
-            match sr.dash {
+            match sr.dash.filter(|_| sr.width > 0.0) {
                 Some((on, off)) => {
                     for seg in dashed(&clipped, on, off) {
                         shape = shape.stroke(seg, sr.width, sr.color);
                     }
                 }
-                None if clipped.len() > 1 => {
+                None if sr.width > 0.0 && clipped.len() > 1 => {
                     shape = shape.stroke(clipped.clone(), sr.width, sr.color)
                 }
                 None => {}
@@ -1373,19 +1508,7 @@ fn chart(s: &State, k: &Ink, spec: ChartSpec) -> El {
                 .child(t((spec.y_fmt)(*v), 12.0, 400.0, k.muted)),
         );
     }
-    card = card.child(if cfg!(target_arch = "wasm32") {
-        // CPU-painted browsers can't draw a turned layer (the frame would stay stale).
-        el().w(16.0)
-            .h(ph)
-            .center()
-            .absolute(3.0, top)
-            .child(super::analysis_page::upright(
-                &spec.y_title,
-                12.0,
-                500.0,
-                k.muted,
-            ))
-    } else {
+    card = card.child(
         row()
             .w(ph)
             .h(16.0)
@@ -1393,8 +1516,8 @@ fn chart(s: &State, k: &Ink, spec: ChartSpec) -> El {
             .center_y()
             .absolute(11.0 - ph / 2.0, top + ph / 2.0 - 8.0)
             .rotate(-std::f32::consts::FRAC_PI_2)
-            .child(t(spec.y_title.clone(), 12.0, 500.0, k.muted))
-    });
+            .child(t(spec.y_title.clone(), 12.0, 500.0, k.muted)),
+    );
     if let Some(xt) = &spec.x_title {
         card = card.child(
             row()
@@ -1684,7 +1807,12 @@ fn live(s: &State, k: &Ink) -> El {
 
 fn scenario(s: &State, k: &Ink, has_own: bool, has_rival: bool) -> El {
     let p = &s.tactics;
-    let group_label = |v: &str| t(v, 13.0, 600.0, k.ink3).mt(8.0);
+    let group_label = |v: &str| {
+        text(v.to_string())
+            .font(font(13.0, 600.0).lh(19.5))
+            .color(k.ink3)
+            .mt(8.0)
+    };
     let goal = font(22.0, 600.0);
     col()
         .w(320.0)
@@ -3059,7 +3187,7 @@ fn historical(s: &State, k: &Ink) -> El {
                         k,
                         "Eerste team",
                         select(s, k, "tac-first", "Eerste team", names.clone(), pos(first.id), 34.0, 13.5,
-                            Rc::new(move |s: &mut State, i| s.tactics.first = ids1[i])),
+                            Rc::new(move |s: &mut State, i| { s.tactics.first = ids1[i]; reset_diagnostics(&mut s.tactics); })),
                     )
                     .grow(0.6)
                     .w(0.0),
@@ -3069,7 +3197,7 @@ fn historical(s: &State, k: &Ink) -> El {
                         k,
                         "Tweede team",
                         select(s, k, "tac-second", "Tweede team", names.clone(), pos(second.id), 34.0, 13.5,
-                            Rc::new(move |s: &mut State, i| s.tactics.second = ids2[i])),
+                            Rc::new(move |s: &mut State, i| { s.tactics.second = ids2[i]; reset_diagnostics(&mut s.tactics); })),
                     )
                     .grow(0.6)
                     .w(0.0),
@@ -3122,7 +3250,12 @@ fn historical(s: &State, k: &Ink) -> El {
             .py(11.0)
             .hover(k.surface2)
             .press(k.surface3)
-            .on_press(move |s: &mut State| s.tactics.deep = i as u8)
+            .on_press(move |s: &mut State| {
+                s.tactics.deep = i as u8;
+                if i == 3 {
+                    reset_diagnostics(&mut s.tactics);
+                }
+            })
             .child(t(*label, 14.0, 700.0, k.text))
             .child(t(*detail, 12.0, 400.0, k.ink3).truncate().min_w(0.0));
         if active {
@@ -3143,11 +3276,8 @@ fn historical(s: &State, k: &Ink) -> El {
         0 => overview_section(s, k, race, first, second),
         1 => tempo_section(s, k, first, second),
         2 => race_section(s, k, first, second),
-        _ => col().child(panel(k).child(section_header(
-            k,
-            if p.deep == 3 { "Diagnostiek" } else { "Volgeffect" },
-            "Dit onderdeel staat nog niet in de native versie; open de webversie voor de volledige analyse.",
-        ))),
+        3 => diagnostics(s, k, first, second),
+        _ => drafting(s, k, first, second),
     };
     col()
         .gap(16.0)
@@ -3161,6 +3291,456 @@ fn historical(s: &State, k: &Ink) -> El {
             race.teams.len(),
             error.as_deref(),
         ))
+}
+
+fn reset_diagnostics(p: &mut Page) {
+    let (race, _, _) = race_data(p);
+    let values = race
+        .into_iter()
+        .flat_map(|race| {
+            [race.team(p.first), race.team(p.second)]
+                .into_iter()
+                .flatten()
+                .flat_map(|team| team.dur.iter().map(|ms| ms / 1000.0))
+        })
+        .collect::<Vec<_>>();
+    let threshold = (quantile(&values, 0.9).unwrap_or(90.0) / 5.0).round() * 5.0;
+    p.vals[DIAG_SLOW] = threshold;
+    p.edits[DIAG_SLOW].replace_text(fmt_num(threshold));
+    p.improving_second = false;
+}
+
+struct DiagnosticLap {
+    number: usize,
+    hour: f64,
+    seconds: f64,
+    change: Option<f64>,
+}
+
+fn diagnostic_laps(team: &Team, slow: f64, jump: f64) -> (Vec<DiagnosticLap>, Vec<DiagnosticLap>) {
+    let mut slow_laps = Vec::new();
+    let mut jumps = Vec::new();
+    for (i, (&end, &duration)) in team.cum.iter().zip(&team.dur).enumerate() {
+        let lap = || DiagnosticLap {
+            number: i + 1,
+            hour: end / 3_600_000.0,
+            seconds: duration / 1000.0,
+            change: None,
+        };
+        if duration / 1000.0 > slow {
+            slow_laps.push(lap());
+        }
+        if i >= 5 {
+            let baseline = team.dur[i - 5..i].iter().sum::<f64>() / 5.0;
+            let change = (duration - baseline) / 1000.0;
+            if change.abs() > jump {
+                jumps.push(DiagnosticLap {
+                    change: Some(change),
+                    ..lap()
+                });
+            }
+        }
+    }
+    slow_laps.sort_by(|a, b| b.seconds.total_cmp(&a.seconds));
+    jumps.sort_by(|a, b| {
+        b.change
+            .unwrap_or_default()
+            .abs()
+            .total_cmp(&a.change.unwrap_or_default().abs())
+    });
+    (slow_laps, jumps)
+}
+
+fn diagnostics(s: &State, k: &Ink, first: &Team, second: &Team) -> El {
+    let p = &s.tactics;
+    let input = |id, title| {
+        field(
+            k,
+            title,
+            num_input(s, k, id, title, font(13.5, 400.0), 34.0),
+        )
+        .grow(1.0)
+        .w(0.0)
+    };
+    let controls = panel(k)
+        .child(section_header(k, "Zoek de verliesmomenten", "Trage rondes zijn absolute uitschieters. Temposprongen wijken af van de vijf vorige rondes."))
+        .child(row().gap(12.0).child(input(DIAG_SLOW, "Trage ronde vanaf (s)")).child(input(DIAG_JUMP, "Temposprong vanaf (s)")));
+    let mut totals = Vec::new();
+    let mut series = Vec::new();
+    let mut tables = row().gap(16.0);
+    for (i, team) in [first, second].into_iter().enumerate() {
+        let (slow_laps, jumps) = diagnostic_laps(team, p.vals[DIAG_SLOW], p.vals[DIAG_JUMP]);
+        let mut column = col().gap(14.0).grow(1.0).w(0.0).min_w(0.0);
+        for (title, laps, is_jump) in [
+            ("Trage rondes", &slow_laps, false),
+            ("Temposprongen", &jumps, true),
+        ] {
+            let name = format!("{title} {}", team.name);
+            totals.push(stat(k, &name, &laps.len().to_string(), None, "", None));
+            series.push(Series {
+                label: name.clone(),
+                color: team_color(k, team.id, i),
+                width: 0.0,
+                dash: None,
+                points: laps
+                    .iter()
+                    .map(|lap| (lap.hour, Some(lap.seconds)))
+                    .collect(),
+                dots: if is_jump { 3.0 } else { 5.0 },
+                hidden: false,
+            });
+            let rows = laps
+                .iter()
+                .take(10)
+                .map(|lap| {
+                    (
+                        vec![
+                            t(lap.number.to_string(), 13.0, 500.0, k.text),
+                            t(format!("{:.2} u", lap.hour), 13.0, 400.0, k.ink2),
+                            t(format!("{:.1} s", lap.seconds), 13.0, 400.0, k.text),
+                            t(
+                                lap.change
+                                    .map(|change| format!("{change:+.1} s"))
+                                    .unwrap_or("—".into()),
+                                13.0,
+                                400.0,
+                                k.ink2,
+                            ),
+                        ],
+                        false,
+                    )
+                })
+                .collect();
+            column = column.child(t(name, 14.0, 600.0, k.text)).child(table(
+                k,
+                &["Ronde", "Race-uur", "Duur", "Verschil"],
+                &[1.0; 4],
+                rows,
+                k.card,
+            ));
+        }
+        tables = tables.child(column);
+    }
+    let timeline = panel(k)
+        .child(section_header(
+            k,
+            "Trage rondes en plotse temposprongen",
+            "De punten tonen op welk moment in de race elke afwijking viel.",
+        ))
+        .child(chart(
+            s,
+            k,
+            ChartSpec {
+                key: "historical-diagnostics",
+                height: 280.0,
+                x_min: 0.0,
+                x_max: 24.0,
+                x_ticks: plain_hour_ticks(),
+                x_title: None,
+                y_title: "Rondeduur (s)".into(),
+                y_fmt: Box::new(|v| format!("{v:.0}")),
+                grace: 0.05,
+                begin_at_zero: false,
+                zero_line: false,
+                legend: true,
+                series,
+                bands: vec![],
+                now: None,
+                scatter: None,
+            },
+        ));
+    let (improving, target) = if p.improving_second {
+        (second, first)
+    } else {
+        (first, second)
+    };
+    let average = improving.dur.iter().sum::<f64>() / improving.dur.len().max(1) as f64 / 1000.0;
+    let required = 86_400.0 / target.cum.len().max(1) as f64;
+    let difference = average - required;
+    let max = p.vals[DIAG_IMPROVEMENT].min((average - 5.0).max(0.0));
+    let points = (0..=(max * 2.0).floor() as usize)
+        .filter_map(|step| {
+            let gain = step as f64 / 2.0;
+            (average > gain).then(|| (gain, Some((86_400.0 / (average - gain)).floor())))
+        })
+        .collect();
+    let calculator = panel(k)
+        .child(section_header(k, "Break-even calculator", "Bereken hoe snel een team gemiddeld moet lopen om het aantal rondes van het andere team te halen."))
+        .child(row().gap(12.0)
+            .child(field(k, "Welk team verbetert?", select(
+                s, k, "tac-improving", "Welk team verbetert?",
+                vec![(first.name.clone(), true), (second.name.clone(), true)], usize::from(p.improving_second),
+                34.0, 13.5, Rc::new(|s: &mut State, i| s.tactics.improving_second = i == 1),
+            )).grow(1.0).w(0.0))
+            .child(input(DIAG_IMPROVEMENT, "Maximale verbetering (s)"))
+            .child(stat(k, "Benodigd voor break-even", &format!("{required:.1} s"), None,
+                &format!("{difference:+.1} s per ronde"), None).grow(1.0).w(0.0)))
+        .child(chart(s, k, ChartSpec {
+            key: "historical-break-even", height: 260.0, x_min: 0.0, x_max: max.max(1.0),
+            x_ticks: (0..=5).map(|i| { let value = i as f64 * max.max(1.0) / 5.0; (value, vec![format!("{value:.1}")]) }).collect(),
+            x_title: Some("Verbetering per ronde (s)".into()), y_title: "Rondes".into(),
+            y_fmt: Box::new(|v| format!("{v:.0}")), grace: 0.05, begin_at_zero: false,
+            zero_line: false, legend: true, bands: vec![], now: None, scatter: None,
+            series: vec![
+                Series { label: improving.name.clone(), color: team_color(k, improving.id, 0), width: 2.0, dash: None, points, dots: 0.0, hidden: false },
+                Series { label: target.name.clone(), color: team_color(k, target.id, 1), width: 2.0, dash: Some((5.0, 5.0)), points: vec![(0.0, Some(target.cum.len() as f64)), (max.max(1.0), Some(target.cum.len() as f64))], dots: 0.0, hidden: false },
+            ],
+        }));
+    col()
+        .gap(16.0)
+        .child(controls)
+        .child(stats_grid(k, "Diagnostiek", totals))
+        .child(timeline)
+        .child(panel(k).child(tables))
+        .child(calculator)
+}
+
+fn clean_passages(team: &Team, page: &Page) -> Vec<(f64, f64)> {
+    let [start, end] = [page.vals[DRAFT_FROM] * 3600.0, page.vals[DRAFT_TO] * 3600.0];
+    let mut laps = team
+        .cum
+        .iter()
+        .zip(&team.dur)
+        .map(|(time, duration)| (time / 1000.0, duration / 1000.0))
+        .filter(|(time, _)| (start..=end).contains(time))
+        .collect::<Vec<_>>();
+    let durations = laps.iter().map(|lap| lap.1).collect::<Vec<_>>();
+    let center = median(&durations).unwrap_or_default();
+    let q1 = quantile(&durations, 0.25).unwrap_or(center);
+    let q3 = quantile(&durations, 0.75).unwrap_or(center);
+    let range = q3 - q1;
+    let deviations = durations
+        .iter()
+        .map(|duration| (duration - center).abs())
+        .collect::<Vec<_>>();
+    let mad = median(&deviations).unwrap_or_default() * 1.4826;
+    let mut min = (q1 - 3.0 * range).max(page.vals[DRAFT_MIN]);
+    let mut max = (q3 + 3.0 * range).min(page.vals[DRAFT_MAX]);
+    if mad > 0.0 {
+        min = min.max(center - 4.0 * mad);
+        max = max.min(center + 4.0 * mad);
+    }
+    laps.retain(|(_, duration)| (min..=max).contains(duration));
+    laps
+}
+
+fn nearest_passages(focus: &[(f64, f64)], other: &[(f64, f64)]) -> Vec<(f64, f64)> {
+    if other.is_empty() {
+        return Vec::new();
+    }
+    focus
+        .iter()
+        .map(|&(time, duration)| {
+            let index = other.partition_point(|lap| lap.0 <= time);
+            let previous = index
+                .checked_sub(1)
+                .and_then(|i| other.get(i))
+                .map_or(f64::INFINITY, |lap| time - lap.0);
+            let next = other.get(index).map_or(f64::INFINITY, |lap| time - lap.0);
+            (
+                if previous.abs() <= next.abs() {
+                    previous
+                } else {
+                    next
+                },
+                duration,
+            )
+        })
+        .collect()
+}
+
+/// Two-sided Mann–Whitney probability, with the same tie correction as the reference.
+fn rank_probability(a: &[f64], b: &[f64]) -> Option<f64> {
+    if a.is_empty() || b.is_empty() {
+        return None;
+    }
+    let mut ranked = a
+        .iter()
+        .map(|v| (*v, true))
+        .chain(b.iter().map(|v| (*v, false)))
+        .collect::<Vec<_>>();
+    ranked.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut rank_sum = 0.0;
+    let mut ties = 0.0;
+    let mut start = 0;
+    while start < ranked.len() {
+        let end = start + ranked[start..].partition_point(|item| item.0 == ranked[start].0);
+        let count = (end - start) as f64;
+        ties += count.powi(3) - count;
+        rank_sum += (start + 1 + end) as f64 / 2.0
+            * ranked[start..end].iter().filter(|item| item.1).count() as f64;
+        start = end;
+    }
+    let (a, b, n) = (a.len() as f64, b.len() as f64, ranked.len() as f64);
+    let variance = a * b / (n * (n - 1.0)) * (n.powi(3) - n - ties) / 12.0;
+    if variance <= 0.0 {
+        return Some(1.0);
+    }
+    let z = ((rank_sum - a * (a + 1.0) / 2.0 - a * b / 2.0) / variance.sqrt()).abs()
+        / std::f64::consts::SQRT_2;
+    let t = 1.0 / (1.0 + 0.3275911 * z);
+    let polynomial = ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t
+        + 0.254829592)
+        * t;
+    Some((polynomial * (-z * z).exp()).clamp(0.0, 1.0))
+}
+
+fn drafting(s: &State, k: &Ink, first: &Team, second: &Team) -> El {
+    let mut controls = row().gap(12.0);
+    for (id, title) in [
+        (DRAFT_FROM, "Van race-uur"),
+        (DRAFT_TO, "Tot race-uur"),
+        (DRAFT_CLOSE, "Dichtbij tot (s)"),
+        (DRAFT_FAR, "Ver weg vanaf (s)"),
+        (DRAFT_MIN, "Minimum ronde (s)"),
+        (DRAFT_MAX, "Maximum ronde (s)"),
+    ] {
+        controls = controls.child(
+            field(
+                k,
+                title,
+                num_input(s, k, id, title, font(13.5, 400.0), 34.0),
+            )
+            .grow(1.0)
+            .w(0.0),
+        );
+    }
+    let first_laps = clean_passages(first, &s.tactics);
+    let second_laps = clean_passages(second, &s.tactics);
+    let edges = [0.0, 5.0, 10.0, 15.0, 20.0, 30.0, f64::INFINITY];
+    let mut scatter = Vec::new();
+    let mut bins = Vec::new();
+    let mut rows = Vec::new();
+    let mut max_gap: f64 = 5.0;
+    for (i, (team, focused, other)) in [
+        (first, &first_laps, &second_laps),
+        (second, &second_laps, &first_laps),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let passages = nearest_passages(focused, other);
+        let color = team_color(k, team.id, i);
+        max_gap = passages
+            .iter()
+            .fold(max_gap, |max, (gap, _)| max.max(gap.abs()));
+        scatter.push(Series {
+            label: team.name.clone(),
+            color,
+            width: 0.0,
+            dash: None,
+            points: passages
+                .iter()
+                .map(|&(gap, duration)| (gap, Some(duration)))
+                .collect(),
+            dots: 2.0,
+            hidden: false,
+        });
+        let points = edges
+            .windows(2)
+            .enumerate()
+            .map(|(i, edge)| {
+                let times = passages
+                    .iter()
+                    .filter(|(gap, _)| (edge[0]..edge[1]).contains(&gap.abs()))
+                    .map(|(_, d)| *d)
+                    .collect::<Vec<_>>();
+                (
+                    i as f64,
+                    if times.len() >= 4 {
+                        median(&times)
+                    } else {
+                        None
+                    },
+                )
+            })
+            .collect();
+        bins.push(Series {
+            label: team.name.clone(),
+            color,
+            width: 2.0,
+            dash: None,
+            points,
+            dots: 3.0,
+            hidden: false,
+        });
+        let collect = |test: &dyn Fn(f64) -> bool| {
+            passages
+                .iter()
+                .filter(|(gap, _)| test(*gap))
+                .map(|(_, d)| *d)
+                .collect::<Vec<_>>()
+        };
+        let close = s.tactics.vals[DRAFT_CLOSE];
+        let far = s.tactics.vals[DRAFT_FAR];
+        let near = collect(&|gap| gap.abs() <= close);
+        let behind = collect(&|gap| gap > 0.0 && gap <= close);
+        let ahead = collect(&|gap| gap < 0.0 && -gap <= close);
+        let far = collect(&|gap| gap.abs() >= far);
+        for (name, a, b) in [
+            ("Dichtbij vs. ver weg", &near, &far),
+            ("Achteraan dichtbij vs. ver weg", &behind, &far),
+            ("Vooraan dichtbij vs. ver weg", &ahead, &far),
+            ("Achteraan vs. vooraan dichtbij", &behind, &ahead),
+        ] {
+            let p = rank_probability(a, b);
+            let effect = median(b).zip(median(a)).map(|(b, a)| b - a);
+            let cell = |value: String| t(value, 13.0, 400.0, k.text);
+            rows.push((
+                vec![
+                    cell(team.name.clone()),
+                    cell(name.into()),
+                    cell(format!("{} / {}", a.len(), b.len())),
+                    cell(effect.map(|v| format!("{v:+.2} s")).unwrap_or("—".into())),
+                    cell(p.map(|v| format!("{v:.4}")).unwrap_or("—".into())),
+                ],
+                p.is_some_and(|v| v < 0.05),
+            ));
+        }
+    }
+    let graph = |key, title: &str, caption: &str, points, x_min, x_max, ticks, zero_line| {
+        panel(k)
+            .child(section_header(k, title, caption))
+            .child(chart(
+                s,
+                k,
+                ChartSpec {
+                    key,
+                    height: 280.0,
+                    x_min,
+                    x_max,
+                    x_ticks: ticks,
+                    x_title: None,
+                    y_title: "Rondeduur (s)".into(),
+                    y_fmt: Box::new(|v| format!("{v:.0}")),
+                    grace: 0.05,
+                    begin_at_zero: false,
+                    zero_line,
+                    legend: true,
+                    series: points,
+                    bands: vec![],
+                    now: None,
+                    scatter: None,
+                },
+            ))
+    };
+    let gap_ticks = (-4..=4)
+        .map(|i| {
+            let gap = i as f64 * max_gap / 4.0;
+            (gap, vec![format!("{gap:.0} s")])
+        })
+        .collect();
+    let bin_ticks = ["0–5 s", "5–10 s", "10–15 s", "15–20 s", "20–30 s", "30 s+"]
+        .into_iter()
+        .enumerate()
+        .map(|(i, name)| (i as f64, vec![name.into()]))
+        .collect();
+    col().gap(16.0)
+        .child(panel(k).child(section_header(k, "Loopt een team sneller vlak bij het andere team?", "Elke passage wordt gekoppeld aan de dichtstbijzijnde passage van het andere team.")).child(controls))
+        .child(graph("historical-drafting-scatter", "Rondetijd volgens positie tegenover de andere ploeg", "Negatief is voorop. Positief is achterop.", scatter, -max_gap, max_gap, gap_ticks, false))
+        .child(graph("historical-drafting-proximity", "Mediaan rondetijd volgens afstand tot de andere ploeg", "Een mediaan verschijnt vanaf vier rondes in de categorie.", bins, 0.0, 5.0, bin_ticks, false))
+        .child(panel(k).child(section_header(k, "Wilcoxon-rangsom met tiecorrectie", "Een positief effect betekent dat de eerste situatie sneller was.")).child(
+            table(k, &["Team", "Vergelijking", "Rondes", "Effect", "p"], &[1.0, 3.0, 0.8, 0.7, 0.7], rows, k.brand_wash)))
 }
 
 fn overview_section(s: &State, k: &Ink, race: &Race, first: &Team, second: &Team) -> El {
@@ -3648,6 +4228,52 @@ mod tests {
         assert_eq!(pace(Some(83.25)), "1:23.250");
         assert_eq!(pace(Some(86_400.0 / 1095.0)), "1:18.904");
         assert_eq!(race_hour(0.85), "0u51");
+    }
+
+    #[test]
+    fn historical_diagnostics_and_drafting_use_the_selected_reference() {
+        let mut s = super::super::init_with_url("http://127.0.0.1:1".into());
+        s.fixture = true;
+        s.page = 4;
+        s.tactics.section = 1;
+        s.tactics.deep = 3;
+        reset_diagnostics(&mut s.tactics);
+        let mut rt = rune::Runtime::new(
+            s,
+            super::super::view,
+            (1366.0, 1080.0),
+            rune::Env {
+                system_dark: false,
+                scale: 1.0,
+            },
+        );
+        rt.frame(0.0);
+        assert!(rt.find("tac-chart-historical-diagnostics").is_some());
+        assert!(rt.find("tac-chart-historical-break-even").is_some());
+        let (x, y) = rt.find("tac-deep-4").expect("Volgeffect tab");
+        rt.pointer_down(x, y);
+        rt.pointer_up(x, y);
+        rt.frame(0.2);
+        assert!(rt.find("tac-chart-historical-drafting-scatter").is_some());
+        assert!(rt.find("tac-chart-historical-drafting-proximity").is_some());
+
+        let fixture = Team {
+            id: 42,
+            name: "Test".into(),
+            cum: vec![
+                60_000.0, 120_000.0, 180_000.0, 240_000.0, 300_000.0, 385_000.0,
+            ],
+            dur: vec![60_000.0, 60_000.0, 60_000.0, 60_000.0, 60_000.0, 85_000.0],
+        };
+        let (slow, jumps) = diagnostic_laps(&fixture, 80.0, 8.0);
+        assert_eq!(slow.iter().map(|lap| lap.number).collect::<Vec<_>>(), [6]);
+        assert_eq!(jumps[0].change, Some(25.0));
+        assert_eq!(
+            nearest_passages(&[(10.0, 60.0)], &[(6.0, 61.0), (14.0, 62.0)]),
+            [(4.0, 60.0)]
+        );
+        assert_eq!(rank_probability(&[60.0, 60.0], &[60.0, 60.0]), Some(1.0));
+        assert!(rank_probability(&[60.0; 10], &[70.0; 10]).unwrap() < 0.05);
     }
 
     #[test]

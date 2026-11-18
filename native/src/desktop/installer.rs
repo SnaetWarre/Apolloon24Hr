@@ -91,29 +91,53 @@ pub fn download(
 /// Moves the unpacked binary and web-dist in place of the running ones (the old ones stay as
 /// `.old` until the next update). A running binary may be renamed on every platform.
 pub fn apply(unpacked: &Path, install_dir: &Path) -> Result<(), String> {
-    let swap = |name: &str| -> Result<(), String> {
+    if !unpacked.join(binary_name()).is_file() || !unpacked.join("web-dist/index.html").is_file() {
+        return Err("Het updatepakket mist het programma of de browserbestanden.".into());
+    }
+    let swap = |name: &str| -> Result<bool, String> {
         let target = install_dir.join(name);
         let old = install_dir.join(format!("{name}.old"));
         let source = unpacked.join(name);
-        if !source.exists() {
-            return Ok(());
+        let had_target = target.exists();
+        if old.exists() {
+            let remove = if old.is_dir() {
+                std::fs::remove_dir_all(&old)
+            } else {
+                std::fs::remove_file(&old)
+            };
+            remove.map_err(|e| format!("{name}: {e}"))?;
         }
-        let _ = if old.is_dir() {
-            std::fs::remove_dir_all(&old)
-        } else {
-            std::fs::remove_file(&old)
-        };
-        if target.exists() {
+        if had_target {
             std::fs::rename(&target, &old).map_err(|e| format!("{name}: {e}"))?;
         }
         if let Err(error) = std::fs::rename(&source, &target) {
-            let _ = std::fs::rename(&old, &target);
+            if had_target && let Err(rollback) = std::fs::rename(&old, &target) {
+                return Err(format!("{name}: {error}. Terugzetten mislukt: {rollback}"));
+            }
             return Err(format!("{name}: {error}"));
         }
-        Ok(())
+        Ok(had_target)
     };
-    swap("web-dist")?;
-    swap(binary_name())?;
+    let had_web = swap("web-dist")?;
+    if let Err(error) = swap(binary_name()) {
+        let rollback = std::fs::rename(install_dir.join("web-dist"), unpacked.join("web-dist"))
+            .and_then(|_| {
+                if had_web {
+                    std::fs::rename(
+                        install_dir.join("web-dist.old"),
+                        install_dir.join("web-dist"),
+                    )
+                } else {
+                    Ok(())
+                }
+            });
+        return match rollback {
+            Ok(()) => Err(error),
+            Err(rollback) => Err(format!(
+                "{error}. Browserbestanden terugzetten mislukt: {rollback}"
+            )),
+        };
+    }
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -137,6 +161,19 @@ mod tests {
         std::fs::write(install.join(binary_name()), "old").unwrap();
         std::fs::write(unpacked.join(binary_name()), "new").unwrap();
         std::fs::write(unpacked.join("web-dist/index.html"), "new").unwrap();
+        let staged = unpacked.join("web-dist/index.html");
+        std::fs::write(install.join("web-dist/index.html"), "old web").unwrap();
+        std::fs::remove_file(&staged).unwrap();
+        assert!(apply(&unpacked, &install).is_err());
+        assert_eq!(
+            std::fs::read_to_string(install.join(binary_name())).unwrap(),
+            "old"
+        );
+        assert_eq!(
+            std::fs::read_to_string(install.join("web-dist/index.html")).unwrap(),
+            "old web"
+        );
+        std::fs::write(staged, "new").unwrap();
         apply(&unpacked, &install).unwrap();
         assert_eq!(
             std::fs::read_to_string(install.join(binary_name())).unwrap(),

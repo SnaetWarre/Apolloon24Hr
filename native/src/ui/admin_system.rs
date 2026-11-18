@@ -4,9 +4,8 @@
 //! src/components/NetworkSetupPanel.tsx.
 //!
 //! Linking laptops (`cluster.*`) runs on the Rust server when `CLUSTER_ENABLED=true` (src/cluster).
-//! Not wired yet (the UI is there, the action answers with an error): pinning or releasing the
-//! address (`net.makeStatic`, `net.revertDhcp`) and update checks. The server reports no way to pin
-//! the address, so that part stays hidden as it does in the reference for a laptop without it.
+//! Static address changes and installation controls use the desktop integrations. Those controls
+//! require a request from the same laptop.
 use super::admin_kit::{self as kit, Kind, Tone};
 use super::*;
 use rune::{Span, text::Link};
@@ -594,6 +593,51 @@ fn confirm_cluster(s: &mut State, method: &str, input: Value) {
     }
 }
 
+pub(super) fn nearby_row(s: &State, found: &Value, busy: bool) -> El {
+    let mut line = format!(
+        "**{}**  {} · {}",
+        laptop_label(found),
+        kit::count_label(found["laptops"].as_i64().unwrap_or(1), "laptop", "laptops"),
+        kit::count_label(found["runners"].as_i64().unwrap_or(0), "loper", "lopers")
+    );
+    if found["name"].is_string() {
+        line.push_str(&format!(" · {}", short_url(st(found, "url"))));
+    }
+    let url = found["url"].clone();
+    let action = if found["compatible"] == false {
+        kit::value_text(
+            format!(
+                "andere versie ({}): installeer overal dezelfde versie",
+                st(found, "appVersion")
+            ),
+            s.dark,
+        )
+    } else if st(found, "link") != "there" {
+        kit::btn(
+            s,
+            format!("cluster-join-{}", st(found, "url")),
+            if busy { "Bezig..." } else { "Koppelen" },
+            Kind::Primary,
+            false,
+            None,
+            busy,
+            move |s| confirm_cluster(s, "cluster.joinGroup", json!({"url":url})),
+        )
+    } else {
+        kit::value_text("Druk op Koppelen op die laptop.", s.dark)
+    };
+    spaced(kit::notice(
+        s,
+        Tone::Hint,
+        row()
+            .w_full()
+            .justify_between()
+            .center_y()
+            .child(kit::strong_text(&line, kit::pal(s.dark).t.ink2, s.dark))
+            .child(action),
+    ))
+}
+
 fn cluster_panel(s: &State) -> El {
     let c = cluster(s);
     let members = c["members"].as_array().cloned().unwrap_or_default();
@@ -749,50 +793,6 @@ fn cluster_panel(s: &State) -> El {
             kit::notice_text(s, Tone::Hint, notice).role("status"),
         ));
     }
-    let nearby_row = |found: &Value| {
-        let mut line = format!(
-            "**{}**  {} · {}",
-            laptop_label(found),
-            kit::count_label(found["laptops"].as_i64().unwrap_or(1), "laptop", "laptops"),
-            kit::count_label(found["runners"].as_i64().unwrap_or(0), "loper", "lopers")
-        );
-        if found["name"].is_string() {
-            line.push_str(&format!(" · {}", short_url(st(found, "url"))));
-        }
-        let url = found["url"].clone();
-        let action = if found["compatible"] == false {
-            kit::value_text(
-                format!(
-                    "andere versie ({}): installeer overal dezelfde versie",
-                    st(found, "appVersion")
-                ),
-                s.dark,
-            )
-        } else if st(found, "link") != "there" {
-            kit::btn(
-                s,
-                format!("cluster-join-{}", st(found, "url")),
-                if busy { "Bezig..." } else { "Koppelen" },
-                Kind::Primary,
-                false,
-                None,
-                busy,
-                move |s| confirm_cluster(s, "cluster.joinGroup", json!({"url":url})),
-            )
-        } else {
-            kit::value_text("Druk op Koppelen op die laptop.", s.dark)
-        };
-        spaced(kit::notice(
-            s,
-            Tone::Hint,
-            row()
-                .w_full()
-                .justify_between()
-                .center_y()
-                .child(kit::strong_text(&line, kit::pal(s.dark).t.ink2, s.dark))
-                .child(action),
-        ))
-    };
     if members.len() == 1 {
         p = p.child(
             kit::copy(
@@ -809,7 +809,7 @@ fn cluster_panel(s: &State) -> El {
             )));
         }
         for found in &nearby {
-            p = p.child(nearby_row(found));
+            p = p.child(nearby_row(s, found, busy));
         }
         let mut details = col().w_full().gap(8.0).child(disclosure(
             s,
@@ -871,7 +871,7 @@ fn cluster_panel(s: &State) -> El {
             p = p.child(kit::copy("Andere laptops op dit netwerk:", s.dark).mb(12.0));
         }
         for found in &nearby {
-            p = p.child(nearby_row(found));
+            p = p.child(nearby_row(s, found, busy));
         }
         if c["removedFrom"].is_null() {
             p = p.child(kit::strong_text(

@@ -9,6 +9,8 @@ use super::*;
 use rune::{Align, Color, TextStyle, oklch, oklcha};
 use std::collections::{HashMap, HashSet};
 
+pub(super) mod settings;
+
 /// The rows of both lists on the Binnenscherm.
 const INSIDE_LIST_LENGTH: usize = 25;
 /// The runners on the Competities screen.
@@ -20,6 +22,12 @@ const MAX_PLAUSIBLE_LAP_MS: i64 = 10 * 60_000;
 thread_local! {
     /// The window this frame lays out in (the CSS viewport the vw/vh units resolve against).
     static VIEWPORT: std::cell::Cell<(f32, f32)> = const { std::cell::Cell::new((1366.0, 768.0)) };
+    /// `--display-zoom`: the display lays out in a box this much smaller and draws it larger.
+    static ZOOM: std::cell::Cell<f32> = const { std::cell::Cell::new(1.0) };
+}
+/// The width the display lays out in, after its zoom (vw and vh stay the window's).
+fn box_w() -> f32 {
+    win_w() / ZOOM.with(|z| z.get())
 }
 fn win_w() -> f32 {
     VIEWPORT.with(|v| v.get().0)
@@ -40,12 +48,20 @@ pub(super) struct Screen {
     picking: Option<Vec<String>>,
     /// The window size the last frame laid out in, for the vw/vh sizes.
     size: Option<(f32, f32)>,
-    /// Licht chosen on the Binnenscherm / Competitiescherm (both default to Donker).
-    inside_light: bool,
-    competitions_light: bool,
+    /// Licht/Donker and zoom per display (`?thema=`, `?zoom=`), remembered across page loads.
+    pub(super) settings: settings::Settings,
+    /// useArrivals: what each slot (active, next) showed, and whether it changed after opening.
+    arrivals: HashMap<&'static str, (String, bool)>,
+    /// Binnenscherm: laps seen since it opened, and the ones that arrived after (`is-new`).
+    seen_laps: Option<HashSet<String>>,
+    new_laps: HashSet<String>,
+    /// The lap count when the screen opened: a later count ticks in (`value-tick`).
+    laps_at_open: Option<usize>,
     /// Ranking voor: the label the points ranking is limited to.
     ranking_label: Option<String>,
     ranking_menu: bool,
+    /// Another ranking was chosen after opening: the table rises in again.
+    ranking_changed: bool,
     /// The pointer is over the screen: the display controls show (hover-capable screens).
     hovered: bool,
     /// Buitenscherm: lap and event ids seen since it opened (observeDisplayHistory).
@@ -107,8 +123,13 @@ pub(super) fn is_record(
         .filter(|l| index(at(l)) == index(at(latest)))
         .all(|l| ms(latest) < ms(l))
 }
+/// Ctrl +, Ctrl −, Ctrl 0 and F11 on a public screen.
+pub(super) fn key(s: &mut State, event: &rune::KeyEvent) -> bool {
+    settings::key(&mut s.public_screens.settings, s.page, event)
+}
 /// Called every poll: while the Buitenscherm is open, a new record lap or Burgie event flashes.
 pub(super) fn refresh(s: &mut State) {
+    track_arrivals(s);
     let now = s.server_now();
     let screen = &mut s.public_screens;
     if let Some((_, at)) = &screen.flash
@@ -218,8 +239,88 @@ pub(super) fn refresh(s: &mut State) {
         screen.flash = None;
     }
 }
+/// useArrivals and the new-lap rows: what changed after a display opened rises in; what was
+/// there on opening is simply there.
+fn track_arrivals(s: &mut State) {
+    if !(5..=7).contains(&s.page) {
+        let screen = &mut s.public_screens;
+        screen.arrivals.clear();
+        screen.seen_laps = None;
+        screen.new_laps.clear();
+        screen.laps_at_open = None;
+        return;
+    }
+    s.public_screens.settings.ensure_loaded();
+    let key = |r: Option<&Value>| r.map_or("none".to_string(), |r| str_of(&r["id"]));
+    let slots = [("active", key(active_runner(s))), ("next", key(next_runner(s)))];
+    let laps: Option<Vec<String>> = s.history["laps"]
+        .as_array()
+        .map(|l| l.iter().map(|l| str_of(&l["id"])).collect());
+    let screen = &mut s.public_screens;
+    for (slot, id) in slots {
+        match screen.arrivals.get(slot) {
+            Some((seen, _)) if *seen == id => {}
+            Some(_) => {
+                screen.arrivals.insert(slot, (id, true));
+            }
+            None => {
+                screen.arrivals.insert(slot, (id, false));
+            }
+        }
+    }
+    if let Some(laps) = laps {
+        screen.laps_at_open.get_or_insert(laps.len());
+        match &mut screen.seen_laps {
+            None => screen.seen_laps = Some(laps.into_iter().collect()),
+            Some(seen) => {
+                for id in laps {
+                    if seen.insert(id.clone()) {
+                        screen.new_laps.insert(id);
+                    }
+                }
+            }
+        }
+    }
+}
+/// Whether `slot` now shows something that arrived after the display opened.
+fn arrived(s: &State, slot: &str) -> bool {
+    s.public_screens
+        .arrivals
+        .get(slot)
+        .is_some_and(|(_, changed)| *changed)
+}
+
+// Motion for the tv screens (displays.css, motion.css): larger and slower than on the laptops.
+// The renderer's one-shot sequences carry opacity and scale; a new element key replays them.
+const EASE_OUT: rune::Easing = rune::Easing::cubic(0.2, 0.0, 0.0, 1.0);
+/// `display-rise` (--dur-3, 360 ms): fades up into place.
+const RISE: &[rune::Beat] = &[
+    rune::Beat::new(0.0).opacity(0.0).scale(0.97),
+    rune::Beat::new(0.36).easing(EASE_OUT),
+];
+/// `display-pop` (600 ms on --ease-spring): the big figure lands with a small overshoot.
+const POP: &[rune::Beat] = &[
+    rune::Beat::new(0.0).opacity(0.0).scale(0.88),
+    rune::Beat::new(0.6).easing(rune::Easing::cubic(0.34, 1.3, 0.64, 1.0)),
+];
+/// `display-flash`: in over the first 4% of the time it stays, out over the last 6%.
+const FLASH: &[rune::Beat] = &[
+    rune::Beat::new(0.0).opacity(0.0),
+    rune::Beat::new(0.32).easing(EASE_OUT),
+    rune::Beat::new(7.52).easing(rune::Easing::LINEAR),
+    rune::Beat::new(8.0).opacity(0.0).easing(EASE_OUT),
+];
+/// `value-tick` (--dur-3 on the displays): a changed figure lands from 35% opacity.
+const TICK: &[rune::Beat] = &[
+    rune::Beat::new(0.0).opacity(0.35),
+    rune::Beat::new(0.36).easing(EASE_OUT),
+];
+fn rise(el: El, delay: f64) -> El {
+    el.sequence(rune::Sequence::new(RISE).delay(delay))
+}
+
 /// `.outside-record-flash`: the whole screen blue, a ring, title, the yellow time and the runner.
-fn flash_view(f: &Flash) -> El {
+fn flash_layer(f: &Flash, ink: Color) -> El {
     let (vw, vh) = (vw_unit(), vh_unit());
     let long = f.title.chars().count() > 18;
     let title = if long {
@@ -248,11 +349,7 @@ fn flash_view(f: &Flash) -> El {
     let inset = clamp(16.0, 2.4 * vw, 46.0f32.max((2.3958 * vw).min(4.2593 * vh)));
     let ring = clamp(4.0, 0.45 * vw, 9.0f32.max((0.4688 * vw).min(0.8333 * vh)));
     rune::el()
-        .key("outside-flash")
-        .role("status")
-        .label(format!("{} {} {}", f.title, f.big, f.who))
         .pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0))
-        .fill(blue())
         .center()
         .padding(clamp(
             26.0,
@@ -263,23 +360,24 @@ fn flash_view(f: &Flash) -> El {
             rune::el()
                 .pin(Some(inset), Some(inset), Some(inset), Some(inset))
                 .radius(12.0)
-                .border(ring, oklcha(1.0, 0.0, 0.0, 0.72)),
+                .border(ring, ink.alpha(0.72)),
         )
         .child(
             col()
                 .items_center()
                 .max_w(1640.0f32.max((85.4167 * vw).min(151.852 * vh)))
-                .child(
+                .child(rise(
                     text(f.title.to_uppercase())
                         .font(
                             TextStyle::new(title, 900.0)
                                 .lh(title * 0.84)
                                 .tracking(-0.01 * title),
                         )
-                        .color(white())
+                        .color(ink)
                         .wrap()
                         .align(Align::Center),
-                )
+                    0.12,
+                ))
                 .child(
                     rune::el()
                         .mt(clamp(
@@ -294,6 +392,7 @@ fn flash_view(f: &Flash) -> El {
                             52.0f32.max((2.7083 * vw).min(4.8148 * vh)),
                         ))
                         .fill(oklch(0.8718, 0.1716, 90.95))
+                        .sequence(rune::Sequence::new(POP))
                         .child(
                             text(f.big.clone())
                                 .font(
@@ -305,10 +404,10 @@ fn flash_view(f: &Flash) -> El {
                                 .color(oklch(0.244, 0.039, 262.6)),
                         ),
                 )
-                .child(
+                .child(rise(
                     text(f.who.clone())
                         .font(TextStyle::new(who, 900.0).lh(who).tracking(-0.02 * who))
-                        .color(white())
+                        .color(ink)
                         .wrap()
                         .align(Align::Center)
                         .mt(clamp(
@@ -316,8 +415,32 @@ fn flash_view(f: &Flash) -> El {
                             (2.6 * vw).min(3.8 * vh),
                             48.0f32.max((2.5 * vw).min(4.4444 * vh)),
                         )),
-                ),
+                    0.2,
+                )),
         )
+}
+/// `.outside-record-flash`: the whole screen blue, a ring, title, the yellow time and the runner.
+/// It fades in, holds and fades out (`display-flash`), and pulses between Apolloon blue with
+/// white and night blue with yellow every 2.4 s (`record-flash-pulse`): the night layer and the
+/// yellow copy of the lines fade in and out together over the blue and white ones.
+fn flash_view(f: &Flash, at: i64) -> El {
+    let pulse = rune::LoopSpec::opacity(2.4, 0.0, 0.0, 1.0);
+    rune::el()
+        .key(format!("outside-flash-{at}"))
+        .role("status")
+        .label(format!("{} {} {}", f.title, f.big, f.who))
+        .pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0))
+        .fill(blue())
+        .clip_rounded(0.0)
+        .sequence(rune::Sequence::new(FLASH))
+        .child(
+            rune::el()
+                .pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0))
+                .fill(oklch(0.297, 0.096, 261.4))
+                .looping(pulse),
+        )
+        .child(flash_layer(f, white()))
+        .child(flash_layer(f, oklch(0.924, 0.115, 93.9)).looping(pulse))
 }
 
 /// The daypart factor of the Brussels clock hour a lap started in.
@@ -752,13 +875,30 @@ fn label_of(r: &Value) -> String {
 }
 
 pub(super) fn view(s: &State) -> El {
-    VIEWPORT.with(|v| v.set(s.public_screens.size.unwrap_or((1366.0, 768.0))));
+    let (w, h) = s.public_screens.size.unwrap_or((1366.0, 768.0));
+    VIEWPORT.with(|v| v.set((w, h)));
+    let zoom = s.public_screens.settings.zoom(s.page);
+    ZOOM.with(|z| z.set(zoom));
     let body = match s.page {
         5 => inside(s),
         6 => competitions(s),
         _ => outside(s),
     };
+    // Ctrl + / Ctrl −: the page stays the size of the screen (displays.css --display-zoom).
+    let body = if zoom == 1.0 {
+        body
+    } else {
+        rune::el()
+            .key(format!("display-zoom-{}", (zoom * 100.0).round()))
+            .size(w / zoom, h / zoom)
+            .origin(0.0, 0.0)
+            .scale(zoom)
+            .child(body)
+    };
     let mut root = rune::el().w_full().h_full().child(body);
+    if let Some(flash) = outside_flash(s) {
+        root = root.child(flash);
+    }
     if s.page == 5 || s.page == 6 {
         root = root.on_hover_change(|s: &mut State, on, _| {
             s.public_screens.hovered = on;
@@ -848,7 +988,21 @@ fn totals(s: &State, p: &Pal) -> El {
     row()
         .gap(2.4 * vw_unit())
         .child(item("Racetijd", elapsed))
-        .child(item("Rondes", format_int(laps.len() as i64)))
+        .child({
+            // `value-tick`: a count that changed after opening lands again, keyed by its value.
+            let mut value = t(format_int(laps.len() as i64), font(dd, 600.0, 1.2, -0.02), p.ink)
+                .key(format!("laps-{}", laps.len()));
+            if s.public_screens.laps_at_open.is_some_and(|n| n != laps.len()) {
+                value = value.sequence(rune::Sequence::new(TICK));
+            }
+            baseline_pair(
+                t("Rondes", font(dt, 400.0, 1.2, -0.01), p.ink3),
+                dt,
+                value,
+                dd,
+                0.6 * vw_unit(),
+            )
+        })
         .child(item("Per uur", per_hour))
 }
 fn panel(p: &Pal) -> El {
@@ -943,11 +1097,7 @@ fn control_button(key: String, label: &str, on: bool, p: &Pal) -> El {
 /// `.display-controls`: Ranking voor (Binnenscherm) and Licht/Donker, bottom right, on hover.
 fn display_controls(s: &State) -> El {
     let inside = s.page == 5;
-    let light = if inside {
-        s.public_screens.inside_light
-    } else {
-        s.public_screens.competitions_light
-    };
+    let light = s.public_screens.settings.light(s.page, false);
     let p = pal(!light);
     let mut bar = row()
         .key("display-controls")
@@ -1010,6 +1160,9 @@ fn display_controls(s: &State) -> El {
                         .radius(4.0)
                         .hover(p.surface2)
                         .on_press(move |s: &mut State| {
+                            if s.public_screens.ranking_label != id {
+                                s.public_screens.ranking_changed = true;
+                            }
                             s.public_screens.ranking_label = id.clone();
                             s.public_screens.ranking_menu = false;
                         })
@@ -1030,13 +1183,7 @@ fn display_controls(s: &State) -> El {
                 .child(select),
         );
     }
-    let set = move |s: &mut State, light: bool| {
-        if inside {
-            s.public_screens.inside_light = light;
-        } else {
-            s.public_screens.competitions_light = light;
-        }
-    };
+    let set = |s: &mut State, light: bool| s.public_screens.settings.choose_light(s.page, light);
     bar.child(
         row()
             .role("group")
@@ -1056,7 +1203,7 @@ fn display_controls(s: &State) -> El {
 // ---------------------------------------------------------------- Binnenscherm
 
 fn inside(s: &State) -> El {
-    let p = pal(!s.public_screens.inside_light);
+    let p = pal(!s.public_screens.settings.light(5, false));
     let done = finished(s);
     let now_size = clamp(16.0, 1.25 * vw_unit(), 28.0);
     let active = active_runner(s);
@@ -1089,11 +1236,13 @@ fn inside(s: &State) -> El {
         .role("group")
         .label("Nu op de piste")
         .child(label)
-        .child(
-            t(runner_text, font(now_size, 650.0, 1.5, -0.02), p.ink)
+        .child({
+            let el = t(runner_text, font(now_size, 650.0, 1.5, -0.02), p.ink)
                 .truncate()
-                .min_w(0.0),
-        );
+                .min_w(0.0)
+                .key(format!("now-{}", active.map_or("none".into(), |r| str_of(&r["id"]))));
+            if arrived(s, "active") { rise(el, 0.0) } else { el }
+        });
     if !done {
         let next_text = next.map(label_of).unwrap_or_else(|| "niemand klaar".into());
         now = now.child(
@@ -1108,15 +1257,17 @@ fn inside(s: &State) -> El {
                     font(now_size, 400.0, 1.5, -0.01),
                     p.ink2,
                 ))
-                .child(
-                    t(next_text, font(now_size, 600.0, 1.5, -0.01), p.ink)
+                .child({
+                    let el = t(next_text, font(now_size, 600.0, 1.5, -0.01), p.ink)
                         .truncate()
-                        .min_w(0.0),
-                ),
+                        .min_w(0.0)
+                        .key(format!("next-{}", next.map_or("none".into(), |r| str_of(&r["id"]))));
+                    if arrived(s, "next") { rise(el, 0.0) } else { el }
+                }),
         );
     }
 
-    let width = win_w() - 4.0 * vw_unit() - 1.2 * vw_unit();
+    let width = box_w() - 4.0 * vw_unit() - 1.2 * vw_unit();
     let left_w = width * 1.5 / 2.5;
     let right_w = width - left_w;
     let board = row()
@@ -1203,7 +1354,7 @@ fn inside_empty(message: &str, p: &Pal) -> El {
 }
 
 fn recent_panel(s: &State, p: &Pal) -> El {
-    let inner = win_w() - 4.0 * vw_unit() - 1.2 * vw_unit();
+    let inner = box_w() - 4.0 * vw_unit() - 1.2 * vw_unit();
     let inner = inner * 1.5 / 2.5 - 2.0 - 2.6 * vw_unit();
     let w = [0.11, 0.42, 0.14, 0.09, 0.12, 0.12].map(|f| f * inner);
     let title = format!("Laatste {INSIDE_LIST_LENGTH} lopers");
@@ -1222,7 +1373,16 @@ fn recent_panel(s: &State, p: &Pal) -> El {
     let big = clamp(15.0, 1.1 * vw_unit(), 23.0);
     let mid = clamp(14.0, vw_unit(), 21.0);
     let when = clamp(13.0, 0.95 * vw_unit(), 20.0);
-    let mut table = col().grow(1.0).min_h(0.0).w_full().child(head_cells(
+    // A new ranking (another label) rises in under the same heading.
+    let ranking_key = format!(
+        "points-{}",
+        s.public_screens.ranking_label.as_deref().unwrap_or("all")
+    );
+    let mut table = col().key(ranking_key.clone()).grow(1.0).min_h(0.0).w_full();
+    if s.public_screens.ranking_changed {
+        table = rise(table, 0.0);
+    }
+    let mut table = table.child(head_cells(
         &[
             (w[0], "Binnen om", false),
             (w[1], "Loper", false),
@@ -1266,9 +1426,14 @@ fn recent_panel(s: &State, p: &Pal) -> El {
                 .ml(0.7 * 0.7 * big)
                 .mb(0.1 * big),
             );
+        let lap_id = str_of(&lap["id"]);
+        let mut tr = table_row(p);
+        // `.recent-lap-row.is-new`: a lap that landed after the screen opened comes in.
+        if s.public_screens.new_laps.contains(&lap_id) {
+            tr = rise(tr, 0.0);
+        }
         table = table.child(
-            table_row(p)
-                .key(lap["id"].as_str().unwrap_or("").to_string())
+            tr.key(lap_id)
                 .child(cell(w[0], first, false, false))
                 .child(cell(w[1], runner, false, false))
                 .child(cell(
@@ -1313,7 +1478,7 @@ fn recent_panel(s: &State, p: &Pal) -> El {
 }
 
 fn points_panel(s: &State, p: &Pal) -> El {
-    let inner = win_w() - 4.0 * vw_unit() - 1.2 * vw_unit();
+    let inner = box_w() - 4.0 * vw_unit() - 1.2 * vw_unit();
     let inner = inner / 2.5 - 2.0 - 2.6 * vw_unit();
     let head = clamp(12.0, 0.8 * vw_unit(), 16.0);
     let place_w = 3.2 * head;
@@ -1410,7 +1575,7 @@ fn points_panel(s: &State, p: &Pal) -> El {
 // ---------------------------------------------------------------- Competitiescherm
 
 fn competitions(s: &State) -> El {
-    let p = pal(!s.public_screens.competitions_light);
+    let p = pal(!s.public_screens.settings.light(6, false));
     let labels = snapshot_list(s, "labels");
     let ids: Vec<Vec<String>> = s.snapshot["settings"]["competitions"]
         .as_array()
@@ -1425,7 +1590,7 @@ fn competitions(s: &State) -> El {
         p.ink,
     )
     .role("heading");
-    let width = win_w() - 4.0 * vw_unit() - 1.2 * vw_unit();
+    let width = box_w() - 4.0 * vw_unit() - 1.2 * vw_unit();
     let left_w = width * 2.3 / 3.3;
     let right_w = width - left_w;
 
@@ -1714,7 +1879,7 @@ fn competition(
             .truncate()
             .min_w(0.0),
         );
-        let track_w = win_w() * 0.5;
+        let track_w = box_w() * 0.5;
         let bar_w =
             (0.35 * vw_unit()).max(share * (track_w - digits * 0.6 * figure - 1.4 * figure));
         let mut track = row()
@@ -1808,7 +1973,7 @@ fn competition(
 /// Tick the teams of one competition, then add it.
 fn picker(s: &State) -> Option<El> {
     let picked = s.public_screens.picking.as_ref()?;
-    let p = pal(!s.public_screens.competitions_light);
+    let p = pal(!s.public_screens.settings.light(6, false));
     let mut labels: Vec<&Value> = snapshot_list(s, "labels").iter().collect();
     labels.sort_by_key(|l| {
         (
@@ -1979,7 +2144,7 @@ fn picker(s: &State) -> Option<El> {
 // ---------------------------------------------------------------- Buitenscherm
 
 fn outside(s: &State) -> El {
-    let p = pal(false);
+    let p = pal(!s.public_screens.settings.light(7, true));
     let done = finished(s);
     let race = &s.snapshot["race"];
     let kicker = clamp(22.0, 2.0 * vw_unit(), 44.0);
@@ -1998,6 +2163,12 @@ fn outside(s: &State) -> El {
                 )),
         );
     }
+    // `.outside-runner--in`: a runner who takes over after the screen opened rises in.
+    let in_key = |slot: &str, r: Option<&Value>| {
+        format!("{slot}-{}", r.map_or("none".into(), |r| str_of(&r["id"])))
+    };
+    let current_in = arrived(s, "active");
+    let next_in = arrived(s, "next");
     current = current.child(if done {
         big_name("Race afgelopen", white(), 650.0)
     } else {
@@ -2014,7 +2185,9 @@ fn outside(s: &State) -> El {
             oklcha(1.0, 0.0, 0.0, 0.88),
             oklcha(1.0, 0.0, 0.0, 0.4),
         )
-    });
+    }
+    .key(in_key("active", active_runner(s)))
+    .sequence_if(current_in));
     let mut next = band()
         .pt(3.0 * vh_unit() + 1.0)
         .fill(p.surface)
@@ -2034,9 +2207,10 @@ fn outside(s: &State) -> El {
         p.ink3,
         p.ink2,
         p.line,
-    ));
+    )
+    .key(in_key("next", next_runner(s)))
+    .sequence_if(next_in));
     let logo_w = clamp(200.0, 17.0 * vw_unit(), 30.0 * vh_unit());
-    let flash = s.public_screens.flash.as_ref().map(|(f, _)| flash_view(f));
     let screen = col()
         .w_full()
         .h_full()
@@ -2053,9 +2227,21 @@ fn outside(s: &State) -> El {
                 .pin(None, Some(4.0 * vh_unit()), Some(4.0 * vw_unit()), None)
                 .child(logo(s, logo_w, logo_w * 169.0 / 560.0)),
         );
-    match flash {
-        Some(f) => screen.child(f),
-        None => screen,
+    screen
+}
+/// The flash on the Buitenscherm; it stays the size of the screen at any zoom.
+fn outside_flash(s: &State) -> Option<El> {
+    (s.page == 7)
+        .then_some(s.public_screens.flash.as_ref())
+        .flatten()
+        .map(|(f, at)| flash_view(f, *at))
+}
+trait RiseIf {
+    fn sequence_if(self, on: bool) -> Self;
+}
+impl RiseIf for El {
+    fn sequence_if(self, on: bool) -> El {
+        if on { rise(self, 0.0) } else { self }
     }
 }
 fn band() -> El {
@@ -2094,7 +2280,7 @@ fn display_runner(
     let number = str_of(&runner["runnerNumber"]);
     let name = str_of(&runner["name"]);
     // Steps a long name down until it fits on one line (RUNNER_NAME_SCALES).
-    let width = win_w() - 10.0 * vw_unit();
+    let width = box_w() - 10.0 * vw_unit();
     let estimate = |scale: f32| {
         (number.chars().count() as f32 * 0.6 + 0.35 + name.chars().count() as f32 * 0.5)
             * size
@@ -2438,9 +2624,65 @@ mod tests {
             rt.frame(1.0 / 60.0);
         };
         press(&mut rt, "display-light");
-        assert!(rt.state.public_screens.inside_light);
+        assert!(rt.state.public_screens.settings.light(5, false));
+        assert_eq!(rt.state.public_screens.settings.query(5), "?thema=licht");
         press(&mut rt, "display-ranking");
         press(&mut rt, "display-ranking-l1");
         assert_eq!(rt.state.public_screens.ranking_label.as_deref(), Some("l1"));
+        assert!(rt.state.public_screens.ranking_changed, "the new ranking rises in");
+    }
+
+    #[test]
+    fn runners_and_laps_that_arrive_after_opening_rise_in() {
+        let mut s = init_with_url("http://127.0.0.1:9".into());
+        s.page = 5;
+        s.snapshot = json!({"race": {"raceStartedAt": 0}, "settings": {}, "runners": []});
+        s.history = json!({"laps": [timed("a", 100_000, 100_000)], "events": []});
+        refresh(&mut s);
+        assert!(!arrived(&s, "active") && !arrived(&s, "next"), "the first ones are simply there");
+        assert!(s.public_screens.new_laps.is_empty());
+        assert_eq!(s.public_screens.laps_at_open, Some(1));
+        s.history["laps"] = json!([timed("a", 100_000, 100_000), timed("b", 170_000, 70_000)]);
+        refresh(&mut s);
+        assert!(s.public_screens.new_laps.contains("b"));
+        assert!(!s.public_screens.new_laps.contains("a"));
+        s.page = 0;
+        refresh(&mut s);
+        assert!(s.public_screens.seen_laps.is_none(), "reopening starts over");
+    }
+
+    #[test]
+    fn ctrl_plus_zooms_the_display_and_ctrl_zero_resets_it() {
+        use rune::{Env, Key, KeyEvent, Mods, Runtime};
+        let mut s = init_with_url("http://127.0.0.1:9".into());
+        s.page = 7;
+        s.snapshot = json!({"race": {}, "settings": {}, "runners": []});
+        s.history = json!({"laps": [], "events": []});
+        let mut rt = Runtime::new(
+            s,
+            super::super::view,
+            (1366.0, 768.0),
+            Env {
+                system_dark: true,
+                scale: 1.0,
+            },
+        );
+        rt.frame(0.0);
+        let ctrl = |c: char| KeyEvent {
+            key: Key::Command(c),
+            mods: Mods {
+                ctrl: true,
+                cmd: true,
+                ..Default::default()
+            },
+        };
+        rt.update_if(|s, _| key(s, &ctrl('+')));
+        rt.frame(1.0 / 60.0);
+        assert_eq!(rt.state.public_screens.settings.zoom(7), 1.1);
+        assert!(rt.find("display-zoom-110").is_some(), "the page draws zoomed");
+        rt.update_if(|s, _| key(s, &ctrl('0')));
+        rt.frame(1.0 / 60.0);
+        assert_eq!(rt.state.public_screens.settings.zoom(7), 1.0);
+        assert!(rt.find("display-zoom-110").is_none());
     }
 }

@@ -38,6 +38,9 @@ pub enum Label<'a> {
     /// The Window menu's items.
     Minimize,
     Close,
+    /// Window caption labels.
+    Maximize,
+    Restore,
     /// The app menu's items; some carry the app's name.
     About(&'a str),
     Services,
@@ -116,6 +119,8 @@ fn english(label: Label<'_>) -> String {
         Label::Menu(name) => name.into(),
         Label::Minimize => "Minimize".into(),
         Label::Close => "Close".into(),
+        Label::Maximize => "Maximize".into(),
+        Label::Restore => "Restore".into(),
         Label::About(app) => format!("About {app}"),
         Label::Services => "Services".into(),
         Label::Hide(app) => format!("Hide {app}"),

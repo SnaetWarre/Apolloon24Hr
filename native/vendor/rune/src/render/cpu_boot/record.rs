@@ -27,7 +27,7 @@ pub fn encode(scene: &Scene<'_>) -> Vec<u8> {
     for c in scene.clear { out.extend_from_slice(&c.to_le_bytes()); }
     out.extend_from_slice(&u32::from(scene.lcd).to_le_bytes());
     out.extend_from_slice(&(scene.instances.len() as u32).to_le_bytes());
-    out.extend_from_slice(bytemuck::cast_slice(scene.instances));
+    out.extend_from_slice(bytemuck::cast_slice(&scene.instances));
     out.extend_from_slice(&(scene.glyph_pages.len() as u32).to_le_bytes());
     for page in &scene.glyph_pages { out.extend_from_slice(page); }
     out.extend_from_slice(&(scene.images.len() as u32).to_le_bytes());
@@ -63,7 +63,7 @@ impl Recording {
     /// The frame, ready for `paint`.
     pub fn scene(&self) -> Scene<'_> {
         Scene {
-            instances: &self.instances,
+            instances: std::borrow::Cow::Borrowed(&self.instances),
             glyph_pages: self.glyph_pages.iter().map(Vec::as_slice).collect(),
             outlines: None,
             images: self.images.iter().map(|(width, data)| Image { width: *width, data, dirty: None }).collect(),

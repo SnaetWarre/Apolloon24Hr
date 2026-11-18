@@ -135,7 +135,7 @@ impl Bins {
         let (cols, rows) = (w.div_ceil(TILE_W), h.div_ceil(TILE_H));
         let tiles = (cols * rows) as usize;
         let mut bounds: Vec<[i32; 4]> = scene.instances.iter().map(|i| pixel_bounds(i, w as i32, h as i32)).collect();
-        let (layers, scope) = plan_layers(scene.instances, (w, h));
+        let (layers, scope) = plan_layers(&scene.instances, (w, h));
         // Within a layer drawn to its own target, nothing reaches past the layer's bounds, and
         // nothing there can stand in for what's under the layer.
         let mut within = vec![TOP; scene.instances.len()];

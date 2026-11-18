@@ -75,7 +75,7 @@ pub(super) fn set_dark(s: &mut State, dark: bool) {
 
 // ---------- Icons (geometry from src/components/Icon.tsx and ThemeSwitch.tsx) ----------
 
-const ICONS: [(&str, &str); 7] = [
+const ICONS: [(&str, &str); 9] = [
     (
         "panelLeft",
         r#"<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/>"#,
@@ -84,6 +84,8 @@ const ICONS: [(&str, &str); 7] = [
         "copy",
         r#"<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>"#,
     ),
+    ("upload", r#"<path d="M12 16V4m-5 5 5-5 5 5M4 16v4h16v-4"/>"#),
+    ("link", r#"<path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7L12 5m2 6a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7L12 19"/>"#),
     ("check", r#"<path d="M20 6 9 17l-5-5"/>"#),
     ("arrowRight", r#"<path d="M5 12h14m-6-6 6 6-6 6"/>"#),
     (

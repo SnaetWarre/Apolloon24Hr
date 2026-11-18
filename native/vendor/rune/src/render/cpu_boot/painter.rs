@@ -180,7 +180,7 @@ impl CpuPainter {
         }
         // The whole list at memcmp's speed first: most frames that get here changed nothing.
         let images = scene.images.iter().any(|p| p.dirty.is_some());
-        if !images && bytemuck::cast_slice::<Instance, u8>(scene.instances) == bytemuck::cast_slice::<Instance, u8>(&prev.instances) {
+        if !images && bytemuck::cast_slice::<Instance, u8>(&scene.instances) == bytemuck::cast_slice::<Instance, u8>(&prev.instances) {
             let mut report = Report { total_ns: super::ns(start.elapsed()), tiles: prev.bins.tile_count(), ..Report::default() };
             report.raster_ns = 0;
             return Some(Painted { tiles: report.tiles, hash_ns: report.total_ns, report, ..Painted::default() });

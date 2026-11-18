@@ -10,6 +10,13 @@ pub const TITLEBAR_HEIGHT: f32 = 36.0;
 
 thread_local! {
     static WINDOW: RefCell<Option<rune::WindowHandle>> = const { RefCell::new(None) };
+    /// The Apolloon wordmark for light and dark title bars (`.brand-mark`).
+    static LOGOS: RefCell<Option<[rune::Image; 2]>> = const { RefCell::new(None) };
+}
+
+/// Hands the title bar the wordmark images the app already loaded.
+pub fn set_logos(light: rune::Image, dark: rune::Image) {
+    LOGOS.with(|l| *l.borrow_mut() = Some([light, dark]));
 }
 
 fn state_path() -> Option<std::path::PathBuf> {
@@ -42,6 +49,15 @@ fn save_window_state() {
 /// Runs the operator UI in the desktop window. Without `boot` (headless, tests, a remote
 /// server through APOLLOON_NATIVE_URL), it is the plain Rune app.
 pub fn run<S: 'static>(mut spec: AppSpec<S>) {
+    rune::set_labels(|label| {
+        Some(match label {
+            rune::Label::Minimize => "Minimaliseren",
+            rune::Label::Maximize => "Maximaliseren",
+            rune::Label::Restore => "Herstellen",
+            rune::Label::Close => "Sluiten",
+            _ => return None,
+        }.into())
+    });
     if super::DESKTOP.get().is_none() {
         rune::run(spec);
         return;
@@ -266,9 +282,16 @@ fn title_bar<S: 'static>(cx: &Cx<S>, dark: bool, home: fn(&mut S)) -> El {
                 .radius(6.0)
                 .hover(tones.surface3)
                 .child(
-                    text("Apolloon")
-                        .font(rune::TextStyle::new(13.0, 700.0))
-                        .color(if focused { t.text } else { tok::muted(dark) }),
+                    // `.titlebar__brand .brand-mark`: the 60x18 wordmark, dimmed while unfocused.
+                    match LOGOS.with(|l| l.borrow().as_ref().map(|l| l[usize::from(dark)].clone())) {
+                        Some(image) => rune::el()
+                            .size(60.0, 18.0)
+                            .opacity(if focused { 1.0 } else { 0.6 })
+                            .pixels_fit(image.pixels(), rune::SurfaceFit::Fit),
+                        None => text("Apolloon")
+                            .font(rune::TextStyle::new(13.0, 700.0))
+                            .color(if focused { t.text } else { tok::muted(dark) }),
+                    },
                 )
                 .on_press(move |s: &mut S| home(s)),
         )

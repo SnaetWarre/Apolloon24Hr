@@ -176,6 +176,8 @@ export function mount(canvas, callback, embedded, fitHeight, page) {
             const chord = event.metaKey || event.ctrlKey;
             const editing = ['Enter', 'Tab', 'Escape', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown'];
             if (field === password) editing.push('Backspace', 'Delete');
+            // With no Rune field to type into, Space presses the focused control, as on a page.
+            if (!h.key) editing.push(' ');
             if (!chord && !editing.includes(event.key)) return;
             if (chord && event.key.toLowerCase() === 'v') return;
             event.preventDefault();

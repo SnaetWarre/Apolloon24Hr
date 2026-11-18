@@ -379,9 +379,124 @@ async fn export(State(host): State<Host>, Path(file): Path<String>) -> axum::res
             .into_response(),
     }
 }
+// These URLs also work when the installed binary starts outside the source checkout.
+fn bundled_asset(directory: &str, file: &str) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let (mime, bytes): (&str, &[u8]) = match (directory, file) {
+        ("labels", "hilok.png") => ("image/png", include_bytes!("../../public/labels/hilok.png")),
+        ("labels", "kinesia.png") => (
+            "image/png",
+            include_bytes!("../../public/labels/kinesia.png"),
+        ),
+        ("labels", "mesacosa.jpg") => (
+            "image/jpeg",
+            include_bytes!("../../public/labels/mesacosa.jpg"),
+        ),
+        ("event-network", "Revert-ApolloonDhcp.ps1") => (
+            "application/octet-stream",
+            include_bytes!("../../public/event-network/Revert-ApolloonDhcp.ps1"),
+        ),
+        ("event-network", "Set-ApolloonStaticIp.ps1") => (
+            "application/octet-stream",
+            include_bytes!("../../public/event-network/Set-ApolloonStaticIp.ps1"),
+        ),
+        ("event-network", "Test-ApolloonNetwork.ps1") => (
+            "application/octet-stream",
+            include_bytes!("../../public/event-network/Test-ApolloonNetwork.ps1"),
+        ),
+        ("event-network", "revert-apolloon-dhcp.sh") => (
+            "application/octet-stream",
+            include_bytes!("../../public/event-network/revert-apolloon-dhcp.sh"),
+        ),
+        ("event-network", "set-apolloon-static-ip.sh") => (
+            "application/octet-stream",
+            include_bytes!("../../public/event-network/set-apolloon-static-ip.sh"),
+        ),
+        ("wrapped", "story.css") => (
+            "text/css; charset=utf-8",
+            include_bytes!("../../src/styles/wrapped.css"),
+        ),
+        ("wrapped", "ready.js") => (
+            "text/javascript; charset=utf-8",
+            include_bytes!("../web/wrapped/ready.js"),
+        ),
+        ("wrapped", "page-1.svg") => (
+            "image/svg+xml",
+            include_bytes!("../../public/wrapped/page-1.svg"),
+        ),
+        ("wrapped", "page-2.svg") => (
+            "image/svg+xml",
+            include_bytes!("../../public/wrapped/page-2.svg"),
+        ),
+        ("wrapped", "page-3.svg") => (
+            "image/svg+xml",
+            include_bytes!("../../public/wrapped/page-3.svg"),
+        ),
+        ("wrapped", "page-4.svg") => (
+            "image/svg+xml",
+            include_bytes!("../../public/wrapped/page-4.svg"),
+        ),
+        ("fonts", "bebas-neue-latin-400-normal.woff2") => (
+            "font/woff2",
+            include_bytes!("../../public/fonts/bebas-neue-latin-400-normal.woff2"),
+        ),
+        ("fonts", "bebas-neue-latin-ext-400-normal.woff2") => (
+            "font/woff2",
+            include_bytes!("../../public/fonts/bebas-neue-latin-ext-400-normal.woff2"),
+        ),
+        ("fonts", "racing-sans-one-latin-400-normal.woff2") => (
+            "font/woff2",
+            include_bytes!("../../public/fonts/racing-sans-one-latin-400-normal.woff2"),
+        ),
+        ("fonts", "racing-sans-one-latin-ext-400-normal.woff2") => (
+            "font/woff2",
+            include_bytes!("../../public/fonts/racing-sans-one-latin-ext-400-normal.woff2"),
+        ),
+        ("fonts", "geist-latin-wght-normal.woff2") => (
+            "font/woff2",
+            include_bytes!("../../public/fonts/geist-latin-wght-normal.woff2"),
+        ),
+        ("fonts", "league-spartan-bold-2014.otf") => (
+            "font/otf",
+            include_bytes!("../../public/fonts/league-spartan-bold-2014.otf"),
+        ),
+        ("brand", "apolloon-logo.png") => (
+            "image/png",
+            include_bytes!("../../public/brand/apolloon-logo.png"),
+        ),
+        _ => return StatusCode::NOT_FOUND.into_response(),
+    };
+    ([(axum::http::header::CONTENT_TYPE, mime)], bytes).into_response()
+}
+
+async fn wrapped_card(
+    State(host): State<Host>,
+    Query(query): Query<std::collections::HashMap<String, String>>,
+) -> std::result::Result<axum::response::Html<String>, StatusCode> {
+    let id = query.get("runner").cloned().unwrap_or_default();
+    tokio::task::spawn_blocking(move || crate::wrapped::card(&host.db.lock().unwrap(), &id))
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .map(axum::response::Html)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+}
+
 pub fn router(host: Host) -> Router {
     Router::new()
         .route("/api/health", get(health))
+        .route("/wrapped/card", get(wrapped_card))
+        .route(
+            "/wrapped/{file}",
+            get(|Path(file): Path<String>| async move { bundled_asset("wrapped", &file) }),
+        )
+        .route(
+            "/fonts/{file}",
+            get(|Path(file): Path<String>| async move { bundled_asset("fonts", &file) }),
+        )
+        .route(
+            "/brand/{file}",
+            get(|Path(file): Path<String>| async move { bundled_asset("brand", &file) }),
+        )
         .route("/api/net/profile", get(net_profile))
         .route("/api/net/{action}", post(net_action))
         .route("/api/backups/status", get(system))
@@ -393,13 +508,13 @@ pub fn router(host: Host) -> Router {
         .route("/api/history", get(history))
         .route("/api/registrations", get(registrations))
         .route("/api/label-images/{id}", get(label_image))
-        .nest_service(
-            "/labels",
-            tower_http::services::ServeDir::new("public/labels"),
+        .route(
+            "/labels/{file}",
+            get(|Path(file): Path<String>| async move { bundled_asset("labels", &file) }),
         )
-        .nest_service(
-            "/event-network",
-            tower_http::services::ServeDir::new("public/event-network"),
+        .route(
+            "/event-network/{file}",
+            get(|Path(file): Path<String>| async move { bundled_asset("event-network", &file) }),
         )
         .route("/api/action/{method}", post(mutation))
         .route("/trpc/{method}", post(rpc).get(query_rpc))

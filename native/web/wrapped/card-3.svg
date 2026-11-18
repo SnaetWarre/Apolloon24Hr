@@ -1,0 +1,6 @@
+<text x="52.9" y="566.4" class="wrapped-bebas wrapped-night" font-size="186.23">Jouw snelste</text>
+<text x="52.9" y="743.7" class="wrapped-racing wrapped-night" font-size="186.25">RONDE</text>
+<text x="52.8" y="1285.4" transform="rotate(-4.05 52.8 1285.4)" class="wrapped-spartan wrapped-night" font-size="325.89" data-fit="980">{{FASTEST}}</text>
+<text x="108" y="1660.6" class="wrapped-bebas wrapped-night" font-size="53.33">ronde {{FASTEST_NUMBER}}</text>
+<text x="972" y="1660.6" class="wrapped-bebas wrapped-night" font-size="53.33" text-anchor="end">{{FASTEST_AT}}</text>
+<text x="108" y="1842.8" class="wrapped-blue"><tspan class="wrapped-racing" font-size="124.21">#{{PLACE}}</tspan><tspan class="wrapped-bebas" font-size="62.92" dx="14" dy="-5.2"> van Apolloon</tspan></text>

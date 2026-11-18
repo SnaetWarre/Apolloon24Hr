@@ -24,6 +24,7 @@ mod theme;
 #[cfg(feature = "desktop")]
 mod ui;
 mod workbook;
+mod wrapped;
 use std::{
     path::PathBuf,
     sync::{Arc, Mutex},

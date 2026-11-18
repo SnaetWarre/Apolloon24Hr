@@ -70,47 +70,162 @@ fn runner_name(r: Option<&&Value>, dark: bool, size: f32, weight: f32, gap: f32)
     }
 }
 
+const WELCOME_KEY: &str = "apolloon.welcome";
+
+pub(super) fn welcome_skipped() -> bool {
+    public_screens::settings::read(WELCOME_KEY).as_deref() == Some("skipped")
+}
+
+fn open_admin(section: usize) -> impl Fn(&mut State) {
+    move |s| {
+        s.page = 8;
+        s.admin_section = section;
+    }
+}
+
 fn welcome(s: &State) -> El {
-    let mut welcome = col()
-        .gap(20.0)
-        .child(heading("Welkom bij Apolloon", s.dark))
-        .child(
-            label(
-                "Begin met de inschrijvingen op deze laptop of koppel met een andere laptop.",
-                s.dark,
-            )
-            .wrap(),
-        );
+    use admin_base::{Kind, banner, btn, copy, h2, h3, panel};
+
+    let cluster = &s.snapshot["cluster"];
+    let linking = cluster["enabled"] == true;
+    let automatic = cluster["autoLink"]["enabled"] == true;
+    let mut welcome = col().max_w(920.0).gap(20.0).child(
+        col()
+            .gap(4.0)
+            .child(h2(s, "Welkom bij Apolloon"))
+            .child(copy(
+                s,
+                "Op deze laptop staan nog geen lopers. Kies hoe ze begint.",
+            )),
+    );
     if let Some(name) = s.recovery["status"]["damagedDatabase"]["fileName"].as_str() {
         welcome = welcome.child(
-            label(
-                format!(
-                    "De databank op deze laptop was beschadigd. Apolloon zette ze opzij als {name} en startte leeg."
-                ),
-                s.dark,
-            )
-            .wrap()
-            .role("alert"),
+            banner(s, true)
+                .role("status")
+                .child(copy(s, format!("De databank op deze laptop was beschadigd. Apolloon zette ze opzij als {name} en startte leeg. Koppel deze laptop opnieuw aan de groep, of zet een backup terug.")))
+                .child(row().child(btn(s, "welcome-recovery", "Naar Systeem & herstel", Kind::Plain, false, false).on_press(open_admin(6)))),
         );
     }
-    welcome
-        .child(button(
-            "welcome-system",
-            "Naar Systeem & herstel",
-            s.dark,
-            |s| {
-                s.page = 8;
-                s.admin_section = 6;
-            },
-        ))
-        .child(button("welcome-runners", "Lopers toevoegen", s.dark, |s| {
-            s.page = 8;
-            s.admin_section = 1;
+    let first = panel(s)
+        .gap(12.0)
+        .padding(20.0)
+        .min_w(300.0)
+        .grow(1.0)
+        .child(shell::icon("upload", s.dark, 0, 18.0).size(36.0, 36.0).center())
+        .child(h3(s, "Dit is de eerste laptop"))
+        .child(copy(s, if automatic {
+            "Importeer hier de inschrijvingen: het Excel-bestand of de CSV-export van het inschrijvingsformulier. De andere laptops koppelen daarna vanzelf met deze."
+        } else {
+            "Importeer hier de inschrijvingen: het Excel-bestand of de CSV-export van het inschrijvingsformulier. De andere laptops koppel je daarna aan deze."
         }))
+        .child(row().child(btn(s, "welcome-import", "Inschrijvingen importeren", Kind::Primary, false, false).on_press(open_admin(0))));
+    let choices = if linking {
+        let mut second = panel(s)
+            .gap(12.0)
+            .padding(20.0)
+            .min_w(300.0)
+            .grow(1.0)
+            .child(shell::icon("link", s.dark, 0, 18.0).size(36.0, 36.0).center())
+            .child(h3(s, "Een andere laptop is al ingesteld"))
+            .child(copy(s, if automatic {
+                "Deze laptop koppelt vanzelf met die groep zodra ze die vindt. Ze neemt alle gegevens over en werkt mee."
+            } else {
+                "Koppel deze laptop aan die groep. Ze neemt alle gegevens over en werkt mee."
+            }));
+        let members = cluster["members"].as_array().map_or(1, Vec::len);
+        if members > 1 {
+            second = second.child(
+                copy(s, format!("Gekoppeld. Deze laptop werkt samen met {}. Importeer de inschrijvingen op één van de laptops.", admin_kit::count_label((members - 1) as i64, "andere laptop", "andere laptops"))).role("status"),
+            );
+        } else {
+            let nearby = cluster["nearby"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|laptop| laptop["runners"].as_i64().unwrap_or(0) > 0)
+                .collect::<Vec<_>>();
+            let busy = s.busy || admin_system::busy_state(cluster);
+            for laptop in &nearby {
+                second = second.child(admin_system::nearby_row(s, laptop, busy));
+            }
+            if let Some(status) = cluster["autoLink"]["waiting"].as_str() {
+                second = second.child(copy(s, status).role("status"));
+            }
+            if nearby.is_empty() {
+                second = second.child(copy(s, "Zoeken naar laptops op dit netwerk… Staat Apolloon aan op de andere laptop, en hangen beide aan dezelfde switch?").role("status"));
+            }
+            second = second.child(
+                row().child(
+                    btn(
+                        s,
+                        "welcome-system",
+                        "Adres zelf invullen",
+                        Kind::Ghost,
+                        true,
+                        false,
+                    )
+                    .on_press(open_admin(6)),
+                ),
+            );
+        }
+        row().gap(16.0).flex_wrap().child(first).child(second)
+    } else {
+        row().child(first.max_w(460.0))
+    };
+    let mut next = col().gap(6.0).child(h3(s, "Daarna"));
+    if linking {
+        let plan = if automatic {
+            "Start Apolloon op de andere laptops, aan dezelfde switch. Ze koppelen vanzelf met deze laptop."
+        } else {
+            "Start Apolloon op de andere laptops, aan dezelfde switch, en kies daar Een andere laptop is al ingesteld."
+        };
+        next = next.child(copy(
+            s,
+            match cluster["hostName"].as_str() {
+                Some(name) => format!("{plan} Deze laptop staat daar als {name}."),
+                None => plan.to_string(),
+            },
+        ));
+    }
+    next = next.child(copy(
+        s,
+        "Kijk Beheer › Voorbereiding na: de wedstrijdgereedheid moet op Klaar staan.",
+    ));
+    if let Some(url) = s.snapshot["host"]["url"].as_str() {
+        next = next.child(
+            row().gap(6.0).center_y().flex_wrap()
+                .child(copy(s, "Open het adres"))
+                .child(btn(s, "welcome-copy-address", url, Kind::Quiet, true, false).on_press_tx(|s: &mut State, tx: &mut Tx| {
+                    if let Some(url) = s.snapshot["host"]["url"].as_str() {
+                        tx.copy(url);
+                    }
+                }))
+                .child(copy(s, "in de browser van de tv’s en kies Binnenscherm, Competitiescherm of Buitenscherm.")),
+        );
+    }
+    welcome.child(choices).child(next).child(
+        row().child(
+            btn(
+                s,
+                "welcome-skip",
+                "Overslaan en het lege overzicht tonen",
+                Kind::Quiet,
+                true,
+                false,
+            )
+            .on_press(|s: &mut State| {
+                s.welcome_skipped = true;
+                if !s.fixture {
+                    public_screens::settings::write(WELCOME_KEY, Some("skipped"));
+                }
+            }),
+        ),
+    )
 }
 
 pub(super) fn overview(s: &State) -> El {
-    if runners(s).is_empty() && s.snapshot["race"]["raceStartedAt"].is_null() {
+    if runners(s).is_empty() && s.snapshot["race"]["raceStartedAt"].is_null() && !s.welcome_skipped
+    {
         return welcome(s);
     }
     let t = tok::theme(s.dark);

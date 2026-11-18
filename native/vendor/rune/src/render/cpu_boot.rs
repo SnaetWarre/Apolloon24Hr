@@ -24,7 +24,7 @@
 
 use crate::time::Instant;
 
-use super::{Instance, KIND_BACKDROP_BLUR, KIND_EFFECT, KIND_GLYPH, KIND_LAYER, KIND_LAYER_END};
+use super::{Instance, KIND_BACKDROP_BLUR, KIND_EFFECT, KIND_GLYPH, KIND_LAYER, KIND_LAYER_END, NO_CLIP};
 use crate::pixels::ImageAtlas;
 use crate::text::{Atlas, FontSmoothing};
 
@@ -49,7 +49,7 @@ pub use painter::{CpuPainter, Painted};
 
 /// One frame's draw data, borrowed from the runtime that built it.
 pub struct Scene<'a> {
-    instances: &'a [Instance],
+    instances: std::borrow::Cow<'a, [Instance]>,
     glyph_pages: Vec<&'a [u8]>,
     /// The outline store, for glyphs drawn from their outlines (text whose scale moves).
     outlines: Option<&'a crate::text::outline::OutlineStore>,
@@ -125,7 +125,7 @@ impl<'a> Scene<'a> {
     pub fn new(instances: &'a [Instance], atlas: &'a Atlas, images: &'a ImageAtlas, size: (u32, u32), clear: [f32; 4]) -> Self {
         let glyph_pages = (0..atlas.page_count()).filter_map(|p| atlas.page_data(p)).collect();
         let images = images.pages.iter().map(|p| Image { width: p.width, data: &p.data, dirty: p.dirty }).collect();
-        Scene { instances, glyph_pages, outlines: Some(&atlas.outlines), images, size, clear, lcd: atlas.lcd, srgb_blend: true, native_surfaces: false, compositor: false, smoothing: None, atlas_resets: atlas.resets(), half: HalfRounding::default() }
+        Scene { instances: untwist(instances), glyph_pages, outlines: Some(&atlas.outlines), images, size, clear, lcd: atlas.lcd, srgb_blend: true, native_surfaces: false, compositor: false, smoothing: None, atlas_resets: atlas.resets(), half: HalfRounding::default() }
     }
 
     /// Whether the frame blends in sRGB encoding (`Runtime::srgb_blend`). Linear blending needs
@@ -181,7 +181,6 @@ impl<'a> Scene<'a> {
         let mut depth = 0u32;
         self.instances.iter().find_map(|i| match i.params[1] {
             k if k == KIND_LAYER && i.params[2] != 0.0 => Some(NeedsGpu::LayerBlur),
-            k if k == KIND_LAYER && i.border[1] != 0.0 => Some(NeedsGpu::TurnedLayer),
             k if k == KIND_LAYER => { depth += 1; None }
             k if k == KIND_LAYER_END => { depth = depth.saturating_sub(1); None }
             k if k == KIND_BACKDROP_BLUR && depth > 0 => Some(NeedsGpu::BackdropBlur),
@@ -192,6 +191,53 @@ impl<'a> Scene<'a> {
             _ => None,
         })
     }
+}
+
+/// The frame with each turned layer's turn (`Instance::turned`) moved onto what it holds, so
+/// the painter draws it as an upright layer: each glyph turns about its own centre (the painter
+/// draws turned glyphs) after its centre turns about the pivot; boxes and clips become the
+/// upright boxes around their turned corners (exact at quarter turns, the usual case: a chart's
+/// vertical axis title). Nested turns compose: the outer one moves the inner one's pivot first.
+fn untwist(instances: &[Instance]) -> std::borrow::Cow<'_, [Instance]> {
+    if !instances.iter().any(|i| i.params[1] == KIND_LAYER && i.border[1] != 0.0) { return instances.into(); }
+    let mut out = instances.to_vec();
+    for n in 0..out.len() {
+        let l = out[n];
+        if l.params[1] != KIND_LAYER || l.border[1] == 0.0 { continue; }
+        let (angle, pivot) = (l.border[1], [l.border[2], l.border[3]]);
+        out[n].border = [0.0; 4];
+        let (sin, cos) = angle.sin_cos();
+        let turn = |p: [f32; 2]| {
+            let (dx, dy) = (p[0] - pivot[0], p[1] - pivot[1]);
+            [pivot[0] + dx * cos - dy * sin, pivot[1] + dx * sin + dy * cos]
+        };
+        let around = |e: [f32; 4]| {
+            let c = [turn([e[0], e[1]]), turn([e[2], e[1]]), turn([e[0], e[3]]), turn([e[2], e[3]])];
+            [c.iter().map(|p| p[0]).fold(f32::MAX, f32::min), c.iter().map(|p| p[1]).fold(f32::MAX, f32::min),
+                c.iter().map(|p| p[0]).fold(f32::MIN, f32::max), c.iter().map(|p| p[1]).fold(f32::MIN, f32::max)]
+        };
+        let rect = |r: [f32; 4]| { let e = around([r[0], r[1], r[0] + r[2], r[1] + r[3]]); [e[0], e[1], e[2] - e[0], e[3] - e[1]] };
+        out[n].rect = rect(l.rect);
+        let mut depth = 0u32;
+        for i in &mut out[n + 1..] {
+            let k = i.params[1];
+            if k == KIND_LAYER_END { if depth == 0 { break; } depth -= 1; continue; }
+            if i.clip != NO_CLIP { i.clip = around(i.clip); }
+            if k == KIND_LAYER {
+                depth += 1;
+                i.rect = rect(i.rect);
+                if i.border[1] != 0.0 { let p = turn([i.border[2], i.border[3]]); i.border[2] = p[0]; i.border[3] = p[1]; }
+            } else if k == KIND_GLYPH {
+                let c = turn([i.rect[0] + i.rect[2] * 0.5, i.rect[1] + i.rect[3] * 0.5]);
+                i.rect[0] = c[0] - i.rect[2] * 0.5;
+                i.rect[1] = c[1] - i.rect[3] * 0.5;
+                i.params[0] += angle;
+            } else {
+                i.rect = rect(i.rect);
+            }
+        }
+    }
+    out.into()
 }
 
 /// Why a frame needs the GPU.

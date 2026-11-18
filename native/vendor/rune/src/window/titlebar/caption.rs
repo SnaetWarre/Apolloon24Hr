@@ -72,13 +72,14 @@ fn caption_button(caption: &Caption, button: CaptionButton, symbol: Color, (w, h
         _ if hovered => (symbol.alpha(symbol.a * HOVER_ALPHA), symbol),
         _ => (Color::TRANSPARENT, symbol),
     };
+    use crate::labels::Label;
     let (key, label) = match button {
-        CaptionButton::Minimize => ("rune-caption-minimize", "Minimize"),
-        CaptionButton::Maximize if caption.maximized => ("rune-caption-maximize", "Restore"),
-        CaptionButton::Maximize => ("rune-caption-maximize", "Maximize"),
-        CaptionButton::Close => ("rune-caption-close", "Close"),
+        CaptionButton::Minimize => ("rune-caption-minimize", Label::Minimize),
+        CaptionButton::Maximize if caption.maximized => ("rune-caption-maximize", Label::Restore),
+        CaptionButton::Maximize => ("rune-caption-maximize", Label::Maximize),
+        CaptionButton::Close => ("rune-caption-close", Label::Close),
     };
-    let mut e = el().key(key).role("button").label(label).focusable(false).disabled(!enabled).size(w, h).fill(fill)
+    let mut e = el().key(key).role("button").label(crate::labels::label(label)).focusable(false).disabled(!enabled).size(w, h).fill(fill)
         .child(symbol_el(button, caption.maximized, ink, (w, h), scales));
     // The mouse presses them through the window procedure; assistive technology invokes these.
     // A dimmed button has nothing to invoke.

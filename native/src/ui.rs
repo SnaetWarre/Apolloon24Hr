@@ -93,6 +93,7 @@ pub struct State {
     file_tx: Sender<Result<PickedFile, String>>,
     file_rx: Receiver<Result<PickedFile, String>>,
     collapsed: bool,
+    welcome_skipped: bool,
     icons: Vec<rune::Image>,
     image_cache: Option<rune::ImageCache>,
     logos: std::collections::HashMap<String, rune::Image>,
@@ -147,6 +148,7 @@ fn apply_route(state: &mut State, route: &str) {
             .and_then(|section| SECTIONS.iter().position(|s| *s == section))
             .unwrap_or(0);
     }
+    state.public_screens.settings.apply_query(state.page, query);
     state.confirm = None;
 }
 #[cfg(target_arch = "wasm32")]
@@ -169,7 +171,7 @@ fn sync_route(state: &mut State) {
     let wanted = if state.page == 8 {
         format!("/admin?section={}", SECTIONS[state.admin_section])
     } else {
-        ROUTES[state.page].into()
+        format!("{}{}", ROUTES[state.page], state.public_screens.settings.query(state.page))
     };
     if wanted != actual {
         if web_sys::window()
@@ -194,6 +196,14 @@ fn init() -> State {
         .expect("page origin");
     #[allow(unused_mut)]
     let mut state = init_with_url(url);
+    #[cfg(not(target_arch = "wasm32"))]
+    if !state.fixture {
+        state.public_screens.settings.ensure_loaded();
+    }
+    if !state.fixture {
+        tactics_page::restore_reference(&mut state.tactics);
+        state.welcome_skipped = overview::welcome_skipped();
+    }
     #[cfg(target_arch = "wasm32")]
     {
         let route = browser_route();
@@ -234,6 +244,7 @@ fn init_with_url(url: String) -> State {
         file_tx,
         file_rx,
         collapsed: false,
+        welcome_skipped: false,
         icons: Vec::new(),
         image_cache: None,
         logos: std::collections::HashMap::new(),
@@ -358,10 +369,12 @@ fn poll(s: &mut State, _: f64, tx: &mut Tx) -> bool {
             s.clock_offset = offset;
         }
         s.connected = !update.snapshot.is_null();
-        if s.connected {
+        // Polls and actions fetch side by side: never let an older answer replace a newer one.
+        let older = |new: &Value, old: &Value| new["revision"].as_i64() < old["revision"].as_i64();
+        if s.connected && !older(&update.snapshot, &s.snapshot) {
             s.snapshot = update.snapshot;
         }
-        if !update.history.is_null() {
+        if !update.history.is_null() && !older(&update.history, &s.history) {
             s.history = update.history;
         }
         if !update.recovery.is_null() {
@@ -895,22 +908,28 @@ fn admin(s: &State) -> El {
         6 => admin_system::panel(s),
         _ => col().child(label("Deze sectie wordt nog gemigreerd.", s.dark)),
     };
-    col()
-        .child(bar)
-        .child(if matches!(s.admin_section, 0 | 1 | 2 | 3 | 6) {
-            content
-        } else {
-            content
-                .padding(16.0)
-                .radius(8.0)
-                .fill(tok::theme(s.dark).card)
-                .border(1.0, tok::theme(s.dark).card_border)
-        })
+    let content = if matches!(s.admin_section, 0 | 1 | 2 | 3 | 6) {
+        content
+    } else {
+        content
+            .padding(16.0)
+            .radius(8.0)
+            .fill(tok::theme(s.dark).card)
+            .border(1.0, tok::theme(s.dark).card_border)
+    };
+    let content = match s.admin_section {
+        1 => content,
+        2 => content.max_w(1720.0),
+        _ => content.max_w(1120.0),
+    };
+    col().child(bar).child(content)
 }
-fn view(s: &State, _: &mut Cx<State>) -> El {
+fn view(s: &State, _cx: &mut Cx<State>) -> El {
     if (5..=7).contains(&s.page) {
         return public_screens::view(s);
     }
+    #[cfg(not(target_arch = "wasm32"))]
+    _cx.zoom(s.public_screens.settings.operator_zoom());
     let t = tok::theme(s.dark);
     let nav = shell::sidebar(s);
     let body = match s.page {
@@ -1041,6 +1060,9 @@ fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
     }
     if event.is_command('b') {
         s.collapsed = !s.collapsed;
+        return true;
+    }
+    if public_screens::key(s, event) {
         return true;
     }
     if s.page != 2
@@ -1239,6 +1261,8 @@ fn setup(s: &mut State, waker: rune::Waker) {
         .push(cache.load(&include_bytes!("../assets/logo-light.png")[..]));
     s.icons
         .push(cache.load(&include_bytes!("../assets/logo-dark.png")[..]));
+    #[cfg(not(target_arch = "wasm32"))]
+    crate::desktop::chrome::set_logos(s.icons[s.icons.len() - 2].clone(), s.icons[s.icons.len() - 1].clone());
     #[cfg(not(target_arch = "wasm32"))]
     for icon in &s.icons {
         icon.wait().expect("bundled icon must decode");
@@ -1485,6 +1509,102 @@ mod tests {
         }
         assert!(rt.find(&format!("runner-hours-{id}")).is_some(), "the hours strip must show");
         assert!(rt.state.admin.registrations[&id].is_object());
+    }
+    #[test]
+    fn empty_laptop_can_link_a_discovered_laptop_from_overview() {
+        let mut state = init_with_url("http://127.0.0.1:1".into());
+        state.fixture = true;
+        let url = "http://192.0.2.2:5173";
+        state.snapshot = json!({
+            "runners": [],
+            "cluster": {
+                "enabled": true,
+                "members": [{}],
+                "nearby": [{"name":"Timing", "url": url, "runners":15, "laptops":1, "compatible":true}]
+            }
+        });
+        let mut rt = Runtime::new(
+            state,
+            view,
+            (1366.0, 768.0),
+            Env { system_dark: false, scale: 1.0 },
+        );
+        click(&mut rt, &format!("cluster-join-{url}"));
+        let confirmation = rt.state.confirm.as_ref().unwrap();
+        assert_eq!(confirmation.method, "cluster.joinGroup");
+        assert_eq!(confirmation.input["url"], url);
+        rt.update(|s, _| s.confirm = None);
+        click(&mut rt, "welcome-import");
+        assert_eq!((rt.state.page, rt.state.admin_section), (8, 0));
+    }
+    #[test]
+    fn space_records_a_lap_on_timing() {
+        let mut initial = crate::db::Db::open(std::path::Path::new(":memory:")).unwrap();
+        for (number, name) in [("1", "Eerste"), ("2", "Tweede")] {
+            initial.mutation("runners.create", &json!({"runnerNumber":number,"name":name,"status":"waiting"})).unwrap();
+        }
+        initial
+            .mutation("race.handoff", &json!({"activeRunnerId":null,"activeStartedAt":null,"pressedAt":now()}))
+            .unwrap();
+        // The first runner has been out for a minute: the next press is a real lap.
+        let started = now() - 60_000;
+        initial.exec("UPDATE race_state SET active_started_at=?,race_started_at=? WHERE id=1", &[json!(started), json!(started)]).unwrap();
+        let db = Arc::new(Mutex::new(initial));
+        let socket = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = socket.local_addr().unwrap().port();
+        drop(socket);
+        let _host = crate::server::start(db.clone(), port).unwrap();
+        let mut state = init_with_url(format!("http://127.0.0.1:{port}"));
+        state.page = 2;
+        let mut rt = Runtime::new(state, view, (1366.0, 1080.0), Env { system_dark: false, scale: 1.0 });
+        rt.on_key = Some(on_key);
+        rt.frame(0.0);
+        update(&mut rt, |s| s.connected && !s.snapshot["race"]["activeRunnerId"].is_null());
+        let laps = || db.lock().unwrap().rows("SELECT id FROM laps", &[]).unwrap().len();
+        assert_eq!(laps(), 0);
+        rt.key(rune::Key::Text(" ".into()).into());
+        rt.frame(1.0 / 60.0);
+        assert!(rt.state.busy, "Space on Timing sends the handoff");
+        update(&mut rt, |s| !s.busy && s.history["laps"].as_array().is_some_and(|l| l.len() == 1));
+        assert_eq!(laps(), 1, "Space on Timing clocks the runner off");
+    }
+    #[test]
+    fn space_presses_a_tab_focused_button_outside_timing() {
+        let mut initial = crate::db::Db::open(std::path::Path::new(":memory:")).unwrap();
+        let id = initial.mutation("runners.create", &json!({"runnerNumber":"5","name":"Tab Loper"})).unwrap()["id"].as_str().unwrap().to_owned();
+        let db = Arc::new(Mutex::new(initial));
+        let socket = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = socket.local_addr().unwrap().port();
+        drop(socket);
+        let _host = crate::server::start(db.clone(), port).unwrap();
+        let mut state = init_with_url(format!("http://127.0.0.1:{port}"));
+        state.page = 8;
+        state.admin_section = 1;
+        let mut rt = Runtime::new(state, view, (1366.0, 1080.0), Env { system_dark: false, scale: 1.0 });
+        rt.on_key = Some(on_key);
+        rt.frame(0.0);
+        update(&mut rt, |s| s.connected && !s.busy && s.admin.registrations.is_object());
+        let target = format!("delete-{id}");
+        for _ in 0..80 {
+            if rt.state.admin.focused.as_deref() == Some(target.as_str()) {
+                break;
+            }
+            rt.key(rune::Key::Tab.into());
+            rt.frame(1.0 / 60.0);
+            rt.update_if(|state, tx| poll(state, 0.0, tx));
+            rt.frame(1.0 / 60.0);
+        }
+        assert_eq!(rt.state.admin.focused.as_deref(), Some(target.as_str()), "Tab reaches Verwijder");
+        rt.key(rune::Key::Text(" ".into()).into());
+        rt.frame(1.0 / 60.0);
+        assert!(rt.state.admin.confirm.is_some(), "Space on the focused Verwijder asks to confirm");
+        rt.state.admin.confirm = None;
+        rt.frame(1.0 / 60.0);
+        rt.update_if(|state, tx| poll(state, 0.0, tx));
+        rt.frame(1.0 / 60.0);
+        rt.key(rune::Key::Enter.into());
+        rt.frame(1.0 / 60.0);
+        assert!(rt.state.admin.confirm.is_some(), "Enter on the focused Verwijder asks to confirm");
     }
     #[test]
     fn runners_section_searches_unhides_and_deletes_a_runner_after_confirming() {
@@ -2155,213 +2275,307 @@ fn clock_offset(samples: impl IntoIterator<Item = (i64, i64, i64)>) -> Option<i6
         .map(|(before, after, server)| server - (before + (after - before) / 2))
 }
 
+/// What the transport already holds, so a poll only refetches heavy data that changed:
+/// history follows the server revision, label images are fetched once, recovery every few seconds.
+#[derive(Default)]
+struct Synced {
+    history_revision: Option<i64>,
+    images: std::collections::HashSet<String>,
+}
+const POLL_EVERY: Duration = Duration::from_millis(200);
+/// Actions that only read: their answer needs no fresh history or recovery behind it.
+fn reads_only(method: &str) -> bool {
+    matches!(method, "runners.registrations" | "runners.profile" | "activity.list" | "activity.older")
+}
+const RECOVERY_EVERY: Duration = Duration::from_secs(5);
+fn action_error(value: &Value) -> String {
+    value["error"]["message"]
+        .as_str()
+        .unwrap_or("Opslaan mislukt")
+        .into()
+}
+fn absolute(url: &str, path: &str) -> String {
+    if path.starts_with("http://") || path.starts_with("https://") {
+        path.into()
+    } else {
+        format!("{url}{path}")
+    }
+}
+
+/// Actions run on their own thread and never wait behind a poll; polls fetch the light state
+/// every cycle and history, recovery and images only when they changed.
 #[cfg(not(target_arch = "wasm32"))]
 fn start_transport(url: String, commands: Receiver<Command>, updates: Sender<Update>) {
-    std::thread::spawn(move || {
-        let client = reqwest::blocking::Client::builder()
-            .timeout(Duration::from_secs(25))
-            .build()
-            .unwrap();
-        let mut seen_images = std::collections::HashSet::new();
-        let mut next_clock_sync = Instant::now();
-        loop {
-            let outcome = match commands.recv_timeout(Duration::from_millis(350)) {
-                Ok(command) => {
-                    let result = client
-                        .post(format!("{url}/api/action/{}", command.method))
-                        .header("x-apolloon-screen", &command.screen)
-                        .json(&command.input)
-                        .send()
-                        .map_err(|e| e.to_string())
-                        .and_then(|response| {
-                            let status = response.status();
-                            let value: Value = response.json().map_err(|e| e.to_string())?;
-                            if status.is_success() {
-                                Ok(value)
-                            } else {
-                                Err(value["error"]["message"]
-                                    .as_str()
-                                    .unwrap_or("Opslaan mislukt")
-                                    .into())
-                            }
-                        });
-                    Some((command.method, result))
-                }
-                Err(mpsc::RecvTimeoutError::Timeout) => None,
-                Err(_) => break,
-            };
-            let fetch = |path: &str| {
-                client
-                    .get(format!("{url}{path}"))
+    use reqwest::blocking::Client;
+    use std::sync::{Arc, Mutex};
+    let client = Client::builder()
+        .timeout(Duration::from_secs(25))
+        .build()
+        .unwrap();
+    let synced = Arc::new(Mutex::new(Synced::default()));
+    fn get(client: &Client, url: &str, path: &str) -> Value {
+        client
+            .get(format!("{url}{path}"))
+            .timeout(Duration::from_secs(3))
+            .send()
+            .and_then(|r| r.error_for_status())
+            .and_then(|r| r.json::<Value>())
+            .unwrap_or(Value::Null)
+    }
+    /// `full`: an action just ran, so its outcome arrives with the history and recovery it changed.
+    fn refresh(
+        client: &Client,
+        url: &str,
+        synced: &Mutex<Synced>,
+        full: bool,
+        recovery: bool,
+        extra_image: Option<String>,
+    ) -> Update {
+        let snapshot = get(client, url, "/api/state");
+        let revision = snapshot["revision"].as_i64();
+        let changed = full || (revision.is_some() && synced.lock().unwrap().history_revision != revision);
+        let history = if changed {
+            get(client, url, "/api/history?scope=full")
+        } else {
+            Value::Null
+        };
+        if let Some(revision) = history["revision"].as_i64() {
+            synced.lock().unwrap().history_revision = Some(revision);
+        }
+        let recovery = if recovery || changed {
+            get(client, url, "/api/recovery")
+        } else {
+            Value::Null
+        };
+        let mut paths = image_urls(&snapshot, &history);
+        paths.extend(extra_image);
+        paths.retain(|path| !synced.lock().unwrap().images.contains(path));
+        let images = paths
+            .into_iter()
+            .filter_map(|path| {
+                let bytes = client
+                    .get(absolute(url, &path))
                     .timeout(Duration::from_secs(3))
                     .send()
                     .and_then(|r| r.error_for_status())
-                    .and_then(|r| r.json::<Value>())
-                    .unwrap_or(Value::Null)
-            };
-            let snapshot = fetch("/api/state");
-            let offset = if !snapshot.is_null() && Instant::now() >= next_clock_sync {
+                    .and_then(|r| r.bytes())
+                    .ok()?;
+                synced.lock().unwrap().images.insert(path.clone());
+                Some((path, bytes.to_vec()))
+            })
+            .collect();
+        Update {
+            snapshot,
+            history,
+            recovery,
+            images,
+            clock_offset: None,
+            outcome: None,
+        }
+    }
+    {
+        let (client, url, synced, updates) =
+            (client.clone(), url.clone(), synced.clone(), updates.clone());
+        std::thread::spawn(move || {
+            while let Ok(command) = commands.recv() {
+                let result = client
+                    .post(format!("{url}/api/action/{}", command.method))
+                    .header("x-apolloon-screen", &command.screen)
+                    .json(&command.input)
+                    .send()
+                    .map_err(|e| e.to_string())
+                    .and_then(|response| {
+                        let status = response.status();
+                        let value: Value = response.json().map_err(|e| e.to_string())?;
+                        if status.is_success() { Ok(value) } else { Err(action_error(&value)) }
+                    });
+                let image = result.as_ref().ok().and_then(|r| r["imageUrl"].as_str()).map(str::to_owned);
+                let mut update = refresh(&client, &url, &synced, !reads_only(&command.method), !reads_only(&command.method), image);
+                update.outcome = Some((command.method, result));
+                if updates.send(update).is_err() {
+                    break;
+                }
+            }
+        });
+    }
+    std::thread::spawn(move || {
+        let mut next_clock_sync = Instant::now();
+        let mut next_recovery = Instant::now();
+        loop {
+            let started = Instant::now();
+            let mut update = refresh(&client, &url, &synced, false, started >= next_recovery, None);
+            if !update.recovery.is_null() {
+                next_recovery = started + RECOVERY_EVERY;
+            }
+            if !update.snapshot.is_null() && started >= next_clock_sync {
                 let mut samples = Vec::new();
                 for _ in 0..3 {
                     let before = now();
-                    let time = fetch("/api/clock");
-                    if let Some(server) = time["serverNowMs"].as_i64() {
+                    if let Some(server) = get(&client, &url, "/api/clock")["serverNowMs"].as_i64() {
                         samples.push((before, now(), server));
                     }
                 }
-                let offset = clock_offset(samples);
-                next_clock_sync =
-                    Instant::now() + Duration::from_secs(if offset.is_some() { 60 } else { 5 });
-                offset
-            } else {
-                None
-            };
-            let history = fetch("/api/history?scope=full");
-            let recovery = fetch("/api/recovery");
-            let mut images = Vec::new();
-            let mut paths = image_urls(&snapshot, &history);
-            if let Some((_, Ok(result))) = &outcome {
-                if let Some(url) = result["imageUrl"].as_str() {
-                    paths.insert(url.to_owned());
-                }
+                update.clock_offset = clock_offset(samples);
+                next_clock_sync = Instant::now()
+                    + Duration::from_secs(if update.clock_offset.is_some() { 60 } else { 5 });
             }
-            for path in paths {
-                if seen_images.contains(&path) {
-                    continue;
-                }
-                let remote = if path.starts_with("http://") || path.starts_with("https://") {
-                    path.clone()
-                } else {
-                    format!("{url}{path}")
-                };
-                if let Ok(response) = client
-                    .get(remote)
-                    .timeout(Duration::from_secs(3))
-                    .send()
-                    .and_then(|r| r.error_for_status())
-                {
-                    if let Ok(bytes) = response.bytes() {
-                        seen_images.insert(path.clone());
-                        images.push((path, bytes.to_vec()));
-                    }
-                }
-            }
-            if updates
-                .send(Update {
-                    snapshot,
-                    history,
-                    recovery,
-                    images,
-                    clock_offset: offset,
-                    outcome,
-                })
-                .is_err()
-            {
+            if updates.send(update).is_err() {
                 break;
             }
+            std::thread::sleep(POLL_EVERY.saturating_sub(started.elapsed()));
         }
     });
 }
 #[cfg(target_arch = "wasm32")]
 fn start_transport(url: String, commands: Receiver<Command>, updates: Sender<Update>) {
-    wasm_bindgen_futures::spawn_local(async move {
-        let client = reqwest::Client::new();
-        let mut seen_images = std::collections::HashSet::new();
-        let mut next_clock_sync = Instant::now();
-        loop {
-            let outcome = match commands.try_recv() {
-                Ok(command) => {
-                    let result = match client
-                        .post(format!("{url}/api/action/{}", command.method))
-                        .header("x-apolloon-screen", &command.screen)
-                        .json(&command.input)
-                        .send()
-                        .await
-                    {
-                        Ok(response) => {
-                            let status = response.status();
-                            match response.json::<Value>().await {
-                                Ok(v) if status.is_success() => Ok(v),
-                                Ok(v) => Err(v["error"]["message"]
-                                    .as_str()
-                                    .unwrap_or("Opslaan mislukt")
-                                    .into()),
-                                Err(e) => Err(e.to_string()),
-                            }
-                        }
-                        Err(e) => Err(e.to_string()),
-                    };
-                    Some((command.method, result))
-                }
-                Err(mpsc::TryRecvError::Empty) => None,
-                Err(mpsc::TryRecvError::Disconnected) => break,
-            };
-            async fn fetch(client: &reqwest::Client, url: &str, path: &str) -> Value {
-                match client.get(format!("{url}{path}")).send().await {
-                    Ok(r) if r.status().is_success() => {
-                        r.json::<Value>().await.unwrap_or(Value::Null)
+    use std::{cell::RefCell, rc::Rc};
+    async fn get(client: &reqwest::Client, url: &str, path: &str) -> Value {
+        match client.get(format!("{url}{path}")).send().await {
+            Ok(r) if r.status().is_success() => r.json::<Value>().await.unwrap_or(Value::Null),
+            _ => Value::Null,
+        }
+    }
+    /// `full`: an action just ran, so its outcome arrives with the history and recovery it changed.
+    async fn refresh(
+        client: &reqwest::Client,
+        url: &str,
+        synced: &RefCell<Synced>,
+        full: bool,
+        recovery: bool,
+        extra_image: Option<String>,
+    ) -> Update {
+        let snapshot = get(client, url, "/api/state").await;
+        let revision = snapshot["revision"].as_i64();
+        let changed = full || (revision.is_some() && synced.borrow().history_revision != revision);
+        // History and recovery load side by side instead of one after the other.
+        let (history, recovery) = futures_join(
+            async {
+                if changed { get(client, url, "/api/history?scope=full").await } else { Value::Null }
+            },
+            async {
+                if recovery || changed { get(client, url, "/api/recovery").await } else { Value::Null }
+            },
+        )
+        .await;
+        if let Some(revision) = history["revision"].as_i64() {
+            synced.borrow_mut().history_revision = Some(revision);
+        }
+        let mut paths = image_urls(&snapshot, &history);
+        paths.extend(extra_image);
+        paths.retain(|path| !synced.borrow().images.contains(path));
+        let mut images = Vec::new();
+        for path in paths {
+            if let Ok(response) = client.get(absolute(url, &path)).send().await
+                && response.status().is_success()
+                && let Ok(bytes) = response.bytes().await
+            {
+                synced.borrow_mut().images.insert(path.clone());
+                images.push((path, bytes.to_vec()));
+            }
+        }
+        Update {
+            snapshot,
+            history,
+            recovery,
+            images,
+            clock_offset: None,
+            outcome: None,
+        }
+    }
+    /// Polls both futures until each is done; enough for two fetches without a futures crate.
+    async fn futures_join<A: std::future::Future, B: std::future::Future>(
+        a: A,
+        b: B,
+    ) -> (A::Output, B::Output) {
+        use std::{future::Future, pin::pin, task::Poll};
+        let (mut a, mut b) = (pin!(a), pin!(b));
+        let (mut ra, mut rb) = (None, None);
+        std::future::poll_fn(move |cx| {
+            if ra.is_none()
+                && let Poll::Ready(v) = a.as_mut().poll(cx)
+            {
+                ra = Some(v);
+            }
+            if rb.is_none()
+                && let Poll::Ready(v) = b.as_mut().poll(cx)
+            {
+                rb = Some(v);
+            }
+            if ra.is_some() && rb.is_some() {
+                Poll::Ready((ra.take().unwrap(), rb.take().unwrap()))
+            } else {
+                Poll::Pending
+            }
+        })
+        .await
+    }
+    let client = reqwest::Client::new();
+    let synced = Rc::new(RefCell::new(Synced::default()));
+    {
+        let (client, url, synced, updates) =
+            (client.clone(), url.clone(), synced.clone(), updates.clone());
+        wasm_bindgen_futures::spawn_local(async move {
+            loop {
+                let command = match commands.try_recv() {
+                    Ok(command) => command,
+                    Err(mpsc::TryRecvError::Empty) => {
+                        gloo_timers::future::TimeoutFuture::new(5).await;
+                        continue;
                     }
-                    _ => Value::Null,
+                    Err(mpsc::TryRecvError::Disconnected) => break,
+                };
+                let result = match client
+                    .post(format!("{url}/api/action/{}", command.method))
+                    .header("x-apolloon-screen", &command.screen)
+                    .json(&command.input)
+                    .send()
+                    .await
+                {
+                    Ok(response) => {
+                        let status = response.status();
+                        match response.json::<Value>().await {
+                            Ok(v) if status.is_success() => Ok(v),
+                            Ok(v) => Err(action_error(&v)),
+                            Err(e) => Err(e.to_string()),
+                        }
+                    }
+                    Err(e) => Err(e.to_string()),
+                };
+                let image = result.as_ref().ok().and_then(|r| r["imageUrl"].as_str()).map(str::to_owned);
+                let mut update = refresh(&client, &url, &synced, !reads_only(&command.method), !reads_only(&command.method), image).await;
+                update.outcome = Some((command.method, result));
+                if updates.send(update).is_err() {
+                    break;
                 }
             }
-            let snapshot = fetch(&client, &url, "/api/state").await;
-            let offset = if !snapshot.is_null() && Instant::now() >= next_clock_sync {
+        });
+    }
+    wasm_bindgen_futures::spawn_local(async move {
+        let mut next_clock_sync = Instant::now();
+        let mut next_recovery = Instant::now();
+        loop {
+            let started = Instant::now();
+            let mut update = refresh(&client, &url, &synced, false, started >= next_recovery, None).await;
+            if !update.recovery.is_null() {
+                next_recovery = started + RECOVERY_EVERY;
+            }
+            if !update.snapshot.is_null() && started >= next_clock_sync {
                 let mut samples = Vec::new();
                 for _ in 0..3 {
                     let before = now();
-                    let time = fetch(&client, &url, "/api/clock").await;
-                    if let Some(server) = time["serverNowMs"].as_i64() {
+                    if let Some(server) = get(&client, &url, "/api/clock").await["serverNowMs"].as_i64() {
                         samples.push((before, now(), server));
                     }
                 }
-                let offset = clock_offset(samples);
-                next_clock_sync =
-                    Instant::now() + Duration::from_secs(if offset.is_some() { 60 } else { 5 });
-                offset
-            } else {
-                None
-            };
-            let history = fetch(&client, &url, "/api/history?scope=full").await;
-            let recovery = fetch(&client, &url, "/api/recovery").await;
-            let mut images = Vec::new();
-            let mut paths = image_urls(&snapshot, &history);
-            if let Some((_, Ok(result))) = &outcome {
-                if let Some(url) = result["imageUrl"].as_str() {
-                    paths.insert(url.to_owned());
-                }
+                update.clock_offset = clock_offset(samples);
+                next_clock_sync = Instant::now()
+                    + Duration::from_secs(if update.clock_offset.is_some() { 60 } else { 5 });
             }
-            for path in paths {
-                if seen_images.contains(&path) {
-                    continue;
-                }
-                let remote = if path.starts_with("http://") || path.starts_with("https://") {
-                    path.clone()
-                } else {
-                    format!("{url}{path}")
-                };
-                if let Ok(response) = client.get(remote).send().await {
-                    if response.status().is_success() {
-                        if let Ok(bytes) = response.bytes().await {
-                            seen_images.insert(path.clone());
-                            images.push((path, bytes.to_vec()));
-                        }
-                    }
-                }
-            }
-            if updates
-                .send(Update {
-                    snapshot,
-                    history,
-                    recovery,
-                    images,
-                    clock_offset: offset,
-                    outcome,
-                })
-                .is_err()
-            {
+            if updates.send(update).is_err() {
                 break;
             }
-            gloo_timers::future::TimeoutFuture::new(350).await;
+            let wait = POLL_EVERY.saturating_sub(started.elapsed()).as_millis() as u32;
+            gloo_timers::future::TimeoutFuture::new(wait).await;
         }
     });
 }

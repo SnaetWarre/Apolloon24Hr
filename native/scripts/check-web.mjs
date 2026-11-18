@@ -84,6 +84,13 @@ try {
     timeout: 90000,
   });
   await page.waitForResponse((r) => r.url().endsWith('/api/state') && r.ok());
+  // Rune paints the first frames on the CPU, then hands over to WebGL2 (no WebGPU here).
+  await page.waitForFunction(() => performance.getEntriesByName('web.handover.done').length > 0, null, {
+    timeout: 30000,
+  });
+  const gl = await page.evaluate(() => document.querySelectorAll('canvas').length);
+  assert.equal(gl, 1, 'After the hand-over only the WebGL2 canvas remains');
+  console.log('Rune draws through WebGL2 (web.handover.done)');
   await page.mouse.click(80, 178);
   await page.screenshot({ path: path.join(dir, 'timing-before.png') });
   const press = page.waitForResponse((r) => r.url().endsWith('/api/action/race.handoff'), { timeout: 10000 });
@@ -91,7 +98,12 @@ try {
   const response = await press;
   assert(response.ok(), await response.text());
   const { pressedAt } = response.request().postDataJSON();
-  assert(Math.abs(pressedAt - Date.now()) < 3000, 'Timing uses the server clock even when the browser clock is 45 seconds fast');
+  // SwiftShader's software WebGL2 takes ~0.5 s a frame here, which blurs the clock sample by
+  // a second or so; the 45 s skew is what this checks.
+  assert(
+    Math.abs(pressedAt - Date.now()) < 6000,
+    'Timing uses the server clock even when the browser clock is 45 seconds fast'
+  );
 
   const persisted = await (await fetch(url + '/api/state')).json();
   assert.equal(persisted.race.activeRunnerId, runner.id, 'Browser click must start the waiting runner');
@@ -107,9 +119,15 @@ try {
   await page.goto(url + '/admin?section=preparation');
   await page.waitForResponse((r) => r.url().endsWith('/api/recovery') && r.ok());
   await page.waitForResponse((r) => r.url().endsWith('/api/state') && r.ok());
+  await page.waitForFunction(() => performance.getEntriesByName('web.handover.done').length > 0, null, {
+    timeout: 30000,
+  });
   await page.screenshot({ path: path.join(dir, 'import-before.png') });
-  const picker = page.waitForEvent('filechooser');
-  await page.mouse.click(307, 586);
+  // The page fades in after navigation. Let the button finish entering before pressing it.
+  await page.mouse.move(307, 586);
+  await page.waitForTimeout(1200);
+  const picker = page.waitForEvent('filechooser', { timeout: 15000 });
+  await page.mouse.click(307, 586, { delay: 120 });
   const chooser = await picker.catch(async (e) => {
     await page.screenshot({ path: path.join(dir, 'import-click-failed.png') });
     throw e;
@@ -137,9 +155,7 @@ try {
   await page.screenshot({ path: path.join(dir, 'import-after.png') });
   await writeFile(path.join(dir, 'browser-errors.json'), JSON.stringify(errors, null, 2));
   assert.equal(errors.length, 0, errors.join('\n'));
-  console.log(
-    'PASS: WebGL2 timing and CSV import, plus pre-race merge and first-lap protection over Rust HTTP/SQLite'
-  );
+  console.log('PASS: WebGL2 timing and CSV import, plus pre-race merge and first-lap protection over Rust HTTP/SQLite');
 } finally {
   if (browser) await browser.close();
   child.kill('SIGTERM');
