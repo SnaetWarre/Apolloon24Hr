@@ -180,6 +180,65 @@ fn swap_package(unpacked: &Path, install_dir: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn update_download_checks_the_archive_and_stages_the_package() {
+        use std::io::{BufRead, BufReader};
+        let root = std::env::temp_dir().join(format!("apolloon-download-{}", uuid::Uuid::new_v4()));
+        let fixture = root.join("fixture");
+        std::fs::create_dir_all(fixture.join("web-dist")).unwrap();
+        std::fs::write(fixture.join(binary_name()), b"updated program").unwrap();
+        std::fs::write(fixture.join("web-dist/index.html"), b"updated browser").unwrap();
+        let name = "apolloon-test.tar.gz";
+        let archive = root.join(name);
+        assert!(Command::new("tar")
+            .arg("-czf")
+            .arg(&archive)
+            .arg("-C")
+            .arg(&fixture)
+            .arg(".")
+            .status()
+            .unwrap()
+            .success());
+        let bytes = std::fs::read(archive).unwrap();
+        let sums = format!("{}  {name}\n", sha256_hex(&bytes));
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let feed = std::thread::spawn(move || {
+            for (route, body) in [("/SHA256SUMS.txt", sums.as_bytes()), ("/package", &bytes)] {
+                let (mut socket, _) = listener.accept().unwrap();
+                let mut request = BufReader::new(&mut socket);
+                let mut line = String::new();
+                request.read_line(&mut line).unwrap();
+                assert!(line.starts_with(&format!("GET {route} ")));
+                loop {
+                    line.clear();
+                    if request.read_line(&mut line).unwrap() == 0 || line == "\r\n" {
+                        break;
+                    }
+                }
+                write!(socket, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).unwrap();
+                socket.write_all(body).unwrap();
+            }
+        });
+        let update = AvailableUpdate {
+            version: "7.8.9".into(),
+            page_url: origin.clone(),
+            download_url: None,
+            package: Some((name.into(), format!("{origin}/package"))),
+            sums_url: Some(format!("{origin}/SHA256SUMS.txt")),
+            published_at: None,
+        };
+        let downloaded = download(&update, &root.join("cache"), &|_| {}).unwrap();
+        feed.join().unwrap();
+        let app = root.join("app");
+        std::fs::create_dir(&app).unwrap();
+        apply(&downloaded, &app).unwrap();
+        assert_eq!(std::fs::read(app.join(binary_name())).unwrap(), b"updated program");
+        assert_eq!(std::fs::read(app.join("web-dist/index.html")).unwrap(), b"updated browser");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn apply_swaps_binary_and_web_dist_and_keeps_the_old_ones() {
         let run = uuid::Uuid::new_v4();

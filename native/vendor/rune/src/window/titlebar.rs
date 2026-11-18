@@ -32,6 +32,7 @@ pub(crate) use caption::{BUTTONS_KEY, FRAME_KEY, frame};
 pub struct Titlebar {
     height: f32,
     traffic_lights: Option<(f32, f32)>,
+    linux_client_controls: bool,
 }
 
 impl Titlebar {
@@ -39,7 +40,7 @@ impl Titlebar {
     pub const CAPTION_BUTTON_WIDTH: f32 = 46.0;
 
     pub const fn new(height: f32) -> Self {
-        Self { height, traffic_lights: None }
+        Self { height, traffic_lights: None, linux_client_controls: false }
     }
 
     /// macOS: the close button's top-left, in points from the window's top-left, for this
@@ -48,6 +49,18 @@ impl Titlebar {
     pub const fn traffic_lights(mut self, x: f32, y: f32) -> Self {
         self.traffic_lights = Some((x, y));
         self
+    }
+
+    /// Linux: remove the frame supplied by the window manager. The app draws the controls
+    /// in the titlebar; Rune keeps its drag regions and starts native edge resizes.
+    pub const fn linux_client_controls(mut self) -> Self {
+        self.linux_client_controls = true;
+        self
+    }
+
+    #[cfg(target_os = "linux")]
+    pub(crate) const fn has_linux_client_controls(&self) -> bool {
+        self.linux_client_controls
     }
 
     pub fn height(&self) -> f32 {

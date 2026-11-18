@@ -79,6 +79,10 @@ pub(super) struct Win {
     /// When a hidden launcher renders the changes it hasn't yet.
     pub(super) hidden_pace: HiddenPace,
     pub(super) cursor: crate::cursor::os::OsCursor,
+    #[cfg(target_os = "linux")]
+    pub(super) client_resize: bool,
+    #[cfg(target_os = "linux")]
+    pub(super) resize_cursor: bool,
     pub(super) alpha: Option<crate::render::surface_alpha::AlphaSurface>,
     /// The frame a due timer asked for, until the window draws it, and whether only it asked
     /// (`TimerFrame`).

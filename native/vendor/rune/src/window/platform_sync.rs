@@ -56,7 +56,54 @@ impl Win {
     /// The runtime's cursor while the pointer is in the window, the arrow once it leaves.
     /// `Hidden` needs focus, so it can't outlive the window being active.
     pub(super) fn apply_cursor<S>(&mut self, rt: &Runtime<S>, focused: bool) {
+        #[cfg(target_os = "linux")]
+        {
+            if let Some(edge) = rt.pointer().and_then(|point| self.linux_resize_edge(rt, point)) {
+                self.window.set_cursor_visible(true);
+                self.window.set_cursor(winit::window::CursorIcon::from(edge));
+                self.resize_cursor = true;
+                return;
+            }
+            if std::mem::take(&mut self.resize_cursor) {
+                self.window.set_cursor(winit::window::CursorIcon::Default);
+                self.cursor = crate::cursor::os::OsCursor::new();
+            }
+        }
         let want = match rt.cursor() { crate::el::Cursor::Hidden if !focused => crate::el::Cursor::Default, c => c };
         self.cursor.apply(&self.window, want, rt.pointer().is_some());
     }
+}
+
+#[cfg(target_os = "linux")]
+impl Win {
+    pub(super) fn linux_resize_edge<S>(&self, rt: &Runtime<S>, point: (f32, f32)) -> Option<winit::window::ResizeDirection> {
+        if !self.client_resize || self.window.is_maximized() || self.window.fullscreen().is_some() {
+            return None;
+        }
+        linux_resize_edge(point, rt.window_viewport(), rt.zoom())
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn linux_resize_edge(
+    (x, y): (f32, f32),
+    (width, height): (f32, f32),
+    zoom: f32,
+) -> Option<winit::window::ResizeDirection> {
+    use winit::window::ResizeDirection::*;
+    let (x, y) = (x * zoom, y * zoom);
+    let margin = 5.0;
+    let horizontal = if x < margin { -1 } else if x >= width - margin { 1 } else { 0 };
+    let vertical = if y < margin { -1 } else if y >= height - margin { 1 } else { 0 };
+    Some(match (horizontal, vertical) {
+        (-1, -1) => NorthWest,
+        (0, -1) => North,
+        (1, -1) => NorthEast,
+        (-1, 0) => West,
+        (1, 0) => East,
+        (-1, 1) => SouthWest,
+        (0, 1) => South,
+        (1, 1) => SouthEast,
+        _ => return None,
+    })
 }

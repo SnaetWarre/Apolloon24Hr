@@ -1114,7 +1114,7 @@ pub fn run() {
 fn desktop_view(s: &State, cx: &mut Cx<State>) -> El {
     let content = view(s, cx);
     #[cfg(not(target_arch = "wasm32"))]
-    return crate::desktop::chrome::frame(cx, s.dark, content, |s: &mut State| s.page = 0);
+    return crate::desktop::chrome::frame(cx, s.dark, (5..=7).contains(&s.page), content, |s: &mut State| s.page = 0);
     #[cfg(target_arch = "wasm32")]
     content
 }

@@ -14,6 +14,10 @@ impl<S: 'static> Host<S> {
         let visible = !launcher && (self.started || self.options.visible);
         #[allow(unused_mut)]
         let mut attrs = self.options.attributes(self.rt.window_title.current().unwrap_or(self.spec.title), size, self.spec.min_size, visible).with_active(focus);
+        #[cfg(target_os = "linux")]
+        if self.titlebar.is_some_and(|titlebar| titlebar.has_linux_client_controls()) {
+            attrs = attrs.with_decorations(false);
+        }
         #[cfg(target_os = "macos")]
         if self.macos_window.nonactivating_panel { attrs = attrs.with_visible(false).with_active(false); }
         #[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
@@ -252,6 +256,10 @@ impl<S: 'static> Host<S> {
             backoff: Backoff::default(),
             hidden_pace: HiddenPace::default(),
             cursor: crate::cursor::os::OsCursor::new(),
+            #[cfg(target_os = "linux")]
+            client_resize: self.options.resizable && self.titlebar.is_some_and(|t| t.has_linux_client_controls()),
+            #[cfg(target_os = "linux")]
+            resize_cursor: false,
             alpha,
             timer_frame: TimerFrame::default(),
             presented: None,

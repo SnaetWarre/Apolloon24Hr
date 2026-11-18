@@ -521,6 +521,12 @@ impl<S: 'static> Host<S> {
                         (ElementState::Pressed, true) => rt.secondary_down(x, y),
                         (ElementState::Released, true) => rt.secondary_up(x, y),
                         (ElementState::Pressed, false) => {
+                            #[cfg(target_os = "linux")]
+                            if let Some(edge) = l.linux_resize_edge(rt, (x, y))
+                                && l.window.drag_resize_window(edge).is_ok()
+                            {
+                                return;
+                            }
                             #[cfg(target_os = "macos")]
                             rt.set_native_titlebar_band(mac::native_titlebar_band(&l.window));
                             rt.pointer_down(x, y);

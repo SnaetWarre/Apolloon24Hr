@@ -77,7 +77,7 @@ pub fn run<S: 'static>(mut spec: AppSpec<S>) {
     let app = rune::App::new(spec)
         .window_options(options)
         .maximized(saved.is_some_and(|s| s.maximized))
-        .titlebar(rune::Titlebar::new(TITLEBAR_HEIGHT))
+        .titlebar(rune::Titlebar::new(TITLEBAR_HEIGHT).linux_client_controls())
         .keep_running()
         .on_close(on_close::<S>)
         .on_quit(|_: &mut S, _| {
@@ -256,20 +256,20 @@ fn start_screen(status: &str, waited: f32, dark: bool) -> El {
     screen
 }
 
-fn title_bar<S: 'static>(cx: &Cx<S>, dark: bool, home: fn(&mut S)) -> El {
+fn title_bar<S: 'static>(cx: &Cx<S>, dark: bool, public: bool, home: fn(&mut S)) -> El {
     let insets = cx.chrome_insets();
     let focused = super::with(|d| d.focused).unwrap_or(true);
     let t = tok::theme(dark);
     let tones = tok::tones(dark);
-    row()
+    let bar = row()
         .key("titlebar")
         .w_full()
         .h(TITLEBAR_HEIGHT)
         .center_y()
         .pl(insets.leading.max(8.0))
         .pr(insets.trailing)
-        .fill(tok::sidebar(dark))
-        .border_sides([0.0, 0.0, 1.0, 0.0], t.card_border)
+        .fill(if public { rune::oklch(0.178, 0.0, 0.0) } else { tok::sidebar(dark) })
+        .border_sides([0.0, 0.0, 1.0, 0.0], if public { rune::oklch(0.269, 0.0, 0.0) } else { t.card_border })
         .window_drag()
         .child(
             row()
@@ -295,17 +295,55 @@ fn title_bar<S: 'static>(cx: &Cx<S>, dark: bool, home: fn(&mut S)) -> El {
                     },
                 )
                 .on_press(move |s: &mut S| home(s)),
-        )
+        );
+    #[cfg(target_os = "linux")]
+    return bar.child(rune::el().grow(1.0)).child(caption_buttons::<S>(dark, focused));
+    #[cfg(not(target_os = "linux"))]
+    bar
+}
+
+#[cfg(target_os = "linux")]
+fn caption_buttons<S: 'static>(dark: bool, focused: bool) -> El {
+    let maximized = WINDOW.with(|window| {
+        window.borrow().as_ref().and_then(|window| window.placement())
+            .is_some_and(|placement| placement.maximized)
+    });
+    let tones = tok::tones(dark);
+    let ink = if focused { tones.ink2 } else { tones.ink3 };
+    let minimize = rune::Shape::new().line([0.5, 5.0], [9.5, 5.0], 1.0, rune::LineCap::Round, ink);
+    let maximize = if maximized {
+        rune::Shape::new()
+            .stroke([[2.5, 2.5], [2.5, 0.5], [9.5, 0.5], [9.5, 7.5], [7.5, 7.5]], 1.0, ink)
+            .stroke_with([[0.5, 2.5], [7.5, 2.5], [7.5, 9.5], [0.5, 9.5]], true, 1.0, rune::LineCap::Round, ink)
+    } else {
+        rune::Shape::new().stroke_with([[0.5, 0.5], [9.5, 0.5], [9.5, 9.5], [0.5, 9.5]], true, 1.0, rune::LineCap::Round, ink)
+    };
+    let close = rune::Shape::new()
+        .line([0.5, 0.5], [9.5, 9.5], 1.0, rune::LineCap::Round, ink)
+        .line([9.5, 0.5], [0.5, 9.5], 1.0, rune::LineCap::Round, ink);
+    let button = |key, label, shape, hover| {
+        row().key(key).role("button").label(label).help(label)
+            .no_window_drag().focusable(true).size(46.0, TITLEBAR_HEIGHT).center().hover(hover)
+            .child(rune::canvas(shape).size(10.0, 10.0))
+    };
+    row().role("group").label("Venster")
+        .child(button("titlebar-minimize", "Minimaliseren", minimize, tones.surface3)
+            .on_press_tx(|_: &mut S, tx: &mut Tx| tx.minimize()))
+        .child(button("titlebar-maximize", if maximized { "Herstellen" } else { "Maximaliseren" }, maximize, tones.surface3)
+            .on_press_tx(|_: &mut S, tx: &mut Tx| tx.toggle_maximized()))
+        .child(button("titlebar-close", "Sluiten", close, rune::oklch(0.536, 0.191, 30.1))
+            .press(rune::oklch(0.499, 0.175, 30.1))
+            .on_press_tx(|_: &mut S, tx: &mut Tx| tx.close_window()))
 }
 
 /// The operator view inside the desktop window.
-pub fn frame<S: 'static>(cx: &mut Cx<S>, dark: bool, content: El, home: fn(&mut S)) -> El {
+pub fn frame<S: 'static>(cx: &mut Cx<S>, dark: bool, public: bool, content: El, home: fn(&mut S)) -> El {
     let Some((phase, ask_close, full_screen)) =
         super::with(|d| (d.phase.clone(), d.ask_close, d.full_screen))
     else {
         return content;
     };
-    cx.caption_color(if dark { Color::WHITE } else { Color::BLACK });
+    cx.caption_color(if public { rune::oklch(0.686, 0.0, 0.0) } else if dark { Color::WHITE } else { Color::BLACK });
     let body = match &phase {
         Phase::Ready => content,
         Phase::Starting { status, since } => {
@@ -319,7 +357,7 @@ pub fn frame<S: 'static>(cx: &mut Cx<S>, dark: bool, content: El, home: fn(&mut 
         .h_full()
         .fill(tok::theme(dark).bg);
     if !full_screen {
-        root = root.child(title_bar(cx, dark, home));
+        root = root.child(title_bar(cx, dark || public, public, home));
     }
     root = root.child(col().grow(1.0).min_h(0.0).w_full().child(body));
     if let Phase::Failed(message) = &phase {
