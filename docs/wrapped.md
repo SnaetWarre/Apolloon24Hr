@@ -6,7 +6,7 @@ Wrapped is not part of the event app. You run it once, at home, from your own la
 
 ## What is on the pages
 
-The pages are a copy of the Canva design "24 urenloop WRAPPED" (October 2026). `/wrapped/card?runner=<id>` shows one runner's pages under each other (the native templates live in `native/web/wrapped` and share `src/styles/wrapped.css` with the Electron app):
+The pages are a copy of the Canva design "24 urenloop WRAPPED" (October 2026). `/wrapped/card?runner=<id>` shows one runner's pages under each other (the native templates live in `native/web/wrapped` and use `public/wrapped/wrapped.css`):
 
 1. First and last name, aantal rondes, snelste ronde, gemiddelde tijd, looptype, and totale afstand (520 m per lap).
 2. "<first name>, je liep" with the lap count, the share of runners who ran fewer laps ("meer dan 78% van alle lopers"), and the distance in meters.
@@ -17,7 +17,7 @@ The boxes, checkered flags and the car are the design's own drawings, taken from
 
 The Rust card route in `native/src/wrapped.rs` uses the same lap rules as the race app:
 
-- Every lap counts as a lap. Lap times skip double presses, split halves and forgotten handoffs (`isMeasuredLap` and `hasPlausibleDuration`).
+- Every lap counts as a lap. Lap times skip double presses, split halves and forgotten handoffs.
 - Hours are Brussels hours.
 
 ## After the race

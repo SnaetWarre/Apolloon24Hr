@@ -9,13 +9,10 @@ permissions:
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
 
 jobs:
   deploy:
-    if: github.event_name == 'workflow_dispatch' || vars.VPS_AUTO_DEPLOY == 'true'
-    runs-on: ubuntu-26.04
+    runs-on: ubuntu-22.04
     environment: production
     env:
       VPS_HOST: ${{ secrets.VPS_HOST }}
@@ -26,21 +23,24 @@ jobs:
       VPS_APP_PORT: ${{ vars.VPS_APP_PORT }}
       VPS_PUBLIC_HOST: ${{ vars.VPS_PUBLIC_HOST }}
       VPS_PUBLIC_APP_PORT: ${{ vars.VPS_PUBLIC_APP_PORT }}
-      VPS_NODE_VERSION: ${{ vars.VPS_NODE_VERSION }}
     steps:
       - uses: actions/checkout@v7
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          node-version: '24'
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci --include=optional
-
-      - name: Build deploy artifact
-        run: npm run build
+          targets: wasm32-unknown-unknown
+      - name: Install wasm-bindgen CLI
+        run: cargo install wasm-bindgen-cli --version 0.2.130 --locked
+      - name: Build and check the Rust server package
+        run: |
+          bash native/scripts/build-web.sh
+          cargo build --release --locked --manifest-path native/Cargo.toml --no-default-features
+          mkdir package
+          cp native/target/release/apolloon-native package/
+          cp -R native/web-dist package/
+          python3 native/scripts/check-package.py package/apolloon-native
+          tar -czf "$RUNNER_TEMP/apolloon-vps.tar.gz" -C package apolloon-native web-dist
+          echo "DEPLOY_ARTIFACT=$RUNNER_TEMP/apolloon-vps.tar.gz" >> "$GITHUB_ENV"
 
       - name: Configure SSH
         env:
@@ -64,6 +64,4 @@ jobs:
           printf 'Host *\n  StrictHostKeyChecking yes\n  BatchMode yes\n' > ~/.ssh/config
 
       - name: Deploy to VPS
-        env:
-          DEPLOY_SKIP_BUILD: '1'
         run: bash scripts/deploy-vps.sh

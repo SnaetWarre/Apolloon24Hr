@@ -139,7 +139,7 @@ async fn health(State(host): State<Host>) -> Json<Value> {
     // The desktop app keeps the laptop awake and asks before closing while this is true.
     let race = host.db.lock().unwrap().race().unwrap_or(Value::Null);
     let active = !race["raceStartedAt"].is_null() && race["raceFinishedAt"].is_null();
-    Json(json!({"ok":true,"runtime":"rust","schemaVersion":17,"race":{"active":active}}))
+    Json(json!({"ok":true,"runtime":"rust","releaseId":std::env::var("APOLLOON_RELEASE_ID").ok(),"schemaVersion":17,"race":{"active":active}}))
 }
 async fn net_profile() -> Json<Value> {
     let profile = tokio::task::spawn_blocking(crate::desktop::net_setup::profile).await;
@@ -402,7 +402,7 @@ fn bundled_asset(directory: &str, file: &str) -> axum::response::Response {
         ),
         ("wrapped", "story.css") => (
             "text/css; charset=utf-8",
-            include_bytes!("../../src/styles/wrapped.css"),
+            include_bytes!("../../public/wrapped/wrapped.css"),
         ),
         ("wrapped", "ready.js") => (
             "text/javascript; charset=utf-8",

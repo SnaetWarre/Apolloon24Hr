@@ -1,6 +1,6 @@
 # Reliability, Failover, And Backup Model
 
-Apolloon keeps SQLite as the storage engine on every Electron laptop.
+Apolloon keeps SQLite as the storage engine on every race laptop.
 Reliability comes from three separate mechanisms, each for a different failure:
 
 1. SQLite transactions protect one laptop from partial writes.
@@ -54,10 +54,9 @@ are therefore not enough: then losing either one stops saving.
   that its laptop stopped answering, then asks the other laptops: once they
   have a leader and say they lost that laptop too, and it has still not
   answered two seconds after the browser lost it, the browser moves. A laptop
-  that is back within two seconds never moves a screen, and in
-  `npm run bench:failover` freezes of up to three seconds did not either. When the others cannot
+  that is back within two seconds keeps its browser screen. When the others cannot
   say (too few laptops left, or they still reach it), the browser moves after
-  eight seconds. The Electron app always stays on its own laptop.
+  eight seconds. The desktop app always stays on its own laptop.
 - Every laptop announces itself on the LAN every two seconds (UDP broadcast,
   port 45737). Laptops of a group use the announcements to find each other
   again when their addresses change. A laptop on its own lists the laptops it
@@ -73,19 +72,14 @@ are therefore not enough: then losing either one stops saving.
   overview name the laptops that linked by themselves ("Automatisch gekoppeld
   met LAPTOP-TIJD, 3 minuten geleden"). `CLUSTER_AUTO_LINK=false` turns it
   off.
-- The race counts as started from ten counted laps on. Fewer laps, or a
-  runner started without a lap, are a test of the timing screen: they never
-  decide which side keeps its data, and never stop a merge. At 70 to 85
-  seconds a lap, the real race passes ten laps in about 13 minutes.
+- An active first lap counts as a started race. Linking will only merge registrations when both laptops are still before the race and neither has recorded a lap.
 - Before the race, Koppelen merges. The joining side first sends its runners
   and labels to the other group, whose leader adds them in one replicated
   write (`runners.merge`), and then joins as usual. Two runners are the same
   person only when name, e-mail and phone all match, ignoring case and the
   spaces around them, and spaces, dots and dashes inside the phone number;
   that person is kept once, as the group typed them. Every other runner is
-  added. A label with the same name as one in the group is that label. The
-  group keeps its own settings, logos and laps; a test race on the joining
-  side stays behind in its backup. Which side joins: a laptop nobody changed
+  added. A label with the same name as one in the group is that label. The group keeps its own settings and logos. Which side joins: a laptop nobody changed
   yet joins one someone prepared, then the smaller group joins the larger,
   then the side with fewer runners, then the group id decides.
 - Once the race started on either side, nothing merges. A group where the
@@ -255,23 +249,9 @@ virus scanner held it. Close other programs and press Opnieuw proberen. If
 that keeps failing, press Logmap openen, move `app.db` out of the `data`
 folder there, leave `backups` alone, and press Opnieuw proberen.
 
-## How The Failover Is Tested
+## How failover is tested
 
-- `npm test` runs the consensus code for hundreds of seeded random runs on
-  a fake clock and network: laptops crash, sleep, and lose cables (also one
-  way), messages are lost, late, or duplicated, and clocks jump. After
-  every step it checks that there is one leader per term, that no confirmed
-  change is lost, and that no lap counts twice; afterwards the group must
-  recover by itself. A failing seed replays exactly.
-- `npm run rehearse` does the same with three real servers on one machine
-  and a bot pressing Space, and compares the lap logs of all laptops.
-- `npm run rehearse -- --hardware` does it on the three event laptops over
-  SSH, with firewall rules for cables, also between only two of them; see
-  `docs/rehearse-hardware.md`.
-- `npm run bench:failover` opens a TV and a browser operator on one of three
-  real servers, crashes or freezes that laptop, and measures how long until
-  each screen shows its page from another laptop; it also checks that
-  freezes of one to three seconds move no screen.
+`npm run test:native` exercises replicated writes, leader loss, partition recovery, restart and catch-up. `npm run test:browser` runs a three-server rehearsal and checks that the public screen keeps its route, theme and zoom after it switches to another laptop. See [the hardware rehearsal](rehearse-hardware.md) for the event network.
 
 ## Rehearsal Before The Event
 

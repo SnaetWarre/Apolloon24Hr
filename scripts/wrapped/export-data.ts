@@ -3,8 +3,8 @@
 // is gone. The workbook has no lap `source`, so every lap is read as a measured handoff;
 // split laps can therefore not be left out of the fastest lap and average again.
 import { readSheet } from 'read-excel-file/node';
-import type { LapRecord, RunnerRegistration } from '../../shared/schemas.ts';
-import { brusselsOffsetMs } from '../../shared/time.ts';
+import type { LapRecord, RunnerRegistration } from './types.ts';
+import { brusselsOffsetMs } from './time.ts';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 

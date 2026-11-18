@@ -4,9 +4,6 @@
   "printWidth": 120,
   "trailingComma": "es5",
   "ignorePatterns": [
-    "dist",
-    "dist-server",
-    "dist-electron",
     "release",
     "public",
     "docs",

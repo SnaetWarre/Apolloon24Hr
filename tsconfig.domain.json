@@ -1,8 +1,0 @@
-{
-  "extends": "./tsconfig.json",
-  "compilerOptions": {
-    "noUncheckedIndexedAccess": true,
-    "exactOptionalPropertyTypes": true
-  },
-  "include": ["shared/**/*.ts", "src/app/realtimeConnection.ts"]
-}

@@ -4,10 +4,10 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import writeXlsxFile, { type Sheet } from 'write-excel-file/node';
-import { buildWrapped } from '../src/lib/wrapped.ts';
+import { buildWrapped } from '../scripts/wrapped/statistics.ts';
 import { findExportRunner, readRaceExport, type ExportRace } from '../scripts/wrapped/export-data.ts';
-import type { LapRecord } from '../shared/schemas.ts';
-import { brusselsOffsetMs } from '../shared/time.ts';
+import type { LapRecord } from '../scripts/wrapped/types.ts';
+import { brusselsOffsetMs } from '../scripts/wrapped/time.ts';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 // 20:00 in Brussels on the evening the 2026 race started.

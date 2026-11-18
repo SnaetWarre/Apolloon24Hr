@@ -12,8 +12,8 @@ import path from 'node:path';
 import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
-import { buildWrapped, wrappedFileNames } from '../../src/lib/wrapped.ts';
-import type { LapRecord, LiveAppSnapshot, RunnerRegistration } from '../../shared/schemas.ts';
+import { buildWrapped, wrappedFileNames } from './statistics.ts';
+import type { LapRecord, LiveAppSnapshot, RunnerRegistration } from './types.ts';
 import { sendWrappedMails, GMAIL, type SmtpServer } from './mail.ts';
 import {
   mailableCards,

@@ -36,7 +36,7 @@
 
 - [ ] `npm test`
 - [ ] `npm run check`
-- [ ] `npm run test:e2e` when runtime, integration, persistence, replication, or critical operator flow changed
+- [ ] `npm run test:native` when runtime, storage, or operator flows changed
 - [ ] Drove the change in the built app with `verify-apolloon` (feature files, scenario, final PASS line):
 - [ ] Focused checks:
 

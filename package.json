@@ -1,168 +1,36 @@
 {
-  "name": "apolloon-telsysteem",
+  "name": "apolloon-tools",
   "private": true,
-  "version": "5.3.1",
-  "description": "Telsysteem voor de Apolloon 24 Urenloop",
-  "author": "Apolloon",
-  "homepage": "https://github.com/SnaetWarre/Apolloon24Hr",
-  "desktopName": "Apolloon Telsysteem",
   "type": "module",
   "packageManager": "npm@11.16.0",
   "engines": {
     "node": ">=24.16.0"
   },
-  "main": "dist-electron/main.js",
   "scripts": {
-    "dev": "npm run dev:fresh",
-    "dev:seeded": "node scripts/ensure-lan-dev-firewall.mjs && concurrently -k \"cross-env DATA_PATH=.dev-data PORT=3000 PUBLIC_APP_PORT=5173 tsx server/index.ts\" \"cross-env VITE_DEV_API_PORT=3000 vite\"",
-    "dev:fresh": "npm run db:dev:seed && npm run dev:seeded",
-    "dev:fresh:live": "npm run db:dev:seed:live && npm run dev:seeded",
-    "dev:fresh:large": "npm run db:dev:seed:large && npm run dev:seeded",
+    "dev": "cargo run --locked --manifest-path native/Cargo.toml",
+    "build": "bash native/scripts/build-web.sh && cargo build --locked --manifest-path native/Cargo.toml",
+    "test": "node --import tsx --test tests/*.test.{ts,mjs}",
+    "test:native": "cargo test --locked --manifest-path native/Cargo.toml",
+    "test:browser": "node native/scripts/check-web.mjs && node native/scripts/check-web.mjs --cpu && node native/scripts/check-failover.mjs",
+    "check": "tsc -p tsconfig.json && oxlint && oxfmt --check",
     "deploy:vps": "bash scripts/deploy-vps.sh",
-    "db:dev:empty": "tsx scripts/seed-test-db.mjs --scenario=empty",
-    "db:dev:seed": "tsx scripts/seed-test-db.mjs --scenario=ready",
-    "db:dev:seed:live": "tsx scripts/seed-test-db.mjs --scenario=live",
-    "db:dev:seed:large": "tsx scripts/seed-test-db.mjs --scenario=large",
-    "client:build": "vite build && node scripts/precompress-dist.mjs",
-    "server:build": "node scripts/clean-build-output.mjs dist-server && tsc -p tsconfig.server.json && node scripts/bundle-server.mjs",
-    "electron:compile": "node scripts/clean-build-output.mjs dist-electron && tsc -p tsconfig.electron.json",
-    "typecheck:client": "tsc -p tsconfig.json",
-    "typecheck:server": "tsc -p tsconfig.server.json --noEmit",
-    "typecheck:tests": "tsc -p tsconfig.tests.json",
-    "typecheck:electron": "tsc -p tsconfig.electron.json --noEmit",
-    "typecheck:domain": "tsc -p tsconfig.domain.json",
-    "typecheck": "npm run typecheck:domain && npm run typecheck:client && npm run typecheck:server && npm run typecheck:tests && npm run typecheck:electron",
-    "lint": "oxlint",
-    "format": "oxfmt",
-    "format:check": "oxfmt --check",
-    "test": "node --import tsx --test \"tests/!(*.e2e).test.{ts,mjs}\"",
-    "test:e2e": "npm run build && node --import tsx --test \"tests/*.e2e.test.ts\"",
-    "test:ui": "node scripts/validation/run.mjs",
-    "test:sim": "node --import tsx --test tests/raft-sim.test.ts",
-    "rehearse": "node scripts/rehearse.mjs",
     "wrapped:build": "cargo build --manifest-path native/Cargo.toml --no-default-features --bin apolloon-native",
     "wrapped:cards": "npm run wrapped:build && tsx scripts/wrapped/run.ts cards",
     "wrapped:from-export": "npm run wrapped:build && tsx scripts/wrapped/from-export.ts",
-    "wrapped:mail": "tsx scripts/wrapped/run.ts mail",
-    "bench:network": "node scripts/bench-network.mjs",
-    "bench:failover": "node scripts/bench-failover.mjs",
-    "check": "npm run typecheck && npm run lint && npm run format:check && npm run client:build",
-    "build": "npm run typecheck:client && npm run client:build && npm run server:build",
-    "electron:dev": "npm run electron:compile && node scripts/ensure-lan-dev-firewall.mjs && concurrently -k \"npm run dev:seeded\" \"wait-on http://localhost:5173 && electron .\"",
-    "electron:build:win": "npm run build && npm run electron:compile && electron-builder --publish never --win",
-    "electron:build:linux": "npm run build && npm run electron:compile && electron-builder --publish never --linux",
-    "electron:build:mac": "npm run build && npm run electron:compile && electron-builder --publish never --mac"
-  },
-  "dependencies": {
-    "@dnd-kit/core": "^6.3.1",
-    "@tanstack/react-query": "^5.104.5",
-    "@tanstack/react-router": "^1.170.46",
-    "@trpc/client": "^11.19.0",
-    "@trpc/server": "^11.19.0",
-    "chart.js": "^4.6.1",
-    "electron-updater": "^6.8.11",
-    "express": "^5.3.0",
-    "papaparse": "^5.7.0",
-    "react": "^19.3.1",
-    "react-dom": "^19.3.1",
-    "read-excel-file": "^9.3.12",
-    "uqr": "^0.1.3",
-    "write-excel-file": "^4.1.1",
-    "ws": "^8.22.0",
-    "zod": "^4.6.7"
+    "wrapped:mail": "tsx scripts/wrapped/run.ts mail"
   },
   "devDependencies": {
-    "@types/express": "^5.0.6",
     "@types/node": "^26.6.6",
-    "@types/papaparse": "^5.5.2",
-    "@types/react": "^19.3.0",
-    "@types/react-dom": "^19.3.0",
+    "@types/nodemailer": "^8.0.2",
     "@types/smtp-server": "^3.5.13",
-    "@types/ws": "^8.18.2",
-    "@vitejs/plugin-react": "^6.1.2",
-    "concurrently": "^10.0.5",
-    "cross-env": "^10.1.0",
-    "electron": "^45.1.0",
-    "electron-builder": "^26.18.0",
-    "esbuild": "^0.28.2",
     "nodemailer": "^10.2.1",
-    "oxc-transform-react": "^0.156.0",
     "oxfmt": "^0.75.0",
     "oxlint": "^1.90.0",
     "playwright": "^1.64.1",
+    "read-excel-file": "^9.3.12",
     "smtp-server": "^3.21.1",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
-    "vite": "^8.3.5",
-    "wait-on": "^9.5.1"
-  },
-  "build": {
-    "appId": "be.apolloon.telsysteem",
-    "productName": "Apolloon Telsysteem",
-    "npmRebuild": false,
-    "directories": {
-      "output": "release"
-    },
-    "files": [
-      "dist/**/*",
-      "dist-server/**/*",
-      "dist-electron/**/*",
-      "!node_modules/**/{CHANGELOG.md,README.md,README,readme.md,readme}",
-      "!node_modules/**/{test,__tests__,tests,powered-test,example,examples}",
-      "!node_modules/**/*.d.ts",
-      "!node_modules/.bin",
-      "!**/*.{iml,o,hprof,orig,pyc,pyo,rbc,swp,csproj,sln,xproj}",
-      "!**/._*",
-      "!**/{.DS_Store,.git,.hg,.svn,CVS,RCS,SCCS,.gitignore,.gitattributes}",
-      "!**/{__pycache__,thumbs.db,.flowconfig,.idea,.vs,.nyc_output}",
-      "!**/{appveyor.yml,.travis.yml,circle.yml}",
-      "!**/{npm-debug.log,yarn.lock,.yarn-integrity,.yarn-metadata.json}"
-    ],
-    "publish": {
-      "provider": "github",
-      "owner": "SnaetWarre",
-      "repo": "apolloon-releases",
-      "releaseType": "release"
-    },
-    "win": {
-      "target": "nsis",
-      "icon": "build/icon.ico",
-      "artifactName": "Apolloon-Telsysteem-${version}-windows-${arch}-setup.${ext}",
-      "extraResources": [
-        {
-          "from": "build/apolloon-firewall.ps1",
-          "to": "apolloon-firewall.ps1"
-        }
-      ]
-    },
-    "linux": {
-      "target": [
-        "AppImage"
-      ],
-      "icon": "build/icon.png",
-      "category": "Utility",
-      "syncDesktopName": true,
-      "artifactName": "Apolloon-Telsysteem-${version}.${ext}"
-    },
-    "mac": {
-      "target": [
-        "dmg",
-        "zip"
-      ],
-      "icon": "build/icon.png",
-      "category": "public.app-category.utilities",
-      "artifactName": "Apolloon-Telsysteem-${version}-macos-${arch}.${ext}"
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": "always",
-      "include": "build/installer.nsh"
-    }
-  },
-  "allowScripts": {
-    "electron@44.5.1": true,
-    "electron-winstaller@5.4.0": true,
-    "esbuild@0.28.1": true
+    "write-excel-file": "^4.1.1"
   }
 }

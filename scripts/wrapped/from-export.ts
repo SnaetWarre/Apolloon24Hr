@@ -6,9 +6,10 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { buildWrapped, formatLapTime, formatTimeOfDay } from '../../src/lib/wrapped.ts';
+import { buildWrapped, formatLapTime, formatTimeOfDay } from './statistics.ts';
 import { findExportRunner, readRaceExport, type ExportRace, type ExportRunner } from './export-data.ts';
 import { makeCards, type Options } from './run.ts';
+import { writeExportDatabase } from './export-database.ts';
 
 const options = Object.fromEntries(
   process.argv.slice(2).map((arg) => {
@@ -36,11 +37,9 @@ async function remake() {
   printRace(race, runner);
 
   const dataRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'apolloon-wrapped-export-'));
-  // The server modules read DATA_PATH when they are first imported, so it is set first.
-  process.env.DATA_PATH = dataRoot;
   try {
-    const { writeExportDatabase } = await import('./export-database.ts');
-    const database = await writeExportDatabase(race);
+    const database = path.join(dataRoot, 'app.db');
+    writeExportDatabase(database, race);
     console.log('');
     await makeCards({
       db: database,

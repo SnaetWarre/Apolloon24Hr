@@ -39,5 +39,5 @@ Thumbs.db
 /.bench-data/
 /.tmp-*/
 
-# Native Rune migration development data
+# Local Rune development data
 /.native-data/

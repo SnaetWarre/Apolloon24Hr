@@ -1,27 +1,38 @@
-// Writes the runners and laps of an exported workbook into a throwaway Apolloon database,
-// so the built app can draw the same Wrapped pages it drew after the race. Kept apart from
-// export-data.ts because the server modules read DATA_PATH when they are first imported.
-import { DB_FILE, closeDb, run } from '../../server/db/connection.ts';
-import { initDb, insertRunner } from '../../server/db.ts';
+// Populate a temporary database using the same schema as the Rust server.
+import fs from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
 import type { ExportRace } from './export-data.ts';
 
-/** Creates the database under the current DATA_PATH and returns its app.db. */
-export async function writeExportDatabase(race: ExportRace): Promise<string> {
-  await initDb();
-  for (const runner of race.runners) {
-    insertRunner({
-      id: runner.id,
-      name: runner.name,
-      runnerNumber: runner.runnerNumber ?? undefined,
-      registrationSource: runner.registration ? 'import' : 'manual',
-      registration: runner.registration,
-    });
-  }
-  for (const lap of race.laps) {
-    run(
-      `INSERT INTO laps (id, runner_id, lap_number, started_at, finished_at, duration_ms, source, created_at, labels_json)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
+const schema = fs.readFileSync(new URL('../../native/src/schema.sql', import.meta.url), 'utf8');
+
+export function writeExportDatabase(file: string, race: ExportRace): void {
+  const db = new DatabaseSync(file);
+  try {
+    db.exec(schema);
+    db.exec('BEGIN');
+    db.exec("PRAGMA user_version = 17; INSERT INTO settings VALUES ('schema_version', '17')");
+    const insertRunner = db.prepare(
+      `INSERT INTO runners (id, name, runner_number, registration_source, registration_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    );
+    for (const runner of race.runners) {
+      insertRunner.run(
+        runner.id,
+        runner.name,
+        runner.runnerNumber,
+        runner.registration ? 'import' : 'manual',
+        runner.registration ? JSON.stringify(runner.registration) : null,
+        race.raceStartedAt,
+        race.raceStartedAt
+      );
+    }
+
+    const insertLap = db.prepare(
+      `INSERT INTO laps (id, runner_id, lap_number, started_at, finished_at, duration_ms, source, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    for (const lap of race.laps) {
+      insertLap.run(
         lap.id,
         lap.runnerId,
         lap.lapNumber,
@@ -29,19 +40,15 @@ export async function writeExportDatabase(race: ExportRace): Promise<string> {
         lap.finishedAt,
         lap.durationMs,
         lap.source,
-        lap.createdAt,
-        '[]',
-      ]
+        lap.createdAt
+      );
+    }
+    db.prepare('INSERT INTO race_state (id, race_started_at, race_finished_at) VALUES (1, ?, ?)').run(
+      race.raceStartedAt,
+      race.raceFinishedAt
     );
+    db.exec('COMMIT');
+  } finally {
+    db.close();
   }
-  // The export has no race start or finish of its own, so the first lap starts the race and
-  // the last one ends it. Nothing is on the track: every lap already finished.
-  run(
-    `UPDATE race_state
-     SET active_runner_id = NULL, active_started_at = NULL, race_started_at = ?, race_finished_at = ?
-     WHERE id = 1`,
-    [race.raceStartedAt, race.raceFinishedAt]
-  );
-  closeDb();
-  return DB_FILE;
 }

@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildWrapped, formatTimeOfDay, splitName, wrappedFileNames, type WrappedRunner } from '../src/lib/wrapped.ts';
-import type { Label, LapRecord, Runner, RunnerRegistration } from '../src/types.ts';
+import {
+  buildWrapped,
+  formatTimeOfDay,
+  splitName,
+  wrappedFileNames,
+  type WrappedRunner,
+} from '../scripts/wrapped/statistics.ts';
+import type { Label, LapRecord, Runner, RunnerRegistration } from '../scripts/wrapped/types.ts';
 
 // A made-up race: 20:00 Tuesday to 20:00 Wednesday in Brussels (UTC+2 in September).
 const RACE_START = Date.parse('2026-09-22T18:00:00Z');
@@ -18,16 +24,13 @@ const firstYears: Label = {
   sortOrder: 1,
 };
 
-const runner = (id: string, name: string, extra: Partial<Runner> = {}): Runner =>
-  ({
-    id,
-    name,
-    runnerNumber: id.replace(/\D/g, '') || null,
-    labels: [],
-    historicalBestMs: null,
-    historicalAvgMs: null,
-    ...extra,
-  }) as Runner;
+const runner = (id: string, name: string, extra: Partial<Runner> = {}): Runner => ({
+  id,
+  name,
+  runnerNumber: id.replace(/\D/g, '') || null,
+  labels: [],
+  ...extra,
+});
 
 const registration = (fields: Partial<RunnerRegistration>): RunnerRegistration => ({
   submittedAt: '',

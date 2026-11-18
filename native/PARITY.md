@@ -1,6 +1,6 @@
 # Native replacement acceptance contract
 
-The reference is the existing Electron application, including its server, browser/public displays, desktop integrations and packaged behavior. A renamed page or a summary in place of a feature does not count as implemented. The existing app remains the production runtime until all gates below pass.
+The reference is the existing Electron application, including its server, browser/public displays, desktop integrations and packaged behavior. A renamed page or a summary in place of a feature does not count as implemented. The previous release remains available for reference in Git history.
 
 ## Appearance
 
