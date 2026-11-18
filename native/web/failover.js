@@ -16,6 +16,9 @@ export function followGroup() {
   async function check() {
     const current = await ask(location.origin);
     if (current) {
+      if (current.memberUrls?.length && !group?.memberUrls?.length) {
+        performance.mark('apolloon.cluster.ready');
+      }
       group = current;
       lostAt = null;
     } else if (typeof group?.clusterId === 'string' && Array.isArray(group.memberUrls) && group.memberUrls.length) {

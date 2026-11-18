@@ -95,8 +95,20 @@ try {
     timeout: 60000,
   });
   const section = '/display/outside?thema=donker&zoom=125';
-  await page.goto(a.url + section);
-  assert.equal((await (await remembered).json()).memberUrls.length, 2);
+  const { promise: allowWasm, resolve: releaseWasm } = Promise.withResolvers();
+  await page.route(a.url + '/app_bg.wasm', async (route) => {
+    await allowWasm;
+    await route.continue();
+  });
+  try {
+    await page.goto(a.url + section, { waitUntil: 'commit' });
+    assert.equal((await (await remembered).json()).memberUrls.length, 2);
+    await page.waitForFunction(() => performance.getEntriesByName('apolloon.cluster.ready').length > 0, null, {
+      timeout: 30000,
+    });
+  } finally {
+    releaseWasm();
+  }
   await page.waitForFunction(() => document.querySelector('canvas') && !document.querySelector('#status'));
   await page.keyboard.press('F11');
   await page.waitForFunction(() => !!document.fullscreenElement);
