@@ -13,6 +13,8 @@ pub mod startup_error;
 pub mod supervisor;
 pub mod updates;
 pub mod window_state;
+#[cfg(feature = "desktop")]
+mod window_watchdog;
 
 use serde_json::{Value, json};
 use std::path::PathBuf;
@@ -133,6 +135,34 @@ fn attached_server() -> Option<u32> {
 }
 
 #[cfg(feature = "desktop")]
+pub fn pulse_window() {
+    use std::cell::Cell;
+    use std::time::{Duration, Instant};
+    thread_local! {
+        static LAST: Cell<Option<Instant>> = const { Cell::new(None) };
+    }
+
+    if DESKTOP.get().is_none() {
+        return;
+    }
+    let now = Instant::now();
+    let due = LAST.with(|last| {
+        if last.get().is_some_and(|at| now.duration_since(at) < Duration::from_secs(1)) {
+            return false;
+        }
+        last.set(Some(now));
+        true
+    });
+    if due {
+        if attached_server().is_some() {
+            window_watchdog::send_attached_pulse();
+        } else if let Some(supervisor) = SUPERVISOR.get() {
+            supervisor.pulse_window();
+        }
+    }
+}
+
+#[cfg(feature = "desktop")]
 pub fn recovered_route() -> Option<String> {
     attached_server()?;
     std::fs::read_to_string(data_dir()?.join("window-route")).ok()
@@ -166,6 +196,12 @@ pub fn boot() -> bool {
     let mut env = std::collections::BTreeMap::new();
     if let Ok(path) = config::ensure_env_file(&paths.data) {
         env = config::parse_env_text(&std::fs::read_to_string(path).unwrap_or_default());
+    }
+    if config::packaged()
+        && !env.contains_key("CLUSTER_ENABLED")
+        && std::env::var_os("CLUSTER_ENABLED").is_none()
+    {
+        env.insert("CLUSTER_ENABLED".into(), "true".into());
     }
     if std::env::var_os("APOLLOON_ATTACHED_SERVER").is_some() || !env.contains_key("PORT") {
         if let Ok(port) = std::env::var("PORT") {

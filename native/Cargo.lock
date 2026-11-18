@@ -155,6 +155,7 @@ dependencies = [
  "if-addrs",
  "image",
  "js-sys",
+ "libc",
  "qrcodegen",
  "reqwest",
  "resvg",
@@ -174,6 +175,7 @@ dependencies = [
  "web-sys",
  "web-time",
  "wgpu",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

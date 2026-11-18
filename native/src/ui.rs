@@ -346,6 +346,7 @@ impl State {
 fn poll(s: &mut State, _: f64, tx: &mut Tx) -> bool {
     #[cfg(not(target_arch = "wasm32"))]
     if !s.fixture {
+        crate::desktop::pulse_window();
         let route = if s.page == 8 {
             format!("/admin?section={}", SECTIONS[s.admin_section])
         } else {

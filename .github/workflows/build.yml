@@ -191,8 +191,10 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: node native/scripts/check-web.mjs
       - run: node native/scripts/check-failover.mjs
-      - name: Recover a crashed Timing window while the server stays online
-        run: timeout 60s xvfb-run -a -s "-screen 0 1366x768x24" bash native/scripts/check-renderer-recovery.sh
+      - name: Recover crashed and frozen Timing windows while the server stays online
+        run: |
+          timeout 60s xvfb-run -a -s "-screen 0 1366x768x24" bash native/scripts/check-renderer-recovery.sh KILL
+          timeout 60s xvfb-run -a -s "-screen 0 1366x768x24" bash native/scripts/check-renderer-recovery.sh STOP
 
   # The one check the main branch requires, so jobs can be added or renamed without touching
   # the repository rules. It runs even when a job fails, and fails with it.

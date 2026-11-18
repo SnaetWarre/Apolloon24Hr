@@ -53,7 +53,7 @@ fn write_log(bytes: &[u8]) {
 
 /// Lines from the desktop app itself, among the server's.
 pub fn desktop_log(message: &str) {
-    println!("{message}");
+    let _ = writeln!(std::io::stdout().lock(), "{message}");
     write_log(format!("[desktop {}] {message}\n", timestamp()).as_bytes());
 }
 
@@ -150,7 +150,7 @@ impl Supervisor {
                     .split(b'\n')
                     .map_while(Result::ok)
                 {
-                    println!("{}", String::from_utf8_lossy(&line));
+                    let _ = writeln!(std::io::stdout().lock(), "{}", String::from_utf8_lossy(&line));
                     write_log(&[line.as_slice(), b"\n"].concat());
                 }
             });
@@ -260,6 +260,13 @@ impl Supervisor {
         })
     }
 
+    #[cfg(feature = "desktop")]
+    pub fn pulse_window(&self) {
+        if let Some(lifeline) = self.inner.lock().unwrap().lifeline.as_mut() {
+            let _ = lifeline.write_all(b"h");
+        }
+    }
+
     /// Stops a server that failed to start, without the automatic restart, so a retry starts clean.
     pub fn drop_server(&self) {
         let mut inner = self.inner.lock().unwrap();
@@ -306,26 +313,32 @@ mod tests {
     }
 }
 
-/// A normal close writes a byte. An unexpected window exit leaves the server running while
-/// it restores the window, so browsers and race writes keep using the same listener and SQLite.
+/// A normal close writes a quit signal. An unexpected window exit leaves the server running
+/// while it restores the window, so browsers and race writes keep using the same SQLite.
 pub fn follow_lifeline() {
     if std::env::var_os("APOLLOON_SUPERVISED").is_none() {
         return;
     }
     std::thread::spawn(|| {
-        let mut quit = [0];
-        if std::io::stdin().read_exact(&mut quit).is_err() {
-            #[cfg(feature = "desktop")]
-            if let Ok(window) = std::env::var("APOLLOON_WINDOW_PID") {
-                recover_window(window);
+        #[cfg(feature = "desktop")]
+        if let Some(window) = std::env::var("APOLLOON_WINDOW_PID").ok()
+            .and_then(|id| id.parse::<u32>().ok())
+        {
+            use super::window_watchdog::{ParentWindow, Signal, observe, parent_signals};
+            let parent = ParentWindow::open(window);
+            if observe(parent_signals(), || parent.terminate()) == Signal::Lost {
+                recover_window(window.to_string());
             }
+            std::process::exit(0);
         }
+        let _ = std::io::copy(&mut std::io::stdin(), &mut std::io::sink());
         std::process::exit(0);
     });
 }
 
 #[cfg(feature = "desktop")]
 fn recover_window(mut previous: String) {
+    use super::window_watchdog::{attached_signals, observe};
     let Ok(exe) = std::env::current_exe() else { return };
     let mut crashes = Vec::new();
     loop {
@@ -347,14 +360,17 @@ fn recover_window(mut previous: String) {
             .env("APOLLOON_ATTACHED_SERVER", std::process::id().to_string())
             .env("RUNE_RELAUNCH_AFTER", &previous)
             .stdin(Stdio::piped())
-            .stdout(Stdio::null())
+            .stdout(Stdio::piped())
             .stderr(stderr)
             .spawn();
         let Ok(mut child) = child else { return };
         previous = child.id().to_string();
-        // Hold the pipe open while the server lives. If the server itself stops, the
-        // replacement window can take ownership of a new server without closing.
+        // Hold the pipe open while the server lives. If the server stops, the replacement
+        // window can take ownership of a new server without closing.
         let _lifeline = child.stdin.take();
+        if let Some(output) = child.stdout.take() {
+            observe(attached_signals(output), || child.kill().is_ok());
+        }
         match child.wait() {
             Ok(status) if status.success() => return,
             Ok(_) => {}

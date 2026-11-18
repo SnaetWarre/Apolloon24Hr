@@ -17,7 +17,7 @@ cargo run --manifest-path native/Cargo.toml -- --snap /tmp/apolloon.png
 
 `PORT` selects the Rust server port (default 5174). `APOLLOON_NATIVE_DATA` selects its SQLite file. Development defaults to `.native-data/app.db`. The packaged app uses its platform data folder. `APOLLOON_NATIVE_URL` makes the desktop UI attach to an existing server. Use a copy of a schema-17 database for migration checks.
 
-Set `CLUSTER_ENABLED=true` on the Rust laptops to test joining, replicated writes, and timing ownership. The Rust and Electron servers use different peer protocols and cannot share one group. A linked database refuses standalone writes when the cluster runtime is disabled.
+Packaged Rust laptops enable linking by default. Set `CLUSTER_ENABLED=true` in a development checkout to test joining, replicated writes, and timing ownership. The Rust and Electron servers use different peer protocols and cannot share one group. A linked database refuses standalone writes when the cluster runtime is disabled.
 
 The remaining race-day checks are tracked in [PARITY.md](PARITY.md). Use a separate database until physical LAN, display and installer checks pass.
 
