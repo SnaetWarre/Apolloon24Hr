@@ -198,14 +198,16 @@ fn lap_text(lap: &Value) -> String {
     )
 }
 fn brussels(ms: i64) -> Option<chrono::DateTime<chrono_tz::Tz>> {
-    chrono::DateTime::from_timestamp_millis(ms).map(|d| d.with_timezone(&chrono_tz::Europe::Brussels))
+    chrono::DateTime::from_timestamp_millis(ms)
+        .map(|d| d.with_timezone(&chrono_tz::Europe::Brussels))
 }
 /// "ma 17:45:16", as the reference table shows the moment a lap ended.
 fn moment(ms: i64) -> String {
     use chrono::Datelike;
     brussels(ms)
         .map(|d| {
-            let day = ["ma", "di", "wo", "do", "vr", "za", "zo"][d.weekday().num_days_from_monday() as usize];
+            let day = ["ma", "di", "wo", "do", "vr", "za", "zo"]
+                [d.weekday().num_days_from_monday() as usize];
             format!("{day} {}", d.format("%H:%M:%S"))
         })
         .unwrap_or_else(|| "—".into())
@@ -258,7 +260,10 @@ fn flag_text(flag: Option<Flag>, median: Option<i64>) -> String {
             lap_duration(m)
         ),
         (Some(Flag::Long), Some(m)) => {
-            format!("Veel langer dan gewoonlijk ({}). Wissel gemist?", lap_duration(m))
+            format!(
+                "Veel langer dan gewoonlijk ({}). Wissel gemist?",
+                lap_duration(m)
+            )
         }
         _ => String::new(),
     }
@@ -325,12 +330,15 @@ fn running_runner<'a>(st: &'a State) -> Option<&'a Value> {
     if race["activeRunnerId"].is_null() {
         return None;
     }
-    runners(st).into_iter().find(|r| r["id"] == race["activeRunnerId"])
+    runners(st)
+        .into_iter()
+        .find(|r| r["id"] == race["activeRunnerId"])
 }
 fn press_after(st: &State, r: &Review, lap: &Value) -> bool {
     let race = &st.snapshot["race"];
     r.lap_after(lap).is_some()
-        || (!race["activeRunnerId"].is_null() && race["activeStartedAt"].as_i64() == Some(n(lap, "finishedAt")))
+        || (!race["activeRunnerId"].is_null()
+            && race["activeStartedAt"].as_i64() == Some(n(lap, "finishedAt")))
 }
 /// The lap ending at the press the panel opens on: a press that looks off next to the lap, else the one after it.
 fn press_lap_for(st: &State, r: &Review, lap: &Value) -> Option<String> {
@@ -376,7 +384,13 @@ pub(super) fn sync_hold(st: &mut State) {
     if !held {
         st.laps.hold_since = None;
     } else if st.laps.hold_since.is_none() {
-        st.laps.hold_since = Some(laps(st).iter().map(|l| n(l, "finishedAt")).max().unwrap_or(0));
+        st.laps.hold_since = Some(
+            laps(st)
+                .iter()
+                .map(|l| n(l, "finishedAt"))
+                .max()
+                .unwrap_or(0),
+        );
     }
 }
 /// What a lap fix reports once the server accepted it.
@@ -389,11 +403,27 @@ pub(super) fn succeeded(st: &mut State, method: &str) {
         st.laps.selected = None;
     }
 }
+/// A refused lap fix, worded as the reference's toast.
+pub(super) fn failed(st: &mut State, method: &str) {
+    let what = match method {
+        "laps.delete" => "Verwijderen mislukt.",
+        "laps.moveHandoff" => "Verschuiven mislukt.",
+        "laps.move" => "Verplaatsen mislukt.",
+        "laps.split" => "Splitsen mislukt.",
+        _ => return,
+    };
+    st.error = format!("{what} {}", st.error);
+}
 pub(super) fn delete_detail(st: &State, lap_id: &Value) -> String {
     laps(st)
         .into_iter()
         .find(|l| l["id"] == *lap_id)
-        .map(|l| format!("{} telt dan niet meer mee. Terugkrijgen kan alleen met een backup.", lap_text(l)))
+        .map(|l| {
+            format!(
+                "{} telt dan niet meer mee. Terugkrijgen kan alleen met een backup.",
+                lap_text(l)
+            )
+        })
         .unwrap_or_default()
 }
 
@@ -411,7 +441,12 @@ fn open_button(key: String, title: String, dark: bool, f: impl Fn(&mut State) + 
         .on_press(f)
         .child(text(title).font(cell_font()).color(tok::theme(dark).text))
 }
-fn small_button(key: String, title: impl Into<String>, dark: bool, f: impl Fn(&mut State) + 'static) -> El {
+fn small_button(
+    key: String,
+    title: impl Into<String>,
+    dark: bool,
+    f: impl Fn(&mut State) + 'static,
+) -> El {
     button(key, title, dark, f).px(10.0).py(6.0)
 }
 
@@ -420,7 +455,12 @@ pub(super) fn panel(st: &State) -> El {
     let r = Review::new(st);
     let p = &st.laps;
     let shown_laps: Vec<&Value> = match p.hold_since {
-        Some(since) => r.all.iter().copied().filter(|l| n(l, "finishedAt") <= since).collect(),
+        Some(since) => r
+            .all
+            .iter()
+            .copied()
+            .filter(|l| n(l, "finishedAt") <= since)
+            .collect(),
         None => r.all.clone(),
     };
     let held = r.all.len() - shown_laps.len();
@@ -438,7 +478,10 @@ pub(super) fn panel(st: &State) -> El {
 
     // Cells as the reference table lays them out: 10px padding on each side, no gap.
     let head = |title: &str, w: Option<f32>| {
-        let l = text(title.to_string()).font(admin_kit::ts(12.5, 500.0)).color(tok::tones(st.dark).ink3).px(10.0);
+        let l = text(title.to_string())
+            .font(admin_kit::ts(12.5, 500.0))
+            .color(tok::tones(st.dark).ink3)
+            .px(10.0);
         match w {
             Some(w) => l.w(w),
             None => l.grow(1.0).min_w(0.0),
@@ -473,12 +516,17 @@ pub(super) fn panel(st: &State) -> El {
             .center_y()
             .border_sides([0.0, 0.0, 1.0, 0.0], t.card_border)
             .child(
-                open_button(format!("lap-open-{id}"), moment(n(lap, "finishedAt")), st.dark, move |st| {
-                    let r = Review::new(st);
-                    let press = r.lap(&open_id).and_then(|l| press_lap_for(st, &r, l));
-                    drop(r);
-                    choose_press(st, open_id.clone(), press);
-                })
+                open_button(
+                    format!("lap-open-{id}"),
+                    moment(n(lap, "finishedAt")),
+                    st.dark,
+                    move |st| {
+                        let r = Review::new(st);
+                        let press = r.lap(&open_id).and_then(|l| press_lap_for(st, &r, l));
+                        drop(r);
+                        choose_press(st, open_id.clone(), press);
+                    },
+                )
                 .checked(is_selected)
                 .w(131.0)
                 .px(10.0)
@@ -490,15 +538,46 @@ pub(super) fn panel(st: &State) -> El {
             )
             .child(cell(
                 row()
-                    .gap(10.0)
+                    .gap(8.0)
                     .clip_rounded(0.0)
-                    .child(text(s(lap, "runnerNumber").to_string()).font(cell_font()).color(tok::muted(st.dark)).w(32.0))
-                    .child(text(s(lap, "runnerName").to_string()).font(cell_font()).color(t.text).grow(1.0).min_w(0.0)),
+                    // `.bib`: min-width 2.6em, weight 500, then the `.runner-name` gap.
+                    .child(
+                        row().w(33.8).child(
+                            text(s(lap, "runnerNumber").to_string())
+                                .font(admin_kit::ts(13.0, 500.0).lh(19.5))
+                                .color(tok::muted(st.dark)),
+                        ),
+                    )
+                    .child(
+                        text(s(lap, "runnerName").to_string())
+                            .font(cell_font())
+                            .color(t.text)
+                            .grow(1.0)
+                            .min_w(0.0),
+                    ),
                 248.0,
             ))
-            .child(cell(text(n(lap, "lapNumber").to_string()).font(cell_font()).color(t.text), 76.0))
-            .child(cell(text(lap_duration(n(lap, "durationMs"))).font(cell_font()).color(t.text), 101.0))
-            .child(text(flag).font(cell_font()).color(warn(st.dark)).px(10.0).grow(1.0).min_w(0.0).wrap());
+            .child(cell(
+                text(n(lap, "lapNumber").to_string())
+                    .font(cell_font())
+                    .color(t.text),
+                76.0,
+            ))
+            .child(cell(
+                text(lap_duration(n(lap, "durationMs")))
+                    .font(cell_font())
+                    .color(t.text),
+                101.0,
+            ))
+            .child(
+                text(flag)
+                    .font(cell_font())
+                    .color(warn(st.dark))
+                    .px(10.0)
+                    .grow(1.0)
+                    .min_w(0.0)
+                    .wrap(),
+            );
         if is_selected {
             line = line.fill(t.hover);
         }
@@ -518,27 +597,35 @@ pub(super) fn panel(st: &State) -> El {
                     .center_y()
                     .border_sides([0.0, 0.0, 1.0, 0.0], t.card_border)
                     .child(
-                        text(format!("Wissel {} gedrukt?", shift_text(hint.shift_ms, true)))
-                            .font(type_::BODY)
-                            .color(warn(st.dark)),
+                        text(format!(
+                            "Wissel {} gedrukt?",
+                            shift_text(hint.shift_ms, true)
+                        ))
+                        .font(type_::BODY)
+                        .color(warn(st.dark)),
                     )
-                    .child(small_button(format!("lap-seam-{older_id}"), "Bekijken", st.dark, move |st| {
-                        choose_press(st, older_id.clone(), Some(older_id.clone()))
-                    })),
+                    .child(small_button(
+                        format!("lap-seam-{older_id}"),
+                        "Bekijken",
+                        st.dark,
+                        move |st| choose_press(st, older_id.clone(), Some(older_id.clone())),
+                    )),
             );
         }
     }
     if visible.is_empty() {
-        table = table.child(label(
-            if !r.all.is_empty() {
-                "Geen rondes die passen."
-            } else {
-                "Nog geen rondes gelopen."
-            },
-            st.dark,
-        )
-        .py(12.0)
-        .px(10.0));
+        table = table.child(
+            label(
+                if !r.all.is_empty() {
+                    "Geen rondes die passen."
+                } else {
+                    "Nog geen rondes gelopen."
+                },
+                st.dark,
+            )
+            .py(12.0)
+            .px(10.0),
+        );
     }
     let mut list = col()
         .gap(0.0)
@@ -595,12 +682,19 @@ pub(super) fn panel(st: &State) -> El {
                 }),
         );
     if matching.len() > p.shown {
-        list = list.child(button(
-            "laps-more",
-            format!("Toon {} oudere rondes", PAGE_SIZE.min(matching.len() - p.shown)),
-            st.dark,
-            |st| st.laps.shown += PAGE_SIZE,
-        ).self_start().mt(12.0));
+        list = list.child(
+            button(
+                "laps-more",
+                format!(
+                    "Toon {} oudere rondes",
+                    PAGE_SIZE.min(matching.len() - p.shown)
+                ),
+                st.dark,
+                |st| st.laps.shown += PAGE_SIZE,
+            )
+            .self_start()
+            .mt(12.0),
+        );
     }
     row()
         .gap(16.0)
@@ -646,7 +740,13 @@ fn fix_panel(st: &State, r: &Review, selected: Option<&Value>) -> El {
                     .gap(6.0)
                     .grow(1.0)
                     .min_w(0.0)
-                    .child(heading(format!("Ronde {} van {}", n(lap, "lapNumber"), lap_runner_text(lap)), st.dark).wrap())
+                    .child(
+                        heading(
+                            format!("Ronde {} van {}", n(lap, "lapNumber"), lap_runner_text(lap)),
+                            st.dark,
+                        )
+                        .wrap(),
+                    )
                     .child(
                         text(format!(
                             "{}, gelopen van {} tot {}",
@@ -676,10 +776,20 @@ fn fix_panel(st: &State, r: &Review, selected: Option<&Value>) -> El {
         .or_else(|| running.map(|r| s(r, "name").to_string()));
     let press_id = st.laps.selected.as_ref().and_then(|(_, p)| p.clone());
     if let (Some(b), Some(next)) = (before, &next_name) {
-        let mut choice = row().gap(6.0).flex_wrap().role("group").label("Welke wissel");
+        let mut choice = row()
+            .gap(6.0)
+            .flex_wrap()
+            .role("group")
+            .label("Welke wissel");
         for (id, title) in [
-            (s(b, "id").to_string(), format!("Van {} naar {}", s(b, "runnerName"), s(lap, "runnerName"))),
-            (lap_id.clone(), format!("Van {} naar {next}", s(lap, "runnerName"))),
+            (
+                s(b, "id").to_string(),
+                format!("Van {} naar {}", s(b, "runnerName"), s(lap, "runnerName")),
+            ),
+            (
+                lap_id.clone(),
+                format!("Van {} naar {next}", s(lap, "runnerName")),
+            ),
         ] {
             let on = press_id.as_deref() == Some(id.as_str());
             let (lap_id, chosen) = (lap_id.clone(), id.clone());
@@ -695,8 +805,18 @@ fn fix_panel(st: &State, r: &Review, selected: Option<&Value>) -> El {
     }
     if let Some(press) = press_id.as_deref().and_then(|id| r.lap(id)) {
         let press_after = r.lap_after(press);
-        let press_running = if press_after.is_none() { running_runner(st) } else { None };
-        if let Some(editor) = press_editor(st, press, press_after, press_running, r.hints.get(s(press, "id")).copied()) {
+        let press_running = if press_after.is_none() {
+            running_runner(st)
+        } else {
+            None
+        };
+        if let Some(editor) = press_editor(
+            st,
+            press,
+            press_after,
+            press_running,
+            r.hints.get(s(press, "id")).copied(),
+        ) {
             aside = aside.child(editor);
         }
     }
@@ -707,7 +827,12 @@ fn fix_panel(st: &State, r: &Review, selected: Option<&Value>) -> El {
             .gap(10.0)
             .pt(6.0)
             .border_sides([1.0, 0.0, 0.0, 0.0], t.card_border)
-            .child(text("Iets anders mis met deze ronde?").font(rune::TextStyle::new(14.0, 600.0)).color(t.text).pt(10.0))
+            .child(
+                text("Iets anders mis met deze ronde?")
+                    .font(rune::TextStyle::new(14.0, 600.0))
+                    .color(t.text)
+                    .pt(10.0),
+            )
             .child(
                 row()
                     .gap(8.0)
@@ -738,7 +863,9 @@ fn fix_panel(st: &State, r: &Review, selected: Option<&Value>) -> El {
                                 method: "laps.delete".into(),
                                 input: json!({"lapId":delete_id}),
                             });
-                            if let Some(lap) = laps(st).into_iter().find(|l| s(l, "id") == delete_id) {
+                            if let Some(lap) =
+                                laps(st).into_iter().find(|l| s(l, "id") == delete_id)
+                            {
                                 st.laps.success = format!("{} is verwijderd.", lap_text(lap));
                             }
                             sync_hold(st);
@@ -751,7 +878,13 @@ fn fix_panel(st: &State, r: &Review, selected: Option<&Value>) -> El {
 
 /// Moves one press with buttons of a second and a tenth: "Mitras −4, Wout +4". The buttons change
 /// the lap before the press; the lap after it changes the other way.
-fn press_editor(st: &State, before: &Value, after: Option<&Value>, running: Option<&Value>, hint: Option<Hint>) -> Option<El> {
+fn press_editor(
+    st: &State,
+    before: &Value,
+    after: Option<&Value>,
+    running: Option<&Value>,
+    hint: Option<Hint>,
+) -> Option<El> {
     let t = tok::theme(st.dark);
     let next_name = after
         .map(|a| s(a, "runnerName").to_string())
@@ -776,7 +909,11 @@ fn press_editor(st: &State, before: &Value, after: Option<&Value>, running: Opti
         if shift == 0 {
             format!("Wissel gedrukt om {}", clock_ms(finished))
         } else {
-            format!("Wissel gedrukt om {} → {}", clock_ms(finished), clock_ms(finished + shift))
+            format!(
+                "Wissel gedrukt om {} → {}",
+                clock_ms(finished),
+                clock_ms(finished + shift)
+            )
         },
         st.dark,
     ));
@@ -796,10 +933,19 @@ fn press_editor(st: &State, before: &Value, after: Option<&Value>, running: Opti
         row()
             .gap(4.0)
             .min_w(0.0)
-            .child(bar(&before_name, lap_duration(before_ms + shift), before_ms + shift, t.hover))
+            .child(bar(
+                &before_name,
+                lap_duration(before_ms + shift),
+                before_ms + shift,
+                t.hover,
+            ))
             .child(bar(
                 &next_name,
-                if after.is_some() { lap_duration(after_ms - shift) } else { "loopt nu".into() },
+                if after.is_some() {
+                    lap_duration(after_ms - shift)
+                } else {
+                    "loopt nu".into()
+                },
                 (after_ms - shift).max(0),
                 t.control_off,
             )),
@@ -836,11 +982,17 @@ fn press_editor(st: &State, before: &Value, after: Option<&Value>, running: Opti
         .center_y()
         .role("group")
         .label(format!("Ronde van {before_name}"))
-        .child(label(format!("Ronde van {before_name}"), st.dark).grow(1.0).min_w(0.0));
+        .child(
+            label(format!("Ronde van {before_name}"), st.dark)
+                .grow(1.0)
+                .min_w(0.0),
+        );
     for step in NUDGES_MS {
         nudges = nudges.child(
-            small_button(format!("nudge-{step}"), signed(step), st.dark, move |st| st.laps.shift_ms += step)
-                .disabled(!allowed(shift + step)),
+            small_button(format!("nudge-{step}"), signed(step), st.dark, move |st| {
+                st.laps.shift_ms += step
+            })
+            .disabled(!allowed(shift + step)),
         );
     }
     editor = editor.child(nudges);
@@ -852,11 +1004,25 @@ fn press_editor(st: &State, before: &Value, after: Option<&Value>, running: Opti
         match now_ms {
             Some(now_ms) => {
                 if delta != 0 {
-                    line = line.child(text(lap_duration(was)).font(type_::BODY).color(tok::muted(st.dark)));
+                    line = line.child(
+                        text(lap_duration(was))
+                            .font(type_::BODY)
+                            .color(tok::muted(st.dark)),
+                    );
                 }
-                line = line.child(text(lap_duration(now_ms)).font(rune::TextStyle::new(13.0, 600.0)).color(t.text));
+                line = line.child(
+                    text(lap_duration(now_ms))
+                        .font(rune::TextStyle::new(13.0, 600.0))
+                        .color(t.text),
+                );
             }
-            None => line = line.child(text("loopt nu").font(rune::TextStyle::new(13.0, 600.0)).color(t.text)),
+            None => {
+                line = line.child(
+                    text("loopt nu")
+                        .font(rune::TextStyle::new(13.0, 600.0))
+                        .color(t.text),
+                )
+            }
         }
         if delta != 0 {
             line = line.child(text(signed(delta)).font(type_::BODY).color(warn(st.dark)));
@@ -864,7 +1030,12 @@ fn press_editor(st: &State, before: &Value, after: Option<&Value>, running: Opti
         line
     };
     editor = editor
-        .child(result(lap_runner_text(before), before_ms, Some(before_ms + shift), shift))
+        .child(result(
+            lap_runner_text(before),
+            before_ms,
+            Some(before_ms + shift),
+            shift,
+        ))
         .child(result(
             next_text.clone(),
             after_ms,
@@ -881,7 +1052,12 @@ fn press_editor(st: &State, before: &Value, after: Option<&Value>, running: Opti
     editor = editor.child(
         row()
             .gap(8.0)
-            .child(button("press-reset", "Terugzetten", st.dark, |st| st.laps.shift_ms = 0).disabled(shift == 0))
+            .child(
+                button("press-reset", "Terugzetten", st.dark, |st| {
+                    st.laps.shift_ms = 0
+                })
+                .disabled(shift == 0),
+            )
             .child(
                 button("press-move", "Wissel verschuiven", st.dark, move |st| {
                     let shift = st.laps.shift_ms;
@@ -889,7 +1065,10 @@ fn press_editor(st: &State, before: &Value, after: Option<&Value>, running: Opti
                         return;
                     }
                     st.laps.success = message.clone();
-                    st.send("laps.moveHandoff", json!({"lapId":lap_id,"from":finished,"to":finished+shift}));
+                    st.send(
+                        "laps.moveHandoff",
+                        json!({"lapId":lap_id,"from":finished,"to":finished+shift}),
+                    );
                 })
                 .disabled(busy || shift == 0),
             ),
@@ -951,7 +1130,14 @@ fn matches<'a>(st: &'a State, fix: &Fix, lap: &Value) -> Vec<&'a Value> {
     let mut found: Vec<&Value> = runners(st)
         .into_iter()
         .filter(|r| fix.kind == FixKind::Split || r["id"] != lap["runnerId"])
-        .filter(|r| matches_search(s(r, "runnerNumber"), s(r, "name"), &label_names(r), &fix.query.text))
+        .filter(|r| {
+            matches_search(
+                s(r, "runnerNumber"),
+                s(r, "name"),
+                &label_names(r),
+                &fix.query.text,
+            )
+        })
         .collect();
     found.sort_by(|a, b| {
         rank(&suggestions, s(a, "id"))
@@ -977,7 +1163,11 @@ fn apply_fix(st: &mut State, runner_id: Option<String>) {
     let Some(runner_id) = runner_id else {
         return;
     };
-    let Some(lap) = laps(st).into_iter().find(|l| s(l, "id") == fix.lap_id).cloned() else {
+    let Some(lap) = laps(st)
+        .into_iter()
+        .find(|l| s(l, "id") == fix.lap_id)
+        .cloned()
+    else {
         return;
     };
     let name = runners(st)
@@ -986,7 +1176,10 @@ fn apply_fix(st: &mut State, runner_id: Option<String>) {
         .map(|r| runner_text(s(r, "runnerNumber"), s(r, "name")))
         .unwrap_or_default();
     let (method, message) = match fix.kind {
-        FixKind::Move => ("laps.move", format!("{} staat nu op {name}.", lap_text(&lap))),
+        FixKind::Move => (
+            "laps.move",
+            format!("{} staat nu op {name}.", lap_text(&lap)),
+        ),
         FixKind::Split => (
             "laps.split",
             format!(
@@ -1105,10 +1298,19 @@ pub(super) fn modal(st: &State) -> Option<El> {
                 }
             })
             .child(label(if on { "●" } else { "○" }, st.dark))
-            .child(text(s(r, "runnerNumber").to_string()).font(type_::BODY).color(tok::muted(st.dark)).w(36.0))
+            .child(
+                text(s(r, "runnerNumber").to_string())
+                    .font(type_::BODY)
+                    .color(tok::muted(st.dark))
+                    .w(36.0),
+            )
             .child(label(s(r, "name"), st.dark).grow(1.0).min_w(0.0));
         if r["id"] == lap["runnerId"] {
-            option = option.child(text("dezelfde loper, twee keer").font(type_::LABEL).color(t.text_secondary));
+            option = option.child(
+                text("dezelfde loper, twee keer")
+                    .font(type_::LABEL)
+                    .color(t.text_secondary),
+            );
         }
         options = options.child(option);
     }
@@ -1119,7 +1321,9 @@ pub(super) fn modal(st: &State) -> Option<El> {
     dialog = dialog.child(options).child(
         row()
             .gap(10.0)
-            .child(button("lap-picker-cancel", "Annuleer", st.dark, |st| apply_fix(st, None)))
+            .child(button("lap-picker-cancel", "Annuleer", st.dark, |st| {
+                apply_fix(st, None)
+            }))
             .child(
                 button(
                     "lap-picker-apply",
@@ -1163,9 +1367,18 @@ mod tests {
         // A runs 80 s and B 70 s; the third press came 4 s late: A 84 s, B 66 s.
         let mut all = Vec::new();
         let mut t = 0;
-        for (i, (runner, ms)) in [("a", 80_000), ("b", 70_000), ("a", 80_000), ("b", 70_000), ("a", 84_000), ("b", 66_000), ("a", 80_000), ("b", 70_000)]
-            .into_iter()
-            .enumerate()
+        for (i, (runner, ms)) in [
+            ("a", 80_000),
+            ("b", 70_000),
+            ("a", 80_000),
+            ("b", 70_000),
+            ("a", 84_000),
+            ("b", 66_000),
+            ("a", 80_000),
+            ("b", 70_000),
+        ]
+        .into_iter()
+        .enumerate()
         {
             all.push(lap(&format!("l{i}"), runner, t, ms));
             t += ms;
@@ -1176,7 +1389,11 @@ mod tests {
         assert_eq!(hints.len(), 1, "{hints:?}");
         assert_eq!(
             hints["l4"],
-            Hint { shift_ms: -4_000, usual_before_ms: 80_000, usual_after_ms: 70_000 }
+            Hint {
+                shift_ms: -4_000,
+                usual_before_ms: 80_000,
+                usual_after_ms: 70_000
+            }
         );
         let (median, flags) = review_laps(&refs);
         assert_eq!(median, Some(70_000));

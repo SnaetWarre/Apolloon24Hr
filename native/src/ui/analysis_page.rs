@@ -112,7 +112,11 @@ fn kind_title(kind: &str) -> &'static str {
 fn compare_labels(a: &Value, b: &Value) -> std::cmp::Ordering {
     kind_order(st(a, "kind"))
         .cmp(&kind_order(st(b, "kind")))
-        .then_with(|| st(a, "name").to_lowercase().cmp(&st(b, "name").to_lowercase()))
+        .then_with(|| {
+            st(a, "name")
+                .to_lowercase()
+                .cmp(&st(b, "name").to_lowercase())
+        })
 }
 /// collectRankingLabels: labels on laps, overridden by the current ones, in label order.
 fn analysis_labels(s: &State) -> Vec<Value> {
@@ -137,7 +141,9 @@ fn analysis_labels(s: &State) -> Vec<Value> {
     labels
 }
 fn filter_laps<'a>(all: &[&'a Value], enabled: &Option<Vec<String>>) -> Vec<&'a Value> {
-    let Some(ids) = enabled else { return all.to_vec() };
+    let Some(ids) = enabled else {
+        return all.to_vec();
+    };
     if ids.is_empty() {
         return Vec::new();
     }
@@ -152,14 +158,22 @@ fn filter_laps<'a>(all: &[&'a Value], enabled: &Option<Vec<String>>) -> Vec<&'a 
         .collect()
 }
 /// toggleLabelFilter: turning every label back on means "all laps" again.
-pub(super) fn toggle(current: &Option<Vec<String>>, id: &str, all: &[String]) -> Option<Vec<String>> {
+pub(super) fn toggle(
+    current: &Option<Vec<String>>,
+    id: &str,
+    all: &[String],
+) -> Option<Vec<String>> {
     let mut ids = current.clone().unwrap_or_else(|| all.to_vec());
     if let Some(i) = ids.iter().position(|x| x == id) {
         ids.remove(i);
     } else {
         ids.push(id.to_string());
     }
-    if all.iter().all(|a| ids.contains(a)) { None } else { Some(ids) }
+    if all.iter().all(|a| ids.contains(a)) {
+        None
+    } else {
+        Some(ids)
+    }
 }
 
 #[derive(Default, Clone, Copy)]
@@ -172,12 +186,19 @@ struct Stats {
     total: i64,
 }
 fn stats(laps: &[&Value]) -> Stats {
-    let mut d: Vec<i64> = laps.iter().filter(|l| plausible(l)).map(|l| n(l, "durationMs")).collect();
+    let mut d: Vec<i64> = laps
+        .iter()
+        .filter(|l| plausible(l))
+        .map(|l| n(l, "durationMs"))
+        .collect();
     d.sort_unstable();
     let count = d.len();
     let total: i64 = d.iter().sum();
     if count == 0 {
-        return Stats { total, ..Default::default() };
+        return Stats {
+            total,
+            ..Default::default()
+        };
     }
     let average = (total as f64 / count as f64).round() as i64;
     let mid = count / 2;
@@ -187,7 +208,11 @@ fn stats(laps: &[&Value]) -> Stats {
         ((d[mid - 1] + d[mid]) as f64 / 2.0).round() as i64
     };
     let deviation = (count > 1).then(|| {
-        let var = d.iter().map(|x| ((x - average) as f64).powi(2)).sum::<f64>() / count as f64;
+        let var = d
+            .iter()
+            .map(|x| ((x - average) as f64).powi(2))
+            .sum::<f64>()
+            / count as f64;
         var.sqrt().round() as i64
     });
     Stats {
@@ -228,12 +253,19 @@ fn kpis(s: &State, laps: &[&Value]) -> Kpis {
         per_hour,
         projected: per_hour.map(|p| (p * 24.0).round() as i64),
         under_minute: laps.iter().filter(|l| n(l, "durationMs") < 60_000).count(),
-        over_limit: laps.iter().filter(|l| n(l, "durationMs") > MAX_PLAUSIBLE_LAP_MS).count(),
+        over_limit: laps
+            .iter()
+            .filter(|l| n(l, "durationMs") > MAX_PLAUSIBLE_LAP_MS)
+            .count(),
     }
 }
 fn brussels_hour(ms: i64) -> String {
     chrono::DateTime::from_timestamp_millis(ms)
-        .map(|d| d.with_timezone(&chrono_tz::Europe::Brussels).format("%H").to_string())
+        .map(|d| {
+            d.with_timezone(&chrono_tz::Europe::Brussels)
+                .format("%H")
+                .to_string()
+        })
         .unwrap_or_default()
 }
 fn clock_time(ms: i64) -> String {
@@ -251,10 +283,14 @@ struct Bucket {
     average: Option<i64>,
 }
 fn time_buckets(s: &State, laps: &[&Value]) -> Vec<Bucket> {
-    let Some(start) = start_of(s, laps) else { return Vec::new() };
+    let Some(start) = start_of(s, laps) else {
+        return Vec::new();
+    };
     let mut map: std::collections::BTreeMap<i64, (usize, usize, i64)> = Default::default();
     for lap in laps {
-        let hour = ((n(lap, "finishedAt") - start) as f64 / HOUR as f64).floor().max(0.0) as i64;
+        let hour = ((n(lap, "finishedAt") - start) as f64 / HOUR as f64)
+            .floor()
+            .max(0.0) as i64;
         let b = map.entry(hour).or_default();
         b.0 += 1;
         if plausible(lap) {
@@ -275,7 +311,9 @@ fn time_buckets(s: &State, laps: &[&Value]) -> Vec<Bucket> {
 }
 /// buildRollingLapTrend: (race hour, rolling one-hour average).
 fn rolling_trend(s: &State, laps: &[&Value]) -> Vec<(f64, i64)> {
-    let Some(start) = start_of(s, laps) else { return Vec::new() };
+    let Some(start) = start_of(s, laps) else {
+        return Vec::new();
+    };
     let mut sorted: Vec<&Value> = laps.iter().copied().filter(|l| plausible(l)).collect();
     sorted.sort_by_key(|l| n(l, "finishedAt"));
     let window = 60 * 60_000;
@@ -323,7 +361,9 @@ fn distribution(laps: &[&Value]) -> Vec<(String, usize)> {
 }
 fn fastest_windows<'a>(s: &State, laps: &[&'a Value], mode: u8) -> Vec<(String, &'a Value)> {
     let timed: Vec<&Value> = laps.iter().copied().filter(|l| plausible(l)).collect();
-    let faster = |a: &Value, b: &Value| (n(a, "durationMs"), n(a, "finishedAt")) < (n(b, "durationMs"), n(b, "finishedAt"));
+    let faster = |a: &Value, b: &Value| {
+        (n(a, "durationMs"), n(a, "finishedAt")) < (n(b, "durationMs"), n(b, "finishedAt"))
+    };
     if timed.is_empty() {
         return Vec::new();
     }
@@ -336,11 +376,15 @@ fn fastest_windows<'a>(s: &State, laps: &[&'a Value], mode: u8) -> Vec<(String, 
         }
         return vec![("Dagrecord".into(), best)];
     }
-    let Some(start) = start_of(s, laps) else { return Vec::new() };
+    let Some(start) = start_of(s, laps) else {
+        return Vec::new();
+    };
     let hours = if mode == 2 { 1 } else { 2 };
     let mut map: std::collections::BTreeMap<i64, &Value> = Default::default();
     for lap in timed {
-        let i = ((n(lap, "finishedAt") - start) as f64 / (hours * HOUR) as f64).floor().max(0.0) as i64;
+        let i = ((n(lap, "finishedAt") - start) as f64 / (hours * HOUR) as f64)
+            .floor()
+            .max(0.0) as i64;
         match map.get(&i) {
             Some(cur) if !faster(lap, cur) => {}
             _ => {
@@ -385,7 +429,13 @@ fn runner_insights(s: &State, laps: &[&Value]) -> Vec<Insight> {
                 .or_else(|| first.and_then(|l| l["runnerName"].as_str()))
                 .unwrap_or("Onbekende loper")
                 .to_string();
-            Insight { id, number, name, stats: stats(&list), count: list.len() }
+            Insight {
+                id,
+                number,
+                name,
+                stats: stats(&list),
+                count: list.len(),
+            }
         })
         .collect();
     out.sort_by(|a, b| sort_key(a, b, 0));
@@ -403,7 +453,10 @@ fn sort_key(a: &Insight, b: &Insight, mode: u8) -> std::cmp::Ordering {
 }
 fn fold(text: &str) -> String {
     use unicode_normalization::UnicodeNormalization;
-    text.nfd().filter(|c| !('\u{300}'..='\u{36f}').contains(c)).collect::<String>().to_lowercase()
+    text.nfd()
+        .filter(|c| !('\u{300}'..='\u{36f}').contains(c))
+        .collect::<String>()
+        .to_lowercase()
 }
 
 fn dur(ms: Option<i64>) -> String {
@@ -441,7 +494,10 @@ pub(super) fn header_meta(s: &State) -> El {
 fn enabled_count(s: &State, labels: &[Value]) -> usize {
     match &s.analysis_page.enabled {
         None => labels.len(),
-        Some(ids) => labels.iter().filter(|l| ids.iter().any(|i| i == st(l, "id"))).count(),
+        Some(ids) => labels
+            .iter()
+            .filter(|l| ids.iter().any(|i| i == st(l, "id")))
+            .count(),
     }
 }
 pub(super) fn header_actions(s: &State) -> Vec<El> {
@@ -567,7 +623,13 @@ fn section_header(title: &str, body: &str, p: &Pal, small: bool) -> El {
         )
         .child(
             text(body.to_string())
-                .font(rune::TextStyle::new(if small { 12.5 } else { 14.0 }, 400.0).lh(if small { 19.0 } else { 21.0 }))
+                .font(
+                    rune::TextStyle::new(if small { 12.5 } else { 14.0 }, 400.0).lh(if small {
+                        19.0
+                    } else {
+                        21.0
+                    }),
+                )
                 .color(p.ink3)
                 .wrap()
                 .min_w(0.0),
@@ -588,7 +650,13 @@ fn empty_state(message: &str, p: &Pal) -> El {
         .center()
         .radius(8.0)
         .border(1.5, p.line2)
-        .child(text(message.to_string()).font(type_::BODY.lh(19.0)).color(p.ink2).wrap().align(Align::Center))
+        .child(
+            text(message.to_string())
+                .font(type_::BODY.lh(19.0))
+                .color(p.ink2)
+                .wrap()
+                .align(Align::Center),
+        )
 }
 fn segmented(s: &State, key: &str, options: &[&str], active: u8, set: fn(&mut State, u8)) -> El {
     let p = pal(s.dark);
@@ -654,7 +722,11 @@ fn scope(s: &State, labels: &[Value]) -> El {
             .border(1.0, p.line2)
             .hover(p.surface2)
             .on_press(f)
-            .child(text(label.to_string()).font(rune::TextStyle::new(13.5, 500.0)).color(p.ink))
+            .child(
+                text(label.to_string())
+                    .font(rune::TextStyle::new(13.5, 500.0))
+                    .color(p.ink),
+            )
     };
     let mut groups = col().gap(12.0);
     let enabled: Vec<String> = match &s.analysis_page.enabled {
@@ -686,8 +758,10 @@ fn scope(s: &State, labels: &[Value]) -> El {
                     .radius(6.0)
                     .hover(p.surface2)
                     .on_press(move |s: &mut State| {
-                        let all: Vec<String> =
-                            analysis_labels(s).iter().map(|l| st(l, "id").to_string()).collect();
+                        let all: Vec<String> = analysis_labels(s)
+                            .iter()
+                            .map(|l| st(l, "id").to_string())
+                            .collect();
                         s.analysis_page.enabled = toggle(&s.analysis_page.enabled, &id, &all);
                     })
                     .child(
@@ -712,7 +786,11 @@ fn scope(s: &State, labels: &[Value]) -> El {
                             .radius(10.0)
                             .fill(if on { p.brand } else { p.line2 })
                             .child(el().w(if on { 14.0 } else { 0.0 }))
-                            .child(el().size(14.0, 14.0).radius(7.0).fill(if on { Color::WHITE } else { p.surface })),
+                            .child(el().size(14.0, 14.0).radius(7.0).fill(if on {
+                                Color::WHITE
+                            } else {
+                                p.surface
+                            })),
                     ),
             );
             i += 1;
@@ -732,40 +810,74 @@ fn scope(s: &State, labels: &[Value]) -> El {
     panel(&p)
         .key("analysis-scope")
         .w(260.0)
-        .child(section_header("Labels", "Een ronde telt mee zodra één van haar labels aan staat.", &p, true).pb(0.0))
+        .child(
+            section_header(
+                "Labels",
+                "Een ronde telt mee zodra één van haar labels aan staat.",
+                &p,
+                true,
+            )
+            .pb(0.0),
+        )
         .child(
             row()
                 .gap(6.0)
                 .pt(12.0)
                 .pb(8.0)
-                .child(ghost("analysis-all-on", "Alles aan", |s| s.analysis_page.enabled = None))
-                .child(ghost("analysis-all-off", "Alles uit", |s| s.analysis_page.enabled = Some(Vec::new()))),
+                .child(ghost("analysis-all-on", "Alles aan", |s| {
+                    s.analysis_page.enabled = None
+                }))
+                .child(ghost("analysis-all-off", "Alles uit", |s| {
+                    s.analysis_page.enabled = Some(Vec::new())
+                })),
         )
         .child(groups)
 }
 
 fn stat_grid(cells: &[(&str, String)], p: &Pal) -> El {
-    let mut grid = col().min_w(0.0).radius(8.0).fill(p.surface).border(1.0, p.line).clip_rounded(8.0);
+    let mut grid = col()
+        .min_w(0.0)
+        .radius(8.0)
+        .fill(p.surface)
+        .border(1.0, p.line)
+        .clip_rounded(8.0);
     for (r, chunk) in cells.chunks(4).enumerate() {
         let mut line = row().w_full();
         for (c, (label, value)) in chunk.iter().enumerate() {
-            let size = if value.chars().count() >= 10 { 21.0 } else { 23.2 };
+            let size = if value.chars().count() >= 10 {
+                21.0
+            } else {
+                23.2
+            };
             line = line.child(
                 col()
                     .w(0.0)
                     .grow(1.0)
                     .min_w(0.0)
                     .px(16.0)
-                    .py(12.0)
-                    .gap(2.0)
+                    .py(14.0)
+                    .gap(4.0)
                     .border_sides(
-                        [0.0, 0.0, if c < 3 { 1.0 } else { 0.0 }, if r == 0 { 1.0 } else { 0.0 }],
+                        [
+                            0.0,
+                            if c < 3 { 1.0 } else { 0.0 },
+                            if r == 0 { 1.0 } else { 0.0 },
+                            0.0,
+                        ],
                         p.line,
                     )
-                    .child(text(label.to_string()).font(type_::LABEL_REGULAR).color(p.ink3))
+                    .child(
+                        text(label.to_string())
+                            .font(type_::LABEL_REGULAR)
+                            .color(p.ink3),
+                    )
                     .child(
                         text(value.clone())
-                            .font(rune::TextStyle::new(size, 550.0).lh(size * 1.2).tracking(-0.02 * size))
+                            .font(
+                                rune::TextStyle::new(size, 550.0)
+                                    .lh(size * 1.2)
+                                    .tracking(-0.02 * size),
+                            )
                             .color(p.ink),
                     ),
             );
@@ -781,7 +893,7 @@ fn section_nav(s: &State, p: &Pal) -> El {
         .role("tablist")
         .label("Analyseonderdelen")
         .gap(20.0)
-        .border_sides([0.0, 0.0, 0.0, 1.0], p.line);
+        .border_sides([0.0, 0.0, 1.0, 0.0], p.line);
     for (i, label) in ["Wedstrijd", "Lopers", "Ploegen"].iter().enumerate() {
         let on = s.analysis_page.section == i as u8;
         bar = bar.child(
@@ -793,7 +905,7 @@ fn section_nav(s: &State, p: &Pal) -> El {
                 .focusable(true)
                 .h(38.0)
                 .justify_center()
-                .border_sides([0.0, 0.0, 0.0, if on { 2.0 } else { 0.0 }], p.ink)
+                .border_sides([0.0, 0.0, if on { 2.0 } else { 0.0 }, 0.0], p.ink)
                 .on_press(move |s: &mut State| s.analysis_page.section = i as u8)
                 .child(
                     text(label.to_string())
@@ -811,9 +923,9 @@ pub(super) fn page(s: &State) -> El {
     let labels = analysis_labels(s);
     let filtered = filter_laps(&all, &s.analysis_page.enabled);
     let k = kpis(s, &filtered);
-    let burgie = s.history["events"]
-        .as_array()
-        .map_or(0, |e| e.iter().filter(|e| e["type"] == "burgie_gepakt").count());
+    let burgie = s.history["events"].as_array().map_or(0, |e| {
+        e.iter().filter(|e| e["type"] == "burgie_gepakt").count()
+    });
     let cells = [
         ("Rondes", k.count.to_string()),
         ("Gemiddelde ronde", dur(k.stats.average)),
@@ -821,7 +933,10 @@ pub(super) fn page(s: &State) -> El {
         ("Snelste", dur(k.stats.best)),
         ("Traagste", dur(k.stats.slowest)),
         ("Rondes per uur", number_nl(k.per_hour, 1)),
-        ("Projectie na 24 uur", number_nl(k.projected.map(|v| v as f64), 0)),
+        (
+            "Projectie na 24 uur",
+            number_nl(k.projected.map(|v| v as f64), 0),
+        ),
         ("Burgie gepakt", burgie.to_string()),
     ];
     let enabled_labels: Vec<&Value> = labels
@@ -834,12 +949,21 @@ pub(super) fn page(s: &State) -> El {
     let section = match s.analysis_page.section {
         1 => runners_section(s, &filtered, &p),
         2 => teams_section(s, &enabled_labels, &filtered, &p),
-        _ => race_section(s, &filtered, &k, !labels.is_empty() && enabled_labels.is_empty(), &p),
+        _ => race_section(
+            s,
+            &filtered,
+            &k,
+            !labels.is_empty() && enabled_labels.is_empty(),
+            &p,
+        ),
     };
     let mut top = col().key("analysis-page").gap(20.0).pb(24.0);
     if s.history["laps"].is_null() {
         top = top.child(
-            text("Racegeschiedenis wordt geladen...").font(type_::BODY).color(p.ink3).role("status"),
+            text("Racegeschiedenis wordt geladen...")
+                .font(type_::BODY)
+                .color(p.ink3)
+                .role("status"),
         );
     }
     top.child(
@@ -866,7 +990,13 @@ fn warning(textv: String, s: &State) -> El {
         .radius(8.0)
         .fill(c.warn_wash)
         .border(1.0, c.warn_line)
-        .child(text(textv).font(type_::BODY.lh(19.0)).color(c.warn_ink).wrap().min_w(0.0))
+        .child(
+            text(textv)
+                .font(type_::BODY.lh(19.0))
+                .color(c.warn_ink)
+                .wrap()
+                .min_w(0.0),
+        )
 }
 
 fn race_section(s: &State, laps: &[&Value], k: &Kpis, no_labels: bool, p: &Pal) -> El {
@@ -908,7 +1038,12 @@ fn race_section(s: &State, laps: &[&Value], k: &Kpis, no_labels: bool, p: &Pal) 
         .key("analysis-trend")
         .w(0.0)
         .grow(1.0)
-        .child(section_header("Rondetijd over de race", "Voortschrijdend gemiddelde van de rondetijden.", p, false));
+        .child(section_header(
+            "Rondetijd over de race",
+            "Voortschrijdend gemiddelde van de rondetijden.",
+            p,
+            false,
+        ));
     trend_panel = if trend.is_empty() {
         trend_panel.child(empty_state("Geen rondes binnen deze selectie.", p))
     } else {
@@ -940,7 +1075,12 @@ fn race_section(s: &State, laps: &[&Value], k: &Kpis, no_labels: bool, p: &Pal) 
             row()
                 .gap(12.0)
                 .center_y()
-                .child(text(label.clone()).font(rune::TextStyle::new(13.5, 400.0)).color(p.ink2).w(76.0))
+                .child(
+                    text(label.clone())
+                        .font(rune::TextStyle::new(13.5, 400.0))
+                        .color(p.ink2)
+                        .w(76.0),
+                )
                 .child(
                     row()
                         .grow(1.0)
@@ -949,7 +1089,13 @@ fn race_section(s: &State, laps: &[&Value], k: &Kpis, no_labels: bool, p: &Pal) 
                         .radius(3.0)
                         .fill(p.surface2)
                         .clip_rounded(3.0)
-                        .child(el().h_full().min_w(3.0).w(0.0).grow(frac.max(0.0001)).fill(p.brand))
+                        .child(
+                            el().h_full()
+                                .min_w(3.0)
+                                .w(0.0)
+                                .grow(frac.max(0.0001))
+                                .fill(p.brand),
+                        )
                         .child(el().h_full().w(0.0).grow((1.0 - frac).max(0.0001))),
                 )
                 .child(
@@ -965,11 +1111,20 @@ fn race_section(s: &State, laps: &[&Value], k: &Kpis, no_labels: bool, p: &Pal) 
     let mut fastest = panel(p)
         .w(0.0)
         .grow(1.0)
-        .child(section_header("Snelste rondes", "Binnen de huidige selectie.", p, false))
+        .child(section_header(
+            "Snelste rondes",
+            "Binnen de huidige selectie.",
+            p,
+            false,
+        ))
         .child(
-            segmented(s, "analysis-window", &["Per dag", "Per 2 uur", "Per uur"], s.analysis_page.window, |s, i| {
-                s.analysis_page.window = i
-            })
+            segmented(
+                s,
+                "analysis-window",
+                &["Per dag", "Per 2 uur", "Per uur"],
+                s.analysis_page.window,
+                |s, i| s.analysis_page.window = i,
+            )
             .mt(8.0)
             .mb(12.0),
         );
@@ -992,7 +1147,11 @@ fn race_section(s: &State, laps: &[&Value], k: &Kpis, no_labels: bool, p: &Pal) 
                 ]
             })
             .collect();
-        fastest = fastest.child(table(&["Periode", "Loper", "Ronde", "Tijd", "Moment"], rows, p));
+        fastest = fastest.child(table(
+            &["Periode", "Loper", "Ronde", "Tijd", "Moment"],
+            rows,
+            p,
+        ));
     }
     out.child(
         row()
@@ -1002,7 +1161,12 @@ fn race_section(s: &State, laps: &[&Value], k: &Kpis, no_labels: bool, p: &Pal) 
                 panel(p)
                     .w(0.0)
                     .grow(1.0)
-                    .child(section_header("Rondeverdeling", "Aantal rondes per zone van 5 seconden.", p, false))
+                    .child(section_header(
+                        "Rondeverdeling",
+                        "Aantal rondes per zone van 5 seconden.",
+                        p,
+                        false,
+                    ))
                     .child(hist),
             )
             .child(fastest),
@@ -1011,10 +1175,21 @@ fn race_section(s: &State, laps: &[&Value], k: &Kpis, no_labels: bool, p: &Pal) 
 
 /// A plain `table`: 12px medium muted heads, 13px cells, 7×10 padding, rules between rows.
 fn table(heads: &[&str], rows: Vec<Vec<(String, bool)>>, p: &Pal) -> El {
-    table_with(heads, rows.into_iter().map(|r| r.into_iter().map(|(v, b)| cell_text(v, b, p)).collect()).collect(), p)
+    table_with(
+        heads,
+        rows.into_iter()
+            .map(|r| r.into_iter().map(|(v, b)| cell_text(v, b, p)).collect())
+            .collect(),
+        p,
+    )
 }
 fn cell_text(v: String, strong: bool, p: &Pal) -> El {
-    text(v).font(rune::TextStyle::new(13.0, if strong { 700.0 } else { 400.0 })).color(p.ink)
+    text(v)
+        .font(rune::TextStyle::new(
+            13.0,
+            if strong { 700.0 } else { 400.0 },
+        ))
+        .color(p.ink)
 }
 fn table_with(heads: &[&str], rows: Vec<Vec<El>>, p: &Pal) -> El {
     let cols = heads.len();
@@ -1026,8 +1201,12 @@ fn table_with(heads: &[&str], rows: Vec<Vec<El>>, p: &Pal) -> El {
                     .h(31.0)
                     .px(10.0)
                     .center_y()
-                    .border_sides([0.0, 0.0, 0.0, 1.0], p.line)
-                    .child(text(h.to_string()).font(rune::TextStyle::new(12.0, 500.0)).color(p.ink3)),
+                    .border_sides([0.0, 0.0, 1.0, 0.0], p.line)
+                    .child(
+                        text(h.to_string())
+                            .font(rune::TextStyle::new(12.0, 500.0))
+                            .color(p.ink3),
+                    ),
             )
         })
         .collect();
@@ -1039,7 +1218,7 @@ fn table_with(heads: &[&str], rows: Vec<Vec<El>>, p: &Pal) -> El {
                     .h(34.0)
                     .px(10.0)
                     .center_y()
-                    .border_sides([0.0, 0.0, 0.0, 1.0], p.line)
+                    .border_sides([0.0, 0.0, 1.0, 0.0], p.line)
                     .child(cell),
             );
         }
@@ -1060,33 +1239,47 @@ fn runners_section(s: &State, laps: &[&Value], p: &Pal) -> El {
         .collect();
     let mode = s.analysis_page.sort;
     insights.sort_by(|a, b| sort_key(a, b, mode));
-    let search = text_input(&s.analysis_page.search, rune::TextStyle::new(13.5, 400.0).lh(18.0))
-        .single_line()
-        .key("analysis-runner-search")
-        .label("Zoek loper...")
-        .role("searchbox")
-        .placeholder("Zoek loper...", p.ink3)
-        .w(300.0)
-        .h(34.0)
-        .px(10.0)
-        .py(8.0)
-        .radius(6.0)
-        .fill(p.surface)
-        .border(1.0, p.line2)
-        .color(p.ink)
-        .on_edit(|s: &mut State| &mut s.analysis_page.search);
+    let search = text_input(
+        &s.analysis_page.search,
+        rune::TextStyle::new(13.5, 400.0).lh(18.0),
+    )
+    .single_line()
+    .key("analysis-runner-search")
+    .label("Zoek loper...")
+    .role("searchbox")
+    .placeholder("Zoek loper...", p.ink3)
+    .w(300.0)
+    .h(34.0)
+    .px(10.0)
+    .py(8.0)
+    .radius(6.0)
+    .fill(p.surface)
+    .border(1.0, p.line2)
+    .color(p.ink)
+    .on_edit(|s: &mut State| &mut s.analysis_page.search);
     let body = if insights.is_empty() {
         row()
             .px(10.0)
             .py(7.0)
-            .border_sides([0.0, 0.0, 0.0, 1.0], p.line)
-            .child(text("Geen lopers met rondes binnen deze selectie.").font(type_::BODY).color(p.ink))
+            .border_sides([0.0, 0.0, 1.0, 0.0], p.line)
+            .child(
+                text("Geen lopers met rondes binnen deze selectie.")
+                    .font(type_::BODY)
+                    .color(p.ink),
+            )
     } else {
         let rows = insights
             .iter()
             .map(|i| {
                 vec![
-                    (if i.number.is_empty() { "-".into() } else { i.number.clone() }, false),
+                    (
+                        if i.number.is_empty() {
+                            "-".into()
+                        } else {
+                            i.number.clone()
+                        },
+                        false,
+                    ),
                     (i.name.clone(), false),
                     (i.count.to_string(), false),
                     (dur(Some(i.stats.total)), false),
@@ -1098,8 +1291,25 @@ fn runners_section(s: &State, laps: &[&Value], p: &Pal) -> El {
                 ]
             })
             .collect();
-        table(&["Nr.", "Naam", "Toeren", "Totaal", "Gem.", "Mediaan", "Snelste", "Traagste", "Spreiding"], rows, p)
-            .key(format!("runner-insights-{}", insights.first().map_or("", |i| i.id.as_str())))
+        table(
+            &[
+                "Nr.",
+                "Naam",
+                "Toeren",
+                "Totaal",
+                "Gem.",
+                "Mediaan",
+                "Snelste",
+                "Traagste",
+                "Spreiding",
+            ],
+            rows,
+            p,
+        )
+        .key(format!(
+            "runner-insights-{}",
+            insights.first().map_or("", |i| i.id.as_str())
+        ))
     };
     panel(p)
         .child(
@@ -1121,7 +1331,12 @@ fn runners_section(s: &State, laps: &[&Value], p: &Pal) -> El {
             segmented(
                 s,
                 "analysis-sort",
-                &["Meeste rondes", "Snelste gem.", "Snelste ronde", "Consistent"],
+                &[
+                    "Meeste rondes",
+                    "Snelste gem.",
+                    "Snelste ronde",
+                    "Consistent",
+                ],
                 mode,
                 |s, i| s.analysis_page.sort = i,
             )
@@ -1138,7 +1353,11 @@ fn teams_section(s: &State, labels: &[&Value], laps: &[&Value], p: &Pal) -> El {
         let list: Vec<&Value> = laps
             .iter()
             .copied()
-            .filter(|l| l["labels"].as_array().is_some_and(|a| a.iter().any(|x| st(x, "id") == id)))
+            .filter(|l| {
+                l["labels"]
+                    .as_array()
+                    .is_some_and(|a| a.iter().any(|x| st(x, "id") == id))
+            })
             .collect();
         if list.is_empty() {
             continue;
@@ -1160,9 +1379,23 @@ fn teams_section(s: &State, labels: &[&Value], laps: &[&Value], p: &Pal) -> El {
         false,
     ));
     out = if rows.is_empty() {
-        out.child(empty_state("Geen labels met rondes binnen deze selectie.", p))
+        out.child(empty_state(
+            "Geen labels met rondes binnen deze selectie.",
+            p,
+        ))
     } else {
-        out.child(table_with(&["Label", "Rondes", "Gemiddeld", "Mediaan", "Snelste", "Traagste"], rows, p))
+        out.child(table_with(
+            &[
+                "Label",
+                "Rondes",
+                "Gemiddeld",
+                "Mediaan",
+                "Snelste",
+                "Traagste",
+            ],
+            rows,
+            p,
+        ))
     };
     out
 }
@@ -1175,7 +1408,11 @@ fn nice_num(range: f64) -> f64 {
         return 1.0;
     }
     let rounded = range.round();
-    let range = if (range - rounded).abs() <= range / 1000.0 { rounded } else { range };
+    let range = if (range - rounded).abs() <= range / 1000.0 {
+        rounded
+    } else {
+        range
+    };
     let exp = 10f64.powf(range.log10().floor());
     let f = range / exp;
     let nf = if f <= 1.0 {
@@ -1190,7 +1427,13 @@ fn nice_num(range: f64) -> f64 {
     nf * exp
 }
 /// Linear ticks as Chart.js generates them: (min, max, step).
-fn nice_ticks(mut min: f64, mut max: f64, begin_at_zero: bool, max_ticks: usize, integer: bool) -> (f64, f64, f64) {
+fn nice_ticks(
+    mut min: f64,
+    mut max: f64,
+    begin_at_zero: bool,
+    max_ticks: usize,
+    integer: bool,
+) -> (f64, f64, f64) {
     if begin_at_zero {
         min = min.min(0.0);
         max = max.max(0.0);
@@ -1214,7 +1457,11 @@ fn nice_ticks(mut min: f64, mut max: f64, begin_at_zero: bool, max_ticks: usize,
             step = step.max(1.0).round();
         }
     }
-    ((min / step).floor() * step, (max / step).ceil() * step, step)
+    (
+        (min / step).floor() * step,
+        (max / step).ceil() * step,
+        step,
+    )
 }
 fn tick_values(min: f64, max: f64, step: f64) -> Vec<f64> {
     let count = ((max - min) / step).round() as usize;
@@ -1229,11 +1476,19 @@ fn spline(points: &[[f32; 2]], tension: f32) -> Path {
     let ctrl = |i: usize| -> ([f32; 2], [f32; 2]) {
         let p1 = points[i];
         let p0 = if i == 0 { p1 } else { points[i - 1] };
-        let p2 = if i + 1 == points.len() { p1 } else { points[i + 1] };
+        let p2 = if i + 1 == points.len() {
+            p1
+        } else {
+            points[i + 1]
+        };
         let d01 = ((p1[0] - p0[0]).powi(2) + (p1[1] - p0[1]).powi(2)).sqrt();
         let d12 = ((p2[0] - p1[0]).powi(2) + (p2[1] - p1[1]).powi(2)).sqrt();
         let sum = d01 + d12;
-        let (s01, s12) = if sum > 0.0 { (d01 / sum, d12 / sum) } else { (0.0, 0.0) };
+        let (s01, s12) = if sum > 0.0 {
+            (d01 / sum, d12 / sum)
+        } else {
+            (0.0, 0.0)
+        };
         let (fa, fb) = (tension * s01, tension * s12);
         (
             [p1[0] - fa * (p2[0] - p0[0]), p1[1] - fa * (p2[1] - p0[1])],
@@ -1248,10 +1503,18 @@ fn spline(points: &[[f32; 2]], tension: f32) -> Path {
     path
 }
 fn chart_text(v: String, size: f32, weight: f32, color: Color) -> El {
-    text(v).font(rune::TextStyle::new(size, weight).lh(14.0)).color(color)
+    text(v)
+        .font(rune::TextStyle::new(size, weight).lh(14.0))
+        .color(color)
 }
 fn legend(items: &[(&str, Color, Color)], p: &Pal) -> El {
-    let mut r = row().w_full().h(19.0).gap(10.0).justify_center().items_start().pt(3.0);
+    let mut r = row()
+        .w_full()
+        .h(19.0)
+        .gap(10.0)
+        .justify_center()
+        .items_start()
+        .pt(3.0);
     for (label, fill, line) in items {
         r = r.child(
             row()
@@ -1264,17 +1527,44 @@ fn legend(items: &[(&str, Color, Color)], p: &Pal) -> El {
     r
 }
 fn axis_title(v: &str, h: f32, p: &Pal, clockwise: bool) -> El {
-    el().w(16.0)
-        .h(h)
-        .center()
-        .child(
-            row()
-                .w(h)
-                .h(16.0)
-                .center()
-                .rotate(if clockwise { std::f32::consts::FRAC_PI_2 } else { -std::f32::consts::FRAC_PI_2 })
-                .child(chart_text(v.to_string(), 12.0, 500.0, p.chart_muted)),
-        )
+    let title = row().w(h).h(16.0).center();
+    let title = if cfg!(target_arch = "wasm32") {
+        // Browsers without WebGPU paint on the CPU, which can't draw a turned layer: the whole
+        // frame would stay stale. Stack the letters there instead.
+        return el()
+            .w(16.0)
+            .h(h)
+            .center()
+            .child(upright(v, 12.0, 500.0, p.chart_muted));
+    } else {
+        title.rotate(if clockwise {
+            std::f32::consts::FRAC_PI_2
+        } else {
+            -std::f32::consts::FRAC_PI_2
+        })
+    };
+    el().w(16.0).h(h).center().child(title.child(chart_text(
+        v.to_string(),
+        12.0,
+        500.0,
+        p.chart_muted,
+    )))
+}
+/// A vertical title as a column of upright letters (the CPU-safe stand-in for turned text).
+pub(super) fn upright(v: &str, size: f32, weight: f32, color: Color) -> El {
+    let mut c = col().items_center();
+    for ch in v.chars() {
+        c = c.child(
+            text(if ch == ' ' {
+                "\u{a0}".to_string()
+            } else {
+                ch.to_string()
+            })
+            .font(rune::TextStyle::new(size, weight).lh(size * 0.92))
+            .color(color),
+        );
+    }
+    c
 }
 /// Tick labels on a vertical axis, top to bottom, with an 8px tick mark toward the plot.
 fn y_ticks(labels: Vec<String>, h: f32, p: &Pal, right: bool) -> El {
@@ -1285,7 +1575,13 @@ fn y_ticks(labels: Vec<String>, h: f32, p: &Pal, right: bool) -> El {
         c = c.child(if right {
             row().h(14.0).gap(4.0).center_y().child(mark).child(label)
         } else {
-            row().h(14.0).gap(4.0).center_y().justify_end().child(label).child(mark)
+            row()
+                .h(14.0)
+                .gap(4.0)
+                .center_y()
+                .justify_end()
+                .child(label)
+                .child(mark)
         });
     }
     c.items_stretch()
@@ -1296,11 +1592,18 @@ fn pace_chart(buckets: &[Bucket], p: &Pal) -> El {
     const W: f32 = 240.0;
     let max_count = buckets.iter().map(|b| b.count).max().unwrap_or(0) as f64;
     let (lmin, lmax, lstep) = nice_ticks(0.0, max_count, true, 11, true);
-    let secs: Vec<f64> = buckets.iter().filter_map(|b| b.average).map(|a| a as f64 / 1000.0).collect();
+    let secs: Vec<f64> = buckets
+        .iter()
+        .filter_map(|b| b.average)
+        .map(|a| a as f64 / 1000.0)
+        .collect();
     let (smin, smax) = if secs.is_empty() {
         (0.0, 1.0)
     } else {
-        (secs.iter().cloned().fold(f64::MAX, f64::min), secs.iter().cloned().fold(f64::MIN, f64::max))
+        (
+            secs.iter().cloned().fold(f64::MAX, f64::min),
+            secs.iter().cloned().fold(f64::MIN, f64::max),
+        )
     };
     let (smin, smax, sstep) = nice_ticks(smin, smax, false, 11, false);
     let ly = |v: f64| H - ((v - lmin) / (lmax - lmin)) as f32 * H;
@@ -1319,12 +1622,17 @@ fn pace_chart(buckets: &[Bucket], p: &Pal) -> El {
         let x0 = cw * (i as f32 + 0.5) - bw / 2.0;
         let top = ly(b.count as f64);
         let rect = vec![[x0, H], [x0, top], [x0 + bw, top], [x0 + bw, H]];
-        shape = shape.fill(rect.clone(), p.live_fill).stroke(rect, 1.0, p.live);
+        shape = shape
+            .fill(rect.clone(), p.live_fill)
+            .stroke(rect, 1.0, p.live);
     }
     let pts: Vec<[f32; 2]> = buckets
         .iter()
         .enumerate()
-        .filter_map(|(i, b)| b.average.map(|a| [cw * (i as f32 + 0.5), sy(a as f64 / 1000.0)]))
+        .filter_map(|(i, b)| {
+            b.average
+                .map(|a| [cw * (i as f32 + 0.5), sy(a as f64 / 1000.0)])
+        })
         .collect();
     if pts.len() > 1 {
         shape = shape.stroke_path(&spline(&pts, 0.3), 3.0, rune::LineCap::Round, p.strong);
@@ -1332,7 +1640,11 @@ fn pace_chart(buckets: &[Bucket], p: &Pal) -> El {
     for pt in &pts {
         shape = shape.line(*pt, *pt, 8.0, rune::LineCap::Round, p.strong);
     }
-    let left: Vec<String> = tick_values(lmin, lmax, lstep).iter().rev().map(|v| format!("{}", v.round() as i64)).collect();
+    let left: Vec<String> = tick_values(lmin, lmax, lstep)
+        .iter()
+        .rev()
+        .map(|v| format!("{}", v.round() as i64))
+        .collect();
     let right: Vec<String> = tick_values(smin, smax, sstep)
         .iter()
         .rev()
@@ -1340,16 +1652,25 @@ fn pace_chart(buckets: &[Bucket], p: &Pal) -> El {
         .collect();
     let mut xlabels = row().w_full().pt(10.0);
     for b in buckets {
-        xlabels = xlabels.child(
-            row().w(0.0).grow(1.0).justify_center().child(chart_text(b.label.clone(), 12.0, 500.0, p.chart_muted)),
-        );
+        xlabels = xlabels.child(row().w(0.0).grow(1.0).justify_center().child(chart_text(
+            b.label.clone(),
+            12.0,
+            500.0,
+            p.chart_muted,
+        )));
     }
     col()
         .key("pace-chart")
         .label("Rondes en tempo per uur")
         .w_full()
         .h(300.0)
-        .child(legend(&[("Rondes per uur", p.live_fill, p.live), ("Gemiddelde rondetijd", p.strong, p.strong)], p))
+        .child(legend(
+            &[
+                ("Rondes per uur", p.live_fill, p.live),
+                ("Gemiddelde rondetijd", p.strong, p.strong),
+            ],
+            p,
+        ))
         .child(
             row()
                 .w_full()
@@ -1375,8 +1696,20 @@ fn trend_chart(points: &[(f64, i64)], p: &Pal) -> El {
     let xs: Vec<f64> = points.iter().map(|p| p.0).collect();
     let ys: Vec<f64> = points.iter().map(|p| p.1 as f64 / 1000.0).collect();
     let fold = |v: &[f64], f: fn(f64, f64) -> f64, init: f64| v.iter().cloned().fold(init, f);
-    let (xmin, xmax, xstep) = nice_ticks(fold(&xs, f64::min, f64::MAX), fold(&xs, f64::max, f64::MIN), false, 7, false);
-    let (ymin, ymax, ystep) = nice_ticks(fold(&ys, f64::min, f64::MAX), fold(&ys, f64::max, f64::MIN), false, 11, false);
+    let (xmin, xmax, xstep) = nice_ticks(
+        fold(&xs, f64::min, f64::MAX),
+        fold(&xs, f64::max, f64::MIN),
+        false,
+        7,
+        false,
+    );
+    let (ymin, ymax, ystep) = nice_ticks(
+        fold(&ys, f64::min, f64::MAX),
+        fold(&ys, f64::max, f64::MIN),
+        false,
+        11,
+        false,
+    );
     let px = |v: f64| ((v - xmin) / (xmax - xmin)) as f32 * W;
     let py = |v: f64| H - ((v - ymin) / (ymax - ymin)) as f32 * H;
     let mut shape = Shape::new().view_box(W, H);
@@ -1397,7 +1730,9 @@ fn trend_chart(points: &[(f64, i64)], p: &Pal) -> El {
         .rev()
         .map(|v| dur(Some((v * 1000.0).round() as i64)))
         .collect();
-    let mut xlabels = row().pin(Some(-20.0), Some(H), Some(-20.0), None).justify_between();
+    let mut xlabels = row()
+        .pin(Some(-20.0), Some(H), Some(-20.0), None)
+        .justify_between();
     for v in tick_values(xmin, xmax, xstep) {
         let minutes = (v * 60.0).round() as i64;
         xlabels = xlabels.child(
@@ -1405,7 +1740,15 @@ fn trend_chart(points: &[(f64, i64)], p: &Pal) -> El {
                 .w(40.0)
                 .items_center()
                 .child(el().size(1.0, 8.0).fill(p.chart_grid))
-                .child(chart_text(format!("{}:{:02}", minutes / 60, minutes % 60), 12.0, 400.0, p.chart_muted).mt(4.0)),
+                .child(
+                    chart_text(
+                        format!("{}:{:02}", minutes / 60, minutes % 60),
+                        12.0,
+                        400.0,
+                        p.chart_muted,
+                    )
+                    .mt(4.0),
+                ),
         );
     }
     col()
@@ -1433,7 +1776,12 @@ fn trend_chart(points: &[(f64, i64)], p: &Pal) -> El {
                             row()
                                 .pin(Some(0.0), Some(H + 34.0), Some(0.0), None)
                                 .justify_center()
-                                .child(chart_text("Tijd sinds start (u:mm)".into(), 12.0, 500.0, p.chart_muted)),
+                                .child(chart_text(
+                                    "Tijd sinds start (u:mm)".into(),
+                                    12.0,
+                                    500.0,
+                                    p.chart_muted,
+                                )),
                         ),
                 ),
         )
@@ -1449,7 +1797,10 @@ mod tests {
         let (a, b, s) = nice_ticks(85.3, 85.3, false, 11, false);
         assert_eq!((a, b, s), (81.0, 90.0, 1.0));
         let (a, b, s) = nice_ticks(0.004, 0.83, false, 7, false);
-        assert!((a, b) == (0.0, 1.0) && (s - 0.2).abs() < 1e-9, "{a} {b} {s}");
+        assert!(
+            (a, b) == (0.0, 1.0) && (s - 0.2).abs() < 1e-9,
+            "{a} {b} {s}"
+        );
     }
 
     use rune::{Env, Runtime};
@@ -1458,7 +1809,11 @@ mod tests {
     fn update(rt: &mut Runtime<State>, predicate: impl Fn(&State) -> bool) {
         let deadline = Instant::now() + Duration::from_secs(5);
         while !predicate(&rt.state) {
-            assert!(Instant::now() < deadline, "UI did not settle: {}", rt.state.error);
+            assert!(
+                Instant::now() < deadline,
+                "UI did not settle: {}",
+                rt.state.error
+            );
             rt.update_if(|state, tx| super::super::poll(state, 0.0, tx));
             rt.frame(1.0 / 60.0);
             std::thread::sleep(Duration::from_millis(10));
@@ -1466,7 +1821,9 @@ mod tests {
     }
     fn click(rt: &mut Runtime<State>, key: &str) {
         rt.frame(1.0 / 60.0);
-        let (x, y) = rt.find(key).unwrap_or_else(|| panic!("Missing UI control {key}"));
+        let (x, y) = rt
+            .find(key)
+            .unwrap_or_else(|| panic!("Missing UI control {key}"));
         rt.pointer_down(x, y);
         rt.pointer_up(x, y);
         rt.frame(1.0 / 60.0);
@@ -1480,14 +1837,24 @@ mod tests {
         let mut db = crate::db::Db::open(std::path::Path::new(":memory:")).unwrap();
         let mut ids = Vec::new();
         for (number, name) in [("1", "Mitras"), ("2", "Wout")] {
-            ids.push(db.mutation("runners.create", &json!({"runnerNumber":number,"name":name})).unwrap()["id"].clone());
+            ids.push(
+                db.mutation(
+                    "runners.create",
+                    &json!({"runnerNumber":number,"name":name}),
+                )
+                .unwrap()["id"]
+                    .clone(),
+            );
         }
         db.exec("DELETE FROM labels", &[]).unwrap();
         let blue = r##"[{"id":"blue","icon":"SB","name":"Speedteam Blue","kind":"speedteam","color":"#2563eb"}]"##;
         let first = r##"[{"id":"first","icon":"1J","name":"1ste jaar","kind":"andere","color":"#16a34a"}]"##;
         let start = 1_700_000_000_000_i64;
         let mut t = start;
-        for (i, (runner, ms, labels)) in [(0, 80_000, blue), (1, 70_000, first), (0, 90_000, blue)].into_iter().enumerate() {
+        for (i, (runner, ms, labels)) in [(0, 80_000, blue), (1, 70_000, first), (0, 90_000, blue)]
+            .into_iter()
+            .enumerate()
+        {
             db.exec(
                 "INSERT INTO laps(id,runner_id,lap_number,started_at,finished_at,duration_ms,source,created_at,labels_json) VALUES(?,?,?,?,?,?,'spacebar',?,?)",
                 &[json!(format!("lap-{i}")), ids[runner].clone(), json!(i + 1), json!(t), json!(t + ms), json!(ms), json!(t + ms), json!(labels)],
@@ -1502,21 +1869,35 @@ mod tests {
         let _host = crate::server::start(db.clone(), port).unwrap();
         let mut state = super::super::init_with_url(format!("http://127.0.0.1:{port}"));
         state.page = 3;
-        let mut rt = Runtime::new(state, super::super::view, (1366.0, 1080.0), Env { system_dark: false, scale: 1.0 });
+        let mut rt = Runtime::new(
+            state,
+            super::super::view,
+            (1366.0, 1080.0),
+            Env {
+                system_dark: false,
+                scale: 1.0,
+            },
+        );
         rt.frame(0.0);
         update(&mut rt, |s| s.connected && laps(s).len() == 3);
         assert!(rt.find("pace-chart").is_some() && rt.find("trend-chart").is_some());
 
         // A label switch drops its laps; switching it back on means every lap again.
         click(&mut rt, "analysis-label-blue");
-        assert_eq!(rt.state.analysis_page.enabled, Some(vec!["first".to_string()]));
+        assert_eq!(
+            rt.state.analysis_page.enabled,
+            Some(vec!["first".to_string()])
+        );
         assert_eq!(shown(&rt.state), 1);
         click(&mut rt, "analysis-label-blue");
         assert_eq!(rt.state.analysis_page.enabled, None);
         click(&mut rt, "analysis-all-off");
         assert_eq!(shown(&rt.state), 0);
         rt.frame(1.0 / 60.0);
-        assert!(rt.find("pace-chart").is_none(), "no labels on: the chart gives way to the empty state");
+        assert!(
+            rt.find("pace-chart").is_none(),
+            "no labels on: the chart gives way to the empty state"
+        );
         click(&mut rt, "analysis-all-on");
         assert_eq!(shown(&rt.state), 3);
 
@@ -1525,10 +1906,18 @@ mod tests {
         assert_eq!(rt.state.analysis_page.window, 2);
         click(&mut rt, "analysis-section-1");
         assert!(rt.find("runner-insights-").is_none());
-        assert!(rt.find(&format!("runner-insights-{}", ids[0].as_str().unwrap())).is_some(), "Mitras has the most laps");
+        assert!(
+            rt.find(&format!("runner-insights-{}", ids[0].as_str().unwrap()))
+                .is_some(),
+            "Mitras has the most laps"
+        );
         click(&mut rt, "analysis-sort-2");
         rt.frame(1.0 / 60.0);
-        assert!(rt.find(&format!("runner-insights-{}", ids[1].as_str().unwrap())).is_some(), "Wout has the fastest lap");
+        assert!(
+            rt.find(&format!("runner-insights-{}", ids[1].as_str().unwrap()))
+                .is_some(),
+            "Wout has the fastest lap"
+        );
         click(&mut rt, "analysis-section-2");
         assert_eq!(rt.state.analysis_page.section, 2);
 
@@ -1538,8 +1927,14 @@ mod tests {
         click(&mut rt, "export-laps.csv");
         assert!(!rt.state.analysis_page.export_open);
         let urls = rt.take_url_requests();
-        assert!(urls.len() == 1 && urls[0].ends_with("/api/export/laps.csv"), "{urls:?}");
-        let csv = reqwest::blocking::get(format!("http://127.0.0.1:{port}/api/export/laps.csv")).unwrap().text().unwrap();
+        assert!(
+            urls.len() == 1 && urls[0].ends_with("/api/export/laps.csv"),
+            "{urls:?}"
+        );
+        let csv = reqwest::blocking::get(format!("http://127.0.0.1:{port}/api/export/laps.csv"))
+            .unwrap()
+            .text()
+            .unwrap();
         assert!(csv.contains("Mitras") && csv.contains("Wout"), "{csv}");
     }
 
@@ -1549,5 +1944,69 @@ mod tests {
         let off = toggle(&None, "a", &all);
         assert_eq!(off, Some(vec!["b".to_string()]));
         assert_eq!(toggle(&off, "a", &all), None);
+    }
+}
+
+#[cfg(test)]
+mod live_tests {
+    use super::*;
+    use rune::{Env, Runtime};
+    use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn analysis_opened_directly_shows_live_laps() {
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../.tmp-native-evidence/native-reference/app.db");
+        if !src.exists() {
+            return;
+        }
+        let copy = std::env::temp_dir().join(format!("apolloon-analysis-{}.db", crate::db::id()));
+        std::fs::copy(&src, &copy).unwrap();
+        let db = Arc::new(Mutex::new(crate::db::Db::open(&copy).unwrap()));
+        let socket = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = socket.local_addr().unwrap().port();
+        drop(socket);
+        let _host = crate::server::start(db, port).unwrap();
+        let mut state = init_with_url(format!("http://127.0.0.1:{port}"));
+        state.page = 3;
+        let mut rt = Runtime::new(
+            state,
+            view,
+            (1366.0, 768.0),
+            Env {
+                system_dark: false,
+                scale: 1.0,
+            },
+        );
+        rt.frame(0.0);
+        let deadline = Instant::now() + Duration::from_secs(8);
+        while !rt.state.connected || rt.state.history.is_null() {
+            assert!(Instant::now() < deadline, "no data");
+            rt.update_if(|state, tx| poll(state, 0.0, tx));
+            rt.frame(1.0 / 60.0);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(
+            rt.state.history["laps"].as_array().map_or(0, |a| a.len()),
+            35
+        );
+        // Exporteren opens the six export routes; each one downloads from the Rust server.
+        rt.frame(1.0 / 60.0);
+        let (x, y) = rt.find("analysis-export").expect("Exporteren");
+        rt.pointer_down(x, y);
+        rt.pointer_up(x, y);
+        rt.frame(1.0 / 60.0);
+        rt.frame(1.0 / 60.0);
+        for (_, file) in EXPORTS {
+            assert!(
+                rt.find(&format!("export-{file}")).is_some(),
+                "menu item {file}"
+            );
+            let response =
+                reqwest::blocking::get(format!("http://127.0.0.1:{port}/api/export/{file}"))
+                    .unwrap();
+            assert!(response.status().is_success(), "{file}");
+            assert!(!response.bytes().unwrap().is_empty(), "{file}");
+        }
     }
 }

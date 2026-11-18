@@ -62,7 +62,7 @@ pub fn create(database: &Path) -> Result<Value> {
     create_reason(database, "manual")
 }
 pub fn create_reason(database: &Path, reason: &str) -> Result<Value> {
-    if !["manual", "scheduled", "pre-restore", "pre-clear"].contains(&reason) {
+    if !["manual", "scheduled", "pre-restore", "pre-clear", "pre-join", "pre-resync"].contains(&reason) {
         return Err("Ongeldige backupreden".into());
     }
     let dir = directory(database)?;

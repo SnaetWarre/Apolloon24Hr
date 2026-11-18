@@ -24,7 +24,7 @@ pub(super) struct Add {
     name: TextEdit,
     phone: TextEdit,
     email: TextEdit,
-    hours: TextEdit,
+    hours: Vec<String>,
     avg_min: TextEdit,
     avg_sec: TextEdit,
     best_min: TextEdit,
@@ -41,11 +41,19 @@ pub(super) struct Add {
 pub(super) enum Dialog {
     Search(Search),
     Add(Box<Add>),
+    /// Bellen: a QR code with the `tel:` link (CallQrDialog.tsx); name and phone as shown.
+    Call(String, String),
 }
 /// What a sent action does once the server took it.
 enum Pending {
-    CheckIn { id: String, name: String, keep_open: bool },
-    Added { name: String },
+    CheckIn {
+        id: String,
+        name: String,
+        keep_open: bool,
+    },
+    Added {
+        name: String,
+    },
     Board,
 }
 #[derive(Clone, PartialEq, Debug)]
@@ -119,9 +127,21 @@ fn pal(dark: bool) -> Pal {
     let th = tok::theme(dark);
     Pal {
         brand: oklch(0.5681, 0.1641, 251.76),
-        brand_hover: if dark { oklch(0.605, 0.166, 250.7) } else { oklch(0.516, 0.148, 251.6) },
-        brand_ink: if dark { oklch(0.715, 0.13, 247.8) } else { oklch(0.4923, 0.1419, 251.85) },
-        brand_wash: if dark { oklch(0.263, 0.036, 250.9) } else { oklch(0.963, 0.015, 248.0) },
+        brand_hover: if dark {
+            oklch(0.605, 0.166, 250.7)
+        } else {
+            oklch(0.516, 0.148, 251.6)
+        },
+        brand_ink: if dark {
+            oklch(0.715, 0.13, 247.8)
+        } else {
+            oklch(0.4923, 0.1419, 251.85)
+        },
+        brand_wash: if dark {
+            oklch(0.263, 0.036, 250.9)
+        } else {
+            oklch(0.963, 0.015, 248.0)
+        },
         on_brand: oklch(1.0, 0.0, 0.0),
         surface: th.card,
         line: th.card_border,
@@ -152,10 +172,20 @@ fn label_names(r: &Value) -> String {
 /// Number, name and labels together, so "149 bram" finds Bram with 149.
 fn matches(r: &Value, query: &str) -> bool {
     let q = fold(query.trim());
-    q.is_empty() || fold(&format!("{} {} {}", st(r, "runnerNumber"), st(r, "name"), label_names(r))).contains(&q)
+    q.is_empty()
+        || fold(&format!(
+            "{} {} {}",
+            st(r, "runnerNumber"),
+            st(r, "name"),
+            label_names(r)
+        ))
+        .contains(&q)
 }
 fn number_value(r: &Value) -> i64 {
-    st(r, "runnerNumber").trim().parse::<i64>().unwrap_or(i64::MAX)
+    st(r, "runnerNumber")
+        .trim()
+        .parse::<i64>()
+        .unwrap_or(i64::MAX)
 }
 fn since(r: &Value) -> i64 {
     r["statusSince"].as_i64().unwrap_or(i64::MAX)
@@ -170,7 +200,10 @@ fn waiting_order(a: &Value, b: &Value) -> std::cmp::Ordering {
 }
 /// The whole queue in its server order, whatever the filter shows.
 fn waiting(s: &State) -> Vec<&Value> {
-    let mut list: Vec<&Value> = runners(s).into_iter().filter(|r| r["status"] == "waiting").collect();
+    let mut list: Vec<&Value> = runners(s)
+        .into_iter()
+        .filter(|r| r["status"] == "waiting")
+        .collect();
     list.sort_by(|a, b| waiting_order(a, b));
     list
 }
@@ -197,7 +230,11 @@ fn can_move(from: &str, to: &str) -> bool {
     )
 }
 fn next_lane(status: &str) -> Option<&'static str> {
-    let to = if status == "warming_up" { "waiting" } else { "warming_up" };
+    let to = if status == "warming_up" {
+        "waiting"
+    } else {
+        "warming_up"
+    };
     can_move(status, to).then_some(to)
 }
 fn can_check_in(status: &str) -> bool {
@@ -214,7 +251,9 @@ thread_local! {
 }
 fn icon(s: &State, name: &'static str, color: rune::Color, size: f32, stroke: f32) -> El {
     let el = rune::el().size(size, size);
-    let Some(cache) = &s.image_cache else { return el };
+    let Some(cache) = &s.image_cache else {
+        return el;
+    };
     let body = match name {
         "search" => r#"<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>"#,
         "timing" => r#"<path d="M10 2h4M12 14l3-3"/><circle cx="12" cy="14" r="8"/>"#,
@@ -257,7 +296,12 @@ fn btn(s: &State, key: impl Into<String>, label: &str, kind: Kind, sm: bool) -> 
         Kind::Plain => (p.surface, p.t.line2, p.ink, p.t.surface2),
         Kind::Primary => (p.brand, p.brand, p.on_brand, p.brand_hover),
         Kind::Ghost => (rune::Color::TRANSPARENT, p.t.line2, p.ink, p.t.surface2),
-        Kind::Quiet => (rune::Color::TRANSPARENT, rune::Color::TRANSPARENT, p.t.ink2, p.t.surface3),
+        Kind::Quiet => (
+            rune::Color::TRANSPARENT,
+            rune::Color::TRANSPARENT,
+            p.t.ink2,
+            p.t.surface3,
+        ),
     };
     let mut b = row()
         .key(key.into())
@@ -295,16 +339,28 @@ fn btn_off(s: &State, key: impl Into<String>, label: &str) -> El {
         .radius(6.0)
         .fill(p.t.surface2)
         .border(1.0, p.line)
-        .child(text(label.to_string()).font(rune::TextStyle::new(13.5, 500.0)).color(p.t.ink3))
+        .child(
+            text(label.to_string())
+                .font(rune::TextStyle::new(13.5, 500.0))
+                .color(p.t.ink3),
+        )
 }
 /// A 16px checkbox in the brand colour, as `accent-color` draws one.
 fn checkbox(s: &State, on: bool) -> El {
     let p = pal(s.dark);
     let b = rune::el().size(16.0, 16.0).radius(3.0).center();
     if on {
-        b.fill(p.brand).child(icon(s, "check", p.on_brand, 12.0, 3.0))
+        b.fill(p.brand)
+            .child(icon(s, "check", p.on_brand, 12.0, 3.0))
     } else {
-        b.fill(p.surface).border(1.0, if s.dark { p.t.ink3 } else { rune::color::hex("#767676").unwrap() })
+        b.fill(p.surface).border(
+            1.0,
+            if s.dark {
+                p.t.ink3
+            } else {
+                rune::color::hex("#767676").unwrap()
+            },
+        )
     }
 }
 /// `.toggle-row`: a checkbox and its label, 30 high.
@@ -321,7 +377,11 @@ fn toggle_row(s: &State, key: &str, title: &str, on: bool, f: impl Fn(&mut State
         .center_y()
         .on_press(f)
         .child(checkbox(s, on))
-        .child(text(title.to_string()).font(rune::TextStyle::new(13.5, 400.0).lh(20.0)).color(pal(s.dark).ink))
+        .child(
+            text(title.to_string())
+                .font(rune::TextStyle::new(13.5, 400.0).lh(20.0))
+                .color(pal(s.dark).ink),
+        )
 }
 /// `.input`: 34 high, 1px line-2 border, brand ring while focused.
 fn field(s: &State, edit: &TextEdit, key: &str, title: &str, placeholder: &str) -> El {
@@ -355,12 +415,20 @@ fn pill(s: &State, l: &Value) -> El {
         .fill(p.surface)
         .border(1.0, p.line);
     if let Some(image) = l["imageUrl"].as_str().and_then(|url| s.logos.get(url)) {
-        b = b.child(rune::el().size(14.0, 14.0).pixels_fit(image.pixels(), rune::SurfaceFit::Fit));
+        b = b.child(
+            rune::el()
+                .size(14.0, 14.0)
+                .pixels_fit(image.pixels(), rune::SurfaceFit::Fit),
+        );
     } else {
         let color = rune::color::hex(st(l, "color")).unwrap_or(p.t.ink3);
         b = b.child(rune::el().size(7.0, 7.0).radius(3.5).fill(color));
     }
-    b.child(text(st(l, "name").to_string()).font(rune::TextStyle::new(11.5, 500.0)).color(p.t.ink2))
+    b.child(
+        text(st(l, "name").to_string())
+            .font(rune::TextStyle::new(11.5, 500.0))
+            .color(p.t.ink2),
+    )
 }
 /// `RunnerName`: the bib (2.6em wide, quiet) and the name.
 fn runner_name(s: &State, r: &Value, size: f32, weight: f32) -> El {
@@ -386,10 +454,13 @@ fn runner_name(s: &State, r: &Value, size: f32, weight: f32) -> El {
 /// `.disclosure`: the chevron that turns when the section opens.
 fn chevron(s: &State, open: bool) -> El {
     let p = pal(s.dark);
-    rune::el()
-        .w(12.0)
-        .center()
-        .child(icon(s, if open { "chevronDown" } else { "chevronRight" }, p.t.ink3, 16.0, 2.25))
+    rune::el().w(12.0).center().child(icon(
+        s,
+        if open { "chevronDown" } else { "chevronRight" },
+        p.t.ink3,
+        16.0,
+        2.25,
+    ))
 }
 
 // ---------- Header actions (QueueActions.tsx) ----------
@@ -411,18 +482,21 @@ pub(super) fn header_actions(s: &State) -> Vec<El> {
         .focus_within_ring(3.0, 0.0, p.brand.alpha(0.22))
         .child(icon(s, "search", p.t.ink3, 15.0, 1.75))
         .child(
-            text_input(&s.queue_page.filter, rune::TextStyle::new(13.5, 400.0).lh(18.0))
-                .single_line()
-                .key("board-filter")
-                .label("Filter dit bord")
-                .role("searchbox")
-                .placeholder("Filter bord", p.t.ink3)
-                .grow(1.0)
-                .min_w(0.0)
-                .py(8.0)
-                .color(p.ink)
-                .no_focus_ring()
-                .on_edit(|s: &mut State| &mut s.queue_page.filter),
+            text_input(
+                &s.queue_page.filter,
+                rune::TextStyle::new(13.5, 400.0).lh(18.0),
+            )
+            .single_line()
+            .key("board-filter")
+            .label("Filter dit bord")
+            .role("searchbox")
+            .placeholder("Filter bord", p.t.ink3)
+            .grow(1.0)
+            .min_w(0.0)
+            .py(8.0)
+            .color(p.ink)
+            .no_focus_ring()
+            .on_edit(|s: &mut State| &mut s.queue_page.filter),
         );
     if filtering {
         search = search.child(
@@ -444,14 +518,18 @@ pub(super) fn header_actions(s: &State) -> Vec<El> {
     }
     vec![
         search,
-        btn(s, "queue-add", "Nieuwe loper", Kind::Plain, false).min_w(110.0).on_press_tx(|s: &mut State, tx: &mut Tx| {
-            s.queue_page.dialog = Some(Dialog::Add(Box::default()));
-            tx.focus_when_shown("add-number", false);
-        }),
-        btn(s, "queue-search", "Loper zoeken", Kind::Primary, false).min_w(112.0).on_press_tx(|s: &mut State, tx: &mut Tx| {
-            s.queue_page.dialog = Some(Dialog::Search(Search::default()));
-            tx.focus_when_shown("search-query", false);
-        }),
+        btn(s, "queue-add", "Nieuwe loper", Kind::Plain, false)
+            .min_w(110.0)
+            .on_press_tx(|s: &mut State, tx: &mut Tx| {
+                s.queue_page.dialog = Some(Dialog::Add(Box::default()));
+                tx.focus_when_shown("add-number", false);
+            }),
+        btn(s, "queue-search", "Loper zoeken", Kind::Primary, false)
+            .min_w(112.0)
+            .on_press_tx(|s: &mut State, tx: &mut Tx| {
+                s.queue_page.dialog = Some(Dialog::Search(Search::default()));
+                tx.focus_when_shown("search-query", false);
+            }),
     ]
 }
 
@@ -468,7 +546,15 @@ pub(super) fn page(s: &State) -> El {
 
 // ---------- Nu beschikbaar, nog niet opgeroepen (AvailableNowPanel.tsx, lib/availability.ts) ----------
 
-const WEEKDAYS: [&str; 7] = ["maandag", "dinsdag", "woensdag", "donderdag", "vrijdag", "zaterdag", "zondag"];
+const WEEKDAYS: [&str; 7] = [
+    "maandag",
+    "dinsdag",
+    "woensdag",
+    "donderdag",
+    "vrijdag",
+    "zaterdag",
+    "zondag",
+];
 
 /// The hour and Dutch weekday on the Brussels wall clock.
 fn brussels_moment(ms: i64) -> (u32, &'static str) {
@@ -476,7 +562,10 @@ fn brussels_moment(ms: i64) -> (u32, &'static str) {
     let d = chrono::DateTime::from_timestamp_millis(ms)
         .unwrap_or_default()
         .with_timezone(&chrono_tz::Europe::Brussels);
-    (d.hour(), WEEKDAYS[d.weekday().num_days_from_monday() as usize])
+    (
+        d.hour(),
+        WEEKDAYS[d.weekday().num_days_from_monday() as usize],
+    )
 }
 /// `20-21u (dinsdag)`, `23-00u`: start, end and weekday of a registration hour block.
 fn parse_block(text: &str) -> Option<(u32, u32, Option<String>)> {
@@ -499,24 +588,42 @@ fn parse_block(text: &str) -> Option<(u32, u32, Option<String>)> {
     Some((start, if end == 24 { 0 } else { end }, day))
 }
 fn covers(text: &str, hour: u32, weekday: &str) -> bool {
-    let Some((start, end, day)) = parse_block(text) else { return false };
+    let Some((start, end, day)) = parse_block(text) else {
+        return false;
+    };
     if day.is_some_and(|d| d != weekday) {
         return false;
     }
-    if end <= start { hour >= start || hour < end } else { hour >= start && hour < end }
+    if end <= start {
+        hour >= start || hour < end
+    } else {
+        hour >= start && hour < end
+    }
 }
-fn available_runners<'a>(s: &'a State, hour: u32, weekday: &str) -> Vec<(&'a Value, String, String)> {
+fn available_runners<'a>(
+    s: &'a State,
+    hour: u32,
+    weekday: &str,
+) -> Vec<(&'a Value, String, String)> {
     let regs = &s.queue_page.registrations;
     let mut list: Vec<(&Value, String, String)> = runners(s)
         .into_iter()
-        .filter(|r| r["hiddenFromQueue"] != true && (r["status"] == "registered" || r["status"] == "ran"))
+        .filter(|r| {
+            r["hiddenFromQueue"] != true && (r["status"] == "registered" || r["status"] == "ran")
+        })
         .filter_map(|r| {
             let reg = &regs[st(r, "id")];
             let hours = reg["availableHours"].as_array()?;
             hours
                 .iter()
                 .any(|h| covers(h.as_str().unwrap_or(""), hour, weekday))
-                .then(|| (r, st(reg, "phone").trim().to_string(), st(reg, "flexibility").trim().to_string()))
+                .then(|| {
+                    (
+                        r,
+                        st(reg, "phone").trim().to_string(),
+                        st(reg, "flexibility").trim().to_string(),
+                    )
+                })
         })
         .collect();
     list.sort_by(|(a, _, _), (b, _, _)| {
@@ -538,7 +645,9 @@ fn available_runners<'a>(s: &'a State, hour: u32, weekday: &str) -> Vec<(&'a Val
 fn phone_link(phone: &str) -> bool {
     let t = phone.trim();
     !t.is_empty()
-        && t.chars().enumerate().all(|(i, c)| c.is_ascii_digit() || " ().-/".contains(c) || (c == '+' && i == 0))
+        && t.chars()
+            .enumerate()
+            .all(|(i, c)| c.is_ascii_digit() || " ().-/".contains(c) || (c == '+' && i == 0))
         && t.chars().filter(char::is_ascii_digit).count() >= 6
 }
 fn available_now(s: &State) -> El {
@@ -569,19 +678,36 @@ fn available_now(s: &State) -> El {
             row()
                 .key("available-now-toggle")
                 .role("button")
-                .label(format!("Nu beschikbaar, nog niet opgeroepen {} {moment}", available.len()))
+                .label(format!(
+                    "Nu beschikbaar, nog niet opgeroepen {} {moment}",
+                    available.len()
+                ))
                 .checked(open)
                 .focusable(true)
                 .min_h(40.0)
                 .px(16.0)
                 .gap(8.0)
                 .center_y()
-                .on_press(|s: &mut State| s.queue_page.available_open = !s.queue_page.available_open)
+                .on_press(|s: &mut State| {
+                    s.queue_page.available_open = !s.queue_page.available_open
+                })
                 .child(chevron(s, open))
-                .child(text("Nu beschikbaar, nog niet opgeroepen").font(rune::TextStyle::new(13.5, 550.0)).color(p.ink))
-                .child(text(available.len().to_string()).font(rune::TextStyle::new(13.5, 400.0)).color(p.t.ink3))
+                .child(
+                    text("Nu beschikbaar, nog niet opgeroepen")
+                        .font(rune::TextStyle::new(13.5, 550.0))
+                        .color(p.ink),
+                )
+                .child(
+                    text(available.len().to_string())
+                        .font(rune::TextStyle::new(13.5, 400.0))
+                        .color(p.t.ink3),
+                )
                 .child(col().grow(1.0))
-                .child(text(moment).font(rune::TextStyle::new(12.5, 400.0).features("tnum")).color(p.t.ink3)),
+                .child(
+                    text(moment)
+                        .font(rune::TextStyle::new(12.5, 400.0).features("tnum"))
+                        .color(p.t.ink3),
+                ),
         );
     if !open {
         return panel;
@@ -599,18 +725,21 @@ fn available_now(s: &State) -> El {
         .focus_within_ring(3.0, 0.0, p.brand.alpha(0.22))
         .child(icon(s, "search", p.t.ink3, 14.0, 1.75))
         .child(
-            text_input(&s.queue_page.available_search, rune::TextStyle::new(13.5, 400.0).lh(18.0))
-                .single_line()
-                .key("available-search")
-                .label("Beschikbare lopers filteren")
-                .role("searchbox")
-                .placeholder("Naam, nummer of telefoon", p.t.ink3)
-                .grow(1.0)
-                .min_w(0.0)
-                .py(8.0)
-                .color(p.ink)
-                .no_focus_ring()
-                .on_edit(|s: &mut State| &mut s.queue_page.available_search),
+            text_input(
+                &s.queue_page.available_search,
+                rune::TextStyle::new(13.5, 400.0).lh(18.0),
+            )
+            .single_line()
+            .key("available-search")
+            .label("Beschikbare lopers filteren")
+            .role("searchbox")
+            .placeholder("Naam, nummer of telefoon", p.t.ink3)
+            .grow(1.0)
+            .min_w(0.0)
+            .py(8.0)
+            .color(p.ink)
+            .no_focus_ring()
+            .on_edit(|s: &mut State| &mut s.queue_page.available_search),
         );
     panel = panel.child(
         row()
@@ -639,20 +768,36 @@ fn available_now(s: &State) -> El {
         let small = rune::TextStyle::new(12.0, 400.0).lh(18.0);
         let laps = r["lapCount"].as_i64().unwrap_or(0);
         details = details.child(
-            text(if r["status"] == "ran" { format!("{laps} gelopen") } else { "nog niet gelopen".into() })
-                .font(small)
-                .color(p.t.ink3),
+            text(if r["status"] == "ran" {
+                format!("{laps} gelopen")
+            } else {
+                "nog niet gelopen".into()
+            })
+            .font(small)
+            .color(p.t.ink3),
         );
         if !flexibility.is_empty() {
             details = details.child(text(flexibility.clone()).font(small).color(p.t.ink3));
         }
         let profile_id = id.clone();
         let phone_el = if phone_link(phone) {
-            btn(s, format!("available-phone-{id}"), phone, Kind::Plain, true)
+            {
+                let label = runner_label(r);
+                let number = phone.clone();
+                btn(s, format!("available-phone-{id}"), phone, Kind::Plain, true).on_press(
+                    move |s: &mut State| {
+                        s.queue_page.dialog = Some(Dialog::Call(label.clone(), number.clone()))
+                    },
+                )
+            }
         } else {
-            text(if phone.is_empty() { "Geen nummer".to_string() } else { phone.clone() })
-                .font(rune::TextStyle::new(12.5, 400.0))
-                .color(p.t.ink3)
+            text(if phone.is_empty() {
+                "Geen nummer".to_string()
+            } else {
+                phone.clone()
+            })
+            .font(rune::TextStyle::new(12.5, 400.0))
+            .color(p.t.ink3)
         };
         let mut line = row()
             .key(format!("available-row-{id}"))
@@ -674,8 +819,15 @@ fn available_now(s: &State) -> El {
                     .min_w(0.0)
                     .py(2.0)
                     .gap(3.0)
-                    .on_press(move |s: &mut State| s.send("runners.profile", json!({"id":profile_id})))
-                    .child(row().h(21.0).center_y().child(runner_name(s, r, 14.0, 550.0)))
+                    .on_press(move |s: &mut State| {
+                        s.send("runners.profile", json!({"id":profile_id}))
+                    })
+                    .child(
+                        row()
+                            .h(21.0)
+                            .center_y()
+                            .child(runner_name(s, r, 14.0, 550.0)),
+                    )
                     .child(details),
             )
             .child(phone_el);
@@ -687,7 +839,11 @@ fn available_now(s: &State) -> El {
     if count == 0 {
         rows = rows.child(empty(
             s,
-            if s.queue_page.registrations.as_object().is_none_or(|m| m.is_empty()) {
+            if s.queue_page
+                .registrations
+                .as_object()
+                .is_none_or(|m| m.is_empty())
+            {
                 "Geen inschrijvingsuren bekend. Importeer de inschrijvingen in Beheer."
             } else if !q.is_empty() {
                 "Geen beschikbare lopers voor dit filter."
@@ -700,7 +856,9 @@ fn available_now(s: &State) -> El {
         col()
             .key("available-rows")
             .max_h(320.0)
-            .scroll(ScrollSpec { stick_bottom: false })
+            .scroll(ScrollSpec {
+                stick_bottom: false,
+            })
             .border_sides([1.0, 0.0, 0.0, 0.0], p.line)
             .child(rows),
     )
@@ -711,16 +869,36 @@ fn strip(s: &State) -> El {
     let p = pal(s.dark);
     let race = &s.snapshot["race"];
     let all = runners(s);
-    let active = all.iter().find(|r| !race["activeRunnerId"].is_null() && r["id"] == race["activeRunnerId"]);
+    let active = all
+        .iter()
+        .find(|r| !race["activeRunnerId"].is_null() && r["id"] == race["activeRunnerId"]);
     let queue = waiting(s);
     let label_style = rune::TextStyle::new(12.5, 400.0).lh(18.75);
     let value_style = rune::TextStyle::new(15.0, 550.0).lh(22.5);
-    let cell = || col().grow(1.0).min_w(0.0).px(16.0).py(12.0).gap(2.0).justify_center();
+    let cell = || {
+        col()
+            .grow(1.0)
+            .min_w(0.0)
+            .px(16.0)
+            .py(12.0)
+            .gap(2.0)
+            .justify_center()
+    };
     let wrap = |grow: f32, inner: El, first: bool| {
         let w = row().grow(grow).min_w(0.0).child(inner);
-        if first { w } else { w.border_sides([0.0, 0.0, 0.0, 1.0], p.line) }
+        if first {
+            w
+        } else {
+            w.border_sides([0.0, 0.0, 0.0, 1.0], p.line)
+        }
     };
-    let quiet = |v: &str| text(v.to_string()).font(value_style).color(p.ink).truncate().min_w(0.0);
+    let quiet = |v: &str| {
+        text(v.to_string())
+            .font(value_style)
+            .color(p.ink)
+            .truncate()
+            .min_w(0.0)
+    };
     let now_runner = match active {
         Some(r) => runner_name(s, r, 15.0, 550.0).h(22.5),
         None => quiet(if !race["raceFinishedAt"].is_null() {
@@ -731,23 +909,34 @@ fn strip(s: &State) -> El {
             "Nog niemand gestart"
         }),
     };
-    let mut now_cell = row().grow(1.0).min_w(0.0).px(16.0).py(12.0).gap(12.0).center_y().child(
-        col()
-            .grow(1.0)
-            .min_w(0.0)
-            .gap(2.0)
-            .child(
-                row()
-                    .center_y()
-                    .child(rune::el().size(6.0, 6.0).radius(3.0).fill(p.brand).mr(6.0))
-                    .child(text("Nu op de piste").font(label_style).color(p.t.ink3)),
-            )
-            .child(now_runner),
-    );
+    let mut now_cell = row()
+        .grow(1.0)
+        .min_w(0.0)
+        .px(16.0)
+        .py(12.0)
+        .gap(12.0)
+        .center_y()
+        .child(
+            col()
+                .grow(1.0)
+                .min_w(0.0)
+                .gap(2.0)
+                .child(
+                    row()
+                        .center_y()
+                        .child(rune::el().size(6.0, 6.0).radius(3.0).fill(p.brand).mr(6.0))
+                        .child(text("Nu op de piste").font(label_style).color(p.t.ink3)),
+                )
+                .child(now_runner),
+        );
     if let (Some(_), Some(start)) = (active, race["activeStartedAt"].as_i64()) {
         now_cell = now_cell.child(
             text(duration((s.clock - start).max(0)))
-                .font(rune::TextStyle::new(20.0, 550.0).tracking(-0.4).features("tnum"))
+                .font(
+                    rune::TextStyle::new(20.0, 550.0)
+                        .tracking(-0.4)
+                        .features("tnum"),
+                )
                 .color(p.ink),
         );
     }
@@ -803,22 +992,51 @@ fn board_data(s: &State) -> Board<'_> {
             matches(r, &q)
         })
         .collect();
-    let mut warming: Vec<&Value> = filtered.iter().copied().filter(|r| r["status"] == "warming_up").collect();
-    warming.sort_by(|a, b| since(a).cmp(&since(b)).then(number_value(a).cmp(&number_value(b))));
+    let mut warming: Vec<&Value> = filtered
+        .iter()
+        .copied()
+        .filter(|r| r["status"] == "warming_up")
+        .collect();
+    warming.sort_by(|a, b| {
+        since(a)
+            .cmp(&since(b))
+            .then(number_value(a).cmp(&number_value(b)))
+    });
     let all_waiting = waiting(s);
-    let positions = all_waiting.iter().enumerate().map(|(i, r)| (st(r, "id").to_string(), i)).collect();
+    let positions = all_waiting
+        .iter()
+        .enumerate()
+        .map(|(i, r)| (st(r, "id").to_string(), i))
+        .collect();
     let waiting_rows = all_waiting
         .into_iter()
         .filter(|r| filtered.iter().any(|f| f["id"] == r["id"]))
         .collect();
-    let mut ran: Vec<&Value> = filtered.iter().copied().filter(|r| r["status"] == "ran").collect();
+    let mut ran: Vec<&Value> = filtered
+        .iter()
+        .copied()
+        .filter(|r| r["status"] == "ran")
+        .collect();
     ran.sort_by(|a, b| {
-        b["statusSince"].as_i64().unwrap_or(0)
+        b["statusSince"]
+            .as_i64()
+            .unwrap_or(0)
             .cmp(&a["statusSince"].as_i64().unwrap_or(0))
-            .then(b["createdAt"].as_i64().unwrap_or(0).cmp(&a["createdAt"].as_i64().unwrap_or(0)))
+            .then(
+                b["createdAt"]
+                    .as_i64()
+                    .unwrap_or(0)
+                    .cmp(&a["createdAt"].as_i64().unwrap_or(0)),
+            )
             .then(number_value(b).cmp(&number_value(a)))
     });
-    Board { filtered, warming, waiting: waiting_rows, ran, positions }
+    Board {
+        filtered,
+        warming,
+        waiting: waiting_rows,
+        ran,
+        positions,
+    }
 }
 
 /// What a drop does, as src/lib/kanban.ts resolves it.
@@ -838,7 +1056,14 @@ fn resolve(s: &State, id: &str, over: &Drop) -> Option<Action> {
             if from == "waiting" && to == "waiting" {
                 (id != target).then(|| Action::Move(id.into(), target.clone()))
             } else if can_move(from, to) {
-                Some(Action::Status(id.into(), if to == "waiting" { "waiting" } else { "warming_up" }))
+                Some(Action::Status(
+                    id.into(),
+                    if to == "waiting" {
+                        "waiting"
+                    } else {
+                        "warming_up"
+                    },
+                ))
             } else {
                 None
             }
@@ -849,9 +1074,12 @@ fn run(s: &mut State, action: Action) {
     match action {
         Action::Status(id, to) => set_status(s, &id, to, Pending::Board),
         Action::Move(id, target) => {
-            let mut order: Vec<String> = waiting(s).iter().map(|r| st(r, "id").to_string()).collect();
-            let (Some(old), Some(at)) = (order.iter().position(|i| *i == id), order.iter().position(|i| *i == target))
-            else {
+            let mut order: Vec<String> =
+                waiting(s).iter().map(|r| st(r, "id").to_string()).collect();
+            let (Some(old), Some(at)) = (
+                order.iter().position(|i| *i == id),
+                order.iter().position(|i| *i == target),
+            ) else {
                 return;
             };
             if old == at {
@@ -868,7 +1096,9 @@ fn send(s: &mut State, method: &str, input: Value, pending: Pending) {
         return;
     }
     if s.busy || s.queue_page.pending.is_some() || s.queue_page.regs_pending {
-        s.queue_page.queued.push_back((method.into(), input, pending));
+        s.queue_page
+            .queued
+            .push_back((method.into(), input, pending));
         return;
     }
     s.queue_page.error.clear();
@@ -879,7 +1109,12 @@ fn send(s: &mut State, method: &str, input: Value, pending: Pending) {
     }
 }
 fn set_status(s: &mut State, id: &str, to: &str, pending: Pending) {
-    send(s, "runners.setStatus", json!({"id":id,"status":to,"statusSince":s.server_now()}), pending);
+    send(
+        s,
+        "runners.setStatus",
+        json!({"id":id,"status":to,"statusSince":s.server_now()}),
+        pending,
+    );
 }
 
 /// Whether this page sent the action that just came back.
@@ -918,7 +1153,11 @@ pub(super) fn succeeded(s: &mut State, method: &str, result: &Value) {
         return;
     }
     match s.queue_page.pending.take() {
-        Some(Pending::CheckIn { id: _, name, keep_open }) => {
+        Some(Pending::CheckIn {
+            id: _,
+            name,
+            keep_open,
+        }) => {
             s.queue_page.filter = TextEdit::new("");
             if keep_open {
                 if let Some(Dialog::Search(search)) = &mut s.queue_page.dialog {
@@ -956,7 +1195,10 @@ pub(super) fn failed(s: &mut State, method: &str) {
             }
         }
         Some(Pending::CheckIn { .. }) => {
-            s.queue_page.toast = Some((format!("Loper activeren mislukt: {}", std::mem::take(&mut s.error)), s.server_now()));
+            s.queue_page.toast = Some((
+                format!("Loper activeren mislukt: {}", std::mem::take(&mut s.error)),
+                s.server_now(),
+            ));
         }
         Some(Pending::Board) => s.queue_page.error = std::mem::take(&mut s.error),
         None => {}
@@ -978,14 +1220,16 @@ fn board(s: &State) -> El {
         ("warming_up", "Opwarming", &b.warming, 1.0),
         ("waiting", "Klaar om te lopen", &b.waiting, 1.08),
     ] {
-        let hint = drop_action.as_ref().and_then(|(id, over)| match resolve(s, id, over) {
-            Some(Action::Status(_, to)) if to == key => Some(if key == "waiting" {
-                "Loslaten: achteraan in de wachtrij"
-            } else {
-                "Loslaten: naar opwarming"
-            }),
-            _ => None,
-        });
+        let hint = drop_action
+            .as_ref()
+            .and_then(|(id, over)| match resolve(s, id, over) {
+                Some(Action::Status(_, to)) if to == key => Some(if key == "waiting" {
+                    "Loslaten: achteraan in de wachtrij"
+                } else {
+                    "Loslaten: naar opwarming"
+                }),
+                _ => None,
+            });
         let total = runners(s)
             .iter()
             .filter(|r| r["status"] == key && r["hiddenFromQueue"] != true)
@@ -1012,8 +1256,13 @@ fn board(s: &State) -> El {
             ));
         }
         let header_right = match hint {
-            Some(h) => text(h).font(rune::TextStyle::new(12.5, 500.0)).color(p.brand_ink).role("status"),
-            None => text(count).font(rune::TextStyle::new(12.5, 400.0)).color(p.t.ink3),
+            Some(h) => text(h)
+                .font(rune::TextStyle::new(12.5, 500.0))
+                .color(p.brand_ink)
+                .role("status"),
+            None => text(count)
+                .font(rune::TextStyle::new(12.5, 400.0))
+                .color(p.t.ink3),
         };
         let lane_key = format!("lane-{key}");
         let mut lane = col()
@@ -1052,7 +1301,9 @@ fn board(s: &State) -> El {
                 col()
                     .key(format!("lane-rows-{key}"))
                     .h(rows_height(s))
-                    .scroll(ScrollSpec { stick_bottom: false })
+                    .scroll(ScrollSpec {
+                        stick_bottom: false,
+                    })
                     .child(rows),
             );
         if hint.is_some() {
@@ -1072,7 +1323,10 @@ fn board(s: &State) -> El {
             row()
                 .key("queue-completed-toggle")
                 .role("button")
-                .label(format!("Heeft gelopen {} Terug laten opwarmen of verbergen", b.ran.len()))
+                .label(format!(
+                    "Heeft gelopen {} Terug laten opwarmen of verbergen",
+                    b.ran.len()
+                ))
                 .checked(s.queue_page.ran_open)
                 .focusable(true)
                 .min_h(40.0)
@@ -1081,8 +1335,16 @@ fn board(s: &State) -> El {
                 .center_y()
                 .on_press(|s: &mut State| s.queue_page.ran_open = !s.queue_page.ran_open)
                 .child(chevron(s, s.queue_page.ran_open))
-                .child(text("Heeft gelopen").font(rune::TextStyle::new(13.5, 550.0)).color(p.ink))
-                .child(text(b.ran.len().to_string()).font(rune::TextStyle::new(13.5, 400.0)).color(p.t.ink3))
+                .child(
+                    text("Heeft gelopen")
+                        .font(rune::TextStyle::new(13.5, 550.0))
+                        .color(p.ink),
+                )
+                .child(
+                    text(b.ran.len().to_string())
+                        .font(rune::TextStyle::new(13.5, 400.0))
+                        .color(p.t.ink3),
+                )
                 .child(col().grow(1.0))
                 .child(
                     text("Terug laten opwarmen of verbergen")
@@ -1098,20 +1360,20 @@ fn board(s: &State) -> El {
             ran_rows = ran_rows.child(empty(s, "Geen gelopen lopers voor deze selectie."));
         }
         completed = completed
-            .child(
-                row().px(16.0).pb(8.0).child(toggle_row(
-                    s,
-                    "queue-show-hidden",
-                    "Verborgen gelopen tonen",
-                    s.queue_page.show_hidden,
-                    |s| s.queue_page.show_hidden = !s.queue_page.show_hidden,
-                )),
-            )
+            .child(row().px(16.0).pb(8.0).child(toggle_row(
+                s,
+                "queue-show-hidden",
+                "Verborgen gelopen tonen",
+                s.queue_page.show_hidden,
+                |s| s.queue_page.show_hidden = !s.queue_page.show_hidden,
+            )))
             .child(
                 col()
                     .key("queue-completed-rows")
                     .max_h(240.0)
-                    .scroll(ScrollSpec { stick_bottom: false })
+                    .scroll(ScrollSpec {
+                        stick_bottom: false,
+                    })
                     .border_sides([1.0, 0.0, 0.0, 0.0], p.line)
                     .child(ran_rows),
             );
@@ -1147,7 +1409,11 @@ fn runner_row(s: &State, r: &Value, b: &Board, drop: Option<&(String, Drop)>) ->
     let status = st(r, "status");
     let position = b.positions.get(&id).copied();
     let next = position == Some(0);
-    let dragging = s.queue_page.drag.as_ref().is_some_and(|d| d.active && d.id == id);
+    let dragging = s
+        .queue_page
+        .drag
+        .as_ref()
+        .is_some_and(|d| d.active && d.id == id);
     let edge = drop.and_then(|(from, over)| match (over, resolve(s, from, over)) {
         (Drop::Before(t) | Drop::After(t), Some(Action::Move(..))) if *t == id => {
             let before = b.positions.get(from).copied().unwrap_or(0) > position.unwrap_or(0);
@@ -1177,7 +1443,11 @@ fn runner_row(s: &State, r: &Value, b: &Board, drop: Option<&(String, Drop)>) ->
                 .h(36.0)
                 .center()
                 .opacity(0.6)
-                .child(text("⠿").font(rune::TextStyle::new(13.0, 400.0)).color(p.t.ink3)),
+                .child(
+                    text("⠿")
+                        .font(rune::TextStyle::new(13.0, 400.0))
+                        .color(p.t.ink3),
+                ),
         );
     if !next {
         line = line.hover(p.t.surface2);
@@ -1192,7 +1462,12 @@ fn runner_row(s: &State, r: &Value, b: &Board, drop: Option<&(String, Drop)>) ->
         );
     }
     // Identity: name (with the Volgende tag) over the labels, laps and pace.
-    let mut title = row().gap(8.0).center_y().min_w(0.0).h(21.0).child(runner_name(s, r, 14.0, 550.0));
+    let mut title = row()
+        .gap(8.0)
+        .center_y()
+        .min_w(0.0)
+        .h(21.0)
+        .child(runner_name(s, r, 14.0, 550.0));
     if next {
         title = title.child(
             row()
@@ -1201,7 +1476,11 @@ fn runner_row(s: &State, r: &Value, b: &Board, drop: Option<&(String, Drop)>) ->
                 .radius(4.0)
                 .fill(p.brand)
                 .center()
-                .child(text("Volgende").font(rune::TextStyle::new(11.0, 550.0)).color(p.on_brand)),
+                .child(
+                    text("Volgende")
+                        .font(rune::TextStyle::new(11.0, 550.0))
+                        .color(p.on_brand),
+                ),
         );
     }
     let mut details = row().gap(8.0).center_y().min_h(18.0).flex_wrap();
@@ -1212,7 +1491,9 @@ fn runner_row(s: &State, r: &Value, b: &Board, drop: Option<&(String, Drop)>) ->
     let small = rune::TextStyle::new(12.0, 400.0).lh(18.0);
     if laps > 0 {
         details = details.child(
-            text(plural(laps as usize, "ronde", "rondes")).font(small).color(p.t.ink3),
+            text(plural(laps as usize, "ronde", "rondes"))
+                .font(small)
+                .color(p.t.ink3),
         );
     }
     if let Some(pace) = r["estimatedPace"].as_str().filter(|v| !v.is_empty()) {
@@ -1240,8 +1521,18 @@ fn runner_row(s: &State, r: &Value, b: &Board, drop: Option<&(String, Drop)>) ->
         let long = status == "warming_up" && elapsed >= LONG_WARM_UP_MS;
         let ink = if long { p.t.warn_ink } else { p.t.ink2 };
         timer = timer
-            .child(icon(s, "timing", if long { p.t.warn_ink } else { p.t.ink3 }, 12.0, 1.75))
-            .child(text(duration(elapsed)).font(rune::TextStyle::new(13.0, 500.0).features("tnum")).color(ink));
+            .child(icon(
+                s,
+                "timing",
+                if long { p.t.warn_ink } else { p.t.ink3 },
+                12.0,
+                1.75,
+            ))
+            .child(
+                text(duration(elapsed))
+                    .font(rune::TextStyle::new(13.0, 500.0).features("tnum"))
+                    .color(ink),
+            );
     }
     line = line.child(timer);
     let mut actions = row().gap(4.0);
@@ -1251,7 +1542,11 @@ fn runner_row(s: &State, r: &Value, b: &Board, drop: Option<&(String, Drop)>) ->
             btn(
                 s,
                 format!("queue-advance-{id}"),
-                if to == "waiting" { "Naar wachtrij" } else { "Opwarmen" },
+                if to == "waiting" {
+                    "Naar wachtrij"
+                } else {
+                    "Opwarmen"
+                },
                 Kind::Plain,
                 true,
             )
@@ -1262,11 +1557,21 @@ fn runner_row(s: &State, r: &Value, b: &Board, drop: Option<&(String, Drop)>) ->
         let hidden = r["hiddenFromQueue"] == true;
         let hide_id = id.clone();
         actions = actions.child(
-            btn(s, format!("queue-hide-{id}"), if hidden { "Terug tonen" } else { "Verberg" }, Kind::Quiet, true)
-                .on_press(move |s: &mut State| {
-                    let method = if hidden { "runners.unhide" } else { "runners.hide" };
-                    send(s, method, json!({"id":hide_id}), Pending::Board)
-                }),
+            btn(
+                s,
+                format!("queue-hide-{id}"),
+                if hidden { "Terug tonen" } else { "Verberg" },
+                Kind::Quiet,
+                true,
+            )
+            .on_press(move |s: &mut State| {
+                let method = if hidden {
+                    "runners.unhide"
+                } else {
+                    "runners.hide"
+                };
+                send(s, method, json!({"id":hide_id}), Pending::Board)
+            }),
         );
     }
     line = line.child(actions);
@@ -1278,14 +1583,18 @@ fn runner_row(s: &State, r: &Value, b: &Board, drop: Option<&(String, Drop)>) ->
             s.queue_page.rects.insert(rect_key.clone(), rect);
             tx.live_only();
         })
-        .child(line.on_drag(move |s: &mut State, d: &mut rune::Drag, tx: &mut Tx| drag(s, &drag_id, d, tx)));
+        .child(
+            line.on_drag(move |s: &mut State, d: &mut rune::Drag, tx: &mut Tx| {
+                drag(s, &drag_id, d, tx)
+            }),
+        );
     if let Some(before) = edge {
         let bar = rune::el().h(2.0).w_full().fill(p.brand);
-        let tag = row()
-            .px(6.0)
-            .radius(4.0)
-            .fill(p.brand)
-            .child(text("Hier invoegen").font(rune::TextStyle::new(11.5, 500.0)).color(p.on_brand));
+        let tag = row().px(6.0).radius(4.0).fill(p.brand).child(
+            text("Hier invoegen")
+                .font(rune::TextStyle::new(11.5, 500.0))
+                .color(p.on_brand),
+        );
         wrap = wrap.child(if before {
             bar.absolute(0.0, 0.0)
         } else {
@@ -1326,7 +1635,11 @@ fn target(s: &State, id: &str, at: [f32; 2]) -> Option<Drop> {
             });
         }
     }
-    Some(Drop::Lane(if lane == "waiting" { "waiting" } else { "warming_up" }))
+    Some(Drop::Lane(if lane == "waiting" {
+        "waiting"
+    } else {
+        "warming_up"
+    }))
 }
 fn drag(s: &mut State, id: &str, d: &mut rune::Drag, _tx: &mut Tx) {
     let at = d.window_point();
@@ -1351,7 +1664,9 @@ fn drag(s: &mut State, id: &str, d: &mut rune::Drag, _tx: &mut Tx) {
             }
         }
         rune::Phase::Up => {
-            let Some(g) = s.queue_page.drag.take() else { return };
+            let Some(g) = s.queue_page.drag.take() else {
+                return;
+            };
             if d.cancelled() || !g.active {
                 return;
             }
@@ -1368,7 +1683,10 @@ fn drag(s: &mut State, id: &str, d: &mut rune::Drag, _tx: &mut Tx) {
 
 /// Nieuwe loper from Beheer › Lopers (`RunnerAddModal destination="registered"`).
 pub(super) fn open_add(s: &mut State, registered: bool) {
-    s.queue_page.dialog = Some(Dialog::Add(Box::new(Add { registered, ..Default::default() })));
+    s.queue_page.dialog = Some(Dialog::Add(Box::new(Add {
+        registered,
+        ..Default::default()
+    })));
 }
 pub(super) fn modal(s: &State) -> Option<El> {
     let adding_elsewhere = s.page == 8 && matches!(s.queue_page.dialog, Some(Dialog::Add(_)));
@@ -1383,6 +1701,7 @@ pub(super) fn modal(s: &State) -> Option<El> {
                 .child(add_dialog(s, add).inert())
                 .child(close_question(s)),
             Dialog::Add(add) => add_dialog(s, add),
+            Dialog::Call(name, phone) => call_dialog(s, name, phone),
         });
     }
     let p = pal(s.dark);
@@ -1417,14 +1736,31 @@ pub(super) fn modal(s: &State) -> Option<El> {
                 .radius(6.0)
                 .fill(p.surface)
                 .border(1.0, p.t.line2)
-                .shadow(8.0, 24.0, if s.dark { rune::oklcha(0.0, 0.0, 0.0, 0.5) } else { rune::oklcha(0.21, 0.006, 285.9, 0.14) })
-                .child(text("⠿").font(rune::TextStyle::new(13.0, 400.0)).color(p.t.ink3).w(16.0))
+                .shadow(
+                    8.0,
+                    24.0,
+                    if s.dark {
+                        rune::oklcha(0.0, 0.0, 0.0, 0.5)
+                    } else {
+                        rune::oklcha(0.21, 0.006, 285.9, 0.14)
+                    },
+                )
+                .child(
+                    text("⠿")
+                        .font(rune::TextStyle::new(13.0, 400.0))
+                        .color(p.t.ink3)
+                        .w(16.0),
+                )
                 .child(
                     col()
                         .gap(3.0)
                         .min_w(0.0)
                         .child(runner_name(s, r, 14.0, 550.0))
-                        .child(text("Loslaten om te verplaatsen").font(rune::TextStyle::new(12.0, 400.0)).color(p.t.ink3)),
+                        .child(
+                            text("Loslaten om te verplaatsen")
+                                .font(rune::TextStyle::new(12.0, 400.0))
+                                .color(p.t.ink3),
+                        ),
                 ),
         );
     }
@@ -1446,7 +1782,15 @@ pub(super) fn modal(s: &State) -> Option<El> {
                 .radius(10.0)
                 .fill(p.surface)
                 .border(1.0, p.line)
-                .shadow(16.0, 48.0, if s.dark { rune::oklcha(0.0, 0.0, 0.0, 0.5) } else { rune::oklcha(0.21, 0.006, 285.9, 0.16) })
+                .shadow(
+                    16.0,
+                    48.0,
+                    if s.dark {
+                        rune::oklcha(0.0, 0.0, 0.0, 0.5)
+                    } else {
+                        rune::oklcha(0.21, 0.006, 285.9, 0.16)
+                    },
+                )
                 .child(
                     rune::el()
                         .size(24.0, 24.0)
@@ -1478,7 +1822,11 @@ fn overlay(s: &State, key: &str, dismiss: impl Fn(&mut State) + 'static) -> El {
         .pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0))
         .padding(16.0)
         .center()
-        .fill(if s.dark { rune::oklcha(0.0, 0.0, 0.0, 0.55) } else { rune::oklcha(0.21, 0.006, 285.9, 0.4) })
+        .fill(if s.dark {
+            rune::oklcha(0.0, 0.0, 0.0, 0.55)
+        } else {
+            rune::oklcha(0.21, 0.006, 285.9, 0.4)
+        })
         .modal(false, dismiss)
 }
 fn sheet(s: &State, key: &str, title: &str, max_h: f32) -> El {
@@ -1495,7 +1843,15 @@ fn sheet(s: &State, key: &str, title: &str, max_h: f32) -> El {
         .radius(10.0)
         .fill(p.surface)
         .border(1.0, p.line)
-        .shadow(16.0, 48.0, if s.dark { rune::oklcha(0.0, 0.0, 0.0, 0.5) } else { rune::oklcha(0.21, 0.006, 285.9, 0.16) })
+        .shadow(
+            16.0,
+            48.0,
+            if s.dark {
+                rune::oklcha(0.0, 0.0, 0.0, 0.5)
+            } else {
+                rune::oklcha(0.21, 0.006, 285.9, 0.16)
+            },
+        )
 }
 fn modal_header(s: &State, key: &str, title: &str, close: impl Fn(&mut State) + 'static) -> El {
     let p = pal(s.dark);
@@ -1504,7 +1860,13 @@ fn modal_header(s: &State, key: &str, title: &str, close: impl Fn(&mut State) + 
         .gap(12.0)
         .items_start()
         .justify_between()
-        .child(text(title.to_string()).font(rune::TextStyle::new(16.0, 600.0).lh(20.0)).color(p.ink).role("heading").level(2))
+        .child(
+            text(title.to_string())
+                .font(rune::TextStyle::new(16.0, 600.0).lh(20.0))
+                .color(p.ink)
+                .role("heading")
+                .level(2),
+        )
         .child(
             row()
                 .key(key.to_string())
@@ -1516,11 +1878,159 @@ fn modal_header(s: &State, key: &str, title: &str, close: impl Fn(&mut State) + 
                 .radius(6.0)
                 .hover(p.t.surface3)
                 .on_press(close)
-                .child(text("✕").font(rune::TextStyle::new(14.0, 500.0)).color(p.t.ink2)),
+                .child(
+                    text("✕")
+                        .font(rune::TextStyle::new(14.0, 500.0))
+                        .color(p.t.ink2),
+                ),
         )
 }
 fn dialog_max_h(s: &State) -> f32 {
     (s.queue_page.window_h * 0.9).min(860.0) - 0.0
+}
+
+// ---------- Bellen (CallQrDialog.tsx) ----------
+
+fn runner_label(r: &Value) -> String {
+    let number = st(r, "runnerNumber");
+    if number.is_empty() {
+        st(r, "name").to_string()
+    } else {
+        format!("{number} {}", st(r, "name"))
+    }
+}
+/// `phoneHref`: tel: plus the digits and a leading +.
+pub(super) fn phone_href(phone: &str) -> String {
+    format!(
+        "tel:{}",
+        phone
+            .trim()
+            .chars()
+            .filter(|c| c.is_ascii_digit() || *c == '+')
+            .collect::<String>()
+    )
+}
+/// The QR modules with a four-module quiet zone (uqr's `border: 4`), as one filled path.
+fn qr_shape(href: &str, dark: bool) -> Option<rune::Shape> {
+    let qr = qrcodegen::QrCode::encode_text(href, qrcodegen::QrCodeEcc::Medium).ok()?;
+    let size = qr.size() as f32 + 8.0;
+    let mut path = rune::Path::new();
+    for y in 0..qr.size() {
+        for x in 0..qr.size() {
+            if qr.get_module(x, y) {
+                let (x, y) = (x as f32 + 4.0, y as f32 + 4.0);
+                path = path
+                    .move_to([x, y])
+                    .line_to([x + 1.0, y])
+                    .line_to([x + 1.0, y + 1.0])
+                    .line_to([x, y + 1.0])
+                    .close();
+            }
+        }
+    }
+    let _ = dark;
+    Some(
+        rune::Shape::new()
+            .view_box(size, size)
+            .fill(
+                vec![[0.0, 0.0], [size, 0.0], [size, size], [0.0, size]],
+                rune::oklch(1.0, 0.0, 0.0),
+            )
+            .fill_path(&path, rune::oklch(0.0, 0.0, 0.0)),
+    )
+}
+fn call_dialog(s: &State, name: &str, phone: &str) -> El {
+    let p = pal(s.dark);
+    let close = |s: &mut State| s.queue_page.dialog = None;
+    let header = row()
+        .w_full()
+        .mb(16.0)
+        .gap(12.0)
+        .items_start()
+        .justify_between()
+        .child(
+            col()
+                .gap(2.0)
+                .child(
+                    text("Bellen")
+                        .font(rune::TextStyle::new(12.0, 500.0))
+                        .color(p.t.ink3),
+                )
+                .child(
+                    text(name.to_string())
+                        .font(rune::TextStyle::new(22.0, 600.0).lh(26.0).tracking(-0.44))
+                        .color(p.ink)
+                        .role("heading")
+                        .level(2),
+                ),
+        )
+        .child(
+            row()
+                .key("call-close")
+                .role("button")
+                .label("Sluiten")
+                .focusable(true)
+                .size(28.0, 28.0)
+                .center()
+                .radius(6.0)
+                .hover(p.t.surface3)
+                .on_press(close)
+                .child(
+                    text("✕")
+                        .font(rune::TextStyle::new(14.0, 500.0))
+                        .color(p.t.ink2),
+                ),
+        );
+    let mut body = col().w_full().items_center().child(header);
+    if let Some(shape) = qr_shape(&phone_href(phone), s.dark) {
+        body = body.child(
+            rune::canvas(shape)
+                .key("call-qr")
+                .label(format!("QR-code om {phone} te bellen"))
+                .size(340.0, 340.0)
+                .radius(6.0)
+                .clip_rounded(6.0),
+        );
+    }
+    body = body
+        .child(
+            text(phone.to_string())
+                .font(
+                    rune::TextStyle::new(32.0, 700.0)
+                        .features("tnum")
+                        .tracking(0.32),
+                )
+                .color(p.ink)
+                .mt(16.0),
+        )
+        .child(
+            text("Scan met de camera van je telefoon en tik op Bellen.")
+                .font(rune::TextStyle::new(13.5, 400.0))
+                .color(p.t.ink2)
+                .mt(8.0),
+        );
+    overlay(s, "call-overlay", close).child(
+        col()
+            .key("call-dialog")
+            .role("dialog")
+            .label(format!("{name} bellen"))
+            .w(460.0)
+            .max_w(460.0)
+            .padding(20.0)
+            .radius(10.0)
+            .fill(p.surface)
+            .border(1.0, p.line)
+            .shadow(
+                16.0,
+                48.0,
+                if s.dark {
+                    rune::oklcha(0.0, 0.0, 0.0, 0.5)
+                } else {
+                    rune::oklcha(0.21, 0.006, 285.9, 0.16)
+                },
+            )
+            .child(body),
+    )
 }
 
 // ---------- Loper zoeken (RunnerActivationModal) ----------
@@ -1539,7 +2049,11 @@ fn search_matches<'a>(s: &'a State, query: &str) -> Vec<&'a Value> {
     if q.is_empty() {
         return all;
     }
-    let exact: Vec<&Value> = all.iter().copied().filter(|r| fold(st(r, "runnerNumber").trim()) == q).collect();
+    let exact: Vec<&Value> = all
+        .iter()
+        .copied()
+        .filter(|r| fold(st(r, "runnerNumber").trim()) == q)
+        .collect();
     if !exact.is_empty() {
         return exact;
     }
@@ -1553,7 +2067,16 @@ fn check_in(s: &mut State, id: &str) {
         .map(|r| st(r, "name").to_string())
         .filter(|n| !n.is_empty())
         .unwrap_or_else(|| "Loper".into());
-    set_status(s, id, "warming_up", Pending::CheckIn { id: id.into(), name, keep_open });
+    set_status(
+        s,
+        id,
+        "warming_up",
+        Pending::CheckIn {
+            id: id.into(),
+            name,
+            keep_open,
+        },
+    );
 }
 fn close_search(s: &mut State) {
     if !matches!(s.queue_page.pending, Some(Pending::CheckIn { .. })) {
@@ -1565,7 +2088,11 @@ fn search_dialog(s: &State, search: &Search) -> El {
     let p = pal(s.dark);
     let found = search_matches(s, &search.query.text);
     let has_query = !search.query.text.trim().is_empty();
-    let shown = if search.show_all { found.len() } else { found.len().min(SEARCH_PAGE) };
+    let shown = if search.show_all {
+        found.len()
+    } else {
+        found.len().min(SEARCH_PAGE)
+    };
     let busy_id = match &s.queue_page.pending {
         Some(Pending::CheckIn { id, .. }) => Some(id.clone()),
         _ => None,
@@ -1573,45 +2100,66 @@ fn search_dialog(s: &State, search: &Search) -> El {
     let help = rune::TextStyle::new(12.5, 400.0).lh(18.75);
     let mut body = col()
         .min_w(0.0)
-        .child(modal_header(s, "search-close", "Loper zoeken", close_search))
+        .child(modal_header(
+            s,
+            "search-close",
+            "Loper zoeken",
+            close_search,
+        ))
         .child(
-            field(s, &search.query, "search-query", "Zoek op nummer, naam of label", "Zoek op nummer, naam of label...")
-                .on_edit(|s: &mut State| match &mut s.queue_page.dialog {
-                    Some(Dialog::Search(x)) => {
-                        x.show_all = false;
-                        &mut x.query
-                    }
-                    _ => unreachable!("search field without its dialog"),
-                })
-                .on_submit(|s: &mut State, _tx: &mut Tx| {
-                    let Some(Dialog::Search(x)) = &s.queue_page.dialog else { return };
-                    let q = x.query.text.clone();
-                    if q.trim().is_empty() || s.queue_page.pending.is_some() {
-                        return;
-                    }
-                    let found = search_matches(s, &q);
-                    if found.len() == 1 && can_check_in(st(found[0], "status")) {
-                        let id = st(found[0], "id").to_string();
-                        check_in(s, &id);
-                    }
-                }),
-        )
-        .child(
-            row().child(toggle_row(
+            field(
                 s,
-                "search-keep-open",
-                "Meerdere lopers aanmelden",
-                search.keep_open,
-                |s| {
-                    if let Some(Dialog::Search(x)) = &mut s.queue_page.dialog {
-                        x.keep_open = !x.keep_open;
-                    }
-                },
-            )),
+                &search.query,
+                "search-query",
+                "Zoek op nummer, naam of label",
+                "Zoek op nummer, naam of label...",
+            )
+            .on_edit(|s: &mut State| match &mut s.queue_page.dialog {
+                Some(Dialog::Search(x)) => {
+                    x.show_all = false;
+                    &mut x.query
+                }
+                _ => unreachable!("search field without its dialog"),
+            })
+            .on_submit(|s: &mut State, _tx: &mut Tx| {
+                let Some(Dialog::Search(x)) = &s.queue_page.dialog else {
+                    return;
+                };
+                let q = x.query.text.clone();
+                if q.trim().is_empty() || s.queue_page.pending.is_some() {
+                    return;
+                }
+                let found = search_matches(s, &q);
+                if found.len() == 1 && can_check_in(st(found[0], "status")) {
+                    let id = st(found[0], "id").to_string();
+                    check_in(s, &id);
+                }
+            }),
         )
-        .child(text("Aan: dit venster blijft open na elke aanmelding.").font(help).color(p.t.ink3).mb(8.0));
+        .child(row().child(toggle_row(
+            s,
+            "search-keep-open",
+            "Meerdere lopers aanmelden",
+            search.keep_open,
+            |s| {
+                if let Some(Dialog::Search(x)) = &mut s.queue_page.dialog {
+                    x.keep_open = !x.keep_open;
+                }
+            },
+        )))
+        .child(
+            text("Aan: dit venster blijft open na elke aanmelding.")
+                .font(help)
+                .color(p.t.ink3)
+                .mb(8.0),
+        );
     if has_query && found.len() == 1 && can_check_in(st(found[0], "status")) {
-        body = body.child(text("Enter: deze loper naar opwarming.").font(help).color(p.t.ink3).mb(8.0));
+        body = body.child(
+            text("Enter: deze loper naar opwarming.")
+                .font(help)
+                .color(p.t.ink3)
+                .mb(8.0),
+        );
     }
     let mut list = col()
         .key("search-results")
@@ -1621,11 +2169,19 @@ fn search_dialog(s: &State, search: &Search) -> El {
             text(format!(
                 "{}{}",
                 if has_query {
-                    format!("{} resultaat{}", found.len(), if found.len() == 1 { "" } else { "en" })
+                    format!(
+                        "{} resultaat{}",
+                        found.len(),
+                        if found.len() == 1 { "" } else { "en" }
+                    )
                 } else {
                     format!("{} lopers in de databank", found.len())
                 },
-                if found.len() > shown { format!(" · eerste {shown} getoond") } else { String::new() }
+                if found.len() > shown {
+                    format!(" · eerste {shown} getoond")
+                } else {
+                    String::new()
+                }
             ))
             .font(rune::TextStyle::new(13.5, 400.0).lh(20.0))
             .color(p.t.ink3)
@@ -1634,7 +2190,11 @@ fn search_dialog(s: &State, search: &Search) -> El {
     if found.is_empty() {
         list = list.child(empty(
             s,
-            if has_query { "Geen loper gevonden." } else { "Geen beschikbare lopers in de databank." },
+            if has_query {
+                "Geen loper gevonden."
+            } else {
+                "Geen beschikbare lopers in de databank."
+            },
         ));
     }
     for r in &found[..shown] {
@@ -1646,7 +2206,11 @@ fn search_dialog(s: &State, search: &Search) -> El {
                 .radius(4.0)
                 .center_y()
                 .fill(p.t.surface2)
-                .child(text(status_label(r)).font(rune::TextStyle::new(12.0, 500.0)).color(p.t.ink2)),
+                .child(
+                    text(status_label(r))
+                        .font(rune::TextStyle::new(12.0, 500.0))
+                        .color(p.t.ink2),
+                ),
         );
         let labels: Vec<&Value> = r["labels"].as_array().into_iter().flatten().collect();
         if !labels.is_empty() {
@@ -1662,13 +2226,24 @@ fn search_dialog(s: &State, search: &Search) -> El {
                         .radius(4.0)
                         .center_y()
                         .border(1.0, p.line)
-                        .child(text(format!("+{}", labels.len() - 2)).font(rune::TextStyle::new(11.5, 500.0)).color(p.t.ink2)),
+                        .child(
+                            text(format!("+{}", labels.len() - 2))
+                                .font(rune::TextStyle::new(11.5, 500.0))
+                                .color(p.t.ink2),
+                        ),
                 );
             }
             meta = meta.child(pills);
         }
         let profile_id = id.clone();
-        let mut profile = btn(s, format!("search-profile-{id}"), "Profiel", Kind::Ghost, false).min_w(104.0);
+        let mut profile = btn(
+            s,
+            format!("search-profile-{id}"),
+            "Profiel",
+            Kind::Ghost,
+            false,
+        )
+        .min_w(104.0);
         if busy_id.is_none() {
             profile = profile.on_press(move |s: &mut State| {
                 s.queue_page.dialog = None;
@@ -1680,8 +2255,14 @@ fn search_dialog(s: &State, search: &Search) -> El {
         let action = if can_check_in(st(r, "status")) {
             let go_id = id.clone();
             let busy = busy_id.as_deref() == Some(id.as_str());
-            let b = btn(s, format!("search-activate-{id}"), if busy { "Bezig..." } else { "Opwarmen" }, Kind::Primary, false)
-                .min_w(170.0);
+            let b = btn(
+                s,
+                format!("search-activate-{id}"),
+                if busy { "Bezig..." } else { "Opwarmen" },
+                Kind::Primary,
+                false,
+            )
+            .min_w(170.0);
             if busy_id.is_some() {
                 b.disabled(true).opacity(0.6)
             } else {
@@ -1702,7 +2283,11 @@ fn search_dialog(s: &State, search: &Search) -> El {
                     .min_w(36.4),
             );
         }
-        title = title.child(text(st(r, "name").to_string()).font(rune::TextStyle::new(14.0, 550.0)).color(p.ink));
+        title = title.child(
+            text(st(r, "name").to_string())
+                .font(rune::TextStyle::new(14.0, 550.0))
+                .color(p.ink),
+        );
         list = list.child(
             row()
                 .key(format!("search-row-{id}"))
@@ -1720,20 +2305,202 @@ fn search_dialog(s: &State, search: &Search) -> El {
     if found.len() > shown {
         let n = found.len();
         list = list.child(
-            btn(s, "search-show-all", &format!("Toon alle {n} lopers"), Kind::Ghost, false).mt(8.0).on_press(
-                |s: &mut State| {
-                    if let Some(Dialog::Search(x)) = &mut s.queue_page.dialog {
-                        x.show_all = true;
-                    }
-                },
-            ),
+            btn(
+                s,
+                "search-show-all",
+                &format!("Toon alle {n} lopers"),
+                Kind::Ghost,
+                false,
+            )
+            .mt(8.0)
+            .on_press(|s: &mut State| {
+                if let Some(Dialog::Search(x)) = &mut s.queue_page.dialog {
+                    x.show_all = true;
+                }
+            }),
         );
     }
     body = body.child(list);
     overlay(s, "search-overlay", close_search).child(
         sheet(s, "search-dialog", "Loper zoeken", dialog_max_h(s))
-            .scroll(ScrollSpec { stick_bottom: false })
+            .scroll(ScrollSpec {
+                stick_bottom: false,
+            })
             .child(body),
+    )
+}
+
+// ---------- Beschikbare uren (AvailableHoursPicker.tsx, lib/availability.ts setHourBlock) ----------
+
+fn hour_block(text: &str) -> Option<(u32, u32, Option<String>)> {
+    let t = text.trim();
+    let (hours, weekday) = match t.find('(') {
+        Some(i) => {
+            let day = t[i + 1..].trim().strip_suffix(')')?.trim().to_lowercase();
+            (t[..i].trim(), (!day.is_empty()).then_some(day))
+        }
+        None => (t, None),
+    };
+    let (a, b) = hours.split_once(['-', '–'])?;
+    let num = |v: &str| -> Option<u32> {
+        let v = v.trim().trim_end_matches(['u', 'U']).trim();
+        (!v.is_empty() && v.len() <= 2 && v.chars().all(|c| c.is_ascii_digit()))
+            .then(|| v.parse().ok())
+            .flatten()
+    };
+    let (start, end) = (num(a)?, num(b)?);
+    if start > 23 || end > 24 || start == end {
+        return None;
+    }
+    Some((start, end % 24, weekday))
+}
+fn block_covers(b: &(u32, u32, Option<String>), weekday: &str, hour: u32) -> bool {
+    if b.2.as_deref().is_some_and(|d| d != weekday) {
+        return false;
+    }
+    if b.1 <= b.0 {
+        hour >= b.0 || hour < b.1
+    } else {
+        hour >= b.0 && hour < b.1
+    }
+}
+fn has_hour(texts: &[String], weekday: &str, hour: u32) -> bool {
+    texts
+        .iter()
+        .any(|t| hour_block(t).is_some_and(|b| block_covers(&b, weekday, hour)))
+}
+fn block_text(hour: u32, weekday: Option<&str>) -> String {
+    match weekday {
+        Some(d) => format!("{hour:02}-{:02}u ({d})", (hour + 1) % 24),
+        None => format!("{hour:02}-{:02}u", (hour + 1) % 24),
+    }
+}
+fn block_position(text: &str) -> usize {
+    match hour_block(text) {
+        Some((start, _, Some(day))) => {
+            WEEKDAYS.iter().position(|d| *d == day).unwrap_or(7) * 24 + start as usize
+        }
+        _ => usize::MAX,
+    }
+}
+pub(super) fn set_hour(texts: &[String], weekday: &str, hour: u32, on: bool) -> Vec<String> {
+    if on {
+        if has_hour(texts, weekday, hour) {
+            return texts.to_vec();
+        }
+        let mut list = texts.to_vec();
+        list.push(block_text(hour, Some(weekday)));
+        list.sort_by(|a, b| {
+            block_position(a)
+                .cmp(&block_position(b))
+                .then(fold(a).cmp(&fold(b)))
+        });
+        return list;
+    }
+    texts
+        .iter()
+        .flat_map(|t| match hour_block(t) {
+            Some(b) if block_covers(&b, weekday, hour) => {
+                let mut out = Vec::new();
+                let mut h = b.0;
+                while h != b.1 {
+                    if h != hour {
+                        out.push(block_text(h, b.2.as_deref()));
+                    }
+                    h = (h + 1) % 24;
+                }
+                out
+            }
+            _ => vec![t.clone()],
+        })
+        .collect()
+}
+/// The event's 24 one-hour slots (eventHourGrid: Tuesday 20u to Wednesday 20u).
+fn event_hour_grid() -> Vec<(&'static str, Vec<u32>)> {
+    let mut days: Vec<(&'static str, Vec<u32>)> = Vec::new();
+    let (mut day, mut hour) = (1usize, 20u32);
+    for _ in 0..24 {
+        match days.last_mut() {
+            Some((d, hs)) if *d == WEEKDAYS[day] => hs.push(hour),
+            _ => days.push((WEEKDAYS[day], vec![hour])),
+        }
+        hour = (hour + 1) % 24;
+        if hour == 0 {
+            day = (day + 1) % 7;
+        }
+    }
+    days
+}
+fn toggle_hour(s: &mut State, weekday: &'static str, hour: u32) {
+    let a = add_mut(s);
+    let on = !has_hour(&a.hours, weekday, hour);
+    a.hours = set_hour(&a.hours, weekday, hour, on);
+}
+fn hours_picker(s: &State, hours: &[String]) -> El {
+    let p = pal(s.dark);
+    let mut picker = col()
+        .key("add-hours")
+        .role("group")
+        .label("Beschikbare uren")
+        .gap(8.0)
+        .mt(16.0)
+        .child(
+            text("Beschikbare uren")
+                .font(rune::TextStyle::new(13.5, 500.0))
+                .color(p.t.ink2)
+                .mb(8.0),
+        );
+    for (weekday, slots_of_day) in event_hour_grid() {
+        let mut slots = row().gap(4.0).flex_wrap().grow(1.0).min_w(0.0);
+        for h in slots_of_day {
+            let on = has_hour(hours, weekday, h);
+            slots = slots.child(
+                row()
+                    .key(format!("add-hour-{weekday}-{h}"))
+                    .role("button")
+                    .label(block_text(h, Some(weekday)))
+                    .checked(on)
+                    .focusable(true)
+                    .min_w(58.0)
+                    .h(28.0)
+                    .px(6.0)
+                    .center()
+                    .radius(6.0)
+                    .fill(if on { p.brand_wash } else { p.surface })
+                    .border(
+                        if on { 2.0 } else { 1.0 },
+                        if on { p.brand } else { p.t.line2 },
+                    )
+                    .hover(if on { p.brand_wash } else { p.t.surface2 })
+                    .on_press(move |s: &mut State| toggle_hour(s, weekday, h))
+                    .child(
+                        text(format!("{h:02}–{:02}", (h + 1) % 24))
+                            .font(rune::TextStyle::new(13.0, 500.0))
+                            .color(if on { p.brand_ink } else { p.ink }),
+                    ),
+            );
+        }
+        let mut name = weekday.to_string();
+        name[..1].make_ascii_uppercase();
+        picker = picker.child(
+            row()
+                .gap(12.0)
+                .items_start()
+                .child(
+                    text(name)
+                        .font(rune::TextStyle::new(13.0, 400.0))
+                        .color(p.t.ink2)
+                        .w(88.0)
+                        .pt(5.0),
+                )
+                .child(slots),
+        );
+    }
+    picker.child(
+        text("Sleep over meerdere uren om ze in één keer aan of uit te zetten.")
+            .font(rune::TextStyle::new(12.5, 400.0))
+            .color(p.t.ink3)
+            .mt(4.0),
     )
 }
 
@@ -1747,9 +2514,20 @@ fn add_mut(s: &mut State) -> &mut Add {
 }
 fn has_draft(a: &Add) -> bool {
     !a.labels.is_empty()
-        || [&a.number, &a.name, &a.notes, &a.phone, &a.email, &a.hours, &a.avg_min, &a.avg_sec, &a.best_min, &a.best_sec]
-            .iter()
-            .any(|e| !e.text.trim().is_empty())
+        || !a.hours.is_empty()
+        || [
+            &a.number,
+            &a.name,
+            &a.notes,
+            &a.phone,
+            &a.email,
+            &a.avg_min,
+            &a.avg_sec,
+            &a.best_min,
+            &a.best_sec,
+        ]
+        .iter()
+        .any(|e| !e.text.trim().is_empty())
 }
 fn request_close(s: &mut State) {
     if matches!(s.queue_page.pending, Some(Pending::Added { .. })) {
@@ -1764,14 +2542,20 @@ fn request_close(s: &mut State) {
     s.queue_page.dialog = None;
 }
 fn seconds_input(v: &str) -> Option<i64> {
-    let n: f64 = if v.trim().is_empty() { 0.0 } else { v.trim().parse().ok()? };
+    let n: f64 = if v.trim().is_empty() {
+        0.0
+    } else {
+        v.trim().parse().ok()?
+    };
     Some(n.round().clamp(0.0, 59.0) as i64)
 }
 fn minute_second_ms(min: &str, sec: &str) -> Value {
     if min.trim().is_empty() && sec.trim().is_empty() {
         return Value::Null;
     }
-    let m: f64 = if min.trim().is_empty() { 0.0 } else {
+    let m: f64 = if min.trim().is_empty() {
+        0.0
+    } else {
         match min.trim().parse() {
             Ok(v) => v,
             Err(_) => return Value::Null,
@@ -1786,20 +2570,16 @@ fn save(s: &mut State) {
     if s.queue_page.pending.is_some() {
         return;
     }
-    let Some(Dialog::Add(a)) = &mut s.queue_page.dialog else { return };
+    let Some(Dialog::Add(a)) = &mut s.queue_page.dialog else {
+        return;
+    };
     let name = a.name.text.trim().to_string();
     if name.is_empty() {
         a.error = "Naam is verplicht.".into();
         return;
     }
     a.error.clear();
-    let hours: Vec<String> = a
-        .hours
-        .text
-        .split(';')
-        .map(|h| h.trim().to_string())
-        .filter(|h| !h.is_empty())
-        .collect();
+    let hours = a.hours.clone();
     let number = a.number.text.trim().to_string();
     let input = json!({
         "runnerNumber": if number.is_empty() { Value::Null } else { json!(number) },
@@ -1820,7 +2600,11 @@ fn labelled(s: &State, title: &str, input: El) -> El {
         .gap(6.0)
         .grow(1.0)
         .min_w(0.0)
-        .child(text(title.to_string()).font(rune::TextStyle::new(13.0, 500.0)).color(pal(s.dark).t.ink2))
+        .child(
+            text(title.to_string())
+                .font(rune::TextStyle::new(13.0, 500.0))
+                .color(pal(s.dark).t.ink2),
+        )
         .child(input)
 }
 macro_rules! add_field {
@@ -1830,7 +2614,14 @@ macro_rules! add_field {
             .on_submit(|s: &mut State, _tx: &mut Tx| save(s))
     };
 }
-fn disclosure(s: &State, key: &str, title: &str, hint: &str, open: bool, f: impl Fn(&mut State) + 'static) -> El {
+fn disclosure(
+    s: &State,
+    key: &str,
+    title: &str,
+    hint: &str,
+    open: bool,
+    f: impl Fn(&mut State) + 'static,
+) -> El {
     let p = pal(s.dark);
     row()
         .key(key.to_string())
@@ -1843,8 +2634,17 @@ fn disclosure(s: &State, key: &str, title: &str, hint: &str, open: bool, f: impl
         .center_y()
         .on_press(f)
         .child(chevron(s, open))
-        .child(text(title.to_string()).font(rune::TextStyle::new(14.0, 600.0)).color(p.ink))
-        .child(text(hint.to_string()).font(rune::TextStyle::new(13.0, 400.0)).color(p.t.ink3).ml(8.0))
+        .child(
+            text(title.to_string())
+                .font(rune::TextStyle::new(14.0, 600.0))
+                .color(p.ink),
+        )
+        .child(
+            text(hint.to_string())
+                .font(rune::TextStyle::new(13.0, 400.0))
+                .color(p.t.ink3)
+                .ml(8.0),
+        )
 }
 fn add_dialog(s: &State, a: &Add) -> El {
     let p = pal(s.dark);
@@ -1856,18 +2656,36 @@ fn add_dialog(s: &State, a: &Add) -> El {
             row()
                 .gap(12.0)
                 .mb(16.0)
-                .child(labelled(s, "Lopersnummer", add_field!(s, a, number, "add-number", "Lopersnummer", "")))
-                .child(labelled(s, "Naam", add_field!(s, a, name, "add-name", "Naam", ""))),
+                .child(labelled(
+                    s,
+                    "Lopersnummer",
+                    add_field!(s, a, number, "add-number", "Lopersnummer", ""),
+                ))
+                .child(labelled(
+                    s,
+                    "Naam",
+                    add_field!(s, a, name, "add-name", "Naam", ""),
+                )),
         );
     // Labels by kind, speedteams first; a runner runs for one speedteam.
-    let mut labels: Vec<&Value> = s.snapshot["labels"].as_array().into_iter().flatten().collect();
+    let mut labels: Vec<&Value> = s.snapshot["labels"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .collect();
     let order = |k: &str| match k {
         "speedteam" => 0,
         "zustervereniging" | "association" => 1,
         "andere" | "group" => 2,
         _ => 3,
     };
-    labels.sort_by(|x, y| order(st(x, "kind")).cmp(&order(st(y, "kind"))).then(st(x, "name").to_lowercase().cmp(&st(y, "name").to_lowercase())));
+    labels.sort_by(|x, y| {
+        order(st(x, "kind")).cmp(&order(st(y, "kind"))).then(
+            st(x, "name")
+                .to_lowercase()
+                .cmp(&st(y, "name").to_lowercase()),
+        )
+    });
     let mut groups = col().gap(16.0).mb(16.0);
     let mut i = 0;
     while i < labels.len() {
@@ -1878,9 +2696,19 @@ fn add_dialog(s: &State, a: &Add) -> El {
             "andere" | "group" => "Andere",
             _ => "Custom",
         };
-        let mut group = col().child(text(title).font(rune::TextStyle::new(14.0, 500.0).lh(17.5)).color(p.t.ink2).mb(2.0));
+        let mut group = col().child(
+            text(title)
+                .font(rune::TextStyle::new(14.0, 500.0).lh(17.5))
+                .color(p.t.ink2)
+                .mb(2.0),
+        );
         if kind == "speedteam" {
-            group = group.child(text("Kies maximaal 1 optie.").font(rune::TextStyle::new(12.5, 400.0).lh(18.75)).color(p.t.ink3).mb(8.0));
+            group = group.child(
+                text("Kies maximaal 1 optie.")
+                    .font(rune::TextStyle::new(12.5, 400.0).lh(18.75))
+                    .color(p.t.ink3)
+                    .mb(8.0),
+            );
         }
         let mut picker = row().gap(6.0).flex_wrap();
         while i < labels.len() && st(labels[i], "kind") == kind {
@@ -1900,16 +2728,36 @@ fn add_dialog(s: &State, a: &Add) -> El {
                 .center_y()
                 .radius(6.0)
                 .fill(if on { p.brand_wash } else { p.surface })
-                .border(if on { 2.0 } else { 1.0 }, if on { p.brand } else { p.t.line2 })
+                .border(
+                    if on { 2.0 } else { 1.0 },
+                    if on { p.brand } else { p.t.line2 },
+                )
                 .hover(if on { p.brand_wash } else { p.t.surface2 });
             if let Some(image) = l["imageUrl"].as_str().and_then(|url| s.logos.get(url)) {
-                chip = chip.child(rune::el().size(14.0, 14.0).pixels_fit(image.pixels(), rune::SurfaceFit::Fit));
+                chip = chip.child(
+                    rune::el()
+                        .size(14.0, 14.0)
+                        .pixels_fit(image.pixels(), rune::SurfaceFit::Fit),
+                );
             } else {
-                chip = chip.child(rune::el().size(7.0, 7.0).radius(3.5).fill(rune::color::hex(st(l, "color")).unwrap_or(p.t.ink3)));
+                chip = chip.child(
+                    rune::el()
+                        .size(7.0, 7.0)
+                        .radius(3.5)
+                        .fill(rune::color::hex(st(l, "color")).unwrap_or(p.t.ink3)),
+                );
             }
-            chip = chip.child(text(st(l, "name").to_string()).font(rune::TextStyle::new(13.0, 500.0)).color(if on { p.brand_ink } else { p.ink }));
+            chip = chip.child(
+                text(st(l, "name").to_string())
+                    .font(rune::TextStyle::new(13.0, 500.0))
+                    .color(if on { p.brand_ink } else { p.ink }),
+            );
             let speed = kind == "speedteam";
-            let all_speed: Vec<String> = labels.iter().filter(|x| st(x, "kind") == "speedteam").map(|x| st(x, "id").to_string()).collect();
+            let all_speed: Vec<String> = labels
+                .iter()
+                .filter(|x| st(x, "kind") == "speedteam")
+                .map(|x| st(x, "id").to_string())
+                .collect();
             picker = picker.child(chip.on_press(move |s: &mut State| {
                 let a = add_mut(s);
                 if a.labels.contains(&id) {
@@ -1944,14 +2792,24 @@ fn add_dialog(s: &State, a: &Add) -> El {
                 row()
                     .gap(12.0)
                     .my(16.0)
-                    .child(labelled(s, "Telefoon", add_field!(s, a, phone, "add-phone", "Telefoon", "")).w(0.0))
-                    .child(labelled(s, "E-mail", add_field!(s, a, email, "add-email", "E-mail", "")).w(0.0)),
+                    .child(
+                        labelled(
+                            s,
+                            "Telefoon",
+                            add_field!(s, a, phone, "add-phone", "Telefoon", ""),
+                        )
+                        .w(0.0),
+                    )
+                    .child(
+                        labelled(
+                            s,
+                            "E-mail",
+                            add_field!(s, a, email, "add-email", "E-mail", ""),
+                        )
+                        .w(0.0),
+                    ),
             )
-            .child(labelled(
-                s,
-                "Beschikbare uren",
-                add_field!(s, a, hours, "add-hours", "Beschikbare uren", "20-21u; 21-22u"),
-            ));
+            .child(hours_picker(s, &a.hours));
     }
     let mut extra = section().mt(16.0).child(disclosure(
         s,
@@ -1965,7 +2823,12 @@ fn add_dialog(s: &State, a: &Add) -> El {
         },
     ));
     if a.extra_open {
-        let pair = |m: El, sec: El| row().gap(8.0).child(m.w(0.0).grow(1.0)).child(sec.w(0.0).grow(1.0));
+        let pair = |m: El, sec: El| {
+            row()
+                .gap(8.0)
+                .child(m.w(0.0).grow(1.0))
+                .child(sec.w(0.0).grow(1.0))
+        };
         extra = extra
             .child(
                 row()
@@ -1975,16 +2838,44 @@ fn add_dialog(s: &State, a: &Add) -> El {
                         s,
                         "Historisch gemiddelde",
                         pair(
-                            add_field!(s, a, avg_min, "add-avg-min", "Historisch gemiddelde minuten", "min"),
-                            add_field!(s, a, avg_sec, "add-avg-sec", "Historisch gemiddelde seconden", "sec"),
+                            add_field!(
+                                s,
+                                a,
+                                avg_min,
+                                "add-avg-min",
+                                "Historisch gemiddelde minuten",
+                                "min"
+                            ),
+                            add_field!(
+                                s,
+                                a,
+                                avg_sec,
+                                "add-avg-sec",
+                                "Historisch gemiddelde seconden",
+                                "sec"
+                            ),
                         ),
                     ))
                     .child(labelled(
                         s,
                         "Historisch snelste",
                         pair(
-                            add_field!(s, a, best_min, "add-best-min", "Historisch snelste minuten", "min"),
-                            add_field!(s, a, best_sec, "add-best-sec", "Historisch snelste seconden", "sec"),
+                            add_field!(
+                                s,
+                                a,
+                                best_min,
+                                "add-best-min",
+                                "Historisch snelste minuten",
+                                "min"
+                            ),
+                            add_field!(
+                                s,
+                                a,
+                                best_sec,
+                                "add-best-sec",
+                                "Historisch snelste seconden",
+                                "sec"
+                            ),
                         ),
                     )),
             )
@@ -2016,7 +2907,19 @@ fn add_dialog(s: &State, a: &Add) -> El {
         );
     }
     let mut cancel = btn(s, "add-cancel", "Annuleer", Kind::Ghost, false);
-    let mut ok = btn(s, "add-save", if saving { "Opslaan..." } else if a.registered { "Loper toevoegen" } else { "Toevoegen aan opwarmen" }, Kind::Primary, false);
+    let mut ok = btn(
+        s,
+        "add-save",
+        if saving {
+            "Opslaan..."
+        } else if a.registered {
+            "Loper toevoegen"
+        } else {
+            "Toevoegen aan opwarmen"
+        },
+        Kind::Primary,
+        false,
+    );
     if saving {
         cancel = cancel.disabled(true).opacity(0.6);
         ok = ok.disabled(true).opacity(0.6);
@@ -2036,7 +2939,9 @@ fn add_dialog(s: &State, a: &Add) -> El {
     );
     overlay(s, "add-overlay", request_close).child(
         sheet(s, "add-dialog", "Nieuwe loper", dialog_max_h(s))
-            .scroll(ScrollSpec { stick_bottom: false })
+            .scroll(ScrollSpec {
+                stick_bottom: false,
+            })
             .child(body),
     )
 }
@@ -2055,7 +2960,12 @@ fn close_question(s: &State) -> El {
             .radius(10.0)
             .fill(p.surface)
             .border(1.0, p.line)
-            .child(text("Nieuwe loper sluiten?").font(rune::TextStyle::new(16.0, 600.0).lh(20.0)).color(p.ink).mb(6.0))
+            .child(
+                text("Nieuwe loper sluiten?")
+                    .font(rune::TextStyle::new(16.0, 600.0).lh(20.0))
+                    .color(p.ink)
+                    .mb(6.0),
+            )
             .child(
                 text("Je invoer is nog niet opgeslagen en gaat verloren.")
                     .font(rune::TextStyle::new(13.5, 400.0).lh(20.0))
@@ -2067,7 +2977,11 @@ fn close_question(s: &State) -> El {
                     .mt(20.0)
                     .gap(8.0)
                     .justify_end()
-                    .child(btn(s, "add-close-cancel", "Verder invullen", Kind::Plain, false).autofocus().on_press(back))
+                    .child(
+                        btn(s, "add-close-cancel", "Verder invullen", Kind::Plain, false)
+                            .autofocus()
+                            .on_press(back),
+                    )
                     .child(
                         row()
                             .key("add-close-confirm")
@@ -2081,8 +2995,124 @@ fn close_question(s: &State) -> El {
                             .fill(p.t.stop)
                             .border(1.0, p.t.stop)
                             .on_press(|s: &mut State| s.queue_page.dialog = None)
-                            .child(text("Sluiten zonder opslaan").font(rune::TextStyle::new(13.5, 500.0)).color(p.on_brand)),
+                            .child(
+                                text("Sluiten zonder opslaan")
+                                    .font(rune::TextStyle::new(13.5, 500.0))
+                                    .color(p.on_brand),
+                            ),
                     ),
             ),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rune::{Env, Runtime};
+    use std::sync::{Arc, Mutex};
+
+    fn update(rt: &mut Runtime<State>, predicate: impl Fn(&State) -> bool) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !predicate(&rt.state) {
+            assert!(
+                Instant::now() < deadline,
+                "UI did not settle: {}",
+                rt.state.error
+            );
+            rt.update_if(|state, tx| super::super::poll(state, 0.0, tx));
+            rt.frame(1.0 / 60.0);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+    fn click(rt: &mut Runtime<State>, key: &str) {
+        rt.frame(1.0 / 60.0);
+        let (x, y) = rt
+            .find(key)
+            .unwrap_or_else(|| panic!("Missing UI control {key}"));
+        rt.pointer_down(x, y);
+        rt.pointer_up(x, y);
+        rt.frame(1.0 / 60.0);
+    }
+    fn start() -> (Runtime<State>, Arc<Mutex<crate::db::Db>>) {
+        let db = Arc::new(Mutex::new(
+            crate::db::Db::open(std::path::Path::new(":memory:")).unwrap(),
+        ));
+        let socket = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = socket.local_addr().unwrap().port();
+        drop(socket);
+        std::mem::forget(crate::server::start(db.clone(), port).unwrap());
+        let mut state = init_with_url(format!("http://127.0.0.1:{port}"));
+        state.page = 1;
+        let mut rt = Runtime::new(
+            state,
+            view,
+            (1366.0, 768.0),
+            Env {
+                system_dark: false,
+                scale: 1.0,
+            },
+        );
+        rt.frame(0.0);
+        update(&mut rt, |s| s.connected);
+        (rt, db)
+    }
+
+    #[test]
+    fn hour_blocks_split_and_merge_like_set_hour_block() {
+        let on = set_hour(&[], "dinsdag", 21, true);
+        assert_eq!(on, vec!["21-22u (dinsdag)"]);
+        let two = set_hour(&on, "dinsdag", 20, true);
+        assert_eq!(two, vec!["20-21u (dinsdag)", "21-22u (dinsdag)"]);
+        // Clearing one hour out of a stretch keeps the rest of it.
+        assert_eq!(
+            set_hour(&["20-23u".into()], "dinsdag", 21, false),
+            vec!["20-21u", "22-23u"]
+        );
+    }
+
+    #[test]
+    fn new_runner_hour_grid_saves_the_pressed_hours() {
+        let (mut rt, db) = start();
+        click(&mut rt, "queue-add");
+        add_mut(&mut rt.state).name = TextEdit::new("Uurtje Test");
+        click(&mut rt, "add-contact");
+        click(&mut rt, "add-hour-dinsdag-21");
+        click(&mut rt, "add-hour-woensdag-3");
+        assert_eq!(
+            add_mut(&mut rt.state).hours,
+            vec!["21-22u (dinsdag)", "03-04u (woensdag)"]
+        );
+        click(&mut rt, "add-hour-woensdag-3");
+        assert_eq!(add_mut(&mut rt.state).hours, vec!["21-22u (dinsdag)"]);
+        // Toevoegen sits below the fold of the taller dialog; press it the way its button does.
+        rt.update_if(|s, _| {
+            save(s);
+            true
+        });
+        update(&mut rt, |s| s.queue_page.dialog.is_none() && !s.busy);
+        let row = db
+            .lock()
+            .unwrap()
+            .one(
+                "SELECT registration_json AS r FROM runners WHERE name='Uurtje Test'",
+                &[],
+            )
+            .unwrap();
+        let reg: Value = serde_json::from_str(row["r"].as_str().unwrap()).unwrap();
+        assert_eq!(reg["availableHours"], json!(["21-22u (dinsdag)"]));
+    }
+
+    #[test]
+    fn call_dialog_shows_a_qr_with_the_tel_link() {
+        assert_eq!(phone_href(" +32 470 12 34 56 "), "tel:+32470123456");
+        let (mut rt, _db) = start();
+        rt.update_if(|s, _| {
+            s.queue_page.dialog = Some(Dialog::Call("12 Fien".into(), "0470 12 34 56".into()));
+            true
+        });
+        rt.frame(1.0 / 60.0);
+        assert!(rt.find("call-qr").is_some());
+        click(&mut rt, "call-close");
+        assert!(rt.state.queue_page.dialog.is_none());
+    }
 }

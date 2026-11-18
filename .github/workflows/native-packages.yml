@@ -1,0 +1,60 @@
+name: Native packages
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['native-v*']
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows
+            binary: apolloon-native.exe
+          - os: macos-latest
+            platform: macos
+            binary: apolloon-native
+          - os: ubuntu-latest
+            platform: linux
+            binary: apolloon-native
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev libxi-dev libxcursor-dev libxrandr-dev
+      - name: Install wasm-bindgen CLI matching native/Cargo.lock
+        run: cargo install wasm-bindgen-cli --version 0.2.130 --locked
+      - run: bash native/scripts/build-web.sh
+      - run: cargo build --release --manifest-path native/Cargo.toml --bin apolloon-native
+      - name: Stage package
+        shell: bash
+        run: |
+          mkdir -p package
+          cp "native/target/release/${{ matrix.binary }}" package/
+          cp -R native/web-dist package/web-dist
+      - name: Archive Windows package
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path package/* -DestinationPath apolloon-native-windows.zip
+      - name: Archive Unix package
+        if: runner.os != 'Windows'
+        run: tar -czf apolloon-native-${{ matrix.platform }}.tar.gz -C package .
+      - uses: actions/upload-artifact@v6
+        with:
+          name: apolloon-native-${{ matrix.platform }}
+          path: apolloon-native-${{ matrix.platform }}.*
+          if-no-files-found: error

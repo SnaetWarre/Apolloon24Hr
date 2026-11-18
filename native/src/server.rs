@@ -13,16 +13,34 @@ pub struct Host {
     pub port: u16,
     discovery: Arc<crate::discovery::Discovery>,
     pub backups: Arc<crate::backup_service::Service>,
+    /// Linked-laptop runtime (`CLUSTER_ENABLED=true`); writes then replicate to a majority.
+    pub cluster: Option<Arc<crate::cluster::Node>>,
 }
 impl Host {
     fn new(db: Arc<Mutex<Db>>, port: u16) -> Self {
+        Self::with_cluster(db, port, crate::cluster::Config::from_env(port))
+    }
+    pub(crate) fn with_cluster(
+        db: Arc<Mutex<Db>>,
+        port: u16,
+        cluster: Option<crate::cluster::Config>,
+    ) -> Self {
         let path = crate::backups::database_path(&db.lock().unwrap()).ok();
         let discovery = crate::discovery::Discovery::start(&db, port);
+        let cluster = cluster.and_then(|config| {
+            crate::cluster::Node::start(db.clone(), config)
+                .inspect_err(|error| eprintln!("Laptops koppelen kon niet starten: {error}"))
+                .ok()
+        });
+        if let Some(node) = &cluster {
+            node.set_discovery(discovery.clone());
+        }
         Self {
             db,
             discovery,
             port,
             backups: Arc::new(crate::backup_service::Service::new(path)),
+            cluster,
         }
     }
 }
@@ -36,7 +54,11 @@ fn reply(result: Result<Value>) -> Reply {
     })
 }
 async fn snapshot(State(host): State<Host>) -> Reply {
-    reply(host.db.lock().unwrap().snapshot(host.port))
+    let mut snapshot = host.db.lock().unwrap().snapshot(host.port);
+    if let (Ok(value), Some(node)) = (&mut snapshot, &host.cluster) {
+        value["cluster"] = node.status();
+    }
+    reply(snapshot)
 }
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -113,8 +135,37 @@ async fn label_image(State(host): State<Host>, Path(id): Path<String>) -> axum::
         Err(_) => StatusCode::NOT_FOUND.into_response(),
     }
 }
-async fn health() -> Json<Value> {
-    Json(json!({"ok":true,"runtime":"rust","schemaVersion":17}))
+async fn health(State(host): State<Host>) -> Json<Value> {
+    // The desktop app keeps the laptop awake and asks before closing while this is true.
+    let race = host.db.lock().unwrap().race().unwrap_or(Value::Null);
+    let active = !race["raceStartedAt"].is_null() && race["raceFinishedAt"].is_null();
+    Json(json!({"ok":true,"runtime":"rust","schemaVersion":17,"race":{"active":active}}))
+}
+async fn net_profile() -> Json<Value> {
+    let profile = tokio::task::spawn_blocking(crate::desktop::net_setup::profile).await;
+    Json(match profile {
+        Ok(profile) => json!({"ok":true,"profile":profile}),
+        Err(_) => json!({"ok":false,"error":"Netwerkprofiel lezen mislukt"}),
+    })
+}
+async fn net_action(
+    Path(action): Path<String>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<std::net::SocketAddr>,
+    Json(input): Json<Value>,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    if !remote.ip().to_canonical().is_loopback() {
+        return (StatusCode::FORBIDDEN, Json(json!({"ok":false,"error":"Alleen op deze laptop zelf."}))).into_response();
+    }
+    let result = tokio::task::spawn_blocking(move || match action.as_str() {
+        "make-static" => crate::desktop::net_setup::make_static(&input),
+        "revert-dhcp" => crate::desktop::net_setup::revert_dhcp(&input),
+        _ => json!({"ok":false,"error":"Onbekende netwerkactie"}),
+    })
+    .await
+    .unwrap_or_else(|_| json!({"ok":false,"error":"Kon de netwerkactie niet starten."}));
+    let status = if result["ok"] == true { StatusCode::OK } else { StatusCode::BAD_REQUEST };
+    (status, Json(result)).into_response()
 }
 async fn clock() -> impl axum::response::IntoResponse {
     (
@@ -140,15 +191,19 @@ async fn action(host: Host, method: String, input: Value, origin: String) -> Res
                 crate::backups::preview(&path, input["fileName"].as_str().unwrap_or(""))
             })
         }
-        "backups.restore" | "race.clear" => {
-            host.backups.recover(&host.db, &method, &input, host.port)
-        }
+        "backups.restore" | "race.clear" => match &host.cluster {
+            Some(node) => node.action(&method, &input, &origin),
+            None => host.backups.recover(&host.db, &method, &input, host.port),
+        },
         "backups.applyRestore" => Err("Deze herstelactie is alleen intern beschikbaar".into()),
-        _ => host
-            .db
-            .lock()
-            .unwrap()
-            .mutation_from(&method, &input, &origin),
+        _ => match &host.cluster {
+            Some(node) => node.action(&method, &input, &origin),
+            None => host
+                .db
+                .lock()
+                .unwrap()
+                .mutation_from(&method, &input, &origin),
+        },
     })
     .await
     .map_err(|e| e.to_string())
@@ -181,6 +236,41 @@ fn system_info(host: &Host) -> Value {
         "nearbyLaptops": host.discovery.nearby(),
     })
 }
+/// Beheer › Systeem's laptop tools: network profile and pinning, updates and diagnostics.
+/// Changing the laptop itself only works on the laptop, not from a browser on the network.
+async fn desktop_action(method: &str, input: &Value, loopback: bool) -> Option<Result<Value>> {
+    use crate::desktop as d;
+    let local = matches!(method, "net.makeStatic" | "net.revertDhcp" | "update.check" | "update.install" | "desktop.openUrl");
+    if !method.starts_with("net.") && !method.starts_with("update.") && !method.starts_with("desktop.") {
+        return None;
+    }
+    if local && !loopback {
+        return Some(Err("Dit kan alleen op de laptop zelf.".into()));
+    }
+    let (method, input) = (method.to_string(), input.clone());
+    let run = tokio::task::spawn_blocking(move || -> Result<Value> {
+        let net = |v: Value| if v["ok"] == true { Ok(v) } else { Err(v["error"].as_str().unwrap_or("Mislukt").to_string()) };
+        match method.as_str() {
+            "net.profile" => Ok(d::net_setup::profile()),
+            "net.makeStatic" => net(d::net_setup::make_static(&input)),
+            "net.revertDhcp" => net(d::net_setup::revert_dhcp(&input)),
+            "update.status" => Ok(json!({
+                "status": d::update_status(),
+                "lastInstall": d::with(|d| d.last_install.clone()).flatten().map(|(version, ok)| json!({"version":version,"ok":ok})),
+            })),
+            "update.check" => {
+                std::thread::spawn(d::check_for_update);
+                Ok(json!({"started":true}))
+            }
+            #[cfg(feature = "desktop")]
+            "update.install" => Ok(json!({"problem": d::install_update()})),
+            "desktop.diagnostics" => Ok(d::diagnostics()),
+            "desktop.openUrl" => d::open_folder(std::path::Path::new(input["url"].as_str().unwrap_or(""))).map(|_| json!({"ok":true})),
+            _ => Err("Onbekende actie".into()),
+        }
+    });
+    Some(run.await.unwrap_or_else(|_| Err("Mislukt".into())))
+}
 async fn mutation(
     State(host): State<Host>,
     Path(method): Path<String>,
@@ -188,6 +278,10 @@ async fn mutation(
     headers: axum::http::HeaderMap,
     Json(input): Json<Value>,
 ) -> Reply {
+    let loopback = remote.ip().to_canonical().is_loopback();
+    if let Some(result) = desktop_action(&method, &input, loopback).await {
+        return reply(result);
+    }
     reply(
         action(
             host,
@@ -288,6 +382,8 @@ async fn export(State(host): State<Host>, Path(file): Path<String>) -> axum::res
 pub fn router(host: Host) -> Router {
     Router::new()
         .route("/api/health", get(health))
+        .route("/api/net/profile", get(net_profile))
+        .route("/api/net/{action}", post(net_action))
         .route("/api/backups/status", get(system))
         .route("/api/recovery", get(recovery_state))
         .route("/api/backups/{name}", get(backup_download))
@@ -309,15 +405,16 @@ pub fn router(host: Host) -> Router {
         .route("/trpc/{method}", post(rpc).get(query_rpc))
         .fallback_service(
             tower_http::services::ServeDir::new(
-                std::env::var("APOLLOON_WEB_DIR").unwrap_or_else(|_| "native/web-dist".into()),
+                crate::desktop::config::current_web_dir(),
             )
             .fallback(tower_http::services::ServeFile::new(
                 std::path::Path::new(
-                    &std::env::var("APOLLOON_WEB_DIR").unwrap_or_else(|_| "native/web-dist".into()),
+                    &crate::desktop::config::current_web_dir(),
                 )
                 .join("index.html"),
             )),
         )
+        .merge(crate::cluster::routes::routes())
         .layer(axum::extract::DefaultBodyLimit::max(50 * 1024 * 1024))
         .with_state(host)
 }

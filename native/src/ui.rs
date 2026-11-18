@@ -33,6 +33,8 @@ use overview::overview;
 mod shell;
 mod tactics_page;
 mod timing_page;
+#[cfg(test)]
+mod cluster_ui_test;
 #[derive(Clone, Copy)]
 enum FilePurpose {
     Import,
@@ -381,6 +383,7 @@ fn poll(s: &mut State, _: f64, tx: &mut Tx) -> bool {
                         timing_page::failed(s, &method);
                     }
                     queue_page::failed(s, &method);
+                    laps_panel::failed(s, &method);
                     admin_base::failed(s);
                     s.last_press = None;
                     s.laps.success.clear();
@@ -473,9 +476,10 @@ fn poll(s: &mut State, _: f64, tx: &mut Tx) -> bool {
     }
     activity_panel::refresh(s);
     queue_page::refresh(s);
-    admin_base::refresh(s);
+    admin_base::refresh(s, tx);
     laps_panel::sync_hold(s);
     tactics_page::refresh(s);
+    public_screens::refresh(s);
     s.clock = s.server_now();
     true
 }
@@ -1057,7 +1061,11 @@ fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
     false
 }
 pub fn run() {
-    rune::run(AppSpec {
+    #[cfg(not(target_arch = "wasm32"))]
+    let run = crate::desktop::chrome::run;
+    #[cfg(target_arch = "wasm32")]
+    let run = rune::run;
+    run(AppSpec {
         fonts: &[
             include_bytes!("../assets/geist-latin-wght-normal.ttf"),
             include_bytes!("../assets/geist-latin-ext-wght-normal.ttf"),
@@ -1067,9 +1075,24 @@ pub fn run() {
         families: ("Geist", "Geist"),
         setup: Some(setup),
         poll: Some(poll),
-        on_key: Some(on_key),
-        ..AppSpec::new("Apolloon Telsysteem", (1366.0, 768.0), init, view)
+        on_key: Some(desktop_key),
+        ..AppSpec::new("Apolloon Telsysteem", (1366.0, 768.0), init, desktop_view)
     });
+}
+/// The desktop window's title bar, start screen and close question around the view.
+fn desktop_view(s: &State, cx: &mut Cx<State>) -> El {
+    let content = view(s, cx);
+    #[cfg(not(target_arch = "wasm32"))]
+    return crate::desktop::chrome::frame(cx, s.dark, content, |s: &mut State| s.page = 0);
+    #[cfg(target_arch = "wasm32")]
+    content
+}
+fn desktop_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
+    #[cfg(not(target_arch = "wasm32"))]
+    if crate::desktop::chrome::key(event, tx) {
+        return true;
+    }
+    on_key(s, event, tx)
 }
 
 fn setup(s: &mut State, waker: rune::Waker) {
@@ -1435,6 +1458,101 @@ mod tests {
         );
     }
     #[test]
+    fn runners_section_shows_each_runners_available_hours() {
+        let mut initial = crate::db::Db::open(std::path::Path::new(":memory:")).unwrap();
+        let id = initial.mutation("runners.create", &json!({"runnerNumber":"5","name":"Uren Loper"})).unwrap()["id"].as_str().unwrap().to_owned();
+        let mut registration = json!({"availableHours":["20-21u (dinsdag)","21-22u (dinsdag)","00-01u (woensdag)"],"categories":[]});
+        for key in ["submittedAt","email","phone","studyPhase","estimatedLaps","estimatedPace","maxLapsPerBlock","reuseConsent","flexibility","remarks"] {
+            registration[key] = json!("");
+        }
+        initial.exec("UPDATE runners SET registration_json=? WHERE id=?", &[json!(registration.to_string()), json!(id)]).unwrap();
+        let db = Arc::new(Mutex::new(initial));
+        let socket = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = socket.local_addr().unwrap().port();
+        drop(socket);
+        let _host = crate::server::start(db.clone(), port).unwrap();
+        let mut state = init_with_url(format!("http://127.0.0.1:{port}"));
+        state.page = 8;
+        state.admin_section = 1;
+        let mut rt = Runtime::new(state, view, (1366.0, 1080.0), Env { system_dark: false, scale: 1.0 });
+        rt.frame(0.0);
+        update(&mut rt, |s| s.connected && !s.busy && s.admin.registrations[&id].is_object());
+        // Keep polling: later snapshots must not lose the hours again.
+        for _ in 0..60 {
+            rt.update_if(|state, tx| poll(state, 0.0, tx));
+            rt.frame(1.0 / 60.0);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(rt.find(&format!("runner-hours-{id}")).is_some(), "the hours strip must show");
+        assert!(rt.state.admin.registrations[&id].is_object());
+    }
+    #[test]
+    fn runners_section_searches_unhides_and_deletes_a_runner_after_confirming() {
+        let mut initial = crate::db::Db::open(std::path::Path::new(":memory:")).unwrap();
+        let mut make = |number: &str, name: &str| {
+            initial.mutation("runners.create", &json!({"runnerNumber":number,"name":name})).unwrap()["id"]
+                .as_str()
+                .unwrap()
+                .to_owned()
+        };
+        let (keep, gone) = (make("7", "Hidden Runner"), make("8", "Removable Runner"));
+        initial.exec("UPDATE runners SET hidden_at=1 WHERE id=?", &[json!(keep)]).unwrap();
+        let db = Arc::new(Mutex::new(initial));
+        let socket = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = socket.local_addr().unwrap().port();
+        drop(socket);
+        let _host = crate::server::start(db.clone(), port).unwrap();
+        let mut state = init_with_url(format!("http://127.0.0.1:{port}"));
+        state.page = 8;
+        state.admin_section = 1;
+        let mut rt = Runtime::new(state, view, (1366.0, 1080.0), Env { system_dark: false, scale: 1.0 });
+        rt.frame(0.0);
+        update(&mut rt, |s| s.connected && !s.busy);
+        // Search narrows the table to one runner, without accents or case.
+        click(&mut rt, "admin-runner-search");
+        rt.paste("removable");
+        rt.frame(1.0 / 60.0);
+        assert!(rt.find(&format!("runner-row-{gone}")).is_some());
+        assert!(rt.find(&format!("runner-row-{keep}")).is_none());
+        // Keyboard: Tab reaches Verwijder in the row and shows while it has focus.
+        let target = format!("delete-{gone}");
+        for _ in 0..8 {
+            if rt.state.admin.focused.as_deref() == Some(target.as_str()) {
+                break;
+            }
+            rt.key(rune::Key::Tab.into());
+            rt.update_if(|state, tx| poll(state, 0.0, tx));
+            rt.frame(1.0 / 60.0);
+        }
+        assert_eq!(rt.state.admin.focused.as_deref(), Some(target.as_str()));
+        // Unhovered, the button only takes a click once focus has made it visible.
+        click(&mut rt, &target);
+        assert!(rt.state.admin.confirm.is_some(), "the focused Verwijder shows and asks first");
+        click(&mut rt, "admin-confirm-cancel");
+        // Verwijder shows on hover and asks first; Annuleer keeps the runner.
+        let (x, y) = rt.find(&format!("delete-{gone}")).unwrap();
+        rt.pointer_move(x, y);
+        rt.frame(1.0 / 60.0);
+        click(&mut rt, &format!("delete-{gone}"));
+        assert_eq!(rt.state.admin.confirm.as_ref().map(|c| c.title.as_str()), Some("Removable Runner definitief verwijderen?"));
+        click(&mut rt, "admin-confirm-cancel");
+        assert!(rt.state.admin.confirm.is_none());
+        click(&mut rt, &format!("delete-{gone}"));
+        click(&mut rt, "admin-confirm-ok");
+        update(&mut rt, |s| !s.busy && s.admin.toast.as_ref().is_some_and(|t| t.text == "Removable Runner is definitief verwijderd."));
+        assert!(db.lock().unwrap().rows("SELECT id FROM runners WHERE id=?", &[json!(gone)]).unwrap().is_empty());
+        // A hidden runner offers Terug tonen, which clears hidden_at.
+        click(&mut rt, "admin-runner-search");
+        for _ in 0.."removable".len() {
+            rt.key(rune::Key::Backspace.into());
+        }
+        rt.frame(1.0 / 60.0);
+        assert_eq!(rt.state.admin.runners.query.text, "");
+        click(&mut rt, &format!("unhide-{keep}"));
+        update(&mut rt, |s| !s.busy && s.admin.toast.as_ref().is_some_and(|t| t.text == "Hidden Runner is terug zichtbaar."));
+        assert!(db.lock().unwrap().rows("SELECT hidden_at AS h FROM runners WHERE id=?", &[json!(keep)]).unwrap()[0]["h"].is_null());
+    }
+    #[test]
     fn label_controls_upload_a_logo_assign_a_runner_and_confirm_deletion() {
         let mut initial = crate::db::Db::open(std::path::Path::new(":memory:")).unwrap();
         initial.exec("DELETE FROM labels", &[]).unwrap();
@@ -1584,8 +1702,11 @@ mod tests {
         rt.paste("zoe@example.be");
         click(&mut rt, "add-phone");
         rt.paste("0471");
-        click(&mut rt, "add-hours");
-        rt.paste("20-21u (dinsdag); 22-23u (dinsdag)");
+        click(&mut rt, "add-hour-dinsdag-20");
+        click(&mut rt, "add-hour-dinsdag-22");
+        // The hour grid makes the dialog taller: scroll Extra gegevens into view first.
+        rt.wheel(700.0, 670.0, -300.0);
+        rt.frame(0.2);
         click(&mut rt, "add-extra");
         rt.wheel(700.0, 670.0, -450.0);
         rt.frame(0.2);

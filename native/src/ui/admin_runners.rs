@@ -3,13 +3,21 @@
 //! src/components/admin/RunnersSection.tsx, AdminRunnerTable.tsx and the hour helpers in
 //! src/lib/availability.ts.
 use super::admin_base::{
-    Choose, ConfirmAction, Confirm, Kind, Pending, btn, copy, field, fold, h2, numeric_cmp, pal, panel, pill, select,
-    send, st, ts,
+    Choose, Confirm, ConfirmAction, Kind, Pending, btn, copy, field, fold, h2, numeric_cmp, pal,
+    panel, pill, select, send, st, ts,
 };
 use super::*;
 
 const MAX_VISIBLE_RUNNERS: usize = 150;
-const WEEKDAYS: [&str; 7] = ["maandag", "dinsdag", "woensdag", "donderdag", "vrijdag", "zaterdag", "zondag"];
+const WEEKDAYS: [&str; 7] = [
+    "maandag",
+    "dinsdag",
+    "woensdag",
+    "donderdag",
+    "vrijdag",
+    "zaterdag",
+    "zondag",
+];
 const HOUR_SELECT: &str = "admin-runner-hours";
 
 pub(super) struct Page {
@@ -20,7 +28,12 @@ pub(super) struct Page {
 }
 impl Default for Page {
     fn default() -> Self {
-        Self { query: TextEdit::new(""), hour: String::new(), shown: MAX_VISIBLE_RUNNERS, hovered: None }
+        Self {
+            query: TextEdit::new(""),
+            hour: String::new(),
+            shown: MAX_VISIBLE_RUNNERS,
+            hovered: None,
+        }
     }
 }
 
@@ -45,22 +58,34 @@ fn parse_block(text: &str) -> Option<Block> {
     let (a, b) = hours.split_once(['-', '–'])?;
     let num = |v: &str| -> Option<u32> {
         let v = v.trim().trim_end_matches(['u', 'U']).trim();
-        (!v.is_empty() && v.len() <= 2 && v.chars().all(|c| c.is_ascii_digit())).then(|| v.parse().ok()).flatten()
+        (!v.is_empty() && v.len() <= 2 && v.chars().all(|c| c.is_ascii_digit()))
+            .then(|| v.parse().ok())
+            .flatten()
     };
     let (start, end) = (num(a)?, num(b)?);
     if start > 23 || end > 24 || start == end {
         return None;
     }
-    Some(Block { start, end: if end == 24 { 0 } else { end }, weekday })
+    Some(Block {
+        start,
+        end: if end == 24 { 0 } else { end },
+        weekday,
+    })
 }
 fn block_covers(b: &Block, weekday: &str, hour: u32) -> bool {
     if b.weekday.as_deref().is_some_and(|d| d != weekday) {
         return false;
     }
-    if b.end <= b.start { hour >= b.start || hour < b.end } else { hour >= b.start && hour < b.end }
+    if b.end <= b.start {
+        hour >= b.start || hour < b.end
+    } else {
+        hour >= b.start && hour < b.end
+    }
 }
 fn covers(texts: &[String], weekday: &str, hour: u32) -> bool {
-    texts.iter().any(|t| parse_block(t).is_some_and(|b| block_covers(&b, weekday, hour)))
+    texts
+        .iter()
+        .any(|t| parse_block(t).is_some_and(|b| block_covers(&b, weekday, hour)))
 }
 /// The race's 24 hours from Tuesday 20:00, as (weekday, hour).
 fn event_hours() -> Vec<(&'static str, u32)> {
@@ -105,12 +130,20 @@ fn covered_slots(s: &State) -> Vec<(&'static str, u32, String)> {
 }
 fn searchable_hours(texts: &[String]) -> Vec<String> {
     let mut out = texts.to_vec();
-    out.extend(event_hours().into_iter().filter(|(d, h)| covers(texts, d, *h)).map(|(d, h)| slot_label(d, h)));
+    out.extend(
+        event_hours()
+            .into_iter()
+            .filter(|(d, h)| covers(texts, d, *h))
+            .map(|(d, h)| slot_label(d, h)),
+    );
     out
 }
 /// The strip's slots and the hours as stretches: `di 20–22u`, `di 23u – wo 1u`.
 fn summarize(texts: &[String]) -> (Vec<(&'static str, bool)>, Vec<String>) {
-    let slots: Vec<(&str, u32, bool)> = event_hours().into_iter().map(|(d, h)| (d, h, covers(texts, d, h))).collect();
+    let slots: Vec<(&str, u32, bool)> = event_hours()
+        .into_iter()
+        .map(|(d, h)| (d, h, covers(texts, d, h)))
+        .collect();
     let mut ranges = Vec::new();
     if slots.iter().all(|s| s.2) {
         ranges.push("Hele race".to_string());
@@ -137,7 +170,10 @@ fn summarize(texts: &[String]) -> (Vec<(&'static str, bool)>, Vec<String>) {
         }
     }
     for t in texts {
-        if !slots.iter().any(|(d, h, _)| covers(std::slice::from_ref(t), d, *h)) {
+        if !slots
+            .iter()
+            .any(|(d, h, _)| covers(std::slice::from_ref(t), d, *h))
+        {
             ranges.push(t.clone());
         }
     }
@@ -168,15 +204,24 @@ pub(super) fn status_label(status: &str) -> &str {
 }
 fn admin_status(r: &Value) -> String {
     let label = status_label(st(r, "status"));
-    if r["hiddenFromQueue"] == true { format!("{label} · verborgen") } else { label.to_string() }
+    if r["hiddenFromQueue"] == true {
+        format!("{label} · verborgen")
+    } else {
+        label.to_string()
+    }
 }
 fn matching<'a>(s: &'a State) -> Vec<&'a Value> {
     let page = &s.admin.runners;
-    let slot = covered_slots(s).into_iter().find(|(_, _, l)| *l == page.hour);
+    let slot = covered_slots(s)
+        .into_iter()
+        .find(|(_, _, l)| *l == page.hour);
     let q = fold(page.query.text.trim());
     let mut list: Vec<&Value> = runners(s)
         .into_iter()
-        .filter(|r| slot.as_ref().is_none_or(|(d, h, _)| covers(&hours_of(s, st(r, "id")), d, *h)))
+        .filter(|r| {
+            slot.as_ref()
+                .is_none_or(|(d, h, _)| covers(&hours_of(s, st(r, "id")), d, *h))
+        })
         .filter(|r| {
             if q.is_empty() {
                 return true;
@@ -185,9 +230,19 @@ fn matching<'a>(s: &'a State) -> Vec<&'a Value> {
                 st(r, "name").to_string(),
                 st(r, "runnerNumber").to_string(),
                 admin_status(r),
-                if st(r, "registrationSource") == "import" { "Import".into() } else { "Manueel".into() },
+                if st(r, "registrationSource") == "import" {
+                    "Import".into()
+                } else {
+                    "Manueel".into()
+                },
             ];
-            texts.extend(r["labels"].as_array().into_iter().flatten().map(|l| st(l, "name").to_string()));
+            texts.extend(
+                r["labels"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .map(|l| st(l, "name").to_string()),
+            );
             texts.extend(searchable_hours(&hours_of(s, st(r, "id"))));
             texts.iter().any(|t| fold(t).contains(&q))
         })
@@ -229,7 +284,9 @@ pub(super) fn select_menu(s: &State, key: &str) -> Option<El> {
 }
 
 fn remove(s: &mut State, id: &str) {
-    let Some(r) = runners(s).into_iter().find(|r| st(r, "id") == id) else { return };
+    let Some(r) = runners(s).into_iter().find(|r| st(r, "id") == id) else {
+        return;
+    };
     if r["lapCount"].as_i64().unwrap_or(0) > 0 || r["status"] == "running" {
         return;
     }
@@ -239,7 +296,10 @@ fn remove(s: &mut State, id: &str) {
         message: "Dit kan niet ongedaan gemaakt worden.".into(),
         confirm_label: "Definitief verwijderen".into(),
         danger: true,
-        action: ConfirmAction::DeleteRunner { id: id.to_string(), name },
+        action: ConfirmAction::DeleteRunner {
+            id: id.to_string(),
+            name,
+        },
     });
 }
 
@@ -247,20 +307,29 @@ fn remove(s: &mut State, id: &str) {
 fn hours_cell(s: &State, texts: &[String]) -> El {
     let p = pal(s.dark);
     if texts.is_empty() {
-        return text("Niet opgegeven").font(ts(13.0, 400.0).lh(19.5)).color(p.t.ink3);
+        return text("Niet opgegeven")
+            .font(ts(13.0, 400.0).lh(19.5))
+            .color(p.t.ink3);
     }
     let (slots, ranges) = summarize(texts);
     let mut strip = row().gap(1.0).center_y();
     for (i, (day, available)) in slots.iter().enumerate() {
-        let mut slot = rune::el().size(5.0, 14.0).radius(1.5).fill(if *available { p.brand } else { p.t.surface3 });
+        let mut slot = rune::el().size(5.0, 14.0).radius(1.5).fill(if *available {
+            p.brand
+        } else {
+            p.t.surface3
+        });
         if i > 0 && slots[i - 1].0 != *day {
             slot = slot.ml(3.0);
         }
         strip = strip.child(slot);
     }
+    // A narrow column wraps between stretches, never inside one.
+    let ranges: Vec<String> = ranges.iter().map(|r| r.replace(' ', "\u{a0}")).collect();
     row()
         .gap(12.0)
         .center_y()
+        .w_full()
         .min_w(0.0)
         .child(strip)
         .child(
@@ -299,7 +368,11 @@ pub(super) fn section(s: &State) -> El {
         }
     }
     counts.sort_by_key(|c| c.0);
-    let mut found = format!("{} {} gevonden", all.len(), if all.len() == 1 { "loper" } else { "lopers" });
+    let mut found = format!(
+        "{} {} gevonden",
+        all.len(),
+        if all.len() == 1 { "loper" } else { "lopers" }
+    );
     if let Some((_, _, label)) = slot {
         found += &format!(" voor {label}");
     }
@@ -308,36 +381,65 @@ pub(super) fn section(s: &State) -> El {
     }
     if !counts.is_empty() {
         found += " · ";
-        found += &counts.iter().map(|(_, st, n)| format!("{}: {n}", status_label(st))).collect::<Vec<_>>().join(" · ");
+        found += &counts
+            .iter()
+            .map(|(_, st, n)| format!("{}: {n}", status_label(st)))
+            .collect::<Vec<_>>()
+            .join(" · ");
     }
 
     let head = |title: &str, w: Option<f32>, num: bool| {
-        let t = text(title.to_string()).font(ts(12.0, 500.0).lh(18.0)).color(p.t.ink3).role("columnheader");
+        let t = text(title.to_string())
+            .font(ts(12.0, 500.0).lh(18.0))
+            .color(p.t.ink3)
+            .role("columnheader");
         let cell = row().px(10.0).py(7.0);
         let cell = match w {
             Some(w) => cell.w(w),
             None => cell.grow(1.0).min_w(0.0),
         };
-        if num { cell.justify_end().child(t) } else { cell.child(t) }
+        if num {
+            cell.justify_end().child(t)
+        } else {
+            cell.child(t)
+        }
     };
-    let mut table = col().key("runner-admin-table").role("table").w_full().min_w(0.0).child(
-        row()
-            .role("row")
-            .w_full()
-            .border_sides([0.0, 0.0, 1.0, 0.0], p.line)
-            .child(head("Nr.", Some(W_NUM), true))
-            .child(head("Naam", Some(W_NAME), false))
-            .child(head("Status", Some(W_STATUS), false))
-            .child(head("Beschikbaar", None, false))
-            .child(head("Labels", Some(W_LABELS), false))
-            .child(head("Bron", Some(W_SOURCE), false))
-            .child(head("Toeren", Some(W_LAPS), true))
-            .child(row().w(W_ACTIONS).child(text("Acties").font(ts(12.0, 500.0)).color(rune::Color::TRANSPARENT).role("columnheader"))),
-    );
+    let mut table = col()
+        .key("runner-admin-table")
+        .role("table")
+        .w_full()
+        .min_w(0.0)
+        .child(
+            row()
+                .role("row")
+                .w_full()
+                .border_sides([0.0, 0.0, 1.0, 0.0], p.line)
+                .child(head("Nr.", Some(W_NUM), true))
+                .child(head("Naam", Some(W_NAME), false))
+                .child(head("Status", Some(W_STATUS), false))
+                .child(head("Beschikbaar", None, false))
+                .child(head("Labels", Some(W_LABELS), false))
+                .child(head("Bron", Some(W_SOURCE), false))
+                .child(head("Toeren", Some(W_LAPS), true))
+                .child(
+                    row().w(W_ACTIONS).child(
+                        text("Acties")
+                            .font(ts(12.0, 500.0))
+                            .color(rune::Color::TRANSPARENT)
+                            .role("columnheader"),
+                    ),
+                ),
+        );
     let count = shown.len();
     for (i, r) in shown.iter().enumerate() {
         let id = st(r, "id").to_string();
-        let hovered = page.hovered.as_deref() == Some(id.as_str());
+        // `tr:is(:hover, :focus-within)`: the name, Terug tonen or Verwijder itself has focus.
+        let focus_within = s.admin.focused.as_deref().is_some_and(|f| {
+            f == format!("profile-{id}")
+                || f == format!("unhide-{id}")
+                || f == format!("delete-{id}")
+        });
+        let hovered = page.hovered.as_deref() == Some(id.as_str()) || focus_within;
         let cell = |w: Option<f32>| {
             let c = row().px(10.0).py(10.0).center_y().min_w(0.0);
             match w {
@@ -345,22 +447,42 @@ pub(super) fn section(s: &State) -> El {
                 None => c.grow(1.0),
             }
         };
-        let mut labels = row().gap(4.0).flex_wrap().min_w(0.0);
+        let mut labels = row().gap(4.0).flex_wrap().w_full().min_w(0.0);
         for l in r["labels"].as_array().into_iter().flatten() {
             labels = labels.child(pill(s, l, true));
         }
         let mut actions = row().gap(4.0).justify_end().w_full();
         if r["hiddenFromQueue"] == true {
             let (rid, name) = (id.clone(), st(r, "name").to_string());
-            actions = actions.child(btn(s, format!("unhide-{id}"), "Terug tonen", Kind::Plain, true, false).on_press(
-                move |s: &mut State| {
-                    send(s, "runners.unhide", json!({"id":rid}), Pending::Unhidden(name.clone()))
-                },
-            ));
+            actions = actions.child(
+                btn(
+                    s,
+                    format!("unhide-{id}"),
+                    "Terug tonen",
+                    Kind::Plain,
+                    true,
+                    false,
+                )
+                .on_press(move |s: &mut State| {
+                    send(
+                        s,
+                        "runners.unhide",
+                        json!({"id":rid}),
+                        Pending::Unhidden(name.clone()),
+                    )
+                }),
+            );
         }
         let removable = r["lapCount"].as_i64().unwrap_or(0) == 0 && r["status"] != "running";
-        let mut delete = btn(s, format!("delete-{id}"), "Verwijder", Kind::QuietDanger, true, !removable)
-            .opacity(if hovered { 1.0 } else { 0.0 });
+        let mut delete = btn(
+            s,
+            format!("delete-{id}"),
+            "Verwijder",
+            Kind::QuietDanger,
+            true,
+            !removable,
+        )
+        .opacity(if hovered { 1.0 } else { 0.0 });
         if removable {
             let rid = id.clone();
             delete = delete.on_press(move |s: &mut State| remove(s, &rid));
@@ -392,38 +514,53 @@ pub(super) fn section(s: &State) -> El {
                     .color(p.t.ink3),
                 ),
             )
+            .child(cell(Some(W_NAME)).child({
+                let pid = id.clone();
+                text(st(r, "name").to_string())
+                    .key(format!("profile-{id}"))
+                    .role("button")
+                    .label(st(r, "name").to_string())
+                    .focusable(true)
+                    .font(ts(13.0, 500.0).lh(19.5))
+                    .color(p.ink)
+                    .wrap()
+                    .min_w(0.0)
+                    .on_press(move |s: &mut State| profile::open(s, &pid))
+            }))
             .child(
-                cell(Some(W_NAME)).child({
-                    let pid = id.clone();
-                    text(st(r, "name").to_string())
-                        .key(format!("profile-{id}"))
-                        .role("button")
-                        .label(st(r, "name").to_string())
-                        .focusable(true)
-                        .font(ts(13.0, 500.0).lh(19.5))
-                        .color(p.ink)
+                cell(Some(W_STATUS)).child(
+                    text(admin_status(r))
+                        .font(ts(13.0, 400.0).lh(19.5))
+                        .color(p.t.ink3)
                         .wrap()
-                        .min_w(0.0)
-                        .on_press(move |s: &mut State| profile::open(s, &pid))
-                }),
-            )
-            .child(cell(Some(W_STATUS)).child(text(admin_status(r)).font(ts(13.0, 400.0).lh(19.5)).color(p.t.ink3).wrap().min_w(0.0)))
-            .child(cell(None).child(hours_cell(s, &hours_of(s, &id))))
-            .child(cell(Some(W_LABELS)).child(labels))
-            .child(
-                cell(Some(W_SOURCE)).child(
-                    text(if st(r, "registrationSource") == "import" { "Import" } else { "Manueel" })
-                        .font(ts(12.0, 500.0).lh(20.0))
-                        .color(p.t.ink2)
-                        .px(6.0)
-                        .radius(4.0)
-                        .fill(p.t.surface2),
+                        .min_w(0.0),
                 ),
             )
             .child(
-                cell(Some(W_LAPS))
-                    .justify_end()
-                    .child(text(r["lapCount"].as_i64().unwrap_or(0).to_string()).font(ts(13.0, 400.0).lh(19.5)).color(p.ink)),
+                cell(None)
+                    .child(hours_cell(s, &hours_of(s, &id)).key(format!("runner-hours-{id}"))),
+            )
+            .child(cell(Some(W_LABELS)).child(labels))
+            .child(
+                cell(Some(W_SOURCE)).child(
+                    text(if st(r, "registrationSource") == "import" {
+                        "Import"
+                    } else {
+                        "Manueel"
+                    })
+                    .font(ts(12.0, 500.0).lh(20.0))
+                    .color(p.t.ink2)
+                    .px(6.0)
+                    .radius(4.0)
+                    .fill(p.t.surface2),
+                ),
+            )
+            .child(
+                cell(Some(W_LAPS)).justify_end().child(
+                    text(r["lapCount"].as_i64().unwrap_or(0).to_string())
+                        .font(ts(13.0, 400.0).lh(19.5))
+                        .color(p.ink),
+                ),
             )
             .child(cell(Some(W_ACTIONS)).child(actions));
         if i + 1 < count {
@@ -433,11 +570,19 @@ pub(super) fn section(s: &State) -> El {
     }
     if shown.is_empty() {
         table = table.child(
-            row().px(10.0).py(7.0).child(text("Geen lopers gevonden.").font(ts(13.0, 400.0).lh(19.5)).color(p.ink)),
+            row().px(10.0).py(7.0).child(
+                text("Geen lopers gevonden.")
+                    .font(ts(13.0, 400.0).lh(19.5))
+                    .color(p.ink),
+            ),
         );
     }
 
-    let hour_value = if page.hour.is_empty() { "Alle beschikbare uren".to_string() } else { page.hour.clone() };
+    let hour_value = if page.hour.is_empty() {
+        "Alle beschikbare uren".to_string()
+    } else {
+        page.hour.clone()
+    };
     let mut card = panel(s)
         .key("runners-panel")
         .child(
@@ -489,8 +634,15 @@ pub(super) fn section(s: &State) -> El {
         let next = MAX_VISIBLE_RUNNERS.min(all.len() - page.shown);
         card = card.child(
             row().child(
-                btn(s, "runners-more", &format!("Toon de volgende {next} lopers"), Kind::Ghost, false, false)
-                    .on_press(|s: &mut State| s.admin.runners.shown += MAX_VISIBLE_RUNNERS),
+                btn(
+                    s,
+                    "runners-more",
+                    &format!("Toon de volgende {next} lopers"),
+                    Kind::Ghost,
+                    false,
+                    false,
+                )
+                .on_press(|s: &mut State| s.admin.runners.shown += MAX_VISIBLE_RUNNERS),
             ),
         );
     }
@@ -502,9 +654,13 @@ mod tests {
     use super::*;
     #[test]
     fn hours_join_into_stretches_like_the_reference() {
-        let texts: Vec<String> = ["20-21u (dinsdag)", "21-22u (dinsdag)", "00-01u (woensdag)"].map(String::from).to_vec();
+        let texts: Vec<String> = ["20-21u (dinsdag)", "21-22u (dinsdag)", "00-01u (woensdag)"]
+            .map(String::from)
+            .to_vec();
         assert_eq!(summarize(&texts).1, vec!["di 20–22u", "wo 0–1u"]);
-        let night: Vec<String> = ["23-00u (dinsdag)", "00-01u (woensdag)", "03-04u (woensdag)"].map(String::from).to_vec();
+        let night: Vec<String> = ["23-00u (dinsdag)", "00-01u (woensdag)", "03-04u (woensdag)"]
+            .map(String::from)
+            .to_vec();
         assert_eq!(summarize(&night).1, vec!["di 23u – wo 1u", "wo 3–4u"]);
         assert!(covers(&["12-14u (woensdag)".into()], "woensdag", 13));
         assert_eq!(slot_label("dinsdag", 23), "23-00u (dinsdag)");

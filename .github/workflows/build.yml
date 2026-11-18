@@ -162,12 +162,41 @@ jobs:
       - name: Smoke test Linux AppImage
         run: xvfb-run -a node scripts/package-smoke.mjs
 
+  native:
+    name: Native tests and browser check
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native
+      - name: Install Linux dependencies
+        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev libxi-dev libxcursor-dev libxrandr-dev
+      - name: Install wasm-bindgen CLI matching native/Cargo.lock
+        run: cargo install wasm-bindgen-cli --version 0.2.130 --locked
+      - run: npm ci --include=optional
+      - run: cargo test --manifest-path native/Cargo.toml
+      - run: bash native/scripts/build-web.sh
+      - run: cargo build --manifest-path native/Cargo.toml --bin apolloon-native
+      - run: npx playwright install --with-deps chromium
+      - run: node native/scripts/check-web.mjs
+
   # The one check the main branch requires, so jobs can be added or renamed without touching
   # the repository rules. It runs even when a job fails, and fails with it.
   all-checks:
     name: All checks
     if: always()
-    needs: [checks, integration, browser, windows-tests, build-windows, build-linux]
+    needs: [checks, integration, browser, windows-tests, build-windows, build-linux, native]
     runs-on: ubuntu-26.04
     timeout-minutes: 2
     steps:

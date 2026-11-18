@@ -15,6 +15,7 @@ pub fn now() -> i64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as i64
+        + crate::cluster::clock::offset()
 }
 pub fn id() -> String {
     uuid::Uuid::new_v4().to_string()
@@ -37,6 +38,8 @@ fn sql_value(v: &Value) -> SqlValue {
 pub struct Db {
     pub conn: Connection,
     pub revision: i64,
+    /// Set by the linked-laptop runtime: every statement `exec` runs is recorded for replication.
+    pub capture: std::cell::RefCell<Option<crate::cluster::log::Capture>>,
 }
 impl Db {
     pub fn open(path: &Path) -> Result<Self> {
@@ -69,6 +72,7 @@ impl Db {
         let db = Self {
             conn,
             revision: now(),
+            capture: Default::default(),
         };
         if tables == 0 {
             let labels: Vec<Value> =
@@ -112,9 +116,14 @@ impl Db {
     }
     pub fn exec(&self, sql: &str, args: &[Value]) -> Result<usize> {
         let values: Vec<_> = args.iter().map(sql_value).collect();
-        self.conn
+        let changed = self
+            .conn
             .execute(sql, params_from_iter(values.iter()))
-            .map_err(err)
+            .map_err(err)?;
+        if let Some(capture) = self.capture.borrow_mut().as_mut() {
+            capture.record(sql, args);
+        }
+        Ok(changed)
     }
     pub fn labels(&self, runner: Option<&str>) -> Result<Vec<Value>> {
         let select = "SELECT l.id,l.name,l.color,l.icon,l.kind,l.image_url AS imageUrl,l.target_laps AS targetLaps,l.sort_order AS sortOrder,l.created_at AS createdAt,l.updated_at AS updatedAt FROM labels l";
@@ -167,9 +176,11 @@ impl Db {
         )
         .map_err(err)?;
         // Existing group databases require the replicated runtime, never silently operate solo.
-        if !self
-            .rows("SELECT 1 FROM cluster_members LIMIT 1", &[])?
-            .is_empty()
+        let replicated = self.capture.borrow().is_some();
+        if !replicated
+            && !self
+                .rows("SELECT 1 FROM cluster_members LIMIT 1", &[])?
+                .is_empty()
         {
             return Err("Gekoppelde database: de Rust replicatie moet actief zijn voordat wijzigingen zijn toegestaan.".into());
         }
@@ -186,6 +197,9 @@ impl Db {
                     json!(origin),
                 ],
             )?;
+        }
+        if replicated {
+            crate::cluster::log::seal(self, method, &result)?;
         }
         transaction.commit().map_err(err)?;
         self.revision += 1;

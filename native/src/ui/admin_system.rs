@@ -3,10 +3,10 @@
 //! Port of src/components/admin/{SystemSection,RestorePanel,ClearRacePanel,AboutPanel}.tsx and
 //! src/components/NetworkSetupPanel.tsx.
 //!
-//! Not wired on the Rust server yet (the UI is there, the action answers with an error): linking
-//! laptops (`cluster.*`), pinning or releasing the address (`net.makeStatic`, `net.revertDhcp`)
-//! and update checks. The server reports no cluster, and no way to pin the address, so those
-//! parts stay hidden exactly as they do in the reference for a laptop without them.
+//! Linking laptops (`cluster.*`) runs on the Rust server when `CLUSTER_ENABLED=true` (src/cluster).
+//! Not wired yet (the UI is there, the action answers with an error): pinning or releasing the
+//! address (`net.makeStatic`, `net.revertDhcp`) and update checks. The server reports no way to pin
+//! the address, so that part stays hidden as it does in the reference for a laptop without it.
 use super::admin_kit::{self as kit, Kind, Tone};
 use super::*;
 use rune::{Span, text::Link};
@@ -14,11 +14,26 @@ use rune::{Span, text::Link};
 const SHOWN_AT_FIRST: usize = 8;
 const UNDO_PHRASE: &str = "VOORBIJ";
 const SCRIPTS: [(&str, &str); 5] = [
-    ("Windows vastzetten-script", "/event-network/Set-ApolloonStaticIp.ps1"),
-    ("Linux/macOS vastzetten-script", "/event-network/set-apolloon-static-ip.sh"),
-    ("controle-script (Windows)", "/event-network/Test-ApolloonNetwork.ps1"),
-    ("terugzetten-script (Linux/macOS)", "/event-network/revert-apolloon-dhcp.sh"),
-    ("terugzetten-script (Windows)", "/event-network/Revert-ApolloonDhcp.ps1"),
+    (
+        "Windows vastzetten-script",
+        "/event-network/Set-ApolloonStaticIp.ps1",
+    ),
+    (
+        "Linux/macOS vastzetten-script",
+        "/event-network/set-apolloon-static-ip.sh",
+    ),
+    (
+        "controle-script (Windows)",
+        "/event-network/Test-ApolloonNetwork.ps1",
+    ),
+    (
+        "terugzetten-script (Linux/macOS)",
+        "/event-network/revert-apolloon-dhcp.sh",
+    ),
+    (
+        "terugzetten-script (Windows)",
+        "/event-network/Revert-ApolloonDhcp.ps1",
+    ),
 ];
 
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
@@ -45,7 +60,28 @@ pub(super) struct Panel {
     folder_error: Option<String>,
     /// The waiting line under the network buttons.
     message: Option<String>,
+    /// The last clear also removed the runners (`Alles wissen`).
+    clearing_all: bool,
+    /// `/api/net/profile` of this laptop; null until read, `"error"` when reading failed.
+    net_profile: Value,
+    /// Following a started network change until the address changed (`pollUntil`).
+    net_wait: Option<NetWait>,
+    /// When the profile, the update status and the diagnostics were last asked for.
+    profile_asked: Option<i64>,
+    update_asked: Option<i64>,
+    /// `{status, lastInstall}` of the desktop app's update flow.
+    update: Value,
+    update_problem: Option<String>,
+    desktop_diagnostics: Value,
 }
+pub(super) struct NetWait {
+    elevation: Value,
+    /// The address being pinned; None while reverting to automatic.
+    wanted: Option<String>,
+    ticks: u32,
+    answers: u32,
+}
+const SAME_VERSION: &str = "Installeer dezelfde versie op alle laptops, en nooit tijdens de race: laptops met een andere versie koppelen niet met elkaar.";
 impl Default for Panel {
     fn default() -> Self {
         Self {
@@ -61,6 +97,14 @@ impl Default for Panel {
             copied_at: None,
             folder_error: None,
             message: None,
+            clearing_all: false,
+            net_profile: Value::Null,
+            net_wait: None,
+            profile_asked: None,
+            update_asked: None,
+            update: Value::Null,
+            update_problem: None,
+            desktop_diagnostics: Value::Null,
         }
     }
 }
@@ -69,7 +113,8 @@ fn st<'a>(v: &'a Value, key: &str) -> &'a str {
     v[key].as_str().unwrap_or("")
 }
 fn short_url(url: &str) -> &str {
-    url.trim_start_matches("http://").trim_start_matches("https://")
+    url.trim_start_matches("http://")
+        .trim_start_matches("https://")
 }
 fn laptop_label(l: &Value) -> String {
     l["name"]
@@ -120,6 +165,12 @@ pub(super) fn owns(s: &State, method: &str) -> bool {
             | "settings.updatePublicRecordMode"
             | "net.makeStatic"
             | "net.revertDhcp"
+            | "net.profile"
+            | "update.status"
+            | "update.check"
+            | "update.install"
+            | "desktop.diagnostics"
+            | "desktop.openUrl"
     ) || (s.page == 8 && (method == "events.burgieGepakt" || method.starts_with("cluster.")))
 }
 
@@ -200,11 +251,34 @@ pub(super) fn succeeded(s: &mut State, method: &str, result: &Value) {
             } else {
                 NetPhase::WaitingRevert
             };
-            let hint = s.recovery["system"]["profile"]["elevateHint"]
+            let hint = net_profile(s)["elevateHint"]
                 .as_str()
                 .unwrap_or("Het systeem vraagt nu om toestemming");
             s.system.message = Some(format!("{hint} — bevestig op deze laptop en wacht op de melding “Gelukt!”…"));
+            let wanted = (method == "net.makeStatic").then(|| s.system.ip.text.trim().to_string());
+            s.system.net_wait = Some(NetWait { elevation: result["elevationId"].clone(), wanted, ticks: 0, answers: 0 });
+            s.system.profile_asked = Some(s.server_now());
         }
+        "net.profile" => {
+            s.system.net_profile = result.clone();
+            if let Some(suggestion) = result["suggestion"].as_object() {
+                if s.system.ip.text.is_empty() {
+                    s.system.ip = TextEdit::new(suggestion["ip"].as_str().unwrap_or(""));
+                }
+                if s.system.gateway.text.is_empty() {
+                    s.system.gateway = TextEdit::new(suggestion["gateway"].as_str().unwrap_or(""));
+                }
+            }
+            follow_net_change(s);
+        }
+        "update.status" => s.system.update = result.clone(),
+        "update.check" => s.system.update_asked = None,
+        "update.install" => {
+            s.system.update_problem = result["problem"].as_str().map(str::to_owned);
+            s.system.update_asked = None;
+        }
+        "desktop.diagnostics" => s.system.desktop_diagnostics = result.clone(),
+        "desktop.openUrl" => {}
         _ => s.notice = "Opgeslagen.".into(),
     }
 }
@@ -212,19 +286,173 @@ pub(super) fn succeeded(s: &mut State, method: &str, result: &Value) {
 /// A failed action of this section; the reason itself is in `s.error`.
 pub(super) fn failed(s: &mut State, method: &str) {
     match method {
-        "net.makeStatic" => {
+        "net.makeStatic" | "net.revertDhcp" => {
             s.system.phase = NetPhase::Idle;
-            s.error = format!("Vastzetten mislukt: {}", s.error);
+            s.system.message = None;
+            let reason = std::mem::take(&mut s.error);
+            let text = if method == "net.makeStatic" {
+                "Vastzetten mislukt"
+            } else {
+                "Terugzetten mislukt"
+            };
+            net_failed(s, text, reason);
         }
-        "net.revertDhcp" => {
-            s.system.phase = NetPhase::Idle;
-            s.error = format!("Terugzetten mislukt: {}", s.error);
+        "net.profile" => {
+            s.error.clear();
+            s.system.net_profile = json!("error");
         }
+        "update.status" | "update.check" | "desktop.diagnostics" => s.error.clear(),
+        "update.install" => s.system.update_problem = Some(std::mem::take(&mut s.error)),
+        "desktop.openUrl" => {}
         "backups.preview" => s.error = format!("De backup kon niet gelezen worden: {}", s.error),
         "backups.create" => s.error = format!("Backup maken mislukt: {}", s.error),
         "backups.restore" => s.error = format!("Terugzetten mislukt: {}", s.error),
-        "race.clear" => s.error = format!("Wissen mislukt: {}", s.error),
+        "race.clear" if s.system.clearing_all => {
+            s.error = format!("Alles wissen mislukt: {}", s.error)
+        }
+        "race.clear" => s.error = format!("Race wissen mislukt: {}", s.error),
+        "settings.updatePublicRecordMode" => {
+            s.error = format!("Recordflits aanpassen mislukt: {}", s.error)
+        }
+        "events.burgieGepakt" => s.error = format!("Burgie gepakt opslaan mislukt: {}", s.error),
         _ => {}
+    }
+}
+
+// ---------- Laptop tools: network profile, updates, diagnostics ----------
+
+fn net_profile(s: &State) -> &Value {
+    if s.system.net_profile.is_object() {
+        &s.system.net_profile
+    } else {
+        &s.recovery["system"]["profile"]
+    }
+}
+fn net_failed(s: &mut State, text: &str, reason: String) {
+    let detail = if reason.contains("alleen op de laptop zelf") {
+        format!(
+            "{reason} Open Beheer op die laptop zelf (dus niet via het netwerk) en probeer het daar."
+        )
+    } else {
+        reason
+    };
+    s.admin.toast = Some(admin_base::Toast {
+        text: text.into(),
+        detail,
+        error: true,
+        at: s.server_now(),
+    });
+}
+/// `pollUntil`: every profile read while a change runs decides whether it worked, failed or timed out.
+fn follow_net_change(s: &mut State) {
+    let Some(mut wait) = s.system.net_wait.take() else {
+        return;
+    };
+    let next = s.system.net_profile.clone();
+    let primary = &next["primary"];
+    wait.ticks += 1;
+    if primary.is_object() && !primary["dhcp"].is_null() {
+        wait.answers += 1;
+    }
+    let make = wait.wanted.is_some();
+    let text = if make {
+        "Vastzetten mislukt"
+    } else {
+        "Terugzetten mislukt"
+    };
+    let done = match &wait.wanted {
+        Some(ip) => primary["address"].as_str() == Some(ip.as_str()) && primary["dhcp"] == false,
+        None => primary["dhcp"] == true,
+    };
+    let elevation = &next["lastElevation"];
+    if done {
+        s.system.phase = NetPhase::Idle;
+        s.system.message = None;
+        let (text, detail) = match &wait.wanted {
+            Some(ip) => (
+                format!("Dit adres is nu vast: {ip}."),
+                format!("Andere apparaten blijven bereikbaar op http://{ip}:5173."),
+            ),
+            None => {
+                s.system.event_over = false;
+                s.system.undo = TextEdit::new("");
+                (
+                    "Dit toestel haalt zijn adres weer automatisch op.".into(),
+                    "Vergeet niet ook de kabel eruit te halen als je naar school-wifi gaat.".into(),
+                )
+            }
+        };
+        s.admin.toast = Some(admin_base::Toast {
+            text,
+            detail,
+            error: false,
+            at: s.server_now(),
+        });
+        return;
+    }
+    let reason = if !wait.elevation.is_null()
+        && elevation["id"] == wait.elevation
+        && elevation["state"] == "failed"
+    {
+        Some(
+            elevation["message"]
+                .as_str()
+                .unwrap_or("De netwerkwijziging is mislukt. Er is niets veranderd.")
+                .to_string(),
+        )
+    } else if wait.answers >= 45 {
+        Some(if make {
+            "Er is niets veranderd. Waarschijnlijk is de toestemming geweigerd of weggeklikt. Probeer het opnieuw."
+        } else {
+            "Er is niets veranderd. Waarschijnlijk is de toestemming geweigerd of weggeklikt."
+        }.to_string())
+    } else if wait.ticks >= 90 {
+        Some("Dit toestel liet niet zien of het adres vast of automatisch is, dus het is niet zeker of het gelukt is. Herlaad deze pagina over een minuut om het na te kijken.".to_string())
+    } else {
+        None
+    };
+    match reason {
+        Some(reason) => {
+            s.system.phase = NetPhase::Idle;
+            s.system.message = None;
+            net_failed(s, text, reason);
+        }
+        None => s.system.net_wait = Some(wait),
+    }
+}
+/// While Systeem & herstel is open: read the network profile (every 2 s during a change), and on
+/// the desktop app the update status (every second while it changes) and the diagnostics once.
+pub(super) fn refresh(s: &mut State) {
+    // The UI tests drive this section without these background reads holding the one request slot.
+    if cfg!(test) || s.busy || !s.connected || s.page != 8 || s.admin_section != 6 {
+        return;
+    }
+    let now = s.server_now();
+    let due = |asked: Option<i64>, every: i64| asked.is_none_or(|at| now - at >= every);
+    if s.system.net_profile.is_null() && s.system.profile_asked.is_none()
+        || s.system.net_wait.is_some() && due(s.system.profile_asked, 2000)
+    {
+        s.system.profile_asked = Some(now);
+        s.send("net.profile", json!({}));
+        return;
+    }
+    if cfg!(target_arch = "wasm32") {
+        return;
+    }
+    if s.system.desktop_diagnostics.is_null() {
+        s.system.desktop_diagnostics = json!({});
+        s.send("desktop.diagnostics", json!({}));
+        return;
+    }
+    let moving = matches!(
+        st(&s.system.update["status"], "state"),
+        "checking" | "downloading" | "installing"
+    );
+    if s.system.update.is_null() && s.system.update_asked.is_none()
+        || moving && due(s.system.update_asked, 1000)
+    {
+        s.system.update_asked = Some(now);
+        s.send("update.status", json!({}));
     }
 }
 
@@ -242,7 +470,10 @@ pub(super) fn panel(s: &State) -> El {
     {
         let mut detected = section("Gevonden laptops", s.dark);
         for laptop in nearby {
-            let name = laptop["name"].as_str().filter(|name| !name.is_empty()).unwrap_or("Laptop");
+            let name = laptop["name"]
+                .as_str()
+                .filter(|name| !name.is_empty())
+                .unwrap_or("Laptop");
             let state = if laptop["raceRunning"] == true {
                 "Race loopt"
             } else if laptop["raceStarted"] == true {
@@ -269,8 +500,9 @@ fn section(title: &str, dark: bool) -> El {
     kit::panel().child(kit::h2(title, dark).mb(8.0))
 }
 /// `.management-content .panel > .host-hint`: 8 above and below, merged with the copy's 12.
+/// `margin-block: 8px`, collapsing with the 12px under a `.panel-copy` above it.
 fn spaced(el: El) -> El {
-    el.my(8.0)
+    el.mb(8.0)
 }
 
 // ---------- Laptops koppelen ----------
@@ -326,7 +558,10 @@ fn describe_group(c: &Value) -> (Tone, String, String) {
             } else {
                 format!("{unreachable} laptops onbereikbaar")
             },
-            format!("Alles werkt nog; bewaard op {} laptops", total - unreachable),
+            format!(
+                "Alles werkt nog; bewaard op {} laptops",
+                total - unreachable
+            ),
         ),
         "degraded" => (
             Tone::Warn,
@@ -338,8 +573,16 @@ fn describe_group(c: &Value) -> (Tone, String, String) {
             "Twee laptops".into(),
             "Koppel een derde, zodat er één mag uitvallen".into(),
         ),
-        _ => (Tone::Hint, "Alles veilig".into(), format!("Gegevens op {total} laptops")),
+        _ => (
+            Tone::Hint,
+            "Alles veilig".into(),
+            format!("Gegevens op {total} laptops"),
+        ),
     }
+}
+/// The server says `"joining"` or `"resyncing"` while this laptop changes its own data (TS `Boolean(cluster.busy)`).
+pub(super) fn busy_state(c: &Value) -> bool {
+    c["busy"].as_str().is_some_and(|b| !b.is_empty()) || c["busy"] == true
 }
 fn confirm_cluster(s: &mut State, method: &str, input: Value) {
     if !s.busy {
@@ -355,7 +598,7 @@ fn cluster_panel(s: &State) -> El {
     let c = cluster(s);
     let members = c["members"].as_array().cloned().unwrap_or_default();
     let nearby = c["nearby"].as_array().cloned().unwrap_or_default();
-    let busy = s.busy || c["busy"] == true;
+    let busy = s.busy || busy_state(c);
     let host_url = st(&s.snapshot["host"], "url").to_string();
     let runner_count = runners(s).len();
     let mut copy_text = if members.len() == 1 {
@@ -372,16 +615,29 @@ fn cluster_panel(s: &State) -> El {
     let (tone, title, detail) = describe_group(c);
     let mut p = section("Laptops koppelen", s.dark)
         .child(kit::copy(copy_text, s.dark).mb(12.0))
-        .child(spaced(kit::notice_text(s, tone, &format!("**{title}** · {detail}")).role("status")));
+        .child(spaced(
+            kit::notice_text(s, tone, &format!("**{title}** · {detail}")).role("status"),
+        ));
     if let Some(waiting) = c["autoLink"]["waiting"].as_str() {
         p = p.child(spaced(kit::notice_text(s, Tone::Hint, waiting)));
     }
-    let timing_elsewhere = (c["timing"].is_object() && c["timing"]["self"] != true)
-        .then(|| c["timing"]["name"].as_str().unwrap_or("een andere laptop").to_string());
+    let timing_elsewhere = (c["timing"].is_object() && c["timing"]["self"] != true).then(|| {
+        c["timing"]["name"]
+            .as_str()
+            .unwrap_or("een andere laptop")
+            .to_string()
+    });
     if members.len() > 1 {
         for m in &members {
             let name = laptop_label(m);
-            let mut line = format!("**{name}{}**", if m["self"] == true { " (deze laptop)" } else { "" });
+            let mut line = format!(
+                "**{name}{}**",
+                if m["self"] == true {
+                    " (deze laptop)"
+                } else {
+                    ""
+                }
+            );
             if m["name"].is_string() {
                 line.push_str(&format!("  {}", short_url(st(m, "url"))));
             }
@@ -402,7 +658,13 @@ fn cluster_panel(s: &State) -> El {
                     false,
                     None,
                     busy,
-                    move |s| confirm_cluster(s, "cluster.removeLaptop", json!({"hostId":host_id,"name":name})),
+                    move |s| {
+                        confirm_cluster(
+                            s,
+                            "cluster.removeLaptop",
+                            json!({"hostId":host_id,"name":name}),
+                        )
+                    },
                 ));
             }
             p = p.child(spaced(kit::notice(s, Tone::Hint, r)));
@@ -461,16 +723,31 @@ fn cluster_panel(s: &State) -> El {
                 .gap(8.0)
                 .center_y()
                 .child(kit::value_text(message, s.dark))
-                .child(kit::btn(s, "cluster-alone", label, Kind::Ghost, false, None, busy, move |s| {
-                    confirm_cluster(s, "cluster.continueAlone", json!({"takeOverTiming":take_over}))
-                })),
+                .child(kit::btn(
+                    s,
+                    "cluster-alone",
+                    label,
+                    Kind::Ghost,
+                    false,
+                    None,
+                    busy,
+                    move |s| {
+                        confirm_cluster(
+                            s,
+                            "cluster.continueAlone",
+                            json!({"takeOverTiming":take_over}),
+                        )
+                    },
+                )),
         )));
     }
     if let Some(error) = c["lastError"].as_str() {
         p = p.child(spaced(kit::notice_text(s, Tone::Alert, error)));
     }
     if let Some(notice) = c["notice"].as_str() {
-        p = p.child(spaced(kit::notice_text(s, Tone::Hint, notice).role("status")));
+        p = p.child(spaced(
+            kit::notice_text(s, Tone::Hint, notice).role("status"),
+        ));
     }
     let nearby_row = |found: &Value| {
         let mut line = format!(
@@ -485,7 +762,10 @@ fn cluster_panel(s: &State) -> El {
         let url = found["url"].clone();
         let action = if found["compatible"] == false {
             kit::value_text(
-                format!("andere versie ({}): installeer overal dezelfde versie", st(found, "appVersion")),
+                format!(
+                    "andere versie ({}): installeer overal dezelfde versie",
+                    st(found, "appVersion")
+                ),
                 s.dark,
             )
         } else if st(found, "link") != "there" {
@@ -514,7 +794,13 @@ fn cluster_panel(s: &State) -> El {
         ))
     };
     if members.len() == 1 {
-        p = p.child(kit::copy("Laptops op dit netwerk waarmee deze laptop kan samenwerken:", s.dark).mb(12.0));
+        p = p.child(
+            kit::copy(
+                "Laptops op dit netwerk waarmee deze laptop kan samenwerken:",
+                s.dark,
+            )
+            .mb(12.0),
+        );
         if nearby.is_empty() {
             p = p.child(spaced(kit::notice_text(
                 s,
@@ -533,7 +819,10 @@ fn cluster_panel(s: &State) -> El {
             |s| s.system.manual_open = !s.system.manual_open,
         ));
         if s.system.manual_open {
-            let name = c["hostName"].as_str().map(|n| format!(" heet **{n}** en")).unwrap_or_default();
+            let name = c["hostName"]
+                .as_str()
+                .map(|n| format!(" heet **{n}** en"))
+                .unwrap_or_default();
             let ready = !s.system.other_url.text.trim().is_empty() && !busy;
             details = details
                 .child(
@@ -600,7 +889,13 @@ fn cluster_panel(s: &State) -> El {
 }
 
 /// `details > summary.disclosure`: a chevron that turns when open.
-fn disclosure(s: &State, key: &str, title: &str, open: bool, f: impl Fn(&mut State) + 'static) -> El {
+fn disclosure(
+    s: &State,
+    key: &str,
+    title: &str,
+    open: bool,
+    f: impl Fn(&mut State) + 'static,
+) -> El {
     let p = kit::pal(s.dark);
     row()
         .key(key.to_string())
@@ -611,7 +906,12 @@ fn disclosure(s: &State, key: &str, title: &str, open: bool, f: impl Fn(&mut Sta
         .gap(8.0)
         .center_y()
         .on_press(f)
-        .child(kit::icon(s, if open { "chevronDown" } else { "chevron" }, p.t.ink3, 12.0))
+        .child(kit::icon(
+            s,
+            if open { "chevronDown" } else { "chevron" },
+            p.t.ink3,
+            12.0,
+        ))
         .child(kit::strong_text(title, p.t.ink2, s.dark))
 }
 
@@ -621,11 +921,17 @@ fn network_panel(s: &State) -> El {
     let p = kit::pal(s.dark);
     let sys = &s.system;
     let mut out = section("Vast netwerkadres", s.dark);
-    let info = &s.recovery["system"];
-    if info.is_null() {
+    if sys.net_profile.is_null() && s.recovery["system"].is_null() {
         return out.child(kit::copy("Bezig met opzoeken…", s.dark).mb(12.0));
     }
-    let profile = &info["profile"];
+    if sys.net_profile == "error" {
+        out = out.child(spaced(kit::notice_text(
+            s,
+            Tone::Alert,
+            "Netwerkprofiel mislukt.",
+        )));
+    }
+    let profile = net_profile(s);
     let primary = &profile["primary"];
     let is_static = primary.is_object() && primary["dhcp"] == false;
     let busy = matches!(sys.phase, NetPhase::WaitingMake | NetPhase::WaitingRevert);
@@ -652,14 +958,22 @@ fn network_panel(s: &State) -> El {
             Some(true) => "automatisch adres (kan veranderen!)",
             Some(false) => "vast adres (blijft staan!)",
         };
-        let mut line = format!("**Nu:** {} (adapter: {}) · {source}", st(primary, "address"), st(primary, "name"));
+        let mut line = format!(
+            "**Nu:** {} (adapter: {}) · {source}",
+            st(primary, "address"),
+            st(primary, "name")
+        );
         if let Some(url) = profile["eventUrl"].as_str() {
             line.push_str(&format!(" · Schermen verbinden met **{url}**"));
         }
         out = out.child(spaced(kit::notice_text(s, Tone::Hint, &line)));
     }
     if let Some(manager) = profile["manager"].as_str() {
-        out = out.child(spaced(kit::notice_text(s, Tone::Hint, &format!("Beheerd door **{manager}**."))));
+        out = out.child(spaced(kit::notice_text(
+            s,
+            Tone::Hint,
+            &format!("Beheerd door **{manager}**."),
+        )));
     }
     let elevate = profile["elevateMethod"].is_string();
     if !elevate {
@@ -698,22 +1012,38 @@ fn network_panel(s: &State) -> El {
                 "**Deze laptop is via wifi verbonden.** Steek de netwerkkabel in: alleen een bedrade verbinding wordt vastgezet, zodat je wifi thuis of op school nooit verandert.",
             )));
         }
-        let field = |title: &str, edit: &TextEdit, key: &str, placeholder: &str, f: fn(&mut State) -> &mut TextEdit| {
+        let field = |title: &str,
+                     edit: &TextEdit,
+                     key: &str,
+                     placeholder: &str,
+                     f: fn(&mut State) -> &mut TextEdit| {
             col()
                 .grow(1.0)
                 .min_w(180.0)
                 .gap(4.0)
-                .child(text(title.to_string()).font(kit::ts(13.5, 400.0)).color(p.ink))
-                .child(kit::input(s, edit, key, title, placeholder).disabled(busy).on_edit(f))
+                .child(
+                    text(title.to_string())
+                        .font(kit::ts(13.5, 400.0))
+                        .color(p.ink),
+                )
+                .child(
+                    kit::input(s, edit, key, title, placeholder)
+                        .disabled(busy)
+                        .on_edit(f),
+                )
         };
         out = out.child(
             row()
                 .w_full()
                 .gap(8.0)
                 .my(12.0)
-                .child(field("Vast adres voor deze laptop", &sys.ip, "net-ip", "192.168.1.211", |s| {
-                    &mut s.system.ip
-                }))
+                .child(field(
+                    "Vast adres voor deze laptop",
+                    &sys.ip,
+                    "net-ip",
+                    "192.168.1.211",
+                    |s| &mut s.system.ip,
+                ))
                 .child(field(
                     "Gateway (alleen als er een router is, anders leeg laten)",
                     &sys.gateway,
@@ -750,7 +1080,11 @@ fn network_panel(s: &State) -> El {
                 kit::btn(
                     s,
                     "net-make",
-                    if busy { "Bezig met controleren…" } else { "Maak dit adres vast" },
+                    if busy {
+                        "Bezig met controleren…"
+                    } else {
+                        "Maak dit adres vast"
+                    },
                     Kind::Primary,
                     false,
                     None,
@@ -815,12 +1149,22 @@ fn network_panel(s: &State) -> El {
                         busy || !ready,
                         |s| {
                             let text = s.system.undo.text.trim().to_uppercase();
-                            s.send("net.revertDhcp", json!({"eventOver":true,"confirmText":text}));
+                            s.send(
+                                "net.revertDhcp",
+                                json!({"eventOver":true,"confirmText":text}),
+                            );
                         },
                     ))
-                    .child(kit::btn(s, "net-revert-no", "Toch niet", Kind::Ghost, false, None, busy, |s| {
-                        s.system.phase = NetPhase::Idle
-                    }))
+                    .child(kit::btn(
+                        s,
+                        "net-revert-no",
+                        "Toch niet",
+                        Kind::Ghost,
+                        false,
+                        None,
+                        busy,
+                        |s| s.system.phase = NetPhase::Idle,
+                    ))
             } else {
                 kit::btn(
                     s,
@@ -857,7 +1201,11 @@ fn network_panel(s: &State) -> El {
         }
         let start = plain.len();
         plain.push_str(title);
-        spans.push(Span::new(start, plain.len()).color(p.brand_ink).underline(p.brand_ink));
+        spans.push(
+            Span::new(start, plain.len())
+                .color(p.brand_ink)
+                .underline(p.brand_ink),
+        );
         links.push(Link::new(start..plain.len(), *path).label(*title));
     }
     let mut paragraph = rune::rich(plain, spans)
@@ -874,7 +1222,9 @@ fn network_panel(s: &State) -> El {
     }
     out = out.child(paragraph);
     if let Some(message) = &sys.message {
-        out = out.child(spaced(kit::notice_text(s, Tone::Hint, message).role("status")));
+        out = out.child(spaced(
+            kit::notice_text(s, Tone::Hint, message).role("status"),
+        ));
     }
     out
 }
@@ -886,7 +1236,10 @@ fn open_server_file(s: &mut State, path: &str, tx: &mut Tx) {
     #[cfg(target_arch = "wasm32")]
     let url = path.to_string();
     #[cfg(not(target_arch = "wasm32"))]
-    let url = format!("http://127.0.0.1:{}{path}", s.snapshot["host"]["port"].as_u64().unwrap_or(5173));
+    let url = format!(
+        "http://127.0.0.1:{}{path}",
+        s.snapshot["host"]["port"].as_u64().unwrap_or(5173)
+    );
     let _ = tx.open_url(&url);
 }
 
@@ -912,7 +1265,11 @@ fn backup_panel(s: &State) -> El {
         return out;
     }
     if !enabled {
-        out = out.child(spaced(kit::notice_text(s, Tone::Alert, "Automatische backups zijn uitgeschakeld.")));
+        out = out.child(spaced(kit::notice_text(
+            s,
+            Tone::Alert,
+            "Automatische backups zijn uitgeschakeld.",
+        )));
     }
     if let Some(created) = b["latest"]["createdAt"].as_i64() {
         out = out.child(
@@ -956,7 +1313,10 @@ fn backup_panel(s: &State) -> El {
             &format!("Laatste backup mislukt: {error}"),
         )));
     }
-    let free = b["diskFreeBytes"].as_i64().map(kit::file_size).unwrap_or_else(|| "onbekend".into());
+    let free = b["diskFreeBytes"]
+        .as_i64()
+        .map(kit::file_size)
+        .unwrap_or_else(|| "onbekend".into());
     if b["diskLow"] == true {
         out = out.child(spaced(kit::notice_text(
             s,
@@ -975,11 +1335,17 @@ fn backup_panel(s: &State) -> El {
         kit::metrics(
             s,
             vec![
-                ("Volgende automatische backup".into(), kit::value_text(next, s.dark)),
+                (
+                    "Volgende automatische backup".into(),
+                    kit::value_text(next, s.dark),
+                ),
                 ("Vrije opslag".into(), kit::value_text(free, s.dark)),
                 (
                     "Database".into(),
-                    kit::value_text(kit::file_size(b["databaseBytes"].as_i64().unwrap_or(0)), s.dark),
+                    kit::value_text(
+                        kit::file_size(b["databaseBytes"].as_i64().unwrap_or(0)),
+                        s.dark,
+                    ),
                 ),
             ],
             &[],
@@ -989,7 +1355,11 @@ fn backup_panel(s: &State) -> El {
     let mut actions = row().gap(8.0).mt(12.0).child(kit::btn(
         s,
         "backup-create",
-        if busy { "Backup bezig..." } else { "Nu backup maken" },
+        if busy {
+            "Backup bezig..."
+        } else {
+            "Nu backup maken"
+        },
         Kind::Primary,
         false,
         None,
@@ -999,9 +1369,17 @@ fn backup_panel(s: &State) -> El {
     if let Some(name) = b["latest"]["fileName"].as_str() {
         let path = format!("/api/backups/{name}");
         actions = actions.child(
-            kit::btn_el(s, "backup-download", "Laatste backup downloaden", Kind::Ghost, false, None, false)
-                .role("link")
-                .on_press_tx(move |s: &mut State, tx: &mut Tx| open_server_file(s, &path, tx)),
+            kit::btn_el(
+                s,
+                "backup-download",
+                "Laatste backup downloaden",
+                Kind::Ghost,
+                false,
+                None,
+                false,
+            )
+            .role("link")
+            .on_press_tx(move |s: &mut State, tx: &mut Tx| open_server_file(s, &path, tx)),
         );
     }
     out.child(actions).child(
@@ -1024,7 +1402,10 @@ fn restore_panel(s: &State) -> El {
         )
         .mb(12.0),
     );
-    let records = s.recovery["backups"].as_array().cloned().unwrap_or_default();
+    let records = s.recovery["backups"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
     if records.is_empty() {
         return out.child(spaced(kit::notice_text(
             s,
@@ -1074,7 +1455,12 @@ fn restore_panel(s: &State) -> El {
                         .color(p.ink)
                         .w(260.0),
                 )
-                .child(text(backup_kind(record)).font(kit::ts(13.0, 400.0)).color(p.ink).w(160.0))
+                .child(
+                    text(backup_kind(record))
+                        .font(kit::ts(13.0, 400.0))
+                        .color(p.ink)
+                        .w(160.0),
+                )
                 .child(
                     text(kit::file_size(record["sizeBytes"].as_i64().unwrap_or(0)))
                         .font(kit::ts(13.0, 400.0))
@@ -1136,10 +1522,15 @@ fn clear_panel(s: &State) -> El {
     let ask = |runners: bool| {
         move |s: &mut State| {
             if !s.busy {
+                s.system.clearing_all = runners;
                 s.confirm = Some(Command {
                     screen: String::new(),
                     method: "race.clear".into(),
-                    input: if runners { json!({"runners":true}) } else { json!({}) },
+                    input: if runners {
+                        json!({"runners":true})
+                    } else {
+                        json!({})
+                    },
                 })
             }
         }
@@ -1169,7 +1560,11 @@ fn database_panel(s: &State) -> El {
         col()
             .grow(1.0)
             .min_w(160.0)
-            .child(text(name.to_string()).font(kit::ts(12.5, 400.0).lh(18.75)).color(p.t.ink3))
+            .child(
+                text(name.to_string())
+                    .font(kit::ts(12.5, 400.0).lh(18.75))
+                    .color(p.t.ink3),
+            )
             .child(
                 text(value.to_string())
                     .font(kit::ts(20.0, 550.0).lh(24.0).tracking(-0.4))
@@ -1189,10 +1584,220 @@ fn database_panel(s: &State) -> El {
 
 // ---------- Over deze installatie ----------
 
+impl State {
+    pub(super) fn system_update_problem_clear(&mut self) {
+        self.system.update_problem = None;
+    }
+}
+fn ask_install(s: &mut State, version: &str) {
+    let others = cluster(s)["members"]
+        .as_array()
+        .map_or(0, |m| m.len().saturating_sub(1));
+    let mut message = "Apolloon maakt eerst een backup, sluit, installeert de nieuwe versie en start daarna vanzelf opnieuw. Dat duurt ongeveer een minuut.".to_string();
+    if others > 0 {
+        message += &format!(
+            " Deze laptop werkt daarna pas weer samen met de {} als die ook bijgewerkt {}: werk ze meteen na elkaar bij.",
+            if others == 1 {
+                "andere laptop".to_string()
+            } else {
+                format!("{others} andere laptops")
+            },
+            if others == 1 { "is" } else { "zijn" }
+        );
+    }
+    s.admin.confirm = Some(admin_base::Confirm {
+        title: format!("Bijwerken naar {version}?"),
+        message,
+        confirm_label: "Installeren en herstarten".into(),
+        danger: false,
+        action: admin_base::ConfirmAction::InstallUpdate,
+    });
+}
+fn open_url(s: &mut State, url: &str) {
+    s.send("desktop.openUrl", json!({"url":url}));
+}
+/// `UpdateStatusRow`: the last install's outcome, then the update's state with its buttons.
+fn update_row(s: &State) -> El {
+    let p = kit::pal(s.dark);
+    let mut out = col().w_full().gap(8.0);
+    let last = &s.system.update["lastInstall"];
+    if let Some(version) = last["version"].as_str() {
+        out = out.child(if last["ok"] == true {
+            row()
+                .gap(6.0)
+                .center_y()
+                .role("status")
+                .child(kit::icon(s, "check", p.t.go, 14.0))
+                .child(kit::value_text(format!("Apolloon is bijgewerkt naar {version}."), s.dark))
+        } else {
+            kit::notice_text(
+                s,
+                Tone::Warn,
+                &format!("De installatie van versie {version} is niet gelukt. Probeer opnieuw, of download het installatiebestand zelf."),
+            )
+            .role("status")
+        });
+    }
+    let status = &s.system.update["status"];
+    let state = status["state"].as_str().unwrap_or("idle");
+    let version = st(&status["update"], "version").to_string();
+    let race = &s.snapshot["race"];
+    let race_running = !race["raceStartedAt"].is_null() && race["raceFinishedAt"].is_null();
+    if matches!(state, "available" | "downloading" | "ready" | "installing") {
+        let percent = status["percent"].as_f64().unwrap_or(0.0);
+        let title = match state {
+            "downloading" => format!("Versie {version} wordt gedownload… {percent}%"),
+            "ready" => format!("Versie {version} is klaar om te installeren."),
+            "installing" => format!("Backup maken en versie {version} installeren…"),
+            _ => format!("Versie {version} is beschikbaar."),
+        };
+        let mut body = col().gap(4.0).grow(1.0).min_w(0.0).child(
+            text(title)
+                .font(kit::ts(13.5, 600.0).lh(20.25))
+                .color(p.ink)
+                .wrap(),
+        );
+        if state == "downloading" {
+            body = body.child(
+                row()
+                    .role("progressbar")
+                    .label("Download")
+                    .a11y_value(format!("{percent}"))
+                    .w_full()
+                    .h(4.0)
+                    .radius(2.0)
+                    .fill(p.t.surface3)
+                    .child(
+                        rune::el()
+                            .w((percent as f32 / 100.0).clamp(0.0, 1.0) * 300.0)
+                            .max_w(300.0)
+                            .h_full()
+                            .radius(2.0)
+                            .fill(p.brand),
+                    )
+                    .max_w(300.0),
+            );
+        }
+        let line = match state {
+            "installing" => "Apolloon sluit zo en start vanzelf opnieuw met de nieuwe versie.",
+            "ready" if race_running => "De wedstrijd loopt: installeer pas na de wedstrijd.",
+            _ => SAME_VERSION,
+        };
+        body = body.child(kit::copy(line, s.dark));
+        if matches!(state, "available" | "ready")
+            && let Some(problem) = status["problem"].as_str()
+        {
+            body = body.child(kit::copy(problem.to_string(), s.dark));
+        }
+        let page_url = st(&status["update"], "pageUrl").to_string();
+        let download = status["update"]["downloadUrl"]
+            .as_str()
+            .map(str::to_owned)
+            .unwrap_or_else(|| page_url.clone());
+        let mut actions = row().gap(8.0).center_y();
+        if matches!(state, "ready" | "installing") {
+            let v = version.clone();
+            actions = actions.child(kit::btn(
+                s,
+                "update-install",
+                if state == "installing" {
+                    "Bezig…"
+                } else {
+                    "Nu installeren en herstarten"
+                },
+                Kind::Primary,
+                false,
+                Some("download"),
+                race_running || state == "installing" || s.busy,
+                move |s| ask_install(s, &v),
+            ));
+        } else if state == "available" {
+            actions = actions.child(kit::btn(
+                s,
+                "update-download",
+                "Installatiebestand downloaden",
+                Kind::Primary,
+                false,
+                Some("download"),
+                s.busy,
+                move |s| open_url(s, &download),
+            ));
+        }
+        actions = actions.child(kit::btn(
+            s,
+            "update-news",
+            "Wat is er nieuw?",
+            Kind::Ghost,
+            false,
+            None,
+            s.busy,
+            move |s| open_url(s, &page_url),
+        ));
+        out = out.child(
+            kit::notice(
+                s,
+                Tone::Hint,
+                row()
+                    .w_full()
+                    .gap(12.0)
+                    .center_y()
+                    .child(body)
+                    .child(actions),
+            )
+            .role("status"),
+        );
+        if let Some(problem) = &s.system.update_problem {
+            out = out.child(kit::notice_text(s, Tone::Alert, problem));
+        }
+        return out;
+    }
+    let checked = status["checkedAt"].as_i64().unwrap_or(0);
+    let line = match state {
+        "checking" => "Controleren op een nieuwere versie…".to_string(),
+        "current" => format!("Dit is de nieuwste versie. Gecontroleerd om {}.", &kit::clock(checked)[..5]),
+        "unreachable" => "Kon niet controleren op een nieuwere versie (geen internet). Op het evenement is dat normaal.".to_string(),
+        _ => "Nog niet gecontroleerd op een nieuwere versie.".to_string(),
+    };
+    let checking = state == "checking";
+    out.child(
+        kit::notice(
+            s,
+            Tone::Hint,
+            row()
+                .w_full()
+                .justify_between()
+                .center_y()
+                .child(kit::value_text(line, s.dark).color(p.t.ink2))
+                .child(kit::btn(
+                    s,
+                    "update-check",
+                    if checking {
+                        "Bezig…"
+                    } else {
+                        "Nu controleren"
+                    },
+                    Kind::Ghost,
+                    true,
+                    None,
+                    checking || s.busy,
+                    |s| {
+                        s.send("update.check", json!({}));
+                        s.system.update["status"] = json!({"state":"checking","checkedAt":null});
+                        s.system.update_asked = Some(s.server_now());
+                    },
+                )),
+        )
+        .role("status"),
+    )
+}
+
 fn diagnostics(s: &State) -> String {
     let info = &s.recovery["system"];
     let mut lines = vec![
-        format!("Apolloon Telsysteem — diagnose van {}", kit::date_time(s.clock)),
+        format!(
+            "Apolloon Telsysteem — diagnose van {}",
+            kit::date_time(s.clock)
+        ),
         String::new(),
     ];
     lines.push(format!(
@@ -1203,8 +1808,17 @@ fn diagnostics(s: &State) -> String {
     if cfg!(target_arch = "wasm32") {
         lines.push("Scherm: browser (Rune WebAssembly)".into());
     } else {
-        lines.push(format!("Scherm: desktop-app (Rune, {})", std::env::consts::OS));
-        if let Some(path) = info["dataPath"].as_str() {
+        lines.push(format!(
+            "Scherm: desktop-app (Rune, {})",
+            std::env::consts::OS
+        ));
+        if let Some(os) = s.system.desktop_diagnostics["os"].as_str() {
+            lines.push(format!("Besturingssysteem: {os}"));
+        }
+        if let Some(path) = s.system.desktop_diagnostics["dataPath"]
+            .as_str()
+            .or(info["dataPath"].as_str())
+        {
             lines.push(format!("Gegevensmap: {path}"));
         }
     }
@@ -1226,12 +1840,25 @@ fn diagnostics(s: &State) -> String {
             .as_i64()
             .map(|at| format!("laatste {}", kit::date_time(at)))
             .unwrap_or_else(|| "nog geen".into()),
-        b["lastError"].as_str().map(|e| format!(" · mislukt: {e}")).unwrap_or_default(),
+        b["lastError"]
+            .as_str()
+            .map(|e| format!(" · mislukt: {e}"))
+            .unwrap_or_default(),
         b["diskFreeBytes"]
             .as_i64()
             .map(|bytes| format!("{} MB", (bytes as f64 / 1024.0 / 1024.0).round()))
             .unwrap_or_else(|| "onbekend".into())
     ));
+    if let Some(tail) = s.system.desktop_diagnostics["logTail"]
+        .as_str()
+        .filter(|t| !t.is_empty())
+    {
+        lines.extend([
+            String::new(),
+            "--- laatste regels van server.log ---".into(),
+            tail.to_string(),
+        ]);
+    }
     lines.join("\n")
 }
 
@@ -1242,11 +1869,19 @@ fn about_panel(s: &State) -> El {
     let mut facts = vec![
         (
             "Versie".to_string(),
-            kit::value_text(format!("Apolloon {}", info["appVersion"].as_str().unwrap_or("…")), s.dark),
+            kit::value_text(
+                format!("Apolloon {}", info["appVersion"].as_str().unwrap_or("…")),
+                s.dark,
+            ),
         ),
         (
             "Databankschema".to_string(),
-            kit::value_text(info["schemaVersion"].as_i64().map_or("…".into(), |v| v.to_string()), s.dark),
+            kit::value_text(
+                info["schemaVersion"]
+                    .as_i64()
+                    .map_or("…".into(), |v| v.to_string()),
+                s.dark,
+            ),
         ),
     ];
     let mut widths = vec![Some(140.0), Some(140.0)];
@@ -1265,22 +1900,10 @@ fn about_panel(s: &State) -> El {
         facts.push((String::new(), rune::el()));
         widths.push(None);
     }
-    let mut out = section("Over deze installatie", s.dark).child(kit::metrics(s, facts, &widths).gap(20.0));
+    let mut out =
+        section("Over deze installatie", s.dark).child(kit::metrics(s, facts, &widths).gap(20.0));
     if desktop {
-        out = out.child(spaced(
-            kit::notice(
-                s,
-                Tone::Hint,
-                row()
-                    .w_full()
-                    .justify_between()
-                    .center_y()
-                    .child(kit::value_text("Nog niet gecontroleerd op een nieuwere versie.", s.dark).color(p.t.ink2))
-                    .child(kit::btn(s, "update-check", "Nu controleren", Kind::Ghost, true, None, true, |_| {})),
-            )
-            .role("status")
-            .mt(12.0),
-        ));
+        out = out.child(update_row(s).mt(12.0));
     } else {
         out = out.child(
             kit::copy(
@@ -1295,8 +1918,18 @@ fn about_panel(s: &State) -> El {
     let mut actions = row().gap(8.0).mt(if desktop { 12.0 } else { 0.0 });
     if desktop {
         actions = actions.child(
-            kit::btn_el(s, "about-folder", "Logmap openen", Kind::Ghost, false, Some("folder"), false).on_press(|s: &mut State| {
-                s.system.folder_error = open_folder(s.recovery["system"]["dataPath"].as_str().unwrap_or(""));
+            kit::btn_el(
+                s,
+                "about-folder",
+                "Logmap openen",
+                Kind::Ghost,
+                false,
+                Some("folder"),
+                false,
+            )
+            .on_press(|s: &mut State| {
+                s.system.folder_error =
+                    open_folder(s.recovery["system"]["dataPath"].as_str().unwrap_or(""));
             }),
         );
     }
@@ -1304,7 +1937,11 @@ fn about_panel(s: &State) -> El {
         kit::btn_el(
             s,
             "about-diagnostics",
-            if copied { "Gekopieerd" } else { "Diagnose kopiëren" },
+            if copied {
+                "Gekopieerd"
+            } else {
+                "Diagnose kopiëren"
+            },
             Kind::Ghost,
             false,
             Some(if copied { "check" } else { "copy" }),
@@ -1347,7 +1984,11 @@ fn open_folder(path: &str) -> Option<String> {
     } else {
         "xdg-open"
     };
-    std::process::Command::new(program).arg(path).spawn().err().map(|e| e.to_string())
+    std::process::Command::new(program)
+        .arg(path)
+        .spawn()
+        .err()
+        .map(|e| e.to_string())
 }
 #[cfg(target_arch = "wasm32")]
 fn open_folder(_: &str) -> Option<String> {
@@ -1445,15 +2086,38 @@ pub(super) fn modal(s: &State) -> Option<El> {
     let p = kit::pal(s.dark);
     let t = tok::theme(s.dark);
     let close = |s: &mut State| s.confirm = None;
-    let cancel = kit::btn(s, "cancel", "Annuleer", Kind::Plain, false, None, false, close).autofocus();
-    let ok = kit::btn(s, "confirm", confirm_label, Kind::Danger, false, None, s.busy, |s| {
-        if let Some(c) = s.confirm.take() {
-            s.send(&c.method, c.input);
-        }
-    });
+    let cancel = kit::btn(
+        s,
+        "cancel",
+        "Annuleer",
+        Kind::Plain,
+        false,
+        None,
+        false,
+        close,
+    )
+    .autofocus();
+    let ok = kit::btn(
+        s,
+        "confirm",
+        confirm_label,
+        Kind::Danger,
+        false,
+        None,
+        s.busy,
+        |s| {
+            if let Some(c) = s.confirm.take() {
+                s.send(&c.method, c.input);
+            }
+        },
+    );
     let mut body = col().gap(8.0);
     for paragraph in paragraphs {
-        body = body.child(kit::strong_text(&paragraph, p.t.ink2, s.dark).wrap().w_full());
+        body = body.child(
+            kit::strong_text(&paragraph, p.t.ink2, s.dark)
+                .wrap()
+                .w_full(),
+        );
     }
     Some(
         rune::el()
@@ -1485,7 +2149,14 @@ pub(super) fn modal(s: &State) -> Option<El> {
                             .w_full(),
                     )
                     .child(body)
-                    .child(row().mt(20.0).gap(8.0).justify_end().child(cancel).child(ok)),
+                    .child(
+                        row()
+                            .mt(20.0)
+                            .gap(8.0)
+                            .justify_end()
+                            .child(cancel)
+                            .child(ok),
+                    ),
             ),
     )
 }
@@ -1500,7 +2171,11 @@ mod tests {
     fn settle(rt: &mut Runtime<State>, predicate: impl Fn(&State) -> bool) {
         let deadline = Instant::now() + Duration::from_secs(8);
         while !predicate(&rt.state) {
-            assert!(Instant::now() < deadline, "UI did not settle: {}", rt.state.error);
+            assert!(
+                Instant::now() < deadline,
+                "UI did not settle: {}",
+                rt.state.error
+            );
             rt.update_if(|state, tx| poll(state, 0.0, tx));
             rt.frame(1.0 / 60.0);
             std::thread::sleep(Duration::from_millis(10));
@@ -1508,7 +2183,9 @@ mod tests {
     }
     fn press(rt: &mut Runtime<State>, key: &str) {
         rt.frame(1.0 / 60.0);
-        let (x, y) = rt.find(key).unwrap_or_else(|| panic!("Missing UI control {key}"));
+        let (x, y) = rt
+            .find(key)
+            .unwrap_or_else(|| panic!("Missing UI control {key}"));
         rt.pointer_down(x, y);
         rt.pointer_up(x, y);
         rt.frame(1.0 / 60.0);
@@ -1527,7 +2204,12 @@ mod tests {
     fn start(
         section: usize,
         seed: impl FnOnce(&mut crate::db::Db),
-    ) -> (Runtime<State>, Arc<Mutex<crate::db::Db>>, impl Drop, std::path::PathBuf) {
+    ) -> (
+        Runtime<State>,
+        Arc<Mutex<crate::db::Db>>,
+        impl Drop,
+        std::path::PathBuf,
+    ) {
         let root = std::env::temp_dir().join(format!("apolloon-native-system-{}", crate::db::id()));
         let mut database = crate::db::Db::open(&root.join("data/app.db")).unwrap();
         seed(&mut database);
@@ -1552,10 +2234,79 @@ mod tests {
         settle(&mut rt, |s| s.connected && s.recovery["system"].is_object());
         (rt, db, host, root)
     }
+    #[test]
+    fn update_row_reads_the_status_over_http_and_asks_before_installing() {
+        let (mut rt, _db, _host, _root) = start(6, |_| {});
+        // The desktop's update status comes from the server.
+        rt.state.send("update.status", json!({}));
+        settle(&mut rt, |s| {
+            !s.busy && s.system.update["status"]["state"].is_string()
+        });
+        assert!(rt.state.error.is_empty(), "{}", rt.state.error);
+        // A downloaded update offers install, which asks first with the reference wording.
+        rt.update_if(|s, _| {
+            s.system.update = json!({"status":{"state":"ready","checkedAt":1,"update":{"version":"9.9.9","pageUrl":"https://example.invalid"}}});
+            true
+        });
+        reveal(&mut rt, "update-install");
+        press(&mut rt, "update-install");
+        let confirm = rt.state.admin.confirm.as_ref().expect("install asks first");
+        assert_eq!(confirm.title, "Bijwerken naar 9.9.9?");
+        assert_eq!(confirm.confirm_label, "Installeren en herstarten");
+        // During the race the install button stays off.
+        rt.update_if(|s, _| {
+            s.admin.confirm = None;
+            s.snapshot["race"]["raceStartedAt"] = json!(1);
+            s.snapshot["race"]["raceFinishedAt"] = Value::Null;
+            true
+        });
+        reveal(&mut rt, "update-install");
+        press(&mut rt, "update-install");
+        assert!(rt.state.admin.confirm.is_none());
+    }
+    #[test]
+    fn a_pinned_address_is_followed_until_the_profile_shows_it() {
+        let (mut rt, _db, _host, _root) = start(6, |_| {});
+        let s = &mut rt.state;
+        s.system.phase = super::NetPhase::WaitingMake;
+        s.system.net_wait = Some(super::NetWait {
+            elevation: json!("e1"),
+            wanted: Some("192.168.1.211".into()),
+            ticks: 0,
+            answers: 0,
+        });
+        s.system.net_profile = json!({"primary":{"address":"192.168.1.20","dhcp":true},"lastElevation":{"id":"e1","state":"waiting"}});
+        super::follow_net_change(s);
+        assert!(s.system.net_wait.is_some(), "still waiting");
+        s.system.net_profile = json!({"primary":{"address":"192.168.1.211","dhcp":false}});
+        super::follow_net_change(s);
+        assert!(s.system.net_wait.is_none() && s.system.phase == super::NetPhase::Idle);
+        assert_eq!(
+            s.admin.toast.as_ref().unwrap().text,
+            "Dit adres is nu vast: 192.168.1.211."
+        );
+        // A refused password prompt stops the wait at once.
+        s.system.net_wait = Some(super::NetWait {
+            elevation: json!("e2"),
+            wanted: None,
+            ticks: 0,
+            answers: 0,
+        });
+        s.system.net_profile = json!({"primary":{"address":"192.168.1.211","dhcp":false},"lastElevation":{"id":"e2","state":"failed","message":"Geweigerd."}});
+        super::follow_net_change(s);
+        let toast = s.admin.toast.as_ref().unwrap();
+        assert_eq!(
+            (toast.text.as_str(), toast.detail.as_str(), toast.error),
+            ("Terugzetten mislukt", "Geweigerd.", true)
+        );
+    }
     fn setting(db: &Arc<Mutex<crate::db::Db>>) -> Value {
         db.lock()
             .unwrap()
-            .rows("SELECT value FROM settings WHERE key='public_record_mode'", &[])
+            .rows(
+                "SELECT value FROM settings WHERE key='public_record_mode'",
+                &[],
+            )
             .unwrap()[0]["value"]
             .clone()
     }
@@ -1563,11 +2314,16 @@ mod tests {
     #[test]
     fn public_section_sets_the_record_flash_and_saves_burgie_gepakt() {
         let (mut rt, db, host, root) = start(4, |db| {
-            db.mutation("runners.create", &json!({"runnerNumber":"7","name":"Mitras","status":"waiting"}))
-                .unwrap();
+            db.mutation(
+                "runners.create",
+                &json!({"runnerNumber":"7","name":"Mitras","status":"waiting"}),
+            )
+            .unwrap();
         });
         press(&mut rt, "record-hour");
-        settle(&mut rt, |s| !s.busy && s.snapshot["settings"]["publicRecordMode"] == "hour");
+        settle(&mut rt, |s| {
+            !s.busy && s.snapshot["settings"]["publicRecordMode"] == "hour"
+        });
         assert_eq!(setting(&db), "hour");
         assert_eq!(rt.state.notice, "Recordflits staat op per uur.");
         // The chosen mode does not send again.
@@ -1575,11 +2331,18 @@ mod tests {
         assert!(!rt.state.busy);
         press(&mut rt, "burgie");
         settle(&mut rt, |s| !s.busy);
-        assert!(rt.state.notice.starts_with("Burgie gepakt opgeslagen om "), "{}", rt.state.notice);
+        assert!(
+            rt.state.notice.starts_with("Burgie gepakt opgeslagen om "),
+            "{}",
+            rt.state.notice
+        );
         let saved = db
             .lock()
             .unwrap()
-            .rows("SELECT COUNT(*) AS n FROM race_events WHERE type='burgie_gepakt'", &[])
+            .rows(
+                "SELECT COUNT(*) AS n FROM race_events WHERE type='burgie_gepakt'",
+                &[],
+            )
             .unwrap();
         assert_eq!(saved[0]["n"], 1);
         press(&mut rt, "open-outside");
@@ -1592,23 +2355,40 @@ mod tests {
     #[test]
     fn activity_section_lists_changes_and_filters_queue_moves_and_search() {
         let (mut rt, db, host, root) = start(5, |db| {
-            let id = db.mutation("runners.create", &json!({"runnerNumber":"7","name":"Mitras"})).unwrap()["id"].clone();
-            db.mutation("runners.create", &json!({"runnerNumber":"8","name":"Wout"})).unwrap();
-            db.mutation("runners.setStatus", &json!({"id":id,"status":"waiting"})).unwrap();
+            let id = db
+                .mutation(
+                    "runners.create",
+                    &json!({"runnerNumber":"7","name":"Mitras"}),
+                )
+                .unwrap()["id"]
+                .clone();
+            db.mutation("runners.create", &json!({"runnerNumber":"8","name":"Wout"}))
+                .unwrap();
+            db.mutation("runners.setStatus", &json!({"id":id,"status":"waiting"}))
+                .unwrap();
         });
         settle(&mut rt, |s| !s.busy && !s.activity.is_empty());
         let all = rt.state.activity.len();
         assert!(rt.find("activity-queue").is_some());
         press(&mut rt, "activity-queue");
         assert!(rt.state.activity_queue);
-        settle(&mut rt, |s| !s.busy && s.activity_filter.starts_with("true|"));
+        settle(&mut rt, |s| {
+            !s.busy && s.activity_filter.starts_with("true|")
+        });
         assert!(rt.state.activity.len() >= all);
         rt.state.activity_search = TextEdit::new("Wout");
         settle(&mut rt, |s| !s.busy && s.activity_filter.ends_with("|Wout"));
         assert!(!rt.state.activity.is_empty());
-        assert!(rt.state.activity.iter().all(|e| e.to_string().contains("Wout")));
+        assert!(
+            rt.state
+                .activity
+                .iter()
+                .all(|e| e.to_string().contains("Wout"))
+        );
         rt.state.activity_search = TextEdit::new("niemand-zo");
-        settle(&mut rt, |s| !s.busy && s.activity_filter.ends_with("|niemand-zo"));
+        settle(&mut rt, |s| {
+            !s.busy && s.activity_filter.ends_with("|niemand-zo")
+        });
         assert!(rt.state.activity.is_empty());
         drop(db);
         drop(rt);
@@ -1617,10 +2397,14 @@ mod tests {
     }
 
     #[test]
-    fn system_section_shows_the_address_clears_the_race_after_its_dialog_and_copies_the_diagnosis() {
+    fn system_section_shows_the_address_clears_the_race_after_its_dialog_and_copies_the_diagnosis()
+    {
         let (mut rt, db, host, root) = start(6, |db| {
-            db.mutation("runners.create", &json!({"runnerNumber":"7","name":"Mitras","status":"waiting"}))
-                .unwrap();
+            db.mutation(
+                "runners.create",
+                &json!({"runnerNumber":"7","name":"Mitras","status":"waiting"}),
+            )
+            .unwrap();
         });
         let profile = &rt.state.recovery["system"]["profile"];
         assert_eq!(profile["elevateMethod"], Value::Null);
@@ -1628,7 +2412,13 @@ mod tests {
         // Race wissen asks first, in the reference's words; Annuleer keeps everything.
         reveal(&mut rt, "clear-race");
         press(&mut rt, "clear-race");
-        assert_eq!(rt.state.confirm.as_ref().map(|c| c.method.as_str()), Some("race.clear"), "clear button at {:?}, busy={}", rt.find("clear-race"), rt.state.busy);
+        assert_eq!(
+            rt.state.confirm.as_ref().map(|c| c.method.as_str()),
+            Some("race.clear"),
+            "clear button at {:?}, busy={}",
+            rt.find("clear-race"),
+            rt.state.busy
+        );
         assert!(rt.find("confirmation").is_some());
         press(&mut rt, "cancel");
         assert!(rt.state.confirm.is_none());
@@ -1636,15 +2426,24 @@ mod tests {
         press(&mut rt, "clear-everything");
         press(&mut rt, "confirm");
         settle(&mut rt, |s| {
-            !s.busy && s.snapshot["runners"].as_array().is_some_and(|r| r.is_empty())
+            !s.busy
+                && s.snapshot["runners"]
+                    .as_array()
+                    .is_some_and(|r| r.is_empty())
         });
         assert!(db.lock().unwrap().runners().unwrap().is_empty());
         assert!(
-            rt.state.notice.starts_with("Alles gewist: 1 lopers en 0 rondes weg."),
+            rt.state
+                .notice
+                .starts_with("Alles gewist: 1 lopers en 0 rondes weg."),
             "{}",
             rt.state.notice
         );
-        settle(&mut rt, |s| s.recovery["backups"].as_array().is_some_and(|b| !b.is_empty()));
+        settle(&mut rt, |s| {
+            s.recovery["backups"]
+                .as_array()
+                .is_some_and(|b| !b.is_empty())
+        });
         assert!(
             rt.state.recovery["backups"][0]["fileName"]
                 .as_str()
@@ -1655,7 +2454,10 @@ mod tests {
         press(&mut rt, "about-diagnostics");
         assert!(rt.state.system.copied_at.is_some());
         let text = diagnostics(&rt.state);
-        assert!(text.contains("· schema 17") && text.contains("Groep: koppelen staat uit"), "{text}");
+        assert!(
+            text.contains("· schema 17") && text.contains("Groep: koppelen staat uit"),
+            "{text}"
+        );
         drop(rt);
         drop(host);
         let _ = std::fs::remove_dir_all(root);

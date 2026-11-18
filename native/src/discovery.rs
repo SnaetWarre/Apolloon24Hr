@@ -36,6 +36,8 @@ struct Beacon {
 #[derive(Default)]
 pub struct Discovery {
     heard: Mutex<BTreeMap<(String, String), (Instant, Beacon)>>,
+    /// Set by the linked-laptop runtime while this laptop leads its group.
+    pub leader: std::sync::atomic::AtomicBool,
 }
 
 impl Discovery {
@@ -94,8 +96,8 @@ impl Discovery {
                     if let Some(db) = db.upgrade() {
                         let db = db.lock().unwrap();
                         if let Ok(state) = db.one(
-                            "SELECT active_started_at, race_started_at, race_finished_at, (SELECT COUNT(*) FROM runners) AS runners, EXISTS(SELECT 1 FROM laps) AS has_laps, EXISTS(SELECT 1 FROM cluster_members) AS linked FROM race_state WHERE id=1", &[],
-                        ) && state["linked"] == 0 {
+                            "SELECT active_started_at, race_started_at, race_finished_at, (SELECT COUNT(*) FROM runners) AS runners, EXISTS(SELECT 1 FROM laps) AS has_laps, MAX(1,(SELECT COUNT(*) FROM cluster_members)) AS group_size, (SELECT value FROM settings WHERE key='replication_cluster_id') AS cluster_id, EXISTS(SELECT 1 FROM replication_log WHERE type NOT LIKE 'cluster.%') AS logged FROM race_state WHERE id=1", &[],
+                        ) {
                             let started = !state["race_started_at"].is_null()
                                 || !state["active_started_at"].is_null()
                                 || !state["race_finished_at"].is_null()
@@ -106,14 +108,14 @@ impl Discovery {
                                 app: "apolloon".into(),
                                 host_id: own_id.clone(),
                                 name: Some(crate::host::name()),
-                                cluster_id: own_id.clone(),
+                                cluster_id: state["cluster_id"].as_str().unwrap_or(&own_id).to_owned(),
                                 url: String::new(),
                                 app_version: VERSION.into(),
                                 schema_version: 17,
-                                leader: false,
-                                group_size: 1,
+                                leader: discovery.leader.load(std::sync::atomic::Ordering::Relaxed),
+                                group_size: state["group_size"].as_u64().unwrap_or(1) as u32,
                                 runners: state["runners"].as_u64().unwrap_or(0) as u32,
-                                changed: state["runners"] != 0 || started,
+                                changed: state["runners"] != 0 || started || state["logged"] == 1,
                                 race_started: started,
                                 race_running: started && state["race_finished_at"].is_null(),
                             };
@@ -140,6 +142,12 @@ impl Discovery {
             }
         });
         discovery
+    }
+
+    /// Tests: a beacon as if it arrived over UDP.
+    #[cfg(test)]
+    pub fn hear(&self, beacon: &Value) {
+        self.receive(beacon.to_string().as_bytes(), "");
     }
 
     fn receive(&self, bytes: &[u8], own_id: &str) {

@@ -6,8 +6,8 @@
 //!
 //! Sizes are the CSS clamp() values of displays.css resolved for a 1366×768 screen.
 use super::*;
-use rune::{Color, TextStyle, oklch, oklcha};
-use std::collections::HashMap;
+use rune::{Align, Color, TextStyle, oklch, oklcha};
+use std::collections::{HashMap, HashSet};
 
 /// The rows of both lists on the Binnenscherm.
 const INSIDE_LIST_LENGTH: usize = 25;
@@ -17,8 +17,19 @@ const MAX_COMPETITIONS: usize = 6;
 const MIN_LAP_MS: i64 = 20_000;
 const MAX_PLAUSIBLE_LAP_MS: i64 = 10 * 60_000;
 
-const VW: f32 = 1366.0 / 100.0;
-const VH: f32 = 768.0 / 100.0;
+thread_local! {
+    /// The window this frame lays out in (the CSS viewport the vw/vh units resolve against).
+    static VIEWPORT: std::cell::Cell<(f32, f32)> = const { std::cell::Cell::new((1366.0, 768.0)) };
+}
+fn win_w() -> f32 {
+    VIEWPORT.with(|v| v.get().0)
+}
+fn vw_unit() -> f32 {
+    win_w() / 100.0
+}
+fn vh_unit() -> f32 {
+    VIEWPORT.with(|v| v.get().1) / 100.0
+}
 fn clamp(min: f32, pref: f32, max: f32) -> f32 {
     pref.max(min).min(max)
 }
@@ -27,9 +38,287 @@ fn clamp(min: f32, pref: f32, max: f32) -> f32 {
 #[derive(Default)]
 pub(super) struct Screen {
     picking: Option<Vec<String>>,
+    /// The window size the last frame laid out in, for the vw/vh sizes.
+    size: Option<(f32, f32)>,
+    /// Licht chosen on the Binnenscherm / Competitiescherm (both default to Donker).
+    inside_light: bool,
+    competitions_light: bool,
+    /// Ranking voor: the label the points ranking is limited to.
+    ranking_label: Option<String>,
+    ranking_menu: bool,
+    /// The pointer is over the screen: the display controls show (hover-capable screens).
+    hovered: bool,
+    /// Buitenscherm: lap and event ids seen since it opened (observeDisplayHistory).
+    known_laps: Option<HashSet<String>>,
+    known_events: Option<HashSet<String>>,
+    /// The flash on screen and when it started (OUTSIDE_ALERT_VISIBLE_MS).
+    flash: Option<(Flash, i64)>,
 }
 
 // ---------------------------------------------------------------- logic
+
+const OUTSIDE_ALERT_VISIBLE_MS: i64 = 8_000;
+/// What the Buitenscherm flashes: a record lap (title, time, runner) or Burgie gepakt.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct Flash {
+    title: String,
+    big: String,
+    who: String,
+    lap_id: Option<String>,
+}
+fn record_title(mode: &str) -> &'static str {
+    match mode {
+        "hour" => "Snelste ronde van dit uur",
+        "two_hour" => "Snelste ronde van deze 2 uur",
+        _ => "Nieuw dagrecord",
+    }
+}
+fn measured(lap: &Value) -> bool {
+    is_measured_lap(
+        lap["durationMs"].as_i64().unwrap_or(0),
+        lap["source"].as_str().unwrap_or(""),
+    )
+}
+/// isFastestLapForRecordMode.
+pub(super) fn is_record(
+    latest: &Value,
+    previous: &[&Value],
+    started: Option<i64>,
+    mode: &str,
+) -> bool {
+    let at = |l: &Value| l["finishedAt"].as_i64().unwrap_or(0);
+    let first = previous.iter().map(|l| at(l)).chain([at(latest)]).min();
+    if mode == "off" || !measured(latest) || Some(at(latest)) == first {
+        return false;
+    }
+    let ms = |l: &Value| l["durationMs"].as_i64().unwrap_or(0);
+    let real = previous
+        .iter()
+        .filter(|l| measured(l) && Some(at(l)) != first);
+    if mode == "day" || mode.is_empty() {
+        return real.into_iter().all(|l| ms(latest) < ms(l));
+    }
+    let Some(start) = started.or(first) else {
+        return false;
+    };
+    let window = if mode == "hour" { 3_600_000 } else { 7_200_000 };
+    let index = |t: i64| ((t - start) / window).max(0);
+    real.into_iter()
+        .filter(|l| index(at(l)) == index(at(latest)))
+        .all(|l| ms(latest) < ms(l))
+}
+/// Called every poll: while the Buitenscherm is open, a new record lap or Burgie event flashes.
+pub(super) fn refresh(s: &mut State) {
+    let now = s.server_now();
+    let screen = &mut s.public_screens;
+    if let Some((_, at)) = &screen.flash
+        && now - at >= OUTSIDE_ALERT_VISIBLE_MS
+    {
+        screen.flash = None;
+    }
+    if s.page != 7 || s.history["laps"].as_array().is_none() {
+        screen.known_laps = None;
+        screen.known_events = None;
+        screen.flash = None;
+        return;
+    }
+    let laps: Vec<&Value> = s.history["laps"].as_array().into_iter().flatten().collect();
+    let events: Vec<&Value> = s.history["events"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .collect();
+    let id = |v: &Value| str_of(&v["id"]);
+    let mut by_new = laps.clone();
+    by_new.sort_by_key(|l| std::cmp::Reverse(l["finishedAt"].as_i64().unwrap_or(0)));
+    let burgie = events
+        .iter()
+        .filter(|e| e["type"] == "burgie_gepakt")
+        .max_by_key(|e| {
+            e["occurredAt"]
+                .as_i64()
+                .or(e["createdAt"].as_i64())
+                .unwrap_or(0)
+        });
+    let new_burgie = burgie.filter(|e| {
+        screen
+            .known_events
+            .as_ref()
+            .is_some_and(|k| !k.contains(&id(e)))
+    });
+    screen.known_events = Some(events.iter().map(|e| id(e)).collect());
+    if let Some(e) = new_burgie {
+        let name = str_of(&e["runnerName"]);
+        screen.flash = Some((
+            Flash {
+                title: "Burgie gepakt".into(),
+                big: "ZINGEN".into(),
+                who: if name.is_empty() {
+                    "Publiek moment".into()
+                } else {
+                    runner_label(&str_of(&e["runnerNumber"]), &name)
+                },
+                lap_id: None,
+            },
+            now,
+        ));
+    }
+    let mode = s.snapshot["settings"]["publicRecordMode"]
+        .as_str()
+        .unwrap_or("day")
+        .to_string();
+    if mode == "off"
+        && screen
+            .flash
+            .as_ref()
+            .is_some_and(|(f, _)| f.lap_id.is_some())
+    {
+        screen.flash = None;
+    }
+    let latest = by_new.first().copied();
+    let new_lap = latest.filter(|l| {
+        screen
+            .known_laps
+            .as_ref()
+            .is_some_and(|k| !k.contains(&id(l)))
+    });
+    screen.known_laps = Some(laps.iter().map(|l| id(l)).collect());
+    let burgie_showing = screen
+        .flash
+        .as_ref()
+        .is_some_and(|(f, _)| f.lap_id.is_none());
+    if let Some(lap) = new_lap
+        && !burgie_showing
+        && is_record(
+            lap,
+            &by_new[1..],
+            s.snapshot["race"]["raceStartedAt"].as_i64(),
+            &mode,
+        )
+    {
+        screen.flash = Some((
+            Flash {
+                title: record_title(&mode).into(),
+                big: format_duration(lap["durationMs"].as_i64()),
+                who: runner_label(&str_of(&lap["runnerNumber"]), &str_of(&lap["runnerName"])),
+                lap_id: Some(id(lap)),
+            },
+            now,
+        ));
+    }
+    // A record lap that was corrected away stops flashing.
+    if let Some((
+        Flash {
+            lap_id: Some(lap), ..
+        },
+        _,
+    )) = &screen.flash
+        && !laps.iter().any(|l| id(l) == *lap)
+    {
+        screen.flash = None;
+    }
+}
+/// `.outside-record-flash`: the whole screen blue, a ring, title, the yellow time and the runner.
+fn flash_view(f: &Flash) -> El {
+    let (vw, vh) = (vw_unit(), vh_unit());
+    let long = f.title.chars().count() > 18;
+    let title = if long {
+        clamp(
+            44.0,
+            (7.5 * vw).min(11.0 * vh),
+            150.0f32.max((7.8125 * vw).min(13.8889 * vh)),
+        )
+    } else {
+        clamp(
+            56.0,
+            (12.0 * vw).min(17.0 * vh),
+            238.0f32.max((12.3958 * vw).min(22.037 * vh)),
+        )
+    };
+    let big = clamp(
+        72.0,
+        (14.0 * vw).min(24.0 * vh),
+        282.0f32.max((14.6875 * vw).min(26.1111 * vh)),
+    );
+    let who = clamp(
+        30.0,
+        (5.8 * vw).min(9.0 * vh),
+        112.0f32.max((5.8333 * vw).min(10.3704 * vh)),
+    );
+    let inset = clamp(16.0, 2.4 * vw, 46.0f32.max((2.3958 * vw).min(4.2593 * vh)));
+    let ring = clamp(4.0, 0.45 * vw, 9.0f32.max((0.4688 * vw).min(0.8333 * vh)));
+    rune::el()
+        .key("outside-flash")
+        .role("status")
+        .label(format!("{} {} {}", f.title, f.big, f.who))
+        .pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0))
+        .fill(blue())
+        .center()
+        .padding(clamp(
+            26.0,
+            5.0 * vw,
+            90.0f32.max((4.6875 * vw).min(8.3333 * vh)),
+        ))
+        .child(
+            rune::el()
+                .pin(Some(inset), Some(inset), Some(inset), Some(inset))
+                .radius(12.0)
+                .border(ring, oklcha(1.0, 0.0, 0.0, 0.72)),
+        )
+        .child(
+            col()
+                .items_center()
+                .max_w(1640.0f32.max((85.4167 * vw).min(151.852 * vh)))
+                .child(
+                    text(f.title.to_uppercase())
+                        .font(
+                            TextStyle::new(title, 900.0)
+                                .lh(title * 0.84)
+                                .tracking(-0.01 * title),
+                        )
+                        .color(white())
+                        .wrap()
+                        .align(Align::Center),
+                )
+                .child(
+                    rune::el()
+                        .mt(clamp(
+                            16.0,
+                            (2.3 * vw).min(3.4 * vh),
+                            42.0f32.max((2.1875 * vw).min(3.8889 * vh)),
+                        ))
+                        .py(clamp(8.0, vw, 20.0f32.max((1.0417 * vw).min(1.8519 * vh))))
+                        .px(clamp(
+                            22.0,
+                            2.2 * vw,
+                            52.0f32.max((2.7083 * vw).min(4.8148 * vh)),
+                        ))
+                        .fill(oklch(0.8718, 0.1716, 90.95))
+                        .child(
+                            text(f.big.clone())
+                                .font(
+                                    TextStyle::new(big, 900.0)
+                                        .lh(big * 0.92)
+                                        .tracking(-0.03 * big)
+                                        .features("'tnum' 1"),
+                                )
+                                .color(oklch(0.244, 0.039, 262.6)),
+                        ),
+                )
+                .child(
+                    text(f.who.clone())
+                        .font(TextStyle::new(who, 900.0).lh(who).tracking(-0.02 * who))
+                        .color(white())
+                        .wrap()
+                        .align(Align::Center)
+                        .mt(clamp(
+                            18.0,
+                            (2.6 * vw).min(3.8 * vh),
+                            48.0f32.max((2.5 * vw).min(4.4444 * vh)),
+                        )),
+                ),
+        )
+}
 
 /// The daypart factor of the Brussels clock hour a lap started in.
 fn daypart_factor(started_at: i64) -> Option<f64> {
@@ -415,8 +704,11 @@ fn score_font(size: f32, weight: f32) -> TextStyle {
         .tracking(size * 0.01)
 }
 fn logo(s: &State, w: f32, h: f32) -> El {
+    logo_on(s, w, h, true)
+}
+fn logo_on(s: &State, w: f32, h: f32, dark_bg: bool) -> El {
     // icons 27/28: the wordmark for light and for dark backgrounds.
-    match s.icons.get(28) {
+    match s.icons.get(if dark_bg { 28 } else { 27 }) {
         Some(image) => rune::el()
             .size(w, h)
             .pixels_fit(image.pixels(), rune::SurfaceFit::Fit),
@@ -460,12 +752,30 @@ fn label_of(r: &Value) -> String {
 }
 
 pub(super) fn view(s: &State) -> El {
+    VIEWPORT.with(|v| v.set(s.public_screens.size.unwrap_or((1366.0, 768.0))));
     let body = match s.page {
         5 => inside(s),
         6 => competitions(s),
         _ => outside(s),
     };
-    let root = rune::el().w_full().h_full().child(body);
+    let mut root = rune::el().w_full().h_full().child(body);
+    if s.page == 5 || s.page == 6 {
+        root = root.on_hover_change(|s: &mut State, on, _| {
+            s.public_screens.hovered = on;
+            if !on {
+                s.public_screens.ranking_menu = false;
+            }
+        });
+        if s.public_screens.hovered || s.public_screens.ranking_menu {
+            root = root.child(display_controls(s));
+        }
+    }
+    let root = root.on_layout(|s: &mut State, r| {
+        let size = Some((r[2].max(1.0), r[3].max(1.0)));
+        if s.public_screens.size != size {
+            s.public_screens.size = size;
+        }
+    });
     match picker(s) {
         Some(modal) => root.child(modal),
         None => root,
@@ -479,7 +789,7 @@ fn header(s: &State, p: &Pal, middle: El) -> El {
     row()
         .h(34.0)
         .center_y()
-        .gap(2.0 * VW)
+        .gap(2.0 * vw_unit())
         .min_w(0.0)
         .child(
             rune::el()
@@ -489,10 +799,11 @@ fn header(s: &State, p: &Pal, middle: El) -> El {
                 .focusable(true)
                 .on_press(|s: &mut State| s.page = 0)
                 .child(
-                    logo(
+                    logo_on(
                         s,
-                        clamp(110.0, 7.0 * VW, 160.0),
-                        clamp(34.0, 2.2 * VW, 48.0),
+                        clamp(110.0, 7.0 * vw_unit(), 160.0),
+                        clamp(34.0, 2.2 * vw_unit(), 48.0),
+                        p.bg == pal(true).bg,
                     )
                     .mt(-2.0)
                     .mb(2.0),
@@ -512,8 +823,8 @@ fn baseline_pair(small: El, small_size: f32, big: El, big_size: f32, gap: f32) -
 fn totals(s: &State, p: &Pal) -> El {
     let race = &s.snapshot["race"];
     let laps = history_laps(s);
-    let dt = clamp(14.0, VW, 22.0);
-    let dd = clamp(20.0, 1.6 * VW, 34.0);
+    let dt = clamp(14.0, vw_unit(), 22.0);
+    let dd = clamp(20.0, 1.6 * vw_unit(), 34.0);
     let elapsed = match (
         race["raceStartedAt"].as_i64(),
         race["raceFinishedAt"].as_i64(),
@@ -531,11 +842,11 @@ fn totals(s: &State, p: &Pal) -> El {
             dt,
             t(value, font(dd, 600.0, 1.2, -0.02), p.ink),
             dd,
-            0.6 * VW,
+            0.6 * vw_unit(),
         )
     };
     row()
-        .gap(2.4 * VW)
+        .gap(2.4 * vw_unit())
         .child(item("Racetijd", elapsed))
         .child(item("Rondes", format_int(laps.len() as i64)))
         .child(item("Per uur", per_hour))
@@ -544,22 +855,23 @@ fn panel(p: &Pal) -> El {
     col()
         .min_h(0.0)
         .h_full()
-        .py(1.6 * VH + 1.0)
-        .px(1.3 * VW + 1.0)
-        .radius(0.7 * VW)
+        .py(1.6 * vh_unit() + 1.0)
+        .px(1.3 * vw_unit() + 1.0)
+        .radius(0.7 * vw_unit())
         .border(1.0, p.line)
         .fill(p.surface)
-        .clip_rounded(0.7 * VW)
+        .clip_rounded(0.7 * vw_unit())
 }
 fn panel_heading(title: &str, note: Option<&str>, p: &Pal) -> El {
-    let h2 = clamp(20.0, 1.5 * VW, 32.0);
-    let mut r = row().h(h2 * 1.25).items_end().gap(VW).min_w(0.0).child(t(
-        title,
-        font(h2, 600.0, 1.25, -0.02),
-        p.ink,
-    ));
+    let h2 = clamp(20.0, 1.5 * vw_unit(), 32.0);
+    let mut r = row()
+        .h(h2 * 1.25)
+        .items_end()
+        .gap(vw_unit())
+        .min_w(0.0)
+        .child(t(title, font(h2, 600.0, 1.25, -0.02), p.ink));
     if let Some(note) = note {
-        let size = clamp(12.0, 0.85 * VW, 18.0);
+        let size = clamp(12.0, 0.85 * vw_unit(), 18.0);
         r = r.child(
             row()
                 .grow(1.0)
@@ -580,15 +892,173 @@ fn screen(p: &Pal) -> El {
         .w_full()
         .h_full()
         .fill(p.bg)
-        .child(rune::el().w_full().h(0.6 * VH).fill(blue()))
+        .child(rune::el().w_full().h(0.6 * vh_unit()).fill(blue()))
+}
+
+// ---------------------------------------------------------------- display controls
+
+/// collectRankingLabels: the labels on laps and the current ones, in label order.
+fn ranking_labels(s: &State) -> Vec<Value> {
+    let mut by_id: Vec<Value> = Vec::new();
+    let laps = history_laps(s)
+        .iter()
+        .flat_map(|l| l["labels"].as_array().cloned().unwrap_or_default());
+    for l in laps.chain(snapshot_list(s, "labels").iter().cloned()) {
+        match by_id.iter_mut().find(|x| x["id"] == l["id"]) {
+            Some(x) => *x = l,
+            None => by_id.push(l),
+        }
+    }
+    let kind = |l: &Value| match l["kind"].as_str().unwrap_or("") {
+        "speedteam" => 0,
+        "zustervereniging" | "association" => 1,
+        _ => 2,
+    };
+    by_id.sort_by(|a, b| {
+        kind(a)
+            .cmp(&kind(b))
+            .then_with(|| name_order(&str_of(&a["name"]), &str_of(&b["name"])))
+    });
+    by_id
+}
+fn control_button(key: String, label: &str, on: bool, p: &Pal) -> El {
+    row()
+        .key(key)
+        .role("button")
+        .label(label.to_string())
+        .checked(on)
+        .focusable(true)
+        .h(28.0)
+        .px(8.0)
+        .center()
+        .radius(5.0)
+        .fill(p.surface2)
+        .border(1.0, if on { p.accent } else { p.line })
+        .child(t(
+            label,
+            TextStyle::new(13.0, 500.0),
+            if on { p.accent } else { p.ink },
+        ))
+}
+/// `.display-controls`: Ranking voor (Binnenscherm) and Licht/Donker, bottom right, on hover.
+fn display_controls(s: &State) -> El {
+    let inside = s.page == 5;
+    let light = if inside {
+        s.public_screens.inside_light
+    } else {
+        s.public_screens.competitions_light
+    };
+    let p = pal(!light);
+    let mut bar = row()
+        .key("display-controls")
+        .pin(None, None, Some(1.2 * vw_unit()), Some(1.2 * vh_unit()))
+        .gap(12.0)
+        .py(8.0)
+        .px(10.0)
+        .center_y()
+        .radius(8.0)
+        .fill(p.surface)
+        .border(1.0, p.line)
+        .shadow(8.0, 24.0, oklcha(0.0, 0.0, 0.0, 0.3));
+    if inside {
+        let labels = ranking_labels(s);
+        let current = labels
+            .iter()
+            .find(|l| Some(str_of(&l["id"])) == s.public_screens.ranking_label)
+            .map_or("Alle lopers".to_string(), |l| str_of(&l["name"]));
+        let mut select = col().child(
+            control_button("display-ranking".into(), &format!("{current} ▾"), false, &p)
+                .label(format!("Ranking voor {current}"))
+                .on_press(|s: &mut State| {
+                    s.public_screens.ranking_menu = !s.public_screens.ranking_menu
+                }),
+        );
+        if s.public_screens.ranking_menu {
+            let mut menu = col()
+                .key("display-ranking-menu")
+                .role("listbox")
+                .absolute(0.0, -8.0)
+                .min_w(180.0)
+                .padding(4.0)
+                .radius(6.0)
+                .fill(p.surface)
+                .border(1.0, p.line)
+                .shadow(8.0, 24.0, oklcha(0.0, 0.0, 0.0, 0.3));
+            let mut options = vec![(None, "Alle lopers".to_string())];
+            options.extend(
+                labels
+                    .iter()
+                    .map(|l| (Some(str_of(&l["id"])), str_of(&l["name"]))),
+            );
+            let count = options.len() as f32;
+            menu = menu.absolute(0.0, -(count * 28.0 + 16.0));
+            for (id, name) in options {
+                let on = id == s.public_screens.ranking_label;
+                menu = menu.child(
+                    row()
+                        .key(format!(
+                            "display-ranking-{}",
+                            id.as_deref().unwrap_or("all")
+                        ))
+                        .role("option")
+                        .label(name.clone())
+                        .checked(on)
+                        .focusable(true)
+                        .h(28.0)
+                        .px(8.0)
+                        .center_y()
+                        .radius(4.0)
+                        .hover(p.surface2)
+                        .on_press(move |s: &mut State| {
+                            s.public_screens.ranking_label = id.clone();
+                            s.public_screens.ranking_menu = false;
+                        })
+                        .child(t(
+                            name,
+                            TextStyle::new(13.0, if on { 600.0 } else { 500.0 }),
+                            p.ink,
+                        )),
+                );
+            }
+            select = select.child(menu);
+        }
+        bar = bar.child(
+            row()
+                .gap(8.0)
+                .center_y()
+                .child(t("Ranking voor", TextStyle::new(13.0, 400.0), p.ink3))
+                .child(select),
+        );
+    }
+    let set = move |s: &mut State, light: bool| {
+        if inside {
+            s.public_screens.inside_light = light;
+        } else {
+            s.public_screens.competitions_light = light;
+        }
+    };
+    bar.child(
+        row()
+            .role("group")
+            .label("Weergave van dit scherm")
+            .gap(6.0)
+            .child(
+                control_button("display-light".into(), "Licht", light, &p)
+                    .on_press(move |s: &mut State| set(s, true)),
+            )
+            .child(
+                control_button("display-dark".into(), "Donker", !light, &p)
+                    .on_press(move |s: &mut State| set(s, false)),
+            ),
+    )
 }
 
 // ---------------------------------------------------------------- Binnenscherm
 
 fn inside(s: &State) -> El {
-    let p = pal(true);
+    let p = pal(!s.public_screens.inside_light);
     let done = finished(s);
-    let now_size = clamp(16.0, 1.25 * VW, 28.0);
+    let now_size = clamp(16.0, 1.25 * vw_unit(), 28.0);
     let active = active_runner(s);
     let next = next_runner(s);
     let race = &s.snapshot["race"];
@@ -613,7 +1083,7 @@ fn inside(s: &State) -> El {
     };
     let mut now = row()
         .center_y()
-        .gap(0.6 * VW)
+        .gap(0.6 * vw_unit())
         .min_w(0.0)
         .clip_rounded(0.0)
         .role("group")
@@ -628,8 +1098,8 @@ fn inside(s: &State) -> El {
         let next_text = next.map(label_of).unwrap_or_else(|| "niemand klaar".into());
         now = now.child(
             row()
-                .ml(0.6 * VW)
-                .pl(1.2 * VW + 1.0)
+                .ml(0.6 * vw_unit())
+                .pl(1.2 * vw_unit() + 1.0)
                 .min_w(0.0)
                 .center_y()
                 .border_sides([0.0, 0.0, 0.0, 1.0], p.line)
@@ -646,13 +1116,13 @@ fn inside(s: &State) -> El {
         );
     }
 
-    let width = 1366.0 - 4.0 * VW - 1.2 * VW;
+    let width = win_w() - 4.0 * vw_unit() - 1.2 * vw_unit();
     let left_w = width * 1.5 / 2.5;
     let right_w = width - left_w;
     let board = row()
         .grow(1.0)
         .min_h(0.0)
-        .gap(1.2 * VW)
+        .gap(1.2 * vw_unit())
         .child(recent_panel(s, &p).w(left_w))
         .child(points_panel(s, &p).w(right_w));
     screen(&p).child(
@@ -660,10 +1130,10 @@ fn inside(s: &State) -> El {
             .grow(1.0)
             .min_h(0.0)
             .w_full()
-            .pt(2.2 * VH)
-            .pb(2.2 * VH)
-            .px(2.0 * VW)
-            .gap(1.6 * VH)
+            .pt(2.2 * vh_unit())
+            .pb(2.2 * vh_unit())
+            .px(2.0 * vw_unit())
+            .gap(1.6 * vh_unit())
             .child(header(s, &p, now))
             .child(board),
     )
@@ -674,7 +1144,7 @@ fn cell(width: f32, content: El, align_end: bool, center: bool) -> El {
     let r = row()
         .w(width)
         .h_full()
-        .px(0.6 * VW)
+        .px(0.6 * vw_unit())
         .center_y()
         .min_w(0.0)
         .clip_rounded(0.0)
@@ -688,14 +1158,14 @@ fn cell(width: f32, content: El, align_end: bool, center: bool) -> El {
     }
 }
 fn head_cells(cols: &[(f32, &str, bool)], p: &Pal) -> El {
-    let size = clamp(12.0, 0.8 * VW, 16.0);
-    let mut r = row().h(2.4 * VH).w_full();
+    let size = clamp(12.0, 0.8 * vw_unit(), 16.0);
+    let mut r = row().h(2.4 * vh_unit()).w_full();
     for (w, name, end) in cols {
         let mut c = row()
             .w(*w)
             .h_full()
-            .px(0.6 * VW)
-            .pb(0.4 * VH)
+            .px(0.6 * vw_unit())
+            .pb(0.4 * vh_unit())
             .items_end()
             .min_w(0.0)
             .clip_rounded(0.0);
@@ -716,16 +1186,16 @@ fn table_row(p: &Pal) -> El {
 fn inside_empty(message: &str, p: &Pal) -> El {
     rune::el()
         .w_full()
-        .min_h(12.0 * VH)
-        .padding(2.0 * VH)
+        .min_h(12.0 * vh_unit())
+        .padding(2.0 * vh_unit())
         .center()
         .border(1.0, p.line)
         .border_dash(4.0, 4.0)
-        .radius(0.7 * VW)
+        .radius(0.7 * vw_unit())
         .child(
             t(
                 message,
-                font(clamp(16.0, 1.2 * VW, 26.0), 400.0, 1.5, -0.01),
+                font(clamp(16.0, 1.2 * vw_unit(), 26.0), 400.0, 1.5, -0.01),
                 p.ink3,
             )
             .wrap(),
@@ -733,14 +1203,14 @@ fn inside_empty(message: &str, p: &Pal) -> El {
 }
 
 fn recent_panel(s: &State, p: &Pal) -> El {
-    let inner = 1366.0 - 4.0 * VW - 1.2 * VW;
-    let inner = inner * 1.5 / 2.5 - 2.0 - 2.6 * VW;
+    let inner = win_w() - 4.0 * vw_unit() - 1.2 * vw_unit();
+    let inner = inner * 1.5 / 2.5 - 2.0 - 2.6 * vw_unit();
     let w = [0.11, 0.42, 0.14, 0.09, 0.12, 0.12].map(|f| f * inner);
     let title = format!("Laatste {INSIDE_LIST_LENGTH} lopers");
     let mut panel = panel(p)
         .role("region")
         .label(title.clone())
-        .gap(0.6 * VH)
+        .gap(0.6 * vh_unit())
         .child(panel_heading(&title, None, p));
     let recent = recent_laps(history_laps(s), INSIDE_LIST_LENGTH);
     if recent.is_empty() {
@@ -749,9 +1219,9 @@ fn recent_panel(s: &State, p: &Pal) -> El {
             p,
         ));
     }
-    let big = clamp(15.0, 1.1 * VW, 23.0);
-    let mid = clamp(14.0, VW, 21.0);
-    let when = clamp(13.0, 0.95 * VW, 20.0);
+    let big = clamp(15.0, 1.1 * vw_unit(), 23.0);
+    let mid = clamp(14.0, vw_unit(), 21.0);
+    let when = clamp(13.0, 0.95 * vw_unit(), 20.0);
     let mut table = col().grow(1.0).min_h(0.0).w_full().child(head_cells(
         &[
             (w[0], "Binnen om", false),
@@ -765,7 +1235,7 @@ fn recent_panel(s: &State, p: &Pal) -> El {
     ));
     for (i, (lap, best, avg)) in recent.iter().enumerate() {
         let first = if i == 0 {
-            let size = clamp(11.0, 0.7 * VW, 14.0);
+            let size = clamp(11.0, 0.7 * vw_unit(), 14.0);
             row()
                 .py(0.2 * size)
                 .px(0.55 * size)
@@ -843,30 +1313,41 @@ fn recent_panel(s: &State, p: &Pal) -> El {
 }
 
 fn points_panel(s: &State, p: &Pal) -> El {
-    let inner = 1366.0 - 4.0 * VW - 1.2 * VW;
-    let inner = inner / 2.5 - 2.0 - 2.6 * VW;
-    let head = clamp(12.0, 0.8 * VW, 16.0);
+    let inner = win_w() - 4.0 * vw_unit() - 1.2 * vw_unit();
+    let inner = inner / 2.5 - 2.0 - 2.6 * vw_unit();
+    let head = clamp(12.0, 0.8 * vw_unit(), 16.0);
     let place_w = 3.2 * head;
     let w = [place_w, inner * 0.6 - place_w, inner * 0.18, inner * 0.22];
-    let ranking: Vec<Entry> =
-        runner_ranking(snapshot_list(s, "runners"), history_laps(s), true, None)
-            .into_iter()
-            .take(INSIDE_LIST_LENGTH)
-            .collect();
-    let mut panel = panel(p)
-        .role("region")
-        .label("Ranking op punten")
-        .gap(0.6 * VH)
-        .child(panel_heading(
-            "Ranking op punten",
-            Some("Snelle rondes en rondes tussen middernacht en 16 uur tellen zwaarder"),
-            p,
-        ));
+    let ranking: Vec<Entry> = runner_ranking(
+        snapshot_list(s, "runners"),
+        history_laps(s),
+        true,
+        s.public_screens.ranking_label.as_deref(),
+    )
+    .into_iter()
+    .take(INSIDE_LIST_LENGTH)
+    .collect();
+    let only = ranking_labels(s)
+        .into_iter()
+        .find(|l| Some(str_of(&l["id"])) == s.public_screens.ranking_label)
+        .map(|l| format!("Alleen {}", str_of(&l["name"])));
+    let mut panel =
+        panel(p)
+            .role("region")
+            .label("Ranking op punten")
+            .gap(0.6 * vh_unit())
+            .child(panel_heading(
+                "Ranking op punten",
+                Some(only.as_deref().unwrap_or(
+                    "Snelle rondes en rondes tussen middernacht en 16 uur tellen zwaarder",
+                )),
+                p,
+            ));
     if ranking.is_empty() {
         return panel.child(inside_empty("Nog geen rondes voor deze selectie", p));
     }
-    let big = clamp(15.0, 1.1 * VW, 23.0);
-    let mid = clamp(14.0, VW, 21.0);
+    let big = clamp(15.0, 1.1 * vw_unit(), 23.0);
+    let mid = clamp(14.0, vw_unit(), 21.0);
     let mut table = col().grow(1.0).min_h(0.0).w_full().child(head_cells(
         &[
             (w[0], "", false),
@@ -929,7 +1410,7 @@ fn points_panel(s: &State, p: &Pal) -> El {
 // ---------------------------------------------------------------- Competitiescherm
 
 fn competitions(s: &State) -> El {
-    let p = pal(true);
+    let p = pal(!s.public_screens.competitions_light);
     let labels = snapshot_list(s, "labels");
     let ids: Vec<Vec<String>> = s.snapshot["settings"]["competitions"]
         .as_array()
@@ -940,11 +1421,11 @@ fn competitions(s: &State) -> El {
     let can_add = ids.len() < MAX_COMPETITIONS && labels.len() >= 2;
     let title = t(
         "Competities",
-        score_font(clamp(26.0, 2.0 * VW, 44.0), 800.0),
+        score_font(clamp(26.0, 2.0 * vw_unit(), 44.0), 800.0),
         p.ink,
     )
     .role("heading");
-    let width = 1366.0 - 4.0 * VW - 1.2 * VW;
+    let width = win_w() - 4.0 * vw_unit() - 1.2 * vw_unit();
     let left_w = width * 2.3 / 3.3;
     let right_w = width - left_w;
 
@@ -955,16 +1436,16 @@ fn competitions(s: &State) -> El {
         }
     }
     let left = if ids.is_empty() {
-        let size = clamp(16.0, 1.3 * VW, 28.0);
+        let size = clamp(16.0, 1.3 * vw_unit(), 28.0);
         let mut empty = col()
             .w(left_w)
             .h_full()
             .center()
-            .gap(2.4 * VH)
-            .padding(4.0 * VH)
+            .gap(2.4 * vh_unit())
+            .padding(4.0 * vh_unit())
             .border(1.0, p.line)
             .border_dash(3.0, 3.0)
-            .radius(0.7 * VW)
+            .radius(0.7 * vw_unit())
             .child(
                 col()
                     .items_center()
@@ -1017,7 +1498,7 @@ fn competitions(s: &State) -> El {
             .iter()
             .map(|l| (l["id"].as_str().unwrap_or(""), l))
             .collect();
-        let mut list = col().w(left_w).h_full().gap(1.4 * VH).min_h(0.0);
+        let mut list = col().w(left_w).h_full().gap(1.4 * vh_unit()).min_h(0.0);
         for group in &ids {
             let teams: Vec<&Value> = group
                 .iter()
@@ -1038,7 +1519,7 @@ fn competitions(s: &State) -> El {
             .into_iter()
             .take(COMPETITION_RANKING_LENGTH)
             .collect();
-    let help = clamp(12.0, 0.85 * VW, 18.0);
+    let help = clamp(12.0, 0.85 * vw_unit(), 18.0);
     let mut right = panel(&p)
         .w(right_w)
         .role("region")
@@ -1050,13 +1531,13 @@ fn competitions(s: &State) -> El {
                 font(help, 400.0, 1.5, -0.01),
                 p.ink3,
             )
-            .mt(0.4 * VH)
-            .mb(0.8 * VH),
+            .mt(0.4 * vh_unit())
+            .mb(0.8 * vh_unit()),
         );
     if ranking.is_empty() {
         right = right.child(inside_empty("Nog geen rondes.", &p));
     } else {
-        let size = clamp(15.0, 1.1 * VW, 23.0);
+        let size = clamp(15.0, 1.1 * vw_unit(), 23.0);
         let mut list = col().grow(1.0).min_h(0.0).w_full();
         for (i, r) in ranking.iter().enumerate() {
             let podium = i < 3;
@@ -1066,9 +1547,9 @@ fn competitions(s: &State) -> El {
                 .grow(1.0)
                 .min_h(0.0)
                 .center_y()
-                .gap(0.6 * VW);
+                .gap(0.6 * vw_unit());
             li = if i == 0 {
-                li.fill(p.highlight).radius(0.4 * VW)
+                li.fill(p.highlight).radius(0.4 * vw_unit())
             } else {
                 li.border_sides([1.0, 0.0, 0.0, 0.0], p.line)
             };
@@ -1112,16 +1593,16 @@ fn competitions(s: &State) -> El {
             .grow(1.0)
             .min_h(0.0)
             .w_full()
-            .pt(2.2 * VH)
-            .pb(2.2 * VH)
-            .px(2.0 * VW)
-            .gap(1.6 * VH)
+            .pt(2.2 * vh_unit())
+            .pb(2.2 * vh_unit())
+            .px(2.0 * vw_unit())
+            .gap(1.6 * vh_unit())
             .child(header(s, &p, row().child(title)))
             .child(
                 row()
                     .grow(1.0)
                     .min_h(0.0)
-                    .gap(1.2 * VW)
+                    .gap(1.2 * vw_unit())
                     .child(left)
                     .child(right),
             ),
@@ -1233,8 +1714,9 @@ fn competition(
             .truncate()
             .min_w(0.0),
         );
-        let track_w = 1366.0 * 0.5;
-        let bar_w = (0.35 * VW).max(share * (track_w - digits * 0.6 * figure - 1.4 * figure));
+        let track_w = win_w() * 0.5;
+        let bar_w =
+            (0.35 * vw_unit()).max(share * (track_w - digits * 0.6 * figure - 1.4 * figure));
         let mut track = row()
             .grow(1.0)
             .min_w(0.0)
@@ -1243,7 +1725,7 @@ fn competition(
                 rune::el()
                     .w(bar_w)
                     .h(figure * 0.9)
-                    .corners([0.0, 0.6 * VH, 0.6 * VH, 0.0])
+                    .corners([0.0, 0.6 * vh_unit(), 0.6 * vh_unit(), 0.0])
                     .fill(team_color(label)),
             )
             .child(t(format_int(*laps), score_font(figure, 800.0), ink).ml(0.22 * figure));
@@ -1263,7 +1745,7 @@ fn competition(
                 .min_h(0.0)
                 .w_full()
                 .center_y()
-                .gap(1.2 * VW)
+                .gap(1.2 * vw_unit())
                 .child(team)
                 .child(track),
         );
@@ -1272,23 +1754,23 @@ fn competition(
         .role("region")
         .label(title.clone())
         .min_h(0.0)
-        .pt(1.6 * VH + 1.0)
-        .px(1.4 * VW + 1.0)
-        .pb(1.8 * VH + 1.0)
-        .gap(VH)
-        .radius(0.7 * VW)
+        .pt(1.6 * vh_unit() + 1.0)
+        .px(1.4 * vw_unit() + 1.0)
+        .pb(1.8 * vh_unit() + 1.0)
+        .gap(vh_unit())
+        .radius(0.7 * vw_unit())
         .border(1.0, p.line)
         .fill(p.surface)
-        .clip_rounded(0.7 * VW)
+        .clip_rounded(0.7 * vw_unit())
         .child(
             row()
                 .center_y()
-                .gap(1.2 * VW)
+                .gap(1.2 * vw_unit())
                 .min_w(0.0)
                 .child(
                     t(
                         title.clone(),
-                        font(clamp(16.0, 1.25 * VW, 27.0), 600.0, 1.25, -0.015),
+                        font(clamp(16.0, 1.25 * vw_unit(), 27.0), 600.0, 1.25, -0.015),
                         p.ink,
                     )
                     .truncate()
@@ -1297,7 +1779,7 @@ fn competition(
                 )
                 .child(t(
                     verdict,
-                    font(clamp(15.0, 1.1 * VW, 23.0), 500.0, 1.25, -0.01),
+                    font(clamp(15.0, 1.1 * vw_unit(), 23.0), 500.0, 1.25, -0.01),
                     p.ink2,
                 ))
                 .child(
@@ -1326,7 +1808,7 @@ fn competition(
 /// Tick the teams of one competition, then add it.
 fn picker(s: &State) -> Option<El> {
     let picked = s.public_screens.picking.as_ref()?;
-    let p = pal(true);
+    let p = pal(!s.public_screens.competitions_light);
     let mut labels: Vec<&Value> = snapshot_list(s, "labels").iter().collect();
     labels.sort_by_key(|l| {
         (
@@ -1500,7 +1982,7 @@ fn outside(s: &State) -> El {
     let p = pal(false);
     let done = finished(s);
     let race = &s.snapshot["race"];
-    let kicker = clamp(22.0, 2.0 * VW, 44.0);
+    let kicker = clamp(22.0, 2.0 * vw_unit(), 44.0);
     let current_ink3 = oklcha(1.0, 0.0, 0.0, 0.8);
     let mut current = band().fill(blue());
     if !done {
@@ -1534,7 +2016,7 @@ fn outside(s: &State) -> El {
         )
     });
     let mut next = band()
-        .pt(3.0 * VH + 1.0)
+        .pt(3.0 * vh_unit() + 1.0)
         .fill(p.surface)
         .border_sides([1.0, 0.0, 0.0, 0.0], p.line);
     if !done {
@@ -1553,8 +2035,9 @@ fn outside(s: &State) -> El {
         p.ink2,
         p.line,
     ));
-    let logo_w = clamp(200.0, 17.0 * VW, 30.0 * VH);
-    col()
+    let logo_w = clamp(200.0, 17.0 * vw_unit(), 30.0 * vh_unit());
+    let flash = s.public_screens.flash.as_ref().map(|(f, _)| flash_view(f));
+    let screen = col()
         .w_full()
         .h_full()
         .fill(p.bg)
@@ -1567,9 +2050,13 @@ fn outside(s: &State) -> El {
                 .label("Apolloon, terug naar start")
                 .focusable(true)
                 .on_press(|s: &mut State| s.page = 0)
-                .pin(None, Some(4.0 * VH), Some(4.0 * VW), None)
+                .pin(None, Some(4.0 * vh_unit()), Some(4.0 * vw_unit()), None)
                 .child(logo(s, logo_w, logo_w * 169.0 / 560.0)),
-        )
+        );
+    match flash {
+        Some(f) => screen.child(f),
+        None => screen,
+    }
 }
 fn band() -> El {
     col()
@@ -1578,13 +2065,13 @@ fn band() -> El {
         .min_h(0.0)
         .min_w(0.0)
         .justify_center()
-        .gap(2.2 * VH)
-        .py(3.0 * VH)
-        .px(5.0 * VW)
+        .gap(2.2 * vh_unit())
+        .py(3.0 * vh_unit())
+        .px(5.0 * vw_unit())
         .clip_rounded(0.0)
 }
 fn runner_size() -> f32 {
-    clamp(46.0, 6.04 * VW, 128.0)
+    clamp(46.0, 6.04 * vw_unit(), 128.0)
 }
 fn big_name(name: &str, color: Color, weight: f32) -> El {
     let size = runner_size();
@@ -1607,7 +2094,7 @@ fn display_runner(
     let number = str_of(&runner["runnerNumber"]);
     let name = str_of(&runner["name"]);
     // Steps a long name down until it fits on one line (RUNNER_NAME_SCALES).
-    let width = 1366.0 - 10.0 * VW;
+    let width = win_w() - 10.0 * vw_unit();
     let estimate = |scale: f32| {
         (number.chars().count() as f32 * 0.6 + 0.35 + name.chars().count() as f32 * 0.5)
             * size
@@ -1638,9 +2125,9 @@ fn display_runner(
         .flatten()
         .filter(|l| l["kind"] == "zustervereniging" || l["kind"] == "association")
         .collect();
-    let mut out = col().gap(2.2 * VH).min_w(0.0).child(name_row);
+    let mut out = col().gap(2.2 * vh_unit()).min_w(0.0).child(name_row);
     if !shown.is_empty() {
-        let fs = clamp(20.0, 1.6 * VW, 34.0);
+        let fs = clamp(20.0, 1.6 * vw_unit(), 34.0);
         let mut labels = row().gap(0.4 * fs);
         for l in shown {
             let mut pill = row()
@@ -1882,5 +2369,78 @@ mod tests {
         assert_eq!(v(&[("A", 3), ("B", 3), ("C", 1)]), "A en B staan gelijk");
         assert_eq!(v(&[("A", 4), ("B", 3)]), "A leidt met 1 ronde");
         assert_eq!(v(&[("A", 5), ("B", 3)]), "A leidt met 2 rondes");
+    }
+
+    fn timed(id: &str, finished: i64, ms: i64) -> Value {
+        json!({"id": id, "runnerNumber": "7", "runnerName": "Fien", "finishedAt": finished, "durationMs": ms, "source": "spacebar"})
+    }
+
+    #[test]
+    fn outside_flashes_a_new_day_record_and_then_burgie() {
+        let mut s = init_with_url("http://127.0.0.1:9".into());
+        s.page = 7;
+        s.snapshot = json!({"race": {"raceStartedAt": 0}, "settings": {"publicRecordMode": "day"}});
+        s.history = json!({"laps": [timed("a", 100_000, 100_000), timed("b", 170_000, 70_000)], "events": []});
+        refresh(&mut s);
+        assert!(
+            s.public_screens.flash.is_none(),
+            "laps there on opening don't flash"
+        );
+        let mut laps = s.history["laps"].as_array().cloned().unwrap();
+        laps.push(timed("c", 250_000, 80_000));
+        s.history["laps"] = json!(laps);
+        refresh(&mut s);
+        assert!(s.public_screens.flash.is_none(), "slower than the record");
+        laps.push(timed("d", 310_000, 60_000));
+        s.history["laps"] = json!(laps);
+        refresh(&mut s);
+        let (f, _) = s.public_screens.flash.clone().expect("record flash");
+        assert_eq!(
+            (f.title.as_str(), f.big.as_str(), f.who.as_str()),
+            ("Nieuw dagrecord", "1:00.000", "7 Fien")
+        );
+        s.history["events"] = json!([{"id": "e1", "type": "burgie_gepakt", "runnerNumber": "8", "runnerName": "Tuur", "createdAt": 1}]);
+        refresh(&mut s);
+        let (f, _) = s.public_screens.flash.clone().expect("burgie flash");
+        assert_eq!(
+            (f.title.as_str(), f.big.as_str(), f.who.as_str()),
+            ("Burgie gepakt", "ZINGEN", "8 Tuur")
+        );
+        s.page = 5;
+        refresh(&mut s);
+        assert!(s.public_screens.flash.is_none());
+    }
+
+    #[test]
+    fn display_controls_switch_presentation_and_ranking_label() {
+        use rune::{Env, Runtime};
+        let mut s = init_with_url("http://127.0.0.1:9".into());
+        s.page = 5;
+        s.snapshot = json!({"race": {}, "settings": {}, "runners": [], "labels": [{"id": "l1", "name": "Dames", "kind": "andere"}]});
+        s.history = json!({"laps": [], "events": []});
+        s.public_screens.hovered = true;
+        let mut rt = Runtime::new(
+            s,
+            super::super::view,
+            (1366.0, 768.0),
+            Env {
+                system_dark: true,
+                scale: 1.0,
+            },
+        );
+        rt.frame(0.0);
+        let press = |rt: &mut Runtime<State>, key: &str| {
+            rt.frame(1.0 / 60.0);
+            let (x, y) = rt.find(key).unwrap_or_else(|| panic!("Missing {key}"));
+            rt.pointer_move(x, y);
+            rt.pointer_down(x, y);
+            rt.pointer_up(x, y);
+            rt.frame(1.0 / 60.0);
+        };
+        press(&mut rt, "display-light");
+        assert!(rt.state.public_screens.inside_light);
+        press(&mut rt, "display-ranking");
+        press(&mut rt, "display-ranking-l1");
+        assert_eq!(rt.state.public_screens.ranking_label.as_deref(), Some("l1"));
     }
 }

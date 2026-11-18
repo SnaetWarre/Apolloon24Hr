@@ -96,6 +96,7 @@ pub fn read(path: &Path) -> Result<Value> {
         )
         .map_err(err)?,
         revision: 0,
+        capture: Default::default(),
     };
     if copy.one("PRAGMA quick_check", &[])?["quick_check"] != "ok"
         || !copy.rows("PRAGMA foreign_key_check", &[])?.is_empty()

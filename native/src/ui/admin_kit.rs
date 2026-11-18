@@ -49,7 +49,8 @@ pub(super) fn pal(dark: bool) -> Pal {
 pub(super) fn ts(size: f32, weight: f32) -> TextStyle {
     TextStyle::new(size, weight).features("tnum")
 }
-pub(super) const COPY_MAX: f32 = 690.0;
+// `max-width: 76ch` of Geist 13.5px.
+pub(super) const COPY_MAX: f32 = 684.0;
 
 /// `.panel`: 16 padding, 1px line, 8 radius, surface.
 pub(super) fn panel() -> El {
@@ -88,10 +89,17 @@ pub(super) fn strong_text(source: &str, color: Color, dark: bool) -> El {
         let start = plain.len();
         plain.push_str(part);
         if i % 2 == 1 {
-            spans.push(Span::new(start, plain.len()).weight(600.0).color(pal(dark).ink));
+            spans.push(
+                Span::new(start, plain.len())
+                    .weight(600.0)
+                    .color(pal(dark).ink),
+            );
         }
     }
-    rune::rich(plain, spans).font(ts(13.5, 400.0).lh(20.25)).color(color).min_w(0.0)
+    rune::rich(plain, spans)
+        .font(ts(13.5, 400.0).lh(20.25))
+        .color(color)
+        .min_w(0.0)
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -162,7 +170,11 @@ pub(super) fn btn_el(
     if let Some(glyph) = glyph {
         b = b.child(icon(s, glyph, ink, 15.0));
     }
-    b.child(text(label.to_string()).font(ts(if sm { 13.0 } else { 13.5 }, 500.0)).color(ink))
+    b.child(
+        text(label.to_string())
+            .font(ts(if sm { 13.0 } else { 13.5 }, 500.0))
+            .color(ink),
+    )
 }
 
 /// `.segmented-control`: 2px inset on surface-2; the chosen one lifts onto surface.
@@ -198,14 +210,20 @@ pub(super) fn segmented(
             .px(10.0)
             .center()
             .radius(4.0)
-            .child(text(title).font(ts(13.0, 500.0)).color(if on { p.ink } else { p.t.ink2 }));
+            .child(
+                text(title)
+                    .font(ts(13.0, 500.0))
+                    .color(if on { p.ink } else { p.t.ink2 }),
+            );
         if on {
             b = b.fill(p.surface).border(1.0, p.t.line2);
             if !s.dark {
                 b = b.shadow(1.0, 2.0, rune::oklcha(0.21, 0.006, 285.9, 0.05));
             }
         } else if !disabled {
-            b = b.hover(p.t.surface3).on_press(move |s: &mut State| f(s, value));
+            b = b
+                .hover(p.t.surface3)
+                .on_press(move |s: &mut State| f(s, value));
         }
         group = group.child(b);
     }
@@ -219,12 +237,25 @@ pub(super) fn checkbox(s: &State, on: bool) -> El {
     if on {
         b.fill(p.brand).child(icon(s, "check", p.on_brand, 12.0))
     } else {
-        b.fill(p.surface)
-            .border(1.0, if s.dark { p.t.ink3 } else { rune::color::hex("#767676").unwrap() })
+        b.fill(p.surface).border(
+            1.0,
+            if s.dark {
+                p.t.ink3
+            } else {
+                rune::color::hex("#767676").unwrap()
+            },
+        )
     }
 }
 /// `.toggle-row`: a checkbox and its label, 30 high.
-pub(super) fn toggle_row(s: &State, key: &str, title: &str, on: bool, disabled: bool, f: impl Fn(&mut State) + 'static) -> El {
+pub(super) fn toggle_row(
+    s: &State,
+    key: &str,
+    title: &str,
+    on: bool,
+    disabled: bool,
+    f: impl Fn(&mut State) + 'static,
+) -> El {
     let mut r = row()
         .key(key.to_string())
         .role("checkbox")
@@ -237,7 +268,11 @@ pub(super) fn toggle_row(s: &State, key: &str, title: &str, on: bool, disabled: 
         .pl(4.0)
         .center_y()
         .child(checkbox(s, on))
-        .child(text(title.to_string()).font(ts(13.5, 400.0).lh(20.0)).color(pal(s.dark).ink));
+        .child(
+            text(title.to_string())
+                .font(ts(13.5, 400.0).lh(20.0))
+                .color(pal(s.dark).ink),
+        );
     if !disabled {
         r = r.on_press(f);
     }
@@ -283,13 +318,18 @@ pub(super) fn notice(s: &State, tone: Tone, body: El) -> El {
         .flex_wrap()
         .gaps(8.0, 12.0)
         .center_y()
-        .py(9.0)
-        .px(12.0)
+        // 9px padding plus the 1px border of the border-box reference.
+        .py(10.0)
+        .px(13.0)
         .radius(6.0)
         .fill(fill)
         .border(1.0, line)
         .child(body.grow(1.0));
-    if tone == Tone::Alert { el.role("alert") } else { el }
+    if tone == Tone::Alert {
+        el.role("alert")
+    } else {
+        el
+    }
 }
 /// A notice of plain text, `**bold**` in ink.
 pub(super) fn notice_text(s: &State, tone: Tone, value: &str) -> El {
@@ -297,7 +337,12 @@ pub(super) fn notice_text(s: &State, tone: Tone, value: &str) -> El {
     notice(
         s,
         tone,
-        strong_text(value, if tone == Tone::Hint { p.t.ink2 } else { p.ink }, s.dark).wrap(),
+        strong_text(
+            value,
+            if tone == Tone::Hint { p.t.ink2 } else { p.ink },
+            s.dark,
+        )
+        .wrap(),
     )
 }
 
@@ -330,7 +375,9 @@ pub(super) fn value_text(value: impl Into<String>, dark: bool) -> El {
 
 /// A table head cell: 13px, ink-3 on surface, 7/10 padding.
 pub(super) fn th(title: &str, dark: bool) -> El {
-    text(title.to_string()).font(ts(12.5, 500.0)).color(pal(dark).t.ink3)
+    text(title.to_string())
+        .font(ts(12.5, 500.0))
+        .color(pal(dark).t.ink3)
 }
 
 // ---------- Icons (src/components/Icon.tsx), in any colour ----------
@@ -340,13 +387,18 @@ thread_local! {
 }
 pub(super) fn icon(s: &State, name: &'static str, color: Color, size: f32) -> El {
     let el = rune::el().size(size, size);
-    let Some(cache) = &s.image_cache else { return el };
+    let Some(cache) = &s.image_cache else {
+        return el;
+    };
     let (body, stroke) = match name {
         "displayInside" => (
             r#"<rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/>"#,
             1.75,
         ),
-        "displayCompetitions" => (r#"<path d="M8 21V10h8v11M2 21v-7h6M16 21v-5h6M1 21h22"/>"#, 1.75),
+        "displayCompetitions" => (
+            r#"<path d="M8 21V10h8v11M2 21v-7h6M16 21v-5h6M1 21h22"/>"#,
+            1.75,
+        ),
         "displayOutside" => (
             r#"<rect x="2" y="7" width="20" height="14" rx="2"/><path d="m17 2-5 5-5-5"/>"#,
             1.75,
@@ -355,7 +407,10 @@ pub(super) fn icon(s: &State, name: &'static str, color: Color, size: f32) -> El
             r#"<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>"#,
             1.75,
         ),
-        "check" => (r#"<path d="M20 6 9 17l-5-5"/>"#, if size <= 12.0 { 3.0 } else { 2.5 }),
+        "check" => (
+            r#"<path d="M20 6 9 17l-5-5"/>"#,
+            if size <= 12.0 { 3.0 } else { 2.5 },
+        ),
         "download" => (r#"<path d="M12 3v12m0 0-4-4m4 4 4-4M4 21h16"/>"#, 1.75),
         "folder" => (
             r#"<path d="M3 6a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/>"#,

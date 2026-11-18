@@ -26,6 +26,8 @@ const routes = [
 ];
 const out = path.resolve(process.argv[2] ?? '.tmp-native-evidence/native-screens');
 const only = process.argv.slice(3);
+// APOLLOON_VIEWPORT=1920x1080 captures at another size (default 1366x768).
+const [vw, vh] = (process.env.APOLLOON_VIEWPORT ?? '1366x768').split('x').map(Number);
 await mkdir(out, { recursive: true });
 const db = path.join(out, `app-${process.pid}.db`);
 await copyFile(path.resolve('.tmp-native-evidence/native-reference/app.db'), db);
@@ -53,7 +55,7 @@ try {
     await new Promise((r) => setTimeout(r, 100));
   }
   for (const theme of ['dark', 'light']) {
-    const page = await browser.newPage({ viewport: { width: 1366, height: 768 }, colorScheme: theme });
+    const page = await browser.newPage({ viewport: { width: vw, height: vh }, colorScheme: theme });
     await page.addInitScript(() =>
       Object.defineProperty(navigator, 'gpu', { get: () => undefined, configurable: true })
     );
@@ -64,7 +66,7 @@ try {
       await page.waitForFunction(() => document.querySelector('canvas') && !document.querySelector('#status'), {
         timeout: 90000,
       });
-      await page.waitForTimeout(2000);
+      await page.waitForTimeout(Number(process.env.APOLLOON_SETTLE_MS ?? 2000));
       await page.screenshot({ path: path.join(out, `native-${theme}-${name}.png`) });
     }
     await page.close();

@@ -3,7 +3,7 @@
 //! reference, plus the historical deep dive. Charts are drawn with Rune shapes on the same
 //! geometry Chart.js uses (title band, tick labels, nice ticks, grace).
 use super::*;
-use rune::{canvas, el, oklch, Color, LineCap, Shape, TextStyle};
+use rune::{Color, LineCap, Shape, TextStyle, canvas, el, oklch};
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -288,11 +288,7 @@ fn group(int: i64) -> String {
         }
         out.push(c);
     }
-    if int < 0 {
-        format!("-{out}")
-    } else {
-        out
-    }
+    if int < 0 { format!("-{out}") } else { out }
 }
 
 /// `toLocaleString('nl-BE', { maximumFractionDigits: digits })` (and a minimum when `fixed`).
@@ -1377,7 +1373,19 @@ fn chart(s: &State, k: &Ink, spec: ChartSpec) -> El {
                 .child(t((spec.y_fmt)(*v), 12.0, 400.0, k.muted)),
         );
     }
-    card = card.child(
+    card = card.child(if cfg!(target_arch = "wasm32") {
+        // CPU-painted browsers can't draw a turned layer (the frame would stay stale).
+        el().w(16.0)
+            .h(ph)
+            .center()
+            .absolute(3.0, top)
+            .child(super::analysis_page::upright(
+                &spec.y_title,
+                12.0,
+                500.0,
+                k.muted,
+            ))
+    } else {
         row()
             .w(ph)
             .h(16.0)
@@ -1385,8 +1393,8 @@ fn chart(s: &State, k: &Ink, spec: ChartSpec) -> El {
             .center_y()
             .absolute(11.0 - ph / 2.0, top + ph / 2.0 - 8.0)
             .rotate(-std::f32::consts::FRAC_PI_2)
-            .child(t(spec.y_title.clone(), 12.0, 500.0, k.muted)),
-    );
+            .child(t(spec.y_title.clone(), 12.0, 500.0, k.muted))
+    });
     if let Some(xt) = &spec.x_title {
         card = card.child(
             row()
@@ -1501,7 +1509,7 @@ pub(super) fn page(s: &State) -> El {
                 })),
         );
     }
-    let mut page = col().gap(0.0).pt(20.0).pb(24.0).min_w(0.0);
+    let mut page = col().gap(0.0).pt(0.0).pb(24.0).min_w(0.0);
     if s.history["laps"].is_null() && s.history.get("error").is_some() {
         page = page.child(
             t(
@@ -2823,9 +2831,7 @@ fn table(
     highlight: Color,
 ) -> El {
     let cell = |w: f32, c: El| row().grow(w).w(0.0).min_w(0.0).px(12.0).center_y().child(c);
-    let mut head = row()
-        .h(36.0)
-        .border_sides([0.0, 0.0, 1.0, 0.0], k.line);
+    let mut head = row().h(36.0).border_sides([0.0, 0.0, 1.0, 0.0], k.line);
     for (h, w) in heads.iter().zip(widths) {
         head = head.child(cell(*w, t(*h, 12.5, 600.0, k.ink3)));
     }
