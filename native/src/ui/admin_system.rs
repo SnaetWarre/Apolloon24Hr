@@ -1201,7 +1201,7 @@ fn network_panel(s: &State) -> El {
             plain.push_str(" · ");
         }
         let start = plain.len();
-        plain.push_str(title);
+        plain.push_str(&title.replace('-', "-\u{200b}"));
         spans.push(
             Span::new(start, plain.len())
                 .color(p.brand_ink)

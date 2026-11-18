@@ -559,6 +559,7 @@ fn members_panel(s: &State, l: &Value) -> El {
                 .key(format!("label-member-remove-{rid}"))
                 .role("button")
                 .label(format!("{rname} uit {name} halen"))
+                .help("Uit dit label halen")
                 .focusable(!pending)
                 .disabled(pending)
                 .size(26.0, 26.0)

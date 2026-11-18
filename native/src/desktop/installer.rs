@@ -88,12 +88,40 @@ pub fn download(
     Ok(unpacked)
 }
 
-/// Moves the unpacked binary and web-dist in place of the running ones (the old ones stay as
-/// `.old` until the next update). A running binary may be renamed on every platform.
+fn copy_package_dir(source: &Path, target: &Path) -> std::io::Result<()> {
+    std::fs::create_dir(target)?;
+    for entry in std::fs::read_dir(source)? {
+        let entry = entry?;
+        let target = target.join(entry.file_name());
+        let kind = entry.file_type()?;
+        if kind.is_dir() {
+            copy_package_dir(&entry.path(), &target)?;
+        } else if kind.is_file() {
+            std::fs::copy(entry.path(), target)?;
+        } else {
+            return Err(std::io::Error::other("Onverwacht bestand in het updatepakket"));
+        }
+    }
+    Ok(())
+}
+
+/// Stage the unpacked package on the installation filesystem, then swap it in place. The
+/// download cache can live on a different volume. The old files stay as `.old`.
 pub fn apply(unpacked: &Path, install_dir: &Path) -> Result<(), String> {
     if !unpacked.join(binary_name()).is_file() || !unpacked.join("web-dist/index.html").is_file() {
         return Err("Het updatepakket mist het programma of de browserbestanden.".into());
     }
+    let staged = install_dir.join(format!(".update-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir(&staged).map_err(|error| error.to_string())?;
+    let result = std::fs::copy(unpacked.join(binary_name()), staged.join(binary_name()))
+        .and_then(|_| copy_package_dir(&unpacked.join("web-dist"), &staged.join("web-dist")))
+        .map_err(|error| error.to_string())
+        .and_then(|()| swap_package(&staged, install_dir));
+    let _ = std::fs::remove_dir_all(staged);
+    result
+}
+
+fn swap_package(unpacked: &Path, install_dir: &Path) -> Result<(), String> {
     let swap = |name: &str| -> Result<bool, String> {
         let target = install_dir.join(name);
         let old = install_dir.join(format!("{name}.old"));
@@ -154,8 +182,13 @@ mod tests {
     use super::*;
     #[test]
     fn apply_swaps_binary_and_web_dist_and_keeps_the_old_ones() {
-        let root = std::env::temp_dir().join(format!("apolloon-apply-{}", std::process::id()));
-        let (install, unpacked) = (root.join("app"), root.join("new"));
+        let run = uuid::Uuid::new_v4();
+        let root = std::env::temp_dir().join(format!("apolloon-apply-{run}"));
+        let cache = std::env::var_os("APOLLOON_TEST_UPDATE_CACHE")
+            .map(PathBuf::from)
+            .unwrap_or_else(std::env::temp_dir);
+        let install = root.join("app");
+        let unpacked = cache.join(format!("apolloon-unpacked-{run}"));
         std::fs::create_dir_all(install.join("web-dist")).unwrap();
         std::fs::create_dir_all(unpacked.join("web-dist")).unwrap();
         std::fs::write(install.join(binary_name()), "old").unwrap();
@@ -185,6 +218,7 @@ mod tests {
         );
         assert!(install.join("web-dist/index.html").exists());
         std::fs::remove_dir_all(root).unwrap();
+        std::fs::remove_dir_all(unpacked).unwrap();
         assert_eq!(
             sha256_hex(b"abc"),
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
