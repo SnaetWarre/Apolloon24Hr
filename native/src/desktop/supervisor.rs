@@ -118,6 +118,7 @@ impl Supervisor {
             .arg("--server")
             .envs(&env)
             .env("APOLLOON_SUPERVISED", "1")
+            .env("APOLLOON_WINDOW_PID", std::process::id().to_string())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -263,7 +264,10 @@ impl Supervisor {
     pub fn drop_server(&self) {
         let mut inner = self.inner.lock().unwrap();
         inner.generation += 1;
-        inner.lifeline = None;
+        if let Some(mut lifeline) = inner.lifeline.take() {
+            // EOF alone means the window died before it could shut down.
+            let _ = lifeline.write_all(b"q");
+        }
         if let Some(mut child) = inner.child.take() {
             let _ = child.kill();
             let _ = child.wait();
@@ -302,13 +306,59 @@ mod tests {
     }
 }
 
-/// In the server process: exit once the desktop app that started it is gone.
+/// A normal close writes a byte. An unexpected window exit leaves the server running while
+/// it restores the window, so browsers and race writes keep using the same listener and SQLite.
 pub fn follow_lifeline() {
     if std::env::var_os("APOLLOON_SUPERVISED").is_none() {
         return;
     }
     std::thread::spawn(|| {
-        let _ = std::io::copy(&mut std::io::stdin(), &mut std::io::sink());
+        let mut quit = [0];
+        if std::io::stdin().read_exact(&mut quit).is_err() {
+            #[cfg(feature = "desktop")]
+            if let Ok(window) = std::env::var("APOLLOON_WINDOW_PID") {
+                recover_window(window);
+            }
+        }
         std::process::exit(0);
     });
+}
+
+#[cfg(feature = "desktop")]
+fn recover_window(mut previous: String) {
+    let Ok(exe) = std::env::current_exe() else { return };
+    let mut crashes = Vec::new();
+    loop {
+        let now = Instant::now();
+        crashes.retain(|at: &Instant| now.duration_since(*at) < Duration::from_secs(60));
+        crashes.push(now);
+        let delay = if crashes.len() > 3 { 10_000 } else { 500 };
+        std::thread::sleep(Duration::from_millis(delay));
+        // The original process owned the redirected log pipes. Open a file for the replacement
+        // so it can report errors even after those pipes close.
+        let log = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(super::paths().data.join("server.log"));
+        let stderr = log.map(Stdio::from).unwrap_or_else(|_| Stdio::null());
+        let child = Command::new(&exe)
+            .env_remove("APOLLOON_SUPERVISED")
+            .env_remove("APOLLOON_WINDOW_PID")
+            .env("APOLLOON_ATTACHED_SERVER", std::process::id().to_string())
+            .env("RUNE_RELAUNCH_AFTER", &previous)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(stderr)
+            .spawn();
+        let Ok(mut child) = child else { return };
+        previous = child.id().to_string();
+        // Hold the pipe open while the server lives. If the server itself stops, the
+        // replacement window can take ownership of a new server without closing.
+        let _lifeline = child.stdin.take();
+        match child.wait() {
+            Ok(status) if status.success() => return,
+            Ok(_) => {}
+            Err(_) => return,
+        }
+    }
 }

@@ -69,6 +69,9 @@ fn app() -> db::Result<()> {
         }
         ui::run();
         desktop::shut_down();
+        if desktop::attached_window_failed() {
+            return Err("Apolloon-venster is onverwacht gestopt".into());
+        }
         Ok(())
     }
     #[cfg(not(feature = "desktop"))]

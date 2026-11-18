@@ -113,7 +113,6 @@ pub struct State {
     clock_offset: i64,
     public_screens: public_screens::Screen,
     fixture: bool,
-    #[cfg(target_arch = "wasm32")]
     route_seen: String,
 }
 const ROUTES: [&str; 9] = [
@@ -127,7 +126,6 @@ const ROUTES: [&str; 9] = [
     "/display/outside",
     "/admin",
 ];
-#[cfg(target_arch = "wasm32")]
 const SECTIONS: [&str; 7] = [
     "preparation",
     "runners",
@@ -137,7 +135,6 @@ const SECTIONS: [&str; 7] = [
     "activity",
     "system",
 ];
-#[cfg(target_arch = "wasm32")]
 fn apply_route(state: &mut State, route: &str) {
     let (path, query) = route.split_once('?').unwrap_or((route, ""));
     state.page = ROUTES.iter().position(|r| *r == path).unwrap_or(0);
@@ -199,6 +196,9 @@ fn init() -> State {
     #[cfg(not(target_arch = "wasm32"))]
     if !state.fixture {
         state.public_screens.settings.ensure_loaded();
+        if let Some(route) = crate::desktop::recovered_route() {
+            apply_route(&mut state, &route);
+        }
     }
     if !state.fixture {
         tactics_page::restore_reference(&mut state.tactics);
@@ -264,7 +264,6 @@ fn init_with_url(url: String) -> State {
         clock_offset: 0,
         public_screens: Default::default(),
         fixture: false,
-        #[cfg(target_arch = "wasm32")]
         route_seen: String::new(),
     };
     #[cfg(not(target_arch = "wasm32"))]
@@ -345,6 +344,15 @@ impl State {
     }
 }
 fn poll(s: &mut State, _: f64, tx: &mut Tx) -> bool {
+    #[cfg(not(target_arch = "wasm32"))]
+    if !s.fixture {
+        let route = if s.page == 8 {
+            format!("/admin?section={}", SECTIONS[s.admin_section])
+        } else {
+            ROUTES[s.page].into()
+        };
+        crate::desktop::remember_route(route, &mut s.route_seen);
+    }
     if s.fixture {
         return false;
     }

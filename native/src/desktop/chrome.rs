@@ -82,6 +82,7 @@ pub fn run<S: 'static>(mut spec: AppSpec<S>) {
         .on_close(on_close::<S>)
         .on_quit(|_: &mut S, _| {
             save_window_state();
+            super::window_closed();
             super::shut_down();
         })
         .on_focus(|_: &mut S, focused, _| {

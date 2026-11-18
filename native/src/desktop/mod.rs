@@ -82,6 +82,10 @@ pub struct Desktop {
 }
 
 static DESKTOP: OnceLock<Mutex<Desktop>> = OnceLock::new();
+#[cfg(feature = "desktop")]
+static ATTACHED_SERVER: OnceLock<Mutex<Option<u32>>> = OnceLock::new();
+#[cfg(feature = "desktop")]
+static WINDOW_CLOSED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 static SUPERVISOR: OnceLock<supervisor::Supervisor> = OnceLock::new();
 type Hook = Box<dyn Fn(Request) + Send + Sync>;
 static HOOK: OnceLock<Hook> = OnceLock::new();
@@ -112,6 +116,44 @@ fn set_phase(phase: Phase) {
     request(Request::Wake);
 }
 
+#[cfg(feature = "desktop")]
+pub fn window_closed() {
+    WINDOW_CLOSED.store(true, std::sync::atomic::Ordering::Release);
+}
+
+#[cfg(feature = "desktop")]
+pub fn attached_window_failed() -> bool {
+    attached_server().is_some()
+        && !WINDOW_CLOSED.load(std::sync::atomic::Ordering::Acquire)
+}
+
+#[cfg(feature = "desktop")]
+fn attached_server() -> Option<u32> {
+    *ATTACHED_SERVER.get()?.lock().unwrap()
+}
+
+#[cfg(feature = "desktop")]
+pub fn recovered_route() -> Option<String> {
+    attached_server()?;
+    std::fs::read_to_string(data_dir()?.join("window-route")).ok()
+}
+
+#[cfg(feature = "desktop")]
+pub fn remember_route(route: String, previous: &mut String) {
+    if *previous == route {
+        return;
+    }
+    if let Some(data) = data_dir() {
+        let temporary = data.join("window-route.tmp");
+        if std::fs::write(&temporary, &route)
+            .and_then(|()| std::fs::rename(&temporary, data.join("window-route")))
+            .is_ok()
+        {
+            *previous = route;
+        }
+    }
+}
+
 /// Prepares the desktop app: returns false when another instance runs (it was brought forward).
 #[cfg(feature = "desktop")]
 pub fn boot() -> bool {
@@ -125,7 +167,7 @@ pub fn boot() -> bool {
     if let Ok(path) = config::ensure_env_file(&paths.data) {
         env = config::parse_env_text(&std::fs::read_to_string(path).unwrap_or_default());
     }
-    if !env.contains_key("PORT") {
+    if std::env::var_os("APOLLOON_ATTACHED_SERVER").is_some() || !env.contains_key("PORT") {
         if let Ok(port) = std::env::var("PORT") {
             env.insert("PORT".into(), port);
         }
@@ -176,7 +218,20 @@ pub fn boot() -> bool {
         env,
     }));
     let _ = SUPERVISOR.set(supervisor::Supervisor::default());
-    std::thread::spawn(open_app);
+    let attached = std::env::var("APOLLOON_ATTACHED_SERVER").ok()
+        .and_then(|pid| pid.parse::<u32>().ok());
+    let _ = ATTACHED_SERVER.set(Mutex::new(attached));
+    std::thread::spawn(move || {
+        open_app();
+        if attached.is_some() {
+            use std::io::Read;
+            let _ = std::io::stdin().read(&mut [0]);
+            *ATTACHED_SERVER.get().unwrap().lock().unwrap() = None;
+            if !WINDOW_CLOSED.load(std::sync::atomic::Ordering::Acquire) {
+                retry_start();
+            }
+        }
+    });
     // The start screen shows after half a second, and its note after eight.
     std::thread::spawn(|| {
         for wait in [520, 7_500] {
@@ -204,8 +259,12 @@ fn open_app() {
     });
     request(Request::Wake);
     let port = env["PORT"].parse().unwrap_or(5173);
-    let result = supervisor
-        .launch(env, data.clone())
+    #[cfg(feature = "desktop")]
+    let attached = attached_server().is_some();
+    #[cfg(not(feature = "desktop"))]
+    let attached = false;
+    let launch = if attached { Ok(()) } else { supervisor.launch(env, data.clone()) };
+    let result = launch
         .map_err(|text| startup_error::StartupFailure::Other { text })
         .and_then(|()| supervisor.wait_for_server(&url, port, std::time::Duration::from_secs(20)));
     match result {
@@ -435,7 +494,8 @@ pub fn install_update() -> Option<String> {
         });
         let relaunch = exe.ok_or_else(|| std::io::Error::other("geen installatiepad")).and_then(|exe| {
             std::process::Command::new(exe)
-                .env("RUNE_RELAUNCH_AFTER", std::process::id().to_string())
+                .env_remove("APOLLOON_ATTACHED_SERVER")
+                .env("RUNE_RELAUNCH_AFTER", attached_server().unwrap_or_else(std::process::id).to_string())
                 .spawn()
         });
         if let Err(error) = relaunch {
