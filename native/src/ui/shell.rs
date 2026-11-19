@@ -300,22 +300,16 @@ pub(super) fn sidebar(s: &State) -> El {
             )
             .child(toggle)
     };
-    let mut nav = col().gap(16.0).label("Hoofdnavigatie").role("navigation");
+    let _ = t;
+    let mut nav = col().gap(14.0).label("Hoofdnavigatie").role("navigation");
     if collapsed {
         nav = nav.items_center();
     }
     for (title, pages) in GROUPS {
-        let mut group = col().gap(1.0);
-        if let Some(title) = title
-            && !collapsed
-        {
-            group = group.child(
-                row().h(22.0).px(8.0).pb(4.0).center_y().child(
-                    text(title)
-                        .font(rune::TextStyle::new(12.0, 500.0))
-                        .color(c.ink3),
-                ),
-            );
+        // Groups are told apart by space alone, as in Hex; the titles stay for screen readers.
+        let mut group = col().gap(2.0);
+        if let Some(title) = title {
+            group = group.label(title).role("group");
         }
         for &i in pages {
             group = group.child(nav_link(s, i));
@@ -323,14 +317,12 @@ pub(super) fn sidebar(s: &State) -> El {
         nav = nav.child(group);
     }
     let mut side = col()
-        .w(if collapsed { 60.0 } else { 208.0 })
+        .w(if collapsed { 60.0 } else { 224.0 })
         .h_full()
-        .pt(16.0)
-        .pb(12.0)
+        .pt(18.0)
+        .pb(14.0)
         .px(if collapsed { 8.0 } else { 12.0 })
-        .gap(16.0)
-        .fill(tok::sidebar(s.dark))
-        .border_sides([0.0, 1.0, 0.0, 0.0], t.card_border)
+        .gap(18.0)
         .scroll(ScrollSpec {
             stick_bottom: false,
         })
@@ -352,12 +344,12 @@ fn nav_link(s: &State, i: usize) -> El {
         .role("link")
         .label(PAGES[i])
         .focusable(true)
-        .h(32.0)
-        .px(if s.collapsed { 0.0 } else { 8.0 })
-        .gap(10.0)
+        .h(36.0)
+        .px(if s.collapsed { 0.0 } else { 10.0 })
+        .gap(12.0)
         .center_y()
-        .radius(6.0)
-        .hover(c.surface3)
+        .radius(8.0)
+        .hover(c.surface2)
         .on_press(move |s: &mut State| {
             s.page = i;
             s.confirm = None;
@@ -366,10 +358,7 @@ fn nav_link(s: &State, i: usize) -> El {
         link = link.w(40.0).center();
     }
     if current {
-        link = link.fill(t.card).border(1.0, t.card_border).hover(t.card);
-        if !s.dark {
-            link = link.shadow(1.0, 2.0, rune::oklcha(0.21, 0.006, 285.9, 0.05));
-        }
+        link = link.fill(c.surface3).hover(c.surface3);
     }
     let image = i * 3 + if current { 2 } else { usize::from(s.dark) };
     if let Some(img) = s.icons.get(image) {
@@ -400,10 +389,8 @@ fn sidebar_row(key: &str) -> El {
 fn footer(s: &State) -> El {
     let t = tok::theme(s.dark);
     let c = tok::tones(s.dark);
-    let mut footer = col()
-        .gap(2.0)
-        .pt(12.0)
-        .border_sides([1.0, 0.0, 0.0, 0.0], t.card_border);
+    let _ = t;
+    let mut footer = col().gap(2.0).pt(12.0);
     if s.collapsed {
         footer = footer.w_full().items_center();
     } else {
@@ -458,9 +445,8 @@ fn footer(s: &State) -> El {
         });
     }
     let alarming = matches!(tone, Some(Tone::Warning | Tone::Error));
-    if alarming {
-        card = card.fill(wash).border(1.0, line).mb(4.0).pb(8.0);
-    } else if status.is_some() {
+    let _ = (wash, line);
+    if status.is_some() {
         card = card.hover(c.surface3);
     }
     if !s.collapsed {
@@ -688,13 +674,12 @@ pub(super) fn header(s: &State) -> El {
     let t = tok::theme(s.dark);
     let mut bar = row()
         .key("page-header")
-        .min_h(52.0)
-        .px(24.0)
-        .py(8.0)
-        .gap(12.0)
+        .min_h(64.0)
+        .px(30.0)
+        .pt(14.0)
+        .pb(4.0)
+        .gap(14.0)
         .center_y()
-        .fill(t.bg)
-        .border_sides([0.0, 0.0, 1.0, 0.0], t.card_border)
         .child(
             text(PAGES[s.page])
                 .font(type_::TITLE)
@@ -718,80 +703,6 @@ pub(super) fn header(s: &State) -> El {
 }
 
 // ---------- Overview helpers ----------
-
-/// `.btn--sm.btn--quiet` with a trailing arrow: "Naar Timing →".
-pub(super) fn quiet_link(key: String, label: &str, page: usize, dark: bool) -> El {
-    let c = tok::tones(dark);
-    row()
-        .key(key)
-        .role("link")
-        .label(label.to_string())
-        .focusable(true)
-        .h(28.0)
-        .px(10.0)
-        .gap(8.0)
-        .center_y()
-        .radius(6.0)
-        .hover(c.surface3)
-        .on_press(move |s: &mut State| {
-            s.page = page;
-            s.confirm = None;
-        })
-        .child(
-            text(label.to_string())
-                .font(rune::TextStyle::new(13.0, 500.0))
-                .color(c.ink3),
-        )
-        .child(icon("arrowRight", dark, 2, 14.0))
-}
-
-/// Overview › Systeem: the status card (`.overview-status`).
-pub(super) fn overview_status(s: &State) -> Option<El> {
-    let st = system_status(s)?;
-    let t = tok::theme(s.dark);
-    let c = tok::tones(s.dark);
-    let (dot_color, wash, line) = tone_colors(st.tone, s.dark);
-    Some(
-        row()
-            .key("overview-status")
-            .role(if st.tone == Tone::Error {
-                "alert"
-            } else {
-                "status"
-            })
-            .items_start()
-            .gap(8.0)
-            .px(12.0)
-            .pt(10.0)
-            .pb(11.0)
-            .mt(1.0)
-            .radius(6.0)
-            .fill(wash)
-            .border(1.0, line)
-            .child(dot(dot_color).mt(6.0))
-            .child(
-                col()
-                    .min_w(0.0)
-                    .grow(1.0)
-                    .child(
-                        text(if st.tone == Tone::Healthy {
-                            "Alles in orde"
-                        } else {
-                            st.title
-                        })
-                        .font(rune::TextStyle::new(13.0, 550.0).lh(19.5))
-                        .color(t.text),
-                    )
-                    .child(
-                        text(st.detail)
-                            .font(type_::BODY.lh(19.5))
-                            .color(c.ink2)
-                            .wrap()
-                            .min_w(0.0),
-                    ),
-            ),
-    )
-}
 
 /// LiveDuration format="seconds": m:ss, or h:mm:ss past an hour.
 pub(super) fn elapsed_seconds(ms: i64) -> String {

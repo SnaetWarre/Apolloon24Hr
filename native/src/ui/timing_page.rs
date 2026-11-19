@@ -48,21 +48,21 @@ struct Pal {
 fn pal(dark: bool) -> Pal {
     use rune::{color::hex, oklch, oklcha};
     let t = tok::theme(dark);
-    let brand = oklch(0.5681, 0.1641, 251.76);
+    let brand = oklch(0.57, 0.2, 264.0);
     if dark {
         Pal {
             brand,
-            brand_ink: oklch(0.715, 0.13, 247.8),
+            brand_ink: oklch(0.72, 0.14, 262.0),
             on_brand: oklch(1.0, 0.0, 0.0),
-            go: oklch(0.695, 0.181, 145.6),
+            go: oklch(0.74, 0.19, 145.0),
             stop: oklch(0.665, 0.205, 27.0),
             stop_ink: oklch(0.734, 0.163, 25.8),
             stop_wash: oklch(0.247, 0.03, 19.5),
             stop_line: oklch(0.356, 0.077, 23.9),
             warn_ink: oklch(0.7904, 0.1386, 85.24),
-            line2: hex("#3D3D3D").unwrap(),
-            surface2: hex("#272727").unwrap(),
-            surface3: oklch(0.309, 0.0, 0.0),
+            line2: hex("#34343A").unwrap(),
+            surface2: hex("#26262A").unwrap(),
+            surface3: rune::color::hex("#2B2B2F").unwrap(),
             ink2: t.text_secondary,
             ink3: tok::muted(true),
             overlay: oklcha(0.0, 0.0, 0.0, 0.55),
@@ -70,7 +70,7 @@ fn pal(dark: bool) -> Pal {
     } else {
         Pal {
             brand,
-            brand_ink: oklch(0.4923, 0.1419, 251.85),
+            brand_ink: oklch(0.5, 0.19, 264.0),
             on_brand: oklch(1.0, 0.0, 0.0),
             go: oklch(0.527, 0.137, 150.1),
             stop: oklch(0.577, 0.215, 27.3),
@@ -78,9 +78,9 @@ fn pal(dark: bool) -> Pal {
             stop_wash: oklch(0.965, 0.014, 17.4),
             stop_line: oklch(0.862, 0.055, 18.3),
             warn_ink: oklch(0.4732, 0.1247, 46.2),
-            line2: hex("#D4D4D8").unwrap(),
-            surface2: hex("#F4F4F5").unwrap(),
-            surface3: oklch(0.932, 0.004, 286.3),
+            line2: hex("#D9D9DE").unwrap(),
+            surface2: hex("#F1F1F3").unwrap(),
+            surface3: rune::color::hex("#E9E9EC").unwrap(),
             ink2: t.text_secondary,
             ink3: tok::muted(false),
             overlay: oklcha(0.21, 0.006, 285.9, 0.4),
@@ -930,9 +930,9 @@ pub(super) fn page(s: &State) -> El {
 }
 fn oklch_hover(dark: bool) -> rune::Color {
     if dark {
-        rune::oklch(0.605, 0.166, 250.7)
+        rune::oklch(0.61, 0.2, 264.0)
     } else {
-        rune::oklch(0.516, 0.148, 251.6)
+        rune::oklch(0.52, 0.2, 264.0)
     }
 }
 

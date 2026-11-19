@@ -22,6 +22,7 @@ mod admin_kit;
 mod analysis_page;
 mod admin_system;
 mod group_view;
+mod hex;
 mod label_editor;
 mod laps_panel;
 mod profile;
@@ -983,7 +984,6 @@ fn view(s: &State, _cx: &mut Cx<State>) -> El {
     };
     let mut content = col()
         .grow(1.0)
-        .h_full()
         .min_h(0.0)
         .min_w(0.0)
         .gap(20.0)
@@ -1077,14 +1077,35 @@ fn view(s: &State, _cx: &mut Cx<State>) -> El {
             .scroll(ScrollSpec {
                 stick_bottom: false,
             })
-            .px(24.0)
+            .px(30.0)
+            .pb(24.0)
             .child(if s.confirm.is_some() || s.profile.is_some() || s.laps.fix.is_some() {
                 body.inert()
             } else {
                 body
             }),
     );
-    let mut root = row().w_full().h_full().fill(t.bg).child(nav).child(content);
+    // Hex-style window: the sidebar sits on the window colour, the page in one rounded panel.
+    let panel = col()
+        .grow(1.0)
+        .h_full()
+        .min_w(0.0)
+        .py(8.0)
+        .pr(8.0)
+        .child(
+            content
+                .w_full()
+                .fill(t.bg)
+                .radius(12.0)
+                .border(1.0, t.card_border)
+                .clip_rounded(12.0),
+        );
+    let mut root = row()
+        .w_full()
+        .h_full()
+        .fill(tok::sidebar(s.dark))
+        .child(nav)
+        .child(panel);
     if let Some(toast) = group_view::toast(s) {
         root = root.child(toast);
     }
@@ -2245,7 +2266,7 @@ mod tests {
             if rt.find(&hide).is_some_and(|(_, y)| y < 1060.0) {
                 break;
             }
-            rt.wheel(300.0, 120.0, -200.0);
+            rt.wheel(700.0, 600.0, -200.0);
             rt.frame(1.0 / 60.0);
         }
         click(&mut rt, &hide);
