@@ -97,16 +97,16 @@ pub(super) fn pal(dark: bool) -> Pal {
     use rune::oklch;
     let th = tok::theme(dark);
     Pal {
-        brand: oklch(0.5681, 0.1641, 251.76),
+        brand: oklch(0.57, 0.2, 264.0),
         brand_hover: if dark {
-            oklch(0.605, 0.166, 250.7)
+            oklch(0.61, 0.2, 264.0)
         } else {
-            oklch(0.516, 0.148, 251.6)
+            oklch(0.52, 0.2, 264.0)
         },
         brand_ink: if dark {
-            oklch(0.715, 0.13, 247.8)
+            oklch(0.72, 0.14, 262.0)
         } else {
-            oklch(0.4923, 0.1419, 251.85)
+            oklch(0.5, 0.19, 264.0)
         },
         brand_wash: if dark {
             oklch(0.263, 0.036, 250.9)

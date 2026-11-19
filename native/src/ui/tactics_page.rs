@@ -824,7 +824,7 @@ fn ink(dark: bool) -> Ink {
         card: t.card,
         surface2: c.surface2,
         surface3: c.surface3,
-        brand: oklch(0.5681, 0.1641, 251.76),
+        brand: oklch(0.57, 0.2, 264.0),
         brand_wash: if dark {
             oklch(0.263, 0.036, 250.9)
         } else {

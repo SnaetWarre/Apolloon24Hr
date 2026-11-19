@@ -67,7 +67,7 @@ fn pal(dark: bool) -> Pal {
         surface: t.card,
         surface2: c.surface2,
         surface3: c.surface3,
-        brand: oklch(0.5681, 0.1641, 251.76),
+        brand: oklch(0.57, 0.2, 264.0),
         chart_text: h(if dark { "#BDBDBD" } else { "#52525B" }),
         chart_muted: h(if dark { "#8C8C8C" } else { "#71717A" }),
         chart_grid: h(if dark { "#2A2A2A" } else { "#EDEDEF" }),
