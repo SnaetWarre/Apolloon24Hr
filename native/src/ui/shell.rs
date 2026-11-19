@@ -250,7 +250,6 @@ const GROUPS: [(Option<&str>, &[usize]); 5] = [
 ];
 
 pub(super) fn sidebar(s: &State) -> El {
-    let t = tok::theme(s.dark);
     let c = tok::tones(s.dark);
     let collapsed = s.collapsed;
     let toggle_label = if collapsed {
@@ -300,7 +299,6 @@ pub(super) fn sidebar(s: &State) -> El {
             )
             .child(toggle)
     };
-    let _ = t;
     let mut nav = col().gap(14.0).label("Hoofdnavigatie").role("navigation");
     if collapsed {
         nav = nav.items_center();
@@ -349,7 +347,7 @@ fn nav_link(s: &State, i: usize) -> El {
         .gap(12.0)
         .center_y()
         .radius(8.0)
-        .hover(c.surface2)
+        .hover(if s.dark { c.surface2 } else { c.surface3 })
         .on_press(move |s: &mut State| {
             s.page = i;
             s.confirm = None;
@@ -357,8 +355,10 @@ fn nav_link(s: &State, i: usize) -> El {
     if s.collapsed {
         link = link.w(40.0).center();
     }
+    // On the light window a white pill shows the page, as in Hex's light theme.
     if current {
-        link = link.fill(c.surface3).hover(c.surface3);
+        let on = if s.dark { c.surface3 } else { t.bg };
+        link = link.fill(on).hover(on);
     }
     let image = i * 3 + if current { 2 } else { usize::from(s.dark) };
     if let Some(img) = s.icons.get(image) {
@@ -389,7 +389,6 @@ fn sidebar_row(key: &str) -> El {
 fn footer(s: &State) -> El {
     let t = tok::theme(s.dark);
     let c = tok::tones(s.dark);
-    let _ = t;
     let mut footer = col().gap(2.0).pt(12.0);
     if s.collapsed {
         footer = footer.w_full().items_center();
@@ -445,8 +444,9 @@ fn footer(s: &State) -> El {
         });
     }
     let alarming = matches!(tone, Some(Tone::Warning | Tone::Error));
-    let _ = (wash, line);
-    if status.is_some() {
+    if alarming {
+        card = card.fill(wash).border(1.0, line).mb(4.0).pb(8.0);
+    } else if status.is_some() {
         card = card.hover(c.surface3);
     }
     if !s.collapsed {

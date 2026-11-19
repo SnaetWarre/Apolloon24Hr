@@ -543,7 +543,7 @@ pub(super) fn page(s: &State) -> El {
     col()
         .key("queue-page")
         .pb(24.0)
-        .child(super::hex::now_block(s, false).mb(20.0))
+        .child(super::hex::now_block(s).mb(20.0))
         .child(board(s))
         .child(available_now(s).mt(12.0))
 }

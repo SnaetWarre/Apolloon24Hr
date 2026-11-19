@@ -110,19 +110,17 @@ fn split_clock(ms: i64) -> (String, String) {
 }
 
 /// Who is on the track: number, name and the lap clock, with who runs after them.
-pub(super) fn now_block(s: &State, big: bool) -> El {
+pub(super) fn now_block(s: &State) -> El {
     let t = tok::theme(s.dark);
     let c = tok::tones(s.dark);
     let brand = super::admin_kit::pal(s.dark).brand;
     let race = &s.snapshot["race"];
     let all = runners(s);
-    let current = all.iter().find(|r| r["id"] == race["activeRunnerId"]);
-    let next = all.iter().find(|r| r["status"] == "waiting");
-    let mut block = group(s)
-        .key("now-block")
-        .px(if big { 26.0 } else { 20.0 })
-        .pt(if big { 22.0 } else { 18.0 })
-        .pb(if big { 20.0 } else { 16.0 });
+    let current = all
+        .iter()
+        .find(|r| !race["activeRunnerId"].is_null() && r["id"] == race["activeRunnerId"]);
+    let next = super::timing_page::waiting(s).into_iter().next();
+    let mut block = group(s).key("now-block").px(20.0).pt(18.0).pb(16.0);
     let Some(current) = current else {
         let message = if !race["raceFinishedAt"].is_null() {
             "De race is afgesloten."
@@ -148,11 +146,7 @@ pub(super) fn now_block(s: &State, big: bool) -> El {
                 .to_string()
         });
     let (whole, tenth) = split_clock(running);
-    let (name_size, clock_size, tenth_size) = if big {
-        (30.0, 92.0, 40.0)
-    } else {
-        (24.0, 40.0, 22.0)
-    };
+    let (name_size, clock_size, tenth_size) = (24.0, 40.0, 22.0);
     block = block
         .child(
             row()
@@ -179,7 +173,7 @@ pub(super) fn now_block(s: &State, big: bool) -> El {
                         .min_w(0.0)
                         .gap(12.0)
                         .items_end()
-                        .pb(if big { 8.0 } else { 2.0 })
+                        .pb(2.0)
                         .child(
                             text(current["runnerNumber"].as_str().unwrap_or("").to_string())
                                 .font(ts(name_size * 0.66, 400.0))

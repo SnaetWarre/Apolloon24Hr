@@ -136,7 +136,7 @@ fn active_runner(s: &State) -> Option<&Value> {
     }
     s.snapshot["runners"].as_array()?.iter().find(|r| &r["id"] == id)
 }
-fn waiting(s: &State) -> Vec<&Value> {
+pub(super) fn waiting(s: &State) -> Vec<&Value> {
     let mut list: Vec<&Value> = runners(s)
         .into_iter()
         .filter(|r| r["status"] == "waiting")
@@ -766,8 +766,8 @@ pub(super) fn page(s: &State) -> El {
         .child(super::hex::stats(
             s,
             vec![
-                ("Vorige ronde", previous),
-                ("Snelste ronde", best),
+                ("Eigen vorige ronde", previous),
+                ("Eigen snelste ronde", best),
                 ("Race gestart", started),
             ],
         ));

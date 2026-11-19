@@ -203,7 +203,7 @@ pub(super) fn overview(s: &State) -> El {
         .grow(1.0)
         .w(0.0)
         .min_w(0.0)
-        .child(hex::now_block(s, false))
+        .child(hex::now_block(s))
         .child(hex::label(s, "Laatste rondes", None).mt(22.0));
     if history.is_empty() {
         left = left.child(
@@ -294,6 +294,7 @@ pub(super) fn overview(s: &State) -> El {
                 ("Racetijd", race_time(s)),
                 ("Rondes", total.to_string()),
                 ("Per uur", pace),
+                ("Snelste ronde", best.map(lap_duration).unwrap_or_else(|| "—".into())),
             ],
         ))
         .child(hex::label(s, "Wisselzone", None).mt(22.0))
@@ -311,7 +312,7 @@ pub(super) fn overview(s: &State) -> El {
                 if waiting_count == 1 { "loper" } else { "lopers" }
             ))
             .font(hex::ts(13.5, 500.0))
-            .color(c.stop)
+            .color(c.ink2)
             .wrap()
             .mt(10.0)
             .px(4.0),
@@ -325,6 +326,7 @@ pub(super) fn overview(s: &State) -> El {
         system = system.child(
             hex::item(s, true)
                 .key("overview-status")
+                .label(format!("{}: {}. Open Beheer › Systeem & herstel.", st.title, st.detail))
                 .role(if st.tone == shell::Tone::Error { "alert" } else { "link" })
                 .focusable(true)
                 .hover(c.surface2)
@@ -359,6 +361,7 @@ pub(super) fn overview(s: &State) -> El {
         system = system.child(
             hex::item(s, first)
                 .key("overview-laptops")
+                .label("Laptops in de groep. Open Beheer › Systeem & herstel.")
                 .role("link")
                 .focusable(true)
                 .hover(c.surface2)

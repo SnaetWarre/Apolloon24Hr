@@ -8,7 +8,6 @@ pub const LABEL: TextStyle = TextStyle::new(12.5, 500.0);
 pub const TITLE: TextStyle = TextStyle::new(18.0, 600.0);
 pub const LABEL_REGULAR: TextStyle = TextStyle::new(12.5, 400.0);
 pub const NAV: TextStyle = TextStyle::new(14.5, 500.0);
-pub const KPI: TextStyle = TextStyle::new(26.0, 550.0);
 
 pub fn sidebar(dark: bool) -> Color {
     if dark {
@@ -89,7 +88,7 @@ pub fn tones(dark: bool) -> Tones {
             ink3: hex("#8A8A93").unwrap(),
             line2: hex("#D9D9DE").unwrap(),
             surface2: hex("#F1F1F3").unwrap(),
-            surface3: hex("#E9E9EC").unwrap(),
+            surface3: hex("#E1E1E5").unwrap(),
             warn: oklch(0.6095, 0.1447, 56.74),
             warn_ink: oklch(0.4732, 0.1247, 46.2),
             warn_wash: oklch(0.975, 0.018, 81.3),
