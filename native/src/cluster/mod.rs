@@ -7,6 +7,7 @@
 pub mod clock;
 mod join;
 pub mod log;
+mod probe;
 mod raft;
 pub mod routes;
 #[cfg(test)]
@@ -545,6 +546,7 @@ impl Node {
                 let data = crate::recovery::read(&file)?;
                 self.write("backups.applyRestore", &data, origin, None)
             }
+            "cluster.testGroup" => self.test_group(origin),
             "cluster.removeLaptop" | "cluster.removeMember" => {
                 self.group_settled();
                 self.write("cluster.removeLaptop", input, origin, None)
@@ -788,6 +790,7 @@ impl Node {
                 )?;
                 Ok(json!({"name": name}))
             }
+            "cluster.probe" => probe::apply(db, input),
             _ => Err("Onbekende groepsactie".into()),
         }
     }

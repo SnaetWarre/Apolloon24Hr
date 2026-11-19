@@ -718,3 +718,42 @@ fn a_fresh_laptop_links_by_itself_and_the_group_says_so() {
     );
     assert_eq!(b.count("SELECT COUNT(*) AS n FROM runners"), 1);
 }
+
+#[test]
+fn the_group_test_sees_a_mark_arrive_and_leave_on_every_laptop() {
+    let _serial = serial();
+    let dir = Dir::new();
+    let (a, b, c) = linked_three(&dir);
+    let runners = |s: &TestServer| s.count("SELECT COUNT(*) AS n FROM runners");
+    let before = [runners(&a), runners(&b), runners(&c)];
+
+    // Started on a follower: the mark goes through the leader and every laptop reports it.
+    let result = c.act("cluster.testGroup", json!({})).unwrap();
+    assert_eq!(result["ok"], true, "{result}");
+    assert_eq!((result["reached"].as_i64(), result["total"].as_i64()), (Some(3), Some(3)));
+    assert_eq!(result["inStep"], true);
+    for laptop in result["laptops"].as_array().unwrap() {
+        assert!(laptop["addedMs"].as_u64().is_some() && laptop["removedMs"].as_u64().is_some());
+    }
+    // Nothing is left behind, and no race data changed.
+    wait_until("the mark is gone everywhere", Duration::from_secs(5), || {
+        [&a, &b, &c].iter().all(|s| {
+            s.count("SELECT COUNT(*) AS n FROM settings WHERE key LIKE 'cluster_probe:%'") == 0
+        })
+    });
+    assert_eq!([runners(&a), runners(&b), runners(&c)], before);
+
+    // A laptop that is off is reported as not reached; the others still pass.
+    c.kill();
+    let result = a.act("cluster.testGroup", json!({})).unwrap();
+    assert_eq!(result["ok"], false);
+    assert_eq!(result["reached"], 2);
+    let missing: Vec<_> = result["laptops"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|l| l["ok"] != true)
+        .map(|l| l["name"].clone())
+        .collect();
+    assert_eq!(missing, vec![json!("Laptop C")]);
+}

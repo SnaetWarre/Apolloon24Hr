@@ -83,6 +83,35 @@ fn koppelen_links_two_laptops_and_alleen_verder_werken_leaves_the_group() {
             .is_some_and(|m| m.len() == 2)
     });
 
+    // Every screen announces the new group.
+    update(&mut rt, |s| {
+        s.group
+            .toast
+            .as_ref()
+            .is_some_and(|t| t.title == "Gekoppeld met Laptop B")
+    });
+    rt.frame(1.0 / 60.0);
+    assert!(rt.find("group-toast").is_some(), "the join is announced");
+
+    // Groep testen: a change reaches both laptops and is gone again, the runners untouched.
+    let host_b = b.status()["hostId"].as_str().unwrap().to_owned();
+    update(&mut rt, |s| s.snapshot["cluster"]["state"] == "healthy" || s.snapshot["cluster"]["state"] == "degraded");
+    rt.frame(1.0 / 60.0);
+    assert!(rt.find(&format!("cluster-laptop-{host_b}")).is_some(), "B has a card");
+    click(&mut rt, "cluster-test");
+    assert!(rt.state.group.testing);
+    update(&mut rt, |s| !s.busy && !s.group.testing);
+    assert_eq!(rt.state.group.test["ok"], true, "{}", rt.state.error);
+    assert_eq!(rt.state.group.test["total"], 2);
+    rt.frame(1.0 / 60.0);
+    let at = rt.state.group.test["at"].clone();
+    assert!(rt.find(&format!("cluster-test-{at}-{host_b}")).is_some());
+    assert_eq!(b.count("SELECT COUNT(*) AS n FROM runners"), 1);
+    assert_eq!(
+        b.count("SELECT COUNT(*) AS n FROM settings WHERE key LIKE 'cluster_probe:%'"),
+        0
+    );
+
     // B breaks for good: A has no majority, and the operator goes on alone.
     b.kill();
     update(&mut rt, |s| s.snapshot["cluster"]["state"] == "no-majority");

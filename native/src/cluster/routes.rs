@@ -19,6 +19,7 @@ pub fn routes() -> Router<Host> {
         .route("/api/cluster/members", post(members))
         .route("/api/cluster/invite", post(invite))
         .route("/api/cluster/write", post(write))
+        .route("/api/cluster/probe", get(probe))
         .route("/api/time", get(time))
 }
 
@@ -75,6 +76,19 @@ async fn status(State(host): State<Host>, headers: HeaderMap) -> Response {
         Err(_) if host.cluster.is_none() => {
             (headers_out, Json(json!({"enabled": false}))).into_response()
         }
+        Err(refused) => refused,
+    }
+}
+
+/// What a group test asks every laptop: its copy of the test mark and how far its log is.
+async fn probe(
+    State(host): State<Host>,
+    headers: HeaderMap,
+    axum::extract::Query(query): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Response {
+    let id = query.get("id").cloned().unwrap_or_default();
+    match node(&host, &headers) {
+        Ok(node) => blocking(move || Json(node.probe_here(&id)).into_response()).await,
         Err(refused) => refused,
     }
 }
