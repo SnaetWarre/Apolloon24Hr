@@ -74,7 +74,9 @@ jobs:
         run: Compress-Archive -Path package/* -DestinationPath apolloon-native-windows.zip
       - name: Build the macOS disk image
         if: runner.os == 'macOS'
-        run: bash native/packaging/macos/build-image.sh package apolloon-native-macos.dmg
+        run: |
+          brew install create-dmg
+          bash native/packaging/macos/build-image.sh package apolloon-native-macos.dmg
       - name: Copy the macOS application from the disk image and verify it
         if: runner.os == 'macOS'
         shell: bash
@@ -84,6 +86,8 @@ jobs:
           trap 'hdiutil detach "$scratch/mount" || true; rm -r "$scratch"' EXIT
           hdiutil attach apolloon-native-macos.dmg -readonly -nobrowse -mountpoint "$scratch/mount"
           cp -R "$scratch/mount/Apolloon Telsysteem.app" "$scratch/"
+          test -s "$scratch/mount/.DS_Store"
+          codesign --verify --deep --strict --verbose=2 "$scratch/Apolloon Telsysteem.app"
           python3 native/scripts/check-package.py "$scratch/Apolloon Telsysteem.app/Contents/MacOS/apolloon-native"
       - name: Archive Unix package
         if: runner.os != 'Windows'

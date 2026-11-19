@@ -4,6 +4,10 @@ All notable changes to Apolloon Telsysteem will be documented in this file.
 
 ## [Unreleased]
 
+## [6.0.1]
+
+- De macOS-app krijgt een geldige bundelhandtekening en het schijfbestand toont een zwart installatievenster met een pijl naar Applications.
+
 ## [6.0.0]
 
 - Apolloon draait als native Rune-app met een Rust-server. Open het adres van de laptop in een browser voor de publieksschermen.
