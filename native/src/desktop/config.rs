@@ -1,5 +1,5 @@
 //! Port of electron/server-config.ts: the `.env` file in the data folder and the server address,
-//! plus where the built web client lives next to a packaged binary.
+//! and how to find the packaged web client.
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -63,17 +63,32 @@ pub fn ensure_env_file(dir: &Path) -> std::io::Result<PathBuf> {
     Ok(path)
 }
 
-/// APOLLOON_WEB_DIR, else `web-dist` beside the binary (packaged builds), else the dev path.
+fn macos_bundle_resources(exe: &Path) -> Option<PathBuf> {
+    let macos = exe.parent()?;
+    let contents = macos.parent()?;
+    if macos.ends_with("MacOS")
+        && contents.ends_with("Contents")
+        && contents.parent()?.extension()? == "app"
+    {
+        return Some(contents.join("Resources"));
+    }
+    None
+}
+
+fn packaged_web_dir(exe: &Path) -> Option<PathBuf> {
+    let parent = macos_bundle_resources(exe).or_else(|| exe.parent().map(Path::to_path_buf))?;
+    let web = parent.join("web-dist");
+    web.is_dir().then_some(web)
+}
+
+/// APOLLOON_WEB_DIR, else the packaged web client, else the dev path.
 pub fn web_dir(env: Option<String>, exe: Option<PathBuf>) -> PathBuf {
     if let Some(dir) = env.filter(|d| !d.trim().is_empty()) {
         return PathBuf::from(dir);
     }
-    if let Some(beside) = exe.and_then(|e| e.parent().map(|p| p.join("web-dist"))) {
-        if beside.is_dir() {
-            return beside;
-        }
-    }
-    PathBuf::from("native/web-dist")
+    exe.as_deref()
+        .and_then(packaged_web_dir)
+        .unwrap_or_else(|| PathBuf::from("native/web-dist"))
 }
 
 pub fn current_web_dir() -> PathBuf {
@@ -83,12 +98,20 @@ pub fn current_web_dir() -> PathBuf {
     )
 }
 
-/// A packaged build has its web client next to the binary.
 pub fn packaged() -> bool {
     std::env::current_exe()
         .ok()
-        .and_then(|e| e.parent().map(|p| p.join("web-dist").is_dir()))
-        .unwrap_or(false)
+        .as_deref()
+        .and_then(packaged_web_dir)
+        .is_some()
+}
+
+/// A signed app must be replaced as a bundle to keep its signature valid.
+#[cfg(feature = "desktop")]
+pub fn can_update_in_place() -> bool {
+    std::env::current_exe().is_ok_and(|exe| {
+        macos_bundle_resources(&exe).is_none() && packaged_web_dir(&exe).is_some()
+    })
 }
 
 /// Electron's userData: the app's own folder in the platform's settings location.
@@ -158,6 +181,11 @@ mod tests {
         );
         std::fs::create_dir_all(root.join("web-dist")).unwrap();
         assert_eq!(web_dir(Some(" ".into()), Some(exe)), root.join("web-dist"));
+        let contents = root.join("Apolloon Telsysteem.app/Contents");
+        let resources = contents.join("Resources/web-dist");
+        std::fs::create_dir_all(&resources).unwrap();
+        let bundle_exe = contents.join("MacOS/apolloon-native");
+        assert_eq!(web_dir(None, Some(bundle_exe)), resources);
         std::fs::remove_dir_all(root).unwrap();
     }
 }

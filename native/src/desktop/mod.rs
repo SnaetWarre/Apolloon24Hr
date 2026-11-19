@@ -246,7 +246,7 @@ pub fn boot() -> bool {
         quit_confirmed: false,
         full_screen: false,
         focused: true,
-        updates: updates::Flow::new(config::packaged()),
+        updates: updates::Flow::new(config::can_update_in_place()),
         last_install,
         staged: None,
         url: address.url,
