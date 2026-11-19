@@ -1,0 +1,113 @@
+name: Native packages
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        type: string
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows
+            binary: apolloon-native.exe
+          - os: macos-latest
+            platform: macos
+            binary: apolloon-native
+          - os: ubuntu-latest
+            platform: linux
+            binary: apolloon-native
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev libxi-dev libxcursor-dev libxrandr-dev
+      - name: Install wasm-bindgen CLI matching native/Cargo.lock
+        run: cargo install wasm-bindgen-cli --version 0.2.130 --locked
+      - run: bash native/scripts/build-web.sh
+      - run: cargo build --release --locked --manifest-path native/Cargo.toml --bin apolloon-native
+        env:
+          APOLLOON_APP_VERSION: ${{ inputs.version }}
+      - name: Stage package
+        shell: bash
+        run: |
+          mkdir -p package
+          cp "native/target/release/${{ matrix.binary }}" package/
+          cp -R native/web-dist package/web-dist
+      - name: Build the Windows installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $nsis = Get-Command makensis -ErrorAction SilentlyContinue
+          if ($nsis) {
+            $compiler = $nsis.Source
+          } else {
+            $compiler = "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
+            if (!(Test-Path $compiler)) { choco install nsis -y --no-progress }
+          }
+          $root = (Get-Location).Path
+          & $compiler "/DSOURCE_DIR=$root" "/DPACKAGE_DIR=$root\package" "/DSETUP_FILE=$root\apolloon-native-windows-setup.exe" native/packaging/windows/installer.nsi
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Install, open and remove the Windows desktop app
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./native/packaging/windows/check-installer.ps1 -Setup ./apolloon-native-windows-setup.exe
+      - name: Archive Windows package
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path package/* -DestinationPath apolloon-native-windows.zip
+      - name: Build the macOS disk image
+        if: runner.os == 'macOS'
+        run: bash native/packaging/macos/build-image.sh package apolloon-native-macos.dmg
+      - name: Copy the macOS application from the disk image and verify it
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          scratch="$(mktemp -d)"
+          mkdir "$scratch/mount"
+          trap 'hdiutil detach "$scratch/mount" || true; rm -r "$scratch"' EXIT
+          hdiutil attach apolloon-native-macos.dmg -readonly -nobrowse -mountpoint "$scratch/mount"
+          cp -R "$scratch/mount/Apolloon Telsysteem.app" "$scratch/"
+          python3 native/scripts/check-package.py "$scratch/Apolloon Telsysteem.app/Contents/MacOS/apolloon-native"
+      - name: Archive Unix package
+        if: runner.os != 'Windows'
+        run: tar -czf apolloon-native-${{ matrix.platform }}.tar.gz -C package .
+      - name: Start the packaged server and open the browser entry point
+        run: python native/scripts/check-package.py package/${{ matrix.binary }}
+      - uses: actions/upload-artifact@v6
+        with:
+          name: apolloon-native-${{ matrix.platform }}
+          path: |
+            apolloon-native-${{ matrix.platform }}.*
+            apolloon-native-${{ matrix.platform }}-setup.exe
+          if-no-files-found: error
+
+  checksums:
+    needs: package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: apolloon-native-*
+          merge-multiple: true
+      - run: sha256sum apolloon-native-* > SHA256SUMS.txt
+      - uses: actions/upload-artifact@v6
+        with:
+          name: native-sha256sums
+          path: SHA256SUMS.txt

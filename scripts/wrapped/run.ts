@@ -12,8 +12,8 @@ import path from 'node:path';
 import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
-import { buildWrapped, wrappedFileNames } from '../../src/lib/wrapped.ts';
-import type { LapRecord, LiveAppSnapshot, RunnerRegistration } from '../../shared/schemas.ts';
+import { buildWrapped, wrappedFileNames } from './statistics.ts';
+import type { LapRecord, LiveAppSnapshot, RunnerRegistration } from './types.ts';
 import { sendWrappedMails, GMAIL, type SmtpServer } from './mail.ts';
 import {
   mailableCards,
@@ -25,7 +25,13 @@ import {
 } from './manifest.ts';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const serverEntry = path.join(repoRoot, 'dist-server/server/index.js');
+const serverEntry = process.env.APOLLOON_WRAPPED_BIN
+  ? path.resolve(process.env.APOLLOON_WRAPPED_BIN)
+  : path.join(
+      repoRoot,
+      'native/target/debug',
+      process.platform === 'win32' ? 'apolloon-native.exe' : 'apolloon-native'
+    );
 const MAIL_TEXT_FILE = 'mail.txt';
 // The numbers are from the 2026 race; change them before the next one.
 const DEFAULT_MAIL_TEXT = `Onderwerp: 24u Wrapped
@@ -70,7 +76,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
 
 export async function makeCards(options: Options) {
   if (!options.db) throw new Error('Geef de backup mee: --db=<pad naar apolloon-….sqlite of app.db>');
-  if (!fs.existsSync(serverEntry)) throw new Error('Geen build gevonden. Draai eerst `npm run build`.');
+  if (!fs.existsSync(serverEntry)) throw new Error('Geen Rust-server gevonden. Draai eerst `npm run wrapped:build`.');
   const app = await startApp(path.resolve(options.db));
   try {
     const [state, history, registrations] = await Promise.all([
@@ -274,29 +280,31 @@ async function startApp(database: string) {
   const port = await freePort();
   const url = `http://127.0.0.1:${port}`;
   const log = fs.openSync(path.join(dataPath, 'server.log'), 'a');
-  const child = spawn(process.execPath, [serverEntry], {
+  const child = spawn(serverEntry, ['--server'], {
     cwd: repoRoot,
     stdio: ['ignore', log, log],
     env: {
       ...process.env,
-      NODE_ENV: 'production',
-      DATA_PATH: dataPath,
+      APOLLOON_NATIVE_DATA: path.join(dataPath, 'data', 'app.db'),
       PORT: String(port),
       CLUSTER_ENABLED: 'false',
       BACKUP_ENABLED: 'false',
       APOLLOON_UPDATE_CHECK: '0',
     },
   });
+  fs.closeSync(log);
   const stop = async () => {
     child.kill();
-    await new Promise((resolve) => (child.exitCode === null ? child.once('exit', resolve) : resolve(null)));
+    await new Promise((resolve) =>
+      child.exitCode === null && child.signalCode === null ? child.once('exit', resolve) : resolve(null)
+    );
     fs.rmSync(dataPath, { recursive: true, force: true });
   };
   const deadline = Date.now() + 20_000;
   while (Date.now() < deadline) {
     if (child.exitCode !== null) break;
     if (
-      await fetch(`${url}/api/host-info`).then(
+      await fetch(`${url}/api/health`).then(
         (response) => response.ok,
         () => false
       )

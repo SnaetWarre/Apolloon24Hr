@@ -24,7 +24,7 @@ asks for `laps.json` and does not maintain a second copy of the current race.
 ## Historical reference data
 
 The bundled `public/reference/quivr-2025-lap-times.json` export is the default
-reference and is included automatically in Vite and Electron builds. A future
+reference and is included automatically in the Rune build. A future
 edition can be selected in the interface without changing the application.
 
 The organiser export is expected to contain cumulative lap completion times in
@@ -76,7 +76,7 @@ operator review but excluded from tactical calculations.
 
 ## Source parity and native replacements
 
-The React implementation keeps the decision-making capabilities from the
+The Rune screen keeps the decision-making capabilities from the
 Streamlit project, but does not embed or run its Python UI. The historical
 workspace contains these five groups:
 
@@ -103,7 +103,7 @@ Some presentation and input mechanisms are intentionally native:
   event while preserving custom targets between restarts.
 - The original 21 simultaneous small plots are represented by the all-team
   table plus a selectable detailed timeline. This retains every team while
-  keeping the Electron page responsive on the race laptop.
+  keeping the native window responsive on the race laptop.
 - Quarter trends use robust medians rather than mean/SEM bands so an invalid
   timing passage cannot pull a short interval as strongly. Suspicious live laps
   are also visible separately instead of silently disappearing.

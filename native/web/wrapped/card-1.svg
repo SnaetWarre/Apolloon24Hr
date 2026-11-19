@@ -1,0 +1,12 @@
+<text x="84.3" y="492.9" class="wrapped-racing wrapped-orange" font-size="225.98" data-fit="930">{{FIRST_UPPER}}</text>
+<text x="86.4" y="671.5" class="wrapped-bebas wrapped-tight" font-size="165.63" data-fit="480">{{LAST}}</text>
+<text x="63.2" y="839.4" transform="rotate(-5.74 63.2 839.4)" class="wrapped-bebas" font-size="46.66">Aantal rondes</text>
+<text x="111.5" y="1189.5" transform="rotate(-5.68 111.5 1189.5)" class="wrapped-spartan" font-size="290.69" data-fit="390">{{LAPS}}</text>
+<text x="582.2" y="701.5" transform="rotate(7.34 582.2 701.5)" class="wrapped-bebas wrapped-night" font-size="46.66">Snelste ronde</text>
+<text x="559.3" y="895.8" transform="rotate(6.97 559.3 895.8)" class="wrapped-spartan wrapped-night" font-size="93.33" data-fit="360">{{FASTEST}}</text>
+<text x="588.5" y="1071.8" transform="rotate(1.99 588.5 1071.8)" class="wrapped-bebas" font-size="46.66">Gemiddelde tijd</text>
+<text x="579.6" y="1263.3" transform="rotate(2.37 579.6 1263.3)" class="wrapped-spartan" font-size="93.33" data-fit="420">{{AVERAGE}}</text>
+<text x="444.7" y="1383" transform="rotate(6.35 444.7 1383)" class="wrapped-bebas wrapped-night" font-size="46.66">Looptype</text>
+<text x="117.5" y="1565.4" transform="rotate(6.52 117.5 1565.4)" class="wrapped-racing wrapped-orange" font-size="102.28" data-fit="470">{{TYPE}}</text>
+<text x="665.7" y="1444.6" transform="rotate(-1.03 665.7 1444.6)" class="wrapped-bebas" font-size="46.66">Totale afstand</text>
+<text x="667" y="1597.1" transform="rotate(-1.41 667 1597.1)" class="wrapped-spartan" font-size="93.33" data-fit="390">{{METERS_FORMATTED}}</text>

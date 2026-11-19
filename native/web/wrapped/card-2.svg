@@ -1,0 +1,5 @@
+<text x="108" y="397.8" class="wrapped-bebas wrapped-orange" font-size="66.66" data-fit="900">{{FIRST}}, je liep</text>
+<text x="-32.8" y="1372.3" class="wrapped-spartan" font-size="1041.64" data-fit="1060">{{LAPS}}</text>
+<text x="108" y="1560.8" class="wrapped-racing wrapped-orange" font-size="160.01">{{LAP_UNIT}}</text>
+<text x="86.3" y="1804.8" class="wrapped-bebas" font-size="54.66">{{BEATEN}}</text>
+<text x="1003" y="1804.8" class="wrapped-bebas" font-size="54.66" text-anchor="end">{{METERS}} meter</text>

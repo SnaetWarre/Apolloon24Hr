@@ -38,3 +38,6 @@ Thumbs.db
 /rehearse-laptops.json
 /.bench-data/
 /.tmp-*/
+
+# Local Rune development data
+/.native-data/

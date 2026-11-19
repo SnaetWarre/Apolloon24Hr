@@ -16,158 +16,62 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
-env:
-  electron_config_cache: ${{ github.workspace }}/.cache/electron
-  ELECTRON_BUILDER_CACHE: ${{ github.workspace }}/.cache/electron-builder
-
 jobs:
-  checks:
-    name: Typecheck, lint and unit tests
+  tools:
+    name: Check release and Wrapped tools
     runs-on: ubuntu-26.04
-    timeout-minutes: 10
-    # The test jobs never start Electron, so they skip its download; only the build jobs package it.
-    env:
-      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
           node-version: '24'
           cache: npm
-      - run: npm ci --include=optional
-      - run: npm run typecheck
-      - run: npm run lint
-      - run: npm run format:check
+      - run: npm ci
+      - run: npm run check
       - run: npm test
 
-  integration:
-    name: Integration tests
-    runs-on: ubuntu-26.04
-    timeout-minutes: 15
-    env:
-      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+  native:
+    name: Native tests and browser check
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
           node-version: '24'
           cache: npm
-      - run: npm ci --include=optional
-      - run: npm run test:e2e
-
-  browser:
-    name: Browser checks (${{ matrix.shard }}/2)
-    runs-on: ubuntu-26.04
-    timeout-minutes: 15
-    env:
-      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2]
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          node-version: '24'
-          cache: npm
-      - run: npm ci --include=optional
-      - run: npm run build
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native
+      - name: Install Linux dependencies
+        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev libxi-dev libxcursor-dev libxrandr-dev xdotool xvfb xauth libxkbcommon-x11-0 mesa-vulkan-drivers
+      - name: Install wasm-bindgen CLI matching native/Cargo.lock
+        run: cargo install wasm-bindgen-cli --version 0.2.130 --locked
+      - run: npm ci
+      - run: npm run test:native
+      - run: bash native/scripts/build-web.sh
+      - run: cargo build --locked --manifest-path native/Cargo.toml --bin apolloon-native
       - run: npx playwright install --with-deps chromium
-      - run: npm run test:ui -- --shard=${{ matrix.shard }}/2
+      - run: node native/scripts/check-web.mjs
+      - run: node native/scripts/check-web.mjs --cpu
+      - run: node native/scripts/check-failover.mjs
+      - name: Recover crashed and frozen Timing windows while the server stays online
+        run: |
+          timeout 60s xvfb-run -a -s "-screen 0 1366x768x24" bash native/scripts/check-renderer-recovery.sh KILL
+          timeout 60s xvfb-run -a -s "-screen 0 1366x768x24" bash native/scripts/check-renderer-recovery.sh STOP
 
-  # The release runs these on Windows too; find a Windows-only failure here first.
-  windows-tests:
-    name: Unit tests on Windows
-    runs-on: windows-latest
-    timeout-minutes: 15
-    env:
-      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: '24'
-          cache: npm
-      - run: npm ci --include=optional
-      - run: npm test
-
-  build-windows:
-    runs-on: windows-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: '24'
-          cache: 'npm'
-
-      - name: Cache Electron binaries
-        uses: actions/cache@v6
-        with:
-          path: |
-            .cache/electron
-            .cache/electron-builder
-          key: ${{ runner.os }}-electron-${{ hashFiles('package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-electron-
-
-      - name: Install dependencies
-        run: npm ci --include=optional
-
-      - name: Build Windows app
-        run: npm run electron:build:win
-
-      - name: Smoke test Windows package
-        run: node scripts/package-smoke.mjs
-
-      # The Windows-only paths: Beheer › Systeem reads the network profile through PowerShell
-      # while the packaged app leads a second laptop.
-      - name: Open Beheer › Systeem in the packaged app
-        run: node scripts/package-system-ui.mjs
-
-      - name: Check the installer opens and closes the firewall
-        run: node scripts/package-firewall.mjs
-
-  build-linux:
-    runs-on: ubuntu-26.04
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: '24'
-          cache: 'npm'
-
-      - name: Cache Electron binaries
-        uses: actions/cache@v6
-        with:
-          path: |
-            .cache/electron
-            .cache/electron-builder
-          key: ${{ runner.os }}-electron-${{ hashFiles('package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-electron-
-
-      - name: Install dependencies
-        run: npm ci --include=optional
-
-      - name: Build Linux app
-        run: npm run electron:build:linux
-
-      - name: Smoke test Linux AppImage
-        run: xvfb-run -a node scripts/package-smoke.mjs
+  packages:
+    uses: ./.github/workflows/native-packages.yml
 
   # The one check the main branch requires, so jobs can be added or renamed without touching
   # the repository rules. It runs even when a job fails, and fails with it.
   all-checks:
     name: All checks
     if: always()
-    needs: [checks, integration, browser, windows-tests, build-windows, build-linux]
+    needs: [tools, native, packages]
     runs-on: ubuntu-26.04
     timeout-minutes: 2
     steps:

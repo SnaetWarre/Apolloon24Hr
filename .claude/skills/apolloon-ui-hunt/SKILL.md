@@ -19,7 +19,7 @@ Arguments: a number sets the minimum count (default 5); any other text is a focu
 
 Judge every screen against the people and hardware it is for. A problem that does not hurt one of them does not count.
 
-- Operators are teachers, not developers. They work on 1366x768 laptops in the Electron window, through a 24-hour race, at 3 in the morning, often with one hand on the space bar. Timing runs from the keyboard. They do not read long text and they do not know what a "leader" or "sync" is.
+- Operators are teachers, not developers. They work on 1366x768 laptops in the native window, through a 24-hour race, at 3 in the morning, often with one hand on the space bar. Timing runs from the keyboard. They do not read long text and they do not know what a "leader" or "sync" is.
 - Spectators look at `/display/inside` (Binnenscherm) and `/display/outside` (Buitenscherm) on giant TVs from several metres away, at 1920x1080. Nobody touches those pages.
 - Phones do not matter. Do not report or fix anything below 1366 wide.
 - The app has a light and a dark theme; both are used.
@@ -69,17 +69,17 @@ Look at each step of a flow through these lenses:
 - **Motion.** An entrance animation that replays on every poll or re-render, so rows keep flickering. Layout shift that moves a button under the cursor between hover and click. Animations that block clicks or keys while they run. A flash of the wrong theme or of empty content on load. An important change (a new lap, a runner on the track) with no motion, so it is easy to miss. Motion that ignores reduced motion or does not end in the element's normal state.
 - **TV readability.** Text too small to read from a few metres, low contrast, numbers that jump in width as they change, and updates that flicker the whole page.
 
-Good places to look: screens changed in the last few PRs, components with no check in `scripts/validation/*-ui.mjs`, states that only happen mid-race (`--scenario=live`), dialogs opened from inside other dialogs, and anything that updates while the operator is typing.
+- Extend the relevant native test or browser check when it can reproduce the issue.
 
 Skip: taste ("I would use another blue"), new features, rewording text that is already clear, anything below 1366 wide, and anything the house rules above or the docs call deliberate.
 
 ## 2. Verify every finding before it counts
 
-A finding counts only when you can show it on the current `origin/main` build and say who it hurts in which flow. Use `verify-apolloon`: `npm run build`, then `verify.mjs up --run=<slug> --scenario=<scenario> --evidence-dir=$HUNT/<slug>`, `doctor`, and a drive script `$HUNT/<slug>.mjs` that drives the real flow with clicks and keys and calls `run.proof` at each step.
+A finding counts when it reproduces on a current build. Follow verify-apolloon to drive the real clicks and keys. Record a screenshot and a server response that shows the failure.
 
 Back every finding with at least one of these, and assert on it so the script fails where the problem is:
 
-- **A measurement.** Cut-off text: `el.scrollWidth > el.clientWidth`. Overlap: compare `locator.boundingBox()` of the two elements. Lost cursor: `document.activeElement` after the action. Layout shift: collect `layout-shift` entries with a `PerformanceObserver` (`buffered: true`) around the action, and the button's `boundingBox()` before and after. Replaying animation: count `document.getAnimations()` started by one poll with nothing changed. Contrast: compute it from `getComputedStyle` colours (draw them on a canvas to get sRGB, as `scripts/validation/theme-ui.mjs` does) and compare with 4.5:1 for body text and 3:1 for large text. Clicks: count them for the task, before and after.
+- Extend the relevant native test or browser check when it can reproduce the issue.
 - **A screenshot** that anyone would call broken, from `run.proof`. Take it in both themes with `run.newPage({ colorScheme: 'dark' })` when colour matters, and at 1920x1080 for TVs (`viewport: { width: 1920, height: 1080 }`).
 - **A filmed clip** for motion. Open the page with `run.newPage({ video: true })`, slow animations with `Animation.setPlaybackRate`, take `const from = Date.now()` before the action, and call `run.film(page, name, { from, clip })`. Look at `NN-name.frames.png` yourself to judge the motion; the `.gif` is for the PR. The verify skill shows the exact calls. Compare with `reducedMotion: 'reduce'` when the problem is about reduced motion.
 
@@ -89,7 +89,7 @@ Then decide:
 - You can name the operator or spectator, the flow, and what goes wrong for them: a wrong key press, a missed lap, a second click, text they cannot read. If you cannot, drop it.
 - When the measurement passes or the motion looks fine, the suspicion was wrong. Drop it and write it in the ledger.
 
-Stop every run with `verify.mjs down --run=<slug>`. Never `pkill -f` or `pgrep -f`. Nothing opens a window on the user's screen.
+Stop each scratch process by its recorded PID. Use headless Chromium or a virtual display.
 
 ## 3. Fix: one T3 thread per finding
 
@@ -104,7 +104,7 @@ Rules to put in every thread prompt (the thread runs in another worktree and doe
 - Follow the house rules from the "Who uses these screens" section of `.claude/skills/apolloon-ui-hunt/SKILL.md`; paste them in too.
 - Before touching styles, load the user's `good-css` skill, and for anything that changes how a screen looks, the `frontend-design` skill (both installed in the user's Claude Code under `~/.claude/skills/`). If your agent does not list them, read their `SKILL.md` files and follow them.
 - Fix it with the existing tokens in `src/styles/tokens.css` and the keyframes in `src/styles/motion.css`. Add a new token or keyframe only when none fits. Keep the change to the screen and the problem named; no restyling around it.
-- Add a check to the matching `scripts/validation/*-ui.mjs` that fails on `main` and passes on your branch, using the same measurement as the repro, so `npm run test:ui` catches it next time. Skip the check only when the problem cannot be measured (pure motion), and say so in the PR.
+- Extend the relevant native test or browser check when it can reproduce the issue.
 - In the PR, show base and head screenshots side by side in both themes when colour matters, at 1366x768 for operator screens and 1920x1080 for TVs. For motion, put the base and head GIFs from `run.film` side by side in the table and say how much the clip is slowed down. Never attach the `.frames.png` grid.
 
 When two fixes touch the same file or the same component, say so in both prompts so each keeps its diff focused.

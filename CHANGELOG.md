@@ -4,6 +4,13 @@ All notable changes to Apolloon Telsysteem will be documented in this file.
 
 ## [Unreleased]
 
+## [6.0.0]
+
+- Apolloon draait als native Rune-app met een Rust-server. Open het adres van de laptop in een browser voor de publieksschermen.
+- Koppel laptops vanuit het welkomstscherm. Voor de wedstrijd komen inschrijvingen samen zonder dubbele lopers.
+- De installatie leest SQLite-databanken vanaf schema 13 en bewaart een gecontroleerde kopie voor een migratie.
+- Installeer 6.0 op alle laptops voordat je ze koppelt. Bewaar een backup van de wedstrijdgegevens voordat je wisselt.
+
 ## [5.3.1] - 2026-10-23
 
 Laptops koppelen alleen met dezelfde versie: zet 5.3.1 op alle laptops.

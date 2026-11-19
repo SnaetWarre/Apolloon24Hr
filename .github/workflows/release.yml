@@ -1,151 +1,73 @@
 name: Release
 
-# A version tag builds, tests and smoke-tests the installers, attaches them to a draft
-# release with that version's changelog, and adds SHA256SUMS.txt once every build is in.
-
 on:
   push:
-    tags:
-      - 'v*'
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: Existing version tag to build, such as v4.1.0
-        required: true
+    tags: ['native-v*']
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
-  group: release-${{ inputs.tag || github.ref_name }}
+  group: release-${{ github.ref_name }}
   cancel-in-progress: false
 
-env:
-  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
-
 jobs:
-  prepare-release:
+  version:
     runs-on: ubuntu-26.04
-    steps:
-      # Keep the generator from this workflow's revision: older tags do not contain it.
-      - uses: actions/checkout@v7
-
-      - name: Keep the release-note generator
-        run: cp scripts/release-notes.mjs "${RUNNER_TEMP}/release-notes.mjs"
-
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ env.RELEASE_TAG }}
-
-      - name: Verify tag matches package version
-        run: node scripts/verify-release-tag.mjs
-
-      - name: Create draft release with the changelog
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          node "${RUNNER_TEMP}/release-notes.mjs" > "${RUNNER_TEMP}/notes.md"
-          if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
-            gh release edit "${RELEASE_TAG}" --notes-file "${RUNNER_TEMP}/notes.md"
-          else
-            gh release create "${RELEASE_TAG}" \
-              --draft \
-              --verify-tag \
-              --title "Apolloon Telsysteem ${RELEASE_TAG#v}" \
-              --notes-file "${RUNNER_TEMP}/notes.md"
-          fi
-
-  build:
-    needs: prepare-release
-    name: ${{ matrix.name }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: Windows x64
-            os: windows-latest
-            script: electron:build:win
-            # latest*.yml tells installed apps about the new version and its installer (electron/updates.ts).
-            assets: release/*.exe release/latest.yml
-            smoke: node scripts/package-smoke.mjs
-          - name: Linux x64
-            os: ubuntu-26.04
-            script: electron:build:linux
-            assets: release/*.AppImage release/latest-linux.yml
-            smoke: xvfb-run -a node scripts/package-smoke.mjs
-          - name: macOS Apple Silicon
-            os: macos-latest
-            script: electron:build:mac
-            assets: release/*.dmg release/*.zip release/latest-mac.yml
-            smoke: ''
-
+    outputs:
+      number: ${{ steps.verify.outputs.number }}
     steps:
       - uses: actions/checkout@v7
-        with:
-          ref: ${{ env.RELEASE_TAG }}
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: '24'
-          cache: npm
-
-      - name: Cache Electron binaries
-        uses: actions/cache@v6
+      - name: Verify the version and generate release notes
+        id: verify
+        run: |
+          version=$(awk -F '"' '/^version = / { print $2; exit }' native/Cargo.toml)
+          RELEASE_TAG="$GITHUB_REF_NAME" node scripts/verify-release-tag.mjs "$version"
+          node scripts/release-notes.mjs "$version" > notes.md
+          echo "number=$version" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v6
         with:
-          path: |
-            ${{ runner.temp }}/electron
-            ${{ runner.temp }}/electron-builder
-          key: ${{ runner.os }}-${{ runner.arch }}-electron-${{ hashFiles('package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-${{ runner.arch }}-electron-
+          name: release-notes
+          path: notes.md
 
-      - name: Install dependencies
-        run: npm ci --include=optional
-        env:
-          ELECTRON_CACHE: ${{ runner.temp }}/electron
-          ELECTRON_BUILDER_CACHE: ${{ runner.temp }}/electron-builder
+  packages:
+    needs: version
+    uses: ./.github/workflows/native-packages.yml
+    with:
+      version: ${{ needs.version.outputs.number }}
 
-      - name: Run regression tests
-        run: npm test
-
-      - name: Build desktop package
-        run: npm run ${{ matrix.script }}
-        env:
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-          ELECTRON_CACHE: ${{ runner.temp }}/electron
-          ELECTRON_BUILDER_CACHE: ${{ runner.temp }}/electron-builder
-
-      # The same checks as on pull requests: the packaged app starts, opens old databases and backs up.
-      - name: Smoke test the package
-        if: matrix.smoke != ''
-        run: ${{ matrix.smoke }}
-
-      - name: Upload installers to draft release
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          shopt -s nullglob
-          files=(${{ matrix.assets }})
-          if (( ${#files[@]} == 0 )); then
-            echo "No release files matched: ${{ matrix.assets }}" >&2
-            exit 1
-          fi
-          gh release upload "${RELEASE_TAG}" "${files[@]}" --clobber
-
-  checksums:
-    needs: build
+  draft:
+    needs: [version, packages]
     runs-on: ubuntu-26.04
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_VERSION: ${{ needs.version.outputs.number }}
     steps:
-      - name: Add SHA256SUMS.txt for every installer
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: apolloon-native-*
+          merge-multiple: true
+      - uses: actions/download-artifact@v8
+        with:
+          name: native-sha256sums
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-notes
+      - name: Create or update the draft
         run: |
-          mkdir assets && cd assets
-          gh release download "${RELEASE_TAG}" --pattern '*.exe' --pattern '*.AppImage' --pattern '*.dmg' --pattern '*.zip'
-          sha256sum -- * > SHA256SUMS.txt
-          cat SHA256SUMS.txt
-          gh release upload "${RELEASE_TAG}" SHA256SUMS.txt --clobber
+          sha256sum --check --strict SHA256SUMS.txt
+          files=(apolloon-native-* SHA256SUMS.txt)
+          if draft=$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft 2>/dev/null); then
+            test "$draft" = true
+            gh release upload "$GITHUB_REF_NAME" "${files[@]}" --clobber
+            gh release edit "$GITHUB_REF_NAME" --notes-file notes.md
+          else
+            gh release create "$GITHUB_REF_NAME" "${files[@]}" --verify-tag --draft --latest=false \
+              --title "Apolloon Telsysteem $RELEASE_VERSION" --notes-file notes.md
+          fi

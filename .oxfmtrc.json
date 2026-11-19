@@ -4,16 +4,16 @@
   "printWidth": 120,
   "trailingComma": "es5",
   "ignorePatterns": [
-    "dist",
-    "dist-server",
-    "dist-electron",
     "release",
     "public",
     "docs",
     "package-lock.json",
     "*.md",
     "*.html",
-    "*.css"
+    "*.css",
+    "native/.rune",
+    "native/web-dist",
+    "native/target"
   ],
   "sortPackageJson": false
 }

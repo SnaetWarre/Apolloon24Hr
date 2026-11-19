@@ -26,10 +26,9 @@ In both modes:
 - Name a new branch after the kind of change: `fix/…`, `feat/…`, `chore/…`, `refactor/…`, `perf/…`.
 - Make the smallest change that does the job. Fix the case that happened, not every case that could. A review or a failing check tends to grow a PR one cheap-looking fix at a time; fix real bugs in the intended case, and put the rest (extra guards, extra tests, edge cases nobody hits) under "Risks and follow-ups" with one line each.
 - Finish the implementation, then run the checks CI runs, in this order, and record each command and result:
-  - `npm test`
-  - `npm run check` (typecheck, oxlint, oxfmt check, client build)
-  - `npm run test:e2e` when runtime, persistence, replication, failover, or a critical operator flow changed
-  - `npm run test:ui`, or `node scripts/validation/run.mjs <check>` for the checks that cover the change, when operator screens changed
+  - `npm test` and `npm run check`
+  - `npm run test:native`
+  - `npm run build` and `npm run test:browser` for operator, browser, and failover changes
 - Review the final diff for scope, secrets, generated noise, and `git diff --check`. Make a focused commit.
 - Get a second read before you open the PR, every time: run the `code-review` skill at `high` on everything since `origin/main` (`/code-review high origin/main...HEAD`), not only the newest commit, and not against a local `main` that may lag behind. Check each finding against the code yourself. Fix the real ones in the intended case, run the checks again, and review again until a round finds nothing worth fixing (at most three rounds). For each finding you leave, write one line in "Risks and follow-ups" on why.
 - Push the branch.
@@ -45,67 +44,22 @@ Unit and browser tests are regression checks; the PR also needs the change seen 
    SHIP=$(mktemp -d "${TMPDIR:-/tmp}/ship-pr.XXXXXX")
    ```
 
-2. Find the feature in `.claude/skills/verify-apolloon/features/README.md` and read its file. Drive every entry point the file lists for the behavior you changed, not only the most convenient one. If the feature is not mapped, drive it anyway and add a feature file for it in this PR.
-
-3. Write the drive script into `$SHIP` (it survives branch switches there) and run it against the head build:
-
-   ```sh
-   npm run build
-   node .claude/skills/verify-apolloon/scripts/verify.mjs up --run=head --scenario=<scenario> --evidence-dir=$SHIP/head
-   node .claude/skills/verify-apolloon/scripts/verify.mjs doctor --run=head    # must end in DOCTOR ok at the task commit
-   APOLLOON_VERIFY_RUN=head node $SHIP/drive.mjs
-   node .claude/skills/verify-apolloon/scripts/verify.mjs down --run=head
-   ```
-
-   Every `run.proof(page, name)` writes `NN-name.png`, `NN-name.aria.yml`, and `NN-name.state.json` into `$SHIP/head`. The script asserts the side effect on the server (lap saved, status changed, export written), so a passing run is proof, not only a picture.
-
-4. If the run shows a problem outside the task (a wrong label, an error in `actions.log`, a stale handle in the feature map), do not fix unrelated behavior in this PR. List it under "Risks and follow-ups" with the proof file name and what you saw, and mention it in your final report so the user can decide. A stale handle or step in a feature file that this PR's change made stale is in scope: fix the feature file in this PR.
+2. Follow the operator workflow in the verify-apolloon skill. Drive each entry point affected by the change in the built app and assert the saved result independently through HTTP or SQLite. Save screenshots and relevant response JSON in the scratch folder.
+3. Record what the changed behavior proves. Report problems outside the change under "Risks and follow-ups".
 
 ## UI before and after
 
-For a visible change, capture the base the same way with the same drive script, scenario, route, and viewport. The tree must be clean apart from the committed task; never stash or discard the user's own changes to do this. If it is not clean, capture the base before you start editing instead, or say in the PR why there is no base capture.
-
-```sh
-git switch --detach origin/main && npm run build
-node .claude/skills/verify-apolloon/scripts/verify.mjs up --run=base --scenario=<scenario> --evidence-dir=$SHIP/base
-APOLLOON_VERIFY_RUN=base node $SHIP/drive.mjs     # may fail on the new behavior; that is the point
-node .claude/skills/verify-apolloon/scripts/verify.mjs down --run=base
-git switch - && npm run build
-```
-
-The base run's assertions about the new behavior fail by design. Call `run.proof` before each assertion in the drive script, so the base run still saves every screenshot up to the point where it stops. `doctor` prints the commit each run started at; check that base and head differ.
-
-Laptops and big TVs are the only screen sizes that matter: 1366x768 (the default) for operator screens and 1920x1080 for `/display/*`. Do not add phone captures.
-
-Mark what changed, so the user sees it without comparing two screenshots pixel by pixel. Pass `mark` to every `run.proof` that goes in the table, with the same list on base and head:
-
-```js
-await run.proof(page, 'timing-short-lap-question', {
-  mark: [page.getByRole('dialog').getByRole('button', { name: 'Toch afklokken', exact: true }), { x: 960, y: 300, width: 380, height: 120 }],
-});
-```
-
-It saves `NN-name.marked.png` next to the plain screenshot, with a numbered red ring around each locator or box. Ring the thing that changed: the new or moved control, the fixed text, the spot where something wrong used to appear. On the base run, a locator for something that does not exist yet draws no ring and logs that in `actions.log`; pass a box for the empty spot when the absence is the point. Two or three rings at most; a ring around half the screen does not show the reader where to look. Open each marked image and check that every ring sits on the change before you attach it.
-
-Put the marked images side by side in the template's "UI before and after" table, referencing the files directly. Under the table, write one short line per number, for example "1: the confirm button now has the focus". Attach them:
-
-```sh
-gh pr create --base main --title "<title>" --body-file $SHIP/body.md \
-  --attach "$SHIP/base/03-timing-short-lap-question.marked.png#Before: …" \
-  --attach "$SHIP/head/03-timing-short-lap-question.marked.png#After: …"
-```
-
-with `![Before](<same path>)` in `body.md` so `gh` swaps in the uploaded URL in place. For motion (an animation, a transition, a flash), use the `.gif` files from `run.film` in the same table instead of screenshots, and say in the row how much slower the clip plays. A clip over 10 MB goes in as the `.mp4` instead, which GitHub shows as a video player below the body. Use `gh pr edit` with the same flags for an existing PR. If an attachment fails partway, look at the PR before retrying so nothing uploads twice. Never commit screenshots or evidence files.
+Capture base and head with the same fixture, route, viewport, and theme. Use the base revision's build instructions when it uses a different runtime. For operator screens use 1366×768. For public displays use 1920×1080. Annotate the specific control or layout change and put the screenshots side by side in the PR. Keep evidence files outside Git.
 
 ## Performance claims
 
-Use the repo's own benchmarks when they fit: `npm run bench:network`, `npm run bench:failover`, or `npm run rehearse` for failure behavior. Measure base and head on the same machine, same build mode, same data, same warm-up, interleaved, at least five measured runs each. Report units, base, head, delta, and spread in the template's table, with the command and both commits. Differences within the spread are inconclusive. For desktop startup, measure "page ready" separately from "on screen": Chromium's GPU start (about 1 s on this laptop) sets a floor the app cannot move. Battery power slows everything by about 20%, so note it.
+Measure base and head on the same machine, build mode, data, and warm-up. Interleave at least five runs each. Report units, base, head, delta, and spread. For desktop startup, measure server readiness and first rendered frame separately.
 
 ## Open or update the PR
 
 Fill in `.github/pull_request_template.md`: Context, What changed, Evidence (delete the sections that do not apply), Validation (tick only what you ran, with the result), Risks and follow-ups. Open Context with the problem the way an operator or spectator meets it, in one or two sentences, before any list of changed files or functions. In Validation, add which feature files you drove, the scenario, and the run's final `PASS` line. Write the title, body, commit message, and final report with the user's `unslop` skill (`/unslop`, installed in their Claude Code at `~/.claude/skills/unslop/SKILL.md`). Load it before writing the first one; if your agent does not list it, read that file and follow it. Titles in this repo describe the visible result in plain words, for example "Keep laps without labels on Analyse after turning a label off and on again".
 
-Then open the PR and check its title, body, base and head branches, and that every image renders. Clean up only after that: `rm -rf "$SHIP"`, and `verify.mjs list` must show no runs left.
+Then open the PR and check its title, body, base and head branches, and that every image renders. Clean up only after that: `rm -rf "$SHIP"`, and make sure the scratch processes stopped.
 
 ## CI
 

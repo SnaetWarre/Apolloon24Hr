@@ -1,0 +1,6 @@
+<text x="108" y="515.5" class="wrapped-bebas" font-size="66.66">jouw looptype</text>
+<text x="55.1" y="837.6" class="wrapped-racing wrapped-orange" font-size="214.81" data-fit="970">{{TYPE}}</text>
+{{CHART}}
+<foreignObject x="108" y="1187" width="900" height="240">
+<p class="wrapped-story__type-text">{{TYPE_TEXT}}</p>
+</foreignObject>
