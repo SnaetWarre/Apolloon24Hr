@@ -81,12 +81,6 @@ fn registration(base: &Value, details: &Value) -> Result<Value> {
     })
 }
 impl Db {
-    pub fn runner(&self, id: &str) -> Result<Value> {
-        self.runners()?
-            .into_iter()
-            .find(|r| r["id"] == id)
-            .ok_or("Loper niet gevonden".into())
-    }
     pub fn create_runner(&self, input: &Value) -> Result<Value> {
         let name = required(input, "name")?.trim();
         if name.is_empty() {

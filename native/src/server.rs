@@ -7,6 +7,28 @@ use axum::{
 };
 use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
+
+#[derive(Default)]
+struct ReadCache {
+    version: Option<(i64, u64)>,
+    snapshot: Option<Value>,
+    history: Option<Value>,
+}
+
+impl ReadCache {
+    fn refresh(&mut self, db: &Db) {
+        // Replication and snapshot installation advance the revision. total_changes also
+        // covers local settings writes that do not advance the operator-visible revision.
+        let version = (db.revision, db.conn.total_changes());
+        if self.version != Some(version) {
+            *self = Self {
+                version: Some(version),
+                ..Self::default()
+            };
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct Host {
     pub db: Arc<Mutex<Db>>,
@@ -15,6 +37,7 @@ pub struct Host {
     pub backups: Arc<crate::backup_service::Service>,
     /// Linked-laptop runtime (`CLUSTER_ENABLED=true`); writes then replicate to a majority.
     pub cluster: Option<Arc<crate::cluster::Node>>,
+    reads: Arc<Mutex<ReadCache>>,
 }
 impl Host {
     fn new(db: Arc<Mutex<Db>>, port: u16) -> Self {
@@ -41,6 +64,7 @@ impl Host {
             port,
             backups: Arc::new(crate::backup_service::Service::new(path)),
             cluster,
+            reads: Arc::default(),
         }
     }
 }
@@ -54,11 +78,22 @@ fn reply(result: Result<Value>) -> Reply {
     })
 }
 async fn snapshot(State(host): State<Host>) -> Reply {
-    let mut snapshot = host.db.lock().unwrap().snapshot(host.port);
-    if let (Ok(value), Some(node)) = (&mut snapshot, &host.cluster) {
-        value["cluster"] = node.status();
-    }
-    reply(snapshot)
+    let read = || -> Result<Value> {
+        let db = host.db.lock().unwrap();
+        let mut cache = host.reads.lock().unwrap();
+        cache.refresh(&db);
+        if cache.snapshot.is_none() {
+            cache.snapshot = Some(db.race_snapshot()?);
+        }
+        Ok(cache.snapshot.as_ref().unwrap().clone())
+    };
+    reply(read().map(|mut value| {
+        value["host"] = crate::host::info(host.port);
+        if let Some(node) = &host.cluster {
+            value["cluster"] = node.status();
+        }
+        value
+    }))
 }
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -68,11 +103,24 @@ struct HistoryQuery {
     limit: Option<usize>,
 }
 async fn history(State(host): State<Host>, Query(query): Query<HistoryQuery>) -> Reply {
-    reply(host.db.lock().unwrap().history_scope(
-        query.scope.as_deref().unwrap_or("full"),
-        query.runner_id.as_deref(),
-        query.limit.unwrap_or(100),
-    ))
+    let db = host.db.lock().unwrap();
+    let scope = query.scope.as_deref().unwrap_or("full");
+    if scope != "full" {
+        return reply(db.history_scope(
+            scope,
+            query.runner_id.as_deref(),
+            query.limit.unwrap_or(100),
+        ));
+    }
+    let mut cache = host.reads.lock().unwrap();
+    cache.refresh(&db);
+    if let Some(value) = &cache.history {
+        return reply(Ok(value.clone()));
+    }
+    reply(db.history().map(|value| {
+        cache.history = Some(value.clone());
+        value
+    }))
 }
 async fn registrations(State(host): State<Host>) -> Reply {
     reply(host.db.lock().unwrap().registrations())
@@ -589,4 +637,73 @@ pub fn start(db: Arc<Mutex<Db>>, port: u16) -> Result<ServerHandle> {
         shutdown: Some(shutdown),
         thread: Some(thread),
     })
+}
+
+#[cfg(test)]
+mod read_cache_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn warm_reads_follow_local_changes_and_timing_writes() {
+        let db = Arc::new(Mutex::new(
+            Db::open(std::path::Path::new(":memory:")).unwrap(),
+        ));
+        let host = Host::with_cluster(db.clone(), 5173, None);
+        let state = || snapshot(State(host.clone()));
+        let full_history = || {
+            history(
+                State(host.clone()),
+                Query(HistoryQuery {
+                    scope: None,
+                    runner_id: None,
+                    limit: None,
+                }),
+            )
+        };
+        assert_eq!(state().await.unwrap().0["runners"], json!([]));
+        assert_eq!(full_history().await.unwrap().0["laps"], json!([]));
+
+        // Some local settings writes deliberately keep the same public revision.
+        let revision = db.lock().unwrap().revision;
+        db.lock()
+            .unwrap()
+            .exec(
+                "INSERT INTO runners(id,name,status,created_at,updated_at)
+             VALUES ('runner','Cached runner','running',0,0)",
+                &[],
+            )
+            .unwrap();
+        let state = state().await.unwrap().0;
+        assert_eq!(state["runners"][0]["name"], "Cached runner");
+        assert_eq!(state["revision"], revision);
+        {
+            let mut db = db.lock().unwrap();
+            db.exec(
+                "UPDATE race_state SET active_runner_id='runner',active_started_at=1,race_started_at=1",
+                &[],
+            ).unwrap();
+            db.mutation(
+                "race.handoff",
+                &json!({
+                    "activeRunnerId":"runner", "activeStartedAt":1,
+                }),
+            )
+            .unwrap();
+        }
+        let full = full_history().await.unwrap().0;
+        assert_eq!(full["laps"][0]["runnerId"], "runner");
+        let recent = history(
+            State(host),
+            Query(HistoryQuery {
+                scope: Some("recent".into()),
+                runner_id: None,
+                limit: Some(1),
+            }),
+        )
+        .await
+        .unwrap()
+        .0;
+        assert_eq!(recent["laps"], full["laps"]);
+        assert_eq!(recent["limit"], 1);
+    }
 }

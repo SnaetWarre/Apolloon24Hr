@@ -45,6 +45,7 @@ fn clamp(min: f32, pref: f32, max: f32) -> f32 {
 /// What the Competitiescherm's picker has ticked; `None` while it is closed.
 #[derive(Default)]
 pub(super) struct Screen {
+    last_page: Option<usize>,
     picking: Option<Vec<String>>,
     /// The window size the last frame laid out in, for the vw/vh sizes.
     size: Option<(f32, f32)>,
@@ -127,10 +128,29 @@ pub(super) fn is_record(
 pub(super) fn key(s: &mut State, event: &rune::KeyEvent) -> bool {
     settings::key(&mut s.public_screens.settings, s.page, event)
 }
-/// Called every poll: while the Buitenscherm is open, a new record lap or Burgie event flashes.
-pub(super) fn refresh(s: &mut State) {
+pub(super) fn poll(s: &mut State, changed: bool, now: i64) -> bool {
+    let screen = &mut s.public_screens;
+    let on_display = (5..=7).contains(&s.page);
+    let refresh_display = screen.last_page != Some(s.page)
+        || (on_display && changed)
+        || screen.flash.as_ref().is_some_and(|(_, at)| now - at >= OUTSIDE_ALERT_VISIBLE_MS);
+    screen.last_page = Some(s.page);
+    if refresh_display {
+        refresh(s, now);
+    }
+    let race = &s.snapshot["race"];
+    let clock_ticked = s.page == 5
+        && race["raceFinishedAt"].is_null()
+        && race["raceStartedAt"].as_i64().is_some_and(|start| {
+            (now - start).max(0) / 1000 != (s.clock - start).max(0) / 1000
+        });
+    s.clock = now;
+    !on_display || refresh_display || clock_ticked
+}
+
+/// While the Buitenscherm is open, a new record lap or Burgie event flashes.
+fn refresh(s: &mut State, now: i64) {
     track_arrivals(s);
-    let now = s.server_now();
     let screen = &mut s.public_screens;
     if let Some((_, at)) = &screen.flash
         && now - at >= OUTSIDE_ALERT_VISIBLE_MS
@@ -2552,12 +2572,28 @@ mod tests {
     }
 
     #[test]
+    fn idle_display_redraws_on_data_clock_or_route_changes() {
+        let mut s = init_with_url("http://127.0.0.1:9".into());
+        s.page = 5;
+        s.snapshot = json!({"race": {"raceStartedAt": 1000}});
+        assert!(poll(&mut s, false, 1000));
+        assert!(!poll(&mut s, false, 1900));
+        assert!(poll(&mut s, false, 2000));
+        s.snapshot["race"]["raceFinishedAt"] = json!(2050);
+        assert!(poll(&mut s, true, 2100));
+        assert!(!poll(&mut s, false, 3000));
+        s.page = 7;
+        assert!(poll(&mut s, false, 3100));
+        assert!(!poll(&mut s, false, 3200));
+    }
+
+    #[test]
     fn outside_flashes_a_new_day_record_and_then_burgie() {
         let mut s = init_with_url("http://127.0.0.1:9".into());
         s.page = 7;
         s.snapshot = json!({"race": {"raceStartedAt": 0}, "settings": {"publicRecordMode": "day"}});
         s.history = json!({"laps": [timed("a", 100_000, 100_000), timed("b", 170_000, 70_000)], "events": []});
-        refresh(&mut s);
+        poll(&mut s, true, now());
         assert!(
             s.public_screens.flash.is_none(),
             "laps there on opening don't flash"
@@ -2565,25 +2601,28 @@ mod tests {
         let mut laps = s.history["laps"].as_array().cloned().unwrap();
         laps.push(timed("c", 250_000, 80_000));
         s.history["laps"] = json!(laps);
-        refresh(&mut s);
+        poll(&mut s, true, now());
         assert!(s.public_screens.flash.is_none(), "slower than the record");
         laps.push(timed("d", 310_000, 60_000));
         s.history["laps"] = json!(laps);
-        refresh(&mut s);
+        poll(&mut s, true, now());
         let (f, _) = s.public_screens.flash.clone().expect("record flash");
         assert_eq!(
             (f.title.as_str(), f.big.as_str(), f.who.as_str()),
             ("Nieuw dagrecord", "1:00.000", "7 Fien")
         );
         s.history["events"] = json!([{"id": "e1", "type": "burgie_gepakt", "runnerNumber": "8", "runnerName": "Tuur", "createdAt": 1}]);
-        refresh(&mut s);
-        let (f, _) = s.public_screens.flash.clone().expect("burgie flash");
+        poll(&mut s, true, now());
+        let (f, shown_at) = s.public_screens.flash.clone().expect("burgie flash");
         assert_eq!(
             (f.title.as_str(), f.big.as_str(), f.who.as_str()),
             ("Burgie gepakt", "ZINGEN", "8 Tuur")
         );
+        assert!(!poll(&mut s, false, shown_at + OUTSIDE_ALERT_VISIBLE_MS - 1));
+        assert!(poll(&mut s, false, shown_at + OUTSIDE_ALERT_VISIBLE_MS));
+        assert!(s.public_screens.flash.is_none());
         s.page = 5;
-        refresh(&mut s);
+        poll(&mut s, true, now());
         assert!(s.public_screens.flash.is_none());
     }
 
@@ -2628,16 +2667,16 @@ mod tests {
         s.page = 5;
         s.snapshot = json!({"race": {"raceStartedAt": 0}, "settings": {}, "runners": []});
         s.history = json!({"laps": [timed("a", 100_000, 100_000)], "events": []});
-        refresh(&mut s);
+        poll(&mut s, true, now());
         assert!(!arrived(&s, "active") && !arrived(&s, "next"), "the first ones are simply there");
         assert!(s.public_screens.new_laps.is_empty());
         assert_eq!(s.public_screens.laps_at_open, Some(1));
         s.history["laps"] = json!([timed("a", 100_000, 100_000), timed("b", 170_000, 70_000)]);
-        refresh(&mut s);
+        poll(&mut s, true, now());
         assert!(s.public_screens.new_laps.contains("b"));
         assert!(!s.public_screens.new_laps.contains("a"));
         s.page = 0;
-        refresh(&mut s);
+        poll(&mut s, true, now());
         assert!(s.public_screens.seen_laps.is_none(), "reopening starts over");
     }
 

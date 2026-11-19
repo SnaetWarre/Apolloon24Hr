@@ -1,35 +1,55 @@
 //! Read contracts shared by the native operator UI and LAN clients.
-use crate::db::{Db, Result};
+use crate::db::{Db, Result, parse_labels};
 use serde_json::{Value, json};
 impl Db {
+    pub fn history(&self) -> Result<Value> {
+        self.history_scope("full", None, 0)
+    }
+
     pub fn history_scope(&self, scope: &str, runner: Option<&str>, limit: usize) -> Result<Value> {
-        let mut history = self.history()?;
-        match scope {
-            "full" => {}
+        let mut args = Vec::new();
+        let (filter, limit_sql, runner_id, reported_limit) = match scope {
+            "full" => ("", "", None, None),
             "recent" => {
                 let limit = limit.clamp(1, 1000);
-                history["laps"].as_array_mut().unwrap().truncate(limit);
-                history["events"]
-                    .as_array_mut()
-                    .unwrap()
-                    .truncate(limit.min(100));
-                history["limit"] = json!(limit);
+                args.push(json!(limit));
+                ("", " LIMIT ?", None, Some(limit))
             }
             "runner" => {
-                let runner = runner
+                let id = runner
                     .filter(|id| !id.is_empty())
                     .ok_or("Loper ontbreekt")?;
-                history["laps"]
-                    .as_array_mut()
-                    .unwrap()
-                    .retain(|lap| lap["runnerId"] == runner);
-                history["events"] = json!([]);
-                history["runnerId"] = json!(runner);
+                args.push(json!(id));
+                (" WHERE l.runner_id=?", "", Some(id), None)
             }
             _ => return Err("Onbekende geschiedenisselectie".into()),
+        };
+        let mut laps = self.rows(&format!(
+            "SELECT l.id,l.runner_id AS runnerId,r.runner_number AS runnerNumber,r.name AS runnerName,
+             l.lap_number AS lapNumber,l.started_at AS startedAt,l.finished_at AS finishedAt,
+             l.duration_ms AS durationMs,l.source,l.created_at AS createdAt,l.labels_json AS labels
+             FROM laps l JOIN runners r ON r.id=l.runner_id{filter}
+             ORDER BY l.finished_at DESC,l.rowid DESC{limit_sql}"),
+            &args,
+        )?;
+        for lap in &mut laps {
+            lap["labels"] = parse_labels(&lap["labels"]);
         }
-        history["scope"] = json!(scope);
-        Ok(history)
+        let events = if runner_id.is_some() {
+            Vec::new()
+        } else {
+            self.rows(
+                "SELECT id,type,message,occurred_at AS occurredAt,runner_id AS runnerId,
+                 runner_number AS runnerNumber,runner_name AS runnerName,created_at AS createdAt
+                 FROM race_events ORDER BY occurred_at DESC LIMIT ?",
+                &[json!(
+                    reported_limit.map(|n| n.min(100) as i64).unwrap_or(-1)
+                )],
+            )?
+        };
+        Ok(
+            json!({"scope":scope,"runnerId":runner_id,"limit":reported_limit,"laps":laps,"events":events,"revision":self.revision}),
+        )
     }
     pub fn registrations(&self) -> Result<Value> {
         let mut output = serde_json::Map::new();

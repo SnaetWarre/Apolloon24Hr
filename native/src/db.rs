@@ -41,6 +41,9 @@ pub struct Db {
     /// Set by the linked-laptop runtime: every statement `exec` runs is recorded for replication.
     pub capture: std::cell::RefCell<Option<crate::cluster::log::Capture>>,
 }
+macro_rules! runner_select {
+    () => { "SELECT r.id,r.runner_number AS runnerNumber,r.name,r.target_laps AS targetLaps,r.historical_avg_ms AS historicalAvgMs,r.historical_best_ms AS historicalBestMs,r.registration_source AS registrationSource,COALESCE(r.notes,'') AS notes,json_extract(r.registration_json,'$.estimatedPace') AS estimatedPace,r.created_at AS createdAt,r.updated_at AS updatedAt,r.status,r.status_since AS statusSince,r.queue_index AS queueIndex,r.hidden_at AS queueHiddenAt,COUNT(l.id) AS lapCount,MIN(CASE WHEN l.duration_ms BETWEEN 20000 AND 600000 THEN l.duration_ms END) AS bestLapMs,MAX(CASE WHEN l.duration_ms BETWEEN 20000 AND 600000 THEN l.duration_ms END) AS slowestLapMs,ROUND(AVG(CASE WHEN l.duration_ms BETWEEN 20000 AND 600000 THEN l.duration_ms END)) AS averageLapMs,COALESCE(SUM(l.duration_ms),0) AS totalTimeMs,(SELECT duration_ms FROM laps WHERE runner_id=r.id ORDER BY finished_at DESC LIMIT 1) AS lastLapMs FROM runners r LEFT JOIN laps l ON l.runner_id=r.id" };
+}
 impl Db {
     pub fn open(path: &Path) -> Result<Self> {
         if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
@@ -139,28 +142,53 @@ impl Db {
         Ok(v)
     }
     pub fn runners(&self) -> Result<Vec<Value>> {
-        let mut runners = self.rows("SELECT r.id,r.runner_number AS runnerNumber,r.name,r.target_laps AS targetLaps,r.historical_avg_ms AS historicalAvgMs,r.historical_best_ms AS historicalBestMs,r.registration_source AS registrationSource,COALESCE(r.notes,'') AS notes,json_extract(r.registration_json,'$.estimatedPace') AS estimatedPace,r.created_at AS createdAt,r.updated_at AS updatedAt,r.status,r.status_since AS statusSince,r.queue_index AS queueIndex,r.hidden_at AS queueHiddenAt,COUNT(l.id) AS lapCount,MIN(CASE WHEN l.duration_ms BETWEEN 20000 AND 600000 THEN l.duration_ms END) AS bestLapMs,MAX(CASE WHEN l.duration_ms BETWEEN 20000 AND 600000 THEN l.duration_ms END) AS slowestLapMs,ROUND(AVG(CASE WHEN l.duration_ms BETWEEN 20000 AND 600000 THEN l.duration_ms END)) AS averageLapMs,COALESCE(SUM(l.duration_ms),0) AS totalTimeMs,(SELECT duration_ms FROM laps WHERE runner_id=r.id ORDER BY finished_at DESC LIMIT 1) AS lastLapMs FROM runners r LEFT JOIN laps l ON l.runner_id=r.id GROUP BY r.id ORDER BY CASE r.status WHEN 'running' THEN 0 WHEN 'waiting' THEN 1 WHEN 'warming_up' THEN 2 WHEN 'ran' THEN 3 ELSE 4 END,r.queue_index,r.name", &[])?;
+        let mut runners = self.rows(concat!(runner_select!(), " GROUP BY r.id ORDER BY CASE r.status WHEN 'running' THEN 0 WHEN 'waiting' THEN 1 WHEN 'warming_up' THEN 2 WHEN 'ran' THEN 3 ELSE 4 END,r.queue_index,r.name"), &[])?;
+        let mut labels = std::collections::HashMap::<String, Vec<Value>>::new();
+        for mut label in self.rows(
+            "SELECT rl.runner_id AS runnerId, l.id,l.name,l.color,l.icon,l.kind,l.image_url AS imageUrl,l.target_laps AS targetLaps,l.sort_order AS sortOrder,l.created_at AS createdAt,l.updated_at AS updatedAt
+             FROM runner_labels rl JOIN labels l ON l.id=rl.label_id
+             ORDER BY CASE l.kind WHEN 'speedteam' THEN 0 WHEN 'zustervereniging' THEN 1 WHEN 'association' THEN 1 WHEN 'andere' THEN 2 WHEN 'group' THEN 2 ELSE 3 END,l.name COLLATE NOCASE",
+            &[],
+        )? {
+            let id = label.as_object_mut().unwrap().remove("runnerId").unwrap();
+            if let Value::String(id) = id {
+                labels.entry(id).or_default().push(label);
+            }
+        }
         for runner in &mut runners {
-            runner["labels"] = json!(self.labels(runner["id"].as_str())?);
+            let id = runner["id"].as_str().unwrap_or_default();
+            runner["labels"] = json!(labels.remove(id).unwrap_or_default());
             runner["hiddenFromQueue"] = json!(!runner["queueHiddenAt"].is_null());
         }
         Ok(runners)
     }
-    pub fn history(&self) -> Result<Value> {
-        let mut laps = self.rows("SELECT l.id,l.runner_id AS runnerId,r.runner_number AS runnerNumber,r.name AS runnerName,l.lap_number AS lapNumber,l.started_at AS startedAt,l.finished_at AS finishedAt,l.duration_ms AS durationMs,l.source,l.created_at AS createdAt,l.labels_json AS labels FROM laps l JOIN runners r ON r.id=l.runner_id ORDER BY l.finished_at DESC,l.rowid DESC", &[])?;
-        for lap in &mut laps {
-            lap["labels"] = parse_labels(&lap["labels"]);
-        }
-        let events = self.rows("SELECT id,type,message,occurred_at AS occurredAt,runner_id AS runnerId,runner_number AS runnerNumber,runner_name AS runnerName,created_at AS createdAt FROM race_events ORDER BY occurred_at DESC", &[])?;
+    pub fn runner(&self, id: &str) -> Result<Value> {
+        let mut runner = self
+            .one(
+                concat!(runner_select!(), " WHERE r.id=? GROUP BY r.id"),
+                &[json!(id)],
+            )
+            .map_err(|error| {
+                if error == "Niet gevonden" {
+                    "Loper niet gevonden".into()
+                } else {
+                    error
+                }
+            })?;
+        runner["labels"] = json!(self.labels(Some(id))?);
+        runner["hiddenFromQueue"] = json!(!runner["queueHiddenAt"].is_null());
+        Ok(runner)
+    }
+    pub(crate) fn race_snapshot(&self) -> Result<Value> {
+        let undo = self.rows("SELECT json_extract(payload_json,'$.kind') AS kind FROM handoff_history WHERE undone=0 ORDER BY created_at DESC,rowid DESC LIMIT 1", &[])?.first().map(|v| v["kind"].clone()).unwrap_or(Value::Null);
         Ok(
-            json!({"scope":"full","runnerId":null,"limit":null,"laps":laps,"events":events,"revision":self.revision}),
+            json!({"runners":self.runners()?,"labels":self.labels(None)?,"race":self.race()?,"nextUndo":undo,"revision":self.revision,"settings":self.settings()?}),
         )
     }
     pub fn snapshot(&self, port: u16) -> Result<Value> {
-        let undo = self.rows("SELECT json_extract(payload_json,'$.kind') AS kind FROM handoff_history WHERE undone=0 ORDER BY created_at DESC,rowid DESC LIMIT 1", &[])?.first().map(|v| v["kind"].clone()).unwrap_or(Value::Null);
-        Ok(
-            json!({"runners":self.runners()?,"labels":self.labels(None)?,"race":self.race()?,"nextUndo":undo,"revision":self.revision,"settings":self.settings()?,"host":crate::host::info(port)}),
-        )
+        let mut state = self.race_snapshot()?;
+        state["host"] = crate::host::info(port);
+        Ok(state)
     }
     pub fn mutation(&mut self, method: &str, input: &Value) -> Result<Value> {
         self.mutation_from(

@@ -7,14 +7,14 @@
     "node": ">=24.16.0"
   },
   "scripts": {
-    "dev": "cargo run --locked --manifest-path native/Cargo.toml",
+    "dev": "bash native/scripts/prepare-rune.sh && cargo run --locked --manifest-path native/Cargo.toml",
     "build": "bash native/scripts/build-web.sh && cargo build --locked --manifest-path native/Cargo.toml",
     "test": "node --import tsx --test tests/*.test.{ts,mjs}",
-    "test:native": "cargo test --locked --manifest-path native/Cargo.toml",
+    "test:native": "bash native/scripts/prepare-rune.sh && cargo test --locked --manifest-path native/Cargo.toml",
     "test:browser": "node native/scripts/check-web.mjs && node native/scripts/check-web.mjs --cpu && node native/scripts/check-failover.mjs",
     "check": "tsc -p tsconfig.json && oxlint && oxfmt --check",
     "deploy:vps": "bash scripts/deploy-vps.sh",
-    "wrapped:build": "cargo build --manifest-path native/Cargo.toml --no-default-features --bin apolloon-native",
+    "wrapped:build": "bash native/scripts/prepare-rune.sh && cargo build --manifest-path native/Cargo.toml --no-default-features --bin apolloon-native",
     "wrapped:cards": "npm run wrapped:build && tsx scripts/wrapped/run.ts cards",
     "wrapped:from-export": "npm run wrapped:build && tsx scripts/wrapped/from-export.ts",
     "wrapped:mail": "tsx scripts/wrapped/run.ts mail"

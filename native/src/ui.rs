@@ -158,12 +158,12 @@ fn browser_route() -> String {
     )
 }
 #[cfg(target_arch = "wasm32")]
-fn sync_route(state: &mut State) {
+fn sync_route(state: &mut State) -> bool {
     let actual = browser_route();
     if actual != state.route_seen {
         apply_route(state, &actual);
         state.route_seen = actual;
-        return;
+        return true;
     }
     let wanted = if state.page == 8 {
         format!("/admin?section={}", SECTIONS[state.admin_section])
@@ -180,6 +180,7 @@ fn sync_route(state: &mut State) {
             state.route_seen = wanted;
         }
     }
+    false
 }
 fn init() -> State {
     #[cfg(not(target_arch = "wasm32"))]
@@ -357,10 +358,15 @@ fn poll(s: &mut State, _: f64, tx: &mut Tx) -> bool {
     if s.fixture {
         return false;
     }
+    let mut changed = false;
     #[cfg(target_arch = "wasm32")]
-    sync_route(s);
+    if sync_route(s) {
+        changed = true;
+    }
     tx.wake_after(Duration::from_millis(100));
+    let public = (5..=7).contains(&s.page);
     while let Ok(file) = s.file_rx.try_recv() {
+        changed = true;
         match file {
             Ok((FilePurpose::Import, name, bytes)) => {
                 s.import_file = Some((name, bytes));
@@ -376,15 +382,26 @@ fn poll(s: &mut State, _: f64, tx: &mut Tx) -> bool {
             && s.clock_offset.abs_diff(offset) >= 16
         {
             s.clock_offset = offset;
+            changed = true;
         }
-        s.connected = !update.snapshot.is_null();
+        let connected = !update.snapshot.is_null();
+        changed |= s.connected != connected;
+        s.connected = connected;
         // Polls and actions fetch side by side: never let an older answer replace a newer one.
         let older = |new: &Value, old: &Value| new["revision"].as_i64() < old["revision"].as_i64();
-        if s.connected && !older(&update.snapshot, &s.snapshot) {
+        if s.connected
+            && !older(&update.snapshot, &s.snapshot)
+            && (!public || s.snapshot != update.snapshot)
+        {
             s.snapshot = update.snapshot;
+            changed = true;
         }
-        if !update.history.is_null() && !older(&update.history, &s.history) {
+        if !update.history.is_null()
+            && !older(&update.history, &s.history)
+            && (!public || s.history != update.history)
+        {
             s.history = update.history;
+            changed = true;
         }
         if !update.recovery.is_null() {
             s.recovery = update.recovery;
@@ -392,9 +409,11 @@ fn poll(s: &mut State, _: f64, tx: &mut Tx) -> bool {
         if let Some(cache) = &s.image_cache {
             for (url, bytes) in update.images {
                 s.logos.insert(url, cache.load(bytes));
+                changed = true;
             }
         }
         if let Some((method, outcome)) = update.outcome {
+            changed = true;
             s.busy = false;
             match outcome {
                 Err(error) => {
@@ -501,9 +520,7 @@ fn poll(s: &mut State, _: f64, tx: &mut Tx) -> bool {
     admin_base::refresh(s, tx);
     laps_panel::sync_hold(s);
     tactics_page::refresh(s);
-    public_screens::refresh(s);
-    s.clock = s.server_now();
-    true
+    public_screens::poll(s, changed, s.server_now())
 }
 fn button(
     key: impl Into<String>,
@@ -2465,19 +2482,24 @@ fn start_transport(url: String, commands: Receiver<Command>, updates: Sender<Upd
         recovery: bool,
         extra_image: Option<String>,
     ) -> Update {
-        let snapshot = get(client, url, "/api/state").await;
-        let revision = snapshot["revision"].as_i64();
-        let changed = full || (revision.is_some() && synced.borrow().history_revision != revision);
-        // History and recovery load side by side instead of one after the other.
-        let (history, recovery) = futures_join(
-            async {
-                if changed { get(client, url, "/api/history?scope=full").await } else { Value::Null }
-            },
-            async {
-                if recovery || changed { get(client, url, "/api/recovery").await } else { Value::Null }
-            },
-        )
-        .await;
+        let fetch_history = full || synced.borrow().history_revision.is_none();
+        let state = get(client, url, "/api/state");
+        let history = get(client, url, "/api/history?scope=full");
+        let recover = get(client, url, "/api/recovery");
+        let (snapshot, (history, recovery)) = if fetch_history {
+            // Start the initial requests before the renderer can occupy the browser thread.
+            futures_join(state, futures_join(history, recover)).await
+        } else {
+            let snapshot = state.await;
+            let revision = snapshot["revision"].as_i64();
+            let changed = revision.is_some() && synced.borrow().history_revision != revision;
+            let data = futures_join(
+                async { if changed { history.await } else { Value::Null } },
+                async { if changed || recovery { recover.await } else { Value::Null } },
+            )
+            .await;
+            (snapshot, data)
+        };
         if let Some(revision) = history["revision"].as_i64() {
             synced.borrow_mut().history_revision = Some(revision);
         }
@@ -2530,6 +2552,16 @@ fn start_transport(url: String, commands: Receiver<Command>, updates: Sender<Upd
         })
         .await
     }
+    async fn sample_clock(client: &reqwest::Client, url: &str) -> Option<i64> {
+        let mut samples = Vec::new();
+        for _ in 0..3 {
+            let before = now();
+            if let Some(server) = get(client, url, "/api/clock").await["serverNowMs"].as_i64() {
+                samples.push((before, now(), server));
+            }
+        }
+        clock_offset(samples)
+    }
     let client = reqwest::Client::new();
     let synced = Rc::new(RefCell::new(Synced::default()));
     {
@@ -2572,23 +2604,25 @@ fn start_transport(url: String, commands: Receiver<Command>, updates: Sender<Upd
         });
     }
     wasm_bindgen_futures::spawn_local(async move {
+        let mut first = true;
         let mut next_clock_sync = Instant::now();
         let mut next_recovery = Instant::now();
         loop {
             let started = Instant::now();
-            let mut update = refresh(&client, &url, &synced, false, started >= next_recovery, None).await;
+            let load = refresh(&client, &url, &synced, false, started >= next_recovery, None);
+            let (mut update, offset) = if std::mem::take(&mut first) {
+                futures_join(load, sample_clock(&client, &url)).await
+            } else {
+                (load.await, None)
+            };
             if !update.recovery.is_null() {
                 next_recovery = started + RECOVERY_EVERY;
             }
             if !update.snapshot.is_null() && started >= next_clock_sync {
-                let mut samples = Vec::new();
-                for _ in 0..3 {
-                    let before = now();
-                    if let Some(server) = get(&client, &url, "/api/clock").await["serverNowMs"].as_i64() {
-                        samples.push((before, now(), server));
-                    }
-                }
-                update.clock_offset = clock_offset(samples);
+                update.clock_offset = match offset {
+                    Some(offset) => Some(offset),
+                    None => sample_clock(&client, &url).await,
+                };
                 next_clock_sync = Instant::now()
                     + Duration::from_secs(if update.clock_offset.is_some() { 60 } else { 5 });
             }

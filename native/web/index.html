@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="nl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Apolloon Telsysteem</title><style>html,body{margin:0;width:100%;height:100%;overflow:hidden}#status{font:16px system-ui;padding:24px}</style></head><body><div id="status" role="status">Apolloon laden…</div><script type="module">
+<html lang="nl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Apolloon Telsysteem</title><link rel="preload" href="/app_bg.wasm" as="fetch" type="application/wasm" crossorigin><style>html,body{margin:0;width:100%;height:100%;overflow:hidden}#status{font:16px system-ui;padding:24px}</style></head><body><div id="status" role="status">Apolloon laden…</div><script type="module">
 import init from '/app.js';
 import { followGroup } from '/failover.js';
 followGroup();

@@ -1,6 +1,6 @@
 # Rune desktop and browser
 
-`cargo run --manifest-path native/Cargo.toml` opens the native window and supervises its Rust server. Use `-- --server` to run only the server. For a server build without desktop libraries, pass `--no-default-features` to Cargo.
+`npm run dev` opens the native window and supervises its Rust server. The [project README](../README.md#build-and-verify) has the server-only command.
 
 | Setting | Purpose |
 | --- | --- |
@@ -15,4 +15,4 @@ The server reads schema 17, migrates schemas 13–16 after verifying a copy, and
 
 Run the build and test commands in the [project README](../README.md). The [acceptance checklist](PARITY.md) records the comparison with the previous app. `scripts/capture-native.mjs` captures the browser screens in both themes from a copy of a supplied database. `--snap /tmp/apolloon.png` and `--tree` can inspect the desktop renderer with a fixture.
 
-The Rune revision and patches are recorded in [vendor/RUNE-PATCHES.md](vendor/RUNE-PATCHES.md). The shared browser bundle uses WebGL2 or CPU rendering when WebGPU is unavailable. The server serves the gzip-compressed WASM when the browser accepts it.
+The [Rune source and patch instructions](patches/rune/README.md) explain how to update the pinned revision. The shared browser bundle uses WebGL2 or CPU rendering when WebGPU is unavailable. The server serves the gzip-compressed WASM when the browser accepts it.

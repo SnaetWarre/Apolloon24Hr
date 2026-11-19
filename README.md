@@ -16,7 +16,7 @@ For an upgrade from the previous desktop app, keep a separate backup and close t
 
 ## Build and verify
 
-Use Rust, a C compiler, and the platform windowing libraries. On Debian or Ubuntu install `build-essential pkg-config libxkbcommon-dev libwayland-dev libx11-dev libxi-dev libxcursor-dev libxrandr-dev`. Node.js 24 and npm are used by the verification, release, and Wrapped tools.
+Use Rust, Git, Bash, curl, tar, a C compiler, and the platform windowing libraries. On Debian or Ubuntu install `build-essential pkg-config libxkbcommon-dev libwayland-dev libx11-dev libxi-dev libxcursor-dev libxrandr-dev`. Node.js 24 and npm are used by the verification, release, and Wrapped tools.
 
 ```sh
 rustup target add wasm32-unknown-unknown
@@ -25,7 +25,7 @@ bash native/scripts/build-web.sh
 cargo run --locked --manifest-path native/Cargo.toml
 ```
 
-Start only the server with `cargo run --locked --manifest-path native/Cargo.toml --no-default-features -- --server`. Development writes to `.native-data/app.db` by default. Set `APOLLOON_NATIVE_DATA` to use a different database.
+On a fresh checkout, run `bash native/scripts/prepare-rune.sh` before invoking Cargo directly. The browser build already runs this step. Start only the server with `cargo run --locked --manifest-path native/Cargo.toml --no-default-features -- --server`. Development writes to `.native-data/app.db` by default. Set `APOLLOON_NATIVE_DATA` to use a different database.
 
 ```sh
 npm ci

@@ -1,0 +1,536 @@
+diff --git a/crates/rune/src/labels.rs b/crates/rune/src/labels.rs
+index 9aeceb2..494fecc 100644
+--- a/crates/rune/src/labels.rs
++++ b/crates/rune/src/labels.rs
+@@ -38,6 +38,9 @@ pub enum Label<'a> {
+     /// The Window menu's items.
+     Minimize,
+     Close,
++    /// Window caption labels.
++    Maximize,
++    Restore,
+     /// The app menu's items; some carry the app's name.
+     About(&'a str),
+     Services,
+@@ -116,6 +119,8 @@ fn english(label: Label<'_>) -> String {
+         Label::Menu(name) => name.into(),
+         Label::Minimize => "Minimize".into(),
+         Label::Close => "Close".into(),
++        Label::Maximize => "Maximize".into(),
++        Label::Restore => "Restore".into(),
+         Label::About(app) => format!("About {app}"),
+         Label::Services => "Services".into(),
+         Label::Hide(app) => format!("Hide {app}"),
+diff --git a/crates/rune/src/platform/web.rs b/crates/rune/src/platform/web.rs
+index 4c797a0..a899f3f 100644
+--- a/crates/rune/src/platform/web.rs
++++ b/crates/rune/src/platform/web.rs
+@@ -181,6 +181,7 @@ struct GpuSide {
+     renderer: Renderer,
+     /// The adapter is WebGL2's.
+     gl: bool,
++    cpu_srgb_blend: bool,
+ }
+ 
+ /// Who draws the page's frames, and how far the GPU is (the native CPU-first window's
+@@ -430,10 +431,12 @@ fn gpu_side<S: 'static>(gpu: Gpu, surface: wgpu::Surface<'static>, size: (u32, u
+     surface.configure(&gpu.device, &config);
+     health::watch(&gpu.device, lost);
+     let mut renderer = Renderer::new(&gpu.device, format);
+-    renderer.set_srgb_blend(!format.is_srgb());
+-    renderer.attach_text(&mut rt.text.atlas);
+     let gl = gpu.adapter.get_info().backend == wgpu::Backend::Gl;
+-    Ok(GpuSide { gpu, surface, config, renderer, gl })
++    let cpu_srgb_blend = rt.srgb_blend();
++    rt.set_srgb_blend(!format.is_srgb());
++    renderer.set_srgb_blend(rt.srgb_blend());
++    renderer.attach_text(&mut rt.text.atlas);
++    Ok(GpuSide { gpu, surface, config, renderer, gl, cpu_srgb_blend })
+ }
+ 
+ /// The canvas's configuration for `size`, and the format the renderer draws in: the canvas's,
+@@ -443,14 +446,19 @@ fn canvas_config(gpu: &Gpu, surface: &wgpu::Surface<'static>, size: (u32, u32),
+     let mut config = surface.get_default_config(&gpu.adapter, size.0.clamp(1, max_dim), size.1.clamp(1, max_dim))?;
+     config.present_mode = wgpu::PresentMode::Fifo;
+     let caps = surface.get_capabilities(&gpu.adapter);
++    let is_gl = gpu.adapter.get_info().backend == wgpu::Backend::Gl;
++    // GLES presents its sRGB surface after sampling it as linear, so the instances
++    // must be linear as well. Passing the CPU's sRGB instances through it encodes twice.
++    if is_gl && caps.formats.contains(&wgpu::TextureFormat::Rgba8UnormSrgb) {
++        config.format = wgpu::TextureFormat::Rgba8UnormSrgb;
++    }
+     config.usage |= caps.usages & wgpu::TextureUsages::COPY_SRC;
+     // A WebGPU canvas can be copied into (wgpu names only its render use): a loop-only step's
+     // frame is the last one, kept, with its dots redrawn (`Renderer::arm_cycle`).
+-    if gpu.adapter.get_info().backend == wgpu::Backend::BrowserWebGpu { config.usage |= wgpu::TextureUsages::COPY_DST; }
++    if !is_gl { config.usage |= wgpu::TextureUsages::COPY_DST; }
+     // A canvas can always be copied from; the hand-over's drift count needs that.
+     if drift_wanted() { config.usage |= wgpu::TextureUsages::COPY_SRC; }
+     let wanted = if srgb_blend { config.format.remove_srgb_suffix() } else { config.format.add_srgb_suffix() };
+-    let is_gl = gpu.adapter.get_info().backend == wgpu::Backend::Gl;
+     let format = if wanted != config.format && !is_gl {
+         config.view_formats.push(wanted);
+         wanted
+@@ -530,7 +538,7 @@ impl Readback {
+     /// appends `[differing, of, max]` to `globalThis.__runeDrift` once the copy is mapped.
+     fn count(self, cpu: Vec<u8>) {
+         let Readback { buffer, row, size: (w, h), rgba } = self;
+-        let buffer = Rc::new(buffer);
++        let buffer = std::sync::Arc::new(buffer);
+         let mapped = buffer.clone();
+         buffer.slice(..).map_async(wgpu::MapMode::Read, move |result| {
+             if result.is_err() { return; }
+@@ -571,17 +579,27 @@ fn drift_wanted() -> bool {
+ }
+ 
+ /// A flag the GPU's queue sets once the work submitted so far is done, waking the loop.
+-fn when_done(queue: &wgpu::Queue, proxy: &EventLoopProxy<Wake>) -> Rc<Cell<bool>> {
++fn when_done(gpu: &Gpu, proxy: &EventLoopProxy<Wake>) -> Rc<Cell<bool>> {
+     let flag = Rc::new(Cell::new(false));
+     let set = PageOnly((flag.clone(), proxy.clone()));
+-    queue.on_submitted_work_done(move || {
++    gpu.queue.on_submitted_work_done(move || {
+         let PageOnly((flag, proxy)) = &set;
+         flag.set(true);
+         let _ = proxy.send_event(Wake::App);
+     });
++    // WebGPU answers from a promise; WebGL2 answers only when the device is polled (its fence is
++    // checked there), so a GL page polls until the work is done.
++    if gpu.adapter.get_info().backend == wgpu::Backend::Gl { poll_until(gpu.device.clone(), flag.clone()); }
+     flag
+ }
+ 
++/// Polls `device` each frame-ish until `done` is set (WebGL2 runs submitted-work callbacks only in a poll).
++fn poll_until(device: wgpu::Device, done: Rc<Cell<bool>>) {
++    let _ = device.poll(wgpu::PollType::Poll);
++    if done.get() { return; }
++    after(Duration::from_millis(16), move || poll_until(device, done));
++}
++
+ /// A value moved into a callback wgpu wants `Send`. In a page that callback runs on the page's
+ /// one thread, from a promise.
+ struct PageOnly<T>(T);
+@@ -629,6 +647,7 @@ impl<S: 'static> Browser<S> {
+         web_sys::console::warn_1(&format!("rune: the GPU device was lost ({why}); the page draws on the CPU").into());
+         crate::marks::mark("web.gpu.lost");
+         side.gpu.device.destroy();
++        r.rt.set_srgb_blend(side.cpu_srgb_blend);
+         crate::render::cpu_boot::attach_text(&mut r.rt.text.atlas);
+         r.rt.text.atlas.refill_gpu_masks();
+         if let Some(c) = &canvas { let _ = c.style().set_property("opacity", "0"); }
+@@ -786,7 +805,7 @@ impl<S: 'static> Browser<S> {
+         // The browser compiles the renderer's pipelines in its GPU process, in order: a submit
+         // made after them is answered once they're built.
+         side.gpu.queue.submit([]);
+-        let built = when_done(&side.gpu.queue, &self.proxy);
++        let built = when_done(&side.gpu, &self.proxy);
+         let Draw::Cpu { mut cpu, .. } = std::mem::replace(&mut r.draw, Draw::Moving) else { unreachable!("checked above") };
+         cpu.half = crate::render::cpu_boot::HalfRounding::of_vendor(side.gpu.adapter.get_info().vendor);
+         r.draw = Draw::HandingOver { cpu, side, built, done: None, since: Instant::now() };
+@@ -808,6 +827,7 @@ impl<S: 'static> Browser<S> {
+             web_sys::console::warn_1(&"rune: the GPU didn't finish its first frame; the page draws on the CPU".into());
+             crate::marks::mark("web.handover.failed");
+             side.gpu.device.destroy();
++            r.rt.set_srgb_blend(side.cpu_srgb_blend);
+             crate::render::cpu_boot::attach_text(&mut r.rt.text.atlas);
+             r.rt.text.atlas.refill_gpu_masks();
+             r.draw = Draw::Cpu { cpu, failed: true };
+@@ -930,7 +950,7 @@ impl<S: 'static> Browser<S> {
+                         Ok(_) if side.renderer.checking_gpu() => crate::marks::mark("web.handover.warming"),
+                         Ok(copy) => {
+                             if let Some(copy) = copy { copy.count(cpu.pixels().to_vec()); }
+-                            *done = Some(when_done(&side.gpu.queue, &self.proxy));
++                            *done = Some(when_done(&side.gpu, &self.proxy));
+                             *since = Instant::now();
+                             let proxy = self.proxy.clone();
+                             after(FINISH_LIMIT + Duration::from_millis(50), move || { let _ = proxy.send_event(Wake::App); });
+@@ -1187,6 +1207,21 @@ impl<S: 'static> ApplicationHandler<Wake> for Browser<S> {
+ 
+     fn new_events(&mut self, _: &ActiveEventLoop, cause: winit::event::StartCause) {
+         if matches!(cause, winit::event::StartCause::ResumeTimeReached { .. }) {
++            if let Some(r) = &mut *self.running.borrow_mut()
++                && r.presented && !r.suspended && !r.full_redraw
++                && matches!(&r.draw, Draw::Cpu { .. } | Draw::Gpu(_))
++                && !r.draw.gpu().is_some_and(|side| side.renderer.checking_gpu())
++                && r.compositor.as_ref().is_none_or(|c| !c.animating() && !c.draws_own())
++                && let Some(stale) = r.rt.resting_wake()
++            {
++                // A due poll on a resting canvas only needs a frame if it changed the view.
++                r.clipboard.flush(&mut r.rt);
++                if let Some(window) = &self.window { r.apply_frame_requests(window); }
++                r.rt.refuse_file_dialog("native file dialogs are unsupported on web");
++                let frame = stale || r.rt.stale() || r.rt.shell_request.is_some() || r.rt.popup_menu().is_some();
++                r.rt.resting_wake_frame(frame);
++                if !frame { return; }
++            }
+             if let Some(window) = &self.window { window.request_redraw(); }
+         }
+     }
+diff --git a/crates/rune/src/platform/web/bridge.js b/crates/rune/src/platform/web/bridge.js
+index f92fe81..e265013 100644
+--- a/crates/rune/src/platform/web/bridge.js
++++ b/crates/rune/src/platform/web/bridge.js
+@@ -176,6 +176,8 @@ export function mount(canvas, callback, embedded, fitHeight, page) {
+             const chord = event.metaKey || event.ctrlKey;
+             const editing = ['Enter', 'Tab', 'Escape', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown'];
+             if (field === password) editing.push('Backspace', 'Delete');
++            // With no Rune field to type into, Space presses the focused control, as on a page.
++            if (!h.key) editing.push(' ');
+             if (!chord && !editing.includes(event.key)) return;
+             if (chord && event.key.toLowerCase() === 'v') return;
+             event.preventDefault();
+diff --git a/crates/rune/src/render/cpu_boot.rs b/crates/rune/src/render/cpu_boot.rs
+index ad62076..1135c84 100644
+--- a/crates/rune/src/render/cpu_boot.rs
++++ b/crates/rune/src/render/cpu_boot.rs
+@@ -24,7 +24,7 @@
+ 
+ use crate::time::Instant;
+ 
+-use super::{Instance, KIND_BACKDROP_BLUR, KIND_EFFECT, KIND_GLYPH, KIND_LAYER, KIND_LAYER_END};
++use super::{Instance, KIND_BACKDROP_BLUR, KIND_EFFECT, KIND_GLYPH, KIND_LAYER, KIND_LAYER_END, NO_CLIP};
+ use crate::pixels::ImageAtlas;
+ use crate::text::{Atlas, FontSmoothing};
+ 
+@@ -49,7 +49,7 @@ pub use painter::{CpuPainter, Painted};
+ 
+ /// One frame's draw data, borrowed from the runtime that built it.
+ pub struct Scene<'a> {
+-    instances: &'a [Instance],
++    instances: std::borrow::Cow<'a, [Instance]>,
+     glyph_pages: Vec<&'a [u8]>,
+     /// The outline store, for glyphs drawn from their outlines (text whose scale moves).
+     outlines: Option<&'a crate::text::outline::OutlineStore>,
+@@ -125,7 +125,7 @@ impl<'a> Scene<'a> {
+     pub fn new(instances: &'a [Instance], atlas: &'a Atlas, images: &'a ImageAtlas, size: (u32, u32), clear: [f32; 4]) -> Self {
+         let glyph_pages = (0..atlas.page_count()).filter_map(|p| atlas.page_data(p)).collect();
+         let images = images.pages.iter().map(|p| Image { width: p.width, data: &p.data, dirty: p.dirty }).collect();
+-        Scene { instances, glyph_pages, outlines: Some(&atlas.outlines), images, size, clear, lcd: atlas.lcd, srgb_blend: true, native_surfaces: false, compositor: false, smoothing: None, atlas_resets: atlas.resets(), half: HalfRounding::default() }
++        Scene { instances: untwist(instances), glyph_pages, outlines: Some(&atlas.outlines), images, size, clear, lcd: atlas.lcd, srgb_blend: true, native_surfaces: false, compositor: false, smoothing: None, atlas_resets: atlas.resets(), half: HalfRounding::default() }
+     }
+ 
+     /// Whether the frame blends in sRGB encoding (`Runtime::srgb_blend`). Linear blending needs
+@@ -181,7 +181,6 @@ impl<'a> Scene<'a> {
+         let mut depth = 0u32;
+         self.instances.iter().find_map(|i| match i.params[1] {
+             k if k == KIND_LAYER && i.params[2] != 0.0 => Some(NeedsGpu::LayerBlur),
+-            k if k == KIND_LAYER && i.border[1] != 0.0 => Some(NeedsGpu::TurnedLayer),
+             k if k == KIND_LAYER => { depth += 1; None }
+             k if k == KIND_LAYER_END => { depth = depth.saturating_sub(1); None }
+             k if k == KIND_BACKDROP_BLUR && depth > 0 => Some(NeedsGpu::BackdropBlur),
+@@ -194,6 +193,53 @@ impl<'a> Scene<'a> {
+     }
+ }
+ 
++/// The frame with each turned layer's turn (`Instance::turned`) moved onto what it holds, so
++/// the painter draws it as an upright layer: each glyph turns about its own centre (the painter
++/// draws turned glyphs) after its centre turns about the pivot; boxes and clips become the
++/// upright boxes around their turned corners (exact at quarter turns, the usual case: a chart's
++/// vertical axis title). Nested turns compose: the outer one moves the inner one's pivot first.
++fn untwist(instances: &[Instance]) -> std::borrow::Cow<'_, [Instance]> {
++    if !instances.iter().any(|i| i.params[1] == KIND_LAYER && i.border[1] != 0.0) { return instances.into(); }
++    let mut out = instances.to_vec();
++    for n in 0..out.len() {
++        let l = out[n];
++        if l.params[1] != KIND_LAYER || l.border[1] == 0.0 { continue; }
++        let (angle, pivot) = (l.border[1], [l.border[2], l.border[3]]);
++        out[n].border = [0.0; 4];
++        let (sin, cos) = angle.sin_cos();
++        let turn = |p: [f32; 2]| {
++            let (dx, dy) = (p[0] - pivot[0], p[1] - pivot[1]);
++            [pivot[0] + dx * cos - dy * sin, pivot[1] + dx * sin + dy * cos]
++        };
++        let around = |e: [f32; 4]| {
++            let c = [turn([e[0], e[1]]), turn([e[2], e[1]]), turn([e[0], e[3]]), turn([e[2], e[3]])];
++            [c.iter().map(|p| p[0]).fold(f32::MAX, f32::min), c.iter().map(|p| p[1]).fold(f32::MAX, f32::min),
++                c.iter().map(|p| p[0]).fold(f32::MIN, f32::max), c.iter().map(|p| p[1]).fold(f32::MIN, f32::max)]
++        };
++        let rect = |r: [f32; 4]| { let e = around([r[0], r[1], r[0] + r[2], r[1] + r[3]]); [e[0], e[1], e[2] - e[0], e[3] - e[1]] };
++        out[n].rect = rect(l.rect);
++        let mut depth = 0u32;
++        for i in &mut out[n + 1..] {
++            let k = i.params[1];
++            if k == KIND_LAYER_END { if depth == 0 { break; } depth -= 1; continue; }
++            if i.clip != NO_CLIP { i.clip = around(i.clip); }
++            if k == KIND_LAYER {
++                depth += 1;
++                i.rect = rect(i.rect);
++                if i.border[1] != 0.0 { let p = turn([i.border[2], i.border[3]]); i.border[2] = p[0]; i.border[3] = p[1]; }
++            } else if k == KIND_GLYPH {
++                let c = turn([i.rect[0] + i.rect[2] * 0.5, i.rect[1] + i.rect[3] * 0.5]);
++                i.rect[0] = c[0] - i.rect[2] * 0.5;
++                i.rect[1] = c[1] - i.rect[3] * 0.5;
++                i.params[0] += angle;
++            } else {
++                i.rect = rect(i.rect);
++            }
++        }
++    }
++    out.into()
++}
++
+ /// Why a frame needs the GPU.
+ #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+ pub enum NeedsGpu {
+diff --git a/crates/rune/src/render/cpu_boot/bin.rs b/crates/rune/src/render/cpu_boot/bin.rs
+index 52afca5..4f519de 100644
+--- a/crates/rune/src/render/cpu_boot/bin.rs
++++ b/crates/rune/src/render/cpu_boot/bin.rs
+@@ -135,7 +135,7 @@ impl Bins {
+         let (cols, rows) = (w.div_ceil(TILE_W), h.div_ceil(TILE_H));
+         let tiles = (cols * rows) as usize;
+         let mut bounds: Vec<[i32; 4]> = scene.instances.iter().map(|i| pixel_bounds(i, w as i32, h as i32)).collect();
+-        let (layers, scope) = plan_layers(scene.instances, (w, h));
++        let (layers, scope) = plan_layers(&scene.instances, (w, h));
+         // Within a layer drawn to its own target, nothing reaches past the layer's bounds, and
+         // nothing there can stand in for what's under the layer.
+         let mut within = vec![TOP; scene.instances.len()];
+diff --git a/crates/rune/src/render/cpu_boot/painter.rs b/crates/rune/src/render/cpu_boot/painter.rs
+index b7f275b..66b671e 100644
+--- a/crates/rune/src/render/cpu_boot/painter.rs
++++ b/crates/rune/src/render/cpu_boot/painter.rs
+@@ -180,7 +180,7 @@ impl CpuPainter {
+         }
+         // The whole list at memcmp's speed first: most frames that get here changed nothing.
+         let images = scene.images.iter().any(|p| p.dirty.is_some());
+-        if !images && bytemuck::cast_slice::<Instance, u8>(scene.instances) == bytemuck::cast_slice::<Instance, u8>(&prev.instances) {
++        if !images && bytemuck::cast_slice::<Instance, u8>(&scene.instances) == bytemuck::cast_slice::<Instance, u8>(&prev.instances) {
+             let mut report = Report { total_ns: super::ns(start.elapsed()), tiles: prev.bins.tile_count(), ..Report::default() };
+             report.raster_ns = 0;
+             return Some(Painted { tiles: report.tiles, hash_ns: report.total_ns, report, ..Painted::default() });
+diff --git a/crates/rune/src/render/cpu_boot/record.rs b/crates/rune/src/render/cpu_boot/record.rs
+index faf139b..7e1c930 100644
+--- a/crates/rune/src/render/cpu_boot/record.rs
++++ b/crates/rune/src/render/cpu_boot/record.rs
+@@ -27,7 +27,7 @@ pub fn encode(scene: &Scene<'_>) -> Vec<u8> {
+     for c in scene.clear { out.extend_from_slice(&c.to_le_bytes()); }
+     out.extend_from_slice(&u32::from(scene.lcd).to_le_bytes());
+     out.extend_from_slice(&(scene.instances.len() as u32).to_le_bytes());
+-    out.extend_from_slice(bytemuck::cast_slice(scene.instances));
++    out.extend_from_slice(bytemuck::cast_slice(&scene.instances));
+     out.extend_from_slice(&(scene.glyph_pages.len() as u32).to_le_bytes());
+     for page in &scene.glyph_pages { out.extend_from_slice(page); }
+     out.extend_from_slice(&(scene.images.len() as u32).to_le_bytes());
+@@ -63,7 +63,7 @@ impl Recording {
+     /// The frame, ready for `paint`.
+     pub fn scene(&self) -> Scene<'_> {
+         Scene {
+-            instances: &self.instances,
++            instances: std::borrow::Cow::Borrowed(&self.instances),
+             glyph_pages: self.glyph_pages.iter().map(Vec::as_slice).collect(),
+             outlines: None,
+             images: self.images.iter().map(|(width, data)| Image { width: *width, data, dirty: None }).collect(),
+diff --git a/crates/rune/src/runtime/input/focus.rs b/crates/rune/src/runtime/input/focus.rs
+index 9e5edb8..1271b4b 100644
+--- a/crates/rune/src/runtime/input/focus.rs
++++ b/crates/rune/src/runtime/input/focus.rs
+@@ -670,10 +670,12 @@ impl<S: 'static> Runtime<S> {
+             if let Some(f) = self.nodes[i].handlers.on_press.clone() { f(states!(self), tx); }
+             return true;
+         }
+-        // Space presses the focused control. Return presses only rows and links; for a button
+-        // it goes on to the default button (`default_button_key`, which ran first) or `on_key`.
++        // Space presses the focused control. Return presses rows and links, and a control the
++        // keyboard focused when no default button took it (`default_button_key` ran first), as
++        // an HTML button does; else it goes on to `on_key`.
+         let space = ev.key == Key::Text(" ".into());
+-        if self.nodes[i].input.is_none() && (space || (ev.key == Key::Enter && self.takes_return(i))) {
++        let enter = ev.key == Key::Enter && (self.takes_return(i) || (self.focus.keyboard() && self.nodes[i].handlers.on_press.is_some()));
++        if self.nodes[i].input.is_none() && (space || enter) {
+             // A row the user cannot see highlighted (the pointer left it) chooses nothing.
+             if self.nodes[i].focus.highlight.is_some() && !shown { self.focus.step(focus_machine::FocusEvent::Pointed); return true; }
+             if repeat { return true; }
+diff --git a/crates/rune/src/runtime/web/runtime.rs b/crates/rune/src/runtime/web/runtime.rs
+index 5d67ada..9272000 100644
+--- a/crates/rune/src/runtime/web/runtime.rs
++++ b/crates/rune/src/runtime/web/runtime.rs
+@@ -275,7 +275,7 @@ impl<S: 'static> Runtime<S> {
+             "Home" => crate::Key::Home, "End" => crate::Key::End,
+             "PageUp" => crate::Key::PageUp, "PageDown" => crate::Key::PageDown,
+             "Backspace" => crate::Key::Backspace, "Delete" => crate::Key::Delete,
+-            "ContextMenu" => crate::Key::ContextMenu,
++            "ContextMenu" => crate::Key::ContextMenu, " " => crate::Key::Text(" ".into()),
+             "Insert" => crate::Key::Insert, "PrintScreen" => crate::Key::PrintScreen,
+             "ScrollLock" => crate::Key::ScrollLock, "Pause" => crate::Key::Pause,
+             name if name.chars().count() == 1 && mods.cmd => crate::Key::Command(name.chars().next().unwrap().to_ascii_lowercase()),
+diff --git a/crates/rune/src/window/create.rs b/crates/rune/src/window/create.rs
+index d1fd541..f11d4b9 100644
+--- a/crates/rune/src/window/create.rs
++++ b/crates/rune/src/window/create.rs
+@@ -14,6 +14,10 @@ impl<S: 'static> Host<S> {
+         let visible = !launcher && (self.started || self.options.visible);
+         #[allow(unused_mut)]
+         let mut attrs = self.options.attributes(self.rt.window_title.current().unwrap_or(self.spec.title), size, self.spec.min_size, visible).with_active(focus);
++        #[cfg(target_os = "linux")]
++        if self.titlebar.is_some_and(|titlebar| titlebar.has_linux_client_controls()) {
++            attrs = attrs.with_decorations(false);
++        }
+         #[cfg(target_os = "macos")]
+         if self.macos_window.nonactivating_panel { attrs = attrs.with_visible(false).with_active(false); }
+         #[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
+@@ -252,6 +256,10 @@ impl<S: 'static> Host<S> {
+             backoff: Backoff::default(),
+             hidden_pace: HiddenPace::default(),
+             cursor: crate::cursor::os::OsCursor::new(),
++            #[cfg(target_os = "linux")]
++            client_resize: self.options.resizable && self.titlebar.is_some_and(|t| t.has_linux_client_controls()),
++            #[cfg(target_os = "linux")]
++            resize_cursor: false,
+             alpha,
+             timer_frame: TimerFrame::default(),
+             presented: None,
+diff --git a/crates/rune/src/window/events.rs b/crates/rune/src/window/events.rs
+index acb321e..b6dde14 100644
+--- a/crates/rune/src/window/events.rs
++++ b/crates/rune/src/window/events.rs
+@@ -521,6 +521,12 @@ impl<S: 'static> Host<S> {
+                         (ElementState::Pressed, true) => rt.secondary_down(x, y),
+                         (ElementState::Released, true) => rt.secondary_up(x, y),
+                         (ElementState::Pressed, false) => {
++                            #[cfg(target_os = "linux")]
++                            if let Some(edge) = l.linux_resize_edge(rt, (x, y))
++                                && l.window.drag_resize_window(edge).is_ok()
++                            {
++                                return;
++                            }
+                             #[cfg(target_os = "macos")]
+                             rt.set_native_titlebar_band(mac::native_titlebar_band(&l.window));
+                             rt.pointer_down(x, y);
+diff --git a/crates/rune/src/window/platform_sync.rs b/crates/rune/src/window/platform_sync.rs
+index 20ad389..de1b6cc 100644
+--- a/crates/rune/src/window/platform_sync.rs
++++ b/crates/rune/src/window/platform_sync.rs
+@@ -56,7 +56,54 @@ impl Win {
+     /// The runtime's cursor while the pointer is in the window, the arrow once it leaves.
+     /// `Hidden` needs focus, so it can't outlive the window being active.
+     pub(super) fn apply_cursor<S>(&mut self, rt: &Runtime<S>, focused: bool) {
++        #[cfg(target_os = "linux")]
++        {
++            if let Some(edge) = rt.pointer().and_then(|point| self.linux_resize_edge(rt, point)) {
++                self.window.set_cursor_visible(true);
++                self.window.set_cursor(winit::window::CursorIcon::from(edge));
++                self.resize_cursor = true;
++                return;
++            }
++            if std::mem::take(&mut self.resize_cursor) {
++                self.window.set_cursor(winit::window::CursorIcon::Default);
++                self.cursor = crate::cursor::os::OsCursor::new();
++            }
++        }
+         let want = match rt.cursor() { crate::el::Cursor::Hidden if !focused => crate::el::Cursor::Default, c => c };
+         self.cursor.apply(&self.window, want, rt.pointer().is_some());
+     }
+ }
++
++#[cfg(target_os = "linux")]
++impl Win {
++    pub(super) fn linux_resize_edge<S>(&self, rt: &Runtime<S>, point: (f32, f32)) -> Option<winit::window::ResizeDirection> {
++        if !self.client_resize || self.window.is_maximized() || self.window.fullscreen().is_some() {
++            return None;
++        }
++        linux_resize_edge(point, rt.window_viewport(), rt.zoom())
++    }
++}
++
++#[cfg(target_os = "linux")]
++fn linux_resize_edge(
++    (x, y): (f32, f32),
++    (width, height): (f32, f32),
++    zoom: f32,
++) -> Option<winit::window::ResizeDirection> {
++    use winit::window::ResizeDirection::*;
++    let (x, y) = (x * zoom, y * zoom);
++    let margin = 5.0;
++    let horizontal = if x < margin { -1 } else if x >= width - margin { 1 } else { 0 };
++    let vertical = if y < margin { -1 } else if y >= height - margin { 1 } else { 0 };
++    Some(match (horizontal, vertical) {
++        (-1, -1) => NorthWest,
++        (0, -1) => North,
++        (1, -1) => NorthEast,
++        (-1, 0) => West,
++        (1, 0) => East,
++        (-1, 1) => SouthWest,
++        (0, 1) => South,
++        (1, 1) => SouthEast,
++        _ => return None,
++    })
++}
+diff --git a/crates/rune/src/window/titlebar.rs b/crates/rune/src/window/titlebar.rs
+index cb8368f..6132d21 100644
+--- a/crates/rune/src/window/titlebar.rs
++++ b/crates/rune/src/window/titlebar.rs
+@@ -32,6 +32,7 @@ pub(crate) use caption::{BUTTONS_KEY, FRAME_KEY, frame};
+ pub struct Titlebar {
+     height: f32,
+     traffic_lights: Option<(f32, f32)>,
++    linux_client_controls: bool,
+ }
+ 
+ impl Titlebar {
+@@ -39,7 +40,7 @@ impl Titlebar {
+     pub const CAPTION_BUTTON_WIDTH: f32 = 46.0;
+ 
+     pub const fn new(height: f32) -> Self {
+-        Self { height, traffic_lights: None }
++        Self { height, traffic_lights: None, linux_client_controls: false }
+     }
+ 
+     /// macOS: the close button's top-left, in points from the window's top-left, for this
+@@ -50,6 +51,18 @@ impl Titlebar {
+         self
+     }
+ 
++    /// Linux: remove the frame supplied by the window manager. The app draws the controls
++    /// in the titlebar; Rune keeps its drag regions and starts native edge resizes.
++    pub const fn linux_client_controls(mut self) -> Self {
++        self.linux_client_controls = true;
++        self
++    }
++
++    #[cfg(target_os = "linux")]
++    pub(crate) const fn has_linux_client_controls(&self) -> bool {
++        self.linux_client_controls
++    }
++
+     pub fn height(&self) -> f32 {
+         self.height
+     }
+diff --git a/crates/rune/src/window/titlebar/caption.rs b/crates/rune/src/window/titlebar/caption.rs
+index 4820ba1..bf73f35 100644
+--- a/crates/rune/src/window/titlebar/caption.rs
++++ b/crates/rune/src/window/titlebar/caption.rs
+@@ -72,13 +72,14 @@ fn caption_button(caption: &Caption, button: CaptionButton, symbol: Color, (w, h
+         _ if hovered => (symbol.alpha(symbol.a * HOVER_ALPHA), symbol),
+         _ => (Color::TRANSPARENT, symbol),
+     };
++    use crate::labels::Label;
+     let (key, label) = match button {
+-        CaptionButton::Minimize => ("rune-caption-minimize", "Minimize"),
+-        CaptionButton::Maximize if caption.maximized => ("rune-caption-maximize", "Restore"),
+-        CaptionButton::Maximize => ("rune-caption-maximize", "Maximize"),
+-        CaptionButton::Close => ("rune-caption-close", "Close"),
++        CaptionButton::Minimize => ("rune-caption-minimize", Label::Minimize),
++        CaptionButton::Maximize if caption.maximized => ("rune-caption-maximize", Label::Restore),
++        CaptionButton::Maximize => ("rune-caption-maximize", Label::Maximize),
++        CaptionButton::Close => ("rune-caption-close", Label::Close),
+     };
+-    let mut e = el().key(key).role("button").label(label).focusable(false).disabled(!enabled).size(w, h).fill(fill)
++    let mut e = el().key(key).role("button").label(crate::labels::label(label)).focusable(false).disabled(!enabled).size(w, h).fill(fill)
+         .child(symbol_el(button, caption.maximized, ink, (w, h), scales));
+     // The mouse presses them through the window procedure; assistive technology invokes these.
+     // A dimmed button has nothing to invoke.
+diff --git a/crates/rune/src/window/win.rs b/crates/rune/src/window/win.rs
+index 40208c2..1790b42 100644
+--- a/crates/rune/src/window/win.rs
++++ b/crates/rune/src/window/win.rs
+@@ -79,6 +79,10 @@ pub(super) struct Win {
+     /// When a hidden launcher renders the changes it hasn't yet.
+     pub(super) hidden_pace: HiddenPace,
+     pub(super) cursor: crate::cursor::os::OsCursor,
++    #[cfg(target_os = "linux")]
++    pub(super) client_resize: bool,
++    #[cfg(target_os = "linux")]
++    pub(super) resize_cursor: bool,
+     pub(super) alpha: Option<crate::render::surface_alpha::AlphaSurface>,
+     /// The frame a due timer asked for, until the window draws it, and whether only it asked
+     /// (`TimerFrame`).
