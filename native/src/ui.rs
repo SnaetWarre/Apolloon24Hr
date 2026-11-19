@@ -21,6 +21,7 @@ mod admin_runners;
 mod admin_kit;
 mod analysis_page;
 mod admin_system;
+mod group_view;
 mod label_editor;
 mod laps_panel;
 mod profile;
@@ -80,6 +81,7 @@ pub struct State {
     admin: admin_base::Admin,
     laps: laps_panel::Panel,
     system: admin_system::Panel,
+    group: group_view::Watch,
     timing_page: timing_page::Page,
     analysis_page: analysis_page::Page,
     queue_page: queue_page::Page,
@@ -266,6 +268,7 @@ fn init_with_url(url: String) -> State {
         public_screens: Default::default(),
         fixture: false,
         route_seen: String::new(),
+        group: Default::default(),
     };
     #[cfg(not(target_arch = "wasm32"))]
     if let Ok(path) = std::env::var("APOLLOON_NATIVE_FIXTURE") {
@@ -414,6 +417,10 @@ fn poll(s: &mut State, _: f64, tx: &mut Tx) -> bool {
         }
         if let Some((method, outcome)) = update.outcome {
             changed = true;
+            if method == "cluster.testGroup" {
+                s.group.testing = false;
+                tx.animated();
+            }
             s.busy = false;
             match outcome {
                 Err(error) => {
@@ -514,6 +521,10 @@ fn poll(s: &mut State, _: f64, tx: &mut Tx) -> bool {
                 },
             }
         }
+    }
+    if group_view::observe(s) {
+        tx.animated();
+        changed = true;
     }
     activity_panel::refresh(s);
     queue_page::refresh(s);
@@ -1073,7 +1084,10 @@ fn view(s: &State, _cx: &mut Cx<State>) -> El {
                 body
             }),
     );
-    let root = row().w_full().h_full().fill(t.bg).child(nav).child(content);
+    let mut root = row().w_full().h_full().fill(t.bg).child(nav).child(content);
+    if let Some(toast) = group_view::toast(s) {
+        root = root.child(toast);
+    }
     match modal {
         Some(modal) => root.child(modal),
         None => root,

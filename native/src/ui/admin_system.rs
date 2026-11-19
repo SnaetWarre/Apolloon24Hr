@@ -111,13 +111,14 @@ impl Default for Panel {
 fn st<'a>(v: &'a Value, key: &str) -> &'a str {
     v[key].as_str().unwrap_or("")
 }
-fn short_url(url: &str) -> &str {
+pub(super) fn short_url(url: &str) -> &str {
     url.trim_start_matches("http://")
         .trim_start_matches("https://")
 }
-fn laptop_label(l: &Value) -> String {
+pub(super) fn laptop_label(l: &Value) -> String {
     l["name"]
         .as_str()
+        .filter(|n| !n.is_empty())
         .map(str::to_owned)
         .unwrap_or_else(|| short_url(st(l, "url")).into())
 }
@@ -171,6 +172,7 @@ pub(super) fn owns(s: &State, method: &str) -> bool {
             | "desktop.diagnostics"
             | "desktop.openUrl"
             | "cluster.joinGroup"
+            | "cluster.testGroup"
     ) || (s.page == 8 && (method == "events.burgieGepakt" || method.starts_with("cluster.")))
 }
 
@@ -235,6 +237,7 @@ pub(super) fn succeeded(s: &mut State, method: &str, result: &Value) {
         "cluster.continueAlone" => {
             s.notice = "Deze laptop werkt alleen verder. De andere laptops sluiten vanzelf weer aan zodra het netwerk terug is.".into()
         }
+        "cluster.testGroup" => s.group.test = result.clone(),
         "cluster.removeLaptop" => {
             s.notice = "De laptop is uit de groep gehaald. Koppel een reservelaptop om weer een laptop te mogen verliezen.".into()
         }
@@ -316,6 +319,7 @@ pub(super) fn failed(s: &mut State, method: &str) {
             s.error = format!("Recordflits aanpassen mislukt: {}", s.error)
         }
         "events.burgieGepakt" => s.error = format!("Burgie gepakt opslaan mislukt: {}", s.error),
+        "cluster.testGroup" => s.error = format!("Groepstest mislukt: {}", s.error),
         _ => {}
     }
 }
@@ -508,19 +512,6 @@ fn spaced(el: El) -> El {
 
 // ---------- Laptops koppelen ----------
 
-fn member_state(c: &Value, m: &Value) -> &'static str {
-    if m["reachable"] != true {
-        "niet bereikbaar"
-    } else if m["self"] == true && c["writable"] != true {
-        "wacht op de andere laptops"
-    } else if m["leader"] == true {
-        "ordent de wijzigingen"
-    } else if m["caughtUp"] == true {
-        "heeft alles"
-    } else {
-        "haalt wijzigingen op"
-    }
-}
 fn describe_group(c: &Value) -> (Tone, String, String) {
     let members = c["members"].as_array().map(Vec::as_slice).unwrap_or(&[]);
     let total = members.len();
@@ -602,7 +593,7 @@ pub(super) fn nearby_row(s: &State, found: &Value, busy: bool) -> El {
         kit::count_label(found["laptops"].as_i64().unwrap_or(1), "laptop", "laptops"),
         kit::count_label(found["runners"].as_i64().unwrap_or(0), "loper", "lopers")
     );
-    if found["name"].is_string() {
+    if found["name"].as_str().is_some_and(|n| !n.is_empty()) {
         line.push_str(&format!(" · {}", short_url(st(found, "url"))));
     }
     let url = found["url"].clone();
@@ -706,47 +697,30 @@ fn cluster_panel(s: &State) -> El {
             .to_string()
     });
     if members.len() > 1 {
-        for m in &members {
-            let name = laptop_label(m);
-            let mut line = format!(
-                "**{name}{}**",
-                if m["self"] == true {
-                    " (deze laptop)"
-                } else {
-                    ""
-                }
-            );
-            if m["name"].is_string() {
-                line.push_str(&format!("  {}", short_url(st(m, "url"))));
-            }
-            line.push_str(&format!("  {}", member_state(c, m)));
-            let mut r = row()
-                .w_full()
-                .justify_between()
-                .center_y()
-                .child(kit::strong_text(&line, kit::pal(s.dark).t.ink2, s.dark));
-            if m["removable"] == true {
-                let host_id = m["hostId"].clone();
-                let name = name.clone();
-                r = r.child(kit::btn(
-                    s,
-                    format!("cluster-remove-{}", st(m, "hostId")),
-                    "Uit de groep halen",
-                    Kind::Ghost,
-                    false,
-                    None,
-                    busy,
-                    move |s| {
-                        confirm_cluster(
-                            s,
-                            "cluster.removeLaptop",
-                            json!({"hostId":host_id,"name":name}),
-                        )
-                    },
-                ));
-            }
-            p = p.child(spaced(kit::notice(s, Tone::Hint, r)));
-        }
+        p = p
+            .child(super::group_view::laptops(s, move |s, m| {
+                (m["removable"] == true).then(|| {
+                    let host_id = m["hostId"].clone();
+                    let name = laptop_label(m);
+                    kit::btn(
+                        s,
+                        format!("cluster-remove-{}", st(m, "hostId")),
+                        "Uit de groep halen",
+                        Kind::Ghost,
+                        true,
+                        None,
+                        busy,
+                        move |s| {
+                            confirm_cluster(
+                                s,
+                                "cluster.removeLaptop",
+                                json!({"hostId":host_id,"name":name}),
+                            )
+                        },
+                    )
+                })
+            }))
+            .child(super::group_view::test_section(s, busy));
     }
     if let Some(from) = c["removedFrom"].as_object() {
         let from = Value::Object(from.clone());
