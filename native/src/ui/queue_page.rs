@@ -543,7 +543,7 @@ pub(super) fn page(s: &State) -> El {
     col()
         .key("queue-page")
         .pb(24.0)
-        .child(strip(s).mb(16.0))
+        .child(super::hex::now_block(s, false).mb(20.0))
         .child(board(s))
         .child(available_now(s).mt(12.0))
 }
@@ -868,111 +868,6 @@ fn available_now(s: &State) -> El {
     )
 }
 
-/// `.race-strip`: Nu op de piste, Volgende and Klaar om te lopen.
-fn strip(s: &State) -> El {
-    let p = pal(s.dark);
-    let race = &s.snapshot["race"];
-    let all = runners(s);
-    let active = all
-        .iter()
-        .find(|r| !race["activeRunnerId"].is_null() && r["id"] == race["activeRunnerId"]);
-    let queue = waiting(s);
-    let label_style = rune::TextStyle::new(12.5, 400.0).lh(18.75);
-    let value_style = rune::TextStyle::new(15.0, 550.0).lh(22.5);
-    let cell = || {
-        col()
-            .grow(1.0)
-            .min_w(0.0)
-            .px(16.0)
-            .py(12.0)
-            .gap(2.0)
-            .justify_center()
-    };
-    let wrap = |grow: f32, inner: El, first: bool| {
-        let w = row().grow(grow).min_w(0.0).child(inner);
-        if first {
-            w
-        } else {
-            w.border_sides([0.0, 0.0, 0.0, 1.0], p.line)
-        }
-    };
-    let quiet = |v: &str| {
-        text(v.to_string())
-            .font(value_style)
-            .color(p.ink)
-            .truncate()
-            .min_w(0.0)
-    };
-    let now_runner = match active {
-        Some(r) => runner_name(s, r, 15.0, 550.0).h(22.5),
-        None => quiet(if !race["raceFinishedAt"].is_null() {
-            "Race afgelopen"
-        } else if !race["raceStartedAt"].is_null() {
-            "Even niemand"
-        } else {
-            "Nog niemand gestart"
-        }),
-    };
-    let mut now_cell = row()
-        .grow(1.0)
-        .min_w(0.0)
-        .px(16.0)
-        .py(12.0)
-        .gap(12.0)
-        .center_y()
-        .child(
-            col()
-                .grow(1.0)
-                .min_w(0.0)
-                .gap(2.0)
-                .child(
-                    row()
-                        .center_y()
-                        .child(rune::el().size(6.0, 6.0).radius(3.0).fill(p.brand).mr(6.0))
-                        .child(text("Nu op de piste").font(label_style).color(p.t.ink3)),
-                )
-                .child(now_runner),
-        );
-    if let (Some(_), Some(start)) = (active, race["activeStartedAt"].as_i64()) {
-        now_cell = now_cell.child(
-            text(duration((s.clock - start).max(0)))
-                .font(
-                    rune::TextStyle::new(20.0, 550.0)
-                        .tracking(-0.4)
-                        .features("tnum"),
-                )
-                .color(p.ink),
-        );
-    }
-    let next = queue.first();
-    row()
-        .key("race-strip")
-        .role("region")
-        .label("Wisselzone")
-        .radius(8.0)
-        .fill(p.surface)
-        .border(1.0, p.line)
-        .padding(1.0)
-        .min_h(69.25)
-        .child(wrap(1.3, now_cell, true))
-        .child(wrap(
-            1.0,
-            cell()
-                .child(text("Volgende").font(label_style).color(p.t.ink3))
-                .child(match next {
-                    Some(r) => runner_name(s, r, 15.0, 550.0).h(22.5),
-                    None => quiet("Niemand klaar"),
-                }),
-            false,
-        ))
-        .child(wrap(
-            0.55,
-            cell()
-                .child(text("Klaar om te lopen").font(label_style).color(p.t.ink3))
-                .child(quiet(&plural(queue.len(), "loper", "lopers"))),
-            false,
-        ))
-}
 
 struct Board<'a> {
     filtered: Vec<&'a Value>,
@@ -1210,7 +1105,7 @@ pub(super) fn failed(s: &mut State, method: &str) {
 }
 
 fn rows_height(s: &State) -> f32 {
-    (s.queue_page.window_h - 290.0).max(280.0)
+    (s.queue_page.window_h - 365.0).max(280.0)
 }
 
 fn board(s: &State) -> El {

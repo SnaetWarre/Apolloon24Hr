@@ -198,14 +198,6 @@ pub(super) fn overview(s: &State) -> El {
         .filter_map(|r| r["bestLapMs"].as_i64())
         .filter(|n| *n > 0)
         .min();
-    let durations: Vec<i64> = history
-        .iter()
-        .filter_map(|l| l["durationMs"].as_i64())
-        .filter(|v| *v > 0)
-        .collect();
-    let average = (!durations.is_empty())
-        .then(|| durations.iter().sum::<i64>() / durations.len() as i64);
-
     // Left: who runs now, then the laps that came in.
     let mut left = col()
         .grow(1.0)
@@ -243,8 +235,6 @@ pub(super) fn overview(s: &State) -> El {
             );
             if best == Some(ms) {
                 name = name.child(hex::flag(s, "Snelste", true));
-            } else if average.is_some_and(|a| ms > a * 13 / 10) {
-                name = name.child(hex::flag(s, "Traag", false));
             }
             list = list.child(
                 hex::item(s, i == 0)

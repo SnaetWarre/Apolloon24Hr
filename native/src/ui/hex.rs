@@ -102,30 +102,6 @@ pub(super) fn stats(s: &State, facts: Vec<(&str, String)>) -> El {
     group(s).child(r)
 }
 
-/// "m:ss" from a registration's pace.
-fn parse_pace(v: &str) -> Option<i64> {
-    let (m, sec) = v.trim().split_once(':')?;
-    Some((m.parse::<i64>().ok()? * 60 + sec.parse::<i64>().ok()?) * 1000)
-}
-
-/// How long this runner's lap should take: their own best, their registered pace, or the race's
-/// average lap.
-pub(super) fn expected_ms(s: &State, r: &Value) -> Option<i64> {
-    if let Some(avg) = r["averageLapMs"].as_i64().filter(|v| *v > 0) {
-        return Some(avg);
-    }
-    if let Some(p) = r["estimatedPace"].as_str().and_then(parse_pace) {
-        return Some(p);
-    }
-    let laps = laps(s);
-    let ms: Vec<i64> = laps
-        .iter()
-        .filter_map(|l| l["durationMs"].as_i64())
-        .filter(|v| *v > 0)
-        .collect();
-    (!ms.is_empty()).then(|| ms.iter().sum::<i64>() / ms.len() as i64)
-}
-
 /// A clock split in its whole seconds and its tenth: "1:12" and ".4".
 fn split_clock(ms: i64) -> (String, String) {
     let ms = ms.max(0);
@@ -133,7 +109,7 @@ fn split_clock(ms: i64) -> (String, String) {
     (whole, format!(".{}", (ms % 1000) / 100))
 }
 
-/// Who is on the track: number, name, the lap clock, and a bar against the expected lap.
+/// Who is on the track: number, name and the lap clock, with who runs after them.
 pub(super) fn now_block(s: &State, big: bool) -> El {
     let t = tok::theme(s.dark);
     let c = tok::tones(s.dark);
@@ -164,7 +140,6 @@ pub(super) fn now_block(s: &State, big: bool) -> El {
     };
     let started = race["activeStartedAt"].as_i64();
     let running = started.map(|start| s.clock - start).unwrap_or(0);
-    let expected = expected_ms(s, current);
     let since = started
         .and_then(chrono::DateTime::from_timestamp_millis)
         .map(|time| {
@@ -235,36 +210,7 @@ pub(super) fn now_block(s: &State, big: bool) -> El {
                         ),
                 ),
         );
-    let share = expected
-        .map(|e| (running as f32 / e.max(1) as f32).clamp(0.0, 1.0))
-        .unwrap_or(0.0);
-    let over = expected.filter(|e| running > *e).map(|e| running - e);
-    block = block.child(
-        row()
-            .mt(if big { 22.0 } else { 16.0 })
-            .w_full()
-            .h(if big { 6.0 } else { 4.0 })
-            .radius(3.0)
-            .fill(c.surface3)
-            .clip_rounded(3.0)
-            .child(
-                rune::el()
-                    .h_full()
-                    .w_frac(share)
-                    .radius(3.0)
-                    .fill(if over.is_some() { c.stop } else { brand }),
-            ),
-    );
-    let left = match (expected, over) {
-        (_, Some(over)) => text(format!("{} boven verwacht", duration(over)))
-            .font(ts(13.5, 500.0))
-            .color(c.stop),
-        (Some(e), None) => text(format!("Verwacht ~{}", duration(e)))
-            .font(ts(13.5, 400.0))
-            .color(c.ink3),
-        (None, None) => text("").font(ts(13.5, 400.0)),
-    };
-    let mut foot = row().mt(10.0).w_full().center_y().child(left.grow(1.0));
+    let mut foot = row().mt(14.0).w_full().center_y().child(col().grow(1.0));
     if let Some(n) = next {
         foot = foot
             .child(text("Hierna ").font(ts(13.5, 400.0)).color(c.ink3))

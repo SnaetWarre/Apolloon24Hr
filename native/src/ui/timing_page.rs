@@ -266,6 +266,14 @@ fn undo(s: &mut State) {
     }
     s.timing_page.dialog = Some(Dialog::Undo { reopen: next == "finish" });
 }
+/// Burgie gepakt and undo sit in the page header, as Hex puts a page's actions top right.
+pub(super) fn header_actions(s: &State) -> Vec<El> {
+    let c = cluster(s);
+    vec![
+        off(btn("burgie", "Burgie gepakt", s.dark, burgie), c.blocked, s.dark),
+        off(btn("undo", "Laatste wissel ongedaan maken", s.dark, undo), c.blocked, s.dark),
+    ]
+}
 fn burgie(s: &mut State) {
     if !unreachable(s) {
         s.send("events.burgieGepakt", json!({}));
@@ -420,9 +428,9 @@ fn btn(key: &str, value: &str, dark: bool, f: impl Fn(&mut State) + 'static) -> 
         .label(value.to_string())
         .focusable(true)
         .h(34.0)
-        .px(12.0)
+        .px(14.0)
         .center()
-        .radius(6.0)
+        .radius(9.0)
         .fill(t.card)
         .border(1.0, p.line2)
         .hover(p.surface2)
@@ -439,19 +447,6 @@ fn off(button: El, disabled: bool, dark: bool) -> El {
         .fill(p.surface2)
         .border(1.0, tok::theme(dark).card_border)
         .opacity(0.75)
-}
-fn muted_label(value: &str, dark: bool) -> El {
-    text(value.to_string())
-        .font(ts(12.5, 400.0).lh(18.75))
-        .color(pal(dark).ink3)
-}
-fn stat(title: &str, value: String, size: f32, weight: f32, dark: bool) -> El {
-    col().child(muted_label(title, dark)).child(
-        text(value)
-            .font(ts(size, weight).lh(size * 1.2).tracking(-0.02 * size))
-            .color(tok::theme(dark).text)
-            .mt(2.0),
-    )
 }
 fn pill(label: &Value, s: &State) -> El {
     let t = tok::theme(s.dark);
@@ -594,12 +589,12 @@ pub(super) fn page(s: &State) -> El {
         .items_end()
         .child(
             text(main)
-                .font(ts(116.0, 600.0).lh(104.4).tracking(-5.22))
+                .font(ts(96.0, 550.0).lh(92.0).tracking(-3.6))
                 .color(if idle { p.surface3 } else { t.text }),
         )
         .child(
             text(fraction)
-                .font(ts(58.0, 600.0).lh(58.0).tracking(-1.16))
+                .font(ts(42.0, 550.0).lh(44.0).tracking(-0.8))
                 .color(if idle { p.surface3 } else { p.ink3 })
                 .mb(-2.0),
         );
@@ -613,18 +608,7 @@ pub(super) fn page(s: &State) -> El {
         .filter(|ms| *ms > 0)
         .map(lap_duration)
         .unwrap_or_else(|| "—".into());
-    let clock_row = row()
-        .items_end()
-        .gap(32.0)
-        .flex_wrap()
-        .child(clock)
-        .child(
-            row()
-                .gap(24.0)
-                .pb(8.0)
-                .child(stat("Vorige ronde", previous, 18.0, 550.0, s.dark))
-                .child(stat("Snelste ronde", best, 18.0, 550.0, s.dark)),
-        );
+    let clock_row = col().w_full().pb(6.0).child(clock);
     let handoff_label = if let Some((name, _)) = &c.elsewhere {
         format!("Timing staat open op {name}")
     } else if c.blocked {
@@ -649,16 +633,16 @@ pub(super) fn page(s: &State) -> El {
         })
         .focusable(true)
         .w_full()
-        .min_h(64.0)
-        .px(20.0)
+        .min_h(76.0)
+        .px(24.0)
         .center_y()
         .justify_between()
         .gap(8.0)
-        .radius(8.0)
+        .radius(12.0)
         .busy(s.busy)
         .child(
             text(handoff_label)
-                .font(ts(17.0, 550.0))
+                .font(ts(19.0, 550.0))
                 .color(if handoff_disabled { p.ink3 } else { p.on_brand })
                 .wrap()
                 .min_w(0.0)
@@ -678,13 +662,12 @@ pub(super) fn page(s: &State) -> El {
     if !finished && !handoff_disabled {
         key = key.child(
             row()
-                .h(20.0)
-                .px(6.0)
+                .h(26.0)
+                .px(10.0)
                 .center_y()
-                .radius(4.0)
-                .border(1.0, p.on_brand)
-                .opacity(0.75)
-                .child(text("Spatie / Enter").font(ts(11.5, 500.0)).color(p.on_brand)),
+                .radius(7.0)
+                .fill(rune::oklcha(1.0, 0.0, 0.0, 0.18))
+                .child(text("Spatie").font(ts(13.0, 500.0)).color(p.on_brand)),
         );
     }
 
@@ -760,131 +743,101 @@ pub(super) fn page(s: &State) -> El {
         .as_i64()
         .map(|ms| clock_time(ms).split('.').next().unwrap_or("").to_string())
         .unwrap_or_else(|| "Nog niet".into());
-    let footer = row()
-        .items_end()
+    let now_group = super::hex::group(s)
+        .key("timing-now-group")
+        .px(26.0)
+        .pt(22.0)
+        .pb(20.0)
         .gap(8.0)
-        .pt(16.0)
-        .border_sides([1.0, 0.0, 0.0, 0.0], t.card_border)
-        .child(stat("Race gestart", started, 15.0, 500.0, s.dark).grow(1.0))
-        .child(off(btn("burgie", "Burgie gepakt", s.dark, burgie), c.blocked, s.dark).mr(24.0))
-        .child(off(btn("undo", "Laatste wissel ongedaan maken", s.dark, undo), c.blocked, s.dark));
+        .child(status)
+        .child(now_row)
+        .child(clock_row);
     let station = col()
         .key("timing-station")
         .role("region")
         .label("Timing bedienen")
-        .grow(1.0)
+        .grow(1.15)
+        .w(0.0)
         .min_w(0.0)
         .gap(16.0)
-        .px(24.0)
-        .py(20.0)
-        .radius(8.0)
-        .fill(t.card)
-        .border(1.0, t.card_border)
-        .child(status)
-        .child(now_row)
-        .child(clock_row)
+        .child(now_group)
         .child(key)
         .child(feedback)
-        .child(footer);
+        .child(super::hex::stats(
+            s,
+            vec![
+                ("Vorige ronde", previous),
+                ("Snelste ronde", best),
+                ("Race gestart", started),
+            ],
+        ));
 
-    // Sidebar: who is next, the last ten laps and the finish.
-    let panel = |key: &str| {
-        col()
-            .key(key.to_string())
-            .px(16.0)
-            .pt(16.0)
-            .radius(8.0)
-            .fill(t.card)
-            .border(1.0, t.card_border)
-    };
-    let h2 = |value: &str| {
-        text(value.to_string())
-            .font(ts(14.0, 600.0).lh(17.5))
-            .color(t.text)
-    };
-    let mut upcoming = panel("timing-upcoming").pb(16.0).role("region").label("Komende lopers").child(
-        row()
-            .mb(8.0)
-            .center_y()
-            .child(h2("Hierna op de piste").grow(1.0))
-            .child(muted_label(&format!("{} klaar", shown_queue.len()), s.dark)),
-    );
+    // Beside it: who is next and the last laps, as grouped rows.
+    use super::hex;
+    let mut upcoming = hex::group(s).key("timing-upcoming").role("region").label("Komende lopers");
     if shown_queue.is_empty() {
-        upcoming = upcoming.child(body_text("Niemand klaar. Zet lopers klaar via Wachtrij.", p.ink3).py(8.0));
-    }
-    let count = shown_queue.len().min(5);
-    for (i, r) in shown_queue.iter().take(5).enumerate() {
-        let font = ts(13.5, 500.0).lh(20.25);
         upcoming = upcoming.child(
-            row()
-                .key(format!("timing-next-{}", st(r, "id")))
-                .gap(8.0)
-                .pt(7.0)
-                .pb(if i + 1 < count { 8.0 } else { 7.0 })
-                .center_y()
-                .border_sides([0.0, 0.0, if i + 1 < count { 1.0 } else { 0.0 }, 0.0], t.card_border)
-                .child(
-                    text(format!("{}", i + 1))
-                        .font(if i == 0 { ts(13.5, 600.0).lh(20.25) } else { font })
-                        .color(if i == 0 { p.brand_ink } else { p.ink3 })
-                        .w(20.0),
-                )
-                .child(text(st(r, "runnerNumber").to_string()).font(font).color(p.ink3).min_w(35.1))
-                .child(text(st(r, "name").to_string()).font(font).color(t.text).truncate().min_w(0.0)),
+            hex::item(s, true).child(body_text("Niemand klaar. Zet lopers klaar via Wachtrij.", p.ink3)),
         );
     }
-    let cell = |value: String, color: rune::Color, weight: f32| {
-        text(value).font(ts(13.0, weight).lh(19.5)).color(color)
-    };
-    let head = |value: &str| text(value.to_string()).font(ts(12.0, 500.0).lh(18.0)).color(p.ink3);
-    let mut log = panel("timing-log").pb(8.0).child(row().mb(8.0).child(h2("Laatste 10 rondes"))).child(
-        row()
-            .mx(-16.0)
-            .pt(6.0)
-            .pb(7.0)
-            .border_sides([0.0, 0.0, 1.0, 0.0], t.card_border)
-            .child(head("Binnen").pl(16.0).w(80.0))
-            .child(head("Loper").pl(8.0).grow(1.0))
-            .child(row().w(51.0).pr(8.0).justify_end().child(head("Ronde")))
-            .child(row().w(79.0).pr(16.0).justify_end().child(head("Rondetijd"))),
-    );
-    let recent: Vec<&Value> = laps(s).into_iter().take(10).collect();
-    if recent.is_empty() {
-        log = log.child(body_text("Nog geen rondes geregistreerd", p.ink3).py(8.0));
-    }
-    let rows = recent.len();
-    for (i, lap) in recent.iter().enumerate() {
-        let mut who = row().pl(8.0).grow(1.0).min_w(0.0);
-        if !st(lap, "runnerNumber").is_empty() {
-            who = who.child(cell(st(lap, "runnerNumber").to_string(), p.ink3, 400.0).min_w(34.0));
-        }
-        who = who.child(cell(st(lap, "runnerName").to_string(), t.text, 400.0).truncate().min_w(0.0));
-        log = log.child(
-            row()
-                .key(format!("timing-lap-{}", st(lap, "id")))
-                .mx(-16.0)
-                .pt(6.0)
-                .pb(if i + 1 < rows { 7.0 } else { 6.0 })
-                .center_y()
-                .border_sides([0.0, 0.0, if i + 1 < rows { 1.0 } else { 0.0 }, 0.0], t.card_border)
-                .hover(p.surface2)
+    for (i, r) in shown_queue.iter().take(3).enumerate() {
+        upcoming = upcoming.child(
+            hex::item(s, i == 0)
+                .key(format!("timing-next-{}", st(r, "id")))
                 .child(
-                    cell(
-                        clock_time(lap["finishedAt"].as_i64().unwrap_or(0)).split('.').next().unwrap_or("").to_string(),
-                        t.text,
-                        400.0,
-                    )
-                    .pl(16.0)
-                    .w(80.0),
+                    text(format!("{}", i + 1))
+                        .font(ts(14.0, if i == 0 { 600.0 } else { 400.0 }))
+                        .color(if i == 0 { p.brand_ink } else { p.ink3 })
+                        .w(14.0),
                 )
-                .child(who)
-                .child(row().w(51.0).pr(8.0).justify_end().child(cell(lap["lapNumber"].to_string(), t.text, 400.0)))
+                .child(hex::number(s, st(r, "runnerNumber"), 14.5, 36.0))
                 .child(
-                    row()
-                        .w(79.0)
-                        .pr(16.0)
-                        .justify_end()
-                        .child(cell(lap_duration(lap["durationMs"].as_i64().unwrap_or(0)), t.text, 600.0)),
+                    text(st(r, "name").to_string())
+                        .font(ts(15.0, 450.0))
+                        .color(t.text)
+                        .truncate()
+                        .min_w(0.0)
+                        .grow(1.0),
+                )
+        );
+    }
+    let recent: Vec<&Value> = laps(s).into_iter().take(5).collect();
+    let mut log = hex::group(s).key("timing-log");
+    if recent.is_empty() {
+        log = log.child(hex::item(s, true).child(body_text("Nog geen rondes geregistreerd", p.ink3)));
+    }
+    for (i, lap) in recent.iter().enumerate() {
+        log = log.child(
+            hex::item(s, i == 0)
+                .key(format!("timing-lap-{}", st(lap, "id")))
+                .child(hex::number(s, st(lap, "runnerNumber"), 14.5, 36.0))
+                .child(
+                    text(st(lap, "runnerName").to_string())
+                        .font(ts(15.0, 450.0))
+                        .color(t.text)
+                        .truncate()
+                        .min_w(0.0)
+                        .grow(1.0),
+                )
+                .child(
+                    text(
+                        clock_time(lap["finishedAt"].as_i64().unwrap_or(0))
+                            .split('.')
+                            .next()
+                            .unwrap_or("")
+                            .chars()
+                            .take(5)
+                            .collect::<String>(),
+                    )
+                    .font(ts(14.0, 400.0))
+                    .color(p.ink3),
+                )
+                .child(
+                    text(lap_duration(lap["durationMs"].as_i64().unwrap_or(0)))
+                        .font(ts(15.0, 550.0))
+                        .color(t.text)
+                        .w(78.0)
+                        .align(rune::Align::End),
                 ),
         );
     }
@@ -895,33 +848,30 @@ pub(super) fn page(s: &State) -> El {
             .role("button")
             .label("Race beëindigen")
             .focusable(true)
-            .h(28.0)
-            .px(10.0)
+            .h(30.0)
+            .px(12.0)
             .center()
-            .radius(6.0)
-            .fill(t.card)
-            .border(1.0, p.line2)
-            .child(text("Race beëindigen").font(ts(13.0, 500.0)).color(
+            .radius(8.0)
+            .child(text("Race beëindigen").font(ts(14.0, 450.0)).color(
                 if c.blocked || !can_finish { p.ink3 } else { p.stop_ink },
             ));
         if c.blocked || !can_finish {
-            b.disabled(true).fill(p.surface2).border(1.0, t.card_border)
+            b.disabled(true)
         } else {
             b.hover(p.stop_wash).on_press(start_finish)
         }
     };
-    let danger = row()
-        .px(2.0)
-        .center_y()
-        .justify_between()
-        .child(
-            text("Race afsluiten")
-                .font(ts(12.5, 400.0))
-                .color(p.ink3),
-        )
-        .child(finish_button);
-    let aside = col().w(380.0).gap(16.0).child(upcoming).child(log).child(danger);
-    let workspace = row().items_start().gap(16.0).pb(24.0).child(station).child(aside);
+    let danger = row().justify_end().child(finish_button);
+    let aside = col()
+        .grow(1.0)
+        .w(0.0)
+        .min_w(0.0)
+        .child(hex::label(s, "Hierna", Some(shown_queue.len())))
+        .child(upcoming)
+        .child(hex::label(s, "Laatste rondes", None).mt(22.0))
+        .child(log)
+        .child(danger.mt(14.0));
+    let workspace = row().items_start().gap(24.0).pb(24.0).child(station).child(aside);
     if s.timing_page.dialog.is_some() {
         workspace.inert()
     } else {

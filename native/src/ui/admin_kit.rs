@@ -158,7 +158,7 @@ pub(super) fn btn_el(
         .px(if sm { 10.0 } else { 12.0 })
         .gap(8.0)
         .center()
-        .radius(6.0)
+        .radius(8.0)
         .fill(fill)
         .border(1.0, line);
     if !disabled {

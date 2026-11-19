@@ -570,7 +570,7 @@ pub(super) fn header_meta(s: &State) -> Option<El> {
     match s.page {
         0 if super::overview::show_welcome(s) => meta("Nog niet ingesteld"),
         3 => Some(super::analysis_page::header_meta(s)),
-        2 => meta("Spatie of Enter klokt de huidige loper af en start de volgende."),
+        2 => meta("Spatie of Enter wisselt"),
         4 => Some(header_tag(
             &if s.history["laps"].is_null() {
                 "Live data laden".to_string()
@@ -634,6 +634,7 @@ pub(super) fn header_actions(s: &State) -> Vec<El> {
             ]
         }
         1 => super::queue_page::header_actions(s),
+        2 => super::timing_page::header_actions(s),
         3 => super::analysis_page::header_actions(s),
         _ => Vec::new(),
     }

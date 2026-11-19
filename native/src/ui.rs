@@ -2266,7 +2266,11 @@ mod tests {
             if rt.find(&hide).is_some_and(|(_, y)| y < 1060.0) {
                 break;
             }
-            rt.wheel(700.0, 600.0, -200.0);
+            rt.wheel(700.0, 160.0, -200.0);
+            rt.frame(1.0 / 60.0);
+        }
+        // Let the scroll glide land before pressing.
+        for _ in 0..40 {
             rt.frame(1.0 / 60.0);
         }
         click(&mut rt, &hide);
