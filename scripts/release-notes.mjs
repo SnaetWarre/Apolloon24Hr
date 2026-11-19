@@ -20,7 +20,7 @@ export function releaseNotes(changelog, version) {
 
 - **Windows**: \`.exe\`. Windows waarschuwt omdat het installatieprogramma niet ondertekend is: kies *Meer informatie* › *Toch uitvoeren*.
 - **Linux**: pak \`apolloon-native-linux.tar.gz\` uit en start \`./apolloon-native\`.
-- **macOS (Apple Silicon)**: \`.dmg\`. Niet ondertekend: open de app één keer, kies dan in *Systeeminstellingen* › *Privacy en beveiliging* voor *Toch openen*.
+- **macOS (Apple Silicon)**: \`.dmg\`. Sleep de app naar Applications. De app is niet door Apple genotariseerd. Meldt macOS dat de ontwikkelaar niet kan worden geverifieerd? Kies dan in *Systeeminstellingen* › *Privacy en beveiliging* voor *Toch openen*.
 
 Zet op alle laptops dezelfde versie. Controleer een download met \`SHA256SUMS.txt\`
 (\`sha256sum -c SHA256SUMS.txt --ignore-missing\`, of \`Get-FileHash\` op Windows).

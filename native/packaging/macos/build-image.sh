@@ -5,7 +5,8 @@ package="${1:?Pass the staged native package directory}"
 output="${2:?Pass the output disk image path}"
 scratch="$(mktemp -d)"
 trap 'rm -r "$scratch"' EXIT
-bundle="$scratch/image/Apolloon Telsysteem.app/Contents"
+app="$scratch/image/Apolloon Telsysteem.app"
+bundle="$app/Contents"
 mkdir -p "$bundle"/{MacOS,Resources} "$scratch/Apolloon.iconset"
 cp -R "$package"/. "$bundle/MacOS/"
 cp native/packaging/macos/Info.plist "$bundle/Info.plist"
@@ -19,5 +20,14 @@ for size in 16 32 128 256 512; do
     sips -z "$retina" "$retina" build/icon.png --out "$scratch/Apolloon.iconset/icon_${size}x${size}@2x.png" >/dev/null
 done
 iconutil -c icns -o "$bundle/Resources/Apolloon.icns" "$scratch/Apolloon.iconset"
-ln -s /Applications "$scratch/image/Applications"
-hdiutil create -volname "Apolloon Telsysteem" -srcfolder "$scratch/image" -format UDZO -ov "$output"
+codesign --force --sign - "$app"
+create-dmg \
+    --volname "Apolloon Telsysteem" \
+    --volicon "$bundle/Resources/Apolloon.icns" \
+    --background native/packaging/macos/background.png \
+    --window-size 600 250 \
+    --icon-size 100 \
+    --icon "Apolloon Telsysteem.app" 153 111 \
+    --hide-extension "Apolloon Telsysteem.app" \
+    --app-drop-link 447 111 \
+    "$output" "$scratch/image"
