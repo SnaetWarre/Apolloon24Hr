@@ -1103,8 +1103,8 @@ fn view(s: &State, _cx: &mut Cx<State>) -> El {
                 .border(1.0, t.card_border)
                 .clip_rounded(12.0),
         );
-    // Laptop screens answer at once: every change a press starts springs on `SNAP` (0.25 s),
-    // not Rune's 0.5 s fallback. The tv screens keep their slower motion.
+    // Laptop screens answer quickly: every change on them that animates (a press, a new lap)
+    // springs on `SNAP` (0.25 s), not Rune's 0.5 s fallback. The tv screens keep their slower motion.
     let mut root = row()
         .w_full()
         .h_full()

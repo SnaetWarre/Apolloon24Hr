@@ -13,25 +13,29 @@ const ALLOW: &[AllowRow] = &[
         "",
         "nav/|admin-tab/",
         "a page or Beheer tab swaps at once, as fast as a press",
-    ),
+    )
+    .max(38),
     AllowRow::new(
         "pop-out",
         "",
         "nav/|admin-tab/",
         "a page or Beheer tab swaps at once, as fast as a press",
-    ),
+    )
+    .max(30),
     AllowRow::new(
         "jump",
         "",
         "nav/|admin-tab/",
         "the new page's header and panel land at their size at once",
-    ),
+    )
+    .max(26),
     AllowRow::new(
         "text-swap",
         "page-header",
         "nav/",
         "the page title changes with the page",
-    ),
+    )
+    .max(12),
     AllowRow::new(
         "appear-then-jump",
         "tac-chart-",
@@ -44,19 +48,22 @@ const ALLOW: &[AllowRow] = &[
         "",
         "lap/",
         "the laptops show a new lap the moment it is saved, without a roll",
-    ),
+    )
+    .max(14),
     AllowRow::new(
         "snap",
         "timing-",
         "lap/timing",
         "the next runner's row becomes the running one at once",
-    ),
+    )
+    .max(3),
     AllowRow::new(
         "snap",
         "points-all/",
         "lap/inside",
         "the NET BINNEN tag moves to the new lap, which rises in",
-    ),
+    )
+    .max(1),
 ];
 
 /// A race in progress, as the server reports it, before and after one more lap.
@@ -151,6 +158,9 @@ fn start(page: usize, section: usize, dark: bool, size: (f32, f32)) -> Run<State
     s.admin_section = section;
     (s.snapshot, s.history) = r.before.clone();
     s.clock = r.clock;
+    // The screen has been open a while: what it shows now is what it opened with.
+    let clock = s.clock;
+    public_screens::poll(&mut s, true, clock);
     let mut rt = Runtime::new(s, view, size, env());
     rt.on_key = Some(on_key);
     let mut run = Run::new(rt, 120.0);
@@ -169,24 +179,27 @@ fn tap_and_play(page: usize, section: usize, dark: bool, key: String) -> Recordi
     run.rec
 }
 
-fn open_and_close(page: usize, key: &str) -> Recording {
+/// Opens `key`, then closes it with Escape (a dialog or menu) or by tapping it again.
+fn open_and_close(page: usize, key: &str, escape: bool) -> Recording {
     let mut run = start(page, 0, false, LAPTOP);
     run.act(&format!("tap {key}"), |rt| Run::tap(rt, key));
     run.play(1.0);
-    run.act("escape, or the same control again", |rt| {
-        rt.key(rune::Key::Escape.into());
-        if rt.find(key).is_some() {
-            rt.frame(1.0 / 120.0);
-        }
-    });
+    if escape {
+        run.act("escape", |rt| rt.key(rune::Key::Escape.into()));
+    } else {
+        run.act(&format!("tap {key} again"), |rt| Run::tap(rt, key));
+    }
     run.play(1.0);
     run.rec
 }
 
 fn lap_arrives(page: usize, size: (f32, f32)) -> Recording {
     let mut run = start(page, 0, false, size);
+    // As a poll that brings the lap: the tv screens mark what arrived and may flash.
     run.rt.update(|s, _| {
         (s.snapshot, s.history) = race().after.clone();
+        let clock = s.clock;
+        public_screens::poll(s, true, clock);
     });
     run.step();
     run.play(2.0);
@@ -217,17 +230,17 @@ fn cells() -> Vec<(String, Job)> {
         }
     }
     // Dialogs, menus and sections that open and close in place: in, then out again.
-    for (name, page, key) in [
-        ("timing-finish", 2, "finish"),
-        ("analysis-export", 3, "analysis-export"),
-        ("queue-completed", 1, "queue-completed-toggle"),
-        ("queue-available", 1, "available-now-toggle"),
-        ("tactics-hours", 4, "tac-hour-toggle"),
-        ("tactics-analysis", 4, "tac-analysis-toggle"),
+    for (name, page, key, escape) in [
+        ("timing-finish", 2, "finish", true),
+        ("analysis-export", 3, "analysis-export", true),
+        ("queue-completed", 1, "queue-completed-toggle", false),
+        ("queue-available", 1, "available-now-toggle", false),
+        ("tactics-hours", 4, "tac-hour-toggle", false),
+        ("tactics-analysis", 4, "tac-analysis-toggle", false),
     ] {
         cells.push((
             format!("open/{name}"),
-            Box::new(move || open_and_close(page, key)),
+            Box::new(move || open_and_close(page, key, escape)),
         ));
     }
     cells.push((

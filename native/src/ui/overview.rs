@@ -332,11 +332,7 @@ pub(super) fn overview(s: &State) -> El {
                 .role(if st.tone == shell::Tone::Error { "alert" } else { "link" })
                 .focusable(true)
                 .hover(c.surface2)
-                .on_press_tx(|s: &mut State, tx: &mut Tx| {
-                    tx.instant();
-                    s.page = 8;
-                    s.admin_section = 6;
-                })
+                .on_press_tx(open_admin(6))
                 .child(shell::dot(dot).size(8.0, 8.0).radius(4.0))
                 .child(
                     col()
@@ -368,11 +364,7 @@ pub(super) fn overview(s: &State) -> El {
                 .role("link")
                 .focusable(true)
                 .hover(c.surface2)
-                .on_press_tx(|s: &mut State, tx: &mut Tx| {
-                    tx.instant();
-                    s.page = 8;
-                    s.admin_section = 6;
-                })
+                .on_press_tx(open_admin(6))
                 .child(shell::dot(dot).size(8.0, 8.0).radius(4.0))
                 .child(text("Laptops").font(hex::ts(15.0, 450.0)).color(t.text).grow(1.0))
                 .child(
