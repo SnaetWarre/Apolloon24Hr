@@ -59,7 +59,7 @@ pub(super) fn number(s: &State, value: &str, size: f32, w: f32) -> El {
         .w(w)
 }
 
-/// A small tag after a name: "Snelste" in green, anything else in grey.
+/// A small tag after a name: praise ("Snelste", "Eigen record") in green, anything else in grey.
 pub(super) fn flag(s: &State, value: &str, good: bool) -> El {
     let c = tok::tones(s.dark);
     row()
@@ -232,7 +232,6 @@ pub(super) fn lap_praise(s: &State, lap: &Value) -> Option<El> {
     let race_best = all
         .iter()
         .filter_map(|r| r["bestLapMs"].as_i64())
-        .filter(|n| *n > 0)
         .min();
     if race_best == Some(ms) {
         return Some(flag(s, "Snelste", true));

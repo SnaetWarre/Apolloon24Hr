@@ -932,7 +932,7 @@ pub(super) fn page(s: &State) -> El {
         ("Mediaan", dur(k.stats.median)),
         ("Snelste", dur(k.stats.best)),
         (
-            "Lopers",
+            "Lopers met rondes",
             filtered
                 .iter()
                 .filter_map(|l| l["runnerId"].as_str())
@@ -1294,7 +1294,6 @@ fn runners_section(s: &State, laps: &[&Value], p: &Pal) -> El {
                     (dur(i.stats.average), false),
                     (dur(i.stats.median), false),
                     (dur(i.stats.best), false),
-                    (dur(i.stats.slowest), false),
                     (dur(i.stats.deviation), false),
                 ]
             })
@@ -1308,7 +1307,6 @@ fn runners_section(s: &State, laps: &[&Value], p: &Pal) -> El {
                 "Gem.",
                 "Mediaan",
                 "Snelste",
-                "Traagste",
                 "Spreiding",
             ],
             rows,
