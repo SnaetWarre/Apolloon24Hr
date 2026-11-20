@@ -2,19 +2,22 @@ name: Build App
 
 # Pull requests verify installers; tagged releases distribute them.
 # The slow parts run side by side on their own machines; "All checks" waits for all of them.
+# Runs on main save the Rust caches every pull request starts from; pull requests only read them.
 
 on:
   pull_request:
+    branches: [main]
+  push:
     branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: read
 
-# A new push to a pull request stops the run for the old commit.
+# A new push to a pull request stops the run for the old commit. Runs on main finish, so they save caches.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   tools:
@@ -46,10 +49,21 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: native
+          # Rune lives in native/.rune, so rust-cache counts it as ours and would drop its build.
+          cache-workspace-crates: true
+          key: rune-${{ hashFiles('native/patches/rune/revision', 'native/patches/rune/apolloon.patch') }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      # Keep the patched Rune source with its old file times, so Cargo reuses the cached build of it.
+      - uses: actions/cache@v6
+        with:
+          path: native/.rune
+          key: rune-${{ runner.os }}-${{ hashFiles('native/patches/rune/revision', 'native/patches/rune/apolloon.patch') }}
       - name: Install Linux dependencies
         run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev libxi-dev libxcursor-dev libxrandr-dev xdotool xvfb xauth libxkbcommon-x11-0 mesa-vulkan-drivers
       - name: Install wasm-bindgen CLI matching native/Cargo.lock
-        run: cargo install wasm-bindgen-cli --version 0.2.130 --locked
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen@0.2.130
       - run: npm ci
       - run: npm run test:native
       - run: bash native/scripts/build-web.sh
