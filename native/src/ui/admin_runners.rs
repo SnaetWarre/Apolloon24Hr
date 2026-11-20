@@ -4,7 +4,7 @@
 //! src/lib/availability.ts.
 use super::admin_base::{
     Choose, Confirm, ConfirmAction, Kind, Pending, btn, copy, field, fold, h2, numeric_cmp, pal,
-    panel, pill, select, send, st, ts,
+    pill, select, send, st, ts,
 };
 use super::*;
 
@@ -495,7 +495,7 @@ pub(super) fn section(s: &State) -> El {
             .role("row")
             .w_full()
             .min_w(0.0)
-            .fill(if hovered { p.t.surface2 } else { p.surface })
+            .fill(if hovered { p.t.surface2 } else { rune::Color::TRANSPARENT })
             .on_hover_change(move |s: &mut State, on, _| {
                 if on {
                     s.admin.runners.hovered = Some(hover_id.clone());
@@ -583,7 +583,7 @@ pub(super) fn section(s: &State) -> El {
     } else {
         page.hour.clone()
     };
-    let mut card = panel(s)
+    let mut card = super::admin_kit::panel()
         .key("runners-panel")
         .child(
             row()

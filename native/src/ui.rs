@@ -949,15 +949,7 @@ fn admin(s: &State) -> El {
         6 => admin_system::panel(s),
         _ => col().child(label("Deze sectie wordt nog gemigreerd.", s.dark)),
     };
-    let content = if matches!(s.admin_section, 0 | 1 | 2 | 3 | 6) {
-        content
-    } else {
-        content
-            .padding(16.0)
-            .radius(8.0)
-            .fill(tok::theme(s.dark).card)
-            .border(1.0, tok::theme(s.dark).card_border)
-    };
+    let content = content.pt(8.0);
     let content = match s.admin_section {
         1 => content,
         2 => content.max_w(1720.0),

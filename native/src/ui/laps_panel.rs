@@ -631,10 +631,6 @@ pub(super) fn panel(st: &State) -> El {
         .gap(0.0)
         .grow(1.0)
         .min_w(0.0)
-        .padding(16.0)
-        .radius(8.0)
-        .fill(t.card)
-        .border(1.0, t.card_border)
         .child(admin_kit::h2("Rondes", st.dark).mb(8.0))
         .child(admin_kit::copy("Elke gelopen ronde, de nieuwste bovenaan. Klik op een ronde om ze te verbeteren: een wissel te laat of te vroeg gedrukt, de verkeerde loper, een gemiste wissel of één keer te veel gedrukt. Elke verbetering staat ook in Activiteit.", st.dark).mb(12.0))
         .child(
@@ -711,8 +707,8 @@ fn fix_panel(st: &State, r: &Review, selected: Option<&Value>) -> El {
         .label("Ronde verbeteren")
         .w(400.0)
         .gap(12.0)
-        .padding(16.0)
-        .radius(8.0)
+        .padding(18.0)
+        .radius(12.0)
         .fill(t.card)
         .border(1.0, t.card_border);
     let Some(lap) = selected else {

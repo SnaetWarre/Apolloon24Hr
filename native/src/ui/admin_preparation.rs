@@ -1,6 +1,6 @@
 //! Beheer › Voorbereiding: Wedstrijdgereedheid and Inschrijvingen importeren. Port of
 //! src/components/admin/PreparationSection.tsx.
-use super::admin_base::{Kind, Pending, banner, btn, copy, h2, pal, panel, send, ts};
+use super::admin_base::{Kind, Pending, banner, btn, copy, h2, pal, send, stack, ts};
 use super::*;
 
 fn import(s: &mut State) {
@@ -36,7 +36,7 @@ pub(super) fn section(s: &State) -> El {
     if ready && !importing {
         import_button = import_button.on_press(import);
     }
-    let mut card = panel(s)
+    let mut card = super::admin_kit::panel()
         .key("import-panel")
         .child(h2(s, "Inschrijvingen importeren").mb(8.0))
         .child(copy(s, "Kies het Excel-bestand of de CSV-export van het inschrijvingsformulier. Nieuwe lopers komen in de databank en verschijnen op het bord zodra je ze aanmeldt in Wachtrij. Het rijnummer wordt het lopersnummer en alle antwoorden komen in het profiel."))
@@ -91,5 +91,5 @@ pub(super) fn section(s: &State) -> El {
         }
         card = card.child(problems);
     }
-    col().gap(16.0).w_full().min_w(0.0).child(readiness::panel(s)).child(card)
+    stack(s, vec![readiness::panel(s), card])
 }

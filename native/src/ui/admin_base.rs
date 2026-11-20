@@ -1,4 +1,4 @@
-//! Shared pieces of Beheer › Voorbereiding, Lopers and Labels: the `.panel`, `.btn`, `.input` and
+//! Shared pieces of Beheer › Voorbereiding, Lopers and Labels: the section stack, `.btn`, `.input` and
 //! select primitives from src/styles/primitives.css, the confirm dialog (ConfirmDialog.tsx), the
 //! toasts (Toaster.tsx) and which sent action belongs to these sections.
 use super::*;
@@ -215,7 +215,7 @@ pub(super) fn icon(
 
 // ---------- Primitives ----------
 
-/// `.panel`: 16 padding, 1px line, 8 radius, surface.
+/// A boxed panel: 16 padding, 1px line, 8 radius, surface. Beheer sections are open instead.
 pub(super) fn panel(s: &State) -> El {
     let p = pal(s.dark);
     col()
@@ -226,12 +226,22 @@ pub(super) fn panel(s: &State) -> El {
         .fill(p.surface)
         .border(1.0, p.line)
 }
+/// Beheer sections one under the other, split by a thin line; each section is an
+/// [`admin_kit::panel`](super::admin_kit::panel).
+pub(super) fn stack(s: &State, sections: Vec<El>) -> El {
+    let line = pal(s.dark).line;
+    let last = sections.len().saturating_sub(1);
+    let mut page = col().w_full().min_w(0.0);
+    for (i, mut section) in sections.into_iter().enumerate() {
+        if i > 0 {
+            section = section.pt(28.0).border_sides([1.0, 0.0, 0.0, 0.0], line);
+        }
+        page = page.child(if i < last { section.pb(28.0) } else { section });
+    }
+    page
+}
 pub(super) fn h2(s: &State, title: &str) -> El {
-    text(title.to_string())
-        .font(ts(14.0, 600.0).lh(17.5))
-        .color(pal(s.dark).ink)
-        .role("heading")
-        .level(2)
+    super::admin_kit::h2(title, s.dark).level(2)
 }
 pub(super) fn h3(s: &State, title: &str) -> El {
     text(title.to_string())
