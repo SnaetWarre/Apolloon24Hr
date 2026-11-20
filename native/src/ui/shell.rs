@@ -286,7 +286,8 @@ pub(super) fn sidebar(s: &State) -> El {
                     .px(8.0)
                     .center_y()
                     .radius(6.0)
-                    .on_press(|s: &mut State| {
+                    .on_press_tx(|s: &mut State, tx: &mut Tx| {
+                        tx.instant();
                         s.page = 0;
                         s.confirm = None;
                     })
@@ -348,7 +349,8 @@ fn nav_link(s: &State, i: usize) -> El {
         .center_y()
         .radius(8.0)
         .hover(if s.dark { c.surface2 } else { c.surface3 })
-        .on_press(move |s: &mut State| {
+        .on_press_tx(move |s: &mut State, tx: &mut Tx| {
+            tx.instant();
             s.page = i;
             s.confirm = None;
         });
@@ -438,7 +440,8 @@ fn footer(s: &State) -> El {
         card = card.px(8.0).w_full();
     }
     if status.is_some() {
-        card = card.on_press(|s: &mut State| {
+        card = card.on_press_tx(|s: &mut State, tx: &mut Tx| {
+            tx.instant();
             s.page = 8;
             s.confirm = None;
         });

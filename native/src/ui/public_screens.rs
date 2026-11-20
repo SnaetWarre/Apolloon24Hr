@@ -957,7 +957,10 @@ fn header(s: &State, p: &Pal, middle: El) -> El {
                 .role("button")
                 .label("Apolloon, terug naar start")
                 .focusable(true)
-                .on_press(|s: &mut State| s.page = 0)
+                .on_press_tx(|s: &mut State, tx: &mut Tx| {
+                    tx.instant();
+                    s.page = 0;
+                })
                 .child(
                     logo_on(
                         s,
@@ -2243,7 +2246,10 @@ fn outside(s: &State) -> El {
                 .role("button")
                 .label("Apolloon, terug naar start")
                 .focusable(true)
-                .on_press(|s: &mut State| s.page = 0)
+                .on_press_tx(|s: &mut State, tx: &mut Tx| {
+                    tx.instant();
+                    s.page = 0;
+                })
                 .pin(None, Some(4.0 * vh_unit()), Some(4.0 * vw_unit()), None)
                 .child(logo(s, logo_w, logo_w * 169.0 / 560.0)),
         );

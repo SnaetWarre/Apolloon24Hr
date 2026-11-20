@@ -298,7 +298,11 @@ fn title_bar<S: 'static>(cx: &Cx<S>, dark: bool, public: bool, home: fn(&mut S))
                             .color(if focused { t.text } else { tok::muted(dark) }),
                     },
                 )
-                .on_press(move |s: &mut S| home(s)),
+                .on_press_tx(move |s: &mut S, tx: &mut Tx| {
+                    // A page switch lands at once, as the sidebar's does.
+                    tx.instant();
+                    home(s)
+                }),
         );
     #[cfg(target_os = "linux")]
     return bar.child(rune::el().grow(1.0)).child(caption_buttons::<S>(dark, focused));

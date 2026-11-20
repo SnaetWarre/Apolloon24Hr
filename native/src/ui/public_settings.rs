@@ -57,10 +57,12 @@ pub(super) fn panel(s: &State) -> El {
         }
     });
     let link = |key: &str, title: &str, glyph: &'static str, page: usize| {
-        kit::btn(s, key.to_string(), title, Kind::Plain, true, Some(glyph), false, move |s| {
-            s.page = page
-        })
-        .role("link")
+        kit::btn_el(s, key.to_string(), title, Kind::Plain, true, Some(glyph), false)
+            .on_press_tx(move |s: &mut State, tx: &mut Tx| {
+                tx.instant();
+                s.page = page;
+            })
+            .role("link")
     };
     col()
         .w_full()
