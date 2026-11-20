@@ -59,7 +59,7 @@ pub(super) fn number(s: &State, value: &str, size: f32, w: f32) -> El {
         .w(w)
 }
 
-/// A small tag after a name: "Snelste" in green, anything else in grey.
+/// A small tag after a name: praise ("Snelste", "Eigen record") in green, anything else in grey.
 pub(super) fn flag(s: &State, value: &str, good: bool) -> El {
     let c = tok::tones(s.dark);
     row()
@@ -79,18 +79,21 @@ pub(super) fn flag(s: &State, value: &str, good: bool) -> El {
 pub(super) fn stats(s: &State, facts: Vec<(&str, String)>) -> El {
     let t = tok::theme(s.dark);
     let c = tok::tones(s.dark);
+    // Four numbers share a half-width panel: smaller figures keep "1:03.000" whole.
+    let (size, pad) = if facts.len() > 3 { (21.0, 14.0) } else { (24.0, 18.0) };
     let mut r = row().w_full();
     for (i, (name, value)) in facts.into_iter().enumerate() {
         let mut cell = col()
             .grow(1.0)
+            .w(0.0)
             .min_w(0.0)
-            .px(18.0)
+            .px(pad)
             .py(14.0)
             .gap(2.0)
             .child(text(name.to_string()).font(ts(13.5, 400.0)).color(c.ink3))
             .child(
                 text(value)
-                    .font(ts(24.0, 550.0).tracking(-0.5))
+                    .font(ts(size, 550.0).tracking(-0.5))
                     .color(t.text)
                     .truncate(),
             );
@@ -219,4 +222,21 @@ pub(super) fn now_block(s: &State) -> El {
             );
     }
     block.child(foot)
+}
+
+/// Praise beside a lap in a list: "Snelste" for the race's fastest lap, "Eigen record" for a
+/// runner's own best once they ran more than one lap. Laps are never marked any other way.
+pub(super) fn lap_praise(s: &State, lap: &Value) -> Option<El> {
+    let all = runners(s);
+    let ms = lap["durationMs"].as_i64()?;
+    let race_best = all
+        .iter()
+        .filter_map(|r| r["bestLapMs"].as_i64())
+        .min();
+    if race_best == Some(ms) {
+        return Some(flag(s, "Snelste", true));
+    }
+    let runner = all.iter().find(|r| r["id"] == lap["runnerId"])?;
+    (runner["lapCount"].as_i64().unwrap_or(0) > 1 && runner["bestLapMs"].as_i64() == Some(ms))
+        .then(|| flag(s, "Eigen record", true))
 }

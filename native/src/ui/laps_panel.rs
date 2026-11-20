@@ -270,9 +270,9 @@ fn flag_text(flag: Option<Flag>, median: Option<i64>) -> String {
 }
 fn warn(dark: bool) -> rune::Color {
     if dark {
-        rune::oklch(0.82, 0.15, 75.0)
+        rune::oklch(0.79, 0.12, 58.0)
     } else {
-        rune::oklch(0.55, 0.15, 60.0)
+        rune::oklch(0.55, 0.15, 50.0)
     }
 }
 

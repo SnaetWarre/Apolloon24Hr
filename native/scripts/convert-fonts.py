@@ -4,7 +4,7 @@ Run with python3-fonttools and python3-brotli installed; no font redesign/substi
 from pathlib import Path
 from fontTools.ttLib import TTFont
 root = Path(__file__).resolve().parents[2]
-for name in ("geist-latin-wght-normal", "geist-latin-ext-wght-normal", "big-shoulders-display-latin-wght-normal", "big-shoulders-display-latin-ext-wght-normal"):
+for name in ("geist-latin-wght-normal", "geist-latin-ext-wght-normal"):
     font = TTFont(root / "public/fonts" / f"{name}.woff2")
     font.flavor = None
     font.save(root / "native/assets" / f"{name}.ttf")

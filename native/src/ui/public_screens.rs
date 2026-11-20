@@ -339,7 +339,7 @@ fn rise(el: El, delay: f64) -> El {
     el.sequence(rune::Sequence::new(RISE).delay(delay))
 }
 
-/// `.outside-record-flash`: the whole screen blue, a ring, title, the yellow time and the runner.
+/// `.outside-record-flash`: the whole screen blue, a ring, title, the time in a white block and the runner.
 fn flash_layer(f: &Flash, ink: Color) -> El {
     let (vw, vh) = (vw_unit(), vh_unit());
     let long = f.title.chars().count() > 18;
@@ -411,7 +411,7 @@ fn flash_layer(f: &Flash, ink: Color) -> El {
                             2.2 * vw,
                             52.0f32.max((2.7083 * vw).min(4.8148 * vh)),
                         ))
-                        .fill(oklch(0.8718, 0.1716, 90.95))
+                        .fill(white())
                         .sequence(rune::Sequence::new(POP))
                         .child(
                             text(f.big.clone())
@@ -421,7 +421,7 @@ fn flash_layer(f: &Flash, ink: Color) -> El {
                                         .tracking(-0.03 * big)
                                         .features("'tnum' 1"),
                                 )
-                                .color(oklch(0.244, 0.039, 262.6)),
+                                .color(blue()),
                         ),
                 )
                 .child(rise(
@@ -439,10 +439,10 @@ fn flash_layer(f: &Flash, ink: Color) -> El {
                 )),
         )
 }
-/// `.outside-record-flash`: the whole screen blue, a ring, title, the yellow time and the runner.
+/// `.outside-record-flash`: the whole screen blue, a ring, title, the time in a white block and the runner.
 /// It fades in, holds and fades out (`display-flash`), and pulses between Apolloon blue with
-/// white and night blue with yellow every 2.4 s (`record-flash-pulse`): the night layer and the
-/// yellow copy of the lines fade in and out together over the blue and white ones.
+/// white and night blue with light blue every 2.4 s (`record-flash-pulse`): the night layer and the
+/// light blue copy of the lines fade in and out together over the blue and white ones.
 fn flash_view(f: &Flash, at: i64) -> El {
     let pulse = rune::LoopSpec::opacity(2.4, 0.0, 0.0, 1.0);
     rune::el()
@@ -460,7 +460,7 @@ fn flash_view(f: &Flash, at: i64) -> El {
                 .looping(pulse),
         )
         .child(flash_layer(f, white()))
-        .child(flash_layer(f, oklch(0.924, 0.115, 93.9)).looping(pulse))
+        .child(flash_layer(f, oklch(0.86, 0.08, 240.0)).looping(pulse))
 }
 
 /// The daypart factor of the Brussels clock hour a lap started in.
@@ -780,7 +780,8 @@ struct Pal {
     ink3: Color,
     line: Color,
     accent: Color,
-    gold: Color,
+    /// Points and the top three places: a lighter Apolloon blue, never yellow beside the blue.
+    podium: Color,
     /// color-mix(apolloon-blue 18%, transparent) over the surface.
     highlight: Color,
 }
@@ -795,7 +796,7 @@ fn pal(dark: bool) -> Pal {
             ink3: oklch(0.633, 0.0, 0.0),
             line: oklch(0.285, 0.0, 0.0),
             accent: oklch(0.715, 0.13, 247.8),
-            gold: oklch(0.7904, 0.1386, 85.24),
+            podium: oklch(0.82, 0.09, 240.0),
             highlight: rune::color::hex("#172b3b").unwrap(),
         }
     } else {
@@ -808,7 +809,7 @@ fn pal(dark: bool) -> Pal {
             ink3: oklch(0.552, 0.014, 285.9),
             line: oklch(0.92, 0.004, 286.3),
             accent: oklch(0.4923, 0.1419, 251.85),
-            gold: oklch(0.5538, 0.1207, 66.44),
+            podium: oklch(0.4923, 0.1419, 251.85),
             highlight: rune::color::hex("#d0e1f2").unwrap(),
         }
     }
@@ -840,11 +841,12 @@ fn font(size: f32, weight: f32, lh: f32, em: f32) -> TextStyle {
 fn t(value: impl Into<String>, style: TextStyle, color: Color) -> El {
     text(value.into()).font(style).color(color)
 }
+/// The Competities title and lap counts: Geist with tabular digits, like the other screens.
 fn score_font(size: f32, weight: f32) -> TextStyle {
-    TextStyle::new(size, weight)
-        .family(rune::Family::Named("Big Shoulders Display Thin"))
+    TextStyle::new(size, weight.min(700.0))
         .lh(size)
-        .tracking(size * 0.01)
+        .tracking(size * -0.02)
+        .features("'tnum' 1")
 }
 fn logo(s: &State, w: f32, h: f32) -> El {
     logo_on(s, w, h, true)
@@ -1474,7 +1476,7 @@ fn recent_panel(s: &State, p: &Pal) -> El {
                     t(
                         format_points(lap_points(lap)),
                         font(mid, 600.0, 1.1, -0.01),
-                        p.gold,
+                        p.podium,
                     ),
                     false,
                     false,
@@ -1527,7 +1529,7 @@ fn points_panel(s: &State, p: &Pal) -> El {
             .child(panel_heading(
                 "Ranking op punten",
                 Some(only.as_deref().unwrap_or(
-                    "Snelle rondes en rondes tussen middernacht en 16 uur tellen zwaarder",
+                    "Snelle rondes en rondes van 0 tot 16 u tellen zwaarder",
                 )),
                 p,
             ));
@@ -1557,7 +1559,7 @@ fn points_panel(s: &State, p: &Pal) -> El {
                 t(
                     (i + 1).to_string(),
                     font(mid, if podium { 700.0 } else { 500.0 }, 1.1, -0.01),
-                    if podium { p.gold } else { p.ink3 },
+                    if podium { p.podium } else { p.ink3 },
                 ),
                 false,
                 true,
@@ -1745,7 +1747,7 @@ fn competitions(s: &State) -> El {
                 li.child(row().w(2.2 * size).justify_center().child(t(
                     (i + 1).to_string(),
                     font(size, if podium { 700.0 } else { 500.0 }, 1.5, -0.01),
-                    if podium { p.gold } else { p.ink3 },
+                    if podium { p.podium } else { p.ink3 },
                 )))
                 .child(
                     t(r.label(), font(size, 550.0, 1.5, -0.01), p.ink)
