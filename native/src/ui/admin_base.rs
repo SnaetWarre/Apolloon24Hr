@@ -226,9 +226,26 @@ pub(super) fn panel(s: &State) -> El {
         .fill(p.surface)
         .border(1.0, p.line)
 }
+/// A Beheer section: open on the page, no box. [`stack`] puts a line between sections.
+pub(super) fn section(_s: &State) -> El {
+    col().w_full().min_w(0.0)
+}
+/// Sections one under the other, split by a thin line.
+pub(super) fn stack(s: &State, sections: Vec<El>) -> El {
+    let line = pal(s.dark).line;
+    let mut page = col().w_full().min_w(0.0);
+    for (i, section) in sections.into_iter().enumerate() {
+        page = page.child(if i == 0 {
+            section.pt(8.0).pb(28.0)
+        } else {
+            section.pt(28.0).pb(28.0).border_sides([1.0, 0.0, 0.0, 0.0], line)
+        });
+    }
+    page
+}
 pub(super) fn h2(s: &State, title: &str) -> El {
     text(title.to_string())
-        .font(ts(14.0, 600.0).lh(17.5))
+        .font(ts(15.5, 600.0).lh(20.0).tracking(-0.2))
         .color(pal(s.dark).ink)
         .role("heading")
         .level(2)

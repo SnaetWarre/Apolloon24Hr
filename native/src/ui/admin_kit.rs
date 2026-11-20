@@ -52,17 +52,13 @@ pub(super) fn ts(size: f32, weight: f32) -> TextStyle {
 // `max-width: 76ch` of Geist 13.5px.
 pub(super) const COPY_MAX: f32 = 684.0;
 
-/// `.panel`: 16 padding, 1px line, 8 radius, surface.
+/// A Beheer section: open on the page; `admin_base::stack` splits sections with a line.
 pub(super) fn panel() -> El {
-    col().w_full().min_w(0.0).padding(16.0).radius(8.0)
-}
-pub(super) fn panel_paint(el: El, dark: bool) -> El {
-    let p = pal(dark);
-    el.fill(p.surface).border(1.0, p.line)
+    col().w_full().min_w(0.0)
 }
 pub(super) fn h2(title: &str, dark: bool) -> El {
     text(title.to_string())
-        .font(ts(14.0, 600.0).lh(17.5).tracking(-0.14))
+        .font(ts(15.5, 600.0).lh(20.0).tracking(-0.2))
         .color(pal(dark).ink)
         .role("heading")
 }

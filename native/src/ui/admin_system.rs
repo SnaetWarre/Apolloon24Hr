@@ -464,10 +464,9 @@ pub(super) fn refresh(s: &mut State) {
 // ---------- The section ----------
 
 pub(super) fn panel(s: &State) -> El {
-    let card = |el: El| kit::panel_paint(el, s.dark);
-    let mut page = col().w_full().min_w(0.0).gap(16.0);
+    let mut page = Vec::new();
     if cluster(s)["enabled"] == true {
-        page = page.child(card(cluster_panel(s)));
+        page.push(cluster_panel(s));
     }
     if let Some(nearby) = s.recovery["system"]["nearbyLaptops"]
         .as_array()
@@ -491,14 +490,17 @@ pub(super) fn panel(s: &State) -> El {
                 s.dark,
             ));
         }
-        page = page.child(card(detected));
+        page.push(detected);
     }
-    page.child(card(network_panel(s)))
-        .child(card(backup_panel(s)))
-        .child(card(restore_panel(s)))
-        .child(card(clear_panel(s)))
-        .child(card(database_panel(s)))
-        .child(card(about_panel(s)))
+    page.extend([
+        network_panel(s),
+        backup_panel(s),
+        restore_panel(s),
+        clear_panel(s),
+        database_panel(s),
+        about_panel(s),
+    ]);
+    super::admin_base::stack(s, page)
 }
 
 fn section(title: &str, dark: bool) -> El {
