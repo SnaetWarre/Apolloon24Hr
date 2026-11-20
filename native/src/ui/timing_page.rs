@@ -59,7 +59,7 @@ fn pal(dark: bool) -> Pal {
             stop_ink: oklch(0.734, 0.163, 25.8),
             stop_wash: oklch(0.247, 0.03, 19.5),
             stop_line: oklch(0.356, 0.077, 23.9),
-            warn_ink: oklch(0.7904, 0.1386, 85.24),
+            warn_ink: oklch(0.79, 0.12, 58.0),
             line2: hex("#34343A").unwrap(),
             surface2: hex("#26262A").unwrap(),
             surface3: rune::color::hex("#2B2B2F").unwrap(),
@@ -496,6 +496,7 @@ pub(super) fn page(s: &State) -> El {
     let c = cluster(s);
     let active = active_runner(s);
     let queue = waiting(s);
+    let total: i64 = runners(s).iter().filter_map(|r| r["lapCount"].as_i64()).sum();
     let pending = page
         .pending
         .as_ref()
@@ -724,6 +725,17 @@ pub(super) fn page(s: &State) -> El {
                 .child(body_text(page.last_action.clone(), p.ink2)),
         );
     }
+    // Every hundredth lap of the race gets a line of its own for two minutes.
+    let newest = laps(s).first().and_then(|l| l["finishedAt"].as_i64());
+    if total > 0 && total % 100 == 0 && newest.is_some_and(|at| s.clock - at < 120_000) {
+        feedback = feedback.child(
+            text(format!("Mijlpaal: {total} rondes in de race. Proficiat, iedereen!"))
+                .key("timing-milestone")
+                .role("status")
+                .font(ts(13.5, 600.0).lh(20.25))
+                .color(p.go),
+        );
+    }
     if shown.is_none() && shown_next.is_none() && !finished && !c.blocked {
         feedback = feedback.child(body_text("Zet in Wachtrij een opgewarmde loper klaar om te starten.", p.ink3));
     }
@@ -739,10 +751,6 @@ pub(super) fn page(s: &State) -> El {
             p.ink3,
         ));
     }
-    let started = race["raceStartedAt"]
-        .as_i64()
-        .map(|ms| clock_time(ms).split('.').next().unwrap_or("").to_string())
-        .unwrap_or_else(|| "Nog niet".into());
     let now_group = super::hex::group(s)
         .key("timing-now-group")
         .px(26.0)
@@ -768,7 +776,7 @@ pub(super) fn page(s: &State) -> El {
             vec![
                 ("Eigen vorige ronde", previous),
                 ("Eigen snelste ronde", best),
-                ("Race gestart", started),
+                ("Rondes in de race", total.to_string()),
             ],
         ));
 
@@ -811,14 +819,28 @@ pub(super) fn page(s: &State) -> El {
             hex::item(s, i == 0)
                 .key(format!("timing-lap-{}", st(lap, "id")))
                 .child(hex::number(s, st(lap, "runnerNumber"), 14.5, 36.0))
-                .child(
-                    text(st(lap, "runnerName").to_string())
-                        .font(ts(15.0, 450.0))
-                        .color(t.text)
-                        .truncate()
+                .child({
+                    // The runner's own lap count, so the table reads like the paper tally.
+                    let mut name = row()
+                        .grow(1.0)
                         .min_w(0.0)
-                        .grow(1.0),
-                )
+                        .gap(8.0)
+                        .center_y()
+                        .child(
+                            text(st(lap, "runnerName").to_string())
+                                .font(ts(15.0, 450.0))
+                                .color(t.text)
+                                .truncate()
+                                .min_w(0.0),
+                        );
+                    if let Some(n) = lap["lapNumber"].as_i64() {
+                        name = name.child(text(format!("ronde {n}")).font(ts(12.5, 400.0)).color(p.ink3));
+                    }
+                    if let Some(praise) = hex::lap_praise(s, lap) {
+                        name = name.child(praise);
+                    }
+                    name
+                })
                 .child(
                     text(
                         clock_time(lap["finishedAt"].as_i64().unwrap_or(0))

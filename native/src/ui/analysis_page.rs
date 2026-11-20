@@ -931,7 +931,15 @@ pub(super) fn page(s: &State) -> El {
         ("Gemiddelde ronde", dur(k.stats.average)),
         ("Mediaan", dur(k.stats.median)),
         ("Snelste", dur(k.stats.best)),
-        ("Traagste", dur(k.stats.slowest)),
+        (
+            "Lopers",
+            filtered
+                .iter()
+                .filter_map(|l| l["runnerId"].as_str())
+                .collect::<std::collections::HashSet<_>>()
+                .len()
+                .to_string(),
+        ),
         ("Rondes per uur", number_nl(k.per_hour, 1)),
         (
             "Projectie na 24 uur",

@@ -1158,8 +1158,6 @@ pub fn run() {
         fonts: &[
             include_bytes!("../assets/geist-latin-wght-normal.ttf"),
             include_bytes!("../assets/geist-latin-ext-wght-normal.ttf"),
-            include_bytes!("../assets/big-shoulders-display-latin-wght-normal.ttf"),
-            include_bytes!("../assets/big-shoulders-display-latin-ext-wght-normal.ttf"),
         ],
         families: ("Geist", "Geist"),
         setup: Some(setup),

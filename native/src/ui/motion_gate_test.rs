@@ -47,9 +47,9 @@ const ALLOW: &[AllowRow] = &[
         "text-swap",
         "",
         "lap/",
-        "the laptops show a new lap the moment it is saved, without a roll",
+        "the laptops show a new lap, and the praise it moves, the moment it is saved, without a roll",
     )
-    .max(14),
+    .max(16),
     AllowRow::new(
         "snap",
         "timing-",
