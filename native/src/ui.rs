@@ -37,6 +37,8 @@ mod tactics_page;
 mod timing_page;
 #[cfg(test)]
 mod cluster_ui_test;
+#[cfg(test)]
+mod motion_gate_test;
 #[derive(Clone, Copy)]
 enum FilePurpose {
     Import,
@@ -926,7 +928,8 @@ fn admin(s: &State) -> El {
             .mb(-1.0)
             .center_y()
             .border_sides([0.0, 0.0, if on { 2.0 } else { 0.0 }, 0.0], p.ink)
-            .on_press(move |s: &mut State| {
+            .on_press_tx(move |s: &mut State, tx: &mut Tx| {
+                tx.instant();
                 s.admin_section = i;
                 s.admin.select = None;
             })
@@ -1100,9 +1103,12 @@ fn view(s: &State, _cx: &mut Cx<State>) -> El {
                 .border(1.0, t.card_border)
                 .clip_rounded(12.0),
         );
+    // Laptop screens answer at once: every change a press starts springs on `SNAP` (0.25 s),
+    // not Rune's 0.5 s fallback. The tv screens keep their slower motion.
     let mut root = row()
         .w_full()
         .h_full()
+        .token_motion(rune::tok::motion::SNAP)
         .fill(tok::sidebar(s.dark))
         .child(nav)
         .child(panel);

@@ -1470,6 +1470,8 @@ fn chart(s: &State, k: &Ink, spec: ChartSpec) -> El {
     }
     let mut card = el()
         .key(format!("tac-chart-{}", spec.key))
+        // The chart redraws to the width it measures: that lands at once, never drifts.
+        .instant_changes()
         .w_full()
         .h(h)
         .min_w(0.0)

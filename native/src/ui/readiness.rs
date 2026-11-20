@@ -136,7 +136,10 @@ pub(super) fn panel(s: &State) -> El {
             body = body.child(
                 row().mt(8.0).child(
                     admin_base::btn(s, "readiness-system", "Naar Systeem & herstel", admin_base::Kind::Ghost, true, false)
-                        .on_press(|s: &mut State| s.admin_section = 6),
+                        .on_press_tx(|s: &mut State, tx: &mut Tx| {
+                            tx.instant();
+                            s.admin_section = 6;
+                        }),
                 ),
             );
         }

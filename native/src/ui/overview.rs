@@ -12,8 +12,9 @@ pub(super) fn show_welcome(s: &State) -> bool {
     runners(s).is_empty() && s.snapshot["race"]["raceStartedAt"].is_null() && !s.welcome_skipped
 }
 
-fn open_admin(section: usize) -> impl Fn(&mut State) {
-    move |s| {
+fn open_admin(section: usize) -> impl Fn(&mut State, &mut Tx) {
+    move |s, tx| {
+        tx.instant();
         s.page = 8;
         s.admin_section = section;
     }
@@ -39,7 +40,7 @@ fn welcome(s: &State) -> El {
             banner(s, true)
                 .role("status")
                 .child(copy(s, format!("De databank op deze laptop was beschadigd. Apolloon zette ze opzij als {name} en startte leeg. Koppel deze laptop opnieuw aan de groep, of zet een backup terug.")))
-                .child(row().child(btn(s, "welcome-recovery", "Naar Systeem & herstel", Kind::Plain, false, false).on_press(open_admin(6)))),
+                .child(row().child(btn(s, "welcome-recovery", "Naar Systeem & herstel", Kind::Plain, false, false).on_press_tx(open_admin(6)))),
         );
     }
     let first = panel(s)
@@ -54,7 +55,7 @@ fn welcome(s: &State) -> El {
         } else {
             "Importeer hier de inschrijvingen: het Excel-bestand of de CSV-export van het inschrijvingsformulier. De andere laptops koppel je daarna aan deze."
         }))
-        .child(row().child(btn(s, "welcome-import", "Inschrijvingen importeren", Kind::Primary, false, false).on_press(open_admin(0))));
+        .child(row().child(btn(s, "welcome-import", "Inschrijvingen importeren", Kind::Primary, false, false).on_press_tx(open_admin(0))));
     let choices = if linking {
         let mut second = panel(s)
             .gap(12.0)
@@ -268,7 +269,8 @@ pub(super) fn overview(s: &State) -> El {
             .label(format!("{title}: {value}"))
             .focusable(true)
             .hover(c.surface2)
-            .on_press(move |s: &mut State| {
+            .on_press_tx(move |s: &mut State, tx: &mut Tx| {
+                tx.instant();
                 s.page = page;
                 s.confirm = None;
             });
@@ -330,7 +332,8 @@ pub(super) fn overview(s: &State) -> El {
                 .role(if st.tone == shell::Tone::Error { "alert" } else { "link" })
                 .focusable(true)
                 .hover(c.surface2)
-                .on_press(|s: &mut State| {
+                .on_press_tx(|s: &mut State, tx: &mut Tx| {
+                    tx.instant();
                     s.page = 8;
                     s.admin_section = 6;
                 })
@@ -365,7 +368,8 @@ pub(super) fn overview(s: &State) -> El {
                 .role("link")
                 .focusable(true)
                 .hover(c.surface2)
-                .on_press(|s: &mut State| {
+                .on_press_tx(|s: &mut State, tx: &mut Tx| {
+                    tx.instant();
                     s.page = 8;
                     s.admin_section = 6;
                 })
