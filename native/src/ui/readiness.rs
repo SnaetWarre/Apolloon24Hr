@@ -109,7 +109,7 @@ pub(super) fn needs_attention(s: &State) -> bool {
 
 /// `ReadinessPanel` from PreparationSection.tsx.
 pub(super) fn panel(s: &State) -> El {
-    use admin_base::{copy, h2, pal, section as card, ts};
+    use admin_base::{copy, h2, pal, ts};
     let p = pal(s.dark);
     let checks = checks(s);
     let level = summary(&checks);
@@ -162,7 +162,7 @@ pub(super) fn panel(s: &State) -> El {
         }
         list = list.child(item);
     }
-    card(s)
+    super::admin_kit::panel()
         .key("readiness-panel")
         .child(
             row()

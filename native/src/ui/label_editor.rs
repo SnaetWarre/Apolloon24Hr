@@ -4,7 +4,7 @@
 //! LabelMembers.tsx and src/lib/labels.ts.
 use super::admin_base::{
     Choose, Confirm, ConfirmAction, Kind, Pending, btn, field, fold, h2, h3, icon, numeric_cmp,
-    pal, pill, plural, runner_label, section, send, st, ts,
+    pal, pill, plural, runner_label, send, st, ts,
 };
 use super::*;
 use std::collections::{HashMap, HashSet};
@@ -845,7 +845,7 @@ pub(super) fn panel_view(s: &State) -> El {
         }
         list = list.child(group);
     }
-    section(s)
+    super::admin_kit::panel()
         .key("labels-panel")
         .child(h2(s, "Labels").mb(8.0))
         .child(create)

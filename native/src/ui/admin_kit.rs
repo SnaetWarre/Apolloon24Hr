@@ -1,5 +1,5 @@
 //! Building blocks the Beheer sections share, from src/styles/primitives.css and admin.css:
-//! `.panel`, `h2`/`h3`, `.panel-copy`, `.btn` and its kinds, `.segmented-control`, `.toggle-row`,
+//! the open section, `h2`/`h3`, `.panel-copy`, `.btn` and its kinds, `.segmented-control`, `.toggle-row`,
 //! `.input`, `.host-hint`, `.warning-banner`, `.backup-metrics` and table cells.
 use super::*;
 use rune::{Color, Span, TextStyle, oklch};

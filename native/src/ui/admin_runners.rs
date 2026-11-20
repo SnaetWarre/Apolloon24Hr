@@ -583,7 +583,7 @@ pub(super) fn section(s: &State) -> El {
     } else {
         page.hour.clone()
     };
-    let mut card = super::admin_base::section(s)
+    let mut card = super::admin_kit::panel()
         .key("runners-panel")
         .child(
             row()
