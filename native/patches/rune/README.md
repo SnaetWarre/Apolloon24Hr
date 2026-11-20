@@ -1,6 +1,6 @@
 # Rune dependency
 
-[revision](revision) pins the upstream Rune workspace. The build downloads that revision into the ignored `native/.rune` directory and applies [apolloon.patch](apolloon.patch). Cargo compiles Rune and its platform dependencies from that prepared workspace. Browser builds, CI and npm commands prepare it automatically. For direct Cargo commands, run `bash native/scripts/prepare-rune.sh` first.
+[revision](revision) pins the upstream Rune workspace. The build downloads that revision into the ignored `.rune` directory at the repository root and applies [apolloon.patch](apolloon.patch). Cargo compiles Rune and its platform dependencies from that prepared workspace. Browser builds, CI and npm commands prepare it automatically. For direct Cargo commands, run `bash native/scripts/prepare-rune.sh` first.
 
 The patch preserves Apolloon's existing window controls, browser keyboard behavior, WebGL2 handover and colors, CPU rendering for rotated labels, and idle browser performance. The upstream reports cover [Linux titlebars](https://github.com/anomalyco/rune/issues/591), [window labels](https://github.com/anomalyco/rune/issues/1232), [WebGL2 handover](https://github.com/anomalyco/rune/issues/1231), [WebGL2 colors](https://github.com/anomalyco/rune/issues/117), [keyboard activation](https://github.com/anomalyco/rune/issues/121), [rotated labels](https://github.com/anomalyco/rune/issues/1233), and [idle redraws](https://github.com/anomalyco/rune/issues/166).
 

@@ -11,7 +11,7 @@
     "*.md",
     "*.html",
     "*.css",
-    "native/.rune",
+    ".rune",
     "native/web-dist",
     "native/target"
   ],

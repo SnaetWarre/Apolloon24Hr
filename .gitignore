@@ -41,3 +41,7 @@ Thumbs.db
 
 # Local Rune development data
 /.native-data/
+
+# Rune source, prepared by native/scripts/prepare-rune.sh
+/.rune/
+/.rune-prepare.*/
