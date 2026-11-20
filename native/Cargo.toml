@@ -80,6 +80,11 @@ crate-type = ["cdylib", "rlib"]
 [profile.dev]
 debug = 0
 
+# Dependencies build once with optimizations; our own code stays quick to rebuild. Rune renders
+# frame by frame in tests (motion gate), which runs about three times faster this way.
+[profile.dev.package."*"]
+opt-level = 2
+
 # Rune's upstream patches are required by its text and platform backends.
 [patch.crates-io]
 wgpu-hal = { path = ".rune/vendor/wgpu-hal" }
