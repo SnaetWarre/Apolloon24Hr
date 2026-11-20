@@ -28,6 +28,11 @@ jobs:
             platform: linux
             binary: apolloon-native
     steps:
+      # Windows Defender scans every file Cargo writes, which slows the build a lot.
+      - name: Stop Windows Defender scanning the build
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Set-MpPreference -DisableRealtimeMonitoring $true
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -35,15 +40,31 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: native
+          key: rune-${{ hashFiles('native/patches/rune/revision', 'native/patches/rune/apolloon.patch') }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      # Keep the patched Rune source with its old file times, so Cargo reuses the cached build of it.
+      - uses: actions/cache@v6
+        with:
+          path: .rune
+          key: rune-${{ github.job }}-${{ runner.os }}-${{ hashFiles('native/patches/rune/revision', 'native/patches/rune/apolloon.patch') }}
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev libxi-dev libxcursor-dev libxrandr-dev
       - name: Install wasm-bindgen CLI matching native/Cargo.lock
-        run: cargo install wasm-bindgen-cli --version 0.2.130 --locked
-      - run: bash native/scripts/build-web.sh
-      - run: cargo build --release --locked --manifest-path native/Cargo.toml --bin apolloon-native
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen@0.2.130
+      # The web app builds in its own target folder beside the desktop app, so both compile at once.
+      - name: Build the web app and the desktop app side by side
+        shell: bash
         env:
           APOLLOON_APP_VERSION: ${{ inputs.version }}
+        run: |
+          bash native/scripts/prepare-rune.sh
+          CARGO_TARGET_DIR=native/target/web bash native/scripts/build-web.sh &
+          web=$!
+          cargo build --release --locked --manifest-path native/Cargo.toml --bin apolloon-native
+          wait "$web"
       - name: Stage package
         shell: bash
         run: |
@@ -74,6 +95,9 @@ jobs:
         run: Compress-Archive -Path package/* -DestinationPath apolloon-native-windows.zip
       - name: Build the macOS disk image
         if: runner.os == 'macOS'
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: '1'
+          HOMEBREW_NO_INSTALL_CLEANUP: '1'
         run: |
           brew install create-dmg
           bash native/packaging/macos/build-image.sh package apolloon-native-macos.dmg

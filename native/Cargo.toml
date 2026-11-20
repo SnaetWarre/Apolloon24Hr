@@ -9,7 +9,7 @@ default = ["desktop"]
 desktop = ["dep:rune", "dep:libc", "dep:windows-sys"]
 
 [dependencies]
-rune = { path = ".rune/crates/rune", optional = true, default-features = false, features = [
+rune = { path = "../.rune/crates/rune", optional = true, default-features = false, features = [
   "embedded-fonts",
   "accessibility",
   "tooling",
@@ -25,7 +25,7 @@ chrono = { version = "0.4", default-features = false, features = ["std"] }
 chrono-tz = "0.10"
 qrcodegen = "1.8"
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-rune = { path = ".rune/crates/rune", optional = true, default-features = false, features = ["native-file-dialog"] }
+rune = { path = "../.rune/crates/rune", optional = true, default-features = false, features = ["native-file-dialog"] }
 fs2 = "0.4"
 if-addrs = "0.15"
 hostname = "0.4"
@@ -80,10 +80,15 @@ crate-type = ["cdylib", "rlib"]
 [profile.dev]
 debug = 0
 
+# Dependencies build once with optimizations; our own code stays quick to rebuild. Rune renders
+# frame by frame in tests (motion gate), which runs about three times faster this way.
+[profile.dev.package."*"]
+opt-level = 2
+
 # Rune's upstream patches are required by its text and platform backends.
 [patch.crates-io]
-wgpu-hal = { path = ".rune/vendor/wgpu-hal" }
-winit = { path = ".rune/vendor/winit" }
-parley_engine = { path = ".rune/vendor/parley_engine" }
-accesskit_windows = { path = ".rune/vendor/accesskit_windows" }
-accesskit_macos = { path = ".rune/vendor/accesskit_macos" }
+wgpu-hal = { path = "../.rune/vendor/wgpu-hal" }
+winit = { path = "../.rune/vendor/winit" }
+parley_engine = { path = "../.rune/vendor/parley_engine" }
+accesskit_windows = { path = "../.rune/vendor/accesskit_windows" }
+accesskit_macos = { path = "../.rune/vendor/accesskit_macos" }

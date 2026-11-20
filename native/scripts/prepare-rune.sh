@@ -3,7 +3,11 @@ set -euo pipefail
 
 native_dir=$(cd "$(dirname "$0")/.." && pwd)
 patch_dir="$native_dir/patches/rune"
-source_dir="$native_dir/.rune"
+root_dir=$(cd "$native_dir/.." && pwd)
+# Outside native/, so CI caches see Rune as a dependency and keep its build.
+source_dir="$root_dir/.rune"
+# Rune used to live in native/.rune; drop that copy so it does not show up as untracked.
+rm -rf "$native_dir/.rune"
 revision=$(<"$patch_dir/revision")
 patch_hash=$(git hash-object "$patch_dir/apolloon.patch")
 stamp="$revision $patch_hash"
@@ -17,8 +21,8 @@ if [[ ! "$revision" =~ ^[0-9a-f]{40}$ ]]; then
   exit 1
 fi
 
-scratch=$(mktemp -d "$native_dir/.rune-prepare.XXXXXX")
-lock="$native_dir/.rune-prepare.lock"
+scratch=$(mktemp -d "$root_dir/.rune-prepare.XXXXXX")
+lock="$root_dir/.rune-prepare.lock"
 locked=false
 cleanup() {
   if [[ "$locked" == true ]]; then
@@ -63,4 +67,4 @@ fi
 if [[ -d "$source_dir" ]]; then
   mv "$source_dir" "$scratch/previous"
 fi
-mv "$scratch/.rune" "$native_dir/"
+mv "$scratch/.rune" "$root_dir/"
