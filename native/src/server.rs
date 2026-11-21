@@ -424,9 +424,9 @@ fn bundled_asset(directory: &str, file: &str) -> axum::response::Response {
             "image/png",
             include_bytes!("../../public/labels/kinesia.png"),
         ),
-        ("labels", "mesacosa.jpg") => (
-            "image/jpeg",
-            include_bytes!("../../public/labels/mesacosa.jpg"),
+        ("labels", "mesacosa.png" | "mesacosa.jpg") => (
+            "image/png",
+            include_bytes!("../../public/labels/mesacosa.png"),
         ),
         ("event-network", "Revert-ApolloonDhcp.ps1") => (
             "application/octet-stream",
@@ -642,6 +642,20 @@ pub fn start(db: Arc<Mutex<Db>>, port: u16) -> Result<ServerHandle> {
 #[cfg(test)]
 mod read_cache_tests {
     use super::*;
+
+    #[tokio::test]
+    async fn both_mesacosa_urls_serve_the_bundled_png() {
+        let expected = include_bytes!("../../public/labels/mesacosa.png");
+        for file in ["mesacosa.png", "mesacosa.jpg"] {
+            let response = bundled_asset("labels", file);
+            assert_eq!(response.status(), StatusCode::OK);
+            assert_eq!(response.headers()["content-type"], "image/png");
+            let body = axum::body::to_bytes(response.into_body(), expected.len())
+                .await
+                .unwrap();
+            assert_eq!(body.as_ref(), expected);
+        }
+    }
 
     #[tokio::test]
     async fn warm_reads_follow_local_changes_and_timing_writes() {

@@ -434,6 +434,14 @@ fn pill(s: &State, l: &Value) -> El {
             .color(p.t.ink2),
     )
 }
+/// How far the name sits right of the bib, so a line under it starts under the name.
+fn name_indent(r: &Value, size: f32) -> f32 {
+    if st(r, "runnerNumber").is_empty() {
+        0.0
+    } else {
+        size * 2.6 + 8.0
+    }
+}
 /// `RunnerName`: the bib (2.6em wide, quiet) and the name.
 fn runner_name(s: &State, r: &Value, size: f32, weight: f32) -> El {
     let p = pal(s.dark);
@@ -765,7 +773,12 @@ fn available_now(s: &State) -> El {
     let count = shown.len();
     for (i, (r, phone, flexibility)) in shown.into_iter().enumerate() {
         let id = st(r, "id").to_string();
-        let mut details = row().gap(8.0).center_y().min_h(18.0).flex_wrap();
+        let mut details = row()
+            .gap(8.0)
+            .center_y()
+            .min_h(18.0)
+            .pl(name_indent(r, 14.0))
+            .flex_wrap();
         for l in r["labels"].as_array().into_iter().flatten() {
             details = details.child(pill(s, l));
         }
@@ -1382,7 +1395,12 @@ fn runner_row(s: &State, r: &Value, b: &Board, drop: Option<&(String, Drop)>) ->
                 ),
         );
     }
-    let mut details = row().gap(8.0).center_y().min_h(18.0).flex_wrap();
+    let mut details = row()
+        .gap(8.0)
+        .center_y()
+        .min_h(18.0)
+        .pl(name_indent(r, 14.0))
+        .flex_wrap();
     for l in r["labels"].as_array().into_iter().flatten() {
         details = details.child(pill(s, l));
     }
@@ -1658,7 +1676,8 @@ pub(super) fn modal(s: &State) -> Option<El> {
                         .child(
                             text("Loslaten om te verplaatsen")
                                 .font(rune::TextStyle::new(12.0, 400.0))
-                                .color(p.t.ink3),
+                                .color(p.t.ink3)
+                                .pl(name_indent(r, 14.0)),
                         ),
                 ),
         );
