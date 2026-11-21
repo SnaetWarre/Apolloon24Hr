@@ -177,16 +177,22 @@ pub(super) fn screen_links(s: &State, url: &str, key: &str) -> El {
             if open { " · open" } else { "" }
         );
         let address = format!("{}/display/{kind}", url.trim_end_matches('/'));
+        let shown = address.clone();
         links = links.child(
-            admin_base::btn(
-                s,
-                &format!("{key}-{kind}"),
-                &label,
-                admin_base::Kind::Quiet,
-                true,
-                false,
-            )
-            .on_press_tx(move |_: &mut State, tx: &mut Tx| tx.copy(&address)),
+            col()
+                .gap(4.0)
+                .child(
+                    admin_base::btn(
+                        s,
+                        &format!("{key}-{kind}"),
+                        &label,
+                        admin_base::Kind::Quiet,
+                        true,
+                        false,
+                    )
+                    .on_press_tx(move |_: &mut State, tx: &mut Tx| tx.copy(&address)),
+                )
+                .child(admin_base::copy(s, shown)),
         );
     }
     col().gap(6.0).child(links).child(admin_base::copy(s, "Kopieer de link van het scherm en open die in een browser op het tweede scherm. Druk op F11 voor volledig scherm."))

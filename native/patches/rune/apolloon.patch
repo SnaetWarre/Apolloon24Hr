@@ -519,6 +519,39 @@ index 4820ba1..bf73f35 100644
          .child(symbol_el(button, caption.maximized, ink, (w, h), scales));
      // The mouse presses them through the window procedure; assistive technology invokes these.
      // A dimmed button has nothing to invoke.
+diff --git a/crates/rune/src/platform/web/platform.js b/crates/rune/src/platform/web/platform.js
+--- a/crates/rune/src/platform/web/platform.js
++++ b/crates/rune/src/platform/web/platform.js
+@@ -2,7 +2,28 @@
+ // is '' and `png` empty otherwise). Empty text isn't written beside another form.
+ export async function writeClipboard(text, html, png) {
+     const clipboard = navigator.clipboard;
+-    if (!clipboard) throw new Error('Clipboard requires HTTPS.');
++    if (!clipboard) {
++        const active = document.activeElement;
++        const selection = document.getSelection();
++        const ranges = selection ? Array.from({ length: selection.rangeCount }, (_, i) => selection.getRangeAt(i).cloneRange()) : [];
++        const field = document.createElement('textarea');
++        field.value = text;
++        field.readOnly = true;
++        field.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0';
++        document.body.appendChild(field);
++        try {
++            field.select();
++            if (!document.execCommand('copy')) throw new Error('Clipboard copy failed.');
++        } finally {
++            field.remove();
++            if (active && typeof active.focus === 'function') active.focus({ preventScroll: true });
++            if (selection) {
++                selection.removeAllRanges();
++                for (const range of ranges) selection.addRange(range);
++            }
++        }
++        return;
++    }
+     if ((!html && !png.length) || typeof ClipboardItem === 'undefined') return clipboard.writeText(text);
+     const forms = {};
+     if (text) forms['text/plain'] = new Blob([text], { type: 'text/plain' });
 diff --git a/crates/rune/src/window/win.rs b/crates/rune/src/window/win.rs
 index 40208c2..1790b42 100644
 --- a/crates/rune/src/window/win.rs

@@ -171,6 +171,58 @@ try {
   const afterImport = await (await fetch(url + '/api/state')).json();
   assert(afterImport.runners.some((r) => r.name === 'Browser Imported' && r.runnerNumber === '77'));
   await page.screenshot({ path: path.join(dir, 'import-after.png') });
+  const clipboardChecks = await page.evaluate(async () => {
+    const source = await (await fetch('/app.js')).text();
+    const module = source.match(/from '(\.\/snippets\/[^']+\/platform\.js)'/)[1];
+    const { writeClipboard } = await import(module);
+    const descriptor = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    const execCommand = document.execCommand;
+    const field = document.createElement('input');
+    document.body.appendChild(field);
+    field.focus();
+    const count = document.querySelectorAll('textarea').length;
+    const checks = [];
+    try {
+      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined });
+      for (const text of ['http://host.example:5173/display/inside', '']) {
+        let copied;
+        document.execCommand = (command) => {
+          copied = command === 'copy' ? document.activeElement.value : undefined;
+          return true;
+        };
+        const copying = writeClipboard(text, '', new Uint8Array());
+        checks.push(copied === text);
+        await copying;
+        checks.push(document.activeElement === field && document.querySelectorAll('textarea').length === count);
+      }
+      document.execCommand = () => false;
+      checks.push(
+        await writeClipboard('refused', '', new Uint8Array()).then(
+          () => false,
+          () => true
+        )
+      );
+      checks.push(document.activeElement === field && document.querySelectorAll('textarea').length === count);
+      let secureText;
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: { writeText: (text) => (secureText = text) },
+      });
+      await writeClipboard('secure context', '', new Uint8Array());
+      checks.push(secureText === 'secure context');
+      return checks;
+    } finally {
+      document.execCommand = execCommand;
+      if (descriptor) Object.defineProperty(navigator, 'clipboard', descriptor);
+      else delete navigator.clipboard;
+      field.remove();
+    }
+  });
+  assert(
+    clipboardChecks.every(Boolean),
+    'clipboard fallback is synchronous, handles empty text and failure, restores focus, and keeps the secure writer'
+  );
+  console.log('PASS: clipboard fallback, cleanup and secure-context writer');
   await writeFile(path.join(dir, 'browser-errors.json'), JSON.stringify(errors, null, 2));
   assert.equal(errors.length, 0, errors.join('\n'));
   console.log(
