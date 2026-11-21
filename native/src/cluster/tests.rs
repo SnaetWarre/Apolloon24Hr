@@ -636,7 +636,7 @@ fn an_unreachable_laptop_and_its_return_are_listed_in_activity_on_every_laptop()
     );
 }
 
-fn beacon(server: &TestServer, url: &str, name: &str) -> Value {
+pub(crate) fn beacon(server: &TestServer, url: &str, name: &str) -> Value {
     let status = server.status();
     json!({
         "app": "apolloon", "hostId": status["hostId"], "name": name, "clusterId": status["clusterId"],
@@ -645,7 +645,7 @@ fn beacon(server: &TestServer, url: &str, name: &str) -> Value {
         "changed": status["changed"], "raceStarted": status["raceStarted"], "raceRunning": status["raceRunning"],
     })
 }
-fn hear(listener: &TestServer, beacon: &Value) {
+pub(crate) fn hear(listener: &TestServer, beacon: &Value) {
     listener
         .node
         .discovery

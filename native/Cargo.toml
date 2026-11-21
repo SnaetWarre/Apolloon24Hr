@@ -6,7 +6,7 @@ publish = false
 
 [features]
 default = ["desktop"]
-desktop = ["dep:rune", "dep:libc", "dep:windows-sys"]
+desktop = ["dep:rune", "dep:libc", "dep:windows-sys", "dep:rodio"]
 
 [dependencies]
 rune = { path = "../.rune/crates/rune", optional = true, default-features = false, features = [
@@ -26,6 +26,7 @@ chrono-tz = "0.10"
 qrcodegen = "1.8"
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 rune = { path = "../.rune/crates/rune", optional = true, default-features = false, features = ["native-file-dialog"] }
+rodio = { version = "0.21.1", optional = true, default-features = false, features = ["playback"] }
 fs2 = "0.4"
 if-addrs = "0.15"
 hostname = "0.4"
@@ -36,11 +37,11 @@ resvg = { version = "0.45", default-features = false }
 csv = "1"
 calamine = { version = "0.38", features = ["dates"] }
 rust_xlsxwriter = "0.102"
-tower-http = { version = "0.6", features = ["fs"] }
+tower-http = { version = "0.6", features = ["fs", "compression-gzip", "compression-br"] }
 rusqlite = { version = "0.38", features = ["bundled", "backup"] }
 axum = "0.8"
 tokio = { version = "1", features = ["rt-multi-thread", "net", "sync", "time", "signal"] }
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "gzip", "json", "rustls-tls"] }
 uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(unix)'.dependencies]
@@ -69,6 +70,13 @@ web-sys = { version = "0.3", features = [
   "Node",
   "Storage",
   "MediaQueryList",
+  "AudioContext",
+  "AudioContextState",
+  "AudioBuffer",
+  "AudioBufferSourceNode",
+  "AudioDestinationNode",
+  "AudioNode",
+  "AudioScheduledSourceNode",
 ] }
 js-sys = "0.3"
 gloo-timers = { version = "0.3", features = ["futures"] }
@@ -79,6 +87,13 @@ crate-type = ["cdylib", "rlib"]
 
 [profile.dev]
 debug = 0
+
+[profile.wasm-release]
+inherits = "release"
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
 
 # Dependencies build once with optimizations; our own code stays quick to rebuild. Rune renders
 # frame by frame in tests (motion gate), which runs about three times faster this way.
@@ -92,3 +107,6 @@ winit = { path = "../.rune/vendor/winit" }
 parley_engine = { path = "../.rune/vendor/parley_engine" }
 accesskit_windows = { path = "../.rune/vendor/accesskit_windows" }
 accesskit_macos = { path = "../.rune/vendor/accesskit_macos" }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+tower = { version = "0.5", features = ["util"] }

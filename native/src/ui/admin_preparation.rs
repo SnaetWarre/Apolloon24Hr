@@ -91,5 +91,42 @@ pub(super) fn section(s: &State) -> El {
         }
         card = card.child(problems);
     }
-    stack(s, vec![readiness::panel(s), card])
+    let mut page = vec![readiness::panel(s)];
+    if let Some(group) = group_card(s) {
+        page.push(group);
+    }
+    page.push(card);
+    stack(s, page)
+}
+
+/// Groep maken at a glance: which laptops are linked.
+fn group_card(s: &State) -> Option<El> {
+    let c = &s.snapshot["cluster"];
+    if c["enabled"] != true {
+        return None;
+    }
+    let members = c["members"].as_array().cloned().unwrap_or_default();
+    let summary = if members.len() > 1 {
+        let names: Vec<String> = members.iter().map(admin_system::laptop_label).collect();
+        format!("{} laptops gekoppeld: {}.", members.len(), names.join(", "))
+    } else {
+        "Deze laptop werkt nog alleen. Koppel de andere laptops en test de groep, alles op één scherm.".into()
+    };
+    Some(
+        super::admin_kit::panel()
+            .key("preparation-group")
+            .child(h2(s, "Groep maken").mb(8.0))
+            .child(copy(s, summary).role("status"))
+            .child(
+                row().mt(12.0).child(
+                    btn(s, "preparation-group-open", "Groep maken openen", Kind::Plain, false, false).on_press_tx(
+                        |s: &mut State, tx: &mut Tx| {
+                            tx.instant();
+                            s.admin_section = 6;
+                            s.admin.select = None;
+                        },
+                    ),
+                ),
+            ),
+    )
 }

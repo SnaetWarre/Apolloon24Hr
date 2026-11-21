@@ -22,6 +22,7 @@ mod admin_kit;
 mod analysis_page;
 mod admin_system;
 mod chart_axis;
+mod cluster_setup;
 mod group_view;
 mod hex;
 mod label_editor;
@@ -2465,7 +2466,78 @@ fn clock_offset(samples: impl IntoIterator<Item = (i64, i64, i64)>) -> Option<i6
 #[derive(Default)]
 struct Synced {
     history_revision: Option<i64>,
+    /// The full history as last shown; later reads ask only for what changed since its cursor.
+    history: Value,
     images: std::collections::HashSet<String>,
+}
+impl Synced {
+    fn history_path(&self) -> String {
+        match self.history["cursor"].as_str() {
+            Some(cursor) => format!("/api/history?scope=full&since={cursor}"),
+            None => "/api/history?scope=full".into(),
+        }
+    }
+    /// The full history to show for a reply to `history_path`, or `None` when the changes did
+    /// not fit what is held and the full history has to be fetched again.
+    fn take_history(&mut self, reply: Value) -> Option<Value> {
+        if reply.is_null() {
+            return Some(Value::Null);
+        }
+        if reply["delta"] == true {
+            if reply["cursor"] == self.history["cursor"] {
+                return Some(Value::Null);
+            }
+            if reply["since"] != self.history["cursor"] {
+                // Another poll already moved on; the next revision check catches up.
+                return Some(Value::Null);
+            }
+            if !merge_history(&mut self.history, &reply) {
+                self.history = Value::Null;
+                return None;
+            }
+        } else if reply["revision"].as_i64() >= self.history["revision"].as_i64() {
+            self.history = reply;
+        } else {
+            return Some(Value::Null);
+        }
+        self.history_revision = self.history["revision"].as_i64();
+        Some(self.history.clone())
+    }
+}
+/// Applies `/api/history?since=` changes to a full history; `false` when they do not line up.
+pub(crate) fn merge_history(held: &mut Value, delta: &Value) -> bool {
+    fn merge(held: Value, change: &Value) -> Option<Value> {
+        let Value::Array(held) = held else { return None };
+        let mut skip: std::collections::HashSet<&str> =
+            change["removed"].as_array()?.iter().filter_map(Value::as_str).collect();
+        let mut slots = vec![None; usize::try_from(change["count"].as_u64()?).ok()?];
+        for pair in change["changed"].as_array()? {
+            let slot = slots.get_mut(usize::try_from(pair[0].as_u64()?).ok()?)?;
+            skip.insert(pair[1]["id"].as_str()?);
+            if slot.replace(pair[1].clone()).is_some() {
+                return None;
+            }
+        }
+        let mut kept = held
+            .into_iter()
+            .filter(|row| row["id"].as_str().is_none_or(|id| !skip.contains(id)));
+        let rows = slots
+            .into_iter()
+            .map(|slot| slot.or_else(|| kept.next()))
+            .collect::<Option<Vec<_>>>()?;
+        kept.next().is_none().then_some(Value::Array(rows))
+    }
+    let changes = &delta["changes"];
+    let laps = merge(held["laps"].take(), &changes["laps"]);
+    let events = merge(held["events"].take(), &changes["events"]);
+    let (Some(laps), Some(events)) = (laps, events) else {
+        return false;
+    };
+    held["laps"] = laps;
+    held["events"] = events;
+    held["revision"] = delta["revision"].clone();
+    held["cursor"] = delta["cursor"].clone();
+    true
 }
 const POLL_EVERY: Duration = Duration::from_millis(200);
 /// Actions that only read: their answer needs no fresh history or recovery behind it.
@@ -2520,13 +2592,16 @@ fn start_transport(url: String, commands: Receiver<Command>, updates: Sender<Upd
         let revision = snapshot["revision"].as_i64();
         let changed = full || (revision.is_some() && synced.lock().unwrap().history_revision != revision);
         let history = if changed {
-            get(client, url, "/api/history?scope=full")
+            let path = synced.lock().unwrap().history_path();
+            let reply = get(client, url, &path);
+            let history = synced.lock().unwrap().take_history(reply);
+            history.unwrap_or_else(|| {
+                let full = get(client, url, "/api/history?scope=full");
+                synced.lock().unwrap().take_history(full).unwrap_or(Value::Null)
+            })
         } else {
             Value::Null
         };
-        if let Some(revision) = history["revision"].as_i64() {
-            synced.lock().unwrap().history_revision = Some(revision);
-        }
         let recovery = if recovery || changed {
             get(client, url, "/api/recovery")
         } else {
@@ -2644,7 +2719,8 @@ fn start_transport(url: String, commands: Receiver<Command>, updates: Sender<Upd
             .map(|kind| format!("/api/state?screen={kind}"))
             .unwrap_or_else(|| "/api/state".into());
         let state = get(client, url, &path);
-        let history = get(client, url, "/api/history?scope=full");
+        let history_path = synced.borrow().history_path();
+        let history = get(client, url, &history_path);
         let recover = get(client, url, "/api/recovery");
         let (snapshot, (history, recovery)) = if fetch_history {
             // Start the initial requests before the renderer can occupy the browser thread.
@@ -2660,9 +2736,14 @@ fn start_transport(url: String, commands: Receiver<Command>, updates: Sender<Upd
             .await;
             (snapshot, data)
         };
-        if let Some(revision) = history["revision"].as_i64() {
-            synced.borrow_mut().history_revision = Some(revision);
-        }
+        let history = synced.borrow_mut().take_history(history);
+        let history = match history {
+            Some(history) => history,
+            None => {
+                let full = get(client, url, "/api/history?scope=full").await;
+                synced.borrow_mut().take_history(full).unwrap_or(Value::Null)
+            }
+        };
         let mut paths = image_urls(&snapshot, &history);
         paths.extend(extra_image);
         paths.retain(|path| !synced.borrow().images.contains(path));
@@ -2783,8 +2864,9 @@ fn start_transport(url: String, commands: Receiver<Command>, updates: Sender<Upd
                     Some(offset) => Some(offset),
                     None => sample_clock(&client, &url).await,
                 };
+                // A browser whose clock is off must not time a handoff before the offset is known.
                 next_clock_sync = Instant::now()
-                    + Duration::from_secs(if update.clock_offset.is_some() { 60 } else { 5 });
+                    + Duration::from_millis(if update.clock_offset.is_some() { 60_000 } else { 500 });
             }
             if updates.send(update).is_err() {
                 break;
