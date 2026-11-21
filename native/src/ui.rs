@@ -1435,6 +1435,45 @@ mod tests {
     }
     use rune::{Env, Runtime};
     use std::sync::{Arc, Mutex};
+    #[test]
+    fn native_transport_delivers_the_clock_with_the_first_snapshot() {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let (sampling, sampled) = mpsc::channel();
+        let (release, released) = mpsc::channel();
+        let server = std::thread::spawn(move || {
+            let mut first_clock = true;
+            for _ in 0..4 {
+                let (mut socket, _) = listener.accept().unwrap();
+                socket.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+                let mut request = [0; 4096];
+                let size = socket.read(&mut request).unwrap();
+                let request = String::from_utf8_lossy(&request[..size]);
+                let body = if request.starts_with("GET /api/clock ") {
+                    if std::mem::take(&mut first_clock) {
+                        sampling.send(()).unwrap();
+                        released.recv_timeout(Duration::from_secs(5)).unwrap();
+                    }
+                    json!({"serverNowMs":now()+60_000})
+                } else if request.starts_with("GET /api/state?") {
+                    json!({"revision":1,"stateHistory":{"scope":"full","cursor":"clock.1","laps":[],"events":[]}})
+                } else { json!({}) }.to_string();
+                write!(socket, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{body}", body.len()).unwrap();
+            }
+        });
+        let (_commands, commands) = mpsc::channel();
+        let (sender, receiver) = mpsc::channel();
+        start_transport(url, commands, Updates { sender, wake: Arc::new(Mutex::new(None)) }, Default::default());
+        sampled.recv_timeout(Duration::from_secs(5)).unwrap();
+        let premature = receiver.try_recv();
+        release.send(()).unwrap();
+        assert!(matches!(premature, Err(mpsc::TryRecvError::Empty)));
+        let update = receiver.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert_eq!(update.snapshot["revision"], 1);
+        assert!((59_000..=61_000).contains(&update.clock_offset.unwrap()));
+        server.join().unwrap();
+    }
     fn update(rt: &mut Runtime<State>, predicate: impl Fn(&State) -> bool) {
         let deadline = Instant::now() + Duration::from_secs(5);
         while !predicate(&rt.state) {
@@ -2791,16 +2830,10 @@ fn start_transport(url: String, commands: Receiver<Command>, updates: Updates, _
         loop {
             let started = Instant::now();
             let path = synced.lock().unwrap().state_path(after.as_deref(), None);
-            let update = refresh(&client, &url, &synced, false, None, &path);
+            let mut update = refresh(&client, &url, &synced, false, None, &path);
             let wait = poll_delay(&update.snapshot, after.as_deref(), started.elapsed());
             after = update.snapshot["changeToken"].as_str().map(str::to_owned);
             let connected = !update.snapshot.is_null();
-            if updates.send(update).is_err() { break; }
-            let mut extra = Update { partial: true, ..Default::default() };
-            if started >= next_recovery {
-                extra.recovery = get(&client, &url, "/api/recovery");
-                next_recovery = Instant::now() + RECOVERY_EVERY;
-            }
             if connected && started >= next_clock_sync {
                 let mut samples = Vec::new();
                 for _ in 0..3 {
@@ -2809,9 +2842,15 @@ fn start_transport(url: String, commands: Receiver<Command>, updates: Updates, _
                         samples.push((before, now(), server));
                     }
                 }
-                extra.clock_offset = clock_offset(samples);
+                update.clock_offset = clock_offset(samples);
                 next_clock_sync = Instant::now()
-                    + Duration::from_secs(if extra.clock_offset.is_some() { 60 } else { 5 });
+                    + Duration::from_secs(if update.clock_offset.is_some() { 60 } else { 5 });
+            }
+            if updates.send(update).is_err() { break; }
+            let mut extra = Update { partial: true, ..Default::default() };
+            if started >= next_recovery {
+                extra.recovery = get(&client, &url, "/api/recovery");
+                next_recovery = Instant::now() + RECOVERY_EVERY;
             }
             if updates.send(extra).is_err() {
                 break;
@@ -2978,37 +3017,30 @@ fn start_transport(url: String, commands: Receiver<Command>, updates: Updates, c
         });
     }
     wasm_bindgen_futures::spawn_local(async move {
-        let mut first = true;
         let mut next_clock_sync = Instant::now();
         let mut next_recovery = Instant::now();
         let mut after: Option<String> = None;
         loop {
             let started = Instant::now();
             let load = refresh(&client, &url, &synced, false, None, after.as_deref());
-            let (mut update, offset) = if std::mem::take(&mut first) {
+            let sync_clock = started >= next_clock_sync;
+            let (mut update, offset) = if sync_clock {
                 futures_join(load, sample_clock(&client, &url)).await
             } else {
                 (load.await, None)
             };
             let wait = poll_delay(&update.snapshot, after.as_deref(), started.elapsed());
             after = update.snapshot["changeToken"].as_str().map(str::to_owned);
-            let connected = !update.snapshot.is_null();
             update.clock_offset = offset;
-            if offset.is_some() { next_clock_sync = Instant::now() + Duration::from_secs(60); }
+            if sync_clock {
+                next_clock_sync = Instant::now()
+                    + Duration::from_millis(if offset.is_some() { 60_000 } else { 500 });
+            }
             if updates.send(update).is_err() { break; }
             let mut extra = Update { partial: true, ..Default::default() };
             if started >= next_recovery {
                 extra.recovery = get(&client, &url, "/api/recovery").await;
                 next_recovery = Instant::now() + RECOVERY_EVERY;
-            }
-            if connected && started >= next_clock_sync {
-                extra.clock_offset = match offset {
-                    Some(offset) => Some(offset),
-                    None => sample_clock(&client, &url).await,
-                };
-                // A browser whose clock is off must not time a handoff before the offset is known.
-                next_clock_sync = Instant::now()
-                    + Duration::from_millis(if extra.clock_offset.is_some() { 60_000 } else { 500 });
             }
             if updates.send(extra).is_err() {
                 break;
