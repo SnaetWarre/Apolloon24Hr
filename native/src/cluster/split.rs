@@ -83,13 +83,14 @@ fn replay(db: &Db, entry: &Entry, clocked: &HashSet<String>) -> bool {
     {
         return false;
     }
-    // A lap correction next to a runner or lap Timing touched meanwhile was made against a
-    // race clock that moved on: it stays in the backup instead of leaving half a correction.
+    // A lap correction that moves the running lap's start, or sits next to a runner or lap
+    // Timing touched meanwhile, was made against a race clock that is not this one: it stays in
+    // the backup instead of leaving half a correction.
     if entry.kind.starts_with("laps.")
-        && entry
-            .statements
-            .iter()
-            .any(|statement| strings(statement).any(|p| clocked.contains(p)))
+        && entry.statements.iter().any(|statement| {
+            table(&statement.sql).as_deref() == Some("race_state")
+                || strings(statement).any(|p| clocked.contains(p))
+        })
     {
         return false;
     }
