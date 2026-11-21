@@ -141,7 +141,7 @@ fn welcome(s: &State) -> El {
     if linking {
         next = next.child(
             row().gap(8.0).center_y().flex_wrap()
-                .child(copy(s, "Alle laptops gestart? Koppel ze, geef elk een rol en test de groep in"))
+                .child(copy(s, "Alle laptops gestart? Koppel ze en test de groep in"))
                 .child(btn(s, "welcome-group", "Groep maken", Kind::Plain, true, false).on_press_tx(open_admin(6))),
         );
     }

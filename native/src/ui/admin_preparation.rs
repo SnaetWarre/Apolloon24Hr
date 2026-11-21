@@ -99,7 +99,7 @@ pub(super) fn section(s: &State) -> El {
     stack(s, page)
 }
 
-/// Groep maken at a glance: how many laptops are linked and which role each one has.
+/// Groep maken at a glance: which laptops are linked.
 fn group_card(s: &State) -> Option<El> {
     let c = &s.snapshot["cluster"];
     if c["enabled"] != true {
@@ -107,19 +107,10 @@ fn group_card(s: &State) -> Option<El> {
     }
     let members = c["members"].as_array().cloned().unwrap_or_default();
     let summary = if members.len() > 1 {
-        let roles: Vec<String> = members
-            .iter()
-            .map(|m| {
-                let name = admin_system::laptop_label(m);
-                match cluster_setup::role(m) {
-                    Some(role) => format!("{name}: {role}"),
-                    None => format!("{name}: nog geen rol"),
-                }
-            })
-            .collect();
-        format!("{} laptops gekoppeld. {}.", members.len(), roles.join(" · "))
+        let names: Vec<String> = members.iter().map(admin_system::laptop_label).collect();
+        format!("{} laptops gekoppeld: {}.", members.len(), names.join(", "))
     } else {
-        "Deze laptop werkt nog alleen. Koppel de andere laptops, geef elk een rol en test de groep, alles op één scherm.".into()
+        "Deze laptop werkt nog alleen. Koppel de andere laptops en test de groep, alles op één scherm.".into()
     };
     Some(
         super::admin_kit::panel()

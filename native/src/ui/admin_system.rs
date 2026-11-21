@@ -175,7 +175,6 @@ pub(super) fn owns(s: &State, method: &str) -> bool {
             | "desktop.openUrl"
             | "cluster.joinGroup"
             | "cluster.testGroup"
-            | "cluster.setRole"
     ) || (s.page == 8 && (method == "events.burgieGepakt" || method.starts_with("cluster.")))
 }
 
@@ -244,7 +243,6 @@ pub(super) fn succeeded(s: &mut State, method: &str, result: &Value) {
         "cluster.removeLaptop" => {
             s.notice = "De laptop is uit de groep gehaald. Koppel een reservelaptop om weer een laptop te mogen verliezen.".into()
         }
-        "cluster.setRole" => super::cluster_setup::role_saved(s, result),
         "cluster.joinGroup" if super::cluster_setup::joined(s, true) => {}
         "cluster.joinGroup" => {
             s.system.other_url = TextEdit::new("");
@@ -328,7 +326,6 @@ pub(super) fn failed(s: &mut State, method: &str) {
         "cluster.joinGroup" => {
             super::cluster_setup::joined(s, false);
         }
-        "cluster.setRole" => s.error = format!("Rol opslaan mislukt: {}", s.error),
         _ => {}
     }
 }
