@@ -45,6 +45,8 @@ the existing active-runner/start-time token, joined to the actual lap ID after
 commit. Replica records come from the durable apply boundary in `cluster/log.rs`.
 The notifier timestamp is the SQLite commit hook, before the durable commit
 returns; state readers still wait for the database mutex to be released.
+Waiter-wake records require an actual watch wake; requests that did not wait
+leave that boundary unavailable. Worker queue time starts at snapshot dispatch.
 
 The trace adds `latency-events.json`, stage p50/p95/max in µs, observed native
 drawn-frame intervals, browser rAF intervals, and browser clock resolution to the

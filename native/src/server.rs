@@ -160,7 +160,6 @@ async fn snapshot_request(
             return json_body(serde_json::to_vec(&state).unwrap().into());
         }
     }
-    let wake = wake.or_else(|| crate::latency::enabled().then(crate::latency::realtime_us));
     snapshot_traced(host, &query, wake).await
 }
 async fn snapshot(State(host): State<Host>) -> Response {
@@ -171,16 +170,18 @@ async fn snapshot_with_history(host: Host, query: &std::collections::HashMap<Str
 }
 async fn snapshot_traced(host: Host, query: &std::collections::HashMap<String, String>, wake: Option<f64>) -> Response {
     let query = query.clone();
-    let result = tokio::task::spawn_blocking(move || snapshot_read(host, &query, wake)).await;
+    let dispatch = crate::latency::enabled().then(crate::latency::realtime_us);
+    let result = tokio::task::spawn_blocking(move || snapshot_read(host, &query, wake, dispatch)).await;
     match result {
         Ok(response) => response,
         Err(error) => error_body(error.to_string()),
     }
 }
-fn snapshot_read(host: Host, query: &std::collections::HashMap<String, String>, wake: Option<f64>) -> Response {
+fn snapshot_read(host: Host, query: &std::collections::HashMap<String, String>, wake: Option<f64>, dispatch: Option<f64>) -> Response {
     static NEXT_REQUEST: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let request = crate::latency::enabled().then(|| format!("{}-{}", std::process::id(), NEXT_REQUEST.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
     let mut marks = Vec::new();
+    if let Some(dispatch) = dispatch { marks.push(("snapshot_dispatch", dispatch)); }
     let mut mark = |stage| if crate::latency::enabled() { marks.push((stage, crate::latency::realtime_us())); };
     mark("snapshot_worker");
     let mut read = || -> Result<(Bytes, Option<Bytes>, Option<String>)> {

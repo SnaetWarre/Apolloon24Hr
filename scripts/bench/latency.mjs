@@ -170,7 +170,9 @@ export function httpMetrics(events, writes, screens) {
       const source = screen.name === 'native Timing' ? 'native' : screen.name;
       const local = events.filter((e) => e.source === source && e.lapId === write.lapId).sort((a, b) => a.us - b.us);
       const push = local.find((e) => e.stage === 'push_received');
-      const parsed = local.findLast((e) => e.stage === 'json_parsed' && e.us <= push?.us);
+      const parsed = local.findLast(
+        (e) => e.stage === 'json_parsed' && e.us <= push?.us && (!push?.requestId || e.requestId === push.requestId)
+      );
       const request = parsed?.requestId;
       if (!request) return { screen: screen.name, lapId: write.lapId };
       const points = events.filter((e) => e.requestId === request);
@@ -188,7 +190,7 @@ export function httpMetrics(events, writes, screens) {
         lapId: write.lapId,
         requestId: request,
         notifyWakeUs: delta(notify, at('waiter_wake')),
-        workerQueueUs: delta(at('waiter_wake'), at('snapshot_worker')),
+        workerQueueUs: delta(at('snapshot_dispatch') ?? at('waiter_wake'), at('snapshot_worker')),
         readSnapshotUs: delta(at('snapshot_worker'), at('snapshot_read_ready')),
         snapshotBuildUs: delta(at('snapshot_read_ready'), at('snapshot_built')),
         serializeUs: delta(at('snapshot_built'), at('snapshot_serialized')),

@@ -2816,6 +2816,7 @@ fn start_transport(url: String, commands: Receiver<Command>, updates: Updates, _
                 crate::latency::http_stage("http_body", &snapshot, body, request.as_deref());
                 crate::latency::http_stage("json_parsed", &snapshot, parsed, request.as_deref());
                 crate::latency::http_size(&snapshot, request.as_deref(), bytes.len());
+                crate::latency::http_stage("push_received", &snapshot, crate::latency::realtime_us(), request.as_deref());
                 Ok(snapshot)
             };
             return read().unwrap_or(Value::Null);
@@ -2841,7 +2842,6 @@ fn start_transport(url: String, commands: Receiver<Command>, updates: Updates, _
         if snapshot["unchanged"] == true {
             return Update { snapshot, ..Default::default() };
         }
-        crate::latency::snapshot("push_received", &snapshot);
         let bundled = snapshot.as_object_mut().and_then(|s| s.remove("stateHistory"));
         let revision = snapshot["revision"].as_i64();
         let changed = full || (revision.is_some() && synced.lock().unwrap().history_revision != revision);
@@ -2979,6 +2979,7 @@ fn start_transport(url: String, commands: Receiver<Command>, updates: Updates, c
                     crate::latency::http_stage("http_body", &snapshot, body, request.as_deref());
                     crate::latency::http_stage("json_parsed", &snapshot, parsed, request.as_deref());
                     crate::latency::http_size(&snapshot, request.as_deref(), bytes.len());
+                    crate::latency::http_stage("push_received", &snapshot, crate::latency::realtime_us(), request.as_deref());
                     return snapshot;
                 }
             }
@@ -3011,7 +3012,6 @@ fn start_transport(url: String, commands: Receiver<Command>, updates: Updates, c
         if snapshot["unchanged"] == true {
             return Update { snapshot, ..Default::default() };
         }
-        crate::latency::snapshot("push_received", &snapshot);
         let bundled = snapshot.as_object_mut().and_then(|s| s.remove("stateHistory"));
         let revision = snapshot["revision"].as_i64();
         let changed = full || (revision.is_some() && synced.borrow().history_revision != revision);

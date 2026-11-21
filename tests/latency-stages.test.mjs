@@ -33,12 +33,14 @@ test('HTTP stages join the exact request, not another screen snapshot of the sam
   const events = [
     event('A', 'notify', 0, null),
     event('A', 'waiter_wake', 2),
+    event('A', 'snapshot_dispatch', 3),
     event('A', 'snapshot_worker', 4),
     event('A', 'response_ready', 10),
     event('A', 'response_ready', 1, 'other'),
     event('native', 'http_headers', 12),
     event('native', 'http_body', 14),
     event('native', 'json_parsed', 17),
+    event('native', 'json_parsed', 17.5, 'other'),
     event('native', 'push_received', 18),
     event('native', 'history_merged', 20),
     event('native', 'update_ready', 21),
@@ -50,7 +52,7 @@ test('HTTP stages join the exact request, not another screen snapshot of the sam
   const screens = [{ name: 'native Timing', node: 'A' }];
   const [row] = httpMetrics(events, [{ lapId: 'lap' }], screens);
   assert.equal(row.notifyWakeUs, 2);
-  assert.equal(row.workerQueueUs, 2);
+  assert.equal(row.workerQueueUs, 1);
   assert.equal(row.responseToProxyUs, 1);
   assert.equal(row.proxyStreamUs, 2);
   assert.equal(row.proxyToClientBodyUs, 1);
@@ -61,6 +63,13 @@ test('HTTP stages join the exact request, not another screen snapshot of the sam
   assert.equal(row.encodedBodySize, 100);
   assert.equal(row.decodedBodySize, 1000);
   assert.equal(row.serializeUs, undefined);
+  const [unwaited] = httpMetrics(
+    events.filter((e) => e.stage !== 'waiter_wake'),
+    [{ lapId: 'lap' }],
+    screens
+  );
+  assert.equal(unwaited.notifyWakeUs, undefined);
+  assert.equal(unwaited.workerQueueUs, 1);
   assert.deepEqual(httpMetrics([], [], screens), []);
   assert.deepEqual(
     httpMetrics(
