@@ -4,14 +4,88 @@ use super::admin_base::{Kind, Pending, banner, btn, copy, h2, pal, send, stack, 
 use super::*;
 
 fn import(s: &mut State) {
-    let Some((name, bytes)) = &s.import_file else { return };
+    let Some((name, bytes)) = &s.import_file else {
+        return;
+    };
     s.import_problems.clear();
     let (method, input) = if name.to_lowercase().ends_with(".xlsx") {
-        ("runners.importXlsx", json!({"dataBase64":base64::engine::general_purpose::STANDARD.encode(bytes)}))
+        (
+            "runners.importXlsx",
+            json!({"dataBase64":base64::engine::general_purpose::STANDARD.encode(bytes)}),
+        )
     } else {
         ("runners.importCsv", json!({"csvText":decode_csv(bytes)}))
     };
     send(s, method, input, Pending::Import);
+    s.import_file = None;
+    s.import_preview = None;
+}
+
+pub(super) fn analysis(s: &State) -> Option<Result<Value, String>> {
+    let (name, bytes) = s.import_file.as_ref()?;
+    let (method, input) = if name.to_lowercase().ends_with(".xlsx") {
+        (
+            "runners.importXlsx",
+            json!({"dataBase64":base64::engine::general_purpose::STANDARD.encode(bytes)}),
+        )
+    } else {
+        ("runners.importCsv", json!({"csvText":decode_csv(bytes)}))
+    };
+    Some(crate::runner_import::preview(
+        method,
+        &input,
+        s.snapshot["runners"]
+            .as_array()
+            .map(Vec::as_slice)
+            .unwrap_or(&[]),
+    ))
+}
+
+fn template(s: &mut State, tx: &mut Tx) {
+    #[cfg(not(target_arch = "wasm32"))]
+    tx.save_file(
+        rune::FileDialogOptions {
+            file_name: Some("voorbeeld-lopers.csv".into()),
+            ..Default::default()
+        },
+        |s: &mut State, result, _| match result {
+            Ok(Some(path)) => {
+                if let Err(e) = std::fs::write(path, crate::runner_import::TEMPLATE) {
+                    s.error = format!("Voorbeeldbestand opslaan mislukt: {e}");
+                }
+            }
+            Err(e) => s.error = e.to_string(),
+            _ => {}
+        },
+    );
+    #[cfg(target_arch = "wasm32")]
+    {
+        use wasm_bindgen::JsCast;
+        let _ = tx;
+        let result = (|| -> Result<(), wasm_bindgen::JsValue> {
+            let document = web_sys::window().unwrap().document().unwrap();
+            let a = document
+                .create_element("a")?
+                .dyn_into::<web_sys::HtmlElement>()?;
+            a.set_attribute(
+                "href",
+                &format!(
+                    "data:text/csv;base64,{}",
+                    base64::engine::general_purpose::STANDARD
+                        .encode(crate::runner_import::TEMPLATE)
+                ),
+            )?;
+            a.set_attribute("download", "voorbeeld-lopers.csv")?;
+            document.body().unwrap().append_child(&a)?;
+            a.click();
+            a.remove();
+            Ok(())
+        })();
+        if result.is_err() {
+            s.error = "Voorbeeldbestand downloaden mislukt.".into();
+        }
+    }
+    let _ = s;
 }
 
 pub(super) fn section(s: &State) -> El {
@@ -23,11 +97,16 @@ pub(super) fn section(s: &State) -> El {
         .map(|(name, _)| name.clone())
         .or_else(|| s.admin.import_failed.clone())
         .unwrap_or_else(|| "Geen bestand gekozen".into());
-    let ready = s.import_file.is_some();
+    let preview = s.import_preview.as_ref();
+    let ready = matches!(preview, Some(Ok(_)));
     let mut import_button = btn(
         s,
         "import-runners",
-        if importing { "Importeren..." } else { "Importeren" },
+        if importing {
+            "Importeren..."
+        } else {
+            "Importeren"
+        },
         Kind::Primary,
         false,
         !ready || importing,
@@ -62,6 +141,65 @@ pub(super) fn section(s: &State) -> El {
                 )
                 .child(import_button),
         );
+    card = card.child(
+        btn(
+            s,
+            "download-template",
+            "Voorbeeldbestand downloaden",
+            Kind::Plain,
+            false,
+            false,
+        )
+        .mt(12.0)
+        .on_press_tx(template),
+    );
+    if let Some(preview) = preview {
+        let mut panel = banner(s, false)
+            .mt(12.0)
+            .child(h2(s, "Importvoorbeeld — nog niet opgeslagen"));
+        match preview {
+            Ok(preview) => {
+                panel = panel.child(copy(s, &format!("{} rijen · {} mogelijke dubbels · {} problemen. Controleer dit voor je importeert. De bestaande importregels blijven gelden; ongeldige rijen kunnen worden overgeslagen.", preview["rowCount"], preview["duplicates"].as_array().unwrap().len(), preview["problems"].as_array().unwrap().len())));
+                let columns = preview["columns"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|c| {
+                        format!(
+                            "{} → {}",
+                            c["header"].as_str().unwrap(),
+                            c["mapping"].as_str().unwrap()
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" · ");
+                panel = panel.child(copy(s, &columns));
+                for key in ["duplicates", "problems"] {
+                    for item in preview[key].as_array().unwrap() {
+                        panel = panel.child(copy(s, item.as_str().unwrap()));
+                    }
+                }
+            }
+            Err(error) => panel = panel.child(copy(s, error.as_str())),
+        }
+        card = card.child(
+            panel.child(
+                btn(
+                    s,
+                    "cancel-import",
+                    "Annuleren",
+                    Kind::Plain,
+                    false,
+                    importing,
+                )
+                .on_press(|s: &mut State| {
+                    s.import_file = None;
+                    s.import_preview = None;
+                    s.import_problems.clear();
+                }),
+            ),
+        );
+    }
     if let Some(name) = &s.admin.import_failed {
         card = card.child(
             banner(s, true).mt(12.0).role("alert").child(
@@ -75,10 +213,11 @@ pub(super) fn section(s: &State) -> El {
         );
     }
     if !s.import_problems.is_empty() {
-        let mut problems = banner(s, false)
-            .key("import-problems")
-            .mt(12.0)
-            .child(text("Nakijken in het bestand").font(ts(13.5, 600.0).lh(20.25)).color(p.ink));
+        let mut problems = banner(s, false).key("import-problems").mt(12.0).child(
+            text("Nakijken in het bestand")
+                .font(ts(13.5, 600.0).lh(20.25))
+                .color(p.ink),
+        );
         for problem in &s.import_problems {
             problems = problems.child(
                 row()
@@ -86,16 +225,32 @@ pub(super) fn section(s: &State) -> El {
                     .pl(6.0)
                     .items_start()
                     .child(text("•").font(ts(13.5, 400.0).lh(20.25)).color(p.ink))
-                    .child(text(problem.clone()).font(ts(13.5, 400.0).lh(20.25)).color(p.ink).wrap().grow(1.0).min_w(0.0)),
+                    .child(
+                        text(problem.clone())
+                            .font(ts(13.5, 400.0).lh(20.25))
+                            .color(p.ink)
+                            .wrap()
+                            .grow(1.0)
+                            .min_w(0.0),
+                    ),
             );
         }
         card = card.child(problems);
     }
+    let occupied = !runners(s).is_empty()
+        || !laps(s).is_empty()
+        || s.snapshot["race"]["raceStartedAt"].is_number();
+    let demo = super::admin_kit::panel()
+        .child(h2(s, "Oefenen met fictieve gegevens"))
+        .child(copy(s, "Laad 30 fictieve lopers en enkele uren rondes om de schermen te verkennen. Je verwijdert de oefenrace via de bestaande actie Wedstrijd wissen in Systeem & herstel."))
+        .child(btn(s, "load-demo", "Oefenrace laden", Kind::Plain, false, occupied || s.busy).mt(12.0).on_press(|s: &mut State| send(s, "demo.load", json!({}), Pending::Status { ok: "Oefenrace geladen.".into(), failure: "Oefenrace laden mislukt" })))
+        .child(copy(s, if occupied { "Alleen beschikbaar wanneer er geen lopers en geen rondes zijn. Wis eerst de wedstrijd als je wilt oefenen." } else { "Alleen voor een lege wedstrijd. Dit zijn geen echte inschrijvingen." }));
     let mut page = vec![readiness::panel(s)];
     if let Some(group) = group_card(s) {
         page.push(group);
     }
     page.push(card);
+    page.push(demo);
     stack(s, page)
 }
 
