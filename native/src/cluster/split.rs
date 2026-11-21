@@ -83,6 +83,16 @@ fn replay(db: &Db, entry: &Entry, clocked: &HashSet<String>) -> bool {
     {
         return false;
     }
+    // A lap correction next to a runner or lap Timing touched meanwhile was made against a
+    // race clock that moved on: it stays in the backup instead of leaving half a correction.
+    if entry.kind.starts_with("laps.")
+        && entry
+            .statements
+            .iter()
+            .any(|statement| strings(statement).any(|p| clocked.contains(p)))
+    {
+        return false;
+    }
     let captured = |db: &Db| {
         db.capture
             .borrow()
@@ -279,6 +289,40 @@ mod tests {
             sql: sql.into(),
             params: params.as_array().cloned().unwrap_or_default(),
         }
+    }
+
+    #[test]
+    fn a_lap_correction_next_to_what_timing_clocked_meanwhile_stays_out() {
+        let db = Db::open(std::path::Path::new(":memory:")).unwrap();
+        db.exec(
+            "INSERT INTO runners(id,name,status,created_at,updated_at) VALUES('zoe','Zoë','ran',0,0)",
+            &[],
+        )
+        .unwrap();
+        *db.capture.borrow_mut() = Some(Default::default());
+        let correction = |lap: &str| Entry {
+            seq: 2,
+            id: lap.into(),
+            epoch: 1,
+            kind: "laps.split".into(),
+            statements: vec![
+                statement(
+                    "UPDATE laps SET finished_at=?,duration_ms=? WHERE id=?",
+                    json!([50, 50, "undone"]),
+                ),
+                statement(
+                    "INSERT INTO laps(id,runner_id,lap_number,started_at,finished_at,duration_ms,source,created_at) VALUES(?,?,?,?,?,?,?,?)",
+                    json!([lap, "zoe", 1, 50, 100, 50, "manual", 0]),
+                ),
+            ],
+            created_at: 0,
+        };
+        let laps = |db: &Db| db.one("SELECT COUNT(*) AS n FROM laps", &[]).unwrap()["n"].clone();
+        // Timing undid the handoff of lap `undone`: its split would leave a second half alone.
+        assert!(!replay(&db, &correction("half"), &["undone".to_owned()].into()));
+        assert_eq!(laps(&db), 0);
+        assert!(replay(&db, &correction("other"), &HashSet::new()));
+        assert_eq!(laps(&db), 1);
     }
 
     #[test]
