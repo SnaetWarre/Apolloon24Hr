@@ -144,7 +144,12 @@ fn clocked_since(db: &Db, seq: i64) -> Result<HashSet<String>> {
             serde_json::from_str(row["statements_json"].as_str().unwrap_or("[]"))
                 .unwrap_or_default();
         for statement in &statements {
-            clocked.extend(strings(statement).map(str::to_owned));
+            // Ids only: a label or race snapshot (JSON) names no runner or lap.
+            clocked.extend(
+                strings(statement)
+                    .filter(|p| !p.starts_with(['[', '{']))
+                    .map(str::to_owned),
+            );
         }
     }
     Ok(clocked)
