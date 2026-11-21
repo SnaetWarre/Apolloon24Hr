@@ -184,6 +184,18 @@ pub(super) fn screen_name(kind: &str) -> Option<&'static str> {
     }
 }
 
+pub(super) fn clocks(s: &State, clock: &mut clock::Sample) {
+    if s.page == 0 || (s.page == 8 && s.admin_section == 0) {
+        COPIED.with(|c| {
+            if let Some((_, at)) = c.borrow().as_ref() { clock.until(*at + 1600); }
+        });
+        let b = &s.recovery["status"];
+        if let Some(at) = b["latest"]["createdAt"].as_i64() {
+            clock.until(at + b["intervalMs"].as_i64().unwrap_or(300_000) * 3 + 1);
+        }
+    }
+}
+
 pub(super) fn screen_links(s: &State, url: &str, key: &str) -> El {
     let mut links = row().gap(8.0).flex_wrap();
     for kind in ["inside", "competitions", "outside"] {

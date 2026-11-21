@@ -82,6 +82,19 @@ pub(super) struct NetWait {
     answers: u32,
 }
 const SAME_VERSION: &str = "Installeer dezelfde versie op alle laptops, en nooit tijdens de race: laptops met een andere versie koppelen niet met elkaar.";
+
+pub(super) fn clocks(s: &State, clock: &mut clock::Sample) {
+    if let Some(at) = s.system.copied_at { clock.until(at + 2000); }
+    for at in [s.recovery["status"]["latest"]["createdAt"].as_i64(), s.snapshot["race"]["raceStartedAt"].as_i64()].into_iter().flatten() {
+        clock.value(kit::relative_age(at, s.clock));
+    }
+    if let Some(records) = s.recovery["backups"].as_array() {
+        let shown = if s.system.show_all { records.len() } else { records.len().min(SHOWN_AT_FIRST) };
+        for record in &records[..shown] {
+            clock.value(kit::relative_age(record["createdAt"].as_i64().unwrap_or(0), s.clock));
+        }
+    }
+}
 impl Default for Panel {
     fn default() -> Self {
         Self {

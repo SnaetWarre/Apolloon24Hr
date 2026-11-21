@@ -642,10 +642,11 @@ fn commit(p: &mut Page, id: usize) {
 }
 
 /// Called every poll: commits a draft once its field lost focus and keeps idle fields in step.
-pub(super) fn refresh(s: &mut State) {
+pub(super) fn refresh(s: &mut State) -> bool {
     if s.page != 4 {
-        return;
+        return false;
     }
+    let mut changed = false;
     let p = &mut s.tactics;
     for id in 0..FIELDS {
         if p.edits[id].focused {
@@ -653,12 +654,15 @@ pub(super) fn refresh(s: &mut State) {
         }
         if p.dirty[id] {
             commit(p, id);
+            changed = true;
         }
         let shown = fmt_num(value(p, id));
         if p.edits[id].text != shown {
             p.edits[id].replace_text(shown);
+            changed = true;
         }
     }
+    changed
 }
 
 /// A chosen reference file (`storeHistoricalRace`).

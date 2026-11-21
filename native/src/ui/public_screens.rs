@@ -139,13 +139,26 @@ pub(super) fn poll(s: &mut State, changed: bool, now: i64) -> bool {
         refresh(s, now);
     }
     let race = &s.snapshot["race"];
-    let clock_ticked = s.page == 5
+    let clock_ticked = matches!(s.page, 5 | 6)
         && race["raceFinishedAt"].is_null()
         && race["raceStartedAt"].as_i64().is_some_and(|start| {
             (now - start).max(0) / 1000 != (s.clock - start).max(0) / 1000
         });
     s.clock = now;
-    !on_display || refresh_display || clock_ticked
+    changed || refresh_display || clock_ticked
+}
+
+pub(super) fn clocks(s: &State, clock: &mut clock::Sample) {
+    if matches!(s.page, 5 | 6) && s.snapshot["race"]["raceFinishedAt"].is_null() {
+        if let Some(start) = s.snapshot["race"]["raceStartedAt"].as_i64() {
+            clock.bucket(start, 1000);
+        }
+    }
+    if s.page == 7 {
+        if let Some((_, at)) = s.public_screens.flash.as_ref() {
+            clock.until(*at + OUTSIDE_ALERT_VISIBLE_MS);
+        }
+    }
 }
 
 /// While the Buitenscherm is open, a new record lap or Burgie event flashes.
