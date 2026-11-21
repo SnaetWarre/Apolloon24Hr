@@ -11,7 +11,7 @@ use axum::{
 use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
 mod history;
-use history::HistoryLog;
+use history::{HistoryBody, HistoryLog};
 
 type ReadVersion = (i64, u64, u64, i64, i64);
 
@@ -186,7 +186,7 @@ fn snapshot_read(host: Host, query: &std::collections::HashMap<String, String>, 
     if let Some(dispatch) = dispatch { marks.push(("snapshot_dispatch", dispatch)); }
     let mut mark = |stage| if crate::latency::enabled() { marks.push((stage, crate::latency::realtime_us())); };
     mark("snapshot_worker");
-    let mut read = || -> Result<(Bytes, Option<Bytes>, Option<String>)> {
+    let mut read = || -> Result<(Bytes, Option<HistoryBody>, Option<String>)> {
         mark("history_lock_begin");
         let mut history = query
             .contains_key("history")
@@ -212,10 +212,8 @@ fn snapshot_read(host: Host, query: &std::collections::HashMap<String, String>, 
                 mark("snapshot_read_ready");
                 let history = if let Some(log) = history.as_mut() {
                     mark("history_built");
-                    Some(query.get("since").and_then(|cursor| log.since(cursor))
-                        .map(Ok).unwrap_or_else(|| log.full_body())?)
+                    Some(log.response(query.get("since").map(String::as_str))?)
                 } else { None };
-                mark("history_ready");
                 return Ok((cached, history, lap));
             }
             mark("read_connection_begin");
@@ -253,20 +251,17 @@ fn snapshot_read(host: Host, query: &std::collections::HashMap<String, String>, 
         let history = if let Some(log) = history.as_mut() {
             log.refresh(&db, version, changes)?;
             mark("history_built");
-            Some(
-                query
-                    .get("since")
-                    .and_then(|cursor| log.since(cursor))
-                    .map(Ok)
-                    .unwrap_or_else(|| log.full_body())?,
-            )
+            Some(log.response(query.get("since").map(String::as_str))?)
         } else {
             None
         };
-        mark("history_ready");
         Ok((cached, history, lap))
     };
-    match read() {
+    let result = read().and_then(|(cached, history, lap)| {
+        Ok((cached, history.map(HistoryBody::bytes).transpose()?, lap))
+    });
+    mark("history_ready");
+    match result {
         Ok((cached, history, lap)) => {
             // The cached object is reused as bytes; only the live fields are appended.
             let mut body = Vec::with_capacity(cached.len() + 512);
@@ -322,10 +317,17 @@ fn history_read(host: Host, query: HistoryQuery) -> Response {
     }
 }
 fn history_result(host: &Host, query: HistoryQuery) -> Result<Bytes> {
+    let scope = query.scope.as_deref().unwrap_or("full");
     let mut log = host.history.lock().unwrap();
     let (db, version, changes) = {
         let writer = host.db.lock().unwrap();
         let version = read_version(&writer)?;
+        if scope == "full" && log.is_current(version) {
+            drop(writer);
+            let body = log.response(query.since.as_deref())?;
+            drop(log);
+            return body.bytes();
+        }
         let db = writer.read_snapshot()?;
         if version != read_version(&writer)? {
             return Err("Database gewijzigd tijdens het lezen".into());
@@ -333,7 +335,6 @@ fn history_result(host: &Host, query: HistoryQuery) -> Result<Bytes> {
         let changes = writer.history_changes_since(log.generation(version));
         (db, version, changes)
     };
-    let scope = query.scope.as_deref().unwrap_or("full");
     if scope != "full" {
         return db
             .history_scope(
@@ -348,10 +349,9 @@ fn history_result(host: &Host, query: HistoryQuery) -> Result<Bytes> {
             });
     }
     log.refresh(&db, version, changes)?;
-    if let Some(delta) = query.since.as_deref().and_then(|cursor| log.since(cursor)) {
-        return Ok(delta);
-    }
-    log.full_body()
+    let body = log.response(query.since.as_deref())?;
+    drop(log);
+    body.bytes()
 }
 async fn registrations(State(host): State<Host>) -> Reply {
     reply(host.db.lock().unwrap().registrations())
