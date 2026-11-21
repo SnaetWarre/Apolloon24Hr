@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{
     collections::HashMap,
-    sync::atomic::Ordering,
+    sync::{atomic::Ordering, mpsc},
     time::{Duration, Instant},
 };
 
@@ -388,33 +388,32 @@ impl Node {
     }
 
     fn ask_for_votes(&self, request: &Value) -> usize {
-        let answers: Vec<(Member, Option<Value>)> = std::thread::scope(|scope| {
-            let handles: Vec<_> = self
-                .others()
-                .into_iter()
-                .map(|member| {
-                    scope.spawn(move || {
-                        let answer = self
-                            .post(
-                                &member.url,
-                                "/api/cluster/peer",
-                                &json!({"type":"vote","body":request}),
-                                self.cfg.election_timeout,
-                            )
-                            .ok()
-                            .filter(|a| a.status == 200)
-                            .map(|a| a.body);
-                        (member, answer)
-                    })
-                })
-                .collect();
-            handles.into_iter().filter_map(|h| h.join().ok()).collect()
-        });
-        let mut st = self.raft.lock().unwrap();
+        let peers = self.others();
+        let quorum = (peers.len() + 1) / 2 + 1;
+        let (send, answers) = mpsc::channel();
+        let body = json!({"type":"vote","body":request});
+        for member in peers {
+            let (node, send, body) = (self.arc(), send.clone(), body.clone());
+            std::thread::spawn(move || {
+                let answer = node
+                    .post(
+                        &member.url,
+                        "/api/cluster/peer",
+                        &body,
+                        node.cfg.election_timeout,
+                    )
+                    .ok()
+                    .filter(|a| a.status == 200)
+                    .map(|a| a.body);
+                let _ = send.send((member, answer));
+            });
+        }
+        drop(send);
         let mut granted = 0;
         let mut someone_leads = false;
         for (member, answer) in answers {
             let Some(answer) = answer else { continue };
+            let mut st = self.raft.lock().unwrap();
             let term = answer["term"].as_i64().unwrap_or(0);
             if answer["removed"] == true {
                 st.removed_answer = Some((member, Instant::now()));
@@ -428,6 +427,9 @@ impl Node {
                 self.become_follower(&mut st, term, None);
             } else if answer["granted"] == true {
                 granted += 1;
+                if !someone_leads && granted + 1 >= quorum {
+                    return granted;
+                }
             }
         }
         if someone_leads { 0 } else { granted }

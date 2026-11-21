@@ -19,7 +19,7 @@ use serde_json::{Value, json};
 use std::{
     collections::HashMap,
     sync::{
-        Arc, Mutex, OnceLock, Weak,
+        Arc, Mutex, OnceLock, Weak, mpsc,
         atomic::{AtomicBool, Ordering},
     },
     time::{Duration, Instant},
@@ -717,14 +717,36 @@ impl Node {
             message: self.no_leader_message().into(),
             retry: true,
         };
-        let answer = self
-            .post(
-                &leader.url,
+        let (send, receive) = mpsc::channel();
+        let node = self.arc();
+        let url = leader.url.clone();
+        std::thread::spawn(move || {
+            let answer = node.post(
+                &url,
                 "/api/cluster/write",
                 &body,
-                self.cfg.commit_timeout + Duration::from_secs(1),
-            )
-            .map_err(|_| retry())?;
+                node.cfg.commit_timeout + Duration::from_secs(1),
+            );
+            let _ = send.send(answer);
+        });
+        let answer = loop {
+            match receive.recv_timeout(Duration::from_millis(50)) {
+                Ok(answer) => break answer.map_err(|_| retry())?,
+                Err(mpsc::RecvTimeoutError::Disconnected) => return Err(retry()),
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    let leader_changed = self
+                        .raft
+                        .lock()
+                        .unwrap()
+                        .leader
+                        .as_ref()
+                        .is_some_and(|current| current.host_id != leader.host_id);
+                    if leader_changed {
+                        return Err(retry());
+                    }
+                }
+            }
+        };
         match (answer.status, answer.body["code"].as_str()) {
             (200, _) => {
                 let seq = answer.body["seq"].as_i64().unwrap_or(0);
