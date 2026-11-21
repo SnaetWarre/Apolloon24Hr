@@ -227,7 +227,14 @@ async fn snapshot(State(host): State<Host>, headers: HeaderMap) -> Response {
             return not_leader();
         }
         let term = node.term();
-        match super::log::serialize(&node.db.lock().unwrap()) {
+        // A database on disk is copied without holding its lock: the copy takes a while for a
+        // long race, and the other laptops must keep hearing from this one meanwhile.
+        let on_disk = crate::backups::database_path(&node.db.lock().unwrap()).ok();
+        let image = match on_disk {
+            Some(path) => super::log::serialize_file(&path),
+            None => super::log::serialize(&node.db.lock().unwrap()),
+        };
+        match image {
             Ok(image) => {
                 use base64::Engine;
                 (

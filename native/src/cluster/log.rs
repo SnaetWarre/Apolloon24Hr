@@ -446,9 +446,24 @@ pub fn can_continue_from(db: &Db, after: i64, after_id: Option<&str>) -> bool {
 
 /// A consistent copy of the whole database, for a laptop that joins or re-syncs.
 pub fn serialize(db: &Db) -> Result<Vec<u8>> {
+    image_of(&db.conn)
+}
+
+/// The same copy read from the database file over a connection of its own: everything saved up
+/// to now, without holding the lock that saving and the signs of life to the other laptops need.
+pub fn serialize_file(database: &std::path::Path) -> Result<Vec<u8>> {
+    let conn = rusqlite::Connection::open_with_flags(
+        database,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .map_err(err)?;
+    conn.busy_timeout(std::time::Duration::from_secs(5)).map_err(err)?;
+    image_of(&conn)
+}
+
+fn image_of(conn: &rusqlite::Connection) -> Result<Vec<u8>> {
     let path = std::env::temp_dir().join(format!("apolloon-image-{}.sqlite", crate::db::id()));
-    db.conn
-        .execute("VACUUM INTO ?1", [path.to_string_lossy()])
+    conn.execute("VACUUM INTO ?1", [path.to_string_lossy()])
         .map_err(err)?;
     let bytes = std::fs::read(&path).map_err(err);
     let _ = std::fs::remove_file(&path);
