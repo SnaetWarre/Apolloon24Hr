@@ -234,8 +234,9 @@ fn base_input(s: &State, pressed: i64) -> Value {
     }
     input
 }
-fn send_handoff(s: &mut State, input: Value) {
+fn send_handoff(s: &mut State, mut input: Value) {
     let next = waiting(s).first().map(|r| st(r, "id").to_string());
+    input["nextRunnerId"] = json!(next);
     let pressed = input["pressedAt"].as_i64().unwrap_or_else(now);
     s.timing_page.pending = Some((s.snapshot["race"]["activeStartedAt"].clone(), next, pressed));
     s.last_press = Some((Instant::now(), pressed));
