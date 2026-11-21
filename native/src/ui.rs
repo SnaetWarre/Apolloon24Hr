@@ -2965,6 +2965,25 @@ fn start_transport(url: String, commands: Receiver<Command>, updates: Updates, _
 fn start_transport(url: String, commands: Receiver<Command>, updates: Updates, command_wake: CommandWake) {
     use std::{cell::RefCell, rc::Rc};
     async fn get(client: &reqwest::Client, url: &str, path: &str) -> Value {
+        if crate::latency::enabled() && path.starts_with("/api/state") {
+            if let Ok(response) = client.get(format!("{url}{path}")).timeout(Duration::from_secs(5)).send().await
+                && response.status().is_success()
+            {
+                let headers = crate::latency::realtime_us();
+                let request = response.headers().get("x-apolloon-trace-request").and_then(|v| v.to_str().ok()).map(str::to_owned);
+                if let Ok(bytes) = response.bytes().await {
+                    let body = crate::latency::realtime_us();
+                    let snapshot = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+                    let parsed = crate::latency::realtime_us();
+                    crate::latency::http_stage("http_headers", &snapshot, headers, request.as_deref());
+                    crate::latency::http_stage("http_body", &snapshot, body, request.as_deref());
+                    crate::latency::http_stage("json_parsed", &snapshot, parsed, request.as_deref());
+                    crate::latency::http_size(&snapshot, request.as_deref(), bytes.len());
+                    return snapshot;
+                }
+            }
+            return Value::Null;
+        }
         match client.get(format!("{url}{path}")).timeout(Duration::from_secs(5)).send().await {
             Ok(r) if r.status().is_success() => r.json::<Value>().await.unwrap_or(Value::Null),
             _ => Value::Null,
@@ -3012,6 +3031,7 @@ fn start_transport(url: String, commands: Receiver<Command>, updates: Updates, c
                 synced.borrow_mut().take_history(full).unwrap_or(Value::Null)
             }
         };
+        crate::latency::snapshot("history_merged", &snapshot);
         let mut paths = image_urls(&snapshot, &history);
         paths.extend(extra_image);
         paths.retain(|path| !synced.borrow().images.contains(path));

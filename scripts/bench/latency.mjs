@@ -5,6 +5,36 @@ export function installBrowserTrace(enabled) {
   window.APOLLOON_LATENCY_TRACE = true;
   window.apolloonLatencyEvents = [];
   window.apolloonRefreshIntervals = [];
+  const requests = [];
+  const fetch = window.fetch;
+  window.fetch = async function (...args) {
+    const start = performance.now();
+    const response = await fetch.apply(this, args);
+    if (response.url.includes('/api/state'))
+      requests.push({
+        url: response.url,
+        start,
+        requestId: response.headers.get('x-apolloon-trace-request'),
+      });
+    return response;
+  };
+  new PerformanceObserver((list) => {
+    for (const entry of list.getEntries()) {
+      if (!entry.name.includes('/api/state')) continue;
+      const request = requests.filter((r) => r.url === entry.name && r.start <= entry.startTime).at(-1);
+      if (!request?.requestId) continue;
+      window.apolloonLatencyEvents.push({
+        stage: 'http_resource',
+        requestId: request.requestId,
+        us: (performance.timeOrigin + entry.responseEnd) * 1000,
+        responseStartUs: (performance.timeOrigin + entry.responseStart) * 1000,
+        encodedBodySize: entry.encodedBodySize,
+        decodedBodySize: entry.decodedBodySize,
+        transferSize: entry.transferSize,
+      });
+      requests.splice(0, requests.indexOf(request) + 1);
+    }
+  }).observe({ type: 'resource', buffered: true });
   let lastLap;
   const submitted = (backend) => {
     const id = window.apolloonLatencyLap;
