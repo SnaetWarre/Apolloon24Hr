@@ -659,6 +659,15 @@ pub(super) fn page(s: &State) -> El {
             .border(1.0, p.brand)
             .hover(oklch_hover(s.dark))
             .on_press(press)
+            .on_key(|s: &mut State, event, tx| {
+                if event.key != Key::Enter || event.mods != rune::Mods::default() {
+                    return false;
+                }
+                if !tx.key_repeat() {
+                    press(s);
+                }
+                true
+            })
     };
     if !finished && !handoff_disabled {
         key = key.child(
@@ -996,6 +1005,7 @@ pub(super) fn modal(s: &State) -> Option<El> {
     Some(
         rune::el()
             .key("timing-dialog-overlay")
+            .focus_return("handoff")
             .absolute(0.0, 0.0)
             .w_full()
             .h_full()

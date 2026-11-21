@@ -141,6 +141,7 @@ const SECTIONS: [&str; 7] = [
     "system",
 ];
 fn apply_route(state: &mut State, route: &str) {
+    state.error.clear();
     let (path, query) = route.split_once('?').unwrap_or((route, ""));
     state.page = ROUTES.iter().position(|r| *r == path).unwrap_or(0);
     if state.page == 8 {
@@ -987,7 +988,11 @@ fn view(s: &State, _cx: &mut Cx<State>) -> El {
         content = content.child(label(&s.notice, s.dark).role("status").wrap().min_w(0.0));
     }
     if !s.error.is_empty() {
-        content = content.child(label(&s.error, s.dark).role("alert").wrap().min_w(0.0));
+        content = content.child(
+            row().gap(12.0).center_y()
+                .child(label(&s.error, s.dark).role("alert").wrap().min_w(0.0).grow(1.0))
+                .child(button("error-dismiss", "Sluiten", s.dark, |s| s.error.clear())),
+        );
     }
     let modal = if let Some(modal) = admin_system::modal(s) {
         Some(modal)
@@ -1634,6 +1639,24 @@ mod tests {
         assert_eq!(laps(), 1, "Space on Timing clocks the runner off");
     }
     #[test]
+    fn errors_can_be_dismissed_and_do_not_follow_navigation() {
+        let mut state = init_with_url("http://127.0.0.1:1".into());
+        state.fixture = true;
+        state.page = 8;
+        state.error = "no XDG desktop portal FileChooser is available".into();
+        let mut rt = Runtime::new(state, view, (1366.0, 768.0), Env { system_dark: false, scale: 1.0 });
+        rt.frame(0.0);
+        click(&mut rt, "error-dismiss");
+        assert!(rt.state.error.is_empty());
+        assert!(rt.find("error-dismiss").is_none());
+        rt.update(|s, _| s.error = "Picker failed".into());
+        click(&mut rt, "nav-2");
+        assert!(rt.state.error.is_empty());
+        rt.state.error = "Picker failed".into();
+        apply_route(&mut rt.state, "/queue");
+        assert!(rt.state.error.is_empty());
+    }
+    #[test]
     fn space_presses_a_tab_focused_button_outside_timing() {
         let mut initial = crate::db::Db::open(std::path::Path::new(":memory:")).unwrap();
         let id = initial.mutation("runners.create", &json!({"runnerNumber":"5","name":"Tab Loper"})).unwrap()["id"].as_str().unwrap().to_owned();
@@ -2075,6 +2098,12 @@ mod tests {
             a
         );
         click(&mut rt, "undo");
+        click(&mut rt, "timing-cancel");
+        rt.key(rune::Key::Enter.into());
+        rt.frame(1.0 / 60.0);
+        assert!(matches!(rt.state.timing_page.dialog, Some(timing_page::Dialog::ShortLap(_))));
+        click(&mut rt, "timing-cancel");
+        click(&mut rt, "undo");
         click(&mut rt, "timing-confirm");
         update(&mut rt, |s| {
             !s.busy && s.snapshot["race"]["activeRunnerId"] == a
@@ -2085,6 +2114,9 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+        rt.key(rune::Key::Text(" ".into()).into());
+        rt.frame(1.0 / 60.0);
+        assert!(matches!(rt.state.timing_page.dialog, Some(timing_page::Dialog::ShortLap(_))));
     }
     fn scroll_to(rt: &mut Runtime<State>, key: &str) {
         for _ in 0..20 {
