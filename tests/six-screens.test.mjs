@@ -14,6 +14,7 @@ test('native frame stages separate prior presentation, apply and redraw work', (
   const events = [
     event('submit_begin', 0),
     event('push_received', 5, 'lap'),
+    event('update_ready', 6, 'lap'),
     event('submit_end', 10),
     event('present_begin', 10),
     event('present_end', 20),
@@ -31,7 +32,8 @@ test('native frame stages separate prior presentation, apply and redraw work', (
     {
       lapId: 'lap',
       pushAppliedUs: 20,
-      previousSubmitUs: 5,
+      transportReadyUs: 1,
+      previousSubmitUs: 4,
       previousPresentUs: 10,
       applyUs: 3,
       otherBeforeApplyUs: 2,

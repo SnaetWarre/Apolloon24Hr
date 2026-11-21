@@ -92,6 +92,7 @@ export function nativeFrameMetrics(events, writes) {
   };
   return writes.map((w) => {
     const push = first('push_received', w.lapId);
+    const ready = first('update_ready', w.lapId, push);
     const apply = first('apply_begin', w.lapId, push);
     const applied = first('applied', w.lapId, apply);
     const frame = first('frame', w.lapId, applied);
@@ -102,8 +103,9 @@ export function nativeFrameMetrics(events, writes) {
     const built = previous('build_end', submit);
     const build = previous('build_begin', built);
     const valid =
-      [push, apply, applied, frame, build, built, submit, submitted, present, end].every(Number.isFinite) &&
-      push <= apply &&
+      [push, ready, apply, applied, frame, build, built, submit, submitted, present, end].every(Number.isFinite) &&
+      push <= ready &&
+      ready <= apply &&
       apply <= applied &&
       build <= built &&
       applied <= built &&
@@ -113,22 +115,71 @@ export function nativeFrameMetrics(events, writes) {
       present <= end &&
       end <= frame;
     if (!valid) return { lapId: w.lapId };
-    const previousSubmitUs = overlap('submit', push, apply);
-    const previousPresentUs = overlap('present', push, apply);
+    const previousSubmitUs = overlap('submit', ready, apply);
+    const previousPresentUs = overlap('present', ready, apply);
     const applyUs = applied - apply;
     return {
       lapId: w.lapId,
       pushAppliedUs: applied - push,
+      transportReadyUs: ready - push,
       previousSubmitUs,
       previousPresentUs,
       applyUs,
-      otherBeforeApplyUs: apply - push - previousSubmitUs - previousPresentUs,
+      otherBeforeApplyUs: apply - ready - previousSubmitUs - previousPresentUs,
       buildUs: built - build - Math.max(0, Math.min(built, applied) - Math.max(build, apply)),
       encodeUs: submit - built,
       submitUs: submitted - submit,
       presentUs: end - present,
     };
   });
+}
+
+export function httpMetrics(events, writes, screens) {
+  return screens.flatMap((screen) =>
+    writes.map((write) => {
+      const source = screen.name === 'native Timing' ? 'native' : screen.name;
+      const local = events.filter((e) => e.source === source && e.lapId === write.lapId).sort((a, b) => a.us - b.us);
+      const push = local.find((e) => e.stage === 'push_received');
+      const parsed = local.findLast((e) => e.stage === 'json_parsed' && e.us <= push?.us);
+      const request = parsed?.requestId;
+      if (!request) return { screen: screen.name, lapId: write.lapId };
+      const points = events.filter((e) => e.requestId === request);
+      const at = (stage) => points.find((e) => e.stage === stage)?.us;
+      const notify = events.find(
+        (e) => e.source === screen.node && e.stage === 'notify' && e.lapId === write.lapId
+      )?.us;
+      const delta = (a, b) => (Number.isFinite(a) && Number.isFinite(b) && b >= a ? b - a : undefined);
+      const localAt = (stage) => local.find((e) => e.stage === stage && e.us >= push?.us)?.us;
+      const size = points.find((e) => e.stage === 'http_size');
+      const wire = points.find((e) => e.stage === 'wire_body');
+      const resource = points.find((e) => e.stage === 'http_resource');
+      return {
+        screen: screen.name,
+        lapId: write.lapId,
+        requestId: request,
+        notifyWakeUs: delta(notify, at('waiter_wake')),
+        workerQueueUs: delta(at('waiter_wake'), at('snapshot_worker')),
+        readSnapshotUs: delta(at('snapshot_worker'), at('snapshot_read_ready')),
+        snapshotBuildUs: delta(at('snapshot_read_ready'), at('snapshot_built')),
+        serializeUs: delta(at('snapshot_built'), at('snapshot_serialized')),
+        stateHistoryUs: delta(at('snapshot_read_ready'), at('history_ready')),
+        historySerializeUs: delta(at('history_built'), at('history_ready')),
+        liveFieldsUs: delta(at('history_ready'), at('response_ready')),
+        responseToProxyUs: delta(at('response_ready'), wire?.headersUs),
+        proxyStreamUs: delta(wire?.headersUs, wire?.us),
+        proxyToClientBodyUs: delta(wire?.us, at('http_body')),
+        headersBodyUs: delta(at('http_headers'), at('http_body')),
+        jsonParseUs: delta(at('http_body'), at('json_parsed')),
+        clientHistoryUs: delta(push?.us, localAt('history_merged')),
+        imagePreparationUs: delta(localAt('history_merged'), localAt('update_ready')),
+        updateQueueUs: delta(localAt('update_ready'), localAt('apply_begin')),
+        applyUs: delta(localAt('apply_begin'), localAt('applied')),
+        decodedBodySize: size?.decodedBodySize ?? resource?.decodedBodySize,
+        encodedBodySize: wire?.encodedBodySize ?? resource?.encodedBodySize,
+        encoding: wire?.encoding,
+      };
+    })
+  );
 }
 
 export function stageMetrics(events, writes, results, leader, refresh = []) {
@@ -209,6 +260,30 @@ export function stageMetrics(events, writes, results, leader, refresh = []) {
     .map((e) => e.us)
     .sort((a, b) => a - b);
   const nativeFrames = nativeFrameMetrics(rows, writes);
+  const httpRequests = httpMetrics(rows, writes, results);
+  for (const screen of results) {
+    const requests = httpRequests.filter((r) => r.screen === screen.name);
+    for (const key of [
+      'notifyWakeUs',
+      'workerQueueUs',
+      'readSnapshotUs',
+      'snapshotBuildUs',
+      'serializeUs',
+      'stateHistoryUs',
+      'historySerializeUs',
+      'liveFieldsUs',
+      'responseToProxyUs',
+      'proxyStreamUs',
+      'proxyToClientBodyUs',
+      'headersBodyUs',
+      'jsonParseUs',
+      'clientHistoryUs',
+      'imagePreparationUs',
+      'updateQueueUs',
+      'applyUs',
+    ])
+      stages.push({ name: key + ' ' + screen.name, ...stats(requests.map((r) => r[key]).filter(Number.isFinite)) });
+  }
   const nativeScreen = results.find((screen) => screen.name === 'native Timing');
   nativeFrames.forEach((frame, i) => {
     const at = first(writes[i].lapId, 'frame', 'native', first(writes[i].lapId, 'applied', 'native'));
@@ -216,6 +291,7 @@ export function stageMetrics(events, writes, results, leader, refresh = []) {
       frame.framePixelsUs = (writes[i].sentAt + nativeScreen.values[i]) * 1000 - at;
   });
   for (const [key, name] of Object.entries({
+    transportReadyUs: 'native push→update ready (transport work)',
     previousSubmitUs: 'native push→apply waiting on previous submit',
     previousPresentUs: 'native push→apply waiting on previous present',
     applyUs: 'native own apply',
@@ -229,6 +305,7 @@ export function stageMetrics(events, writes, results, leader, refresh = []) {
   return {
     stages,
     nativeFrames,
+    httpRequests,
     nativeDrawnFrameIntervalsUs: stats(cadence.slice(1).map((at, i) => at - cadence[i])),
     browserRafIntervalsUs: refresh.map((r) => ({
       screen: r.screen,
@@ -245,6 +322,40 @@ export function stageMarkdown(metrics) {
     metrics.stages
       .map((s) => `| ${s.name} | ${s.n} | ${s.p50 ?? 'N/A'} | ${s.p95 ?? 'N/A'} | ${s.max ?? 'N/A'} |`)
       .join('\n') +
+    '\n\n## Native per press (µs)\n\n| Lap | Push→apply | Transport ready | Prior submit | Prior present | Own apply | Other before apply | Build/acquire excl. apply | Upload/encode | Submit | Present | Frame→pixels |\n|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n' +
+    metrics.nativeFrames
+      .map(
+        (f) =>
+          '| ' +
+          [
+            f.lapId,
+            ...[
+              'pushAppliedUs',
+              'transportReadyUs',
+              'previousSubmitUs',
+              'previousPresentUs',
+              'applyUs',
+              'otherBeforeApplyUs',
+              'buildUs',
+              'encodeUs',
+              'submitUs',
+              'presentUs',
+              'framePixelsUs',
+            ].map((k) => f[k] ?? 'N/A'),
+          ].join(' | ') +
+          ' |'
+      )
+      .join('\n') +
+    '\n\nState response body sizes (bytes, measured requests only): ' +
+    JSON.stringify(
+      metrics.httpRequests.map(({ screen, lapId, decodedBodySize, encodedBodySize, encoding }) => ({
+        screen,
+        lapId,
+        decodedBodySize,
+        encodedBodySize,
+        encoding,
+      }))
+    ) +
     '\n\nNative drawn-frame intervals (actual workload, not physical scanout): ' +
     JSON.stringify(metrics.nativeDrawnFrameIntervalsUs) +
     '\n\nX11 reported display Hz / refresh period µs: ' +

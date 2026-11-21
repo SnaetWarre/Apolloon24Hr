@@ -85,6 +85,7 @@ struct Updates {
 }
 impl Updates {
     fn send(&self, update: Update) -> Result<(), mpsc::SendError<Update>> {
+        crate::latency::snapshot("update_ready", &update.snapshot);
         self.sender.send(update)?;
         if let Some(wake) = self.wake.lock().unwrap().clone() { wake(); }
         Ok(())
@@ -2802,6 +2803,23 @@ fn start_transport(url: String, commands: Receiver<Command>, updates: Updates, _
         .unwrap();
     let synced = Arc::new(Mutex::new(Synced::default()));
     fn get(client: &Client, url: &str, path: &str) -> Value {
+        if crate::latency::enabled() && path.starts_with("/api/state") {
+            let read = || -> std::result::Result<Value, reqwest::Error> {
+                let response = client.get(format!("{url}{path}")).timeout(Duration::from_secs(5)).send()?.error_for_status()?;
+                let headers = crate::latency::realtime_us();
+                let request = response.headers().get("x-apolloon-trace-request").and_then(|v| v.to_str().ok()).map(str::to_owned);
+                let bytes = response.bytes()?;
+                let body = crate::latency::realtime_us();
+                let snapshot = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+                let parsed = crate::latency::realtime_us();
+                crate::latency::http_stage("http_headers", &snapshot, headers, request.as_deref());
+                crate::latency::http_stage("http_body", &snapshot, body, request.as_deref());
+                crate::latency::http_stage("json_parsed", &snapshot, parsed, request.as_deref());
+                crate::latency::http_size(&snapshot, request.as_deref(), bytes.len());
+                Ok(snapshot)
+            };
+            return read().unwrap_or(Value::Null);
+        }
         client
             .get(format!("{url}{path}"))
             .timeout(Duration::from_secs(5))
@@ -2845,6 +2863,7 @@ fn start_transport(url: String, commands: Receiver<Command>, updates: Updates, _
             Value::Null
         };
         let recovery = Value::Null;
+        crate::latency::snapshot("history_merged", &snapshot);
         let mut paths = image_urls(&snapshot, &history);
         paths.extend(extra_image);
         paths.retain(|path| !synced.lock().unwrap().images.contains(path));

@@ -11,6 +11,18 @@ npm run bench:screens -- --trace
 npm run bench:screens -- --followers --trace
 ```
 
+Tracing is off by default. With `--trace`, the report includes per-press native
+previous-frame submit/present overlap, own apply, view build/acquire (excluding
+apply), upload/encode, submit, present and frame-to-pixels time. Submit/present
+are CPU wall times, not GPU execution or physical scanout. Missing boundaries
+remain N/A. Request IDs join server waiter/worker/snapshot/serialization markers
+to client headers/body/JSON parsing and history/apply markers. Proxy body byte
+counts are encoded HTTP entity bytes, not TCP/IP framing; browser Resource Timing
+also records decoded and encoded entity sizes. Proxy-to-client intervals include
+decompression and client scheduling, and cannot identify network time alone.
+State cache hits have no build/serialization sample; state/history time includes
+both on misses. Opt-in instrumentation adds timestamp/logging overhead.
+
 Builds the web bundle first and release desktop binary if either artifact is
 missing. After source changes, rebuild explicitly before comparing:
 

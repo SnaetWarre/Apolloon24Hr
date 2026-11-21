@@ -115,6 +115,7 @@ async function proxy(node) {
     const at = Date.now(),
       counted = measuring;
     const upstream = httpRequest(node.url + req.url, { method: req.method, headers: req.headers }, (reply) => {
+      const headersUs = trace ? (performance.timeOrigin + performance.now()) * 1000 : undefined;
       let bytes = 0;
       res.writeHead(reply.statusCode, reply.headers);
       reply.on('data', (chunk) => {
@@ -122,6 +123,16 @@ async function proxy(node) {
       });
       reply.on('end', () => {
         if (counted) traffic.push({ at, node: node.name, path: req.url, bytes, status: reply.statusCode });
+        if (trace && req.url.startsWith('/api/state'))
+          traceEvents.push({
+            stage: 'wire_body',
+            source: 'proxy ' + node.name,
+            requestId: reply.headers['x-apolloon-trace-request'],
+            us: (performance.timeOrigin + performance.now()) * 1000,
+            headersUs,
+            encodedBodySize: bytes,
+            encoding: reply.headers['content-encoding'] ?? 'identity',
+          });
       });
       reply.pipe(res);
     });

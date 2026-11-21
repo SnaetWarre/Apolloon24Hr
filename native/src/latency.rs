@@ -56,10 +56,23 @@ pub fn realtime_us() -> f64 {
 }
 
 pub fn emit(stage: &str, id: &str, lap: Option<&str>) {
+    if !enabled() { return; }
+    emit_at(stage, id, lap, realtime_us());
+}
+
+pub fn emit_at(stage: &str, id: &str, lap: Option<&str>, us: f64) {
+    emit_at_request(stage, id, lap, us, None);
+}
+
+pub fn emit_at_request(stage: &str, id: &str, lap: Option<&str>, us: f64, request: Option<&str>) {
     if !enabled() {
         return;
     }
-    let event = json!({"stage":stage,"id":id,"lapId":lap,"us":realtime_us()});
+    let event = json!({"stage":stage,"id":id,"lapId":lap,"us":us,"requestId":request});
+    send_event(event);
+}
+
+fn send_event(event: Value) {
     #[cfg(not(target_arch = "wasm32"))]
     if let Some(writer) = WRITER.get() {
         let _ = writer.try_send(event);
@@ -75,13 +88,25 @@ pub fn emit(stage: &str, id: &str, lap: Option<&str>) {
                 }
             }
         }
-        if stage == "applied" {
+        if event["stage"] == "applied" {
             let _ = js_sys::Reflect::set(
                 &global,
                 &"apolloonLatencyLap".into(),
-                &lap.unwrap_or(id).into(),
+                &event["lapId"].as_str().or(event["id"].as_str()).unwrap_or("").into(),
             );
         }
+    }
+}
+
+pub fn http_stage(stage: &str, snapshot: &Value, us: f64, request: Option<&str>) {
+    if let Some(lap) = snapshot["latencyLap"].as_str() {
+        emit_at_request(stage, lap, Some(lap), us, request);
+    }
+}
+
+pub fn http_size(snapshot: &Value, request: Option<&str>, bytes: usize) {
+    if enabled() && let Some(lap) = snapshot["latencyLap"].as_str() {
+        send_event(json!({"stage":"http_size","id":lap,"lapId":lap,"requestId":request,"us":realtime_us(),"decodedBodySize":bytes}));
     }
 }
 

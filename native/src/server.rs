@@ -32,6 +32,7 @@ fn read_version(db: &Db) -> Result<ReadVersion> {
 struct ReadCache {
     version: Option<ReadVersion>,
     snapshot: Option<Bytes>,
+    latency_lap: Option<String>,
 }
 
 #[derive(Default)]
@@ -132,6 +133,7 @@ async fn snapshot_request(
             .unwrap()
             .seen(kind, remote.ip().to_canonical());
     }
+    let mut wake = None;
     if let Some(after) = query.get("after") {
         let mut changes = host.db.lock().unwrap().subscribe();
         let _ = tokio::time::timeout(std::time::Duration::from_secs(2), async {
@@ -142,6 +144,7 @@ async fn snapshot_request(
                 if changes.changed().await.is_err() {
                     break;
                 }
+                wake = crate::latency::enabled().then(crate::latency::realtime_us);
             }
         }).await;
         if host.db.lock().unwrap().change_token() == *after {
@@ -157,21 +160,30 @@ async fn snapshot_request(
             return json_body(serde_json::to_vec(&state).unwrap().into());
         }
     }
-    snapshot_with_history(host, &query).await
+    let wake = wake.or_else(|| crate::latency::enabled().then(crate::latency::realtime_us));
+    snapshot_traced(host, &query, wake).await
 }
 async fn snapshot(State(host): State<Host>) -> Response {
     snapshot_with_history(host, &Default::default()).await
 }
 async fn snapshot_with_history(host: Host, query: &std::collections::HashMap<String, String>) -> Response {
+    snapshot_traced(host, query, None).await
+}
+async fn snapshot_traced(host: Host, query: &std::collections::HashMap<String, String>, wake: Option<f64>) -> Response {
     let query = query.clone();
-    let result = tokio::task::spawn_blocking(move || snapshot_read(host, &query)).await;
+    let result = tokio::task::spawn_blocking(move || snapshot_read(host, &query, wake)).await;
     match result {
         Ok(response) => response,
         Err(error) => error_body(error.to_string()),
     }
 }
-fn snapshot_read(host: Host, query: &std::collections::HashMap<String, String>) -> Response {
-    let read = || -> Result<(Bytes, Option<Bytes>)> {
+fn snapshot_read(host: Host, query: &std::collections::HashMap<String, String>, wake: Option<f64>) -> Response {
+    static NEXT_REQUEST: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let request = crate::latency::enabled().then(|| format!("{}-{}", std::process::id(), NEXT_REQUEST.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
+    let mut marks = Vec::new();
+    let mut mark = |stage| if crate::latency::enabled() { marks.push((stage, crate::latency::realtime_us())); };
+    mark("snapshot_worker");
+    let mut read = || -> Result<(Bytes, Option<Bytes>, Option<String>)> {
         let mut history = query
             .contains_key("history")
             .then(|| host.history.lock().unwrap());
@@ -187,22 +199,28 @@ fn snapshot_read(host: Host, query: &std::collections::HashMap<String, String>) 
             (db, version, writer.change_token(), changes)
         };
         let mut cache = host.reads.lock().unwrap();
+        mark("snapshot_read_ready");
         if cache.version != Some(version) || cache.snapshot.is_none() {
             let mut state = db.race_snapshot()?;
             state["changeToken"] = json!(token);
             if crate::latency::enabled() {
                 state["latencyLap"] = db.rows("SELECT id FROM laps ORDER BY rowid DESC LIMIT 1", &[])?.first().map_or(Value::Null, |row| row["id"].clone());
             }
+            mark("snapshot_built");
             let body = serde_json::to_vec(&state).map_err(|e| e.to_string())?;
+            mark("snapshot_serialized");
             *cache = ReadCache {
                 version: Some(version),
                 snapshot: Some(body.into()),
+                latency_lap: state["latencyLap"].as_str().map(str::to_owned),
             };
         }
         let cached = cache.snapshot.clone().unwrap();
+        let lap = cache.latency_lap.clone();
         drop(cache);
         let history = if let Some(log) = history.as_mut() {
             log.refresh(&db, version, changes)?;
+            mark("history_built");
             Some(
                 query
                     .get("since")
@@ -213,10 +231,11 @@ fn snapshot_read(host: Host, query: &std::collections::HashMap<String, String>) 
         } else {
             None
         };
-        Ok((cached, history))
+        mark("history_ready");
+        Ok((cached, history, lap))
     };
     match read() {
-        Ok((cached, history)) => {
+        Ok((cached, history, lap)) => {
             // The cached object is reused as bytes; only the live fields are appended.
             let mut body = Vec::with_capacity(cached.len() + 512);
             body.extend_from_slice(&cached[..cached.len() - 1]);
@@ -237,7 +256,14 @@ fn snapshot_read(host: Host, query: &std::collections::HashMap<String, String>) 
                 body.extend_from_slice(&history);
             }
             body.push(b'}');
-            json_body(body.into())
+            mark("response_ready");
+            if let Some(lap) = lap {
+                if let Some(wake) = wake { crate::latency::emit_at_request("waiter_wake", &lap, Some(&lap), wake, request.as_deref()); }
+                for (stage, us) in marks { crate::latency::emit_at_request(stage, &lap, Some(&lap), us, request.as_deref()); }
+            }
+            let mut response = json_body(body.into());
+            if let Some(request) = request { response.headers_mut().insert("x-apolloon-trace-request", request.parse().unwrap()); }
+            response
         }
         Err(message) => error_body(message),
     }
