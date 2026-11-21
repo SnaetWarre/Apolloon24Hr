@@ -605,7 +605,7 @@ index 1f43293..f8f2689 100644
          self.plan.iter().enumerate().all(|(i, l)| match self.planner.dispositions.get(i) {
              Some(Disposition::Inline | Disposition::Skip) | None => true,
 diff --git a/crates/rune/src/render/pipelines.rs b/crates/rune/src/render/pipelines.rs
-index c82eaf3..f928ba4 100644
+index c82eaf3..68c7815 100644
 --- a/crates/rune/src/render/pipelines.rs
 +++ b/crates/rune/src/render/pipelines.rs
 @@ -94,9 +94,7 @@ impl Renderer {
@@ -618,6 +618,14 @@ index c82eaf3..f928ba4 100644
              damage: Default::default(),
          }
      }
+@@ -223,6 +221,7 @@ impl Renderer {
+         let old = std::mem::replace(&mut self.pipeline, next);
+         self.extra.push((self.format, old));
+         self.format = format;
++        *self.damage.lock().unwrap() = Default::default();
+         self.lcd = variant::Lcd::Unbuilt;
+         self.srgb_blend = !format.is_srgb();
+         if self.layer_stats().targets > 0 { self.add_layer_format(device, format); }
 diff --git a/crates/rune/src/runtime/input/focus.rs b/crates/rune/src/runtime/input/focus.rs
 index 9e5edb8..1271b4b 100644
 --- a/crates/rune/src/runtime/input/focus.rs
@@ -769,10 +777,10 @@ index e31747b..0c5c753 100644
 +mod tests;
 diff --git a/crates/rune/src/window/damage_tests.rs b/crates/rune/src/window/damage_tests.rs
 new file mode 100644
-index 0000000..e63ddf1
+index 0000000..e17145f
 --- /dev/null
 +++ b/crates/rune/src/window/damage_tests.rs
-@@ -0,0 +1,106 @@
+@@ -0,0 +1,124 @@
 +use super::*;
 +
 +fn quad(x: f32) -> Instance {
@@ -824,20 +832,30 @@ index 0000000..e63ddf1
 +}
 +
 +fn retained_match(format: wgpu::TextureFormat, copies: bool) {
++    retained_formats_match(&[format], format, copies);
++}
++
++#[test]
++fn retained_frames_rebuild_after_linear_and_srgb_view_switches() {
++    for copies in [true, false] {
++        retained_formats_match(&[wgpu::TextureFormat::Rgba8Unorm, wgpu::TextureFormat::Rgba8UnormSrgb,
++            wgpu::TextureFormat::Rgba8Unorm], wgpu::TextureFormat::Rgba8UnormSrgb, copies);
++    }
++}
++
++fn retained_formats_match(formats: &[wgpu::TextureFormat], surface_format: wgpu::TextureFormat, copies: bool) {
 +    use crate::render::{Gpu, Offscreen, Renderer};
 +    let gpu = Gpu::headless();
-+    let mut partial = Renderer::new(&gpu.device, format);
-+    let mut whole = Renderer::new(&gpu.device, format);
++    let mut partial = Renderer::new(&gpu.device, formats[0]);
++    let mut whole = Renderer::new(&gpu.device, formats[0]);
 +    let mut atlas = crate::text::TextSystem::default().atlas;
-+    let target = Offscreen::with_format(&gpu.device, 128, 128, format);
 +    let texture = gpu.device.create_texture(&wgpu::TextureDescriptor {
 +        label: None, size: wgpu::Extent3d { width: 128, height: 128, depth_or_array_layers: 1 },
 +        mip_level_count: 1, sample_count: 1, dimension: wgpu::TextureDimension::D2,
-+        format, usage: wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::RENDER_ATTACHMENT
++        format: surface_format, usage: wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::RENDER_ATTACHMENT
 +            | if copies { wgpu::TextureUsages::COPY_DST } else { wgpu::TextureUsages::empty() },
-+        view_formats: &[],
++        view_formats: &[surface_format.remove_srgb_suffix(), surface_format.add_srgb_suffix()],
 +    });
-+    let view = texture.create_view(&Default::default());
 +    let buffer = gpu.device.create_buffer(&wgpu::BufferDescriptor {
 +        label: None, size: 128 * 128 * 4, usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ, mapped_at_creation: false,
 +    });
@@ -847,36 +865,44 @@ index 0000000..e63ddf1
 +    a.fill = [0.8, 0.1, 0.2, 0.7];
 +    let mut b = quad(25.0);
 +    b.fill = [0.1, 0.8, 0.2, 0.6];
-+    let mut frames = vec![vec![a], vec![a, b], vec![b], vec![b], vec![], vec![a, b], vec![b, a]];
-+    let ramp: Vec<_> = (0..256).map(|n| {
-+        let value = n as f32 / 255.0;
-+        let value = if format.is_srgb() { crate::color::srgb_decode(value) } else { value };
-+        Instance { rect: [(n % 128) as f32, 50.0 + (n / 128) as f32, 1.0, 1.0], fill: [value, value, value, 1.0], ..quad(0.0) }
-+    }).collect();
-+    frames.extend([ramp.clone(), ramp]);
-+    for instances in frames {
-+        let plan = damage.plan(&instances, (128, 128), clear, true);
-+        if let Plan::Part { draw, .. } = &plan {
-+            partial.arm_damage(&gpu.device, &gpu.queue, draw, clear, (128, 128), format);
++    for &format in formats {
++        partial.set_format(&gpu.device, format);
++        whole.set_format(&gpu.device, format);
++        partial.set_srgb_blend(!format.is_srgb());
++        whole.set_srgb_blend(!format.is_srgb());
++        let target = Offscreen::with_format(&gpu.device, 128, 128, format);
++        let view = texture.create_view(&wgpu::TextureViewDescriptor { format: Some(format), ..Default::default() });
++        let mut frames = vec![vec![a], vec![a, b], vec![b], vec![b], vec![], vec![a, b], vec![b, a]];
++        let ramp: Vec<_> = (0..256).map(|n| {
++            let value = n as f32 / 255.0;
++            let value = if format.is_srgb() { crate::color::srgb_decode(value) } else { value };
++            Instance { rect: [(n % 128) as f32, 50.0 + (n / 128) as f32, 1.0, 1.0], fill: [value, value, value, 1.0], ..quad(0.0) }
++        }).collect();
++        frames.extend([ramp.clone(), ramp]);
++        for instances in frames {
++            let plan = damage.plan(&instances, (128, 128), clear, true);
++            if let Plan::Part { draw, .. } = &plan {
++                partial.arm_damage(&gpu.device, &gpu.queue, draw, clear, (128, 128), surface_format);
++            }
++            partial.prepare(&gpu.device, &gpu.queue, &mut atlas, &instances, (128, 128));
++            whole.prepare(&gpu.device, &gpu.queue, &mut atlas, &instances, (128, 128));
++            let mut encoder = gpu.device.create_command_encoder(&Default::default());
++            partial.draw(&mut encoder, &view, clear);
++            whole.draw(&mut encoder, &target.view, clear);
++            target.copy(&mut encoder);
++            encoder.copy_texture_to_buffer(texture.as_image_copy(), wgpu::TexelCopyBufferInfo { buffer: &buffer,
++                layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(512), rows_per_image: Some(128) } },
++                wgpu::Extent3d { width: 128, height: 128, depth_or_array_layers: 1 });
++            let drawn = partial.damage_drawn();
++            if matches!(plan, Plan::Part { .. }) { assert!(drawn.is_ok()); }
++            partial.submit(&gpu.queue, encoder);
++            let expected = target.read(&gpu.device);
++            let slice = buffer.slice(..);
++            slice.map_async(wgpu::MapMode::Read, |r| r.unwrap());
++            gpu.device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
++            assert_eq!(&*slice.get_mapped_range().unwrap(), &expected);
++            buffer.unmap();
 +        }
-+        partial.prepare(&gpu.device, &gpu.queue, &mut atlas, &instances, (128, 128));
-+        whole.prepare(&gpu.device, &gpu.queue, &mut atlas, &instances, (128, 128));
-+        let mut encoder = gpu.device.create_command_encoder(&Default::default());
-+        partial.draw(&mut encoder, &view, clear);
-+        whole.draw(&mut encoder, &target.view, clear);
-+        target.copy(&mut encoder);
-+        encoder.copy_texture_to_buffer(texture.as_image_copy(), wgpu::TexelCopyBufferInfo { buffer: &buffer,
-+            layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(512), rows_per_image: Some(128) } },
-+            wgpu::Extent3d { width: 128, height: 128, depth_or_array_layers: 1 });
-+        let drawn = partial.damage_drawn();
-+        if matches!(plan, Plan::Part { .. }) { assert!(drawn.is_ok()); }
-+        partial.submit(&gpu.queue, encoder);
-+        let expected = target.read(&gpu.device);
-+        let slice = buffer.slice(..);
-+        slice.map_async(wgpu::MapMode::Read, |r| r.unwrap());
-+        gpu.device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
-+        assert_eq!(&*slice.get_mapped_range().unwrap(), &expected);
-+        buffer.unmap();
 +    }
 +}
 diff --git a/crates/rune/src/window/draw.rs b/crates/rune/src/window/draw.rs

@@ -12,6 +12,11 @@ pub(super) fn clocks(s: &State, clock: &mut clock::Sample) {
     }
     let page = &s.timing_page;
     let race = &s.snapshot["race"];
+    if s.connected && !cluster(s).blocked && !s.busy && page.dialog.is_none() {
+        if let Some(at) = active_runner(s).and_then(|runner| handoff_check_at(race, runner)) {
+            clock.until(at);
+        }
+    }
     if page.finish_stop.as_ref().is_some_and(|(_, started)| started == &race["activeStartedAt"]) { return; }
     let pending = page.pending.as_ref();
     let start = match pending {
@@ -161,8 +166,12 @@ fn active_runner(s: &State) -> Option<&Value> {
 }
 
 fn handoff_check_due(race: &Value, runner: &Value, clock: i64) -> bool {
+    handoff_check_at(race, runner).is_some_and(|at| clock >= at)
+}
+
+fn handoff_check_at(race: &Value, runner: &Value) -> Option<i64> {
     if phase(race) != "running" {
-        return false;
+        return None;
     }
     let typical = ["averageLapMs", "historicalAvgMs"].into_iter().find_map(|key| {
         runner[key]
@@ -172,7 +181,7 @@ fn handoff_check_due(race: &Value, runner: &Value, clock: i64) -> bool {
     race["activeStartedAt"]
         .as_i64()
         .zip(typical)
-        .is_some_and(|(start, typical)| clock.saturating_sub(start) as f64 >= 2.0 * typical)
+        .and_then(|(start, typical)| start.checked_add((2.0 * typical).ceil() as i64))
 }
 
 pub(super) fn waiting(s: &State) -> Vec<&Value> {

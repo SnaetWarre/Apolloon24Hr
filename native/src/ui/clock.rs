@@ -156,6 +156,31 @@ mod tests {
     }
 
     #[test]
+    fn timing_reminder_samples_its_exact_deadline_between_clock_ticks() {
+        let mut s = init_with_url("http://127.0.0.1:0".into());
+        s.page = 2;
+        s.connected = true;
+        s.snapshot = json!({"race":{"raceStartedAt":0,"activeStartedAt":1000,"activeRunnerId":"a"},
+            "runners":[{"id":"a","averageLapMs":65000.25}]});
+        s.clock = 131000;
+        let before = sample(&s);
+        assert_eq!(before.due, 131001);
+        s.clock = 131001;
+        let after = sample(&s);
+        assert_ne!(before.values, after.values);
+        s.clock += 1;
+        assert_eq!(after.values, sample(&s).values);
+        for runner in [json!({"id":"a"}), json!({"id":"a","historicalAvgMs":15000})] {
+            s.snapshot["runners"][0] = runner;
+            s.clock = 131000;
+            let before = sample(&s);
+            assert_eq!(before.due, 131100);
+            s.clock += 1;
+            assert_eq!(before.values, sample(&s).values);
+        }
+    }
+
+    #[test]
     fn resting_operator_poll_does_not_invalidate_an_unchanged_or_disconnected_view() {
         let mut s = init_with_url("http://127.0.0.1:0".into());
         let (_sender, receiver) = mpsc::channel();
