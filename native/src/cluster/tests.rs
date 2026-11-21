@@ -973,7 +973,7 @@ fn a_leader_at_the_stored_address_of_a_laptop_that_is_off_keeps_leading() {
     a.node
         .add_member(
             &super::Member {
-                host_id: b_id,
+                host_id: b_id.clone(),
                 url: a.url.clone(),
                 name: None,
             },
@@ -983,6 +983,14 @@ fn a_leader_at_the_stored_address_of_a_laptop_that_is_off_keeps_leading() {
     std::thread::sleep(Duration::from_secs(2));
     assert!(a.node.is_leader());
     assert_eq!(a.node.term(), term);
+    let status = a.status();
+    let off = status["members"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["hostId"] == json!(b_id))
+        .unwrap();
+    assert_eq!(off["reachable"], json!(false));
     let own = json!({"term": term, "leaderId": a.status()["hostId"], "leaderUrl": a.url});
     assert_eq!(a.node.handle_append(&own, None)["reason"], json!("self"));
     assert!(a.node.is_leader());

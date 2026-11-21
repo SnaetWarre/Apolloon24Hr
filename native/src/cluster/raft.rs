@@ -539,10 +539,6 @@ impl Node {
                 let cluster_id = log::setting(&db, "replication_cluster_id").unwrap_or_default();
                 drop(db);
                 let url = p.member.url.clone();
-                // A laptop last seen at the address this one has now is not reached by it.
-                if url == self.self_url() {
-                    return;
-                }
                 let request = json!({
                     "clusterId": cluster_id,
                     "term": term,
@@ -574,6 +570,13 @@ impl Node {
                     return;
                 }
             };
+            // This laptop itself answered: it has the address the other one was last seen at.
+            if answer["reason"] == "self" {
+                if let Some(p) = st.progress.get_mut(host_id) {
+                    p.match_seq = None;
+                }
+                return;
+            }
             let their_term = answer["term"].as_i64().unwrap_or(0);
             if their_term > self.term() {
                 self.become_follower(&mut st, their_term, None);
