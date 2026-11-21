@@ -529,10 +529,10 @@ impl Db {
             return Err("Niemand staat klaar in de wachtrij".into());
         }
         let clock = now();
-        let max_age = if finishing { 600_000 } else { 20_000 };
+        // A press can be held by a question or another action: it keeps its own time.
         let pressed = input["pressedAt"]
             .as_i64()
-            .filter(|p| *p >= clock - max_age && *p <= clock + 1000)
+            .filter(|p| *p >= clock - 600_000 && *p <= clock + 1000)
             .unwrap_or(clock)
             .max(race["activeStartedAt"].as_i64().unwrap_or(0));
         let lap = if !finishing && !race["activeRunnerId"].is_null() {
@@ -675,6 +675,17 @@ mod tests {
         assert_eq!(f.db.race().unwrap()["activeRunnerId"], a);
         assert_eq!(f.db.history().unwrap()["laps"].as_array().unwrap().len(), 0);
         assert_eq!(press_showing(&mut f.db, &seen, &y).unwrap()["startedRunnerId"], y);
+    }
+    #[test]
+    fn a_press_sent_a_minute_late_keeps_the_time_it_was_pressed() {
+        let mut f = Fixture::new();
+        create(&mut f.db, "A");
+        create(&mut f.db, "B");
+        let start = now() - 300_000;
+        press(&mut f.db, "race.handoff", start).unwrap();
+        press(&mut f.db, "race.handoff", start + 200_000).unwrap();
+        assert_eq!(f.db.history().unwrap()["laps"][0]["durationMs"], 200_000);
+        assert_eq!(f.db.race().unwrap()["activeStartedAt"], start + 200_000);
     }
     #[test]
     fn handoff_and_undo_restore_the_exact_runner_and_queue() {
