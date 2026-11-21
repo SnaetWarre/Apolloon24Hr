@@ -138,22 +138,25 @@ impl Node {
     pub fn term(&self) -> i64 {
         log::term(&self.db.lock().unwrap())
     }
-    fn set_term(&self, term: i64) {
-        if term != self.term() {
-            let _ = log::set_local(&self.db.lock().unwrap(), "cluster_epoch", &term.to_string());
-        }
+    /// False when the term could not be stored: this laptop then still has the old one.
+    fn set_term(&self, term: i64) -> bool {
+        term == self.term()
+            || log::set_local(&self.db.lock().unwrap(), "cluster_epoch", &term.to_string()).is_ok()
     }
     fn voted_for(&self, term: i64) -> Option<String> {
         let raw = log::setting(&self.db.lock().unwrap(), "cluster_voted_for")?;
         let (voted_term, host) = raw.split_once(':')?;
         (voted_term.parse::<i64>().ok() == Some(term) && !host.is_empty()).then(|| host.to_owned())
     }
-    fn record_vote(&self, term: i64, host_id: &str) {
-        let _ = log::set_local(
+    /// False when the vote could not be stored. A vote that is not on disk does not count: this
+    /// laptop could give it a second time in the same term, and two laptops would lead.
+    fn record_vote(&self, term: i64, host_id: &str) -> bool {
+        log::set_local(
             &self.db.lock().unwrap(),
             "cluster_voted_for",
             &format!("{term}:{host_id}"),
-        );
+        )
+        .is_ok()
     }
     fn others(&self) -> Vec<Member> {
         self.members()
@@ -379,8 +382,11 @@ impl Node {
             return;
         }
         let term = self.term() + 1;
-        self.set_term(term);
-        self.record_vote(term, &self.host_id);
+        if !self.set_term(term) || !self.record_vote(term, &self.host_id) {
+            st.electing = false;
+            st.reset_deadline();
+            return;
+        }
         self.change_role(&mut st, Role::Candidate, None);
         drop(st);
         let votes = self.ask_for_votes(&self.vote_request(false, term));
@@ -482,7 +488,9 @@ impl Node {
         if !up_to_date || previous.is_some_and(|p| p != candidate) {
             return refuse(self.term());
         }
-        self.record_vote(asked, candidate);
+        if self.term() != asked || !self.record_vote(asked, candidate) {
+            return refuse(self.term());
+        }
         st.reset_deadline();
         json!({"term": self.term(), "granted": true})
     }
@@ -809,6 +817,10 @@ impl Node {
         {
             self.become_follower(&mut st, their_term, Some(leader.clone()));
         }
+        // A term that could not be stored: an earlier leader would still be believed later.
+        if self.term() < their_term {
+            return answer(self.term(), false, Some("term-not-stored"), head(self));
+        }
         st.leader = Some(leader.clone());
         st.last_contact = Some(Instant::now());
         st.group_view = serde_json::from_value(request["group"].clone()).unwrap_or_default();
@@ -927,8 +939,9 @@ impl Node {
             return false;
         }
         let term = self.term() + 1;
-        self.set_term(term);
-        self.record_vote(term, &self.host_id);
+        if !self.set_term(term) || !self.record_vote(term, &self.host_id) {
+            return false;
+        }
         if st.role == Role::Candidate {
             self.change_role(&mut st, Role::Follower, None);
         }
