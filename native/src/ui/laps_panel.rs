@@ -248,9 +248,9 @@ fn tenths(ms: i64) -> String {
 }
 fn off_usual_text(off: i64) -> String {
     format!(
-        "{} {} dan gewoonlijk",
-        seconds(off, 1),
-        if off > 0 { "trager" } else { "sneller" }
+        "{}{} t.o.v. gebruikelijke rondetijd",
+        if off < 0 { "−" } else { "+" },
+        seconds(off, 1)
     )
 }
 fn flag_text(flag: Option<Flag>, median: Option<i64>) -> String {
@@ -1355,6 +1355,12 @@ pub(super) fn modal(st: &State) -> Option<El> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn usual_lap_difference_is_neutral_in_both_directions() {
+        assert_eq!(off_usual_text(4000), "+4 s t.o.v. gebruikelijke rondetijd");
+        assert_eq!(off_usual_text(-4000), "−4 s t.o.v. gebruikelijke rondetijd");
+        assert_eq!(off_usual_text(0), "+0 s t.o.v. gebruikelijke rondetijd");
+    }
     fn lap(id: &str, runner: &str, start: i64, ms: i64) -> Value {
         json!({"id":id,"runnerId":runner,"startedAt":start,"finishedAt":start+ms,"durationMs":ms,"source":"spacebar"})
     }
