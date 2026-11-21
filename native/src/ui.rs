@@ -22,6 +22,7 @@ mod admin_kit;
 mod analysis_page;
 mod admin_system;
 mod chart_axis;
+mod cluster_setup;
 mod group_view;
 mod hex;
 mod label_editor;

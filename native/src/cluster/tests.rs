@@ -636,7 +636,7 @@ fn an_unreachable_laptop_and_its_return_are_listed_in_activity_on_every_laptop()
     );
 }
 
-fn beacon(server: &TestServer, url: &str, name: &str) -> Value {
+pub(crate) fn beacon(server: &TestServer, url: &str, name: &str) -> Value {
     let status = server.status();
     json!({
         "app": "apolloon", "hostId": status["hostId"], "name": name, "clusterId": status["clusterId"],
@@ -645,7 +645,7 @@ fn beacon(server: &TestServer, url: &str, name: &str) -> Value {
         "changed": status["changed"], "raceStarted": status["raceStarted"], "raceRunning": status["raceRunning"],
     })
 }
-fn hear(listener: &TestServer, beacon: &Value) {
+pub(crate) fn hear(listener: &TestServer, beacon: &Value) {
     listener
         .node
         .discovery
@@ -756,4 +756,42 @@ fn the_group_test_sees_a_mark_arrive_and_leave_on_every_laptop() {
         .map(|l| l["name"].clone())
         .collect();
     assert_eq!(missing, vec![json!("Laptop C")]);
+}
+
+#[test]
+fn a_role_given_in_groep_maken_reaches_every_laptop() {
+    let _serial = serial();
+    let dir = Dir::new();
+    let a = TestServer::start(&dir.db("a"), free_port(), "Laptop A");
+    let b = TestServer::start(&dir.db("b"), free_port(), "Laptop B");
+    b.act("cluster.joinGroup", json!({"url": a.url})).unwrap();
+    wait_until("linked", Duration::from_secs(10), || all_healthy(&[&a, &b]));
+    let b_id = b.status()["hostId"].as_str().unwrap().to_owned();
+    let role_of = |s: &TestServer| {
+        s.status()["members"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|m| m["hostId"] == b_id.as_str())
+            .unwrap()["role"]
+            .clone()
+    };
+    let saved = a
+        .act("cluster.setRole", json!({"hostId": b_id, "role": "  Wachtrij  "}))
+        .unwrap();
+    assert_eq!(saved["role"], "Wachtrij");
+    assert_eq!(saved["name"], "Laptop B");
+    wait_until("the role is on both laptops", Duration::from_secs(5), || {
+        role_of(&a) == "Wachtrij" && role_of(&b) == "Wachtrij"
+    });
+    assert!(activity_summaries(&a).iter().any(|s| s == "Laptop B is nu Wachtrij"));
+    // Too long, or a laptop outside the group: refused, the role stays.
+    assert!(a.act("cluster.setRole", json!({"hostId": b_id, "role": "x".repeat(super::ROLE_MAX + 1)})).is_err());
+    assert!(a.act("cluster.setRole", json!({"hostId": "elders", "role": "Timing"})).is_err());
+    assert_eq!(role_of(&b), "Wachtrij");
+    // An empty role clears it.
+    b.act("cluster.setRole", json!({"hostId": b_id, "role": ""})).unwrap();
+    wait_until("the role is cleared everywhere", Duration::from_secs(5), || {
+        role_of(&a).is_null() && role_of(&b).is_null()
+    });
 }
