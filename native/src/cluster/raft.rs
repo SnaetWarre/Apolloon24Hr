@@ -539,6 +539,10 @@ impl Node {
                 let cluster_id = log::setting(&db, "replication_cluster_id").unwrap_or_default();
                 drop(db);
                 let url = p.member.url.clone();
+                // A laptop last seen at the address this one has now is not reached by it.
+                if url == self.self_url() {
+                    return;
+                }
                 let request = json!({
                     "clusterId": cluster_id,
                     "term": term,
@@ -684,6 +688,9 @@ impl Node {
         let answer = |term: i64, ok: bool, reason: Option<&str>, head: Value| json!({"term": term, "ok": ok, "reason": reason, "head": head});
         if st.joining {
             return answer(term, false, Some("joining"), head(self));
+        }
+        if leader_id == self.host_id {
+            return answer(term, false, Some("self"), head(self));
         }
         let their_term = request["term"].as_i64().unwrap_or(0);
         if their_term < term {

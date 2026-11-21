@@ -956,3 +956,35 @@ fn a_leader_that_gets_the_stored_address_of_another_laptop_keeps_that_laptop_in_
     assert_eq!(a.count("SELECT COUNT(*) AS n FROM cluster_members"), 3);
     drop(c);
 }
+
+#[test]
+fn a_leader_at_the_stored_address_of_a_laptop_that_is_off_keeps_leading() {
+    let _serial = serial();
+    let dir = Dir::new();
+    let (a, b, c) = linked_three(&dir);
+    let (a, b, c) = match leader_index(&[&a, &b, &c]).unwrap() {
+        0 => (a, b, c),
+        1 => (b, a, c),
+        _ => (c, a, b),
+    };
+    let b_id = b.status()["hostId"].as_str().unwrap().to_owned();
+    drop(b);
+    let term = a.node.term();
+    a.node
+        .add_member(
+            &super::Member {
+                host_id: b_id,
+                url: a.url.clone(),
+                name: None,
+            },
+            None,
+        )
+        .unwrap();
+    std::thread::sleep(Duration::from_secs(2));
+    assert!(a.node.is_leader());
+    assert_eq!(a.node.term(), term);
+    let own = json!({"term": term, "leaderId": a.status()["hostId"], "leaderUrl": a.url});
+    assert_eq!(a.node.handle_append(&own, None)["reason"], json!("self"));
+    assert!(a.node.is_leader());
+    c.act("runners.create", json!({"name":"Op C"})).unwrap();
+}
