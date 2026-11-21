@@ -6,10 +6,13 @@
 //! messages and their meaning are the same, the bytes are not (mixed TS/Rust groups are not a goal).
 pub mod clock;
 mod join;
+mod key;
+pub(crate) use key::beacon_proof;
 pub mod log;
 mod probe;
 mod raft;
 pub mod routes;
+mod split;
 #[cfg(test)]
 pub(crate) mod tests;
 
@@ -138,6 +141,10 @@ pub struct Node {
     weak: Weak<Node>,
     /// Since when this laptop, leading, has not heard from each other laptop.
     silent_since: Mutex<HashMap<String, Instant>>,
+    /// Held by the one write the leader is adding to the log (lock order: writing, raft, db).
+    writing: Mutex<()>,
+    /// The group keys this laptop holds, newest first (see `key`).
+    keys: Mutex<Vec<String>>,
 }
 
 /// An answer from another laptop: its HTTP status and JSON body.
@@ -149,7 +156,7 @@ pub(crate) struct Answer {
 
 impl Node {
     pub fn start(db: Arc<Mutex<Db>>, cfg: Config) -> Result<Arc<Self>> {
-        let host_id = {
+        let (host_id, keys) = {
             let db = db.lock().unwrap();
             let host_id = match log::setting(&db, "host_id") {
                 Some(id) => id,
@@ -162,12 +169,22 @@ impl Node {
             if log::setting(&db, "replication_cluster_id").is_none() {
                 log::set_local(&db, "replication_cluster_id", &host_id)?;
             }
-            if let Some(offset) =
+            // The offset to a group's clock keeps the times of a race continuous. A laptop that is
+            // alone and has no race yet has nothing to stay continuous with: it shows its own time.
+            let alone = log::stored_members(&db).iter().all(|m| m.host_id == host_id);
+            if alone && !Self::race_progress(&db).0 {
+                if log::setting(&db, "cluster_clock_offset_ms").is_some() {
+                    log::set_local(&db, "cluster_clock_offset_ms", "0")?;
+                }
+                clock::set_offset(0);
+            } else if let Some(offset) =
                 log::setting(&db, "cluster_clock_offset_ms").and_then(|v| v.parse().ok())
             {
                 clock::set_offset(offset);
             }
-            host_id
+            let cluster_id = log::setting(&db, "replication_cluster_id").unwrap_or_default();
+            let keys = key::ensure(&db, &host_id, &cluster_id)?;
+            (host_id, keys)
         };
         // reqwest's blocking client must be built outside an async runtime.
         let client = std::thread::spawn(|| {
@@ -194,6 +211,8 @@ impl Node {
             discovery: Mutex::new(None),
             weak: weak.clone(),
             silent_since: Mutex::default(),
+            writing: Mutex::default(),
+            keys: Mutex::new(keys),
         });
         node.start_raft();
         let weak = Arc::downgrade(&node);
@@ -212,6 +231,7 @@ impl Node {
     }
     pub fn set_discovery(&self, discovery: Arc<crate::discovery::Discovery>) {
         *self.discovery.lock().unwrap() = Some(discovery);
+        self.announce_group_key();
     }
     /// Stops voting, replicating and answering; a laptop switched off.
     pub fn stop(&self) {
@@ -237,16 +257,29 @@ impl Node {
         if self.offline() {
             return Err("isolated".into());
         }
+        let body = match body {
+            Some(body) => serde_json::to_vec(body).map_err(|e| e.to_string())?,
+            None => Vec::new(),
+        };
+        let path = reqwest::Url::parse(url)
+            .map(|u| match u.query() {
+                Some(query) => format!("{}?{query}", u.path()),
+                None => u.path().to_owned(),
+            })
+            .unwrap_or_default();
         let mut request = self
             .client
             .get()
             .ok_or("geen HTTP-client")?
-            .request(method, url)
+            .request(method.clone(), url)
             .header("x-apolloon-app-version", APP_VERSION)
             .header("x-apolloon-schema-version", SCHEMA_VERSION.to_string())
+            .header(key::HEADER, self.signatures(method.as_str(), &path, &body))
             .timeout(timeout);
-        if let Some(body) = body {
-            request = request.json(body);
+        if method != reqwest::Method::GET {
+            request = request
+                .header("content-type", "application/json")
+                .body(body);
         }
         let response = request.send().map_err(|e| e.to_string())?;
         let status = response.status().as_u16();
@@ -318,7 +351,7 @@ impl Node {
         remote: Option<std::net::IpAddr>,
     ) -> String {
         let announced: Vec<reqwest::Url> = self
-            .beacons()
+            .group_beacons()
             .iter()
             .filter(|b| b["hostId"] == host_id)
             .filter_map(|b| reqwest::Url::parse(b["url"].as_str()?).ok())
@@ -364,7 +397,7 @@ impl Node {
     /// The group from the replicated table; a laptop that never joined one is a group of one.
     pub fn members(&self) -> Vec<Member> {
         let mut stored = log::stored_members(&self.db.lock().unwrap());
-        let beacons = self.beacons();
+        let beacons = self.group_beacons();
         for member in &mut stored {
             if let Some(url) = beacons
                 .iter()
@@ -572,6 +605,12 @@ impl Node {
             })
             .collect()
     }
+    /// Announcements signed with a key of this group: only those say where its laptops are.
+    fn group_beacons(&self) -> Vec<Value> {
+        let mut beacons = self.beacons();
+        beacons.retain(|beacon| self.proves(beacon));
+        beacons
+    }
     fn beacons(&self) -> Vec<Value> {
         self.discovery
             .lock()
@@ -663,33 +702,44 @@ impl Node {
         request: Option<String>,
     ) -> Result<Value> {
         let request = request.unwrap_or_else(crate::db::id);
-        let deadline = Instant::now() + self.cfg.write_deadline;
+        let started = Instant::now();
+        let deadline = started + self.cfg.write_deadline;
+        // A press on the Timing laptop is never given up: once an election had time to end
+        // and no majority answers, the laptop goes on alone and stores the press.
+        let mut alone_at = (TIMING_PRESSES.contains(&method) && self.times_here())
+            .then(|| started + self.cfg.election_timeout);
         loop {
-            let Some(target) = self.write_target(deadline) else {
-                return Err(self.no_leader_message().into());
-            };
-            let outcome = if target.host_id == self.host_id {
-                self.commit_local(method, input, origin, &request)
-                    .map(|(v, _)| v)
-            } else {
-                self.forward(&target, method, input, origin, &request)
-            };
-            match outcome {
-                Ok(value) => return Ok(value),
-                Err(Failure {
-                    message,
-                    retry: false,
-                }) => return Err(message),
-                Err(Failure {
-                    message,
-                    retry: true,
-                }) => {
-                    if Instant::now() >= deadline {
-                        return Err(message);
+            let target = self.write_target(alone_at.map_or(deadline, |at| at.min(deadline)));
+            let message = match target {
+                Some(target) => {
+                    let outcome = if target.host_id == self.host_id {
+                        self.commit_local(method, input, origin, &request)
+                            .map(|(v, _)| v)
+                    } else {
+                        self.forward(&target, method, input, origin, &request)
+                    };
+                    match outcome {
+                        Ok(value) => return Ok(value),
+                        Err(Failure {
+                            message,
+                            retry: false,
+                        }) => return Err(message),
+                        Err(Failure { message, .. }) => message,
                     }
-                    std::thread::sleep(Duration::from_millis(50));
                 }
+                None => self.no_leader_message().to_owned(),
+            };
+            if alone_at.is_some_and(|at| Instant::now() >= at) {
+                if self.press_goes_alone() {
+                    alone_at = None;
+                    continue;
+                }
+                alone_at = Some(Instant::now() + self.cfg.election_timeout);
             }
+            if Instant::now() >= deadline {
+                return Err(message);
+            }
+            std::thread::sleep(Duration::from_millis(50));
         }
     }
 
@@ -712,8 +762,15 @@ impl Node {
             "race.clear" => Some("pre-clear"),
             _ => None,
         };
+        // A press on the Timing laptop is stored at once: that laptop goes on alone when it is
+        // cut off, and a lap clocked in the seconds before must still be there.
+        let keep = TIMING_PRESSES.contains(&method)
+            && self
+                .timing()
+                .is_some_and(|t| t["hostId"] == self.host_id.as_str());
+        let _writing = self.writing.lock().unwrap();
         let mut attempts = 0;
-        let (result, seq) = loop {
+        let (result, prepared, seq) = loop {
             attempts += 1;
             let mut safety = None;
             let mut before = None;
@@ -731,42 +788,67 @@ impl Node {
             }
             let mut db = self.db.lock().unwrap();
             if let Some(result) = log::forwarded_result(&db, request) {
-                break (result, log::head(&db).seq);
+                break (result, None, log::head(&db).seq);
             }
             if safety_reason.is_some() && log::head(&db).id != before && attempts < 20 {
                 continue;
             }
-            {
-                let result = if method.starts_with("cluster.") {
-                    let kind = method.to_owned();
-                    log::record(&mut db, &kind, Some(request), |db| {
-                        self.apply_cluster(db, method, input, origin)
-                    })
-                } else {
-                    *db.capture.borrow_mut() = Some(log::Capture {
-                        statements: Vec::new(),
-                        request_id: Some(request.to_owned()),
-                    });
-                    let result = db.mutation_from(method, input, origin);
-                    db.capture.borrow_mut().take();
-                    result
-                };
-                let mut result = result.map_err(Failure::refused)?;
-                if safety_reason.is_some() {
-                    result["safetyBackup"] = safety.unwrap_or(Value::Null);
-                    result["safetyHostUrl"] = json!(self.self_url());
-                    result["safetyHostName"] = json!(self.cfg.name);
-                }
-                break (result, log::head(&db).seq);
+            // The write runs and is taken back: it reaches this laptop's data, and its screens,
+            // only once a majority holds it.
+            let (mut result, mut prepared) = self
+                .run_write(&mut db, method, input, origin, request, keep)
+                .map_err(Failure::refused)?;
+            // A write too large for one message reaches a follower only inside a full copy of
+            // the leader's data, so the leader has to store it first.
+            if prepared.as_ref().is_some_and(|p| !p.fits_one_message()) {
+                (result, prepared) = self
+                    .run_write(&mut db, method, input, origin, request, true)
+                    .map_err(Failure::refused)?;
             }
+            if safety_reason.is_some() {
+                result["safetyBackup"] = safety.unwrap_or(Value::Null);
+                result["safetyHostUrl"] = json!(self.self_url());
+                result["safetyHostName"] = json!(self.cfg.name);
+            }
+            break (result, prepared, log::head(&db).seq);
         };
-        if !self.wait_for_commit(seq) {
+        let (confirmed, seq) = match prepared {
+            Some(prepared) => {
+                let seq = prepared.entry.seq;
+                (self.confirm(prepared), seq)
+            }
+            None => (self.wait_for_commit(seq), seq),
+        };
+        if !confirmed {
             return Err(Failure {
                 message: NOT_CONFIRMED_MESSAGE.into(),
                 retry: true,
             });
         }
         Ok((result, seq))
+    }
+
+    fn run_write(
+        &self,
+        db: &mut Db,
+        method: &str,
+        input: &Value,
+        origin: &str,
+        request: &str,
+        keep: bool,
+    ) -> Result<(Value, Option<log::Prepared>)> {
+        if method.starts_with("cluster.") {
+            return log::record_or_prepare(db, method, Some(request), keep, |db| {
+                self.apply_cluster(db, method, input, origin)
+            });
+        }
+        *db.capture.borrow_mut() = Some(log::Capture {
+            statements: Vec::new(),
+            request_id: Some(request.to_owned()),
+        });
+        let result = db.mutation_run(method, input, origin, keep);
+        db.capture.borrow_mut().take();
+        result
     }
 
     /// Passes a write to the leader, then waits until this laptop's copy has it.
@@ -960,6 +1042,11 @@ impl Node {
             .and_then(|id| self.heard_names().get(id).cloned())
             .or_else(|| timing["name"].as_str().map(str::to_owned))
             .unwrap_or_else(|| "de Timing-laptop".into())
+    }
+    /// True while Timing is open on this laptop.
+    pub(crate) fn times_here(&self) -> bool {
+        self.timing()
+            .is_some_and(|t| t["hostId"] == self.host_id.as_str())
     }
     /// Clocking here while Timing is open on another laptop is refused.
     fn assert_timing_here(&self) -> Result<()> {

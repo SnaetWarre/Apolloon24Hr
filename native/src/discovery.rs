@@ -30,6 +30,9 @@ struct Beacon {
     race_started: bool,
     #[serde(default)]
     race_running: bool,
+    /// Signed with the group key, so laptops of the group can believe a new address.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    proof: Option<String>,
 }
 
 #[derive(Default)]
@@ -37,6 +40,8 @@ pub struct Discovery {
     heard: Mutex<BTreeMap<(String, String), (Instant, Beacon)>>,
     /// Set by the linked-laptop runtime while this laptop leads its group.
     pub leader: std::sync::atomic::AtomicBool,
+    /// Set by the linked-laptop runtime: the group key this laptop's announcements are signed with.
+    pub key: Mutex<Option<String>>,
 }
 
 impl Discovery {
@@ -117,7 +122,9 @@ impl Discovery {
                                 changed: state["runners"] != 0 || started || state["logged"] == 1,
                                 race_started: started,
                                 race_running: started && state["race_finished_at"].is_null(),
+                                proof: None,
                             };
+                            let key = discovery.key.lock().unwrap().clone();
                             let targets = if let Some(address) = loopback_target {
                                 vec![(address, self_url.clone().unwrap_or_else(|| format!("http://127.0.0.1:{port}")))]
                             } else {
@@ -127,6 +134,7 @@ impl Discovery {
                             };
                             drop(db);
                             for (address, url) in targets {
+                                beacon.proof = key.as_deref().map(|key| crate::cluster::beacon_proof(key, &beacon.host_id, &url));
                                 beacon.url = url;
                                 if let Ok(bytes) = serde_json::to_vec(&beacon) {
                                     let _ = socket.send_to(&bytes, (address, discovery_port));

@@ -11,6 +11,18 @@ npm run bench:screens -- --trace
 npm run bench:screens -- --followers --trace
 ```
 
+Tracing is off by default. With `--trace`, the report includes per-press native
+previous-frame submit/present overlap, own apply, view build/acquire (excluding
+apply), upload/encode, submit, present and frame-to-pixels time. Submit/present
+are CPU wall times, not GPU execution or physical scanout. Missing boundaries
+remain N/A. Request IDs join server waiter/worker/snapshot/serialization markers
+to client headers/body/JSON parsing and history/apply markers. Proxy body byte
+counts are encoded HTTP entity bytes, not TCP/IP framing; browser Resource Timing
+also records decoded and encoded entity sizes. Proxy-to-client intervals include
+decompression and client scheduling, and cannot identify network time alone.
+State cache hits have no build/serialization sample; state/history time includes
+both on misses. Opt-in instrumentation adds timestamp/logging overhead.
+
 Builds the web bundle first and release desktop binary if either artifact is
 missing. After source changes, rebuild explicitly before comparing:
 
@@ -33,6 +45,8 @@ the existing active-runner/start-time token, joined to the actual lap ID after
 commit. Replica records come from the durable apply boundary in `cluster/log.rs`.
 The notifier timestamp is the SQLite commit hook, before the durable commit
 returns; state readers still wait for the database mutex to be released.
+Waiter-wake records require an actual watch wake; requests that did not wait
+leave that boundary unavailable. Worker queue time starts at snapshot dispatch.
 
 The trace adds `latency-events.json`, stage p50/p95/max in µs, observed native
 drawn-frame intervals, browser rAF intervals, and browser clock resolution to the
@@ -58,13 +72,17 @@ apart. No measurement handoffs are submitted by the driver over HTTP. Spacing
 respects the existing 20-second short-lap protection; no auto-confirmation is
 used. Each run takes about five minutes. The measurement window starts before
 the first injection and ends 100ms after the final native lap pixel appears.
-Browser observations are retrieved after the rapid-press check, and can extend
+Final browser observations are retrieved after the rapid-press check, and can extend
 beyond that traffic window. Percentiles use nearest rank; overall pools all six
 surfaces (native pixels plus browser accessibility, not all-screen pixels).
 
-After each press, full histories fetched directly from all three replicas must
+After each press, the driver first waits for all five browser accessibility
+observations and the native lap-badge pixel change (10 s timeout). Only then
+does it fetch full histories directly from all three replicas. These histories must
 preserve every seeded lap ID and contain exactly one additional unique lap ID,
-identical across replicas. These driver reads bypass the counting proxies.
+identical across replicas. These driver reads bypass the counting proxies and
+never overlap the press-to-screen observation window. Each write records
+`screensObservedAt` before replica validation starts.
 After the final lap becomes visible, a separate Space press approximately
 300ms later must change the native lap-region pixels (short-lap modal) without
 adding a lap on any replica. Escape dismisses it and must restore the previous
@@ -76,7 +94,8 @@ require explicit confirmation. The separate 500ms double-click guard applies
 to finishing the race, not ordinary handoffs.
 
 Browser timestamps are MutationObserver observations of Rune's accessibility
-mirror, not HTTP response completions: total laps for Timing/inside/competitions,
+mirror, not HTTP response completions: the newest lap's runner and personal lap
+number for Timing, total laps for inside/competitions,
 current runner for outside, and the first remaining waiting runner for queue.
 Later rendered states can cover multiple handoffs. These are accessibility-tree
 commit times, not physical monitor scan-out times. Raw trees are retained to
@@ -86,7 +105,8 @@ deliberately disabled for covered windows.
 Native crop calibration always uses leader Timing's layout (follower Timing
 has a timing-owner warning that shifts its layout). In follower mode a temporary
 leader page is opened and closed before measurement, leaving five browser screens.
-Native captures use XGetImage of only the static lap-total digits, with a 5ms
+Native captures use XGetImage of only the newest completed lap's runner badge
+(40 for the final seeded lap, then 1–15 for the measured laps), with a 5ms
 target period. Changed crops and their timestamps are retained. Exactly one
 change between sends is required for each latency; zero/multiple changes make
 that observation invalid rather than guessing. The summary reports maximum

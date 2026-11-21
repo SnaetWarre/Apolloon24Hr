@@ -87,7 +87,31 @@ try {
   let dropped = 0;
   let stalled;
   const oldRequests = [];
+  let stateRequests = 0;
+  const unchanged = [];
+  let historyRequests = 0;
+  page.on('request', (request) => {
+    const url = new URL(request.url());
+    if (url.pathname === '/api/state') stateRequests++;
+    if (url.pathname === '/api/history') historyRequests++;
+  });
+  page.on('response', async (response) => {
+    if (new URL(response.url()).pathname !== '/api/state') return;
+    try {
+      const body = await response.body();
+      if (JSON.parse(body).unchanged) unchanged.push(body.length);
+    } catch {}
+  });
   await page.route('**/api/state?*', async (route) => {
+    if (fault === 'legacyPush') {
+      const response = await route.fetch();
+      const state = await response.json();
+      if (!state.unchanged) return route.fulfill({ response });
+      const url = new URL(route.request().url());
+      url.searchParams.delete('after');
+      const full = await route.fetch({ url: url.href });
+      return route.fulfill({ response: full });
+    }
     if (fault === 'old') {
       oldRequests.push(Date.now());
       const url = new URL(route.request().url());
@@ -98,6 +122,10 @@ try {
       return route.fulfill({ response, json: state });
     }
     if (new URL(route.request().url()).searchParams.has('after')) {
+      if (fault === 'fast') {
+        const token = new URL(route.request().url()).searchParams.get('after');
+        return route.fulfill({ json: { unchanged: true, changeToken: token } });
+      }
       if (fault === 'drop') {
         fault = undefined;
         dropped++;
@@ -122,6 +150,75 @@ try {
     await visible(name);
   }
   await add('Initial push');
+  const legacy = await (await fetch(follower.url + '/api/state?history=1')).json();
+  assert(Array.isArray(legacy.runners) && Array.isArray(legacy.stateHistory.laps));
+  assert.equal(legacy.unchanged, undefined);
+  console.log('PASS: old clients without after still receive full state and history');
+  const idleHistory = historyRequests;
+  const idleStart = unchanged.length;
+  await page.evaluate(() => performance.clearResourceTimings());
+  await eventually(() => unchanged.length >= idleStart + 3);
+  for (const bytes of unchanged.slice(idleStart, idleStart + 3)) {
+    assert(bytes < 8192, `unchanged response is ${bytes} bytes`);
+  }
+  let timings;
+  await eventually(async () => {
+    timings = await page.evaluate(() =>
+      performance
+        .getEntriesByType('resource')
+        .filter(
+          (entry) => new URL(entry.name).pathname === '/api/state' && new URL(entry.name).searchParams.has('after')
+        )
+        .map((entry) => ({ start: entry.startTime, end: entry.responseEnd, duration: entry.duration }))
+        .filter((entry) => entry.duration >= 1800)
+    );
+    return timings.length >= 4;
+  });
+  if (process.env.STATE_PUSH_TRACE) {
+    const recovery = await page.evaluate(() =>
+      performance
+        .getEntriesByType('resource')
+        .filter((entry) => new URL(entry.name).pathname === '/api/recovery')
+        .map((entry) => ({ start: entry.startTime, end: entry.responseEnd }))
+    );
+    console.log('TRACE: ' + JSON.stringify({ polls: timings, recovery }));
+  }
+  assert.equal(historyRequests, idleHistory);
+  await visible('Initial push');
+  const headStart = stateRequests;
+  await sleep(6000);
+  const headRequests = stateRequests - headStart;
+  assert(headRequests >= 1 && headRequests <= 4, `${headRequests} unchanged polls in 6 seconds`);
+  fault = 'legacyPush';
+  await sleep(3000);
+  const baseStart = stateRequests;
+  await sleep(6000);
+  const baseRequests = stateRequests - baseStart;
+  assert(headRequests <= baseRequests + 1, `marker/base requests in 6 seconds: ${headRequests}/${baseRequests}`);
+  fault = undefined;
+  const marker = await page.waitForResponse(
+    async (response) => new URL(response.url()).pathname === '/api/state' && (await response.json()).unchanged === true
+  );
+  await marker.finished();
+  const writeStarted = Date.now();
+  await add('Write immediately after marker');
+  const writeMs = Date.now() - writeStarted;
+  assert(writeMs < 2500, `write after marker took ${writeMs}ms`);
+  console.log(
+    `PASS: tiny unchanged timeouts retain state/history without spinning (${headRequests} marker/${baseRequests} legacy polls in 6 seconds); write after marker visible in ${writeMs}ms`
+  );
+  fault = 'fast';
+  await eventually(() => unchanged.length >= idleStart + 4);
+  const fastStart = stateRequests;
+  await sleep(3000);
+  const fastRequests = stateRequests - fastStart;
+  assert(fastRequests >= 3 && fastRequests <= 20, String(fastRequests));
+  await visible('Initial push');
+  fault = undefined;
+  await add('After unchanged replies');
+  console.log(
+    `PASS: fast unchanged replies stay paced (${fastRequests} requests in ~3 seconds) and a subsequent write arrives`
+  );
   fault = 'drop';
   await eventually(() => dropped === 1);
   await add('After dropped connection');

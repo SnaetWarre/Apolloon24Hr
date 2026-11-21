@@ -6,7 +6,6 @@ mod tests;
 
 #[derive(Default)]
 pub(super) struct Pending {
-    pub replies: Vec<Value>,
     pub reset: bool,
 }
 

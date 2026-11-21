@@ -8,7 +8,13 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { chromium } from 'playwright';
-import { browserLatencies, nativeLatencies, percentile, validateReplicaLaps } from './metrics.mjs';
+import {
+  browserLatencies,
+  nativeLatencies,
+  percentile,
+  screenObservationsComplete,
+  validateReplicaLaps,
+} from './metrics.mjs';
 import { installBrowserTrace, stageMetrics, stageMarkdown } from './latency.mjs';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
@@ -115,6 +121,7 @@ async function proxy(node) {
     const at = Date.now(),
       counted = measuring;
     const upstream = httpRequest(node.url + req.url, { method: req.method, headers: req.headers }, (reply) => {
+      const headersUs = trace ? (performance.timeOrigin + performance.now()) * 1000 : undefined;
       let bytes = 0;
       res.writeHead(reply.statusCode, reply.headers);
       reply.on('data', (chunk) => {
@@ -122,6 +129,16 @@ async function proxy(node) {
       });
       reply.on('end', () => {
         if (counted) traffic.push({ at, node: node.name, path: req.url, bytes, status: reply.statusCode });
+        if (trace && req.url.startsWith('/api/state'))
+          traceEvents.push({
+            stage: 'wire_body',
+            source: 'proxy ' + node.name,
+            requestId: reply.headers['x-apolloon-trace-request'],
+            us: (performance.timeOrigin + performance.now()) * 1000,
+            headersUs,
+            encodedBodySize: bytes,
+            encoding: reply.headers['content-encoding'] ?? 'identity',
+          });
       });
       reply.pipe(res);
     });
@@ -267,26 +284,30 @@ benchmark: try {
   execFileSync('xdotool', ['mousemove', '--window', windowId, '80', '178', 'click', '1']);
   await sleep(5000);
   execFileSync('import', ['-window', windowId, path.join(out, 'native-before.png')]);
-  // Attached native app has the same content layout as browser Timing. Locate the static total digits.
+  // Attached native app has the same content layout as browser Timing.
   const timing = followers
     ? await browser.newPage({ viewport: { width: 1366, height: 768 }, colorScheme: 'dark' })
     : screens.at(-1).page;
   if (followers) {
     await timing.goto(origins.get(leader) + '/timing');
-    await timing.waitForFunction(() =>
-      [...document.querySelectorAll('[data-rune-a11y] *')].some((e) => !e.children.length && e.textContent === '2240')
-    );
   }
+  await timing.waitForFunction(() =>
+    [...document.querySelectorAll('[data-rune-a11y] *')].some((e) => !e.children.length && e.textContent === 'Bench 39')
+  );
   const rect = await timing.evaluate(() => {
     const leaf = [...document.querySelectorAll('[data-rune-a11y] *')].find(
-      (e) => !e.children.length && e.textContent === 'Rondes in de race'
+      (e) => !e.children.length && e.textContent === 'Laatste rondes'
     );
-    if (!leaf) throw new Error('Timing lap-total label missing');
-    const value = [...leaf.parentElement.querySelectorAll('*')].find(
-      (e) => !e.children.length && e.textContent === '2240'
+    if (!leaf) throw new Error('Timing recent-laps label missing');
+    const runner = [...document.querySelectorAll('[data-rune-a11y] *')].find(
+      (e) => !e.children.length && e.textContent === 'Bench 39'
     );
-    if (!value) throw new Error('Timing lap-total value missing');
-    const r = value.getBoundingClientRect();
+    let latest = runner?.parentElement;
+    const badgeIn = (row) => [...row.querySelectorAll('*')].find((e) => !e.children.length && e.textContent === '40');
+    while (latest && !badgeIn(latest)) latest = latest.parentElement;
+    if (!latest || !latest.textContent.includes('ronde 56')) throw new Error('Timing newest seeded lap missing');
+    const badge = badgeIn(latest);
+    const r = badge.getBoundingClientRect();
     return { x: r.x, y: r.y, width: r.width, height: r.height };
   });
   if (followers) await timing.close();
@@ -363,17 +384,36 @@ benchmark: try {
   for (let i = 0; i < pressCount; i++) {
     await sleep((writes.at(-1)?.sentAt ?? startAt - spacingMs) + spacingMs - Date.now());
     const sentAt = await pressSpace();
-    const ids = await checkReplicas(i + 1);
-    const priorIds = new Set(replicaChecks.at(-2).addedIds);
-    const [lapId] = ids.filter((id) => !priorIds.has(id));
-    writes.push({
+    const write = {
       i,
       sentAt,
-      acknowledgedAt: Date.now(),
       total: 2241 + i,
       active: `Bench ${String(i + 1).padStart(2, '0')}`,
-      lapId,
-    });
+    };
+    writes.push(write);
+    await eventually(
+      async () => {
+        if (nativeLatencies(nativeEvents, [write], Date.now() + 1)[0] === null) return false;
+        const observed = await Promise.all(
+          screens.map(async (screen) => ({
+            name: screen.name,
+            frames: await screen.page.evaluate(
+              (sentAt) =>
+                window.benchFrames.filter((frame) => frame.at >= sentAt).map(({ at, text }) => ({ at, text })),
+              sentAt
+            ),
+          }))
+        );
+        return screenObservationsComplete(observed, nativeEvents, write, Date.now() + 1);
+      },
+      'all six screens observe press ' + (i + 1),
+      10000
+    );
+    write.screensObservedAt = Date.now();
+    const ids = await checkReplicas(i + 1);
+    const priorIds = new Set(replicaChecks.at(-2).addedIds);
+    [write.lapId] = ids.filter((id) => !priorIds.has(id));
+    write.acknowledgedAt = Date.now();
     console.log(`Press ${i + 1}/${pressCount}: exactly one lap on A/B/C`);
   }
   await eventually(() => nativeEvents.find((e) => e.hash && e.at >= writes.at(-1).sentAt), 'last lap pixels', 5000);
@@ -448,7 +488,8 @@ benchmark: try {
       r.values.filter((v) => v !== null),
       1
     );
-    r.signal = r.name === 'native Timing' ? 'X11 lap-total pixels' : 'Rune accessibility mirror (not pixels)';
+    r.signal =
+      r.name === 'native Timing' ? 'X11 newest-lap runner badge pixels' : 'Rune accessibility mirror (not pixels)';
   }
   const seconds = (endAt - startAt) / 1000;
   const rates = Object.fromEntries(

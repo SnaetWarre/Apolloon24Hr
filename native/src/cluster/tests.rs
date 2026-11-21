@@ -392,6 +392,164 @@ fn a_cut_off_leader_saves_nothing_and_takes_the_majority_data_when_it_returns() 
 }
 
 #[test]
+fn a_write_the_majority_never_confirmed_is_not_kept_on_the_leader() {
+    let _serial = serial();
+    let dir = Dir::new();
+    let (a, b, c) = linked_three(&dir);
+    assert!(a.node.is_leader());
+    let off = |s: &TestServer, v: bool| {
+        s.node
+            .isolated
+            .store(v, std::sync::atomic::Ordering::Relaxed)
+    };
+    let named = |s: &TestServer, name: &str| {
+        s.count(&format!(
+            "SELECT COUNT(*) AS n FROM runners WHERE name='{name}'"
+        ))
+    };
+    let head = a.head();
+    off(&b, true);
+    off(&c, true);
+    let refused = a.act("runners.create", json!({"name":"Onbevestigd"}));
+    let answer = refused.unwrap_err();
+    assert!(
+        [super::NOT_CONFIRMED_MESSAGE, super::NO_LEADER_MESSAGE].contains(&answer.as_str()),
+        "{answer}"
+    );
+    // The leader's own data, which its screens read, never held the write.
+    assert_eq!(named(&a, "Onbevestigd"), 0);
+    assert_eq!(a.head(), head);
+    let state: Value = reqwest::blocking::get(format!("{}/api/state", a.url))
+        .unwrap()
+        .json()
+        .unwrap();
+    assert!(!state.to_string().contains("Onbevestigd"));
+
+    // A press on the Timing laptop is the exception: the lap stays, also without the others.
+    a.act("runners.create", json!({"name":"Te laat"})).unwrap_err();
+    off(&b, false);
+    off(&c, false);
+    wait_until("the group works again", Duration::from_secs(15), || {
+        all_healthy(&[&a, &b, &c]) && same_heads(&[&a, &b, &c])
+    });
+    let timing = [&a, &b, &c][leader_index(&[&a, &b, &c]).unwrap()];
+    let others: Vec<&TestServer> = [&a, &b, &c]
+        .into_iter()
+        .filter(|s| s.port != timing.port)
+        .collect();
+    for name in ["Zoë", "Wout"] {
+        timing
+            .act("runners.create", json!({"name":name,"status":"waiting"}))
+            .unwrap();
+    }
+    timing
+        .act("cluster.openTiming", json!({"takeOver": false}))
+        .unwrap();
+    press(timing, "race.handoff").unwrap();
+    off(others[0], true);
+    off(others[1], true);
+    let _ = press(timing, "race.handoff");
+    assert_eq!(timing.count("SELECT COUNT(*) AS n FROM laps"), 1);
+    assert_eq!(named(timing, "Te laat"), 0);
+
+    // The others return: the write that was answered as not saved appears nowhere.
+    off(others[0], false);
+    off(others[1], false);
+    wait_until("the group works again", Duration::from_secs(20), || {
+        all_healthy(&[&a, &b, &c]) && same_heads(&[&a, &b, &c])
+    });
+    let leader = [&a, &b, &c][leader_index(&[&a, &b, &c]).unwrap()];
+    leader
+        .act("runners.create", json!({"name":"Bevestigd"}))
+        .unwrap();
+    wait_until("every laptop holds the next write", Duration::from_secs(5), || {
+        same_heads(&[&a, &b, &c]) && [&a, &b, &c].iter().all(|s| named(s, "Bevestigd") == 1)
+    });
+    for server in [&a, &b, &c] {
+        assert_eq!(named(server, "Onbevestigd"), 0);
+        assert_eq!(named(server, "Te laat"), 0);
+    }
+}
+
+/// A leader that inherits an unconfirmed change from an earlier term may not call it saved
+/// before a change of its own term is on a majority: until then a laptop that led in between
+/// can still win and replace it.
+#[test]
+fn a_change_answered_as_saved_survives_three_leader_losses_in_a_row() {
+    let _serial = serial();
+    let dir = Dir::new();
+    let (a, b, c) = linked_three(&dir);
+    assert!(a.node.is_leader());
+    let off = |s: &TestServer, v: bool| {
+        s.node
+            .isolated
+            .store(v, std::sync::atomic::Ordering::Relaxed)
+    };
+    // A change a leader stored in its own data and could not send on, like a Timing press.
+    let store_unsent = |s: &TestServer, key: &str| {
+        super::log::record(&mut s.db.lock().unwrap(), "test.unsent", None, |db| {
+            super::log::set_replicated(db, key, &json!(true)).map(|_| Value::Null)
+        })
+        .unwrap();
+    };
+    let holds = |s: &TestServer, key: &str| {
+        super::log::setting(&s.db.lock().unwrap(), key).is_some()
+    };
+    let first_term = a.node.term();
+    let place = a.head() + 1;
+
+    // 1. Leader A stores a change and fails before another laptop has it.
+    off(&a, true);
+    off(&b, true);
+    store_unsent(&a, "from-a");
+    assert_eq!(a.head(), place);
+
+    // 2. B wins the next term with C's vote, stores a change at the same place and fails before
+    //    sending anything. Written as what that election and write leave on disk, so that B
+    //    fails at exactly that moment.
+    for server in [&b, &c] {
+        let db = server.db.lock().unwrap();
+        super::log::set_local(&db, "cluster_epoch", &(first_term + 1).to_string()).unwrap();
+        super::log::set_local(
+            &db,
+            "cluster_voted_for",
+            &format!("{}:{}", first_term + 1, b.node.host_id),
+        )
+        .unwrap();
+    }
+    store_unsent(&b, "from-b");
+    assert_eq!(b.head(), place);
+
+    // 3. A returns, wins with C's vote, copies its old change to C and reports the group settled.
+    off(&a, false);
+    wait_until("A leads again and its log is on a majority", Duration::from_secs(15), || {
+        a.node.is_leader() && a.node.term() > first_term + 1 && a.node.log_settled()
+    });
+    assert!(holds(&c, "from-a"));
+
+    // 4. A fails again and B returns.
+    off(&a, true);
+    off(&b, false);
+    wait_until("B and C work together", Duration::from_secs(20), || {
+        leader_index(&[&b, &c]).is_some() && same_heads(&[&b, &c])
+    });
+
+    // 5. Whichever of the two leads, the change that was reported as saved is still there.
+    for server in [&b, &c] {
+        assert!(holds(server, "from-a"), "the saved change is gone");
+        assert!(!holds(server, "from-b"));
+    }
+    off(&a, false);
+    wait_until("three healthy laptops", Duration::from_secs(20), || {
+        all_healthy(&[&a, &b, &c]) && same_heads(&[&a, &b, &c])
+    });
+    for server in [&a, &b, &c] {
+        assert!(holds(server, "from-a"));
+        assert!(!holds(server, "from-b"));
+    }
+}
+
+#[test]
 fn the_timing_laptop_goes_on_alone_by_itself_and_the_splits_join_again() {
     let _serial = serial();
     let dir = Dir::new();
@@ -434,10 +592,27 @@ fn the_timing_laptop_goes_on_alone_by_itself_and_the_splits_join_again() {
     wait_until("A and B elect", Duration::from_secs(10), || {
         leader_index(&[&a, &b]).is_some()
     });
-    b.act("runners.create", json!({"name":"Alleen bij A en B"}))
+    b.act(
+        "runners.create",
+        json!({"name":"Alleen bij A en B", "runnerNumber":"88"}),
+    )
+    .unwrap();
+    // C hands out the same number meanwhile, to someone else.
+    c.act(
+        "runners.create",
+        json!({"name":"Alleen bij C", "runnerNumber":"88"}),
+    )
+    .unwrap();
+
+    // B also sends Wout back to the registrations, not knowing C just put Wout on the track.
+    let wout = b.db.lock().unwrap().rows("SELECT id FROM runners WHERE name='Wout'", &[]).unwrap()
+        [0]["id"]
+        .clone();
+    b.act("runners.setStatus", json!({"id": wout, "status": "registered"}))
         .unwrap();
 
-    // The network returns: C's split holds the Timing laptop, so A and B follow it.
+    // The network returns: C's split holds the Timing laptop, so A and B follow it, and C
+    // first takes what A and B saved meanwhile.
     c.node
         .isolated
         .store(false, std::sync::atomic::Ordering::Relaxed);
@@ -445,14 +620,30 @@ fn the_timing_laptop_goes_on_alone_by_itself_and_the_splits_join_again() {
         let split = c.status()["split"]["id"].clone();
         [&a, &b].iter().all(|s| s.status()["split"]["id"] == split) && all_healthy(&[&a, &b, &c])
     });
-    for server in [&a, &b] {
+    for server in [&a, &b, &c] {
+        // The lap the Timing laptop clocked alone stays, and so does the runner it put on the track.
         assert_eq!(server.count("SELECT COUNT(*) AS n FROM laps"), 1);
         assert_eq!(
-            server.count("SELECT COUNT(*) AS n FROM runners WHERE name='Alleen bij A en B'"),
-            0
+            server
+                .count("SELECT COUNT(*) AS n FROM runners WHERE name='Wout' AND status='running'"),
+            1
+        );
+        // What the majority confirmed while C was away is kept, once: also the runner whose
+        // number C gave to someone else meanwhile, who comes in without that number.
+        assert_eq!(
+            server.count(
+                "SELECT COUNT(*) AS n FROM runners WHERE name='Alleen bij A en B' AND runner_number IS NULL"
+            ),
+            1
+        );
+        assert_eq!(
+            server.count(
+                "SELECT COUNT(*) AS n FROM runners WHERE name='Alleen bij C' AND runner_number='88'"
+            ),
+            1
         );
     }
-    // The laptop that led the other split says what it gave up, and where it went.
+    // The laptops that followed say they worked apart, and where their own copy went.
     let notices: Vec<Value> = [&a, &b]
         .iter()
         .map(|s| s.status()["notice"].clone())
@@ -464,6 +655,98 @@ fn the_timing_laptop_goes_on_alone_by_itself_and_the_splits_join_again() {
         "{notices:?}"
     );
     assert!(c.node.is_leader());
+}
+
+/// The Timing laptop loses the other two and the handoff is pressed in the same moment.
+fn press_right_after_the_timing_laptop_is_cut_off(timing_leads: bool) {
+    let _serial = serial();
+    let dir = Dir::new();
+    let (a, b, c) = linked_three(&dir);
+    a.act("runners.create", json!({"name":"Wout","status":"waiting"}))
+        .unwrap();
+    let (timing, others) = if timing_leads { (&a, [&b, &c]) } else { (&c, [&a, &b]) };
+    assert_eq!(timing.node.is_leader(), timing_leads);
+    timing
+        .act("cluster.openTiming", json!({"takeOver": false}))
+        .unwrap();
+    press(timing, "race.handoff").unwrap();
+    wait_until("the start on every laptop", Duration::from_secs(5), || {
+        same_heads(&[&a, &b, &c])
+    });
+
+    timing
+        .node
+        .isolated
+        .store(true, std::sync::atomic::Ordering::Relaxed);
+    let race = timing.db.lock().unwrap().race().unwrap();
+    let pressed_at = crate::db::now();
+    let pressed = Instant::now();
+    timing
+        .act(
+            "race.handoff",
+            json!({"activeRunnerId":race["activeRunnerId"],"activeStartedAt":race["activeStartedAt"],"pressedAt":pressed_at}),
+        )
+        .expect("a press right after the outage began was refused");
+    // Well inside the time a write may wait, and long before the laptop goes on alone unasked.
+    assert!(
+        pressed.elapsed() < timing.node.cfg.write_deadline / 2,
+        "the press took {:?}",
+        pressed.elapsed()
+    );
+    assert_eq!(timing.count("SELECT COUNT(*) AS n FROM laps"), 1);
+    assert_eq!(
+        timing.count("SELECT finished_at AS n FROM laps"),
+        pressed_at,
+        "the lap ends when the key was pressed"
+    );
+    assert_eq!(timing.status()["state"], "solo");
+    // It keeps clocking, and the others take its laps when the network is back.
+    press(timing, "race.handoff").unwrap();
+    timing
+        .node
+        .isolated
+        .store(false, std::sync::atomic::Ordering::Relaxed);
+    wait_until("one group again", Duration::from_secs(20), || {
+        let split = timing.status()["split"]["id"].clone();
+        others.iter().all(|s| s.status()["split"]["id"] == split) && all_healthy(&[&a, &b, &c])
+    });
+    for server in others {
+        assert_eq!(server.count("SELECT COUNT(*) AS n FROM laps"), 2);
+    }
+}
+
+#[test]
+fn a_press_right_after_the_timing_laptop_is_cut_off_is_kept() {
+    press_right_after_the_timing_laptop_is_cut_off(false);
+}
+
+#[test]
+fn a_press_right_after_the_leading_timing_laptop_is_cut_off_is_kept() {
+    press_right_after_the_timing_laptop_is_cut_off(true);
+}
+
+/// The leader fails while the Timing laptop still reaches a second laptop: the press waits for
+/// the takeover and the group stays whole.
+#[test]
+fn a_press_during_a_takeover_does_not_split_the_group() {
+    let _serial = serial();
+    let dir = Dir::new();
+    let (a, b, c) = linked_three(&dir);
+    a.act("runners.create", json!({"name":"Wout","status":"waiting"}))
+        .unwrap();
+    c.act("cluster.openTiming", json!({"takeOver": false}))
+        .unwrap();
+    press(&c, "race.handoff").unwrap();
+    wait_until("the start on every laptop", Duration::from_secs(5), || {
+        same_heads(&[&a, &b, &c])
+    });
+    a.kill();
+    press(&c, "race.handoff").unwrap();
+    assert_eq!(c.status()["split"]["rank"], 0);
+    assert_eq!(c.status()["members"].as_array().unwrap().len(), 3);
+    wait_until("the lap on B", Duration::from_secs(5), || {
+        b.count("SELECT COUNT(*) AS n FROM laps") == 1
+    });
 }
 
 #[test]
@@ -513,6 +796,78 @@ fn a_lost_laptop_is_taken_out_and_a_spare_takes_its_place() {
     // Opnieuw koppelen takes it back in with the group's data.
     c.act("cluster.joinGroup", json!({"url": a.url, "rejoin": true}))
         .unwrap();
+    wait_until("four laptops", Duration::from_secs(10), || {
+        all_healthy(&[&a, &b, &c, &d])
+    });
+}
+
+#[test]
+fn a_spare_that_links_replaces_a_dead_laptop_and_the_group_survives_one_more_loss() {
+    let _serial = serial();
+    let dir = Dir::new();
+    let (a, b, c) = linked_three(&dir);
+    let c_id = c.status()["hostId"].as_str().unwrap().to_owned();
+    let (c_path, c_port) = (dir.db("c"), c.port);
+    c.kill();
+    wait_until("C is removable", Duration::from_secs(10), || {
+        [&a, &b].iter().any(|s| {
+            s.status()["members"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|m| m["hostId"] == c_id.as_str() && m["removable"] == true)
+        })
+    });
+    // Nobody clicks "Uit de groep halen": the spare links and takes the dead laptop's place.
+    let d = TestServer::start(&dir.db("d"), free_port(), "Laptop D");
+    d.act("cluster.joinGroup", json!({"url": b.url})).unwrap();
+    wait_until("three laptops again", Duration::from_secs(10), || {
+        all_healthy(&[&a, &b, &d])
+    });
+    for server in [&a, &b, &d] {
+        assert_eq!(
+            server.count("SELECT COUNT(*) AS n FROM cluster_members"),
+            3
+        );
+    }
+    assert!(
+        activity_summaries(&a)
+            .iter()
+            .any(|s| s == "Laptop C uit de groep gehaald")
+    );
+    // One more laptop drops out: the two that are left are a majority of three and save.
+    let (gone, left) = if a.node.is_leader() {
+        (&a, [&b, &d])
+    } else {
+        (&b, [&a, &d])
+    };
+    gone.node
+        .isolated
+        .store(true, std::sync::atomic::Ordering::Relaxed);
+    wait_until(
+        "a leader among the two left",
+        Duration::from_secs(10),
+        || leader_index(&left).is_some(),
+    );
+    left[0].act("runners.create", json!({"name":"Na"})).unwrap();
+    wait_until("the write is on both", Duration::from_secs(5), || {
+        left.iter()
+            .all(|s| s.count("SELECT COUNT(*) AS n FROM runners WHERE name='Na'") == 1)
+    });
+    // The replaced laptop comes back on: it is told it was taken out, as after the button.
+    let c = TestServer::start(&c_path, c_port, "Laptop C");
+    wait_until("C hears it was removed", Duration::from_secs(10), || {
+        !c.status()["removedFrom"].is_null()
+    });
+}
+
+#[test]
+fn a_spare_that_links_while_every_laptop_answers_makes_the_group_one_larger() {
+    let _serial = serial();
+    let dir = Dir::new();
+    let (a, b, c) = linked_three(&dir);
+    let d = TestServer::start(&dir.db("d"), free_port(), "Laptop D");
+    d.act("cluster.joinGroup", json!({"url": a.url})).unwrap();
     wait_until("four laptops", Duration::from_secs(10), || {
         all_healthy(&[&a, &b, &c, &d])
     });
@@ -704,9 +1059,14 @@ fn an_unreachable_laptop_and_its_return_are_listed_in_activity_on_every_laptop()
 
 pub(crate) fn beacon(server: &TestServer, url: &str, name: &str) -> Value {
     let status = server.status();
+    let proof = super::beacon_proof(
+        &server.node.group_keys()[0],
+        status["hostId"].as_str().unwrap(),
+        url,
+    );
     json!({
         "app": "apolloon", "hostId": status["hostId"], "name": name, "clusterId": status["clusterId"],
-        "url": url, "appVersion": super::APP_VERSION, "schemaVersion": 17, "leader": server.node.is_leader(),
+        "url": url, "proof": proof, "appVersion": super::APP_VERSION, "schemaVersion": 17, "leader": server.node.is_leader(),
         "groupSize": status["members"].as_array().unwrap().len(), "runners": status["runners"],
         "changed": status["changed"], "raceStarted": status["raceStarted"], "raceRunning": status["raceRunning"],
     })
@@ -995,4 +1355,207 @@ fn a_leader_at_the_stored_address_of_a_laptop_that_is_off_keeps_leading() {
     assert_eq!(a.node.handle_append(&own, None)["reason"], json!("self"));
     assert!(a.node.is_leader());
     c.act("runners.create", json!({"name":"Op C"})).unwrap();
+}
+
+/// A request the way another device on the network sends it: no group key.
+fn unsigned(method: reqwest::Method, url: &str, body: Option<Value>) -> (u16, Value) {
+    let mut request = reqwest::blocking::Client::new()
+        .request(method, url)
+        .header("x-apolloon-app-version", super::APP_VERSION);
+    if let Some(body) = body {
+        request = request.json(&body);
+    }
+    let response = request.send().unwrap();
+    (response.status().as_u16(), response.json().unwrap_or(Value::Null))
+}
+
+#[test]
+fn a_device_outside_the_group_cannot_write_or_read_through_the_laptop_endpoints() {
+    let _serial = serial();
+    let dir = Dir::new();
+    let (a, b, c) = linked_three(&dir);
+    assert!(a.node.is_leader());
+    // Linking gave all three the leader's key; none of them shows it.
+    assert_eq!(a.node.group_keys()[0], b.node.group_keys()[0]);
+    assert_eq!(a.node.group_keys()[0], c.node.group_keys()[0]);
+    assert!(!a.status().to_string().contains(&a.node.group_keys()[0]));
+    // It is in no backup and in no copy of the data either: both are the database, the key is not in it.
+    let key = a.node.group_keys()[0].clone();
+    let image = super::log::serialize(&a.db.lock().unwrap()).unwrap();
+    assert!(!image.windows(key.len()).any(|w| w == key.as_bytes()));
+    let status = a.status();
+    let head = a.head();
+    let runners = a.count("SELECT COUNT(*) AS n FROM runners");
+    let append = json!({"type": "append", "body": {
+        "clusterId": status["clusterId"], "split": status["split"]["id"], "term": a.node.term() + 5,
+        "leaderId": "someone-else", "leaderUrl": "http://127.0.0.1:9",
+    }});
+    let write = json!({"method": "race.clear", "input": {}, "origin": "phone", "requestId": "r1"});
+    for (method, target, path, body) in [
+        (reqwest::Method::POST, &a, "/api/cluster/write", Some(write)),
+        (reqwest::Method::POST, &b, "/api/cluster/peer", Some(append)),
+        (reqwest::Method::GET, &a, "/api/cluster/snapshot", None),
+        (reqwest::Method::GET, &a, "/api/cluster/probe?id=x", None),
+        (reqwest::Method::POST, &a, "/api/cluster/split/common", Some(json!({"marks": []}))),
+        (reqwest::Method::POST, &a, "/api/cluster/split/merge", Some(json!({}))),
+    ] {
+        let (code, answer) = unsigned(method, &format!("{}{path}", target.url), body);
+        assert_eq!((code, &answer["code"]), (401, &json!("not_in_group")), "{path}");
+    }
+    // A signature made with another key is no better than none.
+    let forged = reqwest::blocking::Client::new()
+        .get(format!("{}/api/cluster/snapshot", a.url))
+        .header(
+            super::key::HEADER,
+            super::key::sign("not-the-key", &[b"GET", b"/api/cluster/snapshot", b""]),
+        )
+        .send()
+        .unwrap();
+    assert_eq!(forged.status().as_u16(), 401);
+    // Nobody outside the group tells a laptop to follow another group, or moves it once its
+    // race started.
+    let follow = json!({"url": "http://127.0.0.1:9", "clusterId": "other", "follow": status["clusterId"]});
+    let (code, _) = unsigned(reqwest::Method::POST, &format!("{}/api/cluster/invite", b.url), Some(follow));
+    assert_eq!(code, 409);
+    press(&a, "race.handoff").unwrap();
+    wait_until("the lap is everywhere", Duration::from_secs(5), || same_heads(&[&a, &b, &c]));
+    let invite = json!({"url": "http://127.0.0.1:9", "clusterId": "other"});
+    let (code, _) = unsigned(reqwest::Method::POST, &format!("{}/api/cluster/invite", c.url), Some(invite));
+    assert_eq!(code, 409);
+    // Nothing of that reached the group, and the laptops still save through each other.
+    assert!(a.node.is_leader());
+    assert_eq!(a.head(), head + 1);
+    assert_eq!(a.count("SELECT COUNT(*) AS n FROM runners"), runners);
+    c.act("runners.create", json!({"name": "Op C"})).unwrap();
+    wait_until("healthy", Duration::from_secs(5), || all_healthy(&[&a, &b, &c]));
+}
+
+#[test]
+fn an_announcement_without_the_group_key_does_not_move_a_laptop() {
+    let _serial = serial();
+    let dir = Dir::new();
+    let a = TestServer::start(&dir.db("a"), free_port(), "Laptop A");
+    let b = TestServer::start(&dir.db("b"), free_port(), "Laptop B");
+    b.act("cluster.joinGroup", json!({"url": a.url})).unwrap();
+    wait_until("linked", Duration::from_secs(10), || all_healthy(&[&a, &b]));
+    let (a, b) = if a.node.is_leader() { (a, b) } else { (b, a) };
+    let b_id = b.status()["hostId"].as_str().unwrap().to_owned();
+    // Another device announces itself under B's id, at its own address.
+    let elsewhere = format!("http://127.0.0.1:{}", free_port());
+    let mut spoofed = beacon(&b, &elsewhere, "Laptop B");
+    for proof in [Value::Null, json!(super::beacon_proof("not-the-key", &b_id, &elsewhere))] {
+        spoofed["proof"] = proof;
+        hear(&a, &spoofed);
+        a.node.maintain();
+        let address = |s: &TestServer| {
+            s.node.members().into_iter().find(|m| m.host_id == b_id).unwrap().url
+        };
+        assert_eq!(address(&a), b.url);
+        assert_eq!(
+            a.node.leader_address(&b_id, &b.url, Some("127.0.0.1".parse().unwrap())),
+            b.url
+        );
+    }
+    a.act("runners.create", json!({"name":"Zoë"})).unwrap();
+    wait_until("healthy", Duration::from_secs(5), || all_healthy(&[&a, &b]));
+    assert_eq!(b.count("SELECT COUNT(*) AS n FROM runners"), 1);
+}
+
+
+/// A laptop whose disk refuses the vote neither gives it nor stands: counted and then given
+/// again in the same term, it would let two laptops lead.
+#[test]
+fn a_vote_that_cannot_be_stored_is_not_given() {
+    let _serial = serial();
+    let dir = Dir::new();
+    let (a, b, c) = linked_three(&dir);
+    let refuse_votes = |server: &TestServer, on: bool| {
+        let db = server.db.lock().unwrap();
+        db.conn
+            .execute_batch(if on {
+                "CREATE TRIGGER vote_fails BEFORE INSERT ON settings WHEN NEW.key='cluster_voted_for' BEGIN SELECT RAISE(ABORT,'disk'); END"
+            } else {
+                "DROP TRIGGER vote_fails"
+            })
+            .unwrap();
+    };
+    refuse_votes(&b, true);
+    refuse_votes(&c, true);
+    let term = b.node.term();
+    a.kill();
+    std::thread::sleep(Duration::from_millis(2_500));
+    assert_eq!(leader_index(&[&b, &c]), None, "nobody leads on votes that were not stored");
+    let vote = b.node.handle_vote(&json!({
+        "clusterId": b.status()["clusterId"],
+        "term": b.node.term() + 1,
+        "candidateId": c.node.host_id,
+        "lastSeq": c.head(),
+        "lastTerm": term + 1_000,
+    }));
+    assert_eq!(vote["granted"], false, "a vote that is not on disk is not given");
+    refuse_votes(&b, false);
+    refuse_votes(&c, false);
+    wait_until("a leader once votes are stored again", Duration::from_secs(10), || {
+        leader_index(&[&b, &c]).is_some()
+    });
+    b.act("runners.create", json!({"name":"Wout","status":"waiting"}))
+        .unwrap();
+}
+
+/// A laptop is not taken in on top of a change the others have not confirmed: that change may be
+/// another laptop being taken in, and the group changes by one laptop at a time.
+#[test]
+fn a_new_laptop_is_not_taken_in_before_earlier_changes_are_confirmed() {
+    let _serial = serial();
+    let dir = Dir::new();
+    let (a, b, c) = linked_three_with(&dir, |cfg| {
+        cfg.removable_after = Duration::from_secs(60);
+    });
+    let (a, b, c) = match leader_index(&[&a, &b, &c]).unwrap() {
+        0 => (a, b, c),
+        1 => (b, a, c),
+        _ => (c, a, b),
+    };
+    let new = super::Member {
+        host_id: "new-laptop".into(),
+        url: "http://127.0.0.1:9".into(),
+        name: None,
+    };
+    a.node.make_room_for(&new).unwrap();
+    let b_id = b.status()["hostId"].as_str().unwrap().to_owned();
+    let b_url = b.url.clone();
+    drop(b);
+    drop(c);
+    // A change of the group that no other laptop has.
+    a.node
+        .add_member(&super::Member { host_id: b_id, url: format!("{b_url}0"), name: None }, None)
+        .unwrap();
+    assert!(a.node.make_room_for(&new).is_err());
+}
+
+
+/// The offset to an earlier group's clock is kept across a restart while a race depends on it,
+/// and dropped by a laptop that starts alone without a race.
+#[test]
+fn a_laptop_alone_without_a_race_starts_on_its_own_clock() {
+    let _serial = serial();
+    let dir = Dir::new();
+    let restart_with_offset = |server: TestServer, name: &str| {
+        super::log::set_local(&server.db.lock().unwrap(), "cluster_clock_offset_ms", "5000")
+            .unwrap();
+        server.kill();
+        TestServer::start(&dir.db(name), free_port(), "Laptop")
+    };
+    let idle = restart_with_offset(TestServer::start(&dir.db("idle"), free_port(), "Laptop"), "idle");
+    assert_eq!(super::clock::offset(), 0);
+    assert_eq!(
+        super::log::setting(&idle.db.lock().unwrap(), "cluster_clock_offset_ms").as_deref(),
+        Some("0")
+    );
+    let racing = TestServer::start(&dir.db("racing"), free_port(), "Laptop");
+    racing.act("runners.create", json!({"name":"Zoë","status":"waiting"})).unwrap();
+    press(&racing, "race.handoff").unwrap();
+    let _racing = restart_with_offset(racing, "racing");
+    assert_eq!(super::clock::offset(), 5000);
+    super::clock::set_offset(0);
 }

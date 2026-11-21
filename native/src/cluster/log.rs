@@ -140,6 +140,14 @@ pub fn entry_id(db: &Db, seq: i64) -> Option<String> {
         .map(str::to_owned)
 }
 
+/// The term entry `seq` was written in, while this log still holds it.
+pub fn entry_term(db: &Db, seq: i64) -> Option<i64> {
+    db.rows("SELECT epoch FROM replication_log WHERE seq=?", &[json!(seq)])
+        .ok()?
+        .first()?["epoch"]
+        .as_i64()
+}
+
 fn oldest(db: &Db) -> Option<i64> {
     db.rows("SELECT MIN(seq) AS seq FROM replication_log", &[])
         .ok()?
@@ -212,8 +220,8 @@ fn insert(db: &Db, entry: &Entry) -> Result<()> {
 }
 
 /// Ends a recorded write inside its transaction: remembers the forwarded request's result and
-/// appends what ran to the log. Returns the new entry's position, if anything changed.
-pub fn seal(db: &Db, kind: &str, result: &Value) -> Result<Option<i64>> {
+/// appends what ran to the log. Returns the new entry, if anything changed.
+pub fn seal(db: &Db, kind: &str, result: &Value) -> Result<Option<Entry>> {
     let Some(mut capture) = db.capture.borrow_mut().take() else {
         return Ok(None);
     };
@@ -237,18 +245,32 @@ pub fn seal(db: &Db, kind: &str, result: &Value) -> Result<Option<i64>> {
         }
     }
     let seq = head(db).seq + 1;
+    let entry = Entry {
+        seq,
+        id: crate::db::id(),
+        epoch: term(db),
+        kind: kind.to_owned(),
+        statements: capture.statements,
+        created_at: now(),
+    };
+    insert(db, &entry)?;
+    Ok(Some(entry))
+}
+
+/// Appends an entry that changes nothing. A new leader starts with one, so that its term has an
+/// entry a majority can store (see `advance_commit`).
+pub fn append_empty(db: &Db, kind: &str) -> Result<()> {
     insert(
         db,
         &Entry {
-            seq,
+            seq: head(db).seq + 1,
             id: crate::db::id(),
             epoch: term(db),
             kind: kind.to_owned(),
-            statements: capture.statements,
+            statements: Vec::new(),
             created_at: now(),
         },
-    )?;
-    Ok(Some(seq))
+    )
 }
 
 /// The saved answer to a forwarded write that already ran.
@@ -264,13 +286,38 @@ pub fn forwarded_result(db: &Db, request: &str) -> Option<Value> {
     serde_json::from_str(row["result_json"].as_str()?).ok()
 }
 
-/// Runs `action` as one replicated write of type `kind`, like a mutation.
-pub fn record(
+/// A write the leader ran and took back: it reaches the leader's own data only once enough
+/// laptops stored it.
+#[derive(Clone, Debug)]
+pub struct Prepared {
+    pub entry: Entry,
+    /// The laptops in the group once this write is applied; a majority of them must store it.
+    pub voters: Vec<String>,
+}
+impl Prepared {
+    /// Call inside the write's transaction, after `seal`.
+    pub fn new(db: &Db, entry: Entry) -> Self {
+        Self {
+            entry,
+            voters: stored_members(db).into_iter().map(|m| m.host_id).collect(),
+        }
+    }
+    /// False when a follower could only get this write with a full copy of the database.
+    pub fn fits_one_message(&self) -> bool {
+        serde_json::to_string(&self.entry.statements)
+            .is_ok_and(|raw| raw.len() + 512 <= MAX_ENTRY_BYTES)
+    }
+}
+
+/// Runs `action` as one replicated write of type `kind`, like a mutation. With `keep` false the
+/// write is taken back and returned for `apply_own`.
+pub fn record_or_prepare(
     db: &mut Db,
     kind: &str,
     request: Option<&str>,
+    keep: bool,
     action: impl FnOnce(&Db) -> Result<Value>,
-) -> Result<Value> {
+) -> Result<(Value, Option<Prepared>)> {
     let transaction =
         rusqlite::Transaction::new_unchecked(&db.conn, rusqlite::TransactionBehavior::Immediate)
             .map_err(err)?;
@@ -278,15 +325,33 @@ pub fn record(
         statements: Vec::new(),
         request_id: request.map(str::to_owned),
     });
-    let outcome = action(db).and_then(|result| seal(db, kind, &result).map(|_| result));
+    let outcome =
+        action(db).and_then(|result| seal(db, kind, &result).map(|entry| (result, entry)));
     db.capture.borrow_mut().take();
-    let result = outcome?;
+    let (result, entry) = outcome?;
+    if !keep {
+        // Dropping the transaction takes the write back.
+        return Ok((result, entry.map(|entry| Prepared::new(db, entry))));
+    }
     transaction.commit().map_err(err)?;
     db.revision += 1;
-    Ok(result)
+    Ok((result, None))
+}
+pub fn record(
+    db: &mut Db,
+    kind: &str,
+    request: Option<&str>,
+    action: impl FnOnce(&Db) -> Result<Value>,
+) -> Result<Value> {
+    record_or_prepare(db, kind, request, true, action).map(|(result, _)| result)
 }
 
-fn valid(statement: &Statement) -> bool {
+/// The leader stores a write of its own that enough laptops hold.
+pub fn apply_own(db: &mut Db, entry: &Entry) -> Result<()> {
+    apply(db, std::slice::from_ref(entry))
+}
+
+pub(super) fn valid(statement: &Statement) -> bool {
     let sql = statement.sql.trim_start().to_ascii_lowercase();
     ["insert", "update", "delete", "replace"]
         .iter()

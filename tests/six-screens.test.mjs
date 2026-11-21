@@ -1,15 +1,65 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { nativeFrameMetrics } from '../scripts/bench/latency.mjs';
 import {
   browserLatencies,
   displayedHandoff,
   nativeLatencies,
   percentile,
+  screenObservationsComplete,
   validateReplicaLaps,
 } from '../scripts/bench/metrics.mjs';
 
+test('native frame stages separate prior presentation, apply and redraw work', () => {
+  const event = (stage, us, lapId) => ({ stage, us, lapId, source: 'native' });
+  const events = [
+    event('submit_begin', 0),
+    event('push_received', 5, 'lap'),
+    event('update_ready', 6, 'lap'),
+    event('submit_end', 10),
+    event('present_begin', 10),
+    event('present_end', 20),
+    event('build_begin', 21),
+    event('apply_begin', 22, 'lap'),
+    event('applied', 25, 'lap'),
+    event('build_end', 30),
+    event('submit_begin', 35),
+    event('submit_end', 40),
+    event('present_begin', 41),
+    event('present_end', 50),
+    event('frame', 51, 'lap'),
+  ];
+  assert.deepEqual(nativeFrameMetrics(events, [{ lapId: 'lap' }]), [
+    {
+      lapId: 'lap',
+      pushAppliedUs: 20,
+      transportReadyUs: 1,
+      previousSubmitUs: 4,
+      previousPresentUs: 10,
+      applyUs: 3,
+      otherBeforeApplyUs: 2,
+      buildUs: 6,
+      encodeUs: 5,
+      submitUs: 5,
+      presentUs: 9,
+    },
+  ]);
+  assert.deepEqual(nativeFrameMetrics([], []), []);
+  assert.deepEqual(nativeFrameMetrics(events.slice(1), [{ lapId: 'missing' }]), [{ lapId: 'missing' }]);
+  assert.deepEqual(
+    nativeFrameMetrics(
+      events.filter((e) => e.stage !== 'submit_end'),
+      [{ lapId: 'lap' }]
+    ),
+    [{ lapId: 'lap' }]
+  );
+});
+
 test('screen observations follow rendered totals, active runner and waiting lane', () => {
-  assert.equal(displayedHandoff('/timing', { text: 'Rondes in de race|2241' }), 0);
+  assert.equal(displayedHandoff('/timing', { text: 'Hierna|Bench 01|Laatste rondes|1|Bench 00|ronde 57|12:34' }), 0);
+  assert.equal(displayedHandoff('/timing', { text: 'Laatste rondes|40|Bench 39|ronde 56|12:34' }), -1);
+  assert.equal(displayedHandoff('/timing', { text: 'Laatste rondes|2|Bench 01|ronde 57|12:34' }), 1);
+  assert.equal(displayedHandoff('/timing', { text: 'Laatste rondes|Bench 00' }), null);
   assert.equal(displayedHandoff('/display/inside', { text: 'Rondes|2.242' }), 1);
   assert.equal(displayedHandoff('/display/competitions', { text: 'Speedteam|2 243' }), 2);
   assert.equal(displayedHandoff('/display/outside', { text: 'Nu op de piste|Bench 01|Volgende|Bench 02' }), 0);
@@ -31,8 +81,9 @@ test('later rendered state covers coalesced writes, never pre-send state', () =>
     { i: 1, sentAt: 200 },
   ];
   const frames = [
-    { at: 50, text: '2242' },
-    { at: 250, text: '2242' },
+    { at: 50, text: 'Laatste rondes|2|Bench 01|ronde 57' },
+    { at: 150, text: 'Laatste rondes|40|Bench 39|ronde 56' },
+    { at: 250, text: 'Laatste rondes|2|Bench 01|ronde 57' },
   ];
   assert.deepEqual(browserLatencies('/timing', frames, writes), [150, 50]);
   assert.equal(percentile([300, 100, 200], 0.95), 300);
@@ -61,6 +112,43 @@ test('native ambiguous or missing pixel changes are invalid, not silently attrib
     ),
     [null, null]
   );
+});
+
+test('replica validation gate requires post-send observations on every browser and native pixels', () => {
+  const write = { i: 0, sentAt: 100 };
+  const screens = [
+    { name: '/display/inside', text: 'Rondes|2241' },
+    { name: '/display/competitions', text: 'Speedteam|2241' },
+    { name: '/display/outside', text: 'Nu op de piste|Bench 01' },
+    { name: '/queue', text: 'Klaar om te lopen|Bench 02' },
+    { name: '/timing', text: 'Laatste rondes|1|Bench 00|ronde 57' },
+  ].map(({ name, text }) => ({ name, frames: [{ at: 150, text }] }));
+  const native = [{ at: 160, hash: 'lap' }];
+  assert.equal(screenObservationsComplete(screens, native, write, 200), true);
+  assert.equal(screenObservationsComplete([], native, write, 200), false);
+  assert.equal(screenObservationsComplete(screens, [], write, 200), false);
+  assert.equal(screenObservationsComplete(screens, [{ at: 90, hash: 'old' }], write, 200), false);
+  assert.equal(screenObservationsComplete(screens, [...native, { at: 170, hash: 'ambiguous' }], write, 200), false);
+  for (const missing of screens) {
+    assert.equal(
+      screenObservationsComplete(
+        screens.map((s) => (s === missing ? { ...s, frames: [] } : s)),
+        native,
+        write,
+        200
+      ),
+      false
+    );
+    assert.equal(
+      screenObservationsComplete(
+        screens.map((s) => (s === missing ? { ...s, frames: [{ ...s.frames[0], at: 90 }] } : s)),
+        native,
+        write,
+        200
+      ),
+      false
+    );
+  }
 });
 
 test('replicas preserve seed IDs and agree on exactly one new unique lap per press', () => {

@@ -11,16 +11,74 @@ use axum::{
 use serde_json::{Value, json};
 use std::sync::Arc;
 
-pub fn routes() -> Router<Host> {
-    Router::new()
-        .route("/api/cluster/status", get(status))
+const BODY_LIMIT: usize = 50 * 1024 * 1024;
+
+pub fn routes(host: &Host) -> Router<Host> {
+    // What laptops of one group ask each other: refused unless signed with the group's key.
+    let group = Router::new()
         .route("/api/cluster/peer", post(peer))
         .route("/api/cluster/snapshot", get(snapshot))
-        .route("/api/cluster/members", post(members))
         .route("/api/cluster/invite", post(invite))
         .route("/api/cluster/write", post(write))
+        .route("/api/cluster/split/common", post(split_common))
+        .route("/api/cluster/split/merge", post(split_merge))
         .route("/api/cluster/probe", get(probe))
+        .layer(axum::middleware::from_fn_with_state(
+            host.clone(),
+            group_only,
+        ));
+    // Open to a laptop that is not in the group yet (and to browsers looking for a laptop).
+    Router::new()
+        .route("/api/cluster/status", get(status))
+        .route("/api/cluster/members", post(members))
         .route("/api/time", get(time))
+        .merge(group)
+}
+
+/// Whether the request carries a signature made with a key of this laptop's group.
+#[derive(Clone, Copy)]
+struct Signed(bool);
+
+/// Lets a request through to the group's endpoints only when a laptop of this group signed it.
+/// An invite also comes from a laptop that is not linked yet, so it passes with a note of
+/// whether it was signed. A laptop without linking, with its cable pulled (tests) or hearing
+/// another version answers what it always answered.
+async fn group_only(
+    State(host): State<Host>,
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    let Ok(node) = node(&host, request.headers()) else {
+        return next.run(request).await;
+    };
+    let (mut parts, body) = request.into_parts();
+    let Ok(body) = axum::body::to_bytes(body, BODY_LIMIT).await else {
+        return refusal(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "invalid_request",
+            "Onbekende aanvraag.",
+        );
+    };
+    let path = parts
+        .uri
+        .path_and_query()
+        .map(|p| p.as_str())
+        .unwrap_or_default();
+    let signed = parts
+        .headers
+        .get(super::key::HEADER)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|given| node.signed(parts.method.as_str(), path, &body, given));
+    if !signed && parts.uri.path() != "/api/cluster/invite" {
+        return refusal(
+            StatusCode::UNAUTHORIZED,
+            "not_in_group",
+            "Deze laptops horen bij een andere groep.",
+        );
+    }
+    parts.extensions.insert(Signed(signed));
+    next.run(axum::extract::Request::from_parts(parts, axum::body::Body::from(body)))
+        .await
 }
 
 fn refusal(status: StatusCode, code: &str, error: &str) -> Response {
@@ -215,8 +273,21 @@ async fn members(
                 .as_str()
                 .map(|n| n.chars().take(64).collect()),
         };
+        if let Err(error) = node.make_room_for(&member) {
+            return refusal(StatusCode::CONFLICT, "refused", &error);
+        }
+        // Making room waits for the other laptops: this one may have stopped leading meanwhile.
+        if !node.is_leader() || node.busy().is_some() {
+            return not_leader();
+        }
         match node.add_member(&member, request["autoLinkedWith"].as_str()) {
-            Ok(()) => Json(json!({"ok": true, "term": node.term()})).into_response(),
+            // The laptop that joins signs with this group's key from here on.
+            Ok(()) => Json(json!({
+                "ok": true,
+                "term": node.term(),
+                "groupKey": node.group_keys().first(),
+            }))
+            .into_response(),
             Err(error) => refusal(StatusCode::CONFLICT, "refused", &error),
         }
     })
@@ -225,6 +296,7 @@ async fn members(
 
 async fn invite(
     State(host): State<Host>,
+    signed: Option<axum::Extension<Signed>>,
     headers: HeaderMap,
     Json(request): Json<Value>,
 ) -> Response {
@@ -240,7 +312,7 @@ async fn invite(
                 "Ongeldige koppelaanvraag.",
             );
         }
-        match node.accept_invite(&request) {
+        match node.accept_invite(&request, signed.is_some_and(|s| s.0.0)) {
             Ok(merged) => Json(json!({"ok": true, "merged": merged})).into_response(),
             Err(error) => refusal(StatusCode::CONFLICT, "refused", &error),
         }
@@ -286,6 +358,51 @@ async fn write(
                     "refused"
                 },
                 &failure.message,
+            ),
+        }
+    })
+    .await
+}
+
+/// Where the log of another split of this group still matches this leader's.
+async fn split_common(
+    State(host): State<Host>,
+    headers: HeaderMap,
+    Json(request): Json<Value>,
+) -> Response {
+    let node = match node(&host, &headers) {
+        Ok(node) => node,
+        Err(refused) => return refused,
+    };
+    blocking(move || {
+        if !node.is_leader() || node.busy().is_some() {
+            return not_leader();
+        }
+        Json(json!({"ok": true, "seq": node.common_entry(&request["marks"])})).into_response()
+    })
+    .await
+}
+
+/// What another split of this group saved while apart, added here before that split follows.
+async fn split_merge(
+    State(host): State<Host>,
+    headers: HeaderMap,
+    Json(request): Json<Value>,
+) -> Response {
+    let node = match node(&host, &headers) {
+        Ok(node) => node,
+        Err(refused) => return refused,
+    };
+    blocking(move || {
+        if !node.is_leader() || node.busy().is_some() {
+            return not_leader();
+        }
+        match node.merge_split(&request) {
+            Ok(result) => Json(result).into_response(),
+            Err((retry, message)) => refusal(
+                StatusCode::CONFLICT,
+                if retry { "unavailable" } else { "refused" },
+                &message,
             ),
         }
     })

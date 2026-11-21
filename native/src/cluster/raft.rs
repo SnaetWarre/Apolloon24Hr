@@ -62,6 +62,8 @@ pub struct State {
     electing: bool,
     last_quorum: Instant,
     committed: i64,
+    /// The write this leader is sending round; it is not in the leader's own data yet.
+    pending: Option<log::Prepared>,
     last_clock_sync: Option<Instant>,
     /// The leader address a full copy is being taken from.
     pub copying: Option<String>,
@@ -82,6 +84,7 @@ impl State {
             electing: false,
             last_quorum: Instant::now(),
             committed: 0,
+            pending: None,
             last_clock_sync: None,
             copying: None,
             joining: false,
@@ -135,22 +138,25 @@ impl Node {
     pub fn term(&self) -> i64 {
         log::term(&self.db.lock().unwrap())
     }
-    fn set_term(&self, term: i64) {
-        if term != self.term() {
-            let _ = log::set_local(&self.db.lock().unwrap(), "cluster_epoch", &term.to_string());
-        }
+    /// False when the term could not be stored: this laptop then still has the old one.
+    fn set_term(&self, term: i64) -> bool {
+        term == self.term()
+            || log::set_local(&self.db.lock().unwrap(), "cluster_epoch", &term.to_string()).is_ok()
     }
     fn voted_for(&self, term: i64) -> Option<String> {
         let raw = log::setting(&self.db.lock().unwrap(), "cluster_voted_for")?;
         let (voted_term, host) = raw.split_once(':')?;
         (voted_term.parse::<i64>().ok() == Some(term) && !host.is_empty()).then(|| host.to_owned())
     }
-    fn record_vote(&self, term: i64, host_id: &str) {
-        let _ = log::set_local(
+    /// False when the vote could not be stored. A vote that is not on disk does not count: this
+    /// laptop could give it a second time in the same term, and two laptops would lead.
+    fn record_vote(&self, term: i64, host_id: &str) -> bool {
+        log::set_local(
             &self.db.lock().unwrap(),
             "cluster_voted_for",
             &format!("{term}:{host_id}"),
-        );
+        )
+        .is_ok()
     }
     fn others(&self) -> Vec<Member> {
         self.members()
@@ -225,6 +231,7 @@ impl Node {
         }
         let was = st.role;
         st.role = next;
+        st.pending = None;
         if next == Role::Leader {
             st.leader = Some(self.self_member());
             st.last_contact = Some(Instant::now());
@@ -233,6 +240,13 @@ impl Node {
             st.resync_problem = None;
             st.progress.clear();
             st.group_view.clear();
+            // The first entry of a leadership won by vote: nothing from an earlier term counts as
+            // confirmed until a majority holds it. A laptop going on alone was not elected and
+            // gets no such entry: if it stops before the split is stored, it must not outrank
+            // the group it is still in.
+            if was == Role::Candidate {
+                let _ = log::append_empty(&self.db.lock().unwrap(), "cluster.newLeader");
+            }
             self.set_discovery_leader(true);
             self.replicate_to_all(st);
             return true;
@@ -368,8 +382,11 @@ impl Node {
             return;
         }
         let term = self.term() + 1;
-        self.set_term(term);
-        self.record_vote(term, &self.host_id);
+        if !self.set_term(term) || !self.record_vote(term, &self.host_id) {
+            st.electing = false;
+            st.reset_deadline();
+            return;
+        }
         self.change_role(&mut st, Role::Candidate, None);
         drop(st);
         let votes = self.ask_for_votes(&self.vote_request(false, term));
@@ -471,7 +488,9 @@ impl Node {
         if !up_to_date || previous.is_some_and(|p| p != candidate) {
             return refuse(self.term());
         }
-        self.record_vote(asked, candidate);
+        if self.term() != asked || !self.record_vote(asked, candidate) {
+            return refuse(self.term());
+        }
         st.reset_deadline();
         json!({"term": self.term(), "granted": true})
     }
@@ -523,18 +542,29 @@ impl Node {
                 let db = self.db.lock().unwrap();
                 let head = log::head(&db).seq;
                 let prev_seq = p.match_seq.unwrap_or(head);
+                // A follower may already hold the write this leader is still sending round.
+                let ahead = st.pending.as_ref().filter(|p| p.entry.seq == prev_seq);
                 let prev_id = if prev_seq == 0 {
                     None
+                } else if let Some(pending) = ahead {
+                    Some(pending.entry.id.clone())
                 } else {
                     log::entry_id(&db, prev_seq)
                 };
-                let entries = if p.match_seq.is_none() || p.needs_resync {
+                let mut entries = if p.match_seq.is_none() || p.needs_resync || ahead.is_some() {
                     Some(Vec::new())
                 } else {
                     log::entries_after(&db, prev_seq)
                 };
                 let resync =
                     p.needs_resync || (prev_seq > 0 && prev_id.is_none()) || entries.is_none();
+                if let (false, Some(entries), Some(pending)) =
+                    (resync, entries.as_mut(), &st.pending)
+                {
+                    if prev_seq + entries.len() as i64 == head {
+                        entries.push(pending.entry.clone());
+                    }
+                }
                 let split = log::json_setting(&db, "cluster_split_json")["id"].clone();
                 let cluster_id = log::setting(&db, "replication_cluster_id").unwrap_or_default();
                 drop(db);
@@ -560,6 +590,10 @@ impl Node {
                 self.cfg.election_timeout.max(Duration::from_secs(2)),
             );
             let mut st = self.raft.lock().unwrap();
+            // An answer to a request of an earlier leadership says nothing about this one.
+            if st.role != Role::Leader || self.term() != term {
+                return;
+            }
             let answer = match answer {
                 Ok(a) if a.status == 200 => a.body,
                 Ok(_) => return,
@@ -584,6 +618,10 @@ impl Node {
             }
             let head_seq = answer["head"]["seq"].as_i64().unwrap_or(0);
             let head_id = answer["head"]["id"].as_str().map(str::to_owned);
+            let newest = st
+                .pending
+                .as_ref()
+                .map_or_else(|| log::head(&self.db.lock().unwrap()).seq, |p| p.entry.seq);
             let Some(p) = st.progress.get_mut(host_id) else {
                 return;
             };
@@ -592,7 +630,7 @@ impl Node {
                 p.match_seq = Some(head_seq);
                 p.needs_resync = false;
                 self.advance_commit(&mut st);
-                if head_seq >= log::head(&self.db.lock().unwrap()).seq {
+                if head_seq >= newest {
                     return;
                 }
                 continue;
@@ -622,7 +660,76 @@ impl Node {
         }
         matched.sort_unstable_by(|a, b| b.cmp(a));
         let committed = matched.get(self.majority() - 1).copied().unwrap_or(0);
-        st.committed = st.committed.max(committed);
+        // A majority holding an entry of an earlier term proves nothing: a laptop that led in
+        // between can still win and replace it. Once an entry of this term is on a majority, no
+        // such laptop can win, and everything before that entry is confirmed with it.
+        let db = self.db.lock().unwrap();
+        if log::entry_term(&db, committed) == Some(log::term(&db)) {
+            st.committed = st.committed.max(committed);
+        }
+    }
+
+    /// Sends a write round and stores it here once a majority of the laptops hold it. False when
+    /// that fails in time or leadership is lost: the write is then in this laptop's data nowhere.
+    pub(super) fn confirm(&self, prepared: log::Prepared) -> bool {
+        let (seq, id) = (prepared.entry.seq, prepared.entry.id.clone());
+        let deadline = Instant::now() + self.cfg.commit_timeout;
+        if prepared.voters.len() <= 1 {
+            return log::apply_own(&mut self.db.lock().unwrap(), &prepared.entry).is_ok();
+        }
+        {
+            let mut st = self.raft.lock().unwrap();
+            let db = self.db.lock().unwrap();
+            if st.role != Role::Leader
+                || log::term(&db) != prepared.entry.epoch
+                || log::head(&db).seq + 1 != seq
+            {
+                return false;
+            }
+            drop(db);
+            st.pending = Some(prepared);
+        }
+        loop {
+            let mut st = self.raft.lock().unwrap();
+            let Some(pending) = st.pending.as_ref().filter(|p| p.entry.id == id) else {
+                return false;
+            };
+            if st.role != Role::Leader {
+                return false;
+            }
+            let holders = pending
+                .voters
+                .iter()
+                .filter(|voter| {
+                    **voter == self.host_id
+                        || st
+                            .progress
+                            .get(*voter)
+                            .and_then(|p| p.match_seq)
+                            .is_some_and(|stored| stored >= seq)
+                })
+                .count();
+            if holders > pending.voters.len() / 2 {
+                let entry = st.pending.take().map(|p| p.entry);
+                let stored = entry
+                    .as_ref()
+                    .is_some_and(|e| log::apply_own(&mut self.db.lock().unwrap(), e).is_ok());
+                if stored {
+                    self.advance_commit(&mut st);
+                    return true;
+                }
+            } else if Instant::now() < deadline {
+                self.replicate_to_all(&mut st);
+                drop(st);
+                std::thread::sleep(Duration::from_millis(5));
+                continue;
+            }
+            // Another laptop may hold this write. A later election decides whether it counts, so
+            // what this laptop stores next at that place (a Timing press) gets a new term.
+            let term = self.term() + 1;
+            self.become_follower(&mut st, term, None);
+            return false;
+        }
     }
 
     /// True once a majority stored entry `seq`; false when that fails in time or leadership is lost.
@@ -709,6 +816,10 @@ impl Node {
             || their_term > term
         {
             self.become_follower(&mut st, their_term, Some(leader.clone()));
+        }
+        // A term that could not be stored: an earlier leader would still be believed later.
+        if self.term() < their_term {
+            return answer(self.term(), false, Some("term-not-stored"), head(self));
         }
         st.leader = Some(leader.clone());
         st.last_contact = Some(Instant::now());
@@ -828,12 +939,20 @@ impl Node {
             return false;
         }
         let term = self.term() + 1;
-        self.set_term(term);
-        self.record_vote(term, &self.host_id);
+        if !self.set_term(term) || !self.record_vote(term, &self.host_id) {
+            return false;
+        }
         if st.role == Role::Candidate {
             self.change_role(&mut st, Role::Follower, None);
         }
         self.change_role(&mut st, Role::Leader, None)
+    }
+    pub(super) fn step_down(&self) {
+        let mut st = self.raft.lock().unwrap();
+        if st.role == Role::Leader {
+            let term = self.term();
+            self.become_follower(&mut st, term, None);
+        }
     }
     /// Stops taking part in this laptop's own group while it joins another one.
     pub(super) fn start_joining(&self) -> bool {

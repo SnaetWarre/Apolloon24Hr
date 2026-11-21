@@ -9,6 +9,10 @@ pub fn enabled() -> bool {
     ENABLED.load(Ordering::Relaxed)
 }
 
+pub fn frame_stage(stage: &'static str) {
+    emit(stage, "native-frame", None);
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 static WRITER: std::sync::OnceLock<std::sync::mpsc::SyncSender<Value>> = std::sync::OnceLock::new();
 
@@ -19,7 +23,8 @@ pub fn init() {
             let (sender, receiver) = std::sync::mpsc::sync_channel::<Value>(8192);
             std::thread::spawn(move || {
                 for event in receiver {
-                    eprintln!("APOLLOON_LATENCY {event}");
+                    let line = trace_line(&event);
+                    let _ = std::io::Write::write_all(&mut std::io::stderr().lock(), line.as_bytes());
                 }
             });
             sender
@@ -34,6 +39,11 @@ pub fn init() {
             .unwrap_or(false),
         Ordering::Relaxed,
     );
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn trace_line(event: &Value) -> String {
+    format!("APOLLOON_LATENCY {event}\n")
 }
 
 pub fn realtime_us() -> f64 {
@@ -52,10 +62,23 @@ pub fn realtime_us() -> f64 {
 }
 
 pub fn emit(stage: &str, id: &str, lap: Option<&str>) {
+    if !enabled() { return; }
+    emit_at(stage, id, lap, realtime_us());
+}
+
+pub fn emit_at(stage: &str, id: &str, lap: Option<&str>, us: f64) {
+    emit_at_request(stage, id, lap, us, None);
+}
+
+pub fn emit_at_request(stage: &str, id: &str, lap: Option<&str>, us: f64, request: Option<&str>) {
     if !enabled() {
         return;
     }
-    let event = json!({"stage":stage,"id":id,"lapId":lap,"us":realtime_us()});
+    let event = json!({"stage":stage,"id":id,"lapId":lap,"us":us,"requestId":request});
+    send_event(event);
+}
+
+fn send_event(event: Value) {
     #[cfg(not(target_arch = "wasm32"))]
     if let Some(writer) = WRITER.get() {
         let _ = writer.try_send(event);
@@ -71,13 +94,25 @@ pub fn emit(stage: &str, id: &str, lap: Option<&str>) {
                 }
             }
         }
-        if stage == "applied" {
+        if event["stage"] == "applied" {
             let _ = js_sys::Reflect::set(
                 &global,
                 &"apolloonLatencyLap".into(),
-                &lap.unwrap_or(id).into(),
+                &event["lapId"].as_str().or(event["id"].as_str()).unwrap_or("").into(),
             );
         }
+    }
+}
+
+pub fn http_stage(stage: &str, snapshot: &Value, us: f64, request: Option<&str>) {
+    if let Some(lap) = snapshot["latencyLap"].as_str() {
+        emit_at_request(stage, lap, Some(lap), us, request);
+    }
+}
+
+pub fn http_size(snapshot: &Value, request: Option<&str>, bytes: usize) {
+    if enabled() && let Some(lap) = snapshot["latencyLap"].as_str() {
+        send_event(json!({"stage":"http_size","id":lap,"lapId":lap,"requestId":request,"us":realtime_us(),"decodedBodySize":bytes}));
     }
 }
 
@@ -130,6 +165,15 @@ pub fn notify() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn trace_records_are_complete_lines_before_writing() {
+        for event in [Value::Null, json!({}), json!({"stage":"http_body","id":"line\nbreak"})] {
+            let line = trace_line(&event);
+            assert_eq!(line.lines().count(), 1);
+            assert_eq!(serde_json::from_str::<Value>(line.strip_prefix("APOLLOON_LATENCY ").unwrap()).unwrap(), event);
+        }
+    }
+
     #[test]
     fn handoff_identity_uses_the_existing_exactly_once_token() {
         assert_eq!(

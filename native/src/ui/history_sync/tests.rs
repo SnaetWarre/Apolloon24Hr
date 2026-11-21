@@ -140,22 +140,23 @@ fn empty_and_identical_deltas_keep_rows_and_malformed_deltas_request_recovery() 
 #[test]
 fn transport_queue_preserves_acceptance_order_and_resets_after_a_bad_delta() {
     let mut synced = Synced::default();
-    synced.take_history(full()).unwrap();
+    let initial = synced.take_history(full()).unwrap();
     let push = delta(
         1,
         change(3, json!([[0, row("c", 240000)]]), json!([])),
         change(0, json!([]), json!([])),
     );
     let reply = synced.take_history(push.clone()).unwrap();
-    assert_eq!(reply, push);
-    assert!(synced.history.get("laps").is_none());
+    assert_eq!(reply.body, push);
+    assert!(synced.history["laps"][0].get("durationMs").is_none());
     let (sender, receiver) = mpsc::channel();
     let mut state = init_with_url("http://127.0.0.1:0".into());
     state.rx = receiver;
-    for revision in [2, 1] {
+    for (revision, history) in [(2, reply), (1, initial)] {
         sender
             .send(Update {
                 snapshot: json!({"revision":revision}),
+                history,
                 history_changes: Some(synced.pending.clone()),
                 ..Default::default()
             })
@@ -165,7 +166,14 @@ fn transport_queue_preserves_acceptance_order_and_resets_after_a_bad_delta() {
     assert_eq!(state.snapshot["revision"], 2);
     assert_eq!(state.history["laps"].as_array().unwrap().len(), 3);
     let version = state.history_version;
-    synced
+    let rows = state.history["laps"].as_array().unwrap().as_ptr();
+    sender
+        .send(Update {
+            snapshot: json!({"unchanged":true,"changeToken":"db.2","cluster":{"writable":false}}),
+            ..Default::default()
+        })
+        .unwrap();
+    let empty = synced
         .take_history(delta(
             2,
             change(3, json!([]), json!([])),
@@ -175,22 +183,28 @@ fn transport_queue_preserves_acceptance_order_and_resets_after_a_bad_delta() {
     sender
         .send(Update {
             partial: true,
+            history: empty,
             history_changes: Some(synced.pending.clone()),
             ..Default::default()
         })
         .unwrap();
     poll(&mut state, 0.0, &mut Tx::default());
     assert_eq!(state.history_version, version);
-    synced
-        .take_history(delta(
+    assert_eq!(state.history["laps"].as_array().unwrap().as_ptr(), rows);
+    assert_eq!(state.snapshot["cluster"]["writable"], false);
+    synced.history_sequence = 4;
+    let invalid = history_delivery::Delivery {
+        sequence: 4,
+        body: delta(
             3,
             change(99, json!([]), json!([])),
             change(0, json!([]), json!([])),
-        ))
-        .unwrap();
+        ),
+    };
     sender
         .send(Update {
             partial: true,
+            history: invalid,
             history_changes: Some(synced.pending.clone()),
             ..Default::default()
         })
@@ -213,7 +227,17 @@ fn transport_queue_preserves_acceptance_order_and_resets_after_a_bad_delta() {
     let mut recovered = full();
     recovered["revision"] = json!(5);
     recovered["cursor"] = json!("epoch.5");
-    synced.take_history(recovered).unwrap();
+    let recovered = synced.take_history(recovered).unwrap();
+    sender
+        .send(Update {
+            partial: true,
+            history: recovered,
+            history_changes: Some(synced.pending.clone()),
+            ..Default::default()
+        })
+        .unwrap();
+    poll(&mut state, 0.0, &mut Tx::default());
+    assert_eq!(state.history["cursor"], "epoch.5");
     assert!(!synced.pending.lock().unwrap().reset);
 }
 

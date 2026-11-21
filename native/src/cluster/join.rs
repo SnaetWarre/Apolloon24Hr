@@ -214,7 +214,16 @@ impl Node {
 
     /// Another laptop pressed Koppelen next to this one and keeps its data, or a laptop of this
     /// group joined another group (`follow`) or another split (`split`): this laptop joins too.
-    pub fn accept_invite(&self, request: &Value) -> Result<bool> {
+    pub fn accept_invite(&self, request: &Value, signed: bool) -> Result<bool> {
+        // Only a laptop of this group may tell this one to follow it. Once the race started here,
+        // nobody else moves this laptop either: joining another group is a press on this laptop.
+        if !signed
+            && (request["split"].is_string()
+                || request["follow"].is_string()
+                || self.own_side().race_started)
+        {
+            return Err("Deze laptops horen bij een andere groep.".into());
+        }
         self.wait_while_joining();
         let url = request["url"].as_str().unwrap_or("");
         let cluster_id = request["clusterId"].as_str().unwrap_or("");
@@ -298,8 +307,11 @@ impl Node {
                         } else {
                             leader.url.clone()
                         };
-                        if let Some((term, backup)) =
-                            self.join_through(&leader_url, options.auto_linked_with.as_deref())?
+                        // Another split of this group first takes what this split saved while apart.
+                        let handed = options.split.is_none() || self.hand_over_split(&leader_url);
+                        if handed
+                            && let Some((term, backup)) = self
+                                .join_through(&leader_url, options.auto_linked_with.as_deref())?
                         {
                             joined = Some((
                                 term,
@@ -407,6 +419,9 @@ impl Node {
                 .unwrap_or("Koppelen mislukt.")
                 .into());
         }
+        if let Some(key) = answer.body["groupKey"].as_str() {
+            self.adopt_group_key(key);
+        }
         match self.copy_from(leader_url, "pre-join") {
             Ok(copied) => Ok(Some(copied)),
             Err(error) => {
@@ -437,11 +452,52 @@ impl Node {
         })
     }
 
+    /// Before the leader takes in a laptop that is new to the group: the laptop that has been
+    /// silent longest is taken out, when one has been silent long enough for that. Otherwise the
+    /// group grows by a laptop that cannot vote and needs every other one for a majority. Its own
+    /// write, so the group changes by one laptop at a time; when it fails the link is refused.
+    pub fn make_room_for(&self, member: &Member) -> Result<()> {
+        let known = self
+            .members()
+            .iter()
+            .any(|m| m.host_id == member.host_id || m.url == member.url);
+        if known {
+            return Ok(());
+        }
+        // A change the others have not confirmed yet may be an earlier laptop being taken in: a
+        // second one on top of it would change the group by two laptops at once.
+        if !self.group_settled() {
+            return Err(
+                "De laptops zijn nog bezig met een vorige wijziging. Probeer het zo opnieuw."
+                    .into(),
+            );
+        }
+        let silent = {
+            let st = self.raft.lock().unwrap();
+            self.view(&st)
+                .into_iter()
+                .filter(|v| {
+                    !v.reachable && v.silent_ms >= self.cfg.removable_after.as_millis() as u64
+                })
+                .max_by_key(|v| v.silent_ms)
+        };
+        if let Some(silent) = silent {
+            self.write(
+                "cluster.removeLaptop",
+                &json!({"hostId": silent.host_id}),
+                &automatic_origin(&self.cfg.name),
+                None,
+            )?;
+        }
+        Ok(())
+    }
+
     /// The leader takes a laptop in, or records its new address; a replicated write. A laptop
     /// whose data was wiped comes back with a new id at its old address: the old id is replaced.
     pub fn add_member(&self, member: &Member, auto: Option<&str>) -> Result<()> {
         let me = self.self_member();
         let origin = automatic_origin(&self.cfg.name);
+        let _writing = self.writing.lock().unwrap();
         let mut db = self.db.lock().unwrap();
         log::record(&mut db, "cluster.addMember", None, |db| {
             let stored = log::stored_members(db);
@@ -566,13 +622,62 @@ impl Node {
     /// Makes this laptop a group of one when the others are gone. Only without a majority, and
     /// only on the Timing laptop unless Timing is taken over in the same step. Starts a new split.
     pub fn continue_alone(&self, origin: Option<&str>, take_over_timing: bool) -> Result<Value> {
-        if self.is_leader() {
+        self.go_alone(origin, take_over_timing, false)
+    }
+
+    /// A press on the Timing laptop that no majority can store: the laptop goes on alone now,
+    /// as it would by itself a little later, so the press is kept with its own time.
+    pub(super) fn press_goes_alone(&self) -> bool {
+        self.times_here()
+            && self.removed_by(self.electing_grace()).is_none()
+            && !self.majority_answers()
+            && self.go_alone(None, false, true).is_ok()
+    }
+
+    /// Asks every other laptop of the group at once; true when enough answer for a majority.
+    fn majority_answers(&self) -> bool {
+        let others: Vec<Member> = self
+            .members()
+            .into_iter()
+            .filter(|m| m.host_id != self.host_id)
+            .collect();
+        let cluster_id = self.cluster_id();
+        let answers = std::thread::scope(|scope| {
+            let asked: Vec<_> = others
+                .iter()
+                .map(|member| {
+                    let cluster_id = &cluster_id;
+                    scope.spawn(move || {
+                        self.request(
+                            reqwest::Method::GET,
+                            &format!("{}/api/cluster/status", member.url),
+                            None,
+                            self.cfg.election_timeout,
+                        )
+                        .is_ok_and(|a| a.status == 200 && a.body["clusterId"] == cluster_id.as_str())
+                    })
+                })
+                .collect();
+            asked
+                .into_iter()
+                .filter_map(|answer| answer.join().ok())
+                .filter(|answered| *answered)
+                .count()
+        });
+        answers + 1 >= self.majority()
+    }
+
+    fn go_alone(&self, origin: Option<&str>, take_over_timing: bool, press: bool) -> Result<Value> {
+        if self.is_leader() && !press {
             return Err("Deze laptop werkt al.".into());
         }
         if self.busy().is_some() {
             return Err(BUSY_MESSAGE.into());
         }
-        if self.status()["state"] != "no-majority" {
+        if press {
+            // A leader that lost the others starts over as the leader of a group of one.
+            self.step_down();
+        } else if self.status()["state"] != "no-majority" {
             return Err(
                 "Er zijn nog genoeg laptops bereikbaar; die kiezen zelf een hoofdlaptop.".into(),
             );
@@ -602,6 +707,7 @@ impl Node {
             .map(str::to_owned)
             .unwrap_or_else(|| automatic_origin(&self.cfg.name));
         let name = self.cfg.name.clone();
+        let _writing = self.writing.lock().unwrap();
         let mut db = self.db.lock().unwrap();
         log::record(&mut db, "cluster.continueAlone", None, |db| {
             db.exec(
@@ -678,7 +784,7 @@ impl Node {
                 add(member.host_id, member.url);
             }
         }
-        for beacon in self.beacons() {
+        for beacon in self.group_beacons() {
             if beacon["clusterId"] == cluster_id.as_str() {
                 if let (Some(h), Some(u)) = (beacon["hostId"].as_str(), beacon["url"].as_str()) {
                     add(h.into(), u.into());
@@ -738,7 +844,7 @@ impl Node {
         if stored.iter().find(|m| m.host_id == me.host_id) != Some(&me) {
             let _ = self.add_member(&me, None);
         }
-        let beacons = self.beacons();
+        let beacons = self.group_beacons();
         for member in stored.iter().filter(|m| m.host_id != me.host_id) {
             let Some(beacon) = beacons
                 .iter()
@@ -822,6 +928,10 @@ impl Node {
             return;
         }
         let origin = automatic_origin(&self.cfg.name);
+        // A write on its way to the other laptops goes first; the next round lists the change.
+        let Ok(_writing) = self.writing.try_lock() else {
+            return;
+        };
         let _ = log::record(
             &mut self.db.lock().unwrap(),
             "cluster.reachability",
