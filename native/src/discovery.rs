@@ -40,6 +40,8 @@ pub struct Discovery {
     heard: Mutex<BTreeMap<(String, String), (Instant, Beacon)>>,
     /// Set by the linked-laptop runtime while this laptop leads its group.
     pub leader: std::sync::atomic::AtomicBool,
+    /// Set by the linked-laptop runtime: the group key this laptop's announcements are signed with.
+    pub key: Mutex<Option<String>>,
 }
 
 impl Discovery {
@@ -122,7 +124,7 @@ impl Discovery {
                                 race_running: started && state["race_finished_at"].is_null(),
                                 proof: None,
                             };
-                            let key = crate::cluster::group_key(&db);
+                            let key = discovery.key.lock().unwrap().clone();
                             let targets = if let Some(address) = loopback_target {
                                 vec![(address, self_url.clone().unwrap_or_else(|| format!("http://127.0.0.1:{port}")))]
                             } else {

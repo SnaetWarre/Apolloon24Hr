@@ -6,14 +6,39 @@ use crate::db::{Db, Result};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
-pub(crate) const SETTING: &str = "cluster_group_keys_json";
 pub(crate) const HEADER: &str = "x-apolloon-group";
 /// Keys of groups this laptop was in before stay valid, so the laptops it left behind can still
 /// be told to follow, and a laptop that went on alone is still known when it comes back.
 const KEPT: usize = 4;
 
-pub(crate) fn stored(db: &Db) -> Vec<String> {
-    serde_json::from_value(log::json_setting(db, SETTING)).unwrap_or_default()
+/// The keys live in their own file next to the database, never in it: backups and the full
+/// copies a group hands out are copies of the database, and anyone may download a backup.
+/// A database in memory (tests) keeps its keys in memory.
+fn file(db: &Db) -> Option<std::path::PathBuf> {
+    crate::backups::database_path(db)
+        .ok()
+        .map(|path| path.with_file_name("group-keys.json"))
+}
+
+fn stored(db: &Db) -> Vec<String> {
+    file(db)
+        .and_then(|file| std::fs::read(file).ok())
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default()
+}
+
+fn save(db: &Db, keys: &[String]) -> Result<()> {
+    let Some(file) = file(db) else {
+        return Ok(());
+    };
+    let pending = file.with_extension("json.tmp");
+    std::fs::write(&pending, json!(keys).to_string()).map_err(|e| e.to_string())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&pending, std::fs::Permissions::from_mode(0o600));
+    }
+    std::fs::rename(&pending, &file).map_err(|e| e.to_string())
 }
 
 /// The keys at startup. A group linked by a version without keys gets the same first key on
@@ -29,7 +54,7 @@ pub(super) fn ensure(db: &Db, host_id: &str, cluster_id: &str) -> Result<Vec<Str
         } else {
             format!("{}{}", uuid::Uuid::new_v4().simple(), uuid::Uuid::new_v4().simple())
         });
-        log::set_local(db, SETTING, &json!(keys).to_string())?;
+        save(db, &keys)?;
     }
     Ok(keys)
 }
@@ -86,11 +111,17 @@ impl Node {
         keys.retain(|k| k != key);
         keys.insert(0, key.to_owned());
         keys.truncate(KEPT);
-        let _ = log::set_local(
-            &self.db.lock().unwrap(),
-            SETTING,
-            &json!(*keys).to_string(),
-        );
+        let _ = save(&self.db.lock().unwrap(), &keys);
+        drop(keys);
+        self.announce_group_key();
+    }
+
+    /// Announcements of this laptop are signed with the key it signs requests with.
+    pub(super) fn announce_group_key(&self) {
+        let key = self.keys.lock().unwrap().first().cloned();
+        if let Some(discovery) = self.discovery.lock().unwrap().as_ref() {
+            *discovery.key.lock().unwrap() = key;
+        }
     }
 
     /// One signature per key this laptop holds, for the `x-apolloon-group` header.
@@ -159,10 +190,15 @@ mod tests {
             ensure(&db, host, "group").unwrap()
         };
         assert_eq!(laptop("a"), laptop("b"));
-        // A laptop on its own makes a key nobody else has, and keeps it.
-        let db = Db::open(std::path::Path::new(":memory:")).unwrap();
+        // A laptop on its own makes a key nobody else has, and keeps it beside its database.
+        let dir = std::env::temp_dir().join(format!("apolloon-key-test-{}", crate::db::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Db::open(&dir.join("app.db")).unwrap();
         let own = ensure(&db, "a", "group").unwrap();
         assert_ne!(own, laptop("a"));
         assert_eq!(ensure(&db, "a", "group").unwrap(), own);
+        assert_eq!(db.rows("SELECT 1 FROM settings WHERE value LIKE ?", &[json!(format!("%{}%", own[0]))]).unwrap().len(), 0);
+        drop(db);
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

@@ -8,10 +8,6 @@ pub mod clock;
 mod join;
 mod key;
 pub(crate) use key::beacon_proof;
-/// The key this laptop signs with, when linking made one.
-pub(crate) fn group_key(db: &crate::db::Db) -> Option<String> {
-    key::stored(db).into_iter().next()
-}
 pub mod log;
 mod probe;
 mod raft;
@@ -227,6 +223,7 @@ impl Node {
     }
     pub fn set_discovery(&self, discovery: Arc<crate::discovery::Discovery>) {
         *self.discovery.lock().unwrap() = Some(discovery);
+        self.announce_group_key();
     }
     /// Stops voting, replicating and answering; a laptop switched off.
     pub fn stop(&self) {

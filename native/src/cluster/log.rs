@@ -30,14 +30,13 @@ const REPLICATED_TABLES: [&str; 13] = [
     "replication_log",
 ];
 /// Settings that describe this laptop, not the event: never replicated, never replaced by a copy.
-const LOCAL_SETTINGS: [&str; 7] = [
+const LOCAL_SETTINGS: [&str; 6] = [
     "host_id",
     "replication_cluster_id",
     "cluster_epoch",
     "cluster_voted_for",
     "cluster_clock_offset_ms",
     "cluster_known_peers_json",
-    super::key::SETTING,
 ];
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

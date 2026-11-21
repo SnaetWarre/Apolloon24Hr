@@ -1361,6 +1361,10 @@ fn a_device_outside_the_group_cannot_write_or_read_through_the_laptop_endpoints(
     assert_eq!(a.node.group_keys()[0], b.node.group_keys()[0]);
     assert_eq!(a.node.group_keys()[0], c.node.group_keys()[0]);
     assert!(!a.status().to_string().contains(&a.node.group_keys()[0]));
+    // It is in no backup and in no copy of the data either: both are the database, the key is not in it.
+    let key = a.node.group_keys()[0].clone();
+    let image = super::log::serialize(&a.db.lock().unwrap()).unwrap();
+    assert!(!image.windows(key.len()).any(|w| w == key.as_bytes()));
     let status = a.status();
     let head = a.head();
     let runners = a.count("SELECT COUNT(*) AS n FROM runners");
