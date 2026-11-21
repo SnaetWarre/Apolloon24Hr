@@ -1625,11 +1625,17 @@ mod tests {
         );
         state.snapshot["runners"] = json!([{"id":"runner"}]);
         assert!(!readiness::needs_attention(&state));
+        let checks = readiness::checks(&state);
+        assert_eq!(readiness::summary(&checks), readiness::Level::Ready);
+        assert_eq!(readiness::open_count(&checks), 0);
+        assert_eq!(checks.iter().find(|c| c.id == "screens").unwrap().level, readiness::Level::Warning);
         state.snapshot["screens"] =
-            json!([{"kind":"outside","address":"192.168.88.20","lastSeen":1000}]);
+            json!([{"kind":"outside","address":"192.168.88.20"}]);
         let checks = readiness::checks(&state);
         let screens = checks.iter().find(|c| c.id == "screens").unwrap();
         assert_eq!(screens.level, readiness::Level::Ready);
+        assert_eq!(readiness::summary(&checks), readiness::Level::Ready);
+        assert_eq!(readiness::open_count(&checks), 0);
         assert!(screens.detail.contains("Buitenscherm (192.168.88.20)"));
         assert_eq!(
             checks
@@ -1640,6 +1646,7 @@ mod tests {
             readiness::Level::Ready
         );
         state.connected = false;
+        assert!(readiness::open_count(&readiness::checks(&state)) > 0);
         assert_eq!(
             readiness::summary(&readiness::checks(&state)),
             readiness::Level::Blocked

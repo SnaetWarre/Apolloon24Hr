@@ -145,7 +145,10 @@ fn group_check(cluster: &Value) -> Check {
     }
 }
 pub(super) fn summary(checks: &[Check]) -> Level {
-    checks.iter().map(|c| c.level).min().unwrap_or(Level::Ready)
+    checks.iter().filter(|c| c.id != "screens").map(|c| c.level).min().unwrap_or(Level::Ready)
+}
+pub(super) fn open_count(checks: &[Check]) -> usize {
+    checks.iter().filter(|c| c.id != "screens" && c.level != Level::Ready).count()
 }
 /// Whether the Systeem tab gets its attention dot.
 pub(super) fn needs_attention(s: &State) -> bool {
@@ -204,7 +207,7 @@ pub(super) fn panel(s: &State) -> El {
     let p = pal(s.dark);
     let checks = checks(s);
     let level = summary(&checks);
-    let open = checks.iter().filter(|c| c.level != Level::Ready).count();
+    let open = open_count(&checks);
     let (wash, ink) = match level {
         Level::Ready => (p.t.go_wash, p.go_ink),
         Level::Warning => (p.t.warn_wash, p.t.warn_ink),

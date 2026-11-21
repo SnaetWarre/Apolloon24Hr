@@ -16,24 +16,24 @@ struct ReadCache {
 }
 
 #[derive(Default)]
-struct Screens(std::collections::BTreeMap<(String, std::net::IpAddr), (std::time::Instant, i64)>);
+struct Screens(std::collections::BTreeMap<(String, std::net::IpAddr), std::time::Instant>);
 
 impl Screens {
     fn seen(&mut self, kind: &str, address: std::net::IpAddr) {
         if matches!(kind, "inside" | "competitions" | "outside") {
             self.0
-                .insert((kind.into(), address), (std::time::Instant::now(), now()));
+                .insert((kind.into(), address), std::time::Instant::now());
         }
     }
 
     fn active(&mut self) -> Value {
         self.0
-            .retain(|_, (seen, _)| seen.elapsed() < std::time::Duration::from_secs(15));
+            .retain(|_, seen| seen.elapsed() < std::time::Duration::from_secs(15));
         json!(
             self.0
                 .iter()
-                .map(|((kind, address), (_, seen))| {
-                    json!({"kind":kind,"address":address.to_string(),"lastSeen":seen})
+                .map(|((kind, address), _)| {
+                    json!({"kind":kind,"address":address.to_string()})
                 })
                 .collect::<Vec<_>>()
         )
@@ -706,14 +706,9 @@ mod read_cache_tests {
         let value = register("outside").await.unwrap().0;
         assert_eq!(value["screens"][0]["kind"], "outside");
         assert_eq!(value["screens"][0]["address"], "192.168.88.20");
-        assert!(value["screens"][0]["lastSeen"].is_i64());
-        assert_eq!(
-            register("outside").await.unwrap().0["screens"]
-                .as_array()
-                .unwrap()
-                .len(),
-            1
-        );
+        assert_eq!(value["screens"], json!([{"kind":"outside","address":"192.168.88.20"}]));
+        assert_eq!(register("outside").await.unwrap().0, value);
+        assert_eq!(snapshot(State(host.clone())).await.unwrap().0, value);
         let other = Host::with_cluster(db, 5174, None);
         assert_eq!(
             snapshot(State(other)).await.unwrap().0["screens"],
@@ -724,7 +719,7 @@ mod read_cache_tests {
             .unwrap()
             .0
             .values_mut()
-            .for_each(|(seen, _)| *seen -= std::time::Duration::from_secs(16));
+            .for_each(|seen| *seen -= std::time::Duration::from_secs(16));
         assert_eq!(snapshot(State(host)).await.unwrap().0["screens"], json!([]));
     }
 
