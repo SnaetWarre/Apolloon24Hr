@@ -938,15 +938,19 @@ fn network_panel(s: &State) -> El {
             Some(true) => "automatisch adres (kan veranderen!)",
             Some(false) => "vast adres (blijft staan!)",
         };
-        let mut line = format!(
+        let line = format!(
             "**Nu:** {} (adapter: {}) · {source}",
             st(primary, "address"),
             st(primary, "name")
         );
-        if let Some(url) = profile["eventUrl"].as_str() {
-            line.push_str(&format!(" · Schermen verbinden met **{url}**"));
-        }
         out = out.child(spaced(kit::notice_text(s, Tone::Hint, &line)));
+    }
+    if let Some(url) = s.snapshot["host"]["url"].as_str() {
+        out = out.child(spaced(super::readiness::screen_links(
+            s,
+            url,
+            "network-screen",
+        )));
     }
     if let Some(manager) = profile["manager"].as_str() {
         out = out.child(spaced(kit::notice_text(
