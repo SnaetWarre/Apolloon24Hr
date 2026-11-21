@@ -664,7 +664,7 @@ pub(super) fn page(s: &State) -> El {
                     return false;
                 }
                 if !tx.key_repeat() {
-                    press(s);
+                    key_press(s);
                 }
                 true
             })
