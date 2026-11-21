@@ -82,6 +82,12 @@ fn link_next(s: &mut State) {
         None => {
             let setup = &mut s.system.setup;
             setup.linking_all = false;
+            if setup.linked == 0 && !setup.missed.is_empty() {
+                s.error = format!(
+                    "Koppelen lukte nog niet met {}. Controleer of Apolloon daar open staat en aan dezelfde switch hangt, en probeer opnieuw.",
+                    setup.missed.join(", ")
+                );
+            }
             s.notice = match (setup.linked, setup.missed.as_slice()) {
                 (0, _) => String::new(),
                 (n, []) => format!(
