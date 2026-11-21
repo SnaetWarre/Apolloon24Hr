@@ -433,8 +433,19 @@ fn poll(s: &mut State, _: f64, tx: &mut Tx) -> bool {
         }
         // Polls and actions fetch side by side: never let an older answer replace a newer one.
         let older = |new: &Value, old: &Value| new["revision"].as_i64() < old["revision"].as_i64();
+        if update.snapshot["unchanged"] == true {
+            for key in ["host", "cluster", "screens"] {
+                if let Some(value) = update.snapshot.get(key)
+                    && s.snapshot[key] != *value
+                {
+                    s.snapshot[key] = value.clone();
+                    changed = true;
+                }
+            }
+        }
         if s.connected
             && !update.snapshot.is_null()
+            && update.snapshot["unchanged"] != true
             && !older(&update.snapshot, &s.snapshot)
             && s.snapshot != update.snapshot
         {
@@ -1400,11 +1411,32 @@ mod tests {
     #[test]
     fn old_servers_errors_and_fast_unchanged_answers_are_paced_without_delaying_changes() {
         let elapsed = Duration::from_millis(10);
-        for state in [Value::Null, json!({"revision":1}), json!({"changeToken":"same"})] {
+        for state in [Value::Null, json!({"revision":1}), json!({"changeToken":"same"}), json!({"unchanged":true,"changeToken":"same"})] {
             assert_eq!(poll_delay(&state, Some("same"), elapsed), Duration::from_millis(190));
             assert_eq!(poll_delay(&state, Some("same"), Duration::from_secs(2)), Duration::ZERO);
         }
         assert_eq!(poll_delay(&json!({"changeToken":"new"}), Some("old"), elapsed), Duration::ZERO);
+    }
+
+    #[test]
+    fn unchanged_push_keeps_race_and_history_but_refreshes_live_status() {
+        let (sender, receiver) = mpsc::channel();
+        let mut state = init_with_url("http://127.0.0.1:0".into());
+        state.connected = true;
+        state.snapshot = json!({"revision":7,"changeToken":"db.7","runners":[{"id":"runner"}],"race":{"activeRunnerId":"runner"},"cluster":{"writable":true}});
+        state.history = json!({"laps":[{"id":"lap"}],"cursor":"epoch.2"});
+        let before = (state.snapshot.clone(), state.history.clone());
+        state.rx = receiver;
+        sender.send(Update { snapshot: json!({"unchanged":true,"changeToken":"db.7","cluster":{"writable":false},"screens":[{"kind":"inside"}]}), ..Default::default() }).unwrap();
+        poll(&mut state, 0.0, &mut Tx::default());
+        assert!(state.connected);
+        for key in ["revision", "changeToken", "runners", "race"] {
+            assert_eq!(state.snapshot[key], before.0[key]);
+        }
+        assert_eq!(state.history, before.1);
+        assert_eq!(state.snapshot["cluster"]["writable"], false);
+        assert_eq!(state.snapshot["screens"], json!([{"kind":"inside"}]));
+        assert!(state.snapshot.get("unchanged").is_none());
     }
 
     #[test]
@@ -1472,6 +1504,52 @@ mod tests {
         let update = receiver.recv_timeout(Duration::from_secs(5)).unwrap();
         assert_eq!(update.snapshot["revision"], 1);
         assert!((59_000..=61_000).contains(&update.clock_offset.unwrap()));
+        server.join().unwrap();
+    }
+    #[test]
+    fn native_transport_repolls_unchanged_tokens_without_fetching_history() {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            let mut states = 0;
+            while states < 3 {
+                let (mut socket, _) = listener.accept().unwrap();
+                socket.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+                let mut request = [0; 4096];
+                let size = socket.read(&mut request).unwrap();
+                let request = String::from_utf8_lossy(&request[..size]);
+                let body = if request.starts_with("GET /api/state?") {
+                    states += 1;
+                    if states == 1 {
+                        assert!(!request.contains("after="));
+                        json!({"changeToken":"db.1","revision":1,"stateHistory":{"scope":"full","cursor":"history.1","laps":[],"events":[]}})
+                    } else {
+                        assert!(request.contains("after=db.1"), "{request}");
+                        assert!(request.contains("since=history.1"), "{request}");
+                        json!({"unchanged":true,"changeToken":"db.1"})
+                    }
+                } else if request.starts_with("GET /api/clock ") {
+                    json!({"serverNowMs":now()})
+                } else {
+                    assert!(request.starts_with("GET /api/recovery "), "unexpected fetch: {request}");
+                    json!({})
+                }.to_string();
+                write!(socket, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{body}", body.len()).unwrap();
+            }
+        });
+        let (_commands, commands) = mpsc::channel();
+        let (sender, receiver) = mpsc::channel();
+        start_transport(url, commands, Updates { sender, wake: Arc::new(Mutex::new(None)) }, Default::default());
+        let mut unchanged = 0;
+        while unchanged < 2 {
+            let update = receiver.recv_timeout(Duration::from_secs(5)).unwrap();
+            if update.snapshot["unchanged"] == true {
+                unchanged += 1;
+                assert!(update.history.is_null());
+                assert!(update.images.is_empty());
+            }
+        }
         server.join().unwrap();
     }
     fn update(rt: &mut Runtime<State>, predicate: impl Fn(&State) -> bool) {
@@ -2740,6 +2818,9 @@ fn start_transport(url: String, commands: Receiver<Command>, updates: Updates, _
         path: &str,
     ) -> Update {
         let mut snapshot = get(client, url, path);
+        if snapshot["unchanged"] == true {
+            return Update { snapshot, ..Default::default() };
+        }
         crate::latency::snapshot("push_received", &snapshot);
         let bundled = snapshot.as_object_mut().and_then(|s| s.remove("stateHistory"));
         let revision = snapshot["revision"].as_i64();
@@ -2887,6 +2968,9 @@ fn start_transport(url: String, commands: Receiver<Command>, updates: Updates, c
             ;
         let path = synced.borrow().state_path(after, screen.as_deref());
         let mut snapshot = get(client, url, &path).await;
+        if snapshot["unchanged"] == true {
+            return Update { snapshot, ..Default::default() };
+        }
         crate::latency::snapshot("push_received", &snapshot);
         let bundled = snapshot.as_object_mut().and_then(|s| s.remove("stateHistory"));
         let revision = snapshot["revision"].as_i64();
