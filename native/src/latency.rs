@@ -23,7 +23,8 @@ pub fn init() {
             let (sender, receiver) = std::sync::mpsc::sync_channel::<Value>(8192);
             std::thread::spawn(move || {
                 for event in receiver {
-                    eprintln!("APOLLOON_LATENCY {event}");
+                    let line = trace_line(&event);
+                    let _ = std::io::Write::write_all(&mut std::io::stderr().lock(), line.as_bytes());
                 }
             });
             sender
@@ -38,6 +39,11 @@ pub fn init() {
             .unwrap_or(false),
         Ordering::Relaxed,
     );
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn trace_line(event: &Value) -> String {
+    format!("APOLLOON_LATENCY {event}\n")
 }
 
 pub fn realtime_us() -> f64 {
@@ -159,6 +165,15 @@ pub fn notify() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn trace_records_are_complete_lines_before_writing() {
+        for event in [Value::Null, json!({}), json!({"stage":"http_body","id":"line\nbreak"})] {
+            let line = trace_line(&event);
+            assert_eq!(line.lines().count(), 1);
+            assert_eq!(serde_json::from_str::<Value>(line.strip_prefix("APOLLOON_LATENCY ").unwrap()).unwrap(), event);
+        }
+    }
+
     #[test]
     fn handoff_identity_uses_the_existing_exactly_once_token() {
         assert_eq!(
