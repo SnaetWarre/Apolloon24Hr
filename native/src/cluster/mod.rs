@@ -648,6 +648,12 @@ impl Node {
             "race.clear" => Some("pre-clear"),
             _ => None,
         };
+        // A press on the Timing laptop is stored at once: that laptop goes on alone when it is
+        // cut off, and a lap clocked in the seconds before must still be there.
+        let keep = TIMING_PRESSES.contains(&method)
+            && self
+                .timing()
+                .is_some_and(|t| t["hostId"] == self.host_id.as_str());
         let _writing = self.writing.lock().unwrap();
         let mut attempts = 0;
         let (result, prepared, seq) = loop {
@@ -676,7 +682,7 @@ impl Node {
             // The write runs and is taken back: it reaches this laptop's data, and its screens,
             // only once a majority holds it.
             let (mut result, mut prepared) = self
-                .run_write(&mut db, method, input, origin, request, false)
+                .run_write(&mut db, method, input, origin, request, keep)
                 .map_err(Failure::refused)?;
             // A write too large for one message reaches a follower only inside a full copy of
             // the leader's data, so the leader has to store it first.

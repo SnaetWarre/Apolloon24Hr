@@ -425,10 +425,37 @@ fn a_write_the_majority_never_confirmed_is_not_kept_on_the_leader() {
         .unwrap();
     assert!(!state.to_string().contains("Onbevestigd"));
 
-    // The others return: the write that was answered as not saved appears nowhere.
+    // A press on the Timing laptop is the exception: the lap stays, also without the others.
+    a.act("runners.create", json!({"name":"Te laat"})).unwrap_err();
     off(&b, false);
     off(&c, false);
     wait_until("the group works again", Duration::from_secs(15), || {
+        all_healthy(&[&a, &b, &c]) && same_heads(&[&a, &b, &c])
+    });
+    let timing = [&a, &b, &c][leader_index(&[&a, &b, &c]).unwrap()];
+    let others: Vec<&TestServer> = [&a, &b, &c]
+        .into_iter()
+        .filter(|s| s.port != timing.port)
+        .collect();
+    for name in ["Zoë", "Wout"] {
+        timing
+            .act("runners.create", json!({"name":name,"status":"waiting"}))
+            .unwrap();
+    }
+    timing
+        .act("cluster.openTiming", json!({"takeOver": false}))
+        .unwrap();
+    press(timing, "race.handoff").unwrap();
+    off(others[0], true);
+    off(others[1], true);
+    let _ = press(timing, "race.handoff");
+    assert_eq!(timing.count("SELECT COUNT(*) AS n FROM laps"), 1);
+    assert_eq!(named(timing, "Te laat"), 0);
+
+    // The others return: the write that was answered as not saved appears nowhere.
+    off(others[0], false);
+    off(others[1], false);
+    wait_until("the group works again", Duration::from_secs(20), || {
         all_healthy(&[&a, &b, &c]) && same_heads(&[&a, &b, &c])
     });
     let leader = [&a, &b, &c][leader_index(&[&a, &b, &c]).unwrap()];
@@ -440,6 +467,7 @@ fn a_write_the_majority_never_confirmed_is_not_kept_on_the_leader() {
     });
     for server in [&a, &b, &c] {
         assert_eq!(named(server, "Onbevestigd"), 0);
+        assert_eq!(named(server, "Te laat"), 0);
     }
 }
 
