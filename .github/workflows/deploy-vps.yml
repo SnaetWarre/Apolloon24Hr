@@ -29,8 +29,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
-      - name: Install Binaryen for the web bundle
-        run: npm install --global binaryen@130.0.0
       - name: Install wasm-bindgen CLI
         run: cargo install wasm-bindgen-cli --version 0.2.130 --locked
       - name: Build and check the Rust server package

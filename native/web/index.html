@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="nl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Apolloon Telsysteem</title><link rel="preload" href="/app_bg.wasm" as="fetch" type="application/wasm" crossorigin>
+<html lang="nl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Apolloon Telsysteem</title><link rel="preload" href="/app_bg.wasm" as="fetch" type="application/wasm" crossorigin><link rel="modulepreload" href="/app.js">
 <script>
 const theme = new URLSearchParams(location.search).get('thema');
 document.documentElement.dataset.theme = ['licht', 'light'].includes(theme) ? 'light'
@@ -15,12 +15,13 @@ html[data-theme=dark],html[data-theme=dark] body{background:#18181a;color:#fafaf
 [data-theme=dark] #status .light-logo{display:none}
 [data-theme=dark] #status .dark-logo{display:block}
 #message{opacity:.65;max-width:36em;overflow-wrap:anywhere}
-</style></head><body><div id="status" role="status"><img class="light-logo" src="/logo-light.svg" alt="Apolloon" width="230" height="70"><img class="dark-logo" src="/logo-dark.svg" alt="Apolloon" width="230" height="70"><span id="message">Apolloon laden…</span></div><script type="module">
+</style></head><body><div id="status" role="status"><img class="light-logo" src="/logo-light.svg" alt="Apolloon" width="230" height="70"><img class="dark-logo" src="/logo-dark.svg" alt="Apolloon" width="230" height="70"><span id="message">Apolloon laden…</span></div><script type="module" onerror="document.querySelector('#message').textContent='Apolloon kon niet starten. Herlaad deze pagina.'">
+import init from '/app.js';
 import { followGroup } from '/failover.js';
 followGroup();
 const firstFrame = () => {
   if (!performance.getEntriesByName('web.first.presented').length) return false;
-  requestAnimationFrame(() => document.querySelector('#status')?.remove());
+  document.querySelector('#status')?.remove();
   return true;
 };
 const observer = new PerformanceObserver(() => {
@@ -28,7 +29,6 @@ const observer = new PerformanceObserver(() => {
 });
 observer.observe({ type: 'mark', buffered: true });
 try {
-  const { default: init } = await import('/app.js');
   await init();
   if (firstFrame()) observer.disconnect();
   else setTimeout(() => {

@@ -6,6 +6,18 @@ import vm from 'node:vm';
 const html = readFileSync(new URL('../native/web/index.html', import.meta.url), 'utf8');
 const scripts = [...html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)].map((match) => match[1]);
 
+test('the app module is preloaded and imported without a dynamic-import delay', () => {
+  assert.match(html, /<link rel="modulepreload" href="\/app.js">/);
+  assert.match(scripts[1], /import init from '\/app.js';/);
+});
+
+test('a module fetch failure leaves a readable startup error on the splash', () => {
+  const message = { textContent: 'Apolloon laden…' };
+  const handler = html.match(/<script type="module" onerror="([^"]+)"/)[1];
+  vm.runInNewContext(handler, { document: { querySelector: () => message } });
+  assert.match(message.textContent, /Apolloon kon niet starten/);
+});
+
 test('splash theme follows the URL, then the system preference', () => {
   for (const [query, dark, expected] of [
     ['', false, 'light'],
@@ -35,12 +47,14 @@ test('splash waits for a presented frame, with a three-second fallback after ini
   const timers = [];
   const source = scripts[1]
     .replace("import { followGroup } from '/failover.js';", '')
-    .replace("await import('/app.js')", 'await loadApp()');
+    .replace("import init from '/app.js';", '');
   const message = { textContent: 'Apolloon laden…' };
   const context = {
     followGroup() {},
     performance: { getEntriesByName: () => (presented ? [{}] : []) },
-    requestAnimationFrame: (callback) => callback(),
+    requestAnimationFrame() {
+      assert.fail('the presented frame must not wait behind another animation frame');
+    },
     setTimeout: (callback, delay) => timers.push({ callback, delay }),
     document: { querySelector: (selector) => (selector === '#message' ? message : { remove: () => (removed = true) }) },
     PerformanceObserver: class {
@@ -52,7 +66,7 @@ test('splash waits for a presented frame, with a three-second fallback after ini
         disconnected = true;
       }
     },
-    loadApp: async () => ({ default: async () => {} }),
+    init: async () => {},
     console: { error() {} },
   };
   await vm.runInNewContext(`(async () => {${source}})()`, context);
@@ -71,13 +85,11 @@ test('splash waits for a presented frame, with a three-second fallback after ini
   let finishInit;
   let startedInit;
   const initStarted = new Promise((resolve) => (startedInit = resolve));
-  context.loadApp = async () => ({
-    default: () =>
-      new Promise((resolve) => {
-        finishInit = resolve;
-        startedInit();
-      }),
-  });
+  context.init = () =>
+    new Promise((resolve) => {
+      finishInit = resolve;
+      startedInit();
+    });
   const initializing = vm.runInNewContext(`(async () => {${source}})()`, context);
   await initStarted;
   assert.equal(timers.length, 0, 'the fallback must not start before init resolves');
@@ -93,7 +105,7 @@ test('splash waits for a presented frame, with a three-second fallback after ini
 
   removed = false;
   timers.length = 0;
-  context.loadApp = async () => {
+  context.init = async () => {
     throw new Error('network unavailable');
   };
   await vm.runInNewContext(`(async () => {${source}})()`, context);
