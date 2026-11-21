@@ -918,3 +918,41 @@ fn followers_keep_saving_after_the_leader_gets_another_address() {
     assert_eq!(a.status()["leader"]["url"], json!(moved));
     followers_save(&a, &b, &c);
 }
+
+#[test]
+fn an_announcement_from_elsewhere_does_not_replace_the_address_the_leader_connects_from() {
+    let _serial = serial();
+    let dir = Dir::new();
+    let (a, b, _c) = linked_three(&dir);
+    let a_id = a.status()["hostId"].as_str().unwrap().to_owned();
+    hear(&b, &beacon(&a, "http://192.0.2.9:5173", "Laptop A"));
+    let from = Some(std::net::IpAddr::from(std::net::Ipv4Addr::LOCALHOST));
+    assert_eq!(b.node.leader_address(&a_id, &a.url, from), a.url);
+    assert_eq!(b.node.leader_address(&a_id, &a.url, None), a.url);
+}
+
+#[test]
+fn a_leader_that_gets_the_stored_address_of_another_laptop_keeps_that_laptop_in_the_group() {
+    let _serial = serial();
+    let dir = Dir::new();
+    let (a, b, c) = linked_three(&dir);
+    let (a, b, c) = match leader_index(&[&a, &b, &c]).unwrap() {
+        0 => (a, b, c),
+        1 => (b, a, c),
+        _ => (c, a, b),
+    };
+    let a_id = a.status()["hostId"].as_str().unwrap().to_owned();
+    a.node.set_self_url(&b.url);
+    wait_until(
+        "the leader stores its new address",
+        Duration::from_secs(10),
+        || {
+            a.db.lock()
+                .unwrap()
+                .one("SELECT url FROM cluster_members WHERE host_id=?", &[json!(a_id)])
+                .is_ok_and(|row| row["url"] == json!(b.url))
+        },
+    );
+    assert_eq!(a.count("SELECT COUNT(*) AS n FROM cluster_members"), 3);
+    drop(c);
+}

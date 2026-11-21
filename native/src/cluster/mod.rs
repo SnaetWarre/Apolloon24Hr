@@ -310,7 +310,7 @@ impl Node {
         *self.self_url.lock().unwrap() = url.to_owned();
     }
     /// Where a follower reaches the leader. The address the leader gives for itself can be an old
-    /// one, so what it announces on the network and where its requests come from go first.
+    /// one, so where its requests come from decides; an announcement counts only from there.
     pub(crate) fn leader_address(
         &self,
         host_id: &str,
@@ -343,7 +343,7 @@ impl Node {
         {
             url.set_ip_host(remote).ok().map(|_| url)
         } else {
-            announced.first().cloned()
+            None
         };
         chosen
             .and_then(|url| join::normalize_url(url.as_str()))
