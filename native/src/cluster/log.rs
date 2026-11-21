@@ -140,6 +140,14 @@ pub fn entry_id(db: &Db, seq: i64) -> Option<String> {
         .map(str::to_owned)
 }
 
+/// The term entry `seq` was written in, while this log still holds it.
+pub fn entry_term(db: &Db, seq: i64) -> Option<i64> {
+    db.rows("SELECT epoch FROM replication_log WHERE seq=?", &[json!(seq)])
+        .ok()?
+        .first()?["epoch"]
+        .as_i64()
+}
+
 fn oldest(db: &Db) -> Option<i64> {
     db.rows("SELECT MIN(seq) AS seq FROM replication_log", &[])
         .ok()?
@@ -247,6 +255,22 @@ pub fn seal(db: &Db, kind: &str, result: &Value) -> Result<Option<Entry>> {
     };
     insert(db, &entry)?;
     Ok(Some(entry))
+}
+
+/// Appends an entry that changes nothing. A new leader starts with one, so that its term has an
+/// entry a majority can store (see `advance_commit`).
+pub fn append_empty(db: &Db, kind: &str) -> Result<()> {
+    insert(
+        db,
+        &Entry {
+            seq: head(db).seq + 1,
+            id: crate::db::id(),
+            epoch: term(db),
+            kind: kind.to_owned(),
+            statements: Vec::new(),
+            created_at: now(),
+        },
+    )
 }
 
 /// The saved answer to a forwarded write that already ran.
