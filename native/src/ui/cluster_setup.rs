@@ -1,7 +1,6 @@
-//! Beheer › Systeem & herstel › Groep maken: one guided screen to link the laptops, give each one
-//! a role and test the group. Every laptop is a card with its live state (gevonden, gekoppeld,
-//! bijgewerkt), one button links all found laptops, and the role (Timing, Wachtrij, Opwarming or
-//! a name of your own) replicates to the group and shows in the sidebar of that laptop.
+//! Beheer › Systeem & herstel › Groep maken: one guided screen to link the laptops and test the
+//! group. Every laptop is a card with its live state (gevonden, gekoppeld, bijgewerkt), and one
+//! button links all found laptops. Every laptop can do everything; there is nothing to configure.
 use super::admin_kit::{self as kit, Kind, Tone};
 use super::admin_system::{
     busy_state, cluster, confirm_cluster, describe_group, disclosure, laptop_label,
@@ -9,42 +8,19 @@ use super::admin_system::{
 };
 use super::*;
 use super::admin_base::st;
-use std::collections::HashMap;
 
-/// The roles the cards offer with one click.
-pub(super) const ROLES: [&str; 3] = ["Timing", "Wachtrij", "Opwarming"];
 /// The cards a full group shows; empty places invite the next laptop.
 const CARDS: usize = 3;
 const CARD_W: f32 = 268.0;
 
 #[derive(Default)]
 pub(super) struct Setup {
-    /// A role being typed, by host id; dropped once saved so the card shows the group's role.
-    roles: HashMap<String, TextEdit>,
     /// Linking every found laptop, one after the other.
     linking_all: bool,
     /// Addresses tried in this round of linking, so a failure moves on to the next laptop.
     tried: Vec<String>,
     linked: usize,
     missed: Vec<String>,
-}
-
-/// The role of a laptop in the group, if it has one.
-pub(super) fn role(m: &Value) -> Option<&str> {
-    m["role"].as_str().filter(|r| !r.is_empty())
-}
-/// The role of this laptop, for the sidebar.
-pub(super) fn own_role(s: &State) -> Option<String> {
-    let c = &s.snapshot["cluster"];
-    if c["enabled"] != true {
-        return None;
-    }
-    c["members"]
-        .as_array()?
-        .iter()
-        .find(|m| m["self"] == true)
-        .and_then(role)
-        .map(str::to_owned)
 }
 
 /// Found laptops this laptop can link with from here.
@@ -91,7 +67,7 @@ fn link_next(s: &mut State) {
             s.notice = match (setup.linked, setup.missed.as_slice()) {
                 (0, _) => String::new(),
                 (n, []) => format!(
-                    "{} gekoppeld. Geef elke laptop nu een rol en test de groep.",
+                    "{} gekoppeld. Test nu de groep.",
                     kit::count_label(n as i64, "laptop", "laptops")
                 ),
                 (n, missed) => format!(
@@ -116,16 +92,6 @@ pub(super) fn joined(s: &mut State, ok: bool) -> bool {
     }
     link_next(s);
     true
-}
-pub(super) fn role_saved(s: &mut State, result: &Value) {
-    if let Some(host) = result["hostId"].as_str() {
-        s.system.setup.roles.remove(host);
-    }
-    let name = st(result, "name");
-    s.notice = match result["role"].as_str() {
-        Some(role) => format!("{name} is nu {role}."),
-        None => format!("Rol van {name} gewist."),
-    };
 }
 
 /// The confirmation before linking every found laptop.
@@ -233,105 +199,15 @@ fn member_state(s: &State, c: &Value, m: &Value) -> (&'static str, rune::Color) 
     }
 }
 
-fn role_editor(s: &State, m: &Value, busy: bool) -> El {
-    let p = kit::pal(s.dark);
-    let host = st(m, "hostId").to_string();
-    let current = role(m).unwrap_or("").to_string();
-    let typed = s.system.setup.roles.get(&host);
-    let shown = typed.cloned().unwrap_or_else(|| TextEdit::new(current.as_str()));
-    let mut presets = row().gap(6.0).flex_wrap();
-    for preset in ROLES {
-        let on = current == preset;
-        let id = host.clone();
-        presets = presets.child(
-            kit::btn(
-                s,
-                format!("setup-role-{host}-{}", preset.to_lowercase()),
-                preset,
-                if on { Kind::Primary } else { Kind::Plain },
-                true,
-                None,
-                busy,
-                move |s| {
-                    if !on {
-                        s.send("cluster.setRole", json!({"hostId": id, "role": preset}))
-                    }
-                },
-            )
-            .checked(on),
-        );
-    }
-    let edit_id = host.clone();
-    let start = current.clone();
-    let save_id = host.clone();
-    let submit_id = host.clone();
-    let changed = typed.is_some_and(|t| t.text.trim() != current);
-    let save = move |s: &mut State, id: &str| {
-        let Some(edit) = s.system.setup.roles.get(id) else { return };
-        let role = edit.text.trim().to_string();
-        s.send("cluster.setRole", json!({"hostId": id, "role": role}));
-    };
-    let save_btn = save.clone();
-    col()
-        .w_full()
-        .gap(6.0)
-        .child(text("Rol").font(kit::ts(12.0, 500.0)).color(p.t.ink3))
-        .child(presets)
-        .child(
-            row()
-                .w_full()
-                .gap(6.0)
-                .center_y()
-                .child(
-                    kit::input(s, &shown, &format!("setup-role-{host}"), "Rol van deze laptop", "Eigen naam, bv. Reserve")
-                        .grow(1.0)
-                        .disabled(busy)
-                        .on_edit(move |s: &mut State| {
-                            s.system
-                                .setup
-                                .roles
-                                .entry(edit_id.clone())
-                                .or_insert_with(|| TextEdit::new(start.as_str()))
-                        })
-                        .on_submit(move |s: &mut State, _tx: &mut Tx| save(s, &submit_id)),
-                )
-                .child(kit::btn(
-                    s,
-                    format!("setup-role-save-{host}"),
-                    "Opslaan",
-                    Kind::Plain,
-                    true,
-                    None,
-                    busy || !changed,
-                    move |s| save_btn(s, &save_id),
-                )),
-        )
-}
-
-fn member_card(s: &State, c: &Value, m: &Value, busy: bool, linked: bool) -> El {
+fn member_card(s: &State, c: &Value, m: &Value, busy: bool) -> El {
     let p = kit::pal(s.dark);
     let (state, color) = member_state(s, c, m);
-    let mut title = card_title(s, &laptop_label(m), (m["self"] == true).then_some("deze laptop"));
-    if let Some(r) = role(m) {
-        title = title.child(rune::el().grow(1.0)).child(
-            text(r.to_string())
-                .key(format!("setup-role-tag-{}", st(m, "hostId")))
-                .font(kit::ts(12.0, 600.0))
-                .color(p.brand)
-                .truncate()
-                .min_w(0.0)
-                .max_w(110.0),
-        );
-    }
+    let title = card_title(s, &laptop_label(m), (m["self"] == true).then_some("deze laptop"));
     let mut el = card(s, format!("setup-laptop-{}", st(m, "hostId")))
         .label(format!("{} {state}", laptop_label(m)))
         .child(title)
         .child(text(short_url(st(m, "url")).to_string()).font(kit::ts(12.5, 400.0)).color(p.t.ink3))
         .child(chip(s, state, color));
-    // A laptop that joins a group takes over that group's data, so roles wait until it is linked.
-    if linked {
-        el = el.child(role_editor(s, m, busy));
-    }
     if m["removable"] == true {
         let host_id = m["hostId"].clone();
         let name = laptop_label(m);
@@ -427,7 +303,6 @@ pub(super) fn panel(s: &State) -> El {
     let busy = s.busy || busy_state(c) || s.system.setup.linking_all;
     let host_url = st(&s.snapshot["host"], "url").to_string();
     let linked = members.len() > 1;
-    let roles_done = linked && members.iter().all(|m| role(m).is_some());
     let tested = s.group.test["ok"] == true;
     let mut copy_text = if linked {
         format!(
@@ -454,8 +329,7 @@ pub(super) fn panel(s: &State) -> El {
                 .flex_wrap()
                 .mb(14.0)
                 .child(step(s, 1, "Laptops koppelen", linked, !linked))
-                .child(step(s, 2, "Rollen geven", roles_done, linked && !roles_done))
-                .child(step(s, 3, "Groep testen", tested, roles_done && !tested)),
+                .child(step(s, 2, "Groep testen", tested, linked && !tested)),
         )
         .child(spaced(
             kit::notice_text(s, tone, &format!("**{title}** · {detail}")).role("status"),
@@ -468,7 +342,7 @@ pub(super) fn panel(s: &State) -> El {
 
     let mut cards = row().key("setup-cards").w_full().gaps(12.0, 12.0).flex_wrap().mb(12.0);
     for m in &members {
-        cards = cards.child(member_card(s, c, m, busy, linked));
+        cards = cards.child(member_card(s, c, m, busy));
     }
     for found in &nearby {
         cards = cards.child(found_card(s, found, busy));
