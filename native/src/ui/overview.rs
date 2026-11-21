@@ -138,6 +138,13 @@ fn welcome(s: &State) -> El {
         s,
         "Kijk Beheer › Voorbereiding na: de wedstrijdgereedheid moet op Klaar staan.",
     ));
+    if linking {
+        next = next.child(
+            row().gap(8.0).center_y().flex_wrap()
+                .child(copy(s, "Alle laptops gestart? Koppel ze, geef elk een rol en test de groep in"))
+                .child(btn(s, "welcome-group", "Groep maken", Kind::Plain, true, false).on_press_tx(open_admin(6))),
+        );
+    }
     if let Some(url) = s.snapshot["host"]["url"].as_str() {
         next = next.child(readiness::screen_links(s, url, "welcome-screen"));
     }
