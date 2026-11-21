@@ -477,8 +477,10 @@ pub(super) fn panel(s: &State) -> El {
     if cluster(s)["enabled"] == true {
         page.push(super::cluster_setup::panel(s));
     }
+    // With linking on, Groep maken already shows every found laptop as a card.
     if let Some(nearby) = s.recovery["system"]["nearbyLaptops"]
         .as_array()
+        .filter(|_| cluster(s)["enabled"] != true)
         .filter(|laptops| !laptops.is_empty())
     {
         let mut detected = section("Gevonden laptops", s.dark);

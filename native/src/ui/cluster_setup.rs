@@ -245,8 +245,12 @@ fn role_editor(s: &State, m: &Value, busy: bool) -> El {
                 if on { Kind::Primary } else { Kind::Plain },
                 true,
                 None,
-                busy || on,
-                move |s| s.send("cluster.setRole", json!({"hostId": id, "role": preset})),
+                busy,
+                move |s| {
+                    if !on {
+                        s.send("cluster.setRole", json!({"hostId": id, "role": preset}))
+                    }
+                },
             )
             .checked(on),
         );
@@ -426,7 +430,10 @@ pub(super) fn panel(s: &State) -> El {
     if c["autoLink"]["enabled"] == true && runners(s).is_empty() {
         copy_text.push_str(" Zolang hier geen lopers staan, koppelt deze laptop vanzelf met de laptops die ze op het netwerk vindt.");
     }
-    let (tone, title, detail) = describe_group(c);
+    let (tone, title, mut detail) = describe_group(c);
+    if detail == "Koppel de andere laptops in Beheer" {
+        detail = "Koppel hieronder de andere laptops".into();
+    }
     let mut p = section("Groep maken", s.dark)
         .key("group-setup")
         .child(kit::copy(copy_text, s.dark).mb(12.0))
