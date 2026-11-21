@@ -62,6 +62,8 @@ pub struct State {
     electing: bool,
     last_quorum: Instant,
     committed: i64,
+    /// The write this leader is sending round; it is not in the leader's own data yet.
+    pending: Option<log::Prepared>,
     last_clock_sync: Option<Instant>,
     /// The leader address a full copy is being taken from.
     pub copying: Option<String>,
@@ -82,6 +84,7 @@ impl State {
             electing: false,
             last_quorum: Instant::now(),
             committed: 0,
+            pending: None,
             last_clock_sync: None,
             copying: None,
             joining: false,
@@ -225,6 +228,7 @@ impl Node {
         }
         let was = st.role;
         st.role = next;
+        st.pending = None;
         if next == Role::Leader {
             st.leader = Some(self.self_member());
             st.last_contact = Some(Instant::now());
@@ -523,18 +527,29 @@ impl Node {
                 let db = self.db.lock().unwrap();
                 let head = log::head(&db).seq;
                 let prev_seq = p.match_seq.unwrap_or(head);
+                // A follower may already hold the write this leader is still sending round.
+                let ahead = st.pending.as_ref().filter(|p| p.entry.seq == prev_seq);
                 let prev_id = if prev_seq == 0 {
                     None
+                } else if let Some(pending) = ahead {
+                    Some(pending.entry.id.clone())
                 } else {
                     log::entry_id(&db, prev_seq)
                 };
-                let entries = if p.match_seq.is_none() || p.needs_resync {
+                let mut entries = if p.match_seq.is_none() || p.needs_resync || ahead.is_some() {
                     Some(Vec::new())
                 } else {
                     log::entries_after(&db, prev_seq)
                 };
                 let resync =
                     p.needs_resync || (prev_seq > 0 && prev_id.is_none()) || entries.is_none();
+                if let (false, Some(entries), Some(pending)) =
+                    (resync, entries.as_mut(), &st.pending)
+                {
+                    if prev_seq + entries.len() as i64 == head {
+                        entries.push(pending.entry.clone());
+                    }
+                }
                 let split = log::json_setting(&db, "cluster_split_json")["id"].clone();
                 let cluster_id = log::setting(&db, "replication_cluster_id").unwrap_or_default();
                 drop(db);
@@ -560,6 +575,10 @@ impl Node {
                 self.cfg.election_timeout.max(Duration::from_secs(2)),
             );
             let mut st = self.raft.lock().unwrap();
+            // An answer to a request of an earlier leadership says nothing about this one.
+            if st.role != Role::Leader || self.term() != term {
+                return;
+            }
             let answer = match answer {
                 Ok(a) if a.status == 200 => a.body,
                 Ok(_) => return,
@@ -577,6 +596,10 @@ impl Node {
             }
             let head_seq = answer["head"]["seq"].as_i64().unwrap_or(0);
             let head_id = answer["head"]["id"].as_str().map(str::to_owned);
+            let newest = st
+                .pending
+                .as_ref()
+                .map_or_else(|| log::head(&self.db.lock().unwrap()).seq, |p| p.entry.seq);
             let Some(p) = st.progress.get_mut(host_id) else {
                 return;
             };
@@ -585,7 +608,7 @@ impl Node {
                 p.match_seq = Some(head_seq);
                 p.needs_resync = false;
                 self.advance_commit(&mut st);
-                if head_seq >= log::head(&self.db.lock().unwrap()).seq {
+                if head_seq >= newest {
                     return;
                 }
                 continue;
@@ -616,6 +639,69 @@ impl Node {
         matched.sort_unstable_by(|a, b| b.cmp(a));
         let committed = matched.get(self.majority() - 1).copied().unwrap_or(0);
         st.committed = st.committed.max(committed);
+    }
+
+    /// Sends a write round and stores it here once a majority of the laptops hold it. False when
+    /// that fails in time or leadership is lost: the write is then in this laptop's data nowhere.
+    pub(super) fn confirm(&self, prepared: log::Prepared) -> bool {
+        let (seq, id) = (prepared.entry.seq, prepared.entry.id.clone());
+        let deadline = Instant::now() + self.cfg.commit_timeout;
+        if prepared.voters.len() <= 1 {
+            return log::apply_own(&mut self.db.lock().unwrap(), &prepared.entry).is_ok();
+        }
+        {
+            let mut st = self.raft.lock().unwrap();
+            let db = self.db.lock().unwrap();
+            if st.role != Role::Leader
+                || log::term(&db) != prepared.entry.epoch
+                || log::head(&db).seq + 1 != seq
+            {
+                return false;
+            }
+            drop(db);
+            st.pending = Some(prepared);
+        }
+        loop {
+            let mut st = self.raft.lock().unwrap();
+            let Some(pending) = st.pending.as_ref().filter(|p| p.entry.id == id) else {
+                return false;
+            };
+            if st.role != Role::Leader {
+                return false;
+            }
+            let holders = pending
+                .voters
+                .iter()
+                .filter(|voter| {
+                    **voter == self.host_id
+                        || st
+                            .progress
+                            .get(*voter)
+                            .and_then(|p| p.match_seq)
+                            .is_some_and(|stored| stored >= seq)
+                })
+                .count();
+            if holders > pending.voters.len() / 2 {
+                let entry = st.pending.take().map(|p| p.entry);
+                let stored = entry
+                    .as_ref()
+                    .is_some_and(|e| log::apply_own(&mut self.db.lock().unwrap(), e).is_ok());
+                if stored {
+                    self.advance_commit(&mut st);
+                    return true;
+                }
+            } else if Instant::now() < deadline {
+                self.replicate_to_all(&mut st);
+                drop(st);
+                std::thread::sleep(Duration::from_millis(5));
+                continue;
+            }
+            // Another laptop may hold this write. A later election decides whether it counts, so
+            // this laptop must not put a different write in its place in the same term.
+            let term = self.term();
+            self.become_follower(&mut st, term, None);
+            return false;
+        }
     }
 
     /// True once a majority stored entry `seq`; false when that fails in time or leadership is lost.

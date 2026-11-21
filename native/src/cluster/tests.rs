@@ -392,6 +392,58 @@ fn a_cut_off_leader_saves_nothing_and_takes_the_majority_data_when_it_returns() 
 }
 
 #[test]
+fn a_write_the_majority_never_confirmed_is_not_kept_on_the_leader() {
+    let _serial = serial();
+    let dir = Dir::new();
+    let (a, b, c) = linked_three(&dir);
+    assert!(a.node.is_leader());
+    let off = |s: &TestServer, v: bool| {
+        s.node
+            .isolated
+            .store(v, std::sync::atomic::Ordering::Relaxed)
+    };
+    let named = |s: &TestServer, name: &str| {
+        s.count(&format!(
+            "SELECT COUNT(*) AS n FROM runners WHERE name='{name}'"
+        ))
+    };
+    let head = a.head();
+    off(&b, true);
+    off(&c, true);
+    let refused = a.act("runners.create", json!({"name":"Onbevestigd"}));
+    let answer = refused.unwrap_err();
+    assert!(
+        [super::NOT_CONFIRMED_MESSAGE, super::NO_LEADER_MESSAGE].contains(&answer.as_str()),
+        "{answer}"
+    );
+    // The leader's own data, which its screens read, never held the write.
+    assert_eq!(named(&a, "Onbevestigd"), 0);
+    assert_eq!(a.head(), head);
+    let state: Value = reqwest::blocking::get(format!("{}/api/state", a.url))
+        .unwrap()
+        .json()
+        .unwrap();
+    assert!(!state.to_string().contains("Onbevestigd"));
+
+    // The others return: the write that was answered as not saved appears nowhere.
+    off(&b, false);
+    off(&c, false);
+    wait_until("the group works again", Duration::from_secs(15), || {
+        all_healthy(&[&a, &b, &c]) && same_heads(&[&a, &b, &c])
+    });
+    let leader = [&a, &b, &c][leader_index(&[&a, &b, &c]).unwrap()];
+    leader
+        .act("runners.create", json!({"name":"Bevestigd"}))
+        .unwrap();
+    wait_until("every laptop holds the next write", Duration::from_secs(5), || {
+        same_heads(&[&a, &b, &c]) && [&a, &b, &c].iter().all(|s| named(s, "Bevestigd") == 1)
+    });
+    for server in [&a, &b, &c] {
+        assert_eq!(named(server, "Onbevestigd"), 0);
+    }
+}
+
+#[test]
 fn the_timing_laptop_goes_on_alone_by_itself_and_the_splits_join_again() {
     let _serial = serial();
     let dir = Dir::new();

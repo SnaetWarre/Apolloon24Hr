@@ -202,6 +202,17 @@ impl Db {
         )
     }
     pub fn mutation_from(&mut self, method: &str, input: &Value, origin: &str) -> Result<Value> {
+        self.mutation_run(method, input, origin, true)
+            .map(|(result, _)| result)
+    }
+    /// With `keep` false the write is taken back and returned for the group to confirm first.
+    pub fn mutation_run(
+        &mut self,
+        method: &str,
+        input: &Value,
+        origin: &str,
+        keep: bool,
+    ) -> Result<(Value, Option<crate::cluster::log::Prepared>)> {
         let transaction = rusqlite::Transaction::new_unchecked(
             &self.conn,
             rusqlite::TransactionBehavior::Immediate,
@@ -230,12 +241,21 @@ impl Db {
                 ],
             )?;
         }
-        if replicated {
-            crate::cluster::log::seal(self, method, &result)?;
+        let entry = if replicated {
+            crate::cluster::log::seal(self, method, &result)?
+        } else {
+            None
+        };
+        if !keep {
+            // Dropping the transaction takes the write back.
+            return Ok((
+                result,
+                entry.map(|entry| crate::cluster::log::Prepared::new(self, entry)),
+            ));
         }
         transaction.commit().map_err(err)?;
         self.revision += 1;
-        Ok(result)
+        Ok((result, None))
     }
     fn apply(&self, method: &str, input: &Value) -> Result<Value> {
         match method {
