@@ -7,6 +7,8 @@ libX11 and xdotool, and an available `DISPLAY=:0`:
 ```sh
 npm run bench:screens
 npm run bench:screens -- --followers
+npm run bench:screens -- --trace
+npm run bench:screens -- --followers --trace
 ```
 
 Builds the web bundle first and release desktop binary if either artifact is
@@ -21,6 +23,29 @@ Each invocation creates `.tmp-bench/<timestamp>/`, three fresh databases and
 three linked release servers, seeding 2,240 laps among 40 queued/running runners.
 All runners belong to the first team; a competition against the second team is
 configured. Backups and network discovery are disabled for disposable runs.
+
+`--trace` (or `APOLLOON_LATENCY_TRACE=1`) opts into realtime-microsecond stage
+records and refresh-cadence measurements. Native/server records are buffered on
+a bounded channel and printed by a dedicated thread; no UI-frame-thread file I/O
+is performed. With tracing off there are no timestamp reads, allocations or I/O
+for records, and no frame callbacks are installed. The handoff correlation key is
+the existing active-runner/start-time token, joined to the actual lap ID after
+commit. Replica records come from the durable apply boundary in `cluster/log.rs`.
+The notifier timestamp is the SQLite commit hook, before the durable commit
+returns; state readers still wait for the database mutex to be released.
+
+The trace adds `latency-events.json`, stage p50/p95/max in µs, observed native
+drawn-frame intervals, browser rAF intervals, and browser clock resolution to the
+summary. Native frame records use Rune's after-drawn callback. Rune does not call
+its frame hooks on web: the benchmark instead observes WebGPU surface queue
+submission, visible WebGL flush, or visible CPU canvas upload. Unsupported frame
+boundaries remain N/A rather than being guessed from rAF. The response boundary
+is after the majority-waiting action returns, not instrumentation inside Raft.
+Neither API submission nor rAF proves physical scanout; native intervals reflect
+the actual application workload, not a forced continuous animation. Browser
+`frame → a11y` is explicitly NOT `frame → pixel`; the endpoint is unchanged from
+the accepted baseline. Browser timestamps use `performance.timeOrigin +
+performance.now`; observed clock quantization is reported per screen.
 Five headed Chromium contexts render the public displays, queue and Timing at
 1366x768. Native Timing uses the same release binary, attached to the leader.
 `--followers` alternates browser origins across the two follower servers; native

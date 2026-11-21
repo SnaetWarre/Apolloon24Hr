@@ -8,10 +8,13 @@ import path from 'node:path';
 import os from 'node:os';
 import { chromium } from 'playwright';
 import { browserLatencies, nativeLatencies, percentile, validateReplicaLaps } from './metrics.mjs';
+import { installBrowserTrace, stageMetrics, stageMarkdown } from './latency.mjs';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
 const followers = process.argv.includes('--followers');
 const setupOnly = process.argv.includes('--setup-only');
+const trace = process.argv.includes('--trace') || process.env.APOLLOON_LATENCY_TRACE === '1';
+const traceEvents = [];
 const pressCount = 15;
 const spacingMs = 21000;
 const out = path.resolve('.tmp-bench', new Date().toISOString().replaceAll(':', '-'));
@@ -24,7 +27,10 @@ const children = [],
 let browser,
   measuring = false;
 function launch(command, args, env = {}, name = 'process') {
-  const child = spawn(command, args, { env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(command, args, {
+    env: { ...process.env, APOLLOON_LATENCY_TRACE: trace ? '1' : '0', ...env },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
   children.push(child);
   let log = '';
   child.stdout.on('data', (chunk) => {
@@ -33,6 +39,17 @@ function launch(command, args, env = {}, name = 'process') {
   child.stderr.on('data', (chunk) => {
     log += chunk;
   });
+  if (trace) {
+    let pending = '';
+    child.stderr.on('data', (chunk) => {
+      pending += chunk;
+      const lines = pending.split('\n');
+      pending = lines.pop();
+      for (const line of lines) {
+        if (line.startsWith('APOLLOON_LATENCY ')) traceEvents.push({ ...JSON.parse(line.slice(17)), source: name });
+      }
+    });
+  }
   child.on('error', (error) => {
     log += error.stack;
   });
@@ -186,6 +203,7 @@ try {
     const node = followers ? other[i % other.length] : leader;
     const context = await browser.newContext({ viewport: { width: 1366, height: 768 }, colorScheme: 'dark' });
     const page = await context.newPage();
+    await page.addInitScript(installBrowserTrace, trace);
     await page.addInitScript(() => {
       window.benchFrames = [];
       let previous = '';
@@ -394,12 +412,22 @@ try {
   sampler.kill();
   execFileSync('import', ['-window', windowId, path.join(out, 'native-after.png')]);
   const results = [];
+  const refresh = [];
   for (const screen of screens) {
     const frames = await screen.page.evaluate(() => window.benchFrames);
     await writeFile(path.join(out, screen.name.split('/').at(-1) + '-frames.json'), JSON.stringify(frames));
     await screen.page.screenshot({ path: path.join(out, screen.name.split('/').at(-1) + '-after.png') });
     const values = browserLatencies(screen.name, frames, writes);
     results.push({ name: screen.name, node: screen.node, values });
+    if (trace) {
+      const timing = await screen.page.evaluate(() => ({
+        events: window.apolloonLatencyEvents,
+        intervals: window.apolloonRefreshIntervals,
+        clockResolutionUs: window.apolloonClockResolutionUs,
+      }));
+      traceEvents.push(...timing.events.map((e) => ({ ...e, source: screen.name })));
+      refresh.push({ screen: screen.name, intervals: timing.intervals, clockResolutionUs: timing.clockResolutionUs });
+    }
   }
   const changes = nativeEvents.filter((e) => e.hash && e.at >= startAt && e.at <= endAt);
   const nativeValues = nativeLatencies(changes, writes, endAt);
@@ -481,6 +509,14 @@ try {
     },
     valid: results.every((r) => r.observed === pressCount),
   };
+  if (trace) {
+    summary.latency = stageMetrics(traceEvents, writes, results, leader.name, refresh);
+    const modes = execFileSync('xrandr', ['--current'], { encoding: 'utf8' });
+    const hz = Number(modes.match(/([\d.]+)\*\+?/)?.[1]);
+    summary.latency.reportedDisplayHz = hz || null;
+    summary.latency.reportedRefreshPeriodUs = hz ? 1_000_000 / hz : null;
+    await writeFile(path.join(out, 'latency-events.json'), JSON.stringify(traceEvents));
+  }
   const markdown =
     `# Six-screen native-Space baseline\n\n${out}\n\nNative = pixels; browsers = Rune accessibility mirror, NOT pixels.\n\n| Screen | n/${pressCount} | p50 ms | p95 ms | max ms |\n|---|---:|---:|---:|---:|\n` +
     results.map((r) => `| ${r.name} | ${r.observed} | ${r.p50} | ${r.p95} | ${r.max} |`).join('\n') +
@@ -492,7 +528,8 @@ try {
           `${name}: ${r.reqPerSecond.toFixed(2)} req/s, ${r.bytesPerSecond.toFixed(0)} encoded body bytes/s`
       )
       .join('\n\n') +
-    `\n\nNative 5ms target sampler maximum gap: ${summary.nativeMaxSampleGapMs.toFixed(2)}ms.\n`;
+    `\n\nNative 5ms target sampler maximum gap: ${summary.nativeMaxSampleGapMs.toFixed(2)}ms.\n` +
+    (trace ? stageMarkdown(summary.latency) : '');
   await writeFile(path.join(out, 'summary.json'), JSON.stringify(summary, null, 2));
   await writeFile(path.join(out, 'summary.md'), markdown);
   await writeFile(path.join(out, 'traffic.json'), JSON.stringify(traffic));
