@@ -345,7 +345,7 @@ impl Node {
             "preVote": pre_vote,
             "term": term,
             "candidateId": self.host_id,
-            "candidateUrl": self.cfg.self_url,
+            "candidateUrl": self.self_url(),
             "lastSeq": head.seq,
             "lastTerm": head.epoch,
             "split": self.split()["id"],
@@ -543,7 +543,7 @@ impl Node {
                     "clusterId": cluster_id,
                     "term": term,
                     "leaderId": self.host_id,
-                    "leaderUrl": self.cfg.self_url,
+                    "leaderUrl": self.self_url(),
                     "prevSeq": prev_seq,
                     "prevId": prev_id,
                     "entries": entries.unwrap_or_default(),
@@ -570,6 +570,13 @@ impl Node {
                     return;
                 }
             };
+            // This laptop itself answered: it has the address the other one was last seen at.
+            if answer["reason"] == "self" {
+                if let Some(p) = st.progress.get_mut(host_id) {
+                    p.match_seq = None;
+                }
+                return;
+            }
             let their_term = answer["term"].as_i64().unwrap_or(0);
             if their_term > self.term() {
                 self.become_follower(&mut st, their_term, None);
@@ -668,7 +675,13 @@ impl Node {
     // Follower side.
 
     /// Stores a leader's append; answers with this log's head so the leader knows what to send next.
-    pub(super) fn handle_append(&self, request: &Value) -> Value {
+    pub(super) fn handle_append(&self, request: &Value, remote: Option<std::net::IpAddr>) -> Value {
+        let leader_id = request["leaderId"].as_str().unwrap_or("");
+        let leader_url = self.leader_address(
+            leader_id,
+            request["leaderUrl"].as_str().unwrap_or(""),
+            remote,
+        );
         let mut st = self.raft.lock().unwrap();
         let head = |node: &Node| {
             let h = log::head(&node.db.lock().unwrap());
@@ -679,13 +692,16 @@ impl Node {
         if st.joining {
             return answer(term, false, Some("joining"), head(self));
         }
+        if leader_id == self.host_id {
+            return answer(term, false, Some("self"), head(self));
+        }
         let their_term = request["term"].as_i64().unwrap_or(0);
         if their_term < term {
             return answer(term, false, Some("stale-term"), head(self));
         }
         let leader = Member {
-            host_id: request["leaderId"].as_str().unwrap_or("").to_owned(),
-            url: request["leaderUrl"].as_str().unwrap_or("").to_owned(),
+            host_id: leader_id.to_owned(),
+            url: leader_url,
             name: None,
         };
         if st.role != Role::Follower
