@@ -1548,7 +1548,7 @@ mod tests {
             let update = receiver.recv_timeout(Duration::from_secs(5)).unwrap();
             if update.snapshot["unchanged"] == true {
                 unchanged += 1;
-                assert!(update.history.is_null());
+                assert_eq!(update.history, history_delivery::Delivery::default());
                 assert!(update.images.is_empty());
             }
         }
