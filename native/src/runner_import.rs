@@ -16,17 +16,17 @@ use std::{
 type Row = Vec<(String, String)>;
 pub const TEMPLATE: &str = "runner_number,name,labels,historical_avg,historical_best\n901,Demo Ster,Dames,1:35,1:25\n902,Demo Maan,Speedteam,1:40,1:30\n";
 
-fn mapping(header: &str) -> &str {
+fn mapping(header: &str, is_form: bool) -> &str {
     let key = canonical(header).replace(' ', "_");
     match key.as_str() {
         "runner_number" | "lopersnummer" | "nummer" | "number" | "bib" => "lopersnummer",
         "name" | "naam" | "runner_name" | "loper" | "voornaam_+_naam" => "naam",
         "labels" | "label" | "categorie" | "categories" | "type" | "zustervereniging"
-        | "vereniging" | "club" | "team" | "speedteam" | "jaar" | "groep" => "labels",
-        "historical_avg" | "gemiddelde" | "avg" | "average" => "gemiddelde tijd",
-        "historical_best" | "snelste" | "best" | "fastest" => "snelste tijd",
+        | "vereniging" | "club" | "team" | "speedteam" | "jaar" | "groep" if !is_form => "labels",
+        "historical_avg" | "gemiddelde" | "avg" | "average" if !is_form => "gemiddelde tijd",
+        "historical_best" | "snelste" | "best" | "fastest" if !is_form => "snelste tijd",
         _ => {
-            if [
+            if is_form && [
                 "tijdstempel",
                 "tijdsstempel",
                 "e-mailadres",
@@ -95,7 +95,7 @@ pub fn preview(method: &str, input: &Value, existing: &[Value]) -> Result<Value>
             problems.push(format!("Rij {n}: meer waarden dan kolommen"));
         }
         for (h, v) in &row {
-            if ["gemiddelde tijd", "snelste tijd"].contains(&mapping(h))
+            if ["gemiddelde tijd", "snelste tijd"].contains(&mapping(h, is_form))
                 && !v.trim().is_empty()
                 && duration(v).is_none_or(|ms| ms <= 0)
             {
@@ -120,7 +120,7 @@ pub fn preview(method: &str, input: &Value, existing: &[Value]) -> Result<Value>
         }
     }
     Ok(
-        json!({"columns":headers.iter().map(|h| json!({"header":h,"mapping":mapping(h)})).collect::<Vec<_>>(),"rowCount":count,"duplicates":duplicates,"problems":problems}),
+        json!({"columns":headers.iter().map(|h| json!({"header":h,"mapping":mapping(h, is_form)})).collect::<Vec<_>>(),"rowCount":count,"duplicates":duplicates,"problems":problems}),
     )
 }
 fn text(v: &Value) -> &str {
@@ -605,6 +605,20 @@ mod tests {
         assert_eq!(p["rowCount"], 2);
         assert_eq!(p["problems"], json!([]));
         assert_eq!(p["duplicates"], json!([]));
+    }
+    #[test]
+    fn preview_only_maps_profile_fields_for_form_exports() {
+        for (headers, expected) in [
+            ("nummer,naam,GSM-nummer", "genegeerd"),
+            ("nummer,naam,GSM-nummer,E-mailadres", "inschrijvingsprofiel"),
+        ] {
+            let p = preview("runners.importCsv", &json!({"csvText":format!("{headers}\n12,Demo Ster,0471000000")}), &[]).unwrap();
+            assert_eq!(p["columns"][2]["mapping"], expected);
+        }
+        let p = preview("runners.importCsv", &json!({"csvText":"naam,E-mailadres,labels,gemiddelde\nDemo Ster,demo@example.be,Dames,onleesbaar"}), &[]).unwrap();
+        assert_eq!(p["columns"][2]["mapping"], "genegeerd");
+        assert_eq!(p["columns"][3]["mapping"], "genegeerd");
+        assert_eq!(p["problems"], json!([]));
     }
     #[test]
     fn excel_preview_uses_the_same_columns_and_row_numbers() {
