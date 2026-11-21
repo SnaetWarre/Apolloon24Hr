@@ -2342,10 +2342,10 @@ fn display_runner(
     let mut out = col().gap(2.2 * vh_unit()).min_w(0.0).child(name_row);
     if !shown.is_empty() {
         let fs = clamp(20.0, 1.6 * vw_unit(), 34.0);
-        let mut labels = row().gap(0.4 * fs);
+        let mut labels = row().gap(0.4 * fs).flex_wrap();
         for l in shown {
             let mut pill = row()
-                .h(1.6 * fs)
+                .h(1.8 * fs)
                 .pl(0.45 * fs + 1.0)
                 .pr(0.55 * fs + 1.0)
                 .gap(0.4 * fs)
@@ -2355,7 +2355,7 @@ fn display_runner(
             if let Some(image) = l["imageUrl"].as_str().and_then(|u| s.logos.get(u)) {
                 pill = pill.child(
                     rune::el()
-                        .size(1.1 * fs, 1.1 * fs)
+                        .size(1.4 * fs, 1.4 * fs)
                         .pixels_fit(image.pixels(), rune::SurfaceFit::Fit),
                 );
             } else {

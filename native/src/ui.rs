@@ -21,6 +21,7 @@ mod admin_runners;
 mod admin_kit;
 mod analysis_page;
 mod admin_system;
+mod chart_axis;
 mod group_view;
 mod hex;
 mod label_editor;
@@ -1615,6 +1616,57 @@ mod tests {
         assert_eq!((rt.state.page, rt.state.admin_section), (8, 0));
     }
     #[test]
+    fn readiness_counts_registrations_and_local_screens() {
+        let mut state = init_with_url("http://127.0.0.1:1".into());
+        state.fixture = true;
+        state.connected = true;
+        state.clock = 1000;
+        state.recovery = json!({"status":{"enabled":true,"latest":{"createdAt":1000},"diskFreeBytes":1000000000}});
+        state.snapshot = json!({"runners":[],"screens":[],"cluster":{"enabled":true,"state":"healthy","members":[{"reachable":true},{"reachable":true},{"reachable":true}]}});
+        let checks = readiness::checks(&state);
+        assert_eq!(
+            checks
+                .iter()
+                .find(|c| c.id == "registrations")
+                .unwrap()
+                .level,
+            readiness::Level::Blocked
+        );
+        assert_eq!(
+            checks.iter().find(|c| c.id == "screens").unwrap().level,
+            readiness::Level::Info
+        );
+        state.snapshot["runners"] = json!([{"id":"runner"}]);
+        assert!(!readiness::needs_attention(&state));
+        let checks = readiness::checks(&state);
+        assert_eq!(readiness::summary(&checks), readiness::Level::Ready);
+        assert_eq!(readiness::open_count(&checks), 0);
+        assert_eq!(checks.last().unwrap().id, "screens");
+        assert_eq!(checks.last().unwrap().level, readiness::Level::Info);
+        state.snapshot["screens"] =
+            json!([{"kind":"outside","address":"192.168.88.20"}]);
+        let checks = readiness::checks(&state);
+        let screens = checks.iter().find(|c| c.id == "screens").unwrap();
+        assert_eq!(screens.level, readiness::Level::Ready);
+        assert_eq!(readiness::summary(&checks), readiness::Level::Ready);
+        assert_eq!(readiness::open_count(&checks), 0);
+        assert!(screens.detail.contains("Buitenscherm (192.168.88.20)"));
+        assert_eq!(
+            checks
+                .iter()
+                .find(|c| c.id == "registrations")
+                .unwrap()
+                .level,
+            readiness::Level::Ready
+        );
+        state.connected = false;
+        let offline = readiness::checks(&state);
+        assert_eq!(offline.len(), 1);
+        assert_eq!(offline[0].id, "server-status");
+        assert_eq!(readiness::open_count(&offline), 1);
+        assert_eq!(readiness::summary(&offline), readiness::Level::Blocked);
+    }
+    #[test]
     fn space_records_a_lap_on_timing() {
         let mut initial = crate::db::Db::open(std::path::Path::new(":memory:")).unwrap();
         for (number, name) in [("1", "Eerste"), ("2", "Tweede")] {
@@ -2188,6 +2240,7 @@ mod tests {
         update(&mut rt, |s| s.connected && s.recovery["backups"].is_array());
         click(&mut rt, "nav-8");
         click(&mut rt, "admin-tab-6");
+        scroll_to(&mut rt, "backup-create");
         click(&mut rt, "backup-create");
         update(&mut rt, |s| {
             !s.busy
@@ -2581,7 +2634,16 @@ fn start_transport(url: String, commands: Receiver<Command>, updates: Sender<Upd
         extra_image: Option<String>,
     ) -> Update {
         let fetch_history = full || synced.borrow().history_revision.is_none();
-        let state = get(client, url, "/api/state");
+        let path = web_sys::window()
+            .and_then(|w| w.location().pathname().ok())
+            .and_then(|p| {
+                p.strip_prefix("/display/")
+                    .map(|kind| kind.trim_end_matches('/').to_owned())
+            })
+            .filter(|kind| matches!(kind.as_str(), "inside" | "competitions" | "outside"))
+            .map(|kind| format!("/api/state?screen={kind}"))
+            .unwrap_or_else(|| "/api/state".into());
+        let state = get(client, url, &path);
         let history = get(client, url, "/api/history?scope=full");
         let recover = get(client, url, "/api/recovery");
         let (snapshot, (history, recovery)) = if fetch_history {

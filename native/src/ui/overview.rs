@@ -139,16 +139,7 @@ fn welcome(s: &State) -> El {
         "Kijk Beheer › Voorbereiding na: de wedstrijdgereedheid moet op Klaar staan.",
     ));
     if let Some(url) = s.snapshot["host"]["url"].as_str() {
-        next = next.child(
-            row().gap(6.0).center_y().flex_wrap()
-                .child(copy(s, "Open het adres"))
-                .child(btn(s, "welcome-copy-address", url, Kind::Quiet, true, false).on_press_tx(|s: &mut State, tx: &mut Tx| {
-                    if let Some(url) = s.snapshot["host"]["url"].as_str() {
-                        tx.copy(url);
-                    }
-                }))
-                .child(copy(s, "in een browser. Zet het venster op het tweede scherm en kies Binnenscherm, Competitiescherm of Buitenscherm.")),
-        );
+        next = next.child(readiness::screen_links(s, url, "welcome-screen"));
     }
     welcome.child(choices).child(next).child(
         row().child(

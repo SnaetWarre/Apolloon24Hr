@@ -2,6 +2,7 @@
 //! src/components/AnalysisView.tsx, src/components/analysis/* and src/lib/analysis.ts; sizes are
 //! the reference's at 1366×768 (src/styles/analysis.css). Charts are drawn with Rune shapes the
 //! way Chart.js lays them out (same nice ticks, legend, axis titles).
+use super::chart_axis::{LabelSlot, visible_labels};
 use super::*;
 use rune::{Align, Color, Path, Shape, canvas, color::hex, el, oklch};
 use std::collections::{HashMap, HashSet};
@@ -695,16 +696,18 @@ fn segmented(s: &State, key: &str, options: &[&str], active: u8, set: fn(&mut St
     bar
 }
 
+/// A logo or a colour dot in the same 16px slot, so every label name starts at the same x.
 fn label_mark(s: &State, label: &Value, on: bool) -> El {
     let alpha = if on { 1.0 } else { 0.45 };
-    if let Some(image) = label["imageUrl"].as_str().and_then(|u| s.logos.get(u)) {
+    let mark = if let Some(image) = label["imageUrl"].as_str().and_then(|u| s.logos.get(u)) {
         el().size(16.0, 16.0)
             .opacity(alpha)
             .pixels_fit(image.pixels(), rune::SurfaceFit::Fit)
     } else {
         let color = hex(st(label, "color")).unwrap_or(tok::theme(s.dark).text);
         el().size(7.0, 7.0).radius(3.5).fill(color).opacity(alpha)
-    }
+    };
+    el().size(16.0, 16.0).center().child(mark)
 }
 
 fn scope(s: &State, labels: &[Value]) -> El {
@@ -993,7 +996,9 @@ pub(super) fn page(s: &State) -> El {
 
 fn warning(textv: String, s: &State) -> El {
     let c = tok::tones(s.dark);
-    row()
+    col()
+        .w_full()
+        .min_w(0.0)
         .padding(12.0)
         .radius(8.0)
         .fill(c.warn_wash)
@@ -1003,6 +1008,7 @@ fn warning(textv: String, s: &State) -> El {
                 .font(type_::BODY.lh(19.0))
                 .color(c.warn_ink)
                 .wrap()
+                .w_full()
                 .min_w(0.0),
         )
 }
@@ -1071,7 +1077,7 @@ fn race_section(s: &State, laps: &[&Value], k: &Kpis, no_labels: bool, p: &Pal) 
         ));
     }
     if k.over_limit > 0 {
-        out = out.child(warning(format!("{} ronde(s) langer dan 10 minuten gevonden. Waarschijnlijk werd er niet gewisseld; die tijden tellen niet mee in gemiddelden, traagste en grafieken.", k.over_limit), s));
+        out = out.child(warning(format!("{} ronde(s) langer dan 10 minuten gevonden. Waarschijnlijk werd er niet gewisseld; die tijden tellen niet mee in gemiddelden, maximumtijden en grafieken.", k.over_limit), s));
     }
     // Rondeverdeling
     let bins = distribution(laps);
@@ -1397,7 +1403,7 @@ fn teams_section(s: &State, labels: &[&Value], laps: &[&Value], p: &Pal) -> El {
                 "Gemiddeld",
                 "Mediaan",
                 "Snelste",
-                "Traagste",
+                "Maximumtijd",
             ],
             rows,
             p,
@@ -1630,14 +1636,31 @@ fn pace_chart(buckets: &[Bucket], p: &Pal) -> El {
         .rev()
         .map(|v| dur(Some((v * 1000.0).round() as i64)))
         .collect();
-    let mut xlabels = row().w_full().pt(10.0);
-    for b in buckets {
-        xlabels = xlabels.child(row().w(0.0).grow(1.0).justify_center().child(chart_text(
-            b.label.clone(),
-            12.0,
-            500.0,
-            p.chart_muted,
-        )));
+    let width = rune::memo::layout_with("pace-plot", |r| r[2]).unwrap_or_default();
+    let mut xlabels = el().w_full().h(24.0).instant_changes();
+    if width > 0.0 {
+        let font = rune::TextStyle::new(12.0, 500.0).lh(14.0);
+        let ticks: Vec<_> = buckets
+            .iter()
+            .enumerate()
+            .map(|(i, b)| {
+                LabelSlot::new(
+                    width / buckets.len() as f32 * (i as f32 + 0.5),
+                    [b.label.as_str()],
+                    font,
+                )
+            })
+            .collect();
+        for i in visible_labels(&ticks) {
+            xlabels = xlabels.child(
+                row()
+                    .key(format!("pace-tick-{i}"))
+                    .w(ticks[i].width)
+                    .justify_center()
+                    .absolute(ticks[i].x - ticks[i].width / 2.0, 10.0)
+                    .child(text(buckets[i].label.clone()).font(font).color(p.chart_muted)),
+            );
+        }
     }
     col()
         .key("pace-chart")
@@ -1662,7 +1685,7 @@ fn pace_chart(buckets: &[Bucket], p: &Pal) -> El {
                         .grow(1.0)
                         .min_w(0.0)
                         .mt(7.0)
-                        .child(canvas(shape).w_full().h(H))
+                        .child(canvas(shape).key("pace-plot").w_full().h(H))
                         .child(xlabels),
                 )
                 .child(y_ticks(right, H, p, true))
@@ -1696,7 +1719,8 @@ fn trend_chart(points: &[(f64, i64)], p: &Pal) -> El {
     for v in tick_values(ymin, ymax, ystep) {
         shape = shape.stroke(vec![[0.0, py(v)], [W, py(v)]], 1.0, p.chart_grid);
     }
-    for v in tick_values(xmin, xmax, xstep) {
+    let x_ticks = tick_values(xmin, xmax, xstep);
+    for &v in &x_ticks {
         shape = shape.stroke(vec![[px(v), 0.0], [px(v), H]], 1.0, p.chart_grid);
     }
     let pts: Vec<[f32; 2]> = xs.iter().zip(&ys).map(|(x, y)| [px(*x), py(*y)]).collect();
@@ -1710,26 +1734,42 @@ fn trend_chart(points: &[(f64, i64)], p: &Pal) -> El {
         .rev()
         .map(|v| dur(Some((v * 1000.0).round() as i64)))
         .collect();
-    let mut xlabels = row()
-        .pin(Some(-20.0), Some(H), Some(-20.0), None)
-        .justify_between();
-    for v in tick_values(xmin, xmax, xstep) {
-        let minutes = (v * 60.0).round() as i64;
-        xlabels = xlabels.child(
-            col()
-                .w(40.0)
-                .items_center()
-                .child(el().size(1.0, 8.0).fill(p.chart_grid))
-                .child(
-                    chart_text(
-                        format!("{}:{:02}", minutes / 60, minutes % 60),
-                        12.0,
-                        400.0,
-                        p.chart_muted,
-                    )
-                    .mt(4.0),
-                ),
-        );
+    let width = rune::memo::layout_with("trend-plot", |r| r[2]).unwrap_or_default();
+    let mut xlabels = el()
+        .pin(Some(0.0), Some(H), Some(0.0), None)
+        .h(26.0)
+        .instant_changes();
+    if width > 0.0 {
+        let font = rune::TextStyle::new(12.0, 400.0).lh(14.0);
+        let labels: Vec<_> = x_ticks
+            .iter()
+            .map(|v| {
+                let minutes = (v * 60.0).round() as i64;
+                format!("{}:{:02}", minutes / 60, minutes % 60)
+            })
+            .collect();
+        let ticks: Vec<_> = x_ticks
+            .iter()
+            .zip(&labels)
+            .map(|(&v, label)| LabelSlot::new(px(v) / W * width, [label.as_str()], font))
+            .collect();
+        for tick in &ticks {
+            xlabels = xlabels.child(
+                el().size(1.0, 8.0)
+                    .fill(p.chart_grid)
+                    .absolute(tick.x - 0.5, 0.0),
+            );
+        }
+        for i in visible_labels(&ticks) {
+            xlabels = xlabels.child(
+                row()
+                    .key(format!("trend-tick-{i}"))
+                    .w(ticks[i].width)
+                    .justify_center()
+                    .absolute(ticks[i].x - ticks[i].width / 2.0, 12.0)
+                    .child(text(labels[i].clone()).font(font).color(p.chart_muted)),
+            );
+        }
     }
     col()
         .key("trend-chart")
@@ -1750,7 +1790,7 @@ fn trend_chart(points: &[(f64, i64)], p: &Pal) -> El {
                         .mt(7.0)
                         .mr(16.0)
                         .h(H + 52.0)
-                        .child(canvas(shape).w_full().h(H))
+                        .child(canvas(shape).key("trend-plot").w_full().h(H))
                         .child(xlabels)
                         .child(
                             row()
@@ -1785,6 +1825,99 @@ mod tests {
 
     use rune::{Env, Runtime};
     use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn chart_labels_follow_the_plot_when_the_window_resizes() {
+        fn charts(_: &(), _: &mut rune::Cx<()>) -> El {
+            let p = pal(false);
+            let buckets: Vec<_> = (0..24)
+                .map(|hour| Bucket {
+                    label: format!("{hour}u-{}u", (hour + 1) % 24),
+                    count: 42,
+                    average: Some(82_000),
+                })
+                .collect();
+            col().child(pace_chart(&buckets, &p)).child(trend_chart(
+                &[(0.0, 81_000), (24.0, 83_000)],
+                &p,
+            ))
+        }
+        let mut rt = Runtime::new(
+            (),
+            charts,
+            (1800.0, 768.0),
+            Env {
+                system_dark: false,
+                scale: 1.0,
+            },
+        );
+        for width in [1800.0, 220.0, 1800.0] {
+            rt.set_viewport((width, 768.0), 1.0);
+            for _ in 0..4 {
+                rt.frame(1.0 / 60.0);
+            }
+            let elements = rt.elements();
+            let rect = |key: &str| {
+                elements
+                    .iter()
+                    .find(|el| !el.exiting && el.key.as_deref() == Some(key))
+                    .map(|el| el.target)
+            };
+            for (axis, count) in [("pace", 24), ("trend", 6)] {
+                let plot = rect(&format!("{axis}-plot")).unwrap();
+                let ticks: Vec<_> = (0..count)
+                    .filter_map(|i| rect(&format!("{axis}-tick-{i}")).map(|r| (i, r)))
+                    .collect();
+                if width == 1800.0 {
+                    assert_eq!(ticks.len(), count, "{axis}");
+                } else {
+                    assert!((2..count).contains(&ticks.len()), "{axis}: {} labels", ticks.len());
+                }
+                for &(i, r) in &ticks {
+                    let fraction = if axis == "pace" {
+                        (i as f32 + 0.5) / count as f32
+                    } else {
+                        i as f32 / (count - 1) as f32
+                    };
+                    assert!((r[0] + r[2] / 2.0 - plot[0] - fraction * plot[2]).abs() < 1.1);
+                }
+                assert!(ticks.windows(2).all(|pair| {
+                    let [(.., left), (.., right)] = pair else { unreachable!() };
+                    left[0] + left[2] + 7.0 <= right[0]
+                }));
+            }
+        }
+    }
+
+    #[test]
+    fn race_warning_wraps_inside_the_panel() {
+        const WARNING: &str = "1 ronde(s) langer dan 10 minuten gevonden. Die tijden tellen niet mee in de cijfers en in de grafieken van deze wedstrijd.";
+        let state = init_with_url("http://127.0.0.1:1".into());
+        let mut rt = Runtime::new(
+            state,
+            |s, _| col().child(warning(WARNING.into(), s).key("race-warning")),
+            (480.0, 768.0),
+            Env {
+                system_dark: false,
+                scale: 1.0,
+            },
+        );
+        rt.frame(0.0);
+        let elements = rt.elements();
+        let panel = elements
+            .iter()
+            .find(|el| el.key.as_deref() == Some("race-warning"))
+            .unwrap()
+            .target;
+        let text = elements
+            .iter()
+            .find(|el| el.text.as_deref() == Some(WARNING))
+            .unwrap()
+            .target;
+        assert!(text[3] >= 38.0, "warning did not wrap: {text:?}");
+        assert!(text[0] + text[2] <= panel[0] + panel[2] - 12.0);
+        assert!(text[1] + text[3] <= panel[1] + panel[3] - 12.0);
+    }
 
     fn update(rt: &mut Runtime<State>, predicate: impl Fn(&State) -> bool) {
         let deadline = Instant::now() + Duration::from_secs(5);

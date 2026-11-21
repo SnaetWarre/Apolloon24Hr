@@ -6,6 +6,7 @@ pub(super) enum Level {
     Blocked,
     Warning,
     Ready,
+    Info,
 }
 pub(super) struct Check {
     pub id: &'static str,
@@ -14,15 +15,67 @@ pub(super) struct Check {
     pub detail: String,
 }
 fn check(id: &'static str, label: &'static str, level: Level, detail: impl Into<String>) -> Check {
-    Check { id, label, level, detail: detail.into() }
+    Check {
+        id,
+        label,
+        level,
+        detail: detail.into(),
+    }
 }
 /// The checks, blocking problems first; within a level the order of readiness.ts stays.
 pub(super) fn checks(s: &State) -> Vec<Check> {
     let b = &s.recovery["status"];
-    let mut checks = Vec::new();
     if !s.connected || b.is_null() {
-        return vec![check("server-status", "Serverstatus", Level::Blocked, "De serverstatus kon niet worden geladen.")];
+        return vec![check(
+            "server-status",
+            "Serverstatus",
+            Level::Blocked,
+            "De serverstatus kon niet worden geladen.",
+        )];
     }
+    let mut checks = Vec::new();
+    let count = runners(s).len();
+    checks.push(check(
+        "registrations",
+        "Inschrijvingen",
+        if count == 0 {
+            Level::Blocked
+        } else {
+            Level::Ready
+        },
+        if count == 0 {
+            "Er staan nog geen lopers in de databank.".into()
+        } else {
+            format!("Er staan {count} lopers in de databank.")
+        },
+    ));
+    let screens = s.snapshot["screens"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|screen| {
+            screen["kind"].as_str().and_then(screen_name).map(|name| {
+                format!(
+                    "{name} ({})",
+                    screen["address"].as_str().unwrap_or("onbekend adres")
+                )
+            })
+        })
+        .collect::<Vec<_>>();
+    checks.push(check(
+        "screens",
+        "Schermen",
+        if screens.is_empty() {
+            Level::Info
+        } else {
+            Level::Ready
+        },
+        if screens.is_empty() {
+            "Er zijn nog geen schermen open op deze laptop. Schermen op andere laptops tellen hier niet mee.".into()
+        } else {
+            format!("Open op deze laptop: {}.", screens.join(", "))
+        },
+    ));
     let age = b["latest"]["createdAt"].as_i64().map(|t| (s.clock - t).max(0));
     let stale = age.is_none_or(|age| age > b["intervalMs"].as_i64().unwrap_or(300_000) * 3);
     let enabled = b["enabled"] == true;
@@ -100,11 +153,84 @@ fn group_check(cluster: &Value) -> Check {
     }
 }
 pub(super) fn summary(checks: &[Check]) -> Level {
-    checks.iter().map(|c| c.level).min().unwrap_or(Level::Ready)
+    checks
+        .iter()
+        .filter(|c| c.level != Level::Info)
+        .map(|c| c.level)
+        .min()
+        .unwrap_or(Level::Ready)
+}
+pub(super) fn open_count(checks: &[Check]) -> usize {
+    checks
+        .iter()
+        .filter(|c| matches!(c.level, Level::Blocked | Level::Warning))
+        .count()
 }
 /// Whether the Systeem tab gets its attention dot.
 pub(super) fn needs_attention(s: &State) -> bool {
     summary(&checks(s)) != Level::Ready
+}
+
+thread_local! {
+    static COPIED: std::cell::RefCell<Option<(String, i64)>> = const { std::cell::RefCell::new(None) };
+}
+
+pub(super) fn screen_name(kind: &str) -> Option<&'static str> {
+    match kind {
+        "inside" => Some("Binnenscherm"),
+        "competitions" => Some("Competitiescherm"),
+        "outside" => Some("Buitenscherm"),
+        _ => None,
+    }
+}
+
+pub(super) fn screen_links(s: &State, url: &str, key: &str) -> El {
+    let mut links = row().gap(8.0).flex_wrap();
+    for kind in ["inside", "competitions", "outside"] {
+        let btn_key = format!("{key}-{kind}");
+        let just_copied = COPIED.with(|c| {
+            c.borrow()
+                .as_ref()
+                .is_some_and(|(k, at)| k == &btn_key && s.clock - *at < 1600)
+        });
+        let open = s.snapshot["screens"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|screen| screen["kind"] == kind);
+        let label = if just_copied {
+            "Gekopieerd".to_string()
+        } else {
+            format!(
+                "{}{}",
+                screen_name(kind).unwrap(),
+                if open { " · open" } else { "" }
+            )
+        };
+        let address = format!("{}/display/{kind}", url.trim_end_matches('/'));
+        let shown = address.clone();
+        let copied_key = btn_key.clone();
+        links = links.child(
+            col()
+                .gap(4.0)
+                .child(
+                    admin_base::btn(
+                        s,
+                        &btn_key,
+                        &label,
+                        admin_base::Kind::Quiet,
+                        true,
+                        false,
+                    )
+                    .on_press_tx(move |s: &mut State, tx: &mut Tx| {
+                        tx.copy(&address);
+                        COPIED.with(|c| *c.borrow_mut() = Some((copied_key.clone(), s.clock)));
+                    }),
+                )
+                .child(admin_base::copy(s, shown)),
+        );
+    }
+    col().gap(6.0).child(links).child(admin_base::copy(s, "Kopieer de link van het scherm en open die in een browser op het tweede scherm. Druk op F11 voor volledig scherm."))
 }
 
 /// `ReadinessPanel` from PreparationSection.tsx.
@@ -113,9 +239,9 @@ pub(super) fn panel(s: &State) -> El {
     let p = pal(s.dark);
     let checks = checks(s);
     let level = summary(&checks);
-    let open = checks.iter().filter(|c| c.level != Level::Ready).count();
+    let open = open_count(&checks);
     let (wash, ink) = match level {
-        Level::Ready => (p.t.go_wash, p.go_ink),
+        Level::Ready | Level::Info => (p.t.go_wash, p.go_ink),
         Level::Warning => (p.t.warn_wash, p.t.warn_ink),
         Level::Blocked => (p.t.stop_wash, p.stop_ink),
     };
@@ -126,6 +252,7 @@ pub(super) fn panel(s: &State) -> El {
             Level::Ready => ("✓", p.t.go, if s.dark { rune::oklch(0.161, 0.019, 162.8) } else { p.on_brand }),
             Level::Warning => ("!", p.t.warn, rune::oklch(0.189, 0.039, 78.4)),
             Level::Blocked => ("×", p.t.stop, if s.dark { rune::oklch(0.161, 0.019, 162.8) } else { p.on_brand }),
+            Level::Info => ("i", p.t.surface3, p.t.ink2),
         };
         let mut body = col()
             .grow(1.0)
@@ -174,11 +301,11 @@ pub(super) fn panel(s: &State) -> El {
                         .min_w(0.0)
                         .shrink()
                         .child(h2(s, "Wedstrijdgereedheid"))
-                        .child(copy(s, "Eén overzicht van backups, opslagruimte en de gekoppelde laptops.")),
+                        .child(copy(s, "Eén overzicht van inschrijvingen, schermen, backups, opslagruimte en de gekoppelde laptops.")),
                 )
                 .child(
                     text(match level {
-                        Level::Ready => "Klaar".to_string(),
+                        Level::Ready | Level::Info => "Klaar".to_string(),
                         Level::Warning => format!("Aandacht nodig · {open} open"),
                         Level::Blocked => format!("Niet klaar · {open} open"),
                     })

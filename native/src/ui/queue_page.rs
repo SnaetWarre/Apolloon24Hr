@@ -434,17 +434,28 @@ fn pill(s: &State, l: &Value) -> El {
             .color(p.t.ink2),
     )
 }
-/// `RunnerName`: the bib (2.6em wide, quiet) and the name.
+const BIB_WIDTH_EM: f32 = 2.6;
+const BIB_NAME_GAP: f32 = 8.0;
+
+/// How far the name sits right of the bib, so a line under it starts under the name.
+fn name_indent(r: &Value, size: f32) -> f32 {
+    if st(r, "runnerNumber").is_empty() {
+        0.0
+    } else {
+        size * BIB_WIDTH_EM + BIB_NAME_GAP
+    }
+}
+/// `RunnerName`: the muted bib and the name.
 fn runner_name(s: &State, r: &Value, size: f32, weight: f32) -> El {
     let p = pal(s.dark);
-    let mut line = row().gap(8.0).min_w(0.0).center_y();
+    let mut line = row().gap(BIB_NAME_GAP).min_w(0.0).center_y();
     let number = st(r, "runnerNumber");
     if !number.is_empty() {
         line = line.child(
             text(number.to_string())
                 .font(rune::TextStyle::new(size, 500.0).features("tnum"))
                 .color(p.t.ink3)
-                .min_w(size * 2.6),
+                .min_w(size * BIB_WIDTH_EM),
         );
     }
     line.child(
@@ -765,7 +776,12 @@ fn available_now(s: &State) -> El {
     let count = shown.len();
     for (i, (r, phone, flexibility)) in shown.into_iter().enumerate() {
         let id = st(r, "id").to_string();
-        let mut details = row().gap(8.0).center_y().min_h(18.0).flex_wrap();
+        let mut details = row()
+            .gap(8.0)
+            .center_y()
+            .min_h(18.0)
+            .pl(name_indent(r, 14.0))
+            .flex_wrap();
         for l in r["labels"].as_array().into_iter().flatten() {
             details = details.child(pill(s, l));
         }
@@ -867,7 +883,6 @@ fn available_now(s: &State) -> El {
             .child(rows),
     )
 }
-
 
 struct Board<'a> {
     filtered: Vec<&'a Value>,
@@ -1365,7 +1380,8 @@ fn runner_row(s: &State, r: &Value, b: &Board, drop: Option<&(String, Drop)>) ->
         .gap(8.0)
         .center_y()
         .min_w(0.0)
-        .h(21.0)
+        .min_h(21.0)
+        .flex_wrap()
         .child(runner_name(s, r, 14.0, 550.0));
     if next {
         title = title.child(
@@ -1382,7 +1398,29 @@ fn runner_row(s: &State, r: &Value, b: &Board, drop: Option<&(String, Drop)>) ->
                 ),
         );
     }
-    let mut details = row().gap(8.0).center_y().min_h(18.0).flex_wrap();
+    if position == Some(1) {
+        title = title.child(
+            row()
+                .key(format!("queue-then-{id}"))
+                .h(18.0)
+                .px(6.0)
+                .radius(4.0)
+                .fill(p.brand_wash)
+                .border(1.0, p.brand.alpha(0.35))
+                .center()
+                .child(
+                    text("Daarna")
+                        .font(rune::TextStyle::new(11.0, 550.0))
+                        .color(p.brand_ink),
+                ),
+        );
+    }
+    let mut details = row()
+        .gap(8.0)
+        .center_y()
+        .min_h(18.0)
+        .pl(name_indent(r, 14.0))
+        .flex_wrap();
     for l in r["labels"].as_array().into_iter().flatten() {
         details = details.child(pill(s, l));
     }
@@ -1658,7 +1696,8 @@ pub(super) fn modal(s: &State) -> Option<El> {
                         .child(
                             text("Loslaten om te verplaatsen")
                                 .font(rune::TextStyle::new(12.0, 400.0))
-                                .color(p.t.ink3),
+                                .color(p.t.ink3)
+                                .pl(name_indent(r, 14.0)),
                         ),
                 ),
         );
@@ -2071,7 +2110,11 @@ fn search_dialog(s: &State, search: &Search) -> El {
                     format!(
                         "{} {}",
                         found.len(),
-                        if found.len() == 1 { "resultaat" } else { "resultaten" }
+                        if found.len() == 1 {
+                            "resultaat"
+                        } else {
+                            "resultaten"
+                        }
                     )
                 } else {
                     format!("{} lopers in de databank", found.len())
@@ -3075,6 +3118,36 @@ mod tests {
         click(&mut rt, "add-hour-dinsdag-21");
 
         assert!(add_mut(&mut rt.state).hours.is_empty());
+    }
+
+    #[test]
+    fn the_runner_after_volgende_is_tagged_without_turn_times() {
+        let (mut rt, db) = start();
+        {
+            let mut db = db.lock().unwrap();
+            for name in ["Anna", "Bram", "Cas", "Dirk"] {
+                db.mutation("runners.create", &json!({"name":name,"status":"waiting"}))
+                    .unwrap();
+            }
+            let race = db.race().unwrap();
+            db.mutation("race.handoff", &json!({"activeRunnerId":race["activeRunnerId"],"activeStartedAt":race["activeStartedAt"],"pressedAt":crate::db::now()})).unwrap();
+            db.exec("UPDATE runners SET historical_avg_ms=90000", &[])
+                .unwrap();
+        }
+        update(&mut rt, |s| waiting(s).len() == 3);
+        let ids: Vec<String> = waiting(&rt.state)
+            .iter()
+            .map(|r| st(r, "id").to_string())
+            .collect();
+        rt.frame(1.0 / 60.0);
+        assert!(rt.find(&format!("queue-then-{}", ids[1])).is_some());
+        assert!(rt.find(&format!("queue-then-{}", ids[0])).is_none());
+        assert!(rt.find(&format!("queue-then-{}", ids[2])).is_none());
+        // Apolloon plans turns on paper: no turn times or warm-up prompts here.
+        for id in &ids {
+            assert!(rt.find(&format!("queue-eta-{id}")).is_none());
+        }
+        assert!(rt.find("queue-warm-up-nudge").is_none());
     }
 
     #[test]
