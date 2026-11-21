@@ -1,15 +1,128 @@
 //! CSV and Excel imports preserve operator edits and distinguish people sharing a bib or email.
-use crate::db::{Db, Result};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::db::Db;
+type Result<T> = std::result::Result<T, String>;
+#[cfg(not(target_arch = "wasm32"))]
+use std::collections::HashSet;
 use base64::Engine;
 use calamine::{Data, Reader, Xlsx};
 use chrono::{Datelike, Timelike};
 use serde_json::{Value, json};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     io::Cursor,
 };
 
 type Row = Vec<(String, String)>;
+pub const TEMPLATE: &str = "runner_number,name,labels,historical_avg,historical_best\n901,Demo Ster,Dames,1:35,1:25\n902,Demo Maan,Speedteam,1:40,1:30\n";
+
+fn mapping(header: &str) -> &str {
+    let key = canonical(header).replace(' ', "_");
+    match key.as_str() {
+        "runner_number" | "lopersnummer" | "nummer" | "number" | "bib" => "lopersnummer",
+        "name" | "naam" | "runner_name" | "loper" | "voornaam_+_naam" => "naam",
+        "labels" | "label" | "categorie" | "categories" | "type" | "zustervereniging"
+        | "vereniging" | "club" | "team" | "speedteam" | "jaar" | "groep" => "labels",
+        "historical_avg" | "gemiddelde" | "avg" | "average" => "gemiddelde tijd",
+        "historical_best" | "snelste" | "best" | "fastest" => "snelste tijd",
+        _ => {
+            if [
+                "tijdstempel",
+                "tijdsstempel",
+                "e-mailadres",
+                "gsm-nummer",
+                "studiefase",
+                "ik schat",
+                "maximum aantal rondjes",
+                "ik geef hierbij toestemming",
+                "hoe flexibel ben jij",
+                "nog iets dat wij best kunnen weten",
+                "wat was de tijd van jouw snelste",
+                "ik ben volgende uren beschikbaar",
+                "behoor je tot",
+            ]
+            .iter()
+            .any(|p| canonical(header).starts_with(p))
+            {
+                "inschrijvingsprofiel"
+            } else {
+                "genegeerd"
+            }
+        }
+    }
+}
+
+pub fn preview(method: &str, input: &Value, existing: &[Value]) -> Result<Value> {
+    let (headers, records) = rows(method, input)?;
+    let is_form = headers
+        .iter()
+        .any(|h| canonical(h).starts_with("e-mailadres"));
+    let mut seen_numbers = HashMap::new();
+    let mut seen_names = HashMap::new();
+    let mut problems = Vec::new();
+    let mut duplicates = Vec::new();
+    let mut count = 0;
+    for (i, values) in records.iter().enumerate() {
+        if values.iter().all(|v| v.trim().is_empty()) {
+            continue;
+        }
+        count += 1;
+        let n = i + 2;
+        let row: Row = headers
+            .iter()
+            .enumerate()
+            .map(|(i, h)| (h.clone(), values.get(i).cloned().unwrap_or_default()))
+            .collect();
+        let name = column(
+            &row,
+            &["name", "naam", "runner_name", "loper", "voornaam_+_naam"],
+        );
+        let number = column(
+            &row,
+            &["runner_number", "lopersnummer", "nummer", "number", "bib"],
+        );
+        if name.is_empty() {
+            problems.push(format!("Rij {n}: naam ontbreekt"));
+        }
+        if number.is_empty() && !is_form {
+            problems.push(format!("Rij {n}: lopersnummer ontbreekt"));
+        }
+        if values
+            .iter()
+            .skip(headers.len())
+            .any(|v| !v.trim().is_empty())
+        {
+            problems.push(format!("Rij {n}: meer waarden dan kolommen"));
+        }
+        for (h, v) in &row {
+            if ["gemiddelde tijd", "snelste tijd"].contains(&mapping(h))
+                && !v.trim().is_empty()
+                && duration(v).is_none_or(|ms| ms <= 0)
+            {
+                problems.push(format!("Rij {n}: onleesbare tijd in {h}: {v}"));
+            }
+        }
+        for (value, seen, label) in [
+            (&number, &mut seen_numbers, "nummer"),
+            (&name, &mut seen_names, "naam"),
+        ] {
+            if !value.is_empty() {
+                if let Some(first) = seen.insert(canonical(value), n) {
+                    duplicates.push(format!("Rij {n}: {label} {value} staat ook op rij {first}"));
+                }
+            }
+        }
+        if existing.iter().any(|r| {
+            (!number.is_empty() && text(&r["runnerNumber"]) == number)
+                || (!name.is_empty() && canonical(text(&r["name"])) == canonical(&name))
+        }) {
+            duplicates.push(format!("Rij {n}: {name} of nummer {number} staat al in de databank; bestaande importregels bepalen de samenvoeging"));
+        }
+    }
+    Ok(
+        json!({"columns":headers.iter().map(|h| json!({"header":h,"mapping":mapping(h)})).collect::<Vec<_>>(),"rowCount":count,"duplicates":duplicates,"problems":problems}),
+    )
+}
 fn text(v: &Value) -> &str {
     v.as_str().unwrap_or("")
 }
@@ -231,6 +344,7 @@ fn rows(method: &str, input: &Value) -> Result<(Vec<String>, Vec<Vec<String>>)> 
         .collect::<Result<Vec<_>>>()?;
     Ok((headers, records))
 }
+#[cfg(not(target_arch = "wasm32"))]
 impl Db {
     fn import_upsert(
         &self,
@@ -460,6 +574,60 @@ impl Db {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn preview_reports_columns_counts_duplicates_and_problems() {
+        let p = preview(
+            "runners.importCsv",
+            &json!({"csvText":"nummer,naam,avg,extra\n1,Ster,1:30,x\n1,Maan,abc,x\n3,,1:20,x"}),
+            &[json!({"runnerNumber":"3","name":"Anders"})],
+        )
+        .unwrap();
+        assert_eq!(p["rowCount"], 3);
+        assert_eq!(p["columns"][3]["mapping"], "genegeerd");
+        assert_eq!(p["columns"][0]["mapping"], "lopersnummer");
+        assert_eq!(p["duplicates"].as_array().unwrap().len(), 2);
+        assert!(p["problems"][0].as_str().unwrap().contains("Rij 3"));
+        assert!(p["problems"][1].as_str().unwrap().contains("Rij 4"));
+        assert!(preview("runners.importCsv", &json!({"csvText":""}), &[]).is_err());
+        assert_eq!(
+            preview(
+                "runners.importCsv",
+                &json!({"csvText":"name,number\n"}),
+                &[]
+            )
+            .unwrap()["rowCount"],
+            0
+        );
+    }
+    #[test]
+    fn template_has_no_problems() {
+        let p = preview("runners.importCsv", &json!({"csvText":TEMPLATE}), &[]).unwrap();
+        assert_eq!(p["rowCount"], 2);
+        assert_eq!(p["problems"], json!([]));
+        assert_eq!(p["duplicates"], json!([]));
+    }
+    #[test]
+    fn excel_preview_uses_the_same_columns_and_row_numbers() {
+        let mut book = rust_xlsxwriter::Workbook::new();
+        let sheet = book.add_worksheet();
+        sheet.write_string(0, 0, "nummer").unwrap();
+        sheet.write_string(0, 1, "naam").unwrap();
+        sheet.write_string(1, 0, "12").unwrap();
+        sheet.write_string(1, 1, "Demo Komeet").unwrap();
+        sheet.write_string(2, 0, "13").unwrap();
+        let input = json!({"dataBase64":base64::engine::general_purpose::STANDARD.encode(book.save_to_buffer().unwrap())});
+        let p = preview("runners.importXlsx", &input, &[]).unwrap();
+        assert_eq!(p["rowCount"], 2);
+        assert_eq!(p["problems"], json!(["Rij 3: naam ontbreekt"]));
+        assert!(
+            preview(
+                "runners.importXlsx",
+                &json!({"dataBase64":"geen excel"}),
+                &[]
+            )
+            .is_err()
+        );
+    }
     fn db() -> Db {
         Db::open(std::path::Path::new(":memory:")).unwrap()
     }

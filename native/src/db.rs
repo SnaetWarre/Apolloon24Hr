@@ -239,6 +239,7 @@ impl Db {
     }
     fn apply(&self, method: &str, input: &Value) -> Result<Value> {
         match method {
+            "demo.load" => self.load_demo(),
             "backups.applyRestore" => self.restore_event_data(input),
             "race.clear" => self.clear_race(input),
             "runners.merge" => self.merge_registrations(input),
