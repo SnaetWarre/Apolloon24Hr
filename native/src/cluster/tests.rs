@@ -764,14 +764,9 @@ fn a_role_given_in_groep_maken_reaches_every_laptop() {
     let dir = Dir::new();
     let a = TestServer::start(&dir.db("a"), free_port(), "Laptop A");
     let b = TestServer::start(&dir.db("b"), free_port(), "Laptop B");
-    let b_id = b.status()["hostId"].as_str().unwrap().to_owned();
-    // A laptop that is still alone can already get its role.
-    let alone = b
-        .act("cluster.setRole", json!({"hostId": b_id, "role": "Opwarming"}))
-        .unwrap();
-    assert_eq!(alone["role"], "Opwarming");
     b.act("cluster.joinGroup", json!({"url": a.url})).unwrap();
     wait_until("linked", Duration::from_secs(10), || all_healthy(&[&a, &b]));
+    let b_id = b.status()["hostId"].as_str().unwrap().to_owned();
     let role_of = |s: &TestServer| {
         s.status()["members"]
             .as_array()

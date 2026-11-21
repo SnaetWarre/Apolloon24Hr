@@ -807,7 +807,6 @@ impl Node {
                 let member = log::stored_members(db)
                     .into_iter()
                     .find(|m| m.host_id == host_id)
-                    .or_else(|| (host_id == self.host_id).then(|| self.self_member()))
                     .ok_or("Deze laptop hoort niet bij de groep.")?;
                 let role: String = input["role"]
                     .as_str()
