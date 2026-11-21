@@ -759,7 +759,7 @@ pub fn router(host: Host) -> Router {
                 .join("index.html"),
             )),
         )
-        .merge(crate::cluster::routes::routes())
+        .merge(crate::cluster::routes::routes(&host))
         .layer(axum::extract::DefaultBodyLimit::max(50 * 1024 * 1024))
         .with_state(host)
 }
