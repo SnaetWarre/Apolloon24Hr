@@ -1,5 +1,6 @@
 // Real Rune surfaces, disposable data. See README.md for measurement boundaries.
-import { spawn, execFileSync } from 'node:child_process';
+import { spawn, execFile, execFileSync } from 'node:child_process';
+import { promisify } from 'node:util';
 import { once } from 'node:events';
 import { createServer, request as httpRequest } from 'node:http';
 import { createServer as netServer } from 'node:net';
@@ -11,6 +12,7 @@ import { browserLatencies, nativeLatencies, percentile, validateReplicaLaps } fr
 import { installBrowserTrace, stageMetrics, stageMarkdown } from './latency.mjs';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
+const exec = promisify(execFile);
 const followers = process.argv.includes('--followers');
 const setupOnly = process.argv.includes('--setup-only');
 const trace = process.argv.includes('--trace') || process.env.APOLLOON_LATENCY_TRACE === '1';
@@ -351,16 +353,16 @@ try {
   await checkReplicas(0);
   execFileSync('xdotool', ['windowfocus', '--sync', windowId]);
   execFileSync('xdotool', ['mousemove', '--window', windowId, '700', '40', 'click', '1']);
-  const pressSpace = () => {
+  const pressSpace = async () => {
     const sentAt = Date.now();
-    execFileSync('xdotool', ['key', '--window', windowId, '--clearmodifiers', 'space']);
+    await exec('xdotool', ['key', '--window', windowId, '--clearmodifiers', 'space']);
     return sentAt;
   };
   const startAt = Date.now();
   measuring = true;
   for (let i = 0; i < pressCount; i++) {
     await sleep((writes.at(-1)?.sentAt ?? startAt - spacingMs) + spacingMs - Date.now());
-    const sentAt = pressSpace();
+    const sentAt = await pressSpace();
     const ids = await checkReplicas(i + 1);
     const priorIds = new Set(replicaChecks.at(-2).addedIds);
     const [lapId] = ids.filter((id) => !priorIds.has(id));
@@ -380,7 +382,7 @@ try {
   measuring = false;
   const beforeRapid = nativeEvents.filter((e) => e.hash).at(-1);
   await sleep(Math.max(0, beforeRapid.at + 300 - Date.now()));
-  const rapidAt = pressSpace();
+  const rapidAt = await pressSpace();
   await eventually(() => nativeEvents.find((e) => e.hash && e.at > rapidAt), 'short-lap modal pixel change', 3000);
   await sleep(800);
   await checkReplicas(pressCount);
