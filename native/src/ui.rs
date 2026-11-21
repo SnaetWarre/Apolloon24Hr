@@ -26,6 +26,7 @@ mod clock;
 mod cluster_setup;
 mod group_view;
 mod hex;
+mod history_delivery;
 mod label_editor;
 mod laps_panel;
 mod profile;
@@ -127,6 +128,7 @@ pub struct State {
     dark: bool,
     snapshot: Value,
     history: Value,
+    history_pending: Vec<Value>,
     error: String,
     busy: bool,
     connected: bool,
@@ -285,6 +287,7 @@ fn init_with_url(url: String) -> State {
         dark: shell::initial_dark(),
         snapshot: Value::Null,
         history: json!({"laps":[]}),
+        history_pending: Vec::new(),
         error: String::new(),
         busy: false,
         connected: false,
@@ -454,13 +457,7 @@ fn poll(s: &mut State, _: f64, tx: &mut Tx) -> bool {
             s.snapshot = update.snapshot;
             changed = true;
         }
-        if !update.history.is_null()
-            && !older(&update.history, &s.history)
-            && s.history != update.history
-        {
-            s.history = update.history;
-            changed = true;
-        }
+        changed |= history_delivery::apply(&mut s.history, &mut s.history_pending, update.history);
         if !update.recovery.is_null() && s.recovery != update.recovery {
             s.recovery = update.recovery;
             changed |= !public;
@@ -2645,6 +2642,9 @@ fn image_urls(snapshot: &Value, history: &Value) -> std::collections::HashSet<St
     for lap in history["laps"].as_array().into_iter().flatten() {
         collect(&lap["labels"]);
     }
+    for pair in history["changes"]["laps"]["changed"].as_array().into_iter().flatten() {
+        collect(&pair[1]["labels"]);
+    }
     urls
 }
 fn label_badge(value: &Value, s: &State) -> El {
@@ -2686,7 +2686,7 @@ fn clock_offset(samples: impl IntoIterator<Item = (i64, i64, i64)>) -> Option<i6
 #[derive(Default)]
 struct Synced {
     history_revision: Option<i64>,
-    /// The full history as last shown; later reads ask only for what changed since its cursor.
+    /// Identities validate deltas and image paths retain retries; payloads move to the UI.
     history: Value,
     images: std::collections::HashSet<String>,
 }
@@ -2704,8 +2704,7 @@ impl Synced {
             None => "/api/history?scope=full".into(),
         }
     }
-    /// The full history to show for a reply to `history_path`, or `None` when the changes did
-    /// not fit what is held and the full history has to be fetched again.
+    /// Move a validated full or delta reply to the UI; `None` requests full recovery.
     fn take_history(&mut self, reply: Value) -> Option<Value> {
         if reply.is_null() {
             return Some(Value::Null);
@@ -2717,17 +2716,17 @@ impl Synced {
             if reply["since"] != self.history["cursor"] {
                 return None;
             }
-            if !merge_history(&mut self.history, &reply) {
+            if !merge_history(&mut self.history, &history_delivery::delta_index(&reply)) {
                 self.history = Value::Null;
                 return None;
             }
         } else if reply["revision"].as_i64() >= self.history["revision"].as_i64() {
-            self.history = reply;
+            self.history = history_delivery::index(&reply);
         } else {
             return Some(Value::Null);
         }
         self.history_revision = self.history["revision"].as_i64();
-        Some(self.history.clone())
+        Some(reply)
     }
 }
 /// Applies `/api/history?since=` changes to a full history; `false` when they do not line up.
@@ -2864,7 +2863,7 @@ fn start_transport(url: String, commands: Receiver<Command>, updates: Updates, _
         };
         let recovery = Value::Null;
         crate::latency::snapshot("history_merged", &snapshot);
-        let mut paths = image_urls(&snapshot, &history);
+        let mut paths = image_urls(&snapshot, &synced.lock().unwrap().history);
         paths.extend(extra_image);
         paths.retain(|path| !synced.lock().unwrap().images.contains(path));
         let images = paths
@@ -3032,7 +3031,7 @@ fn start_transport(url: String, commands: Receiver<Command>, updates: Updates, c
             }
         };
         crate::latency::snapshot("history_merged", &snapshot);
-        let mut paths = image_urls(&snapshot, &history);
+        let mut paths = image_urls(&snapshot, &synced.borrow().history);
         paths.extend(extra_image);
         paths.retain(|path| !synced.borrow().images.contains(path));
         let mut images = Vec::new();
