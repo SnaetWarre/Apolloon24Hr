@@ -75,13 +75,19 @@ test('HTTP payload metrics distinguish encoded bytes from decoded JSON, includin
 
 test('stress flags have safe defaults and reject malformed inputs', () => {
   assert.equal(options([]).ratio, 60);
+  assert.equal(options([]).chaos, 'on');
   assert.equal(options([]).work, '.tmp-stress');
   assert.equal(options(['--out', '/tmp/summary', '--work', '/tmp/work']).work, '/tmp/work');
   assert.equal(options(['--out', '/tmp/work/summaries', '--work', '/tmp/work']).work, '/tmp/work');
   assert.equal(options(['--hours', '2', '--seed', 'night']).hours, 2);
+  assert.equal(options(['--laps', '1115', '--chaos', 'off']).laps, 1115);
+  assert.equal(options(['--chaos', 'off']).chaos, 'off');
   for (const args of [
     ['--hours', '0'],
     ['--ratio', 'NaN'],
+    ['--laps', '0'],
+    ['--laps', '1.5'],
+    ['--chaos', 'false'],
     ['--other', '1'],
     ['--out'],
     ['--out', '/tmp/out', '--work', '/tmp/out'],
@@ -178,6 +184,15 @@ test('race schedule is reproducible, ordered and seed-dependent', () => {
   assert.equal(a.chaos.length, 5);
   assert(a.laps.every((s, i) => s > 0 && (i === 0 || s > a.laps[i - 1])));
   assert.deepEqual(schedule(0, 'empty').laps, []);
+});
+test('a fixed lap count spans the race and preserves tightly spaced handoffs', () => {
+  const { laps } = schedule(24, 'night', 1115);
+  assert.equal(laps.length, 1115);
+  assert(laps[0] > 0 && laps[0] < 120);
+  assert(laps.at(-1) > 24 * 3600 - 120 && laps.at(-1) < 24 * 3600);
+  assert(laps.every((s, i) => i === 0 || s > laps[i - 1]));
+  assert(laps.some((s, i) => s - laps[i - 1] < 5));
+  assert.equal(schedule(24, 'night', 80).laps.length, 80);
 });
 test('percentiles cover populated and empty series without mutating input', () => {
   const values = [4, 1, 3, 2];

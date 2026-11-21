@@ -133,6 +133,9 @@
     CREATE INDEX IF NOT EXISTS idx_laps_finished
       ON laps(finished_at DESC);
 
+    CREATE INDEX IF NOT EXISTS idx_handoff_history_undo_created
+      ON handoff_history(undone, created_at);
+
     CREATE INDEX IF NOT EXISTS idx_race_events_occurred
       ON race_events(occurred_at DESC, created_at DESC);
 

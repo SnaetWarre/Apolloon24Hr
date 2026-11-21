@@ -99,6 +99,60 @@ pub fn damaged(path: &Path) -> Value {
 mod tests {
     use super::*;
     #[test]
+    fn startup_indexes_latest_undo_without_changing_timestamp_ties() {
+        let root = std::env::temp_dir().join(format!("apolloon-undo-index-{}", id()));
+        let path = root.join("app.db");
+        let db = Db::open(&path).unwrap();
+        db.conn
+            .execute_batch(
+                "DROP INDEX idx_handoff_history_undo_created;
+            INSERT INTO handoff_history VALUES
+                ('z-first',100,'{\"kind\":\"first\"}',0),
+                ('a-second',100,'{\"kind\":\"second\"}',0),
+                ('older',99,'{\"kind\":\"older\"}',0),
+                ('undone',101,'{\"kind\":\"undone\"}',1);",
+            )
+            .unwrap();
+        let query = "SELECT json_extract(payload_json,'$.kind') AS kind FROM handoff_history WHERE undone=0 ORDER BY created_at DESC,rowid DESC LIMIT 1";
+        let old_query = query.replace("FROM handoff_history", "FROM handoff_history NOT INDEXED");
+        let expected = db.rows(&old_query, &[]).unwrap();
+        assert_eq!(expected, vec![json!({"kind":"second"})]);
+        drop(db);
+
+        let db = open(&path).unwrap();
+        let plan = db
+            .rows(&format!("EXPLAIN QUERY PLAN {query}"), &[])
+            .unwrap();
+        let details = plan
+            .iter()
+            .map(|row| row["detail"].as_str().unwrap())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            details.contains("USING INDEX idx_handoff_history_undo_created"),
+            "{details}"
+        );
+        assert!(!details.contains("SCAN"), "{details}");
+        assert!(!details.contains("USE TEMP B-TREE"), "{details}");
+        for kind in ["second", "first", "older"] {
+            assert_eq!(
+                db.rows(query, &[]).unwrap(),
+                db.rows(&old_query, &[]).unwrap()
+            );
+            assert_eq!(db.race_snapshot().unwrap()["nextUndo"], kind);
+            db.exec(
+                "UPDATE handoff_history SET undone=1 WHERE json_extract(payload_json,'$.kind')=?",
+                &[json!(kind)],
+            )
+            .unwrap();
+        }
+        assert!(db.rows(query, &[]).unwrap().is_empty());
+        assert!(db.race_snapshot().unwrap()["nextUndo"].is_null());
+        drop(db);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn damaged_bytes_are_preserved_and_old_backup_is_available_for_restore() {
         let root = std::env::temp_dir().join(format!("apolloon-damaged-{}", id()));
         let path = root.join("data/app.db");

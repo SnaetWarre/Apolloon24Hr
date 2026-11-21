@@ -86,13 +86,15 @@ try {
     const localNow = Date.now.bind(Date);
     Date.now = () => localNow() + 45_000;
   }, cpuOnly);
-  const stateRequest = page.waitForResponse((r) => r.url().endsWith('/api/state') && r.ok(), { timeout: 90000 });
+  const stateRequest = page.waitForResponse((r) => new URL(r.url()).pathname === '/api/state' && r.ok(), {
+    timeout: 90000,
+  });
   await page.goto(url);
   await stateRequest;
   await page.waitForFunction(() => document.querySelector('canvas') && !document.querySelector('#status'), null, {
     timeout: 90000,
   });
-  await page.waitForResponse((r) => r.url().endsWith('/api/state') && r.ok());
+  await page.waitForResponse((r) => new URL(r.url()).pathname === '/api/state' && r.ok());
   const mark = cpuOnly ? 'web.gpu.failed' : 'web.handover.done';
   await page.waitForFunction((mark) => performance.getEntriesByName(mark).length > 0, mark, { timeout: 30000 });
   const canvases = await page.evaluate(() => document.querySelectorAll('canvas').length);
@@ -111,10 +113,18 @@ try {
     return Array.from(context.getImageData(1330, 710, 1, 1).data);
   }, frame.toString('base64'));
   assert.deepEqual(color, [24, 24, 26, 255], `${renderer} keeps the dark page panel`);
-  await page.mouse.click(80, 178);
+  const clickCanvasButton = async (button) => {
+    await button.waitFor({ state: 'visible' });
+    const bounds = await button.boundingBox();
+    assert(bounds, 'Canvas button has visible bounds');
+    await page.mouse.click(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+  };
+  await clickCanvasButton(page.getByRole('button', { name: 'Timing', exact: true }));
+  const startButton = page.getByRole('button', { name: /^Start .+ Spatie \/ Enter$/ });
+  await startButton.waitFor({ state: 'visible' });
   await page.screenshot({ path: path.join(dir, 'timing-before.png') });
   const press = page.waitForResponse((r) => r.url().endsWith('/api/action/race.handoff'), { timeout: 10000 });
-  await page.mouse.click(780, 335);
+  await clickCanvasButton(startButton);
   const response = await press;
   assert(response.ok(), await response.text());
   const { pressedAt } = response.request().postDataJSON();
@@ -134,11 +144,11 @@ try {
   const recoveryRequest = page.waitForResponse((r) => r.url().endsWith('/api/recovery') && r.ok());
   await page.goto(url + '/admin?section=system');
   await recoveryRequest;
-  await page.waitForResponse((r) => r.url().endsWith('/api/state') && r.ok());
+  await page.waitForResponse((r) => new URL(r.url()).pathname === '/api/state' && r.ok());
   await page.screenshot({ path: path.join(dir, 'recovery-before.png') });
   await page.goto(url + '/admin?section=preparation');
   await page.waitForResponse((r) => r.url().endsWith('/api/recovery') && r.ok());
-  await page.waitForResponse((r) => r.url().endsWith('/api/state') && r.ok());
+  await page.waitForResponse((r) => new URL(r.url()).pathname === '/api/state' && r.ok());
   await page.waitForFunction((mark) => performance.getEntriesByName(mark).length > 0, mark, { timeout: 30000 });
   await page.screenshot({ path: path.join(dir, 'import-before.png') });
   // The page fades in after navigation. Let the button finish entering before pressing it.
@@ -167,7 +177,7 @@ try {
     skipped: 1,
     errors: ['Rij 3: lopersnummer en naam ontbreekt'],
   });
-  await page.waitForResponse((r) => r.url().endsWith('/api/state') && r.ok());
+  await page.waitForResponse((r) => new URL(r.url()).pathname === '/api/state' && r.ok());
   const afterImport = await (await fetch(url + '/api/state')).json();
   assert(afterImport.runners.some((r) => r.name === 'Browser Imported' && r.runnerNumber === '77'));
   await page.screenshot({ path: path.join(dir, 'import-after.png') });
