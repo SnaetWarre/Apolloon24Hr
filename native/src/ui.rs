@@ -98,6 +98,7 @@ pub struct State {
     preview: Value,
     notice: String,
     import_file: Option<(String, Vec<u8>)>,
+    import_preview: Option<Result<Value, String>>,
     import_problems: Vec<String>,
     file_tx: Sender<Result<PickedFile, String>>,
     file_rx: Receiver<Result<PickedFile, String>>,
@@ -251,6 +252,7 @@ fn init_with_url(url: String) -> State {
         preview: Value::Null,
         notice: String::new(),
         import_file: None,
+        import_preview: None,
         import_problems: Vec::new(),
         file_tx,
         file_rx,
@@ -386,6 +388,7 @@ fn poll(s: &mut State, _: f64, tx: &mut Tx) -> bool {
         match file {
             Ok((FilePurpose::Import, name, bytes)) => {
                 s.import_file = Some((name, bytes));
+                s.import_preview = admin_preparation::analysis(s);
                 s.import_problems.clear();
             }
             Ok((FilePurpose::Reference, name, bytes)) => tactics_page::load_file(s, name, bytes),

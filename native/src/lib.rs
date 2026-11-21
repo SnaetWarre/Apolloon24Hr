@@ -1,4 +1,6 @@
 #[cfg(all(target_arch = "wasm32", feature = "desktop"))]
+mod runner_import;
+#[cfg(all(target_arch = "wasm32", feature = "desktop"))]
 mod theme;
 #[cfg(all(target_arch = "wasm32", feature = "desktop"))]
 mod ui;
