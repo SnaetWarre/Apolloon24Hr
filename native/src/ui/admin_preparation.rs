@@ -91,5 +91,51 @@ pub(super) fn section(s: &State) -> El {
         }
         card = card.child(problems);
     }
-    stack(s, vec![readiness::panel(s), card])
+    let mut page = vec![readiness::panel(s)];
+    if let Some(group) = group_card(s) {
+        page.push(group);
+    }
+    page.push(card);
+    stack(s, page)
+}
+
+/// Groep maken at a glance: how many laptops are linked and which role each one has.
+fn group_card(s: &State) -> Option<El> {
+    let c = &s.snapshot["cluster"];
+    if c["enabled"] != true {
+        return None;
+    }
+    let members = c["members"].as_array().cloned().unwrap_or_default();
+    let summary = if members.len() > 1 {
+        let roles: Vec<String> = members
+            .iter()
+            .map(|m| {
+                let name = admin_system::laptop_label(m);
+                match cluster_setup::role(m) {
+                    Some(role) => format!("{name}: {role}"),
+                    None => format!("{name}: nog geen rol"),
+                }
+            })
+            .collect();
+        format!("{} laptops gekoppeld. {}.", members.len(), roles.join(" · "))
+    } else {
+        "Deze laptop werkt nog alleen. Koppel de andere laptops, geef elk een rol en test de groep, alles op één scherm.".into()
+    };
+    Some(
+        super::admin_kit::panel()
+            .key("preparation-group")
+            .child(h2(s, "Groep maken").mb(8.0))
+            .child(copy(s, summary).role("status"))
+            .child(
+                row().mt(12.0).child(
+                    btn(s, "preparation-group-open", "Groep maken openen", Kind::Plain, false, false).on_press_tx(
+                        |s: &mut State, tx: &mut Tx| {
+                            tx.instant();
+                            s.admin_section = 6;
+                            s.admin.select = None;
+                        },
+                    ),
+                ),
+            ),
+    )
 }

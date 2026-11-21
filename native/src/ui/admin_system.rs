@@ -72,6 +72,7 @@ pub(super) struct Panel {
     update: Value,
     update_problem: Option<String>,
     desktop_diagnostics: Value,
+    pub(super) setup: super::cluster_setup::Setup,
 }
 pub(super) struct NetWait {
     elevation: Value,
@@ -104,6 +105,7 @@ impl Default for Panel {
             update: Value::Null,
             update_problem: None,
             desktop_diagnostics: Value::Null,
+            setup: Default::default(),
         }
     }
 }
@@ -148,7 +150,7 @@ fn backup_kind(record: &Value) -> &'static str {
         "Handmatig"
     }
 }
-fn cluster(s: &State) -> &Value {
+pub(super) fn cluster(s: &State) -> &Value {
     &s.snapshot["cluster"]
 }
 
@@ -173,6 +175,7 @@ pub(super) fn owns(s: &State, method: &str) -> bool {
             | "desktop.openUrl"
             | "cluster.joinGroup"
             | "cluster.testGroup"
+            | "cluster.setRole"
     ) || (s.page == 8 && (method == "events.burgieGepakt" || method.starts_with("cluster.")))
 }
 
@@ -241,6 +244,8 @@ pub(super) fn succeeded(s: &mut State, method: &str, result: &Value) {
         "cluster.removeLaptop" => {
             s.notice = "De laptop is uit de groep gehaald. Koppel een reservelaptop om weer een laptop te mogen verliezen.".into()
         }
+        "cluster.setRole" => super::cluster_setup::role_saved(s, result),
+        "cluster.joinGroup" if super::cluster_setup::joined(s, true) => {}
         "cluster.joinGroup" => {
             s.system.other_url = TextEdit::new("");
             s.notice = match result["backupFile"].as_str() {
@@ -320,6 +325,10 @@ pub(super) fn failed(s: &mut State, method: &str) {
         }
         "events.burgieGepakt" => s.error = format!("Burgie gepakt opslaan mislukt: {}", s.error),
         "cluster.testGroup" => s.error = format!("Groepstest mislukt: {}", s.error),
+        "cluster.joinGroup" => {
+            super::cluster_setup::joined(s, false);
+        }
+        "cluster.setRole" => s.error = format!("Rol opslaan mislukt: {}", s.error),
         _ => {}
     }
 }
@@ -466,10 +475,12 @@ pub(super) fn refresh(s: &mut State) {
 pub(super) fn panel(s: &State) -> El {
     let mut page = Vec::new();
     if cluster(s)["enabled"] == true {
-        page.push(cluster_panel(s));
+        page.push(super::cluster_setup::panel(s));
     }
+    // With linking on, Groep maken already shows every found laptop as a card.
     if let Some(nearby) = s.recovery["system"]["nearbyLaptops"]
         .as_array()
+        .filter(|_| cluster(s)["enabled"] != true)
         .filter(|laptops| !laptops.is_empty())
     {
         let mut detected = section("Gevonden laptops", s.dark);
@@ -503,18 +514,18 @@ pub(super) fn panel(s: &State) -> El {
     super::admin_base::stack(s, page)
 }
 
-fn section(title: &str, dark: bool) -> El {
+pub(super) fn section(title: &str, dark: bool) -> El {
     kit::panel().child(kit::h2(title, dark).mb(8.0))
 }
 /// `.management-content .panel > .host-hint`: 8 above and below, merged with the copy's 12.
 /// `margin-block: 8px`, collapsing with the 12px under a `.panel-copy` above it.
-fn spaced(el: El) -> El {
+pub(super) fn spaced(el: El) -> El {
     el.mb(8.0)
 }
 
-// ---------- Laptops koppelen ----------
+// ---------- Groep maken (ui/cluster_setup.rs) ----------
 
-fn describe_group(c: &Value) -> (Tone, String, String) {
+pub(super) fn describe_group(c: &Value) -> (Tone, String, String) {
     let members = c["members"].as_array().map(Vec::as_slice).unwrap_or(&[]);
     let total = members.len();
     let unreachable = members.iter().filter(|m| m["reachable"] != true).count();
@@ -578,7 +589,7 @@ fn describe_group(c: &Value) -> (Tone, String, String) {
 pub(super) fn busy_state(c: &Value) -> bool {
     c["busy"].as_str().is_some_and(|b| !b.is_empty()) || c["busy"] == true
 }
-fn confirm_cluster(s: &mut State, method: &str, input: Value) {
+pub(super) fn confirm_cluster(s: &mut State, method: &str, input: Value) {
     if !s.busy {
         s.confirm = Some(Command {
             screen: String::new(),
@@ -665,211 +676,8 @@ pub(super) fn manual_join_form(s: &State, busy: bool) -> El {
         ))
 }
 
-fn cluster_panel(s: &State) -> El {
-    let c = cluster(s);
-    let members = c["members"].as_array().cloned().unwrap_or_default();
-    let nearby = c["nearby"].as_array().cloned().unwrap_or_default();
-    let busy = s.busy || busy_state(c);
-    let host_url = st(&s.snapshot["host"], "url").to_string();
-    let runner_count = runners(s).len();
-    let mut copy_text = if members.len() == 1 {
-        "Koppel deze laptop met de andere: dan heeft elke laptop alle gegevens, kan je op elke laptop werken, en werken de andere vanzelf verder als er één uitvalt.".to_string()
-    } else {
-        format!(
-            "Gekoppelde laptops hebben elk alle gegevens, en op elke laptop kan je werken. Een wijziging is pas bewaard als minstens {} laptops ze hebben. Valt een laptop uit, dan werken de andere vanzelf verder.",
-            c["majority"]
-        )
-    };
-    if c["autoLink"]["enabled"] == true && runner_count == 0 {
-        copy_text.push_str(" Zolang hier geen lopers staan, koppelt deze laptop vanzelf met de laptops die ze op het netwerk vindt.");
-    }
-    let (tone, title, detail) = describe_group(c);
-    let mut p = section("Laptops koppelen", s.dark)
-        .child(kit::copy(copy_text, s.dark).mb(12.0))
-        .child(spaced(
-            kit::notice_text(s, tone, &format!("**{title}** · {detail}")).role("status"),
-        ));
-    if let Some(waiting) = c["autoLink"]["waiting"].as_str() {
-        p = p.child(spaced(kit::notice_text(s, Tone::Hint, waiting)));
-    }
-    let timing_elsewhere = (c["timing"].is_object() && c["timing"]["self"] != true).then(|| {
-        c["timing"]["name"]
-            .as_str()
-            .unwrap_or("een andere laptop")
-            .to_string()
-    });
-    if members.len() > 1 {
-        p = p
-            .child(super::group_view::laptops(s, move |s, m| {
-                (m["removable"] == true).then(|| {
-                    let host_id = m["hostId"].clone();
-                    let name = laptop_label(m);
-                    kit::btn(
-                        s,
-                        format!("cluster-remove-{}", st(m, "hostId")),
-                        "Uit de groep halen",
-                        Kind::Ghost,
-                        true,
-                        None,
-                        busy,
-                        move |s| {
-                            confirm_cluster(
-                                s,
-                                "cluster.removeLaptop",
-                                json!({"hostId":host_id,"name":name}),
-                            )
-                        },
-                    )
-                })
-            }))
-            .child(super::group_view::test_section(s, busy));
-    }
-    if let Some(from) = c["removedFrom"].as_object() {
-        let from = Value::Object(from.clone());
-        p = p.child(spaced(kit::notice(
-            s,
-            Tone::Alert,
-            row()
-                .flex_wrap()
-                .gap(8.0)
-                .center_y()
-                .child(kit::value_text(
-                    "Deze laptop is uit de groep gehaald. Wat je hier doet, wordt niet bewaard. Werkt hij weer?",
-                    s.dark,
-                ))
-                .child(kit::btn(
-                    s,
-                    "cluster-rejoin",
-                    "Opnieuw koppelen",
-                    Kind::Ghost,
-                    false,
-                    None,
-                    s.busy,
-                    move |s| confirm_cluster(s, "cluster.joinGroup", json!({"url":from["url"],"name":from["name"],"rejoin":true})),
-                )),
-        )));
-    } else if st(c, "state") == "no-majority" {
-        let (message, label) = match &timing_elsewhere {
-            Some(name) => (
-                format!(
-                    "Er zijn te weinig laptops bereikbaar om iets te bewaren. Wacht tot het netwerk terug is, of klok verder op {name}: daar staat Timing open, en alleen die laptop kan alleen verder werken. Is {name} echt kapot?"
-                ),
-                "Timing overnemen en alleen verder werken",
-            ),
-            None => (
-                format!(
-                    "Er zijn te weinig laptops bereikbaar om iets te bewaren. Zet de andere laptops aan of controleer de kabel.{} Zijn ze echt kapot?",
-                    if c["timing"]["self"] == true {
-                        " Timing staat open op deze laptop: komt het netwerk niet snel terug, dan werkt ze vanzelf alleen verder."
-                    } else {
-                        ""
-                    }
-                ),
-                "Alleen verder werken",
-            ),
-        };
-        let take_over = timing_elsewhere.is_some();
-        p = p.child(spaced(kit::notice(
-            s,
-            Tone::Alert,
-            row()
-                .flex_wrap()
-                .gap(8.0)
-                .center_y()
-                .child(kit::value_text(message, s.dark))
-                .child(kit::btn(
-                    s,
-                    "cluster-alone",
-                    label,
-                    Kind::Ghost,
-                    false,
-                    None,
-                    busy,
-                    move |s| {
-                        confirm_cluster(
-                            s,
-                            "cluster.continueAlone",
-                            json!({"takeOverTiming":take_over}),
-                        )
-                    },
-                )),
-        )));
-    }
-    if let Some(error) = c["lastError"].as_str() {
-        p = p.child(spaced(kit::notice_text(s, Tone::Alert, error)));
-    }
-    if let Some(notice) = c["notice"].as_str() {
-        p = p.child(spaced(
-            kit::notice_text(s, Tone::Hint, notice).role("status"),
-        ));
-    }
-    if members.len() == 1 {
-        p = p.child(
-            kit::copy(
-                "Laptops op dit netwerk waarmee deze laptop kan samenwerken:",
-                s.dark,
-            )
-            .mb(12.0),
-        );
-        if nearby.is_empty() {
-            p = p.child(spaced(kit::notice_text(
-                s,
-                Tone::Hint,
-                "Nog geen andere laptops gevonden. Staat Apolloon aan op de andere laptops, en hangen ze aan hetzelfde netwerk?",
-            )));
-        }
-        for found in &nearby {
-            p = p.child(nearby_row(s, found, busy));
-        }
-        let mut details = col().w_full().gap(8.0).child(disclosure(
-            s,
-            "cluster-manual",
-            "Laptop niet in de lijst? Vul het adres in",
-            s.system.manual_open,
-            |s| s.system.manual_open = !s.system.manual_open,
-        ));
-        if s.system.manual_open {
-            let name = c["hostName"]
-                .as_str()
-                .map(|n| format!(" heet **{n}** en"))
-                .unwrap_or_default();
-            details = details
-                .child(
-                    kit::strong_text(
-                        &format!("Het adres staat onderaan de zijbalk van die laptop. Deze laptop{name} heeft adres **{host_url}**."),
-                        kit::pal(s.dark).t.ink2,
-                        s.dark,
-                    )
-                    .wrap()
-                    .max_w(kit::COPY_MAX),
-                )
-                .child(manual_join_form(s, busy));
-        }
-        p = p.child(spaced(kit::notice(s, Tone::Hint, details)));
-    } else {
-        if !nearby.is_empty() {
-            p = p.child(kit::copy("Andere laptops op dit netwerk:", s.dark).mb(12.0));
-        }
-        for found in &nearby {
-            p = p.child(nearby_row(s, found, busy));
-        }
-        if c["removedFrom"].is_null() {
-            p = p.child(kit::strong_text(
-                &if c["autoLink"]["enabled"] == true {
-                    format!("Nog een laptop toevoegen? Start Apolloon op die laptop aan hetzelfde netwerk: een lege laptop koppelt vanzelf, en zolang de race nog niet gestart is ook een laptop met lopers; zijn lopers komen erbij. Lukt dat niet, open dan op die laptop Beheer › Systeem & herstel en klik op Koppelen naast deze groep (adres **{host_url}**).")
-                } else {
-                    format!("Nog een laptop toevoegen? Open op die laptop Beheer › Systeem & herstel en klik op Koppelen naast deze groep (adres **{host_url}**).")
-                },
-                kit::pal(s.dark).t.ink2,
-                s.dark,
-            ).wrap().max_w(kit::COPY_MAX).mb(12.0));
-        }
-    }
-    p
-}
-
 /// `details > summary.disclosure`: a chevron that turns when open.
-fn disclosure(
+pub(super) fn disclosure(
     s: &State,
     key: &str,
     title: &str,
@@ -2049,6 +1857,7 @@ pub(super) fn modal(s: &State) -> Option<El> {
                 "Uit de groep halen",
             )
         }
+        "cluster.linkAll" => super::cluster_setup::link_all_dialog(s),
         "cluster.joinGroup" if input["rejoin"] == true => (
             "Opnieuw koppelen?".into(),
             vec![format!(
@@ -2091,7 +1900,11 @@ pub(super) fn modal(s: &State) -> Option<El> {
         s.busy,
         |s| {
             if let Some(c) = s.confirm.take() {
-                s.send(&c.method, c.input);
+                if c.method == "cluster.linkAll" {
+                    super::cluster_setup::start_link_all(s);
+                } else {
+                    s.send(&c.method, c.input);
+                }
             }
         },
     );
