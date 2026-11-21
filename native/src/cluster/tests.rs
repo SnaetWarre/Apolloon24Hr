@@ -1460,3 +1460,45 @@ fn an_announcement_without_the_group_key_does_not_move_a_laptop() {
     wait_until("healthy", Duration::from_secs(5), || all_healthy(&[&a, &b]));
     assert_eq!(b.count("SELECT COUNT(*) AS n FROM runners"), 1);
 }
+||||||| parent of b32c33a (Do not count a vote or a term that could not be stored)
+
+
+/// A laptop whose disk refuses the vote neither gives it nor stands: counted and then given
+/// again in the same term, it would let two laptops lead.
+#[test]
+fn a_vote_that_cannot_be_stored_is_not_given() {
+    let _serial = serial();
+    let dir = Dir::new();
+    let (a, b, c) = linked_three(&dir);
+    let refuse_votes = |server: &TestServer, on: bool| {
+        let db = server.db.lock().unwrap();
+        db.conn
+            .execute_batch(if on {
+                "CREATE TRIGGER vote_fails BEFORE INSERT ON settings WHEN NEW.key='cluster_voted_for' BEGIN SELECT RAISE(ABORT,'disk'); END"
+            } else {
+                "DROP TRIGGER vote_fails"
+            })
+            .unwrap();
+    };
+    refuse_votes(&b, true);
+    refuse_votes(&c, true);
+    let term = b.node.term();
+    a.kill();
+    std::thread::sleep(Duration::from_millis(2_500));
+    assert_eq!(leader_index(&[&b, &c]), None, "nobody leads on votes that were not stored");
+    let vote = b.node.handle_vote(&json!({
+        "clusterId": b.status()["clusterId"],
+        "term": b.node.term() + 1,
+        "candidateId": c.node.host_id,
+        "lastSeq": c.head(),
+        "lastTerm": term + 1_000,
+    }));
+    assert_eq!(vote["granted"], false, "a vote that is not on disk is not given");
+    refuse_votes(&b, false);
+    refuse_votes(&c, false);
+    wait_until("a leader once votes are stored again", Duration::from_secs(10), || {
+        leader_index(&[&b, &c]).is_some()
+    });
+    b.act("runners.create", json!({"name":"Wout","status":"waiting"}))
+        .unwrap();
+}
