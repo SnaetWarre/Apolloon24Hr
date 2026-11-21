@@ -18,6 +18,8 @@ use std::{
 };
 
 const CLOCK_SYNC: Duration = Duration::from_secs(2);
+/// Longest a write waiting for the majority goes without looking again.
+const WAIT_STEP: Duration = Duration::from_millis(5);
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Role {
@@ -232,6 +234,7 @@ impl Node {
         let was = st.role;
         st.role = next;
         st.pending = None;
+        self.raft_changed.notify_all();
         if next == Role::Leader {
             st.leader = Some(self.self_member());
             st.last_contact = Some(Instant::now());
@@ -525,6 +528,7 @@ impl Node {
                 if let Some(p) = node.raft.lock().unwrap().progress.get_mut(&member.host_id) {
                     p.in_flight = false;
                 }
+                node.raft_changed.notify_all();
             });
         }
     }
@@ -630,6 +634,7 @@ impl Node {
                 p.match_seq = Some(head_seq);
                 p.needs_resync = false;
                 self.advance_commit(&mut st);
+                self.raft_changed.notify_all();
                 if head_seq >= newest {
                     return;
                 }
@@ -720,8 +725,8 @@ impl Node {
                 }
             } else if Instant::now() < deadline {
                 self.replicate_to_all(&mut st);
-                drop(st);
-                std::thread::sleep(Duration::from_millis(5));
+                // Woken as soon as another laptop answers; the short wait only bounds a miss.
+                let _ = self.raft_changed.wait_timeout(st, WAIT_STEP).unwrap();
                 continue;
             }
             // Another laptop may hold this write. A later election decides whether it counts, so
@@ -747,20 +752,17 @@ impl Node {
             self.advance_commit(&mut st);
         }
         loop {
-            {
-                let st = self.raft.lock().unwrap();
-                if st.role != Role::Leader {
-                    return false;
-                }
-                if st.committed >= seq {
-                    return true;
-                }
+            let st = self.raft.lock().unwrap();
+            if st.role != Role::Leader {
+                return false;
+            }
+            if st.committed >= seq {
+                return true;
             }
             if Instant::now() >= deadline {
                 return false;
             }
-            std::thread::sleep(Duration::from_millis(5));
-            let mut st = self.raft.lock().unwrap();
+            let (mut st, _) = self.raft_changed.wait_timeout(st, WAIT_STEP).unwrap();
             self.replicate_to_all(&mut st);
         }
     }
