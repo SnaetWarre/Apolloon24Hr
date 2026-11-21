@@ -75,13 +75,16 @@ impl HistoryLog {
             .filter(|old| old.3 == version.3 && old.4 == version.4)
             .map(|old| old.2)
     }
+    pub(super) fn is_current(&self, version: ReadVersion) -> bool {
+        self.version == Some(version) && self.current.is_some()
+    }
     pub(super) fn refresh(
         &mut self,
         db: &Db,
         version: ReadVersion,
         changes: Option<Changes>,
     ) -> Result<()> {
-        if self.version == Some(version) && self.current.is_some() {
+        if self.is_current(version) {
             return Ok(());
         }
         if let (Some(changes), Some(current)) = (changes, &mut self.current) {

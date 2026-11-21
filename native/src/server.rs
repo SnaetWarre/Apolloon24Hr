@@ -33,6 +33,8 @@ struct ReadCache {
     version: Option<ReadVersion>,
     snapshot: Option<Bytes>,
     latency_lap: Option<String>,
+    #[cfg(test)]
+    snapshot_reads: usize,
 }
 
 #[derive(Default)]
@@ -185,13 +187,40 @@ fn snapshot_read(host: Host, query: &std::collections::HashMap<String, String>, 
     let mut mark = |stage| if crate::latency::enabled() { marks.push((stage, crate::latency::realtime_us())); };
     mark("snapshot_worker");
     let mut read = || -> Result<(Bytes, Option<Bytes>, Option<String>)> {
+        mark("history_lock_begin");
         let mut history = query
             .contains_key("history")
             .then(|| host.history.lock().unwrap());
+        mark("history_lock_ready");
         let (db, version, token, changes) = {
+            mark("writer_lock_begin");
             let writer = host.db.lock().unwrap();
+            mark("writer_lock_ready");
             let version = read_version(&writer)?;
+            mark("read_cache_lookup_begin");
+            let cached = host.reads.try_lock().ok().filter(|cache| {
+                cache.version == Some(version)
+                    && cache.snapshot.is_some()
+                    && history.as_ref().is_none_or(|log| log.is_current(version))
+            });
+            mark("read_cache_lookup_ready");
+            if let Some(cache) = cached {
+                let cached = cache.snapshot.clone().unwrap();
+                let lap = cache.latency_lap.clone();
+                drop(cache);
+                drop(writer);
+                mark("snapshot_read_ready");
+                let history = if let Some(log) = history.as_mut() {
+                    mark("history_built");
+                    Some(query.get("since").and_then(|cursor| log.since(cursor))
+                        .map(Ok).unwrap_or_else(|| log.full_body())?)
+                } else { None };
+                mark("history_ready");
+                return Ok((cached, history, lap));
+            }
+            mark("read_connection_begin");
             let db = writer.read_snapshot()?;
+            mark("read_connection_ready");
             if version != read_version(&writer)? {
                 return Err("Database gewijzigd tijdens het lezen".into());
             }
@@ -199,7 +228,11 @@ fn snapshot_read(host: Host, query: &std::collections::HashMap<String, String>, 
                 .history_changes_since(history.as_ref().and_then(|log| log.generation(version)));
             (db, version, writer.change_token(), changes)
         };
+        mark("read_cache_lock_begin");
         let mut cache = host.reads.lock().unwrap();
+        mark("read_cache_lock_ready");
+        #[cfg(test)]
+        { cache.snapshot_reads += 1; }
         mark("snapshot_read_ready");
         if cache.version != Some(version) || cache.snapshot.is_none() {
             let mut state = db.race_snapshot()?;
@@ -210,11 +243,9 @@ fn snapshot_read(host: Host, query: &std::collections::HashMap<String, String>, 
             mark("snapshot_built");
             let body = serde_json::to_vec(&state).map_err(|e| e.to_string())?;
             mark("snapshot_serialized");
-            *cache = ReadCache {
-                version: Some(version),
-                snapshot: Some(body.into()),
-                latency_lap: state["latencyLap"].as_str().map(str::to_owned),
-            };
+            cache.version = Some(version);
+            cache.snapshot = Some(body.into());
+            cache.latency_lap = state["latencyLap"].as_str().map(str::to_owned);
         }
         let cached = cache.snapshot.clone().unwrap();
         let lap = cache.latency_lap.clone();
@@ -900,6 +931,47 @@ mod read_cache_tests {
         let state = tokio::time::timeout(std::time::Duration::from_secs(1), pushed(host.clone(), None, false)).await.unwrap();
         assert_eq!(state["runners"], json!([]));
         assert!(state.get("stateHistory").is_none());
+    }
+
+    #[tokio::test]
+    async fn same_version_waiters_share_reads_but_local_commits_invalidate_them() {
+        let db = Arc::new(Mutex::new(Db::open(std::path::Path::new(":memory:")).unwrap()));
+        let host = Host::with_cluster(db.clone(), 5173, None);
+        let (initial, parallel) = tokio::join!(pushed(host.clone(), None, true), pushed(host.clone(), None, true));
+        assert_eq!(initial["stateHistory"], parallel["stateHistory"]);
+        let cursor = initial["stateHistory"]["cursor"].as_str().unwrap();
+        let mut query = std::collections::HashMap::from([
+            ("history".into(), "1".into()), ("since".into(), cursor.to_owned())
+        ]);
+        for since in [cursor, "unknown.0", cursor] {
+            query.insert("since".into(), since.to_owned());
+            let answer = body(snapshot_with_history(host.clone(), &query).await).await;
+            assert_eq!(answer["revision"], initial["revision"]);
+            if since == cursor {
+                assert_eq!(answer["stateHistory"]["changes"]["laps"]["count"], 0);
+            } else { assert_eq!(answer["stateHistory"], initial["stateHistory"]); }
+        }
+        let plain = pushed(host.clone(), None, false).await;
+        assert_eq!(plain["changeToken"], initial["changeToken"]);
+        assert_eq!(host.reads.lock().unwrap().snapshot_reads, 1);
+        db.lock().unwrap().exec("INSERT INTO settings VALUES('shared-read-test','yes')", &[]).unwrap();
+        let updated = pushed(host.clone(), None, true).await;
+        assert_eq!(updated["revision"], initial["revision"]);
+        assert_ne!(updated["changeToken"], initial["changeToken"]);
+        assert_eq!(host.reads.lock().unwrap().snapshot_reads, 2);
+        pushed(host.clone(), None, true).await;
+        assert_eq!(host.reads.lock().unwrap().snapshot_reads, 2);
+    }
+
+    #[tokio::test]
+    async fn warm_state_does_not_hide_a_schema_error() {
+        let db = Arc::new(Mutex::new(Db::open(std::path::Path::new(":memory:")).unwrap()));
+        let host = Host::with_cluster(db.clone(), 5173, None);
+        pushed(host.clone(), None, true).await;
+        db.lock().unwrap().exec("DROP TABLE race_state", &[]).unwrap();
+        let failed = pushed(host, None, true).await;
+        assert!(failed["error"]["message"].as_str().unwrap().contains("race_state"));
+        assert!(failed["changeToken"].is_null());
     }
 
     #[test]

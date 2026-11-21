@@ -181,6 +181,9 @@ export function httpMetrics(events, writes, screens) {
         (e) => e.source === screen.node && e.stage === 'notify' && e.lapId === write.lapId
       )?.us;
       const delta = (a, b) => (Number.isFinite(a) && Number.isFinite(b) && b >= a ? b - a : undefined);
+      const cacheWaits = ['read_cache_lookup', 'read_cache_lock']
+        .map((stage) => delta(at(stage + '_begin'), at(stage + '_ready')))
+        .filter(Number.isFinite);
       const localAt = (stage) => local.find((e) => e.stage === stage && e.us >= push?.us)?.us;
       const size = points.find((e) => e.stage === 'http_size');
       const wire = points.find((e) => e.stage === 'wire_body');
@@ -192,6 +195,10 @@ export function httpMetrics(events, writes, screens) {
         notifyWakeUs: delta(notify, at('waiter_wake')),
         workerQueueUs: delta(at('snapshot_dispatch') ?? at('waiter_wake'), at('snapshot_worker')),
         readSnapshotUs: delta(at('snapshot_worker'), at('snapshot_read_ready')),
+        historyLockUs: delta(at('history_lock_begin'), at('history_lock_ready')),
+        writerLockUs: delta(at('writer_lock_begin'), at('writer_lock_ready')),
+        readConnectionUs: delta(at('read_connection_begin'), at('read_connection_ready')),
+        readCacheLockUs: cacheWaits.length ? cacheWaits.reduce((a, b) => a + b, 0) : undefined,
         snapshotBuildUs: delta(at('snapshot_read_ready'), at('snapshot_built')),
         serializeUs: delta(at('snapshot_built'), at('snapshot_serialized')),
         stateHistoryUs: delta(at('snapshot_read_ready'), at('history_ready')),
@@ -299,6 +306,10 @@ export function stageMetrics(events, writes, results, leader, refresh = []) {
       'notifyWakeUs',
       'workerQueueUs',
       'readSnapshotUs',
+      'historyLockUs',
+      'writerLockUs',
+      'readConnectionUs',
+      'readCacheLockUs',
       'snapshotBuildUs',
       'serializeUs',
       'stateHistoryUs',

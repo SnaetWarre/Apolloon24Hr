@@ -35,6 +35,17 @@ test('HTTP stages join the exact request, not another screen snapshot of the sam
     event('A', 'waiter_wake', 2),
     event('A', 'snapshot_dispatch', 3),
     event('A', 'snapshot_worker', 4),
+    event('A', 'history_lock_begin', 4),
+    event('A', 'history_lock_ready', 5),
+    event('A', 'writer_lock_begin', 5),
+    event('A', 'writer_lock_ready', 6),
+    event('A', 'read_cache_lookup_begin', 6),
+    event('A', 'read_cache_lookup_ready', 6.5),
+    event('A', 'read_connection_begin', 6),
+    event('A', 'read_connection_ready', 8),
+    event('A', 'read_cache_lock_begin', 8),
+    event('A', 'read_cache_lock_ready', 9),
+    event('A', 'snapshot_read_ready', 9),
     event('A', 'response_ready', 10),
     event('A', 'response_ready', 1, 'other'),
     event('native', 'http_headers', 12),
@@ -53,6 +64,11 @@ test('HTTP stages join the exact request, not another screen snapshot of the sam
   const [row] = httpMetrics(events, [{ lapId: 'lap' }], screens);
   assert.equal(row.notifyWakeUs, 2);
   assert.equal(row.workerQueueUs, 1);
+  assert.equal(row.readSnapshotUs, 5);
+  assert.equal(row.historyLockUs, 1);
+  assert.equal(row.writerLockUs, 1);
+  assert.equal(row.readConnectionUs, 2);
+  assert.equal(row.readCacheLockUs, 1.5);
   assert.equal(row.responseToProxyUs, 1);
   assert.equal(row.proxyStreamUs, 2);
   assert.equal(row.proxyToClientBodyUs, 1);
@@ -70,6 +86,12 @@ test('HTTP stages join the exact request, not another screen snapshot of the sam
   );
   assert.equal(unwaited.notifyWakeUs, undefined);
   assert.equal(unwaited.workerQueueUs, 1);
+  const [cached] = httpMetrics(
+    events.filter((e) => !e.stage.startsWith('read_connection_')),
+    [{ lapId: 'lap' }],
+    screens
+  );
+  assert.equal(cached.readConnectionUs, undefined);
   assert.deepEqual(httpMetrics([], [], screens), []);
   assert.deepEqual(
     httpMetrics(
