@@ -2,6 +2,7 @@
 //! styles in src/styles/tactics.css. Live laps against a target schedule and last year's Quivr
 //! reference, plus the historical deep dive. Charts are drawn with Rune shapes on the same
 //! geometry Chart.js uses (title band, tick labels, nice ticks, grace).
+use super::chart_axis::{LabelSlot, visible_labels};
 use super::*;
 use rune::{Color, LineCap, Shape, TextStyle, canvas, el, oklch};
 use std::collections::HashMap;
@@ -1483,13 +1484,18 @@ fn chart(s: &State, k: &Ink, spec: ChartSpec) -> El {
             s.tactics.widths.insert(key, r[2]);
         }
     });
-    for (x, lines) in &spec.x_ticks {
-        let xx = px(*x);
+    let slots: Vec<_> = spec
+        .x_ticks
+        .iter()
+        .map(|(x, lines)| LabelSlot::new(px(*x), lines.iter().map(String::as_str), font(12.0, 400.0)))
+        .collect();
+    for i in visible_labels(&slots) {
+        let slot = &slots[i];
         let mut c = col()
-            .w(80.0)
+            .w(slot.width)
             .items_center()
-            .absolute(xx - 40.0, top + ph + 11.0);
-        for l in lines {
+            .absolute(slot.x - slot.width / 2.0, top + ph + 11.0);
+        for l in &spec.x_ticks[i].1 {
             c = c.child(
                 row()
                     .h(14.4)
