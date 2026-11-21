@@ -582,6 +582,7 @@ fn poll(s: &mut State, _: f64, tx: &mut Tx) -> bool {
         tx.animated();
         changed = true;
     }
+    timing_page::send_waiting_press(s);
     let was_busy = s.busy;
     activity_panel::refresh(s);
     queue_page::refresh(s);
@@ -1872,6 +1873,44 @@ mod tests {
         assert_eq!(offline[0].id, "server-status");
         assert_eq!(readiness::open_count(&offline), 1);
         assert_eq!(readiness::summary(&offline), readiness::Level::Blocked);
+    }
+    #[test]
+    fn a_press_while_another_action_is_on_its_way_is_kept_with_its_own_time() {
+        let mut initial = crate::db::Db::open(std::path::Path::new(":memory:")).unwrap();
+        for (number, name) in [("1", "Eerste"), ("2", "Tweede")] {
+            initial.mutation("runners.create", &json!({"runnerNumber":number,"name":name,"status":"waiting"})).unwrap();
+        }
+        initial
+            .mutation("race.handoff", &json!({"activeRunnerId":null,"activeStartedAt":null,"pressedAt":now()}))
+            .unwrap();
+        let started = now() - 60_000;
+        initial.exec("UPDATE race_state SET active_started_at=?,race_started_at=? WHERE id=1", &[json!(started), json!(started)]).unwrap();
+        let db = Arc::new(Mutex::new(initial));
+        let socket = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = socket.local_addr().unwrap().port();
+        drop(socket);
+        let _host = crate::server::start(db.clone(), port).unwrap();
+        let mut state = init_with_url(format!("http://127.0.0.1:{port}"));
+        state.page = 2;
+        let mut rt = Runtime::new(state, view, (1366.0, 1080.0), Env { system_dark: false, scale: 1.0 });
+        rt.on_key = Some(on_key);
+        rt.frame(0.0);
+        update(&mut rt, |s| s.connected && !s.snapshot["race"]["activeRunnerId"].is_null());
+        rt.update_if(|s, _| {
+            s.send("events.burgieGepakt", json!({}));
+            true
+        });
+        assert!(rt.state.busy, "Burgie gepakt is on its way");
+        let pressed = rt.state.server_now();
+        rt.key(rune::Key::Text(" ".into()).into());
+        rt.frame(1.0 / 60.0);
+        std::thread::sleep(Duration::from_millis(300));
+        update(&mut rt, |s| !s.busy && s.history["laps"].as_array().is_some_and(|l| l.len() == 1));
+        let lap = db.lock().unwrap().rows("SELECT duration_ms FROM laps", &[]).unwrap();
+        assert_eq!(lap.len(), 1, "The press is sent once the other action is done");
+        let duration = lap[0]["duration_ms"].as_i64().unwrap();
+        assert!((duration - (pressed - started)).abs() < 100, "The lap ends at the press, not when it was sent: {duration}");
+        assert!(rt.state.timing_page.error.is_empty());
     }
     #[test]
     fn space_records_one_lap_and_guards_an_immediate_second_press() {

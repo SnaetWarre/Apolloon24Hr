@@ -43,6 +43,8 @@ pub(super) struct Page {
     finish_step_at: Option<Instant>,
     /// A handoff on its way: the lap it ends, the runner it starts and when.
     pending: Option<(Value, Option<String>, i64)>,
+    /// A press made while another action was on its way: when it was pressed. It is sent next.
+    waiting_press: Option<i64>,
     reopen: bool,
     pub(super) last_action: String,
     pub(super) error: String,
@@ -236,9 +238,20 @@ pub(super) fn key_press(s: &mut State) {
 }
 /// The big button: clock the runner off and start the next, start the first, or resume.
 pub(super) fn press(s: &mut State) {
+    let pressed = s.server_now();
+    press_at(s, pressed);
+}
+/// Sends the press that had to wait for another action, with the time it was pressed.
+pub(super) fn send_waiting_press(s: &mut State) {
+    if !s.busy
+        && let Some(pressed) = s.timing_page.waiting_press.take()
+    {
+        press_at(s, pressed);
+    }
+}
+fn press_at(s: &mut State, pressed: i64) {
     let race = s.snapshot["race"].clone();
-    if s.busy
-        || s.timing_page.dialog.is_some()
+    if s.timing_page.dialog.is_some()
         || cluster(s).blocked
         || (active_runner(s).is_none() && waiting(s).is_empty())
     {
@@ -247,11 +260,15 @@ pub(super) fn press(s: &mut State) {
     if unreachable(s) {
         return;
     }
+    if s.busy {
+        s.timing_page.waiting_press.get_or_insert(pressed);
+        return;
+    }
     if phase(&race) == "finished" {
         s.timing_page.dialog = Some(Dialog::Resume);
         return;
     }
-    let input = base_input(s, s.server_now());
+    let input = base_input(s, pressed);
     let lap_ms = input["measuredDurationMs"].as_i64().or_else(|| {
         race["activeStartedAt"]
             .as_i64()
@@ -740,7 +757,7 @@ pub(super) fn page(s: &State) -> El {
     if !page.error.is_empty() {
         feedback = feedback.child(banner(body_text(page.error.clone(), t.text), s.dark).key("timing-error").role("alert"));
     }
-    if pending.is_some() {
+    if pending.is_some() || page.waiting_press.is_some() {
         feedback = feedback.child(body_text("Wissel wordt opgeslagen…", p.ink3).role("status"));
     } else if !page.last_action.is_empty() {
         feedback = feedback.child(
