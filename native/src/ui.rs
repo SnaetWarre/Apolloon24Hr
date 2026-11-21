@@ -26,6 +26,7 @@ mod clock;
 mod cluster_setup;
 mod group_view;
 mod hex;
+mod history_delivery;
 mod label_editor;
 mod laps_panel;
 mod profile;
@@ -70,7 +71,7 @@ struct Command {
 struct Update {
     partial: bool,
     snapshot: Value,
-    history: Value,
+    history: history_delivery::Delivery,
     outcome: Option<(String, Result<Value, String>)>,
     recovery: Value,
     images: Vec<(String, Vec<u8>)>,
@@ -85,6 +86,7 @@ struct Updates {
 }
 impl Updates {
     fn send(&self, update: Update) -> Result<(), mpsc::SendError<Update>> {
+        crate::latency::snapshot("update_ready", &update.snapshot);
         self.sender.send(update)?;
         if let Some(wake) = self.wake.lock().unwrap().clone() { wake(); }
         Ok(())
@@ -126,6 +128,8 @@ pub struct State {
     dark: bool,
     snapshot: Value,
     history: Value,
+    history_sequence: u64,
+    history_pending: Vec<history_delivery::Delivery>,
     error: String,
     busy: bool,
     connected: bool,
@@ -284,6 +288,8 @@ fn init_with_url(url: String) -> State {
         dark: shell::initial_dark(),
         snapshot: Value::Null,
         history: json!({"laps":[]}),
+        history_sequence: 0,
+        history_pending: Vec::new(),
         error: String::new(),
         busy: false,
         connected: false,
@@ -421,6 +427,7 @@ fn poll(s: &mut State, _: f64, tx: &mut Tx) -> bool {
     }
     while let Ok(update) = s.rx.try_recv() {
         let traced = crate::latency::enabled() && !update.snapshot.is_null();
+        if traced { crate::latency::snapshot("apply_begin", &update.snapshot); }
         if let Some(offset) = update.clock_offset
             && s.clock_offset.abs_diff(offset) >= 16
         {
@@ -452,13 +459,7 @@ fn poll(s: &mut State, _: f64, tx: &mut Tx) -> bool {
             s.snapshot = update.snapshot;
             changed = true;
         }
-        if !update.history.is_null()
-            && !older(&update.history, &s.history)
-            && s.history != update.history
-        {
-            s.history = update.history;
-            changed = true;
-        }
+        changed |= history_delivery::apply(&mut s.history, &mut s.history_sequence, &mut s.history_pending, update.history);
         if !update.recovery.is_null() && s.recovery != update.recovery {
             s.recovery = update.recovery;
             changed |= !public;
@@ -1220,6 +1221,7 @@ pub fn run() {
     #[cfg(not(target_arch = "wasm32"))]
     crate::desktop::chrome::run(spec, |app| if crate::latency::enabled() {
         app.on_frame_drawn(|rt| crate::latency::snapshot("frame", &rt.state.snapshot))
+            .on_frame_stage(crate::latency::frame_stage)
             .on_frame_encoded(|frame| {
                 if frame.outcome() == rune::FrameOutcome::Drawn { crate::latency::emit("cadence", "native", None); }
             })
@@ -1444,8 +1446,8 @@ mod tests {
     fn racing_history_deltas_request_a_full_recovery_instead_of_waiting_for_another_change() {
         let mut synced = Synced { history: json!({"cursor":"epoch.2", "revision":2}), ..Default::default() };
         assert_eq!(synced.take_history(json!({"delta":true,"since":"epoch.1","cursor":"epoch.3"})), None);
-        assert_eq!(synced.take_history(json!({"delta":true,"since":"epoch.1","cursor":"epoch.2"})), Some(Value::Null));
-        assert_eq!(synced.take_history(Value::Null), Some(Value::Null));
+        assert_eq!(synced.take_history(json!({"delta":true,"since":"epoch.1","cursor":"epoch.2"})), Some(Default::default()));
+        assert_eq!(synced.take_history(Value::Null), Some(Default::default()));
     }
 
     #[test]
@@ -1547,7 +1549,7 @@ mod tests {
             let update = receiver.recv_timeout(Duration::from_secs(5)).unwrap();
             if update.snapshot["unchanged"] == true {
                 unchanged += 1;
-                assert!(update.history.is_null());
+                assert_eq!(update.history, history_delivery::Delivery::default());
                 assert!(update.images.is_empty());
             }
         }
@@ -2689,6 +2691,9 @@ fn image_urls(snapshot: &Value, history: &Value) -> std::collections::HashSet<St
     for lap in history["laps"].as_array().into_iter().flatten() {
         collect(&lap["labels"]);
     }
+    for pair in history["changes"]["laps"]["changed"].as_array().into_iter().flatten() {
+        collect(&pair[1]["labels"]);
+    }
     urls
 }
 fn label_badge(value: &Value, s: &State) -> El {
@@ -2730,7 +2735,8 @@ fn clock_offset(samples: impl IntoIterator<Item = (i64, i64, i64)>) -> Option<i6
 #[derive(Default)]
 struct Synced {
     history_revision: Option<i64>,
-    /// The full history as last shown; later reads ask only for what changed since its cursor.
+    history_sequence: u64,
+    /// Identities validate deltas and image paths retain retries; payloads move to the UI.
     history: Value,
     images: std::collections::HashSet<String>,
 }
@@ -2748,30 +2754,30 @@ impl Synced {
             None => "/api/history?scope=full".into(),
         }
     }
-    /// The full history to show for a reply to `history_path`, or `None` when the changes did
-    /// not fit what is held and the full history has to be fetched again.
-    fn take_history(&mut self, reply: Value) -> Option<Value> {
+    /// Move a validated full or delta reply to the UI; `None` requests full recovery.
+    fn take_history(&mut self, reply: Value) -> Option<history_delivery::Delivery> {
         if reply.is_null() {
-            return Some(Value::Null);
+            return Some(Default::default());
         }
         if reply["delta"] == true {
             if reply["cursor"] == self.history["cursor"] {
-                return Some(Value::Null);
+                return Some(Default::default());
             }
             if reply["since"] != self.history["cursor"] {
                 return None;
             }
-            if !merge_history(&mut self.history, &reply) {
+            if !merge_history(&mut self.history, &history_delivery::delta_index(&reply)) {
                 self.history = Value::Null;
                 return None;
             }
         } else if reply["revision"].as_i64() >= self.history["revision"].as_i64() {
-            self.history = reply;
+            self.history = history_delivery::index(&reply);
         } else {
-            return Some(Value::Null);
+            return Some(Default::default());
         }
         self.history_revision = self.history["revision"].as_i64();
-        Some(self.history.clone())
+        self.history_sequence += 1;
+        Some(history_delivery::Delivery { sequence: self.history_sequence, body: reply })
     }
 }
 /// Applies `/api/history?since=` changes to a full history; `false` when they do not line up.
@@ -2847,6 +2853,24 @@ fn start_transport(url: String, commands: Receiver<Command>, updates: Updates, _
         .unwrap();
     let synced = Arc::new(Mutex::new(Synced::default()));
     fn get(client: &Client, url: &str, path: &str) -> Value {
+        if crate::latency::enabled() && path.starts_with("/api/state") {
+            let read = || -> std::result::Result<Value, reqwest::Error> {
+                let response = client.get(format!("{url}{path}")).timeout(Duration::from_secs(5)).send()?.error_for_status()?;
+                let headers = crate::latency::realtime_us();
+                let request = response.headers().get("x-apolloon-trace-request").and_then(|v| v.to_str().ok()).map(str::to_owned);
+                let bytes = response.bytes()?;
+                let body = crate::latency::realtime_us();
+                let snapshot = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+                let parsed = crate::latency::realtime_us();
+                crate::latency::http_stage("http_headers", &snapshot, headers, request.as_deref());
+                crate::latency::http_stage("http_body", &snapshot, body, request.as_deref());
+                crate::latency::http_stage("json_parsed", &snapshot, parsed, request.as_deref());
+                crate::latency::http_size(&snapshot, request.as_deref(), bytes.len());
+                crate::latency::http_stage("push_received", &snapshot, crate::latency::realtime_us(), request.as_deref());
+                Ok(snapshot)
+            };
+            return read().unwrap_or(Value::Null);
+        }
         client
             .get(format!("{url}{path}"))
             .timeout(Duration::from_secs(5))
@@ -2868,7 +2892,6 @@ fn start_transport(url: String, commands: Receiver<Command>, updates: Updates, _
         if snapshot["unchanged"] == true {
             return Update { snapshot, ..Default::default() };
         }
-        crate::latency::snapshot("push_received", &snapshot);
         let bundled = snapshot.as_object_mut().and_then(|s| s.remove("stateHistory"));
         let revision = snapshot["revision"].as_i64();
         let changed = full || (revision.is_some() && synced.lock().unwrap().history_revision != revision);
@@ -2876,7 +2899,7 @@ fn start_transport(url: String, commands: Receiver<Command>, updates: Updates, _
             let history = synced.lock().unwrap().take_history(reply);
             history.unwrap_or_else(|| {
                 let full = get(client, url, "/api/history?scope=full");
-                synced.lock().unwrap().take_history(full).unwrap_or(Value::Null)
+                synced.lock().unwrap().take_history(full).unwrap_or_default()
             })
         } else if changed {
             let path = synced.lock().unwrap().history_path();
@@ -2884,13 +2907,14 @@ fn start_transport(url: String, commands: Receiver<Command>, updates: Updates, _
             let history = synced.lock().unwrap().take_history(reply);
             history.unwrap_or_else(|| {
                 let full = get(client, url, "/api/history?scope=full");
-                synced.lock().unwrap().take_history(full).unwrap_or(Value::Null)
+                synced.lock().unwrap().take_history(full).unwrap_or_default()
             })
         } else {
-            Value::Null
+            Default::default()
         };
         let recovery = Value::Null;
-        let mut paths = image_urls(&snapshot, &history);
+        crate::latency::snapshot("history_merged", &snapshot);
+        let mut paths = image_urls(&snapshot, &synced.lock().unwrap().history);
         paths.extend(extra_image);
         paths.retain(|path| !synced.lock().unwrap().images.contains(path));
         let images = paths
@@ -2991,6 +3015,26 @@ fn start_transport(url: String, commands: Receiver<Command>, updates: Updates, _
 fn start_transport(url: String, commands: Receiver<Command>, updates: Updates, command_wake: CommandWake) {
     use std::{cell::RefCell, rc::Rc};
     async fn get(client: &reqwest::Client, url: &str, path: &str) -> Value {
+        if crate::latency::enabled() && path.starts_with("/api/state") {
+            if let Ok(response) = client.get(format!("{url}{path}")).timeout(Duration::from_secs(5)).send().await
+                && response.status().is_success()
+            {
+                let headers = crate::latency::realtime_us();
+                let request = response.headers().get("x-apolloon-trace-request").and_then(|v| v.to_str().ok()).map(str::to_owned);
+                if let Ok(bytes) = response.bytes().await {
+                    let body = crate::latency::realtime_us();
+                    let snapshot = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+                    let parsed = crate::latency::realtime_us();
+                    crate::latency::http_stage("http_headers", &snapshot, headers, request.as_deref());
+                    crate::latency::http_stage("http_body", &snapshot, body, request.as_deref());
+                    crate::latency::http_stage("json_parsed", &snapshot, parsed, request.as_deref());
+                    crate::latency::http_size(&snapshot, request.as_deref(), bytes.len());
+                    crate::latency::http_stage("push_received", &snapshot, crate::latency::realtime_us(), request.as_deref());
+                    return snapshot;
+                }
+            }
+            return Value::Null;
+        }
         match client.get(format!("{url}{path}")).timeout(Duration::from_secs(5)).send().await {
             Ok(r) if r.status().is_success() => r.json::<Value>().await.unwrap_or(Value::Null),
             _ => Value::Null,
@@ -3018,7 +3062,6 @@ fn start_transport(url: String, commands: Receiver<Command>, updates: Updates, c
         if snapshot["unchanged"] == true {
             return Update { snapshot, ..Default::default() };
         }
-        crate::latency::snapshot("push_received", &snapshot);
         let bundled = snapshot.as_object_mut().and_then(|s| s.remove("stateHistory"));
         let revision = snapshot["revision"].as_i64();
         let changed = full || (revision.is_some() && synced.borrow().history_revision != revision);
@@ -3035,10 +3078,11 @@ fn start_transport(url: String, commands: Receiver<Command>, updates: Updates, c
             Some(history) => history,
             None => {
                 let full = get(client, url, "/api/history?scope=full").await;
-                synced.borrow_mut().take_history(full).unwrap_or(Value::Null)
+                synced.borrow_mut().take_history(full).unwrap_or_default()
             }
         };
-        let mut paths = image_urls(&snapshot, &history);
+        crate::latency::snapshot("history_merged", &snapshot);
+        let mut paths = image_urls(&snapshot, &synced.borrow().history);
         paths.extend(extra_image);
         paths.retain(|path| !synced.borrow().images.contains(path));
         let mut images = Vec::new();

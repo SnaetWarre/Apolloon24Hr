@@ -2,6 +2,7 @@ use super::ReadVersion;
 use crate::db::{Db, Result, history_changes::Changes};
 use axum::body::Bytes;
 use serde_json::{Value, json};
+use std::sync::{Arc, Mutex};
 
 /// Every full history this server built, as numbered versions, so a client that holds one can
 /// fetch only the laps and events that changed since (`/api/history?since=<cursor>`).
@@ -18,13 +19,39 @@ pub(super) struct HistoryLog {
     incremental_refreshes: usize,
 }
 struct CurrentHistory {
-    value: Value,
-    body: Option<Bytes>,
+    value: Arc<Value>,
+    body: Arc<Mutex<Option<Bytes>>>,
     laps: Rows,
     events: Rows,
     lap_order: std::collections::HashMap<String, i64>,
     event_order: std::collections::HashMap<String, i64>,
     runners: std::collections::HashMap<i64, Value>,
+}
+
+pub(super) enum HistoryBody {
+    Cached(Bytes),
+    Full {
+        value: Arc<Value>,
+        body: Arc<Mutex<Option<Bytes>>>,
+    },
+}
+impl HistoryBody {
+    pub(super) fn bytes(self) -> Result<Bytes> {
+        match self {
+            Self::Cached(body) => Ok(body),
+            Self::Full { value, body } => {
+                let mut body = body.lock().unwrap();
+                if body.is_none() {
+                    *body = Some(
+                        serde_json::to_vec(value.as_ref())
+                            .map_err(|e| e.to_string())?
+                            .into(),
+                    );
+                }
+                Ok(body.as_ref().unwrap().clone())
+            }
+        }
+    }
 }
 /// Row id to its position in the list and a fingerprint of its content.
 type Rows = std::collections::HashMap<String, (usize, u64)>;
@@ -75,13 +102,16 @@ impl HistoryLog {
             .filter(|old| old.3 == version.3 && old.4 == version.4)
             .map(|old| old.2)
     }
+    pub(super) fn is_current(&self, version: ReadVersion) -> bool {
+        self.version == Some(version) && self.current.is_some()
+    }
     pub(super) fn refresh(
         &mut self,
         db: &Db,
         version: ReadVersion,
         changes: Option<Changes>,
     ) -> Result<()> {
-        if self.version == Some(version) && self.current.is_some() {
+        if self.is_current(version) {
             return Ok(());
         }
         if let (Some(changes), Some(current)) = (changes, &mut self.current) {
@@ -95,9 +125,10 @@ impl HistoryLog {
                     self.incremental_refreshes += 1;
                 }
                 self.seq += 1;
-                current.value["revision"] = json!(db.revision);
-                current.value["cursor"] = json!(format!("{}.{}", self.epoch, self.seq));
-                current.body = None;
+                let value = Arc::make_mut(&mut current.value);
+                value["revision"] = json!(db.revision);
+                value["cursor"] = json!(format!("{}.{}", self.epoch, self.seq));
+                current.body = Default::default();
                 self.steps.push_back((self.seq, laps, events));
                 self.version = Some(version);
                 self.prune();
@@ -138,8 +169,8 @@ impl HistoryLog {
         }
         value["cursor"] = json!(self.cursor());
         self.current = Some(CurrentHistory {
-            value,
-            body: None,
+            value: Arc::new(value),
+            body: Default::default(),
             laps,
             events,
             lap_order,
@@ -158,14 +189,19 @@ impl HistoryLog {
         }
         self.deltas.clear();
     }
-    pub(super) fn full_body(&mut self) -> Result<Bytes> {
-        let current = self.current.as_mut().ok_or("Geschiedenis ontbreekt")?;
-        if current.body.is_none() {
-            current.body = Some(Bytes::from(
-                serde_json::to_vec(&current.value).map_err(|e| e.to_string())?,
-            ));
+    pub(super) fn response(&mut self, cursor: Option<&str>) -> Result<HistoryBody> {
+        if let Some(body) = cursor.and_then(|cursor| self.since(cursor)) {
+            return Ok(HistoryBody::Cached(body));
         }
-        Ok(current.body.as_ref().unwrap().clone())
+        let current = self.current.as_ref().ok_or("Geschiedenis ontbreekt")?;
+        Ok(HistoryBody::Full {
+            value: current.value.clone(),
+            body: current.body.clone(),
+        })
+    }
+    #[cfg(test)]
+    fn full_body(&mut self) -> Result<Bytes> {
+        self.response(None)?.bytes()
     }
     /// The changes since `cursor`, or `None` when this server cannot tell them apart from a
     /// full history (another epoch, or a version older than the steps it still keeps).
@@ -253,7 +289,7 @@ impl CurrentHistory {
         for row in &rows {
             ids.insert(row["id"].as_str().unwrap().to_owned());
         }
-        let list = self.value[key].as_array_mut().unwrap();
+        let list = Arc::make_mut(&mut self.value)[key].as_array_mut().unwrap();
         let mut touched = Vec::new();
         for id in &ids {
             let before = index.get(id).map(|(position, _)| &list[*position]);
@@ -302,6 +338,38 @@ impl CurrentHistory {
 mod tests {
     use super::*;
     use crate::server::read_version;
+
+    #[test]
+    fn shared_full_answers_remain_immutable_across_an_incremental_refresh() {
+        let db = Db::open(std::path::Path::new(":memory:")).unwrap();
+        let mut log = HistoryLog::new();
+        assert!(log.response(None).is_err());
+        log.refresh(&db, read_version(&db).unwrap(), None).unwrap();
+        let cursor = log.cursor();
+        let old = log.response(None).unwrap();
+        let same = log.response(None).unwrap();
+        db.exec("INSERT INTO race_events(id,type,message,occurred_at,created_at) VALUES('event','burgie_gepakt','new',1,1)", &[]).unwrap();
+        let version = read_version(&db).unwrap();
+        let changes = db.history_changes_since(log.generation(version));
+        log.refresh(&db, version, changes).unwrap();
+        assert_eq!(log.incremental_refreshes, 1);
+        let current = log.response(None).unwrap().bytes().unwrap();
+        let old = old.bytes().unwrap();
+        let same = same.bytes().unwrap();
+        assert_eq!(old.as_ptr(), same.as_ptr());
+        let old: Value = serde_json::from_slice(&old).unwrap();
+        let current: Value = serde_json::from_slice(&current).unwrap();
+        assert_eq!(old["events"], json!([]));
+        assert_eq!(old["cursor"], cursor);
+        assert_eq!(current["events"][0]["message"], "new");
+        assert_ne!(old["cursor"], current["cursor"]);
+        let delta = log.response(Some(&cursor)).unwrap().bytes().unwrap();
+        let delta: Value = serde_json::from_slice(&delta).unwrap();
+        assert_eq!(
+            delta["changes"]["events"]["changed"][0][1],
+            current["events"][0]
+        );
+    }
 
     fn check(
         db: &Db,
