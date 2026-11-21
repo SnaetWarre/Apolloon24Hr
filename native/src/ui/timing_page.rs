@@ -423,7 +423,7 @@ pub(super) fn succeeded(s: &mut State, method: &str, result: &Value) {
     };
 }
 
-/// A Timing action that failed: the reason shows under the button, not at the top of the page.
+/// A failed Timing action shows its reason above the handoff button.
 pub(super) fn failed(s: &mut State, method: &str) {
     if !(method.starts_with("race.") && method != "race.clear"
         || method == "events.burgieGepakt"
