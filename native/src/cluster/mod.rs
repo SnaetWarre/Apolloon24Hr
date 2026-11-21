@@ -663,33 +663,44 @@ impl Node {
         request: Option<String>,
     ) -> Result<Value> {
         let request = request.unwrap_or_else(crate::db::id);
-        let deadline = Instant::now() + self.cfg.write_deadline;
+        let started = Instant::now();
+        let deadline = started + self.cfg.write_deadline;
+        // A press on the Timing laptop is never given up: once an election had time to end
+        // and no majority answers, the laptop goes on alone and stores the press.
+        let mut alone_at = (TIMING_PRESSES.contains(&method) && self.times_here())
+            .then(|| started + self.cfg.election_timeout);
         loop {
-            let Some(target) = self.write_target(deadline) else {
-                return Err(self.no_leader_message().into());
-            };
-            let outcome = if target.host_id == self.host_id {
-                self.commit_local(method, input, origin, &request)
-                    .map(|(v, _)| v)
-            } else {
-                self.forward(&target, method, input, origin, &request)
-            };
-            match outcome {
-                Ok(value) => return Ok(value),
-                Err(Failure {
-                    message,
-                    retry: false,
-                }) => return Err(message),
-                Err(Failure {
-                    message,
-                    retry: true,
-                }) => {
-                    if Instant::now() >= deadline {
-                        return Err(message);
+            let target = self.write_target(alone_at.map_or(deadline, |at| at.min(deadline)));
+            let message = match target {
+                Some(target) => {
+                    let outcome = if target.host_id == self.host_id {
+                        self.commit_local(method, input, origin, &request)
+                            .map(|(v, _)| v)
+                    } else {
+                        self.forward(&target, method, input, origin, &request)
+                    };
+                    match outcome {
+                        Ok(value) => return Ok(value),
+                        Err(Failure {
+                            message,
+                            retry: false,
+                        }) => return Err(message),
+                        Err(Failure { message, .. }) => message,
                     }
-                    std::thread::sleep(Duration::from_millis(50));
                 }
+                None => self.no_leader_message().to_owned(),
+            };
+            if alone_at.is_some_and(|at| Instant::now() >= at) {
+                if self.press_goes_alone() {
+                    alone_at = None;
+                    continue;
+                }
+                alone_at = Some(Instant::now() + self.cfg.election_timeout);
             }
+            if Instant::now() >= deadline {
+                return Err(message);
+            }
+            std::thread::sleep(Duration::from_millis(50));
         }
     }
 
@@ -960,6 +971,11 @@ impl Node {
             .and_then(|id| self.heard_names().get(id).cloned())
             .or_else(|| timing["name"].as_str().map(str::to_owned))
             .unwrap_or_else(|| "de Timing-laptop".into())
+    }
+    /// True while Timing is open on this laptop.
+    pub(crate) fn times_here(&self) -> bool {
+        self.timing()
+            .is_some_and(|t| t["hostId"] == self.host_id.as_str())
     }
     /// Clocking here while Timing is open on another laptop is refused.
     fn assert_timing_here(&self) -> Result<()> {
