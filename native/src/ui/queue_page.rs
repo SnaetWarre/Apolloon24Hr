@@ -434,25 +434,28 @@ fn pill(s: &State, l: &Value) -> El {
             .color(p.t.ink2),
     )
 }
+const BIB_WIDTH_EM: f32 = 2.6;
+const BIB_NAME_GAP: f32 = 8.0;
+
 /// How far the name sits right of the bib, so a line under it starts under the name.
 fn name_indent(r: &Value, size: f32) -> f32 {
     if st(r, "runnerNumber").is_empty() {
         0.0
     } else {
-        size * 2.6 + 8.0
+        size * BIB_WIDTH_EM + BIB_NAME_GAP
     }
 }
-/// `RunnerName`: the bib (2.6em wide, quiet) and the name.
+/// `RunnerName`: the muted bib and the name.
 fn runner_name(s: &State, r: &Value, size: f32, weight: f32) -> El {
     let p = pal(s.dark);
-    let mut line = row().gap(8.0).min_w(0.0).center_y();
+    let mut line = row().gap(BIB_NAME_GAP).min_w(0.0).center_y();
     let number = st(r, "runnerNumber");
     if !number.is_empty() {
         line = line.child(
             text(number.to_string())
                 .font(rune::TextStyle::new(size, 500.0).features("tnum"))
                 .color(p.t.ink3)
-                .min_w(size * 2.6),
+                .min_w(size * BIB_WIDTH_EM),
         );
     }
     line.child(
