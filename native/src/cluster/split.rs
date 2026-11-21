@@ -183,6 +183,8 @@ impl Node {
             .map_err(|_| refused("invalid_request"))?;
         let key = format!("{split}:{fork_id}");
         let (seq, taken) = {
+            // Not into the place of a write that is on its way to the other laptops.
+            let _writing = self.writing.lock().unwrap();
             let mut db = self.db.lock().unwrap();
             if log::entry_id(&db, fork_seq).as_deref() != Some(fork_id) {
                 return Err(refused("unknown_fork"));
