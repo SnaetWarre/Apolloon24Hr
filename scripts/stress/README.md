@@ -10,6 +10,8 @@ Defaults: 24 race-hours, 60x speed, summaries in `.tmp-stress-results/`, work
 artifacts in `.tmp-stress/`, release native binary. The summary default moved
 to keep work artifacts outside the summary folder even with no flags.
 Flags: `--hours`, `--ratio`, `--seed`, `--out`, `--work`, `--binary`, `--compare`.
+`--laps 1115 --chaos off` schedules exactly 1,115 laps over the full race,
+keeps the three servers running, and checks that every server saved that count.
 `--work` must be outside `--out`; neither the same folder nor its descendant.
 The default binary is built only if missing. An explicit missing binary fails.
 No dependencies are installed and no existing race databases are used.

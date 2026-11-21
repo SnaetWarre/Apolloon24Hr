@@ -48,7 +48,7 @@ fn save_window_state() {
 
 /// Runs the operator UI in the desktop window. Without `boot` (headless, tests, a remote
 /// server through APOLLOON_NATIVE_URL), it is the plain Rune app.
-pub fn run<S: 'static>(mut spec: AppSpec<S>) {
+pub fn run<S: 'static>(mut spec: AppSpec<S>, configure: impl FnOnce(rune::App<S>) -> rune::App<S>) {
     rune::set_labels(|label| {
         Some(match label {
             rune::Label::Minimize => "Minimaliseren",
@@ -59,7 +59,7 @@ pub fn run<S: 'static>(mut spec: AppSpec<S>) {
         }.into())
     });
     if super::DESKTOP.get().is_none() {
-        rune::run(spec);
+        configure(rune::App::new(spec)).run();
         return;
     }
     #[cfg(any(windows, target_os = "macos"))]
@@ -113,6 +113,7 @@ pub fn run<S: 'static>(mut spec: AppSpec<S>) {
                 }
             }
         });
+    let app = configure(app);
     let handle = app.handle();
     super::set_hook(Box::new(move |r| match r {
         Request::Wake => handle.wake(),

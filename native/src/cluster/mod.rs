@@ -44,6 +44,9 @@ const TIMING_PRESSES: [&str; 4] = [
 #[derive(Clone, Debug)]
 pub struct Config {
     pub self_url: String,
+    /// The port of an address taken from the network adapters; such an address follows them.
+    /// `None` when the address was set by hand.
+    pub adapter_port: Option<u16>,
     pub name: String,
     pub heartbeat: Duration,
     pub election_timeout: Duration,
@@ -74,9 +77,10 @@ impl Config {
         if std::env::var("CLUSTER_ENABLED").as_deref() != Ok("true") {
             return None;
         }
+        let fixed = std::env::var("CLUSTER_SELF_URL").ok();
         Some(Self {
-            self_url: std::env::var("CLUSTER_SELF_URL")
-                .ok()
+            adapter_port: fixed.is_none().then_some(port),
+            self_url: fixed
                 .unwrap_or_else(|| crate::host::info(port)["url"].as_str().unwrap_or("").into()),
             name: crate::host::name(),
             heartbeat: env_ms("CLUSTER_HEARTBEAT_MS", 150),
@@ -95,6 +99,7 @@ impl Config {
     pub fn test(self_url: String, name: &str) -> Self {
         Self {
             self_url,
+            adapter_port: None,
             name: name.into(),
             heartbeat: Duration::from_millis(40),
             election_timeout: Duration::from_millis(500),
@@ -121,6 +126,7 @@ pub struct Node {
     pub(crate) db: Arc<Mutex<Db>>,
     pub(crate) cfg: Config,
     pub(crate) host_id: String,
+    self_url: Mutex<String>,
     raft: Mutex<raft::State>,
     notes: Mutex<Notes>,
     /// Test hook: a pulled network cable. Requests to and from other laptops fail.
@@ -133,6 +139,8 @@ pub struct Node {
     weak: Weak<Node>,
     /// Since when this laptop, leading, has not heard from each other laptop.
     silent_since: Mutex<HashMap<String, Instant>>,
+    /// Held by the one write the leader is adding to the log (lock order: writing, raft, db).
+    writing: Mutex<()>,
 }
 
 /// An answer from another laptop: its HTTP status and JSON body.
@@ -177,6 +185,7 @@ impl Node {
         let node = Arc::new_cyclic(|weak| Self {
             db,
             raft: Mutex::new(raft::State::new(&cfg)),
+            self_url: Mutex::new(cfg.self_url.clone()),
             cfg,
             host_id,
             notes: Mutex::default(),
@@ -188,6 +197,7 @@ impl Node {
             discovery: Mutex::new(None),
             weak: weak.clone(),
             silent_since: Mutex::default(),
+            writing: Mutex::default(),
         });
         node.start_raft();
         let weak = Arc::downgrade(&node);
@@ -285,10 +295,69 @@ impl Node {
 
     // ---------- The group ----------
 
+    /// This laptop's address now. A laptop started before its network was up, or moved to another
+    /// network, has another address than at startup; without any network the last one stands.
+    pub fn self_url(&self) -> String {
+        let mut url = self.self_url.lock().unwrap();
+        if let Some(port) = self.cfg.adapter_port {
+            let info = crate::host::info(port);
+            if let Some(now) = info["url"].as_str().filter(|_| info["hostIpHint"] != "localhost") {
+                if *url != now {
+                    *url = now.to_owned();
+                }
+            }
+        }
+        url.clone()
+    }
+    #[cfg(test)]
+    pub(crate) fn set_self_url(&self, url: &str) {
+        *self.self_url.lock().unwrap() = url.to_owned();
+    }
+    /// Where a follower reaches the leader. The address the leader gives for itself can be an old
+    /// one, so where its requests come from decides; an announcement counts only from there.
+    pub(crate) fn leader_address(
+        &self,
+        host_id: &str,
+        claimed: &str,
+        remote: Option<std::net::IpAddr>,
+    ) -> String {
+        let announced: Vec<reqwest::Url> = self
+            .beacons()
+            .iter()
+            .filter(|b| b["hostId"] == host_id)
+            .filter_map(|b| reqwest::Url::parse(b["url"].as_str()?).ok())
+            .collect();
+        let Ok(mut url) = reqwest::Url::parse(claimed) else {
+            return claimed.to_owned();
+        };
+        let ip = |url: &reqwest::Url| {
+            let host = url.host_str()?;
+            if host == "localhost" {
+                return Some(std::net::IpAddr::from(std::net::Ipv4Addr::LOCALHOST));
+            }
+            let host = host.trim_matches(['[', ']']);
+            host.parse::<std::net::IpAddr>().ok().map(|ip| ip.to_canonical())
+        };
+        let remote = remote.map(|ip| ip.to_canonical());
+        let chosen = if announced.iter().any(|a| a.origin() == url.origin()) {
+            None
+        } else if let Some(a) = announced.iter().find(|a| remote.is_some() && ip(a) == remote) {
+            Some(a.clone())
+        } else if let (Some(remote), Some(_)) = (remote.filter(|r| Some(*r) != ip(&url)), ip(&url))
+        {
+            url.set_ip_host(remote).ok().map(|_| url)
+        } else {
+            None
+        };
+        chosen
+            .and_then(|url| join::normalize_url(url.as_str()))
+            .unwrap_or_else(|| claimed.to_owned())
+    }
+
     pub fn self_member(&self) -> Member {
         Member {
             host_id: self.host_id.clone(),
-            url: self.cfg.self_url.clone(),
+            url: self.self_url(),
             name: Some(self.cfg.name.clone()),
         }
     }
@@ -407,6 +476,7 @@ impl Node {
             let st = self.raft.lock().unwrap();
             (st.role, st.leader.clone(), self.view(&st), self.term())
         };
+        let leader = if role == raft::Role::Leader { Some(self.self_member()) } else { leader };
         let writable = busy.is_none() && self.leader_alive();
         let group = self.members();
         let names = self.heard_names();
@@ -420,7 +490,7 @@ impl Node {
                 let reachable = is_self || if is_leader { writable } else { seen.is_some_and(|s| s.reachable) };
                 json!({
                     "hostId": member.host_id,
-                    "url": if is_self { self.cfg.self_url.clone() } else { member.url.clone() },
+                    "url": if is_self { self.self_url() } else { member.url.clone() },
                     "name": if is_self { Some(self.cfg.name.clone()) } else { names.get(&member.host_id).cloned().or(member.name.clone()) },
                     "self": is_self,
                     "leader": is_leader && writable,
@@ -474,7 +544,7 @@ impl Node {
             "majority": group.len() / 2 + 1,
             "writable": writable,
             "busy": busy,
-            "selfUrl": self.cfg.self_url,
+            "selfUrl": self.self_url(),
             "logHead": head,
             "runners": runners,
             "changed": changed,
@@ -646,8 +716,15 @@ impl Node {
             "race.clear" => Some("pre-clear"),
             _ => None,
         };
+        // A press on the Timing laptop is stored at once: that laptop goes on alone when it is
+        // cut off, and a lap clocked in the seconds before must still be there.
+        let keep = TIMING_PRESSES.contains(&method)
+            && self
+                .timing()
+                .is_some_and(|t| t["hostId"] == self.host_id.as_str());
+        let _writing = self.writing.lock().unwrap();
         let mut attempts = 0;
-        let (result, seq) = loop {
+        let (result, prepared, seq) = loop {
             attempts += 1;
             let mut safety = None;
             let mut before = None;
@@ -665,42 +742,67 @@ impl Node {
             }
             let mut db = self.db.lock().unwrap();
             if let Some(result) = log::forwarded_result(&db, request) {
-                break (result, log::head(&db).seq);
+                break (result, None, log::head(&db).seq);
             }
             if safety_reason.is_some() && log::head(&db).id != before && attempts < 20 {
                 continue;
             }
-            {
-                let result = if method.starts_with("cluster.") {
-                    let kind = method.to_owned();
-                    log::record(&mut db, &kind, Some(request), |db| {
-                        self.apply_cluster(db, method, input, origin)
-                    })
-                } else {
-                    *db.capture.borrow_mut() = Some(log::Capture {
-                        statements: Vec::new(),
-                        request_id: Some(request.to_owned()),
-                    });
-                    let result = db.mutation_from(method, input, origin);
-                    db.capture.borrow_mut().take();
-                    result
-                };
-                let mut result = result.map_err(Failure::refused)?;
-                if safety_reason.is_some() {
-                    result["safetyBackup"] = safety.unwrap_or(Value::Null);
-                    result["safetyHostUrl"] = json!(self.cfg.self_url);
-                    result["safetyHostName"] = json!(self.cfg.name);
-                }
-                break (result, log::head(&db).seq);
+            // The write runs and is taken back: it reaches this laptop's data, and its screens,
+            // only once a majority holds it.
+            let (mut result, mut prepared) = self
+                .run_write(&mut db, method, input, origin, request, keep)
+                .map_err(Failure::refused)?;
+            // A write too large for one message reaches a follower only inside a full copy of
+            // the leader's data, so the leader has to store it first.
+            if prepared.as_ref().is_some_and(|p| !p.fits_one_message()) {
+                (result, prepared) = self
+                    .run_write(&mut db, method, input, origin, request, true)
+                    .map_err(Failure::refused)?;
             }
+            if safety_reason.is_some() {
+                result["safetyBackup"] = safety.unwrap_or(Value::Null);
+                result["safetyHostUrl"] = json!(self.self_url());
+                result["safetyHostName"] = json!(self.cfg.name);
+            }
+            break (result, prepared, log::head(&db).seq);
         };
-        if !self.wait_for_commit(seq) {
+        let (confirmed, seq) = match prepared {
+            Some(prepared) => {
+                let seq = prepared.entry.seq;
+                (self.confirm(prepared), seq)
+            }
+            None => (self.wait_for_commit(seq), seq),
+        };
+        if !confirmed {
             return Err(Failure {
                 message: NOT_CONFIRMED_MESSAGE.into(),
                 retry: true,
             });
         }
         Ok((result, seq))
+    }
+
+    fn run_write(
+        &self,
+        db: &mut Db,
+        method: &str,
+        input: &Value,
+        origin: &str,
+        request: &str,
+        keep: bool,
+    ) -> Result<(Value, Option<log::Prepared>)> {
+        if method.starts_with("cluster.") {
+            return log::record_or_prepare(db, method, Some(request), keep, |db| {
+                self.apply_cluster(db, method, input, origin)
+            });
+        }
+        *db.capture.borrow_mut() = Some(log::Capture {
+            statements: Vec::new(),
+            request_id: Some(request.to_owned()),
+        });
+        let result = db.mutation_run(method, input, origin, keep);
+        db.capture.borrow_mut().take();
+        result
     }
 
     /// Passes a write to the leader, then waits until this laptop's copy has it.

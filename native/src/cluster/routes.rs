@@ -97,6 +97,7 @@ async fn probe(
 
 async fn peer(
     State(host): State<Host>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<std::net::SocketAddr>,
     headers: HeaderMap,
     Json(request): Json<Value>,
 ) -> Response {
@@ -126,7 +127,7 @@ async fn peer(
                         "Deze laptops horen bij een andere groep.",
                     );
                 }
-                Json(node.handle_append(body)).into_response()
+                Json(node.handle_append(body, Some(remote.ip()))).into_response()
             }
             Some("vote") => {
                 let candidate = body["candidateId"].as_str().unwrap_or("");

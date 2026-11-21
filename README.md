@@ -16,7 +16,7 @@ For an upgrade from the previous desktop app, keep a separate backup and close t
 
 ## Build and verify
 
-Use Rust, Git, Bash, curl, tar, a C compiler, and the platform windowing libraries. On Debian or Ubuntu install `build-essential pkg-config libasound2-dev libxkbcommon-dev libwayland-dev libx11-dev libxi-dev libxcursor-dev libxrandr-dev`. Node.js 24 and npm are used by the verification, release, and Wrapped tools.
+Use Rust, Git, Bash, curl, tar, a C compiler, and the platform windowing libraries. On Debian or Ubuntu install `build-essential pkg-config libxkbcommon-dev libwayland-dev libx11-dev libxi-dev libxcursor-dev libxrandr-dev`. Node.js 24 and npm are used by the verification, release, and Wrapped tools.
 
 ```sh
 rustup target add wasm32-unknown-unknown
