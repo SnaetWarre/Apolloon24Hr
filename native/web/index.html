@@ -1,8 +1,40 @@
 <!doctype html>
-<html lang="nl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Apolloon Telsysteem</title><link rel="preload" href="/app_bg.wasm" as="fetch" type="application/wasm" crossorigin><style>html,body{margin:0;width:100%;height:100%;overflow:hidden}#status{font:16px system-ui;padding:24px}</style></head><body><div id="status" role="status">Apolloon laden…</div><script type="module">
+<html lang="nl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Apolloon Telsysteem</title><link rel="preload" href="/app_bg.wasm" as="fetch" type="application/wasm" crossorigin><link rel="modulepreload" href="/app.js">
+<script>
+const theme = new URLSearchParams(location.search).get('thema');
+document.documentElement.dataset.theme = ['licht', 'light'].includes(theme) ? 'light'
+  : ['donker', 'dark'].includes(theme) ? 'dark'
+  : matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+</script>
+<style>
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#fafafa;color:#18181b}
+html[data-theme=dark],html[data-theme=dark] body{background:#18181a;color:#fafafa;color-scheme:dark}
+#status{position:fixed;inset:0;z-index:100;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:28px;background:inherit;font:16px/1.5 system-ui;text-align:center;padding:24px}
+#status img{width:230px;max-width:70vw;height:auto}
+#status .dark-logo{display:none}
+[data-theme=dark] #status .light-logo{display:none}
+[data-theme=dark] #status .dark-logo{display:block}
+#message{opacity:.65;max-width:36em;overflow-wrap:anywhere}
+</style></head><body><div id="status" role="status"><img class="light-logo" src="/logo-light.svg" alt="Apolloon" width="230" height="70"><img class="dark-logo" src="/logo-dark.svg" alt="Apolloon" width="230" height="70"><span id="message">Apolloon laden…</span></div><script type="module" onerror="document.querySelector('#message').textContent='Apolloon kon niet starten. Herlaad deze pagina.'">
 import init from '/app.js';
 import { followGroup } from '/failover.js';
 followGroup();
-try { await init(); document.querySelector('#status')?.remove(); }
-catch (error) { document.querySelector('#status').textContent='Apolloon kon niet starten: '+error; console.error(error); }
+const firstFrame = () => {
+  if (!performance.getEntriesByName('web.first.presented').length) return false;
+  document.querySelector('#status')?.remove();
+  return true;
+};
+const observer = new PerformanceObserver(() => {
+  if (firstFrame()) observer.disconnect();
+});
+observer.observe({ type: 'mark', buffered: true });
+try {
+  await init();
+  if (firstFrame()) observer.disconnect();
+  else setTimeout(() => {
+    observer.disconnect();
+    document.querySelector('#status')?.remove();
+  }, 3000);
+}
+catch (error) { observer.disconnect(); document.querySelector('#message').textContent='Apolloon kon niet starten: '+error; console.error(error); }
 </script></body></html>
