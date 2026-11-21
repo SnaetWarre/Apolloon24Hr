@@ -148,10 +148,7 @@ fn welcome(s: &State) -> El {
     if let Some(url) = s.snapshot["host"]["url"].as_str() {
         next = next.child(readiness::screen_links(s, url, "welcome-screen"));
     }
-    let demo = col().gap(6.0)
-        .child(row().child(btn(s, "welcome-demo", "Oefenrace laden", Kind::Plain, false, !admin_preparation::demo_available(s) || s.busy).on_press(admin_preparation::load_demo)))
-        .child(copy(s, "Eerst oefenen? Laad 30 fictieve lopers met rondes, alleen in een lege wedstrijd. Verwijder ze daarna via Wedstrijd wissen in Systeem & herstel."));
-    welcome.child(choices).child(next).child(demo).child(
+    welcome.child(choices).child(next).child(
         row().child(
             btn(
                 s,
