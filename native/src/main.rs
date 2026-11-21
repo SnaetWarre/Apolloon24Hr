@@ -10,6 +10,7 @@ mod discovery;
 mod exports;
 mod host;
 mod labels;
+mod latency;
 mod lap_shift;
 mod linking;
 mod logo;
@@ -44,6 +45,7 @@ fn port() -> db::Result<u16> {
         .map_err(|_| "PORT moet een geldig poortnummer zijn".into())
 }
 fn app() -> db::Result<()> {
+    latency::init();
     let server_only = std::env::args().any(|s| s == "--server");
     if server_only {
         desktop::supervisor::exit_on_panic();

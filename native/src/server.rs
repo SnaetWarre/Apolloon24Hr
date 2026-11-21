@@ -6,20 +6,31 @@ use axum::{
     http::{StatusCode, header},
     response::{IntoResponse, Response},
     routing::{get, post},
+    serve::ListenerExt,
 };
 use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
+mod history;
+use history::HistoryLog;
+
+type ReadVersion = (i64, u64, u64, i64, i64);
 
 /// Database version a cached read was built at. Replication and snapshot installation advance
 /// the revision; total_changes also covers local settings writes that keep the same revision.
-fn read_version(db: &Db) -> (i64, u64) {
-    (db.revision, db.conn.total_changes())
+fn read_version(db: &Db) -> Result<ReadVersion> {
+    Ok((
+        db.revision,
+        db.conn.total_changes(),
+        db.history_generation(),
+        db.data_version()?,
+        db.schema_version()?,
+    ))
 }
 
 /// Serialized `/api/state` body without the per-request `host` and `cluster` fields.
 #[derive(Default)]
 struct ReadCache {
-    version: Option<(i64, u64)>,
+    version: Option<ReadVersion>,
     snapshot: Option<Bytes>,
 }
 
@@ -45,149 +56,6 @@ impl Screens {
                 })
                 .collect::<Vec<_>>()
         )
-    }
-}
-
-/// Every full history this server built, as numbered versions, so a client that holds one can
-/// fetch only the laps and events that changed since (`/api/history?since=<cursor>`).
-struct HistoryLog {
-    /// Random per server start: a cursor from another laptop or an earlier run never matches.
-    epoch: String,
-    version: Option<(i64, u64)>,
-    seq: u64,
-    current: Option<CurrentHistory>,
-    /// Ids of laps and events that changed (or disappeared) on the way to each `seq`.
-    steps: std::collections::VecDeque<(u64, Vec<String>, Vec<String>)>,
-    deltas: std::collections::HashMap<u64, Bytes>,
-}
-struct CurrentHistory {
-    value: Value,
-    body: Bytes,
-    laps: Rows,
-    events: Rows,
-}
-/// Row id to its position in the list and a fingerprint of its content.
-type Rows = std::collections::HashMap<String, (usize, u64)>;
-/// Older versions are dropped first; a client further behind gets the full history again.
-const HISTORY_STEPS: usize = 1024;
-const HISTORY_STEP_IDS: usize = 20_000;
-
-fn index_rows(rows: &Value) -> Rows {
-    use std::hash::{Hash, Hasher};
-    rows.as_array()
-        .into_iter()
-        .flatten()
-        .enumerate()
-        .filter_map(|(index, row)| {
-            let mut hasher = std::collections::hash_map::DefaultHasher::new();
-            row.to_string().hash(&mut hasher);
-            Some((row["id"].as_str()?.to_owned(), (index, hasher.finish())))
-        })
-        .collect()
-}
-fn touched(old: &Rows, new: &Rows) -> Vec<String> {
-    let changed = new
-        .iter()
-        .filter(|(id, (_, hash))| old.get(*id).is_none_or(|(_, before)| before != hash))
-        .map(|(id, _)| id.clone());
-    let removed = old.keys().filter(|id| !new.contains_key(*id)).cloned();
-    changed.chain(removed).collect()
-}
-
-impl HistoryLog {
-    fn new() -> Self {
-        Self {
-            epoch: uuid::Uuid::new_v4().simple().to_string()[..12].to_owned(),
-            version: None,
-            seq: 0,
-            current: None,
-            steps: Default::default(),
-            deltas: Default::default(),
-        }
-    }
-    fn cursor(&self) -> String {
-        format!("{}.{}", self.epoch, self.seq)
-    }
-    fn refresh(&mut self, db: &Db) -> Result<()> {
-        let version = read_version(db);
-        if self.version == Some(version) && self.current.is_some() {
-            return Ok(());
-        }
-        let mut value = db.history()?;
-        let (laps, events) = (index_rows(&value["laps"]), index_rows(&value["events"]));
-        self.seq += 1;
-        if let Some(old) = &self.current {
-            self.steps.push_back((
-                self.seq,
-                touched(&old.laps, &laps),
-                touched(&old.events, &events),
-            ));
-        }
-        let mut ids: usize = self.steps.iter().map(|(_, l, e)| l.len() + e.len()).sum();
-        while self.steps.len() > HISTORY_STEPS || ids > HISTORY_STEP_IDS {
-            let (_, l, e) = self.steps.pop_front().unwrap();
-            ids -= l.len() + e.len();
-        }
-        value["cursor"] = json!(self.cursor());
-        let body = Bytes::from(serde_json::to_vec(&value).map_err(|e| e.to_string())?);
-        self.current = Some(CurrentHistory {
-            value,
-            body,
-            laps,
-            events,
-        });
-        self.version = Some(version);
-        self.deltas.clear();
-        Ok(())
-    }
-    /// The changes since `cursor`, or `None` when this server cannot tell them apart from a
-    /// full history (another epoch, or a version older than the steps it still keeps).
-    fn since(&mut self, cursor: &str) -> Option<Bytes> {
-        let (epoch, seq) = cursor.rsplit_once('.')?;
-        let since: u64 = seq.parse().ok()?;
-        let oldest = self.steps.front().map_or(self.seq, |(seq, ..)| seq - 1);
-        if epoch != self.epoch || since < oldest || since > self.seq {
-            return None;
-        }
-        if let Some(body) = self.deltas.get(&since) {
-            return Some(body.clone());
-        }
-        let current = self.current.as_ref()?;
-        let changes = |pick: fn(&(u64, Vec<String>, Vec<String>)) -> &Vec<String>,
-                       rows: &Rows,
-                       list: &Value| {
-            let ids: std::collections::BTreeSet<&String> = self
-                .steps
-                .iter()
-                .filter(|step| step.0 > since)
-                .flat_map(|step| pick(step))
-                .collect();
-            let mut changed: Vec<(usize, &Value)> = Vec::new();
-            let mut removed = Vec::new();
-            for id in ids {
-                match rows.get(id) {
-                    Some(&(index, _)) => changed.push((index, &list[index])),
-                    None => removed.push(id),
-                }
-            }
-            changed.sort_by_key(|(index, _)| *index);
-            json!({"changed":changed,"removed":removed,"count":rows.len()})
-        };
-        let value = &current.value;
-        let delta = json!({
-            "scope": "full",
-            "delta": true,
-            "since": cursor,
-            "cursor": self.cursor(),
-            "revision": value["revision"],
-            "changes": {
-                "laps": changes(|step| &step.1, &current.laps, &value["laps"]),
-                "events": changes(|step| &step.2, &current.events, &value["events"]),
-            },
-        });
-        let body = Bytes::from(serde_json::to_vec(&delta).ok()?);
-        self.deltas.insert(since, body.clone());
-        Some(body)
     }
 }
 
@@ -264,24 +132,79 @@ async fn snapshot_request(
             .unwrap()
             .seen(kind, remote.ip().to_canonical());
     }
-    snapshot(State(host)).await
+    if let Some(after) = query.get("after") {
+        let mut changes = host.db.lock().unwrap().subscribe();
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                if host.db.lock().unwrap().change_token() != *after {
+                    break;
+                }
+                if changes.changed().await.is_err() {
+                    break;
+                }
+            }
+        }).await;
+    }
+    snapshot_with_history(host, &query).await
 }
 async fn snapshot(State(host): State<Host>) -> Response {
-    let read = || -> Result<Bytes> {
-        let db = host.db.lock().unwrap();
+    snapshot_with_history(host, &Default::default()).await
+}
+async fn snapshot_with_history(host: Host, query: &std::collections::HashMap<String, String>) -> Response {
+    let query = query.clone();
+    let result = tokio::task::spawn_blocking(move || snapshot_read(host, &query)).await;
+    match result {
+        Ok(response) => response,
+        Err(error) => error_body(error.to_string()),
+    }
+}
+fn snapshot_read(host: Host, query: &std::collections::HashMap<String, String>) -> Response {
+    let read = || -> Result<(Bytes, Option<Bytes>)> {
+        let mut history = query
+            .contains_key("history")
+            .then(|| host.history.lock().unwrap());
+        let (db, version, token, changes) = {
+            let writer = host.db.lock().unwrap();
+            let version = read_version(&writer)?;
+            let db = writer.read_snapshot()?;
+            if version != read_version(&writer)? {
+                return Err("Database gewijzigd tijdens het lezen".into());
+            }
+            let changes = writer
+                .history_changes_since(history.as_ref().and_then(|log| log.generation(version)));
+            (db, version, writer.change_token(), changes)
+        };
         let mut cache = host.reads.lock().unwrap();
-        let version = read_version(&db);
         if cache.version != Some(version) || cache.snapshot.is_none() {
-            let body = serde_json::to_vec(&db.race_snapshot()?).map_err(|e| e.to_string())?;
+            let mut state = db.race_snapshot()?;
+            state["changeToken"] = json!(token);
+            if crate::latency::enabled() {
+                state["latencyLap"] = db.rows("SELECT id FROM laps ORDER BY rowid DESC LIMIT 1", &[])?.first().map_or(Value::Null, |row| row["id"].clone());
+            }
+            let body = serde_json::to_vec(&state).map_err(|e| e.to_string())?;
             *cache = ReadCache {
                 version: Some(version),
                 snapshot: Some(body.into()),
             };
         }
-        Ok(cache.snapshot.clone().unwrap())
+        let cached = cache.snapshot.clone().unwrap();
+        drop(cache);
+        let history = if let Some(log) = history.as_mut() {
+            log.refresh(&db, version, changes)?;
+            Some(
+                query
+                    .get("since")
+                    .and_then(|cursor| log.since(cursor))
+                    .map(Ok)
+                    .unwrap_or_else(|| log.full_body())?,
+            )
+        } else {
+            None
+        };
+        Ok((cached, history))
     };
     match read() {
-        Ok(cached) => {
+        Ok((cached, history)) => {
             // The cached object is reused as bytes; only the live fields are appended.
             let mut body = Vec::with_capacity(cached.len() + 512);
             body.extend_from_slice(&cached[..cached.len() - 1]);
@@ -297,6 +220,10 @@ async fn snapshot(State(host): State<Host>) -> Response {
                 field("cluster", &node.status());
             }
             field("screens", &host.screens.lock().unwrap().active());
+            if let Some(history) = history {
+                body.extend_from_slice(b",\"stateHistory\":");
+                body.extend_from_slice(&history);
+            }
             body.push(b'}');
             json_body(body.into())
         }
@@ -313,27 +240,48 @@ struct HistoryQuery {
     since: Option<String>,
 }
 async fn history(State(host): State<Host>, Query(query): Query<HistoryQuery>) -> Response {
-    let db = host.db.lock().unwrap();
+    match tokio::task::spawn_blocking(move || history_read(host, query)).await {
+        Ok(response) => response,
+        Err(error) => error_body(error.to_string()),
+    }
+}
+fn history_read(host: Host, query: HistoryQuery) -> Response {
+    match history_result(&host, query) {
+        Ok(body) => json_body(body),
+        Err(message) => error_body(message),
+    }
+}
+fn history_result(host: &Host, query: HistoryQuery) -> Result<Bytes> {
+    let mut log = host.history.lock().unwrap();
+    let (db, version, changes) = {
+        let writer = host.db.lock().unwrap();
+        let version = read_version(&writer)?;
+        let db = writer.read_snapshot()?;
+        if version != read_version(&writer)? {
+            return Err("Database gewijzigd tijdens het lezen".into());
+        }
+        let changes = writer.history_changes_since(log.generation(version));
+        (db, version, changes)
+    };
     let scope = query.scope.as_deref().unwrap_or("full");
     if scope != "full" {
-        return match db.history_scope(
-            scope,
-            query.runner_id.as_deref(),
-            query.limit.unwrap_or(100),
-        ) {
-            Ok(value) => Json(value).into_response(),
-            Err(message) => error_body(message),
-        };
+        return db
+            .history_scope(
+                scope,
+                query.runner_id.as_deref(),
+                query.limit.unwrap_or(100),
+            )
+            .and_then(|value| {
+                serde_json::to_vec(&value)
+                    .map(Bytes::from)
+                    .map_err(|e| e.to_string())
+            });
     }
-    let mut log = host.history.lock().unwrap();
-    if let Err(message) = log.refresh(&db) {
-        return error_body(message);
-    }
-    drop(db);
+    log.refresh(&db, version, changes)?;
     if let Some(delta) = query.since.as_deref().and_then(|cursor| log.since(cursor)) {
-        return json_body(delta);
+        return Ok(delta);
     }
-    json_body(log.current.as_ref().unwrap().body.clone())
+    log.full_body()
 }
 async fn registrations(State(host): State<Host>) -> Reply {
     reply(host.db.lock().unwrap().registrations())
@@ -526,11 +474,14 @@ async fn mutation(
     Json(input): Json<Value>,
 ) -> Reply {
     let loopback = remote.ip().to_canonical().is_loopback();
+    let trace = if crate::latency::enabled() && method == "race.handoff" {
+        crate::latency::handoff("server_received", &input, None);
+        Some(crate::latency::handoff_id(&input))
+    } else { None };
     if let Some(result) = desktop_action(&method, &input, loopback).await {
         return reply(result);
     }
-    reply(
-        action(
+    let result = action(
             host,
             method,
             input,
@@ -542,8 +493,11 @@ async fn mutation(
                 remote.ip(),
             ),
         )
-        .await,
-    )
+        .await;
+    if let Some(id) = trace {
+        crate::latency::emit("ack_response", &id, result.as_ref().ok().and_then(|r| r["lapId"].as_str()));
+    }
+    reply(result)
 }
 async fn rpc(
     State(host): State<Host>,
@@ -805,7 +759,7 @@ pub fn serve(db: Arc<Mutex<Db>>, port: u16) -> Result<()> {
             .map_err(|e| e.to_string())?;
         println!("Apolloon Rust http://127.0.0.1:{port}");
         axum::serve(
-            listener,
+            listener.tap_io(|socket| { let _ = socket.set_nodelay(true); }),
             router(Host::new(db, port))
                 .into_make_service_with_connect_info::<std::net::SocketAddr>(),
         )
@@ -847,7 +801,7 @@ pub fn start(db: Arc<Mutex<Db>>, port: u16) -> Result<ServerHandle> {
             let listener =
                 tokio::net::TcpListener::from_std(listener).expect("bound server socket");
             if let Err(error) = axum::serve(
-                listener,
+                listener.tap_io(|socket| { let _ = socket.set_nodelay(true); }),
                 router(Host::new(db, port))
                     .into_make_service_with_connect_info::<std::net::SocketAddr>(),
             )
@@ -900,6 +854,32 @@ mod read_cache_tests {
     }
 
     #[tokio::test]
+    async fn plain_state_does_not_wait_for_the_history_lane() {
+        let db = Arc::new(Mutex::new(Db::open(std::path::Path::new(":memory:")).unwrap()));
+        let host = Host::with_cluster(db, 5173, None);
+        let _history = host.history.lock().unwrap();
+        let state = tokio::time::timeout(std::time::Duration::from_secs(1), pushed(host.clone(), None, false)).await.unwrap();
+        assert_eq!(state["runners"], json!([]));
+        assert!(state.get("stateHistory").is_none());
+    }
+
+    #[test]
+    fn wal_reader_is_read_only_and_does_not_hold_up_a_writer() {
+        let path = std::env::temp_dir().join(format!("apolloon-reader-{}.sqlite", uuid::Uuid::new_v4()));
+        {
+            let writer = Db::open(&path).unwrap();
+            assert_eq!(writer.one("PRAGMA journal_mode", &[]).unwrap()["journal_mode"], "wal");
+            assert_eq!(writer.one("PRAGMA synchronous", &[]).unwrap()["synchronous"], 2);
+            let reader = writer.read_snapshot().unwrap();
+            assert!(reader.exec("INSERT INTO settings VALUES('forbidden','x')", &[]).is_err());
+            writer.exec("INSERT INTO settings VALUES('concurrent','yes')", &[]).unwrap();
+            assert!(reader.rows("SELECT * FROM settings WHERE key='concurrent'", &[]).unwrap().is_empty());
+            assert_eq!(writer.read_snapshot().unwrap().one("SELECT value FROM settings WHERE key='concurrent'", &[]).unwrap()["value"], "yes");
+        }
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
     async fn warm_reads_follow_local_changes_and_timing_writes() {
         let db = Arc::new(Mutex::new(
             Db::open(std::path::Path::new(":memory:")).unwrap(),
@@ -911,6 +891,8 @@ mod read_cache_tests {
         assert_eq!(empty["runners"], json!([]));
         assert_eq!(empty["host"], crate::host::info(5173));
         assert_eq!(full_history().await["laps"], json!([]));
+        let initial = pushed(host.clone(), None, true).await;
+        let cursor = initial["stateHistory"]["cursor"].as_str().unwrap().to_owned();
 
         // Some local settings writes deliberately keep the same public revision.
         let revision = db.lock().unwrap().revision;
@@ -941,9 +923,74 @@ mod read_cache_tests {
         }
         let full = full_history().await;
         assert_eq!(full["laps"][0]["runnerId"], "runner");
+        let bundle_query = std::collections::HashMap::from([
+            ("history".into(), "1".into()),
+            ("since".into(), cursor.clone()),
+        ]);
+        let bundled = body(snapshot_with_history(host.clone(), &bundle_query).await).await;
+        assert_eq!(bundled["stateHistory"]["delta"], true);
+        assert_eq!(bundled["stateHistory"]["since"], cursor);
+        assert_eq!(bundled["stateHistory"]["revision"], bundled["revision"]);
+        assert_eq!(bundled["stateHistory"]["changes"]["laps"]["changed"][0][1], full["laps"][0]);
         let recent = body(history(State(host), query(Some("recent"), Some(1), None)).await).await;
         assert_eq!(recent["laps"], full["laps"]);
         assert_eq!(recent["limit"], 1);
+    }
+
+    async fn pushed(host: Host, after: Option<String>, history: bool) -> Value {
+        let mut query = std::collections::HashMap::new();
+        if let Some(after) = after { query.insert("after".into(), after); }
+        if history { query.insert("history".into(), "1".into()); }
+        body(snapshot_request(State(host), axum::extract::ConnectInfo("127.0.0.1:1234".parse().unwrap()), Query(query)).await).await
+    }
+
+    #[tokio::test]
+    async fn long_poll_wakes_on_raw_settings_commit_without_a_revision_change() {
+        let db = Arc::new(Mutex::new(Db::open(std::path::Path::new(":memory:")).unwrap()));
+        let host = Host::with_cluster(db.clone(), 5173, None);
+        let initial = pushed(host.clone(), None, true).await;
+        assert_eq!(initial["stateHistory"]["laps"], json!([]));
+        let token = initial["changeToken"].as_str().unwrap().to_owned();
+        let pending = tokio::spawn(pushed(host.clone(), Some(token.clone()), true));
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        assert!(!pending.is_finished());
+        db.lock().unwrap().conn.execute("INSERT INTO settings(key,value) VALUES('push_test','changed')", []).unwrap();
+        let result = tokio::time::timeout(std::time::Duration::from_millis(500), pending).await.unwrap().unwrap();
+        assert_ne!(result["changeToken"], token);
+        assert_eq!(result["revision"], initial["revision"]);
+        let immediate = tokio::time::timeout(std::time::Duration::from_millis(500), pushed(host, Some(token), false)).await.unwrap();
+        assert_eq!(immediate["changeToken"], result["changeToken"]);
+        assert!(immediate.get("stateHistory").is_none());
+    }
+
+    #[tokio::test]
+    async fn unchanged_state_times_out_and_foreign_restart_tokens_return_immediately() {
+        let db = Arc::new(Mutex::new(Db::open(std::path::Path::new(":memory:")).unwrap()));
+        let host = Host::with_cluster(db, 5173, None);
+        let initial = pushed(host.clone(), Some("foreign-or-restarted".into()), false).await;
+        let started = std::time::Instant::now();
+        let current = pushed(host, initial["changeToken"].as_str().map(str::to_owned), false).await;
+        assert!(started.elapsed() >= std::time::Duration::from_millis(1900));
+        assert!(started.elapsed() < std::time::Duration::from_secs(4));
+        assert_eq!(initial, current);
+        let other = Db::open(std::path::Path::new(":memory:")).unwrap();
+        assert_ne!(other.change_token(), current["changeToken"].as_str().unwrap());
+    }
+
+    #[test]
+    fn commit_and_rollback_notifiers_cover_direct_connection_writes() {
+        let db = Db::open(std::path::Path::new(":memory:")).unwrap();
+        let mut changes = db.subscribe();
+        let before = db.change_token();
+        db.conn.execute_batch("BEGIN; INSERT INTO settings(key,value) VALUES('push_test','first'); COMMIT;").unwrap();
+        assert!(changes.has_changed().unwrap());
+        changes.borrow_and_update();
+        assert_ne!(before, db.change_token());
+        let before = db.change_token();
+        db.conn.execute_batch("BEGIN; UPDATE settings SET value='rolled back' WHERE key='push_test'; ROLLBACK;").unwrap();
+        assert!(changes.has_changed().unwrap());
+        assert_ne!(before, db.change_token());
+        assert_eq!(db.one("SELECT value FROM settings WHERE key='push_test'", &[]).unwrap()["value"], "first");
     }
 
     #[tokio::test]

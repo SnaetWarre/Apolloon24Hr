@@ -86,13 +86,15 @@ try {
     const localNow = Date.now.bind(Date);
     Date.now = () => localNow() + 45_000;
   }, cpuOnly);
-  const stateRequest = page.waitForResponse((r) => r.url().endsWith('/api/state') && r.ok(), { timeout: 90000 });
+  const stateRequest = page.waitForResponse((r) => new URL(r.url()).pathname === '/api/state' && r.ok(), {
+    timeout: 90000,
+  });
   await page.goto(url);
   await stateRequest;
   await page.waitForFunction(() => document.querySelector('canvas') && !document.querySelector('#status'), null, {
     timeout: 90000,
   });
-  await page.waitForResponse((r) => r.url().endsWith('/api/state') && r.ok());
+  await page.waitForResponse((r) => new URL(r.url()).pathname === '/api/state' && r.ok());
   const mark = cpuOnly ? 'web.gpu.failed' : 'web.handover.done';
   await page.waitForFunction((mark) => performance.getEntriesByName(mark).length > 0, mark, { timeout: 30000 });
   const canvases = await page.evaluate(() => document.querySelectorAll('canvas').length);
@@ -142,11 +144,11 @@ try {
   const recoveryRequest = page.waitForResponse((r) => r.url().endsWith('/api/recovery') && r.ok());
   await page.goto(url + '/admin?section=system');
   await recoveryRequest;
-  await page.waitForResponse((r) => r.url().endsWith('/api/state') && r.ok());
+  await page.waitForResponse((r) => new URL(r.url()).pathname === '/api/state' && r.ok());
   await page.screenshot({ path: path.join(dir, 'recovery-before.png') });
   await page.goto(url + '/admin?section=preparation');
   await page.waitForResponse((r) => r.url().endsWith('/api/recovery') && r.ok());
-  await page.waitForResponse((r) => r.url().endsWith('/api/state') && r.ok());
+  await page.waitForResponse((r) => new URL(r.url()).pathname === '/api/state' && r.ok());
   await page.waitForFunction((mark) => performance.getEntriesByName(mark).length > 0, mark, { timeout: 30000 });
   await page.screenshot({ path: path.join(dir, 'import-before.png') });
   // The page fades in after navigation. Let the button finish entering before pressing it.
@@ -175,7 +177,7 @@ try {
     skipped: 1,
     errors: ['Rij 3: lopersnummer en naam ontbreekt'],
   });
-  await page.waitForResponse((r) => r.url().endsWith('/api/state') && r.ok());
+  await page.waitForResponse((r) => new URL(r.url()).pathname === '/api/state' && r.ok());
   const afterImport = await (await fetch(url + '/api/state')).json();
   assert(afterImport.runners.some((r) => r.name === 'Browser Imported' && r.runnerNumber === '77'));
   await page.screenshot({ path: path.join(dir, 'import-after.png') });

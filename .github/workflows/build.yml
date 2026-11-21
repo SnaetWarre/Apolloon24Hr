@@ -75,6 +75,7 @@ jobs:
       - run: node native/scripts/check-web.mjs
       - run: node native/scripts/check-web.mjs --cpu
       - run: node native/scripts/check-failover.mjs
+      - run: node native/scripts/check-state-push.mjs
       - name: Recover crashed and frozen Timing windows while the server stays online
         run: |
           timeout 60s xvfb-run -a -s "-screen 0 1366x768x24" bash native/scripts/check-renderer-recovery.sh KILL
