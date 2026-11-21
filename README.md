@@ -7,7 +7,7 @@ Lap counting for the Apolloon 24 Urenloop. The desktop app uses Rune. Its Rust s
 1. Install the same Apolloon version on each laptop and connect them to the same wired network.
 2. Start Apolloon on the first laptop and import registrations from Excel or CSV. Start it on the other laptops. They discover the group automatically. You can enter a laptop address directly on the welcome screen.
 3. In **Beheer › Voorbereiding**, check that each laptop is ready. The app uses TCP port `5173` for the browser and UDP port `45737` for discovery. Use a DHCP reservation or **Beheer › Systeem & herstel › Vast netwerkadres** if the browser address needs to stay fixed.
-4. Open the address shown in Apolloon in a browser on the second monitor. Choose **Binnenscherm**, **Competitiescherm**, or **Buitenscherm** and press F11 for fullscreen.
+4. On the welcome screen or under **Beheer › Systeem & herstel › Vast netwerkadres**, copy the direct link for **Binnenscherm**, **Competitiescherm**, or **Buitenscherm**. Open it in a browser on the second monitor and press F11 for fullscreen. The links show **open** when that screen is connected. **Beheer › Voorbereiding › Schermen** lists screens connected to this laptop; screens served by other laptops are not counted.
 5. Download a backup from **Beheer › Systeem & herstel** before starting the race.
 
 Before the race, linking merges registrations and labels. A shared registration counts once when name, email, and phone match. Linking protects race data as soon as a runner starts, including the first lap. A group of three can continue timing after one laptop drops out. The browser can move to a surviving laptop and retain its view.

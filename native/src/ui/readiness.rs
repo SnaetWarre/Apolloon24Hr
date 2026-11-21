@@ -14,14 +14,59 @@ pub(super) struct Check {
     pub detail: String,
 }
 fn check(id: &'static str, label: &'static str, level: Level, detail: impl Into<String>) -> Check {
-    Check { id, label, level, detail: detail.into() }
+    Check {
+        id,
+        label,
+        level,
+        detail: detail.into(),
+    }
 }
 /// The checks, blocking problems first; within a level the order of readiness.ts stays.
 pub(super) fn checks(s: &State) -> Vec<Check> {
     let b = &s.recovery["status"];
     let mut checks = Vec::new();
+    let count = runners(s).len();
+    checks.push(check(
+        "registrations",
+        "Inschrijvingen",
+        if count == 0 {
+            Level::Blocked
+        } else {
+            Level::Ready
+        },
+        if count == 0 {
+            "Er staan nog geen lopers in de databank.".into()
+        } else {
+            format!("Er staan {count} lopers in de databank.")
+        },
+    ));
+    let screens = s.snapshot["screens"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|screen| {
+            screen["kind"].as_str().and_then(screen_name).map(|name| {
+                format!(
+                    "{name} ({})",
+                    screen["address"].as_str().unwrap_or("onbekend adres")
+                )
+            })
+        })
+        .collect::<Vec<_>>();
+    checks.push(check("screens", "Schermen", if screens.is_empty() { Level::Warning } else { Level::Ready }, if screens.is_empty() {
+        "Er zijn nog geen schermen open op deze laptop. Schermen op andere laptops tellen hier niet mee.".into()
+    } else {
+        format!("Open op deze laptop: {}.", screens.join(", "))
+    }));
     if !s.connected || b.is_null() {
-        return vec![check("server-status", "Serverstatus", Level::Blocked, "De serverstatus kon niet worden geladen.")];
+        checks.push(check(
+            "server-status",
+            "Serverstatus",
+            Level::Blocked,
+            "De serverstatus kon niet worden geladen.",
+        ));
+        checks.sort_by_key(|c| c.level);
+        return checks;
     }
     let age = b["latest"]["createdAt"].as_i64().map(|t| (s.clock - t).max(0));
     let stale = age.is_none_or(|age| age > b["intervalMs"].as_i64().unwrap_or(300_000) * 3);
@@ -104,7 +149,47 @@ pub(super) fn summary(checks: &[Check]) -> Level {
 }
 /// Whether the Systeem tab gets its attention dot.
 pub(super) fn needs_attention(s: &State) -> bool {
-    summary(&checks(s)) != Level::Ready
+    checks(s)
+        .iter()
+        .any(|c| c.id != "screens" && c.level != Level::Ready)
+}
+
+pub(super) fn screen_name(kind: &str) -> Option<&'static str> {
+    match kind {
+        "inside" => Some("Binnenscherm"),
+        "competitions" => Some("Competitiescherm"),
+        "outside" => Some("Buitenscherm"),
+        _ => None,
+    }
+}
+
+pub(super) fn screen_links(s: &State, url: &str, key: &str) -> El {
+    let mut links = row().gap(8.0).flex_wrap();
+    for kind in ["inside", "competitions", "outside"] {
+        let open = s.snapshot["screens"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|screen| screen["kind"] == kind);
+        let label = format!(
+            "{}{}",
+            screen_name(kind).unwrap(),
+            if open { " · open" } else { "" }
+        );
+        let address = format!("{}/display/{kind}", url.trim_end_matches('/'));
+        links = links.child(
+            admin_base::btn(
+                s,
+                &format!("{key}-{kind}"),
+                &label,
+                admin_base::Kind::Quiet,
+                true,
+                false,
+            )
+            .on_press_tx(move |_: &mut State, tx: &mut Tx| tx.copy(&address)),
+        );
+    }
+    col().gap(6.0).child(links).child(admin_base::copy(s, "Kopieer de link van het scherm en open die in een browser op het tweede scherm. Druk op F11 voor volledig scherm."))
 }
 
 /// `ReadinessPanel` from PreparationSection.tsx.

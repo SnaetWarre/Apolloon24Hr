@@ -142,10 +142,10 @@ try {
   await page.waitForFunction((mark) => performance.getEntriesByName(mark).length > 0, mark, { timeout: 30000 });
   await page.screenshot({ path: path.join(dir, 'import-before.png') });
   // The page fades in after navigation. Let the button finish entering before pressing it.
-  await page.mouse.move(330, 605);
+  await page.mouse.move(330, 741);
   await page.waitForTimeout(1200);
   const picker = page.waitForEvent('filechooser', { timeout: 15000 });
-  await page.mouse.click(330, 605, { delay: 120 });
+  await page.mouse.click(330, 741, { delay: 120 });
   const chooser = await picker.catch(async (e) => {
     await page.screenshot({ path: path.join(dir, 'import-click-failed.png') });
     throw e;
@@ -158,7 +158,7 @@ try {
   await page.waitForTimeout(250);
   await page.screenshot({ path: path.join(dir, 'import-picked.png') });
   const importing = page.waitForResponse((r) => r.url().endsWith('/api/action/runners.importCsv'));
-  await page.mouse.click(1259, 605);
+  await page.mouse.click(1259, 741);
   const imported = await importing;
   assert(imported.ok(), await imported.text());
   assert.deepEqual(await imported.json(), {
