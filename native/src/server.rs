@@ -6,6 +6,7 @@ use axum::{
     http::{StatusCode, header},
     response::{IntoResponse, Response},
     routing::{get, post},
+    serve::ListenerExt,
 };
 use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
@@ -264,24 +265,51 @@ async fn snapshot_request(
             .unwrap()
             .seen(kind, remote.ip().to_canonical());
     }
-    snapshot(State(host)).await
+    if let Some(after) = query.get("after") {
+        let mut changes = host.db.lock().unwrap().subscribe();
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                if host.db.lock().unwrap().change_token() != *after {
+                    break;
+                }
+                if changes.changed().await.is_err() {
+                    break;
+                }
+            }
+        }).await;
+    }
+    snapshot_with_history(host, &query).await
 }
 async fn snapshot(State(host): State<Host>) -> Response {
-    let read = || -> Result<Bytes> {
+    snapshot_with_history(host, &Default::default()).await
+}
+async fn snapshot_with_history(host: Host, query: &std::collections::HashMap<String, String>) -> Response {
+    let read = || -> Result<(Bytes, Option<Bytes>)> {
         let db = host.db.lock().unwrap();
         let mut cache = host.reads.lock().unwrap();
         let version = read_version(&db);
         if cache.version != Some(version) || cache.snapshot.is_none() {
-            let body = serde_json::to_vec(&db.race_snapshot()?).map_err(|e| e.to_string())?;
+            let mut state = db.race_snapshot()?;
+            state["changeToken"] = json!(db.change_token());
+            if crate::latency::enabled() {
+                state["latencyLap"] = db.rows("SELECT id FROM laps ORDER BY rowid DESC LIMIT 1", &[])?.first().map_or(Value::Null, |row| row["id"].clone());
+            }
+            let body = serde_json::to_vec(&state).map_err(|e| e.to_string())?;
             *cache = ReadCache {
                 version: Some(version),
                 snapshot: Some(body.into()),
             };
         }
-        Ok(cache.snapshot.clone().unwrap())
+        let history = if query.contains_key("history") {
+            let mut log = host.history.lock().unwrap();
+            log.refresh(&db)?;
+            Some(query.get("since").and_then(|cursor| log.since(cursor))
+                .unwrap_or_else(|| log.current.as_ref().unwrap().body.clone()))
+        } else { None };
+        Ok((cache.snapshot.clone().unwrap(), history))
     };
     match read() {
-        Ok(cached) => {
+        Ok((cached, history)) => {
             // The cached object is reused as bytes; only the live fields are appended.
             let mut body = Vec::with_capacity(cached.len() + 512);
             body.extend_from_slice(&cached[..cached.len() - 1]);
@@ -297,6 +325,10 @@ async fn snapshot(State(host): State<Host>) -> Response {
                 field("cluster", &node.status());
             }
             field("screens", &host.screens.lock().unwrap().active());
+            if let Some(history) = history {
+                body.extend_from_slice(b",\"stateHistory\":");
+                body.extend_from_slice(&history);
+            }
             body.push(b'}');
             json_body(body.into())
         }
@@ -526,11 +558,14 @@ async fn mutation(
     Json(input): Json<Value>,
 ) -> Reply {
     let loopback = remote.ip().to_canonical().is_loopback();
+    let trace = if crate::latency::enabled() && method == "race.handoff" {
+        crate::latency::handoff("server_received", &input, None);
+        Some(crate::latency::handoff_id(&input))
+    } else { None };
     if let Some(result) = desktop_action(&method, &input, loopback).await {
         return reply(result);
     }
-    reply(
-        action(
+    let result = action(
             host,
             method,
             input,
@@ -542,8 +577,11 @@ async fn mutation(
                 remote.ip(),
             ),
         )
-        .await,
-    )
+        .await;
+    if let Some(id) = trace {
+        crate::latency::emit("ack_response", &id, result.as_ref().ok().and_then(|r| r["lapId"].as_str()));
+    }
+    reply(result)
 }
 async fn rpc(
     State(host): State<Host>,
@@ -805,7 +843,7 @@ pub fn serve(db: Arc<Mutex<Db>>, port: u16) -> Result<()> {
             .map_err(|e| e.to_string())?;
         println!("Apolloon Rust http://127.0.0.1:{port}");
         axum::serve(
-            listener,
+            listener.tap_io(|socket| { let _ = socket.set_nodelay(true); }),
             router(Host::new(db, port))
                 .into_make_service_with_connect_info::<std::net::SocketAddr>(),
         )
@@ -847,7 +885,7 @@ pub fn start(db: Arc<Mutex<Db>>, port: u16) -> Result<ServerHandle> {
             let listener =
                 tokio::net::TcpListener::from_std(listener).expect("bound server socket");
             if let Err(error) = axum::serve(
-                listener,
+                listener.tap_io(|socket| { let _ = socket.set_nodelay(true); }),
                 router(Host::new(db, port))
                     .into_make_service_with_connect_info::<std::net::SocketAddr>(),
             )
@@ -911,6 +949,8 @@ mod read_cache_tests {
         assert_eq!(empty["runners"], json!([]));
         assert_eq!(empty["host"], crate::host::info(5173));
         assert_eq!(full_history().await["laps"], json!([]));
+        let initial = pushed(host.clone(), None, true).await;
+        let cursor = initial["stateHistory"]["cursor"].as_str().unwrap().to_owned();
 
         // Some local settings writes deliberately keep the same public revision.
         let revision = db.lock().unwrap().revision;
@@ -941,9 +981,74 @@ mod read_cache_tests {
         }
         let full = full_history().await;
         assert_eq!(full["laps"][0]["runnerId"], "runner");
+        let bundle_query = std::collections::HashMap::from([
+            ("history".into(), "1".into()),
+            ("since".into(), cursor.clone()),
+        ]);
+        let bundled = body(snapshot_with_history(host.clone(), &bundle_query).await).await;
+        assert_eq!(bundled["stateHistory"]["delta"], true);
+        assert_eq!(bundled["stateHistory"]["since"], cursor);
+        assert_eq!(bundled["stateHistory"]["revision"], bundled["revision"]);
+        assert_eq!(bundled["stateHistory"]["changes"]["laps"]["changed"][0][1], full["laps"][0]);
         let recent = body(history(State(host), query(Some("recent"), Some(1), None)).await).await;
         assert_eq!(recent["laps"], full["laps"]);
         assert_eq!(recent["limit"], 1);
+    }
+
+    async fn pushed(host: Host, after: Option<String>, history: bool) -> Value {
+        let mut query = std::collections::HashMap::new();
+        if let Some(after) = after { query.insert("after".into(), after); }
+        if history { query.insert("history".into(), "1".into()); }
+        body(snapshot_request(State(host), axum::extract::ConnectInfo("127.0.0.1:1234".parse().unwrap()), Query(query)).await).await
+    }
+
+    #[tokio::test]
+    async fn long_poll_wakes_on_raw_settings_commit_without_a_revision_change() {
+        let db = Arc::new(Mutex::new(Db::open(std::path::Path::new(":memory:")).unwrap()));
+        let host = Host::with_cluster(db.clone(), 5173, None);
+        let initial = pushed(host.clone(), None, true).await;
+        assert_eq!(initial["stateHistory"]["laps"], json!([]));
+        let token = initial["changeToken"].as_str().unwrap().to_owned();
+        let pending = tokio::spawn(pushed(host.clone(), Some(token.clone()), true));
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        assert!(!pending.is_finished());
+        db.lock().unwrap().conn.execute("INSERT INTO settings(key,value) VALUES('push_test','changed')", []).unwrap();
+        let result = tokio::time::timeout(std::time::Duration::from_millis(500), pending).await.unwrap().unwrap();
+        assert_ne!(result["changeToken"], token);
+        assert_eq!(result["revision"], initial["revision"]);
+        let immediate = tokio::time::timeout(std::time::Duration::from_millis(500), pushed(host, Some(token), false)).await.unwrap();
+        assert_eq!(immediate["changeToken"], result["changeToken"]);
+        assert!(immediate.get("stateHistory").is_none());
+    }
+
+    #[tokio::test]
+    async fn unchanged_state_times_out_and_foreign_restart_tokens_return_immediately() {
+        let db = Arc::new(Mutex::new(Db::open(std::path::Path::new(":memory:")).unwrap()));
+        let host = Host::with_cluster(db, 5173, None);
+        let initial = pushed(host.clone(), Some("foreign-or-restarted".into()), false).await;
+        let started = std::time::Instant::now();
+        let current = pushed(host, initial["changeToken"].as_str().map(str::to_owned), false).await;
+        assert!(started.elapsed() >= std::time::Duration::from_millis(1900));
+        assert!(started.elapsed() < std::time::Duration::from_secs(4));
+        assert_eq!(initial, current);
+        let other = Db::open(std::path::Path::new(":memory:")).unwrap();
+        assert_ne!(other.change_token(), current["changeToken"].as_str().unwrap());
+    }
+
+    #[test]
+    fn commit_and_rollback_notifiers_cover_direct_connection_writes() {
+        let db = Db::open(std::path::Path::new(":memory:")).unwrap();
+        let mut changes = db.subscribe();
+        let before = db.change_token();
+        db.conn.execute_batch("BEGIN; INSERT INTO settings(key,value) VALUES('push_test','first'); COMMIT;").unwrap();
+        assert!(changes.has_changed().unwrap());
+        changes.borrow_and_update();
+        assert_ne!(before, db.change_token());
+        let before = db.change_token();
+        db.conn.execute_batch("BEGIN; UPDATE settings SET value='rolled back' WHERE key='push_test'; ROLLBACK;").unwrap();
+        assert!(changes.has_changed().unwrap());
+        assert_ne!(before, db.change_token());
+        assert_eq!(db.one("SELECT value FROM settings WHERE key='push_test'", &[]).unwrap()["value"], "first");
     }
 
     #[tokio::test]

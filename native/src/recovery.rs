@@ -89,15 +89,14 @@ fn validate_undo(raw: &Value) -> Result<()> {
 }
 /// The backup is opened read-only, checked and decoded before a live transaction starts.
 pub fn read(path: &Path) -> Result<Value> {
-    let copy = Db {
-        conn: rusqlite::Connection::open_with_flags(
+    let copy = Db::from_connection(
+        rusqlite::Connection::open_with_flags(
             path,
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
         )
         .map_err(err)?,
-        revision: 0,
-        capture: Default::default(),
-    };
+        0,
+    )?;
     if copy.one("PRAGMA quick_check", &[])?["quick_check"] != "ok"
         || !copy.rows("PRAGMA foreign_key_check", &[])?.is_empty()
     {

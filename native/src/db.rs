@@ -38,6 +38,8 @@ fn sql_value(v: &Value) -> SqlValue {
 pub struct Db {
     pub conn: Connection,
     pub revision: i64,
+    changes: tokio::sync::watch::Sender<u64>,
+    epoch: String,
     /// Set by the linked-laptop runtime: every statement `exec` runs is recorded for replication.
     pub capture: std::cell::RefCell<Option<crate::cluster::log::Capture>>,
 }
@@ -72,11 +74,7 @@ impl Db {
             "INSERT OR IGNORE INTO race_state(id) VALUES(1); PRAGMA user_version=17;",
         )
         .map_err(err)?;
-        let db = Self {
-            conn,
-            revision: now(),
-            capture: Default::default(),
-        };
+        let db = Self::from_connection(conn, now())?;
         if tables == 0 {
             db.exec(
                 "INSERT INTO settings(key,value) VALUES('schema_version','17')",
@@ -92,6 +90,26 @@ impl Db {
             return Err("Databasecontrole mislukt".into());
         }
         Ok(db)
+    }
+    pub(crate) fn from_connection(conn: Connection, revision: i64) -> Result<Self> {
+        let (changes, _) = tokio::sync::watch::channel(0u64);
+        let committed = changes.clone();
+        conn.commit_hook(Some(move || {
+            committed.send_modify(|version| *version = version.wrapping_add(1));
+            crate::latency::notify();
+            false
+        })).map_err(err)?;
+        let rolled_back = changes.clone();
+        conn.rollback_hook(Some(move || {
+            rolled_back.send_modify(|version| *version = version.wrapping_add(1));
+        })).map_err(err)?;
+        Ok(Self { conn, revision, changes, epoch: id(), capture: Default::default() })
+    }
+    pub fn change_token(&self) -> String {
+        format!("{}.{}.{}", self.epoch, self.revision, self.conn.total_changes())
+    }
+    pub fn subscribe(&self) -> tokio::sync::watch::Receiver<u64> {
+        self.changes.subscribe()
     }
     pub fn rows(&self, sql: &str, args: &[Value]) -> Result<Vec<Value>> {
         let mut stmt = self.conn.prepare(sql).map_err(err)?;
@@ -233,7 +251,11 @@ impl Db {
         if replicated {
             crate::cluster::log::seal(self, method, &result)?;
         }
+        let _trace = if crate::latency::enabled() && method == "race.handoff" {
+            result["lapId"].as_str().map(|lap| crate::latency::commit_context(vec![(crate::latency::handoff_id(input), lap.to_owned())]))
+        } else { None };
         transaction.commit().map_err(err)?;
+        if method == "race.handoff" { crate::latency::handoff("local_commit", input, result["lapId"].as_str()); }
         self.revision += 1;
         Ok(result)
     }
