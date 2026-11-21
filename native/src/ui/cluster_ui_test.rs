@@ -144,7 +144,7 @@ fn a_joining_or_resyncing_laptop_counts_as_busy_like_the_reference() {
 }
 
 #[test]
-fn groep_maken_links_three_laptops_gives_roles_and_tests_the_group() {
+fn groep_maken_links_three_laptops_and_tests_the_group() {
     let _serial = serial();
     let memory = std::path::Path::new(":memory:");
     let a = TestServer::start(memory, free_port(), "Laptop A");
@@ -180,39 +180,6 @@ fn groep_maken_links_three_laptops_gives_roles_and_tests_the_group() {
     assert_eq!(c.count("SELECT COUNT(*) AS n FROM runners WHERE name='Zoë'"), 1);
     update(&mut rt, |s| s.snapshot["cluster"]["members"].as_array().is_some_and(|m| m.len() == 3));
 
-    // Roles: two presets and one name of our own, on every laptop.
-    let id = |s: &TestServer| s.status()["hostId"].as_str().unwrap().to_owned();
-    let (host_a, host_b, host_c) = (id(&a), id(&b), id(&c));
-    rt.frame(1.0 / 60.0);
-    click(&mut rt, &format!("setup-role-{host_a}-timing"));
-    update(&mut rt, |s| !s.busy);
-    click(&mut rt, &format!("setup-role-{host_b}-wachtrij"));
-    update(&mut rt, |s| !s.busy);
-    click(&mut rt, &format!("setup-role-{host_c}"));
-    rt.paste("Reserve");
-    rt.frame(1.0 / 60.0);
-    rt.frame(1.0 / 60.0);
-    click(&mut rt, &format!("setup-role-save-{host_c}"));
-    update(&mut rt, |s| !s.busy && s.notice == "Laptop C is nu Reserve.");
-    let roles = |s: &TestServer| -> Vec<(String, Value)> {
-        s.status()["members"].as_array().unwrap().iter()
-            .map(|m| (m["hostId"].as_str().unwrap().to_owned(), m["role"].clone()))
-            .collect()
-    };
-    wait_until("the roles are on every laptop", Duration::from_secs(5), || {
-        [&a, &b, &c].iter().all(|s| {
-            let r = roles(s);
-            r.contains(&(host_a.clone(), json!("Timing")))
-                && r.contains(&(host_b.clone(), json!("Wachtrij")))
-                && r.contains(&(host_c.clone(), json!("Reserve")))
-        })
-    });
-    // The sidebar of this laptop names its role.
-    update(&mut rt, |s| super::cluster_setup::own_role(s).as_deref() == Some("Timing"));
-    rt.frame(1.0 / 60.0);
-    assert!(rt.find("laptop-role").is_some(), "the sidebar shows the role");
-    assert!(rt.find(&format!("setup-role-tag-{host_b}")).is_some());
-
     // Groep testen: all three confirm, in plain words.
     update(&mut rt, |s| s.snapshot["cluster"]["state"] == "healthy");
     click(&mut rt, "cluster-test");
@@ -221,6 +188,6 @@ fn groep_maken_links_three_laptops_gives_roles_and_tests_the_group() {
     assert_eq!(rt.state.group.test["total"], 3);
     rt.frame(1.0 / 60.0);
     assert!(rt.find("setup-test-verdict").is_some());
-    assert!(rt.find("setup-step-3").is_some());
+    assert!(rt.find("setup-step-2").is_some());
     assert_eq!(c.count("SELECT COUNT(*) AS n FROM runners"), 1);
 }

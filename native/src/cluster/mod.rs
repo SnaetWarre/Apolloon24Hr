@@ -25,8 +25,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-/// The longest role name a laptop can get in Groep maken.
-pub const ROLE_MAX: usize = 24;
 pub const APP_VERSION: &str = env!("APOLLOON_PEER_VERSION");
 pub const SCHEMA_VERSION: i64 = 17;
 
@@ -330,14 +328,6 @@ impl Node {
         let timing = log::json_setting(&self.db.lock().unwrap(), "cluster_timing_json");
         timing["hostId"].is_string().then_some(timing)
     }
-    /// The role each laptop got in Groep maken (Timing, Wachtrij, ...), by host id.
-    fn roles(&self) -> HashMap<String, String> {
-        serde_json::from_value(log::json_setting(
-            &self.db.lock().unwrap(),
-            "cluster_roles_json",
-        ))
-        .unwrap_or_default()
-    }
     fn removed(&self) -> Vec<String> {
         serde_json::from_value(log::json_setting(
             &self.db.lock().unwrap(),
@@ -419,7 +409,6 @@ impl Node {
         let writable = busy.is_none() && self.leader_alive();
         let group = self.members();
         let names = self.heard_names();
-        let roles = self.roles();
         let removable_after = self.cfg.removable_after.as_millis() as u64;
         let statuses: Vec<Value> = group
             .iter()
@@ -433,7 +422,6 @@ impl Node {
                     "url": if is_self { self.cfg.self_url.clone() } else { member.url.clone() },
                     "name": if is_self { Some(self.cfg.name.clone()) } else { names.get(&member.host_id).cloned().or(member.name.clone()) },
                     "self": is_self,
-                    "role": roles.get(&member.host_id).cloned(),
                     "leader": is_leader && writable,
                     "reachable": reachable,
                     "caughtUp": (is_leader && writable) || seen.is_some_and(|s| s.caught_up) || group.len() == 1,
@@ -801,42 +789,6 @@ impl Node {
                     origin,
                 )?;
                 Ok(json!({"name": name}))
-            }
-            "cluster.setRole" => {
-                let host_id = input["hostId"].as_str().ok_or("Laptop ontbreekt")?;
-                let member = log::stored_members(db)
-                    .into_iter()
-                    .find(|m| m.host_id == host_id)
-                    .ok_or("Deze laptop hoort niet bij de groep.")?;
-                let role: String = input["role"]
-                    .as_str()
-                    .unwrap_or("")
-                    .split_whitespace()
-                    .collect::<Vec<_>>()
-                    .join(" ");
-                if role.chars().count() > ROLE_MAX {
-                    return Err(format!("Een rol heeft hoogstens {ROLE_MAX} tekens.").into());
-                }
-                let mut roles: HashMap<String, String> =
-                    serde_json::from_value(log::json_setting(db, "cluster_roles_json"))
-                        .unwrap_or_default();
-                if role.is_empty() {
-                    roles.remove(host_id);
-                } else {
-                    roles.insert(host_id.to_owned(), role.clone());
-                }
-                log::set_replicated(db, "cluster_roles_json", &json!(roles))?;
-                let name = member
-                    .name
-                    .clone()
-                    .unwrap_or_else(|| short_url(&member.url).to_owned());
-                let summary = if role.is_empty() {
-                    format!("Rol van {name} gewist")
-                } else {
-                    format!("{name} is nu {role}")
-                };
-                activity(db, "cluster.setRole", &summary, origin)?;
-                Ok(json!({"hostId": host_id, "name": name, "role": (!role.is_empty()).then_some(role)}))
             }
             "cluster.probe" => probe::apply(db, input),
             _ => Err("Onbekende groepsactie".into()),
