@@ -471,6 +471,84 @@ fn a_write_the_majority_never_confirmed_is_not_kept_on_the_leader() {
     }
 }
 
+/// A leader that inherits an unconfirmed change from an earlier term may not call it saved
+/// before a change of its own term is on a majority: until then a laptop that led in between
+/// can still win and replace it.
+#[test]
+fn a_change_answered_as_saved_survives_three_leader_losses_in_a_row() {
+    let _serial = serial();
+    let dir = Dir::new();
+    let (a, b, c) = linked_three(&dir);
+    assert!(a.node.is_leader());
+    let off = |s: &TestServer, v: bool| {
+        s.node
+            .isolated
+            .store(v, std::sync::atomic::Ordering::Relaxed)
+    };
+    // A change a leader stored in its own data and could not send on, like a Timing press.
+    let store_unsent = |s: &TestServer, key: &str| {
+        super::log::record(&mut s.db.lock().unwrap(), "test.unsent", None, |db| {
+            super::log::set_replicated(db, key, &json!(true)).map(|_| Value::Null)
+        })
+        .unwrap();
+    };
+    let holds = |s: &TestServer, key: &str| {
+        super::log::setting(&s.db.lock().unwrap(), key).is_some()
+    };
+    let first_term = a.node.term();
+    let place = a.head() + 1;
+
+    // 1. Leader A stores a change and fails before another laptop has it.
+    off(&a, true);
+    off(&b, true);
+    store_unsent(&a, "from-a");
+    assert_eq!(a.head(), place);
+
+    // 2. B wins the next term with C's vote, stores a change at the same place and fails before
+    //    sending anything. Written as what that election and write leave on disk, so that B
+    //    fails at exactly that moment.
+    for server in [&b, &c] {
+        let db = server.db.lock().unwrap();
+        super::log::set_local(&db, "cluster_epoch", &(first_term + 1).to_string()).unwrap();
+        super::log::set_local(
+            &db,
+            "cluster_voted_for",
+            &format!("{}:{}", first_term + 1, b.node.host_id),
+        )
+        .unwrap();
+    }
+    store_unsent(&b, "from-b");
+    assert_eq!(b.head(), place);
+
+    // 3. A returns, wins with C's vote, copies its old change to C and reports the group settled.
+    off(&a, false);
+    wait_until("A leads again and its log is on a majority", Duration::from_secs(15), || {
+        a.node.is_leader() && a.node.term() > first_term + 1 && a.node.log_settled()
+    });
+    assert!(holds(&c, "from-a"));
+
+    // 4. A fails again and B returns.
+    off(&a, true);
+    off(&b, false);
+    wait_until("B and C work together", Duration::from_secs(20), || {
+        leader_index(&[&b, &c]).is_some() && same_heads(&[&b, &c])
+    });
+
+    // 5. Whichever of the two leads, the change that was reported as saved is still there.
+    for server in [&b, &c] {
+        assert!(holds(server, "from-a"), "the saved change is gone");
+        assert!(!holds(server, "from-b"));
+    }
+    off(&a, false);
+    wait_until("three healthy laptops", Duration::from_secs(20), || {
+        all_healthy(&[&a, &b, &c]) && same_heads(&[&a, &b, &c])
+    });
+    for server in [&a, &b, &c] {
+        assert!(holds(server, "from-a"));
+        assert!(!holds(server, "from-b"));
+    }
+}
+
 #[test]
 fn the_timing_laptop_goes_on_alone_by_itself_and_the_splits_join_again() {
     let _serial = serial();
