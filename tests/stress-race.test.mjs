@@ -3,6 +3,9 @@ import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, rm, utimes } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { createServer } from 'node:http';
+import { once } from 'node:events';
+import { gzipSync, brotliCompressSync } from 'node:zlib';
 import {
   options,
   schedule,
@@ -13,7 +16,62 @@ import {
   compactSummary,
   isRunSummary,
   latestRun,
+  historyPath,
+  endpointKey,
+  responseBody,
 } from '../scripts/stress/race.mjs';
+
+test('screen history paths retain node cursors without creating unbounded metric buckets', () => {
+  assert.equal(historyPath(), '/api/history?scope=full');
+  assert.equal(historyPath('epoch.1'), '/api/history?scope=full&since=epoch.1');
+  assert.equal(historyPath('a&b'), '/api/history?scope=full&since=a%26b');
+  assert.equal(endpointKey(historyPath('epoch.1')), endpointKey(historyPath('epoch.2')));
+  assert.notEqual(endpointKey(historyPath('epoch.1')), endpointKey(historyPath()));
+  assert.equal(endpointKey('/api/history?scope=recent'), '/api/history?scope=recent');
+});
+
+test('HTTP payload metrics distinguish encoded bytes from decoded JSON, including error and empty bodies', async () => {
+  const payload = JSON.stringify({ laps: Array(100).fill({ id: 'lap' }) });
+  const server = createServer((req, res) => {
+    assert.equal(req.headers['accept-encoding'], 'gzip, br');
+    const encoding = req.url.slice(1);
+    if (encoding === 'empty') {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+    if (encoding === 'error') {
+      res.writeHead(503);
+      res.end('No writable leader');
+      return;
+    }
+    if (encoding === 'broken') {
+      res.writeHead(200, { 'Content-Encoding': 'gzip' });
+      res.end('invalid gzip');
+      return;
+    }
+    res.writeHead(200, encoding === 'identity' ? {} : { 'Content-Encoding': encoding });
+    res.end(encoding === 'gzip' ? gzipSync(payload) : encoding === 'br' ? brotliCompressSync(payload) : payload);
+  }).listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const url = `http://127.0.0.1:${server.address().port}`;
+  try {
+    for (const encoding of ['gzip', 'br', 'identity']) {
+      const response = await responseBody(`${url}/${encoding}`);
+      assert.equal(response.raw, payload);
+      assert.equal(response.bytes, Buffer.byteLength(payload));
+      assert.equal(response.encoding, encoding);
+      assert(
+        encoding === 'identity' ? response.encodedBytes === response.bytes : response.encodedBytes < response.bytes
+      );
+    }
+    assert.equal((await responseBody(`${url}/empty`)).bytes, 0);
+    assert.equal((await responseBody(`${url}/error`, { action: 'probe' })).status, 503);
+    await assert.rejects(responseBody(`${url}/broken`));
+  } finally {
+    await new Promise((done) => server.close(done));
+  }
+});
 
 test('stress flags have safe defaults and reject malformed inputs', () => {
   assert.equal(options([]).ratio, 60);

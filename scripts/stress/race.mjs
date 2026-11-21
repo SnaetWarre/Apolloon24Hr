@@ -5,6 +5,8 @@ import { mkdir, readFile, readdir, stat, writeFile, open } from 'node:fs/promise
 import { resolve, join, relative, isAbsolute } from 'node:path';
 import os from 'node:os';
 import { pathToFileURL } from 'node:url';
+import { request as httpRequest } from 'node:http';
+import { gunzipSync, brotliDecompressSync } from 'node:zlib';
 
 const sleep = (ms) => new Promise((done) => setTimeout(done, Math.max(0, ms)));
 export function options(args) {
@@ -61,6 +63,48 @@ export function distribution(values) {
   const sorted = [...values].sort((a, b) => a - b);
   const p = (fraction) => (sorted.length ? sorted[Math.max(0, Math.ceil(sorted.length * fraction) - 1)] : null);
   return { count: sorted.length, p50: p(0.5), p95: p(0.95), p99: p(0.99), max: p(1) };
+}
+export function historyPath(cursor) {
+  return '/api/history?scope=full' + (cursor ? `&since=${encodeURIComponent(cursor)}` : '');
+}
+export function endpointKey(path) {
+  return path.startsWith('/api/history?scope=full&since=') ? '/api/history?scope=full&since' : path;
+}
+export async function responseBody(url, body) {
+  return new Promise((done, reject) => {
+    const request = httpRequest(
+      url,
+      {
+        method: body === undefined ? 'GET' : 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept-Encoding': 'gzip, br' },
+        signal: AbortSignal.timeout(1800),
+      },
+      (response) => {
+        const chunks = [];
+        response.on('error', reject);
+        response.on('data', (chunk) => chunks.push(chunk));
+        response.on('end', () => {
+          try {
+            const encoded = Buffer.concat(chunks),
+              encoding = response.headers['content-encoding'] ?? 'identity';
+            const decoded =
+              encoding === 'gzip' ? gunzipSync(encoded) : encoding === 'br' ? brotliDecompressSync(encoded) : encoded;
+            done({
+              status: response.statusCode,
+              encoding,
+              encodedBytes: encoded.length,
+              bytes: decoded.length,
+              raw: decoded.toString('utf8'),
+            });
+          } catch (error) {
+            reject(error);
+          }
+        });
+      }
+    );
+    request.on('error', reject);
+    request.end(body === undefined ? undefined : JSON.stringify(body));
+  });
 }
 export function errorClass(record, injectedUnavailable) {
   if (record.status !== undefined) return 'liveResponse';
@@ -199,21 +243,21 @@ export async function main(args = process.argv.slice(2)) {
   async function request(node, path, body) {
     const start = performance.now(),
       window = chaos;
-    const record = { ...stamp(), node: node.name, endpoint: path, write: body !== undefined };
+    const record = { ...stamp(), node: node.name, endpoint: endpointKey(path), path, write: body !== undefined };
     const wasUnavailable = node.injectedUnavailable,
       interruptions = node.interruptions;
     try {
-      const response = await fetch(node.url + path, {
-        method: body === undefined ? 'GET' : 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: body === undefined ? undefined : JSON.stringify(body),
-        signal: AbortSignal.timeout(1800),
-      });
+      const response = await responseBody(node.url + path, body);
       record.status = response.status;
-      const raw = await response.text();
-      record.bytes = Buffer.byteLength(raw);
-      if (!response.ok) throw new Error(`HTTP ${response.status}: ${raw.slice(0, 400)}`);
-      return JSON.parse(raw);
+      record.bytes = response.bytes;
+      record.encodedBytes = response.encodedBytes;
+      record.encoding = response.encoding;
+      if (response.status < 200 || response.status >= 300)
+        throw new Error(`HTTP ${response.status}: ${response.raw.slice(0, 400)}`);
+      const value = JSON.parse(response.raw);
+      if (path.startsWith('/api/history'))
+        record.historyKind = value.delta === true ? 'delta' : path.includes('scope=recent') ? 'recent' : 'full';
+      return value;
     } catch (error) {
       record.error = error.message;
       record.errorClass = errorClass(
@@ -412,17 +456,37 @@ export async function main(args = process.argv.slice(2)) {
     }
   }
   const loops = [];
+  async function screenPoll(node) {
+    const state = await request(node, '/api/state');
+    if (state.revision === node.historyRevision) return;
+    const path = historyPath(node.historyCursor);
+    const history = await request(node, path);
+    if (
+      typeof history.cursor !== 'string' ||
+      (history.delta === true
+        ? history.since !== node.historyCursor ||
+          !Array.isArray(history.changes?.laps?.changed) ||
+          !Array.isArray(history.changes?.events?.changed)
+        : !Array.isArray(history.laps))
+    ) {
+      result.failures.push(`Invalid screen history response on ${node.name}`);
+      node.historyCursor = undefined;
+      return;
+    }
+    node.historyCursor = history.cursor;
+    node.historyRevision = history.revision;
+  }
   async function poll() {
     let tick = 0;
     while (!stopped) {
       await Promise.allSettled(
-        nodes.flatMap((n) =>
-          [
-            '/api/state',
+        nodes.flatMap((n) => [
+          screenPoll(n),
+          ...[
             '/api/cluster/status',
             ...(tick % 10 === 0 ? ['/api/history?scope=full', '/api/history?scope=recent'] : []),
-          ].map((p) => request(n, p))
-        )
+          ].map((p) => request(n, p)),
+        ])
       );
       tick++;
       await sleep(1000);
@@ -568,9 +632,10 @@ export async function main(args = process.argv.slice(2)) {
   for (const r of result.requests) {
     const bucket = r.phase === 'race' ? Math.floor(r.raceSeconds / 3600) : r.phase;
     for (const key of [r.endpoint, `${r.endpoint}@${bucket}`]) {
-      const metric = (result.metrics[key] ??= { latencies: [], payloadBytes: [], errors: 0 });
+      const metric = (result.metrics[key] ??= { latencies: [], payloadBytes: [], encodedPayloadBytes: [], errors: 0 });
       metric.latencies.push(r.ms);
       if (r.bytes !== undefined) metric.payloadBytes.push(r.bytes);
+      if (r.encodedBytes !== undefined) metric.encodedPayloadBytes.push(r.encodedBytes);
       if (r.error) metric.errors++;
     }
   }
@@ -578,8 +643,12 @@ export async function main(args = process.argv.slice(2)) {
     result.metrics[key] = {
       latencyMs: distribution(m.latencies),
       payloadBytes: distribution(m.payloadBytes),
+      encodedPayloadBytes: distribution(m.encodedPayloadBytes),
       errors: m.errors,
     };
+  result.historyResponses = Object.fromEntries(
+    ['full', 'recent', 'delta'].map((kind) => [kind, result.requests.filter((r) => r.historyKind === kind).length])
+  );
   const mean = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
   result.growth = nodes.map((n) => {
     const rows = result.resources.filter((r) => r.node === n.name);
@@ -621,12 +690,14 @@ export async function main(args = process.argv.slice(2)) {
         '/api/state',
         '/api/history?scope=full',
         '/api/history?scope=recent',
+        '/api/history?scope=full&since',
         '/api/cluster/status',
         '/api/action/race.handoff',
       ])
         for (const [field, p] of [
           ['latencyMs', 'p95'],
           ['payloadBytes', 'p50'],
+          ['encodedPayloadBytes', 'p50'],
         ])
           add(
             `${endpoint} ${field} ${p}`,
@@ -666,11 +737,19 @@ export async function main(args = process.argv.slice(2)) {
   );
   for (const [cause, counts] of Object.entries(result.writeErrors.byCause))
     console.log(`Write errors ${cause}: ${counts.total} (chaos/outside ${counts.insideChaos}/${counts.outsideChaos})`);
-  for (const endpoint of ['/api/action/race.handoff', '/api/state', '/api/history?scope=full']) {
+  console.log(
+    `History responses full/recent/delta: ${result.historyResponses.full}/${result.historyResponses.recent}/${result.historyResponses.delta}`
+  );
+  for (const endpoint of [
+    '/api/action/race.handoff',
+    '/api/state',
+    '/api/history?scope=full',
+    '/api/history?scope=full&since',
+  ]) {
     const metric = result.metrics[endpoint];
     const fmt = (value) => (value == null ? 'n/a' : value.toFixed(2));
     console.log(
-      `${endpoint}: latency p50/p95/max ${fmt(metric?.latencyMs.p50)}/${fmt(metric?.latencyMs.p95)}/${fmt(metric?.latencyMs.max)}ms; peak payload ${metric?.payloadBytes.max ?? 'n/a'} bytes`
+      `${endpoint}: latency p50/p95/max ${fmt(metric?.latencyMs.p50)}/${fmt(metric?.latencyMs.p95)}/${fmt(metric?.latencyMs.max)}ms; peak payload decoded/encoded ${metric?.payloadBytes.max ?? 'n/a'}/${metric?.encodedPayloadBytes.max ?? 'n/a'} bytes`
     );
   }
   console.log(

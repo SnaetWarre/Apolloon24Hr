@@ -22,6 +22,18 @@ chaos events, counts, percentile metrics with per-hour buckets, growth, failures
 comparison and at most 120 uniformly selected resource samples per laptop.
 Growth and peak values still use all samples; metrics are rounded to 0.001.
 
+Screen readers poll state and cluster status about once a second and request
+history when the state revision changes. Each laptop keeps its own history
+cursor, using `scope=full&since=<cursor>` after the first full read; a restarted
+server can return a full snapshot instead. Delta requests share one stable
+`/api/history?scope=full&since` metric bucket, not one bucket per cursor.
+Occasional uncursored full and recent probes remain for baseline comparisons
+and final invariants always use full histories. The harness advertises gzip/Brotli
+and measures both decoded JSON (`payloadBytes`) and encoded HTTP body bytes
+(`encodedPayloadBytes`, excluding headers/framing). Raw records include content
+encoding and the exact request path. Summary counts distinguish full, recent
+and delta replies, including full fallbacks on cursor requests.
+
 Lap deadlines and chaos start times are seeded race-time offsets; OS/election
 timing and successful writes are not deterministic. The clock is compressed in
 the driver, not in the product: persisted lap durations are wall time. Late
