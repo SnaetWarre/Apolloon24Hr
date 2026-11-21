@@ -149,7 +149,7 @@ c.execute('UPDATE race_state SET active_runner_id=?,active_started_at=?,race_sta
 c.execute("INSERT OR REPLACE INTO settings VALUES('competitions_json',?)",(json.dumps([[l['id'] for l in labels]]),))
 c.commit()
 `;
-try {
+benchmark: try {
   try {
     await readFile(binary);
     await readFile('native/web-dist/index.html');
@@ -329,7 +329,7 @@ try {
   console.log('Ready:', out, 'native ROI', roi);
   if (setupOnly) {
     await sleep(30000);
-    throw new Error('Setup-only: measurement not requested');
+    break benchmark;
   }
   await sleep(2000);
   const writes = [];
