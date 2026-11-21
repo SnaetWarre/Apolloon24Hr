@@ -319,7 +319,8 @@ fn member_card(s: &State, c: &Value, m: &Value, busy: bool, linked: bool) -> El 
                 .font(kit::ts(12.0, 600.0))
                 .color(p.brand)
                 .truncate()
-                .min_w(0.0),
+                .min_w(0.0)
+                .max_w(110.0),
         );
     }
     let mut el = card(s, format!("setup-laptop-{}", st(m, "hostId")))
