@@ -706,6 +706,78 @@ fn a_lost_laptop_is_taken_out_and_a_spare_takes_its_place() {
 }
 
 #[test]
+fn a_spare_that_links_replaces_a_dead_laptop_and_the_group_survives_one_more_loss() {
+    let _serial = serial();
+    let dir = Dir::new();
+    let (a, b, c) = linked_three(&dir);
+    let c_id = c.status()["hostId"].as_str().unwrap().to_owned();
+    let (c_path, c_port) = (dir.db("c"), c.port);
+    c.kill();
+    wait_until("C is removable", Duration::from_secs(10), || {
+        [&a, &b].iter().any(|s| {
+            s.status()["members"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|m| m["hostId"] == c_id.as_str() && m["removable"] == true)
+        })
+    });
+    // Nobody clicks "Uit de groep halen": the spare links and takes the dead laptop's place.
+    let d = TestServer::start(&dir.db("d"), free_port(), "Laptop D");
+    d.act("cluster.joinGroup", json!({"url": b.url})).unwrap();
+    wait_until("three laptops again", Duration::from_secs(10), || {
+        all_healthy(&[&a, &b, &d])
+    });
+    for server in [&a, &b, &d] {
+        assert_eq!(
+            server.count("SELECT COUNT(*) AS n FROM cluster_members"),
+            3
+        );
+    }
+    assert!(
+        activity_summaries(&a)
+            .iter()
+            .any(|s| s == "Laptop C uit de groep gehaald")
+    );
+    // One more laptop drops out: the two that are left are a majority of three and save.
+    let (gone, left) = if a.node.is_leader() {
+        (&a, [&b, &d])
+    } else {
+        (&b, [&a, &d])
+    };
+    gone.node
+        .isolated
+        .store(true, std::sync::atomic::Ordering::Relaxed);
+    wait_until(
+        "a leader among the two left",
+        Duration::from_secs(10),
+        || leader_index(&left).is_some(),
+    );
+    left[0].act("runners.create", json!({"name":"Na"})).unwrap();
+    wait_until("the write is on both", Duration::from_secs(5), || {
+        left.iter()
+            .all(|s| s.count("SELECT COUNT(*) AS n FROM runners WHERE name='Na'") == 1)
+    });
+    // The replaced laptop comes back on: it is told it was taken out, as after the button.
+    let c = TestServer::start(&c_path, c_port, "Laptop C");
+    wait_until("C hears it was removed", Duration::from_secs(10), || {
+        !c.status()["removedFrom"].is_null()
+    });
+}
+
+#[test]
+fn a_spare_that_links_while_every_laptop_answers_makes_the_group_one_larger() {
+    let _serial = serial();
+    let dir = Dir::new();
+    let (a, b, c) = linked_three(&dir);
+    let d = TestServer::start(&dir.db("d"), free_port(), "Laptop D");
+    d.act("cluster.joinGroup", json!({"url": a.url})).unwrap();
+    wait_until("four laptops", Duration::from_secs(10), || {
+        all_healthy(&[&a, &b, &c, &d])
+    });
+}
+
+#[test]
 fn the_retaining_laptop_reports_the_registration_merge() {
     let _serial = serial();
     let dir = Dir::new();
