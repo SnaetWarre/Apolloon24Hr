@@ -311,6 +311,62 @@ mod tests {
         assert_eq!(read_log_tail(&path.with_extension("missing"), 2), "");
         std::fs::remove_file(path).unwrap();
     }
+
+    /// Runs twice: as the test, and as the server stand-in the test starts.
+    #[test]
+    fn a_panic_under_the_database_lock_ends_the_server_process() {
+        const STAND_IN: &str = "APOLLOON_TEST_PANIC_UNDER_LOCK";
+        if std::env::var_os(STAND_IN).is_some() {
+            exit_on_panic();
+            let db = Arc::new(Mutex::new(
+                crate::db::Db::open(Path::new(":memory:")).unwrap(),
+            ));
+            let held = db.clone();
+            let _ = std::thread::spawn(move || {
+                let _db = held.lock().unwrap();
+                panic!("panic while the database lock is held");
+            })
+            .join();
+            // Without the exit the process lives on with a lock nobody can take.
+            assert!(db.lock().is_err());
+            std::thread::sleep(Duration::from_secs(60));
+            std::process::exit(0);
+        }
+        let mut child = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "desktop::supervisor::tests::a_panic_under_the_database_lock_ends_the_server_process",
+            ])
+            .env(STAND_IN, "1")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(20);
+        let status = loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                break status;
+            }
+            if Instant::now() > deadline {
+                let _ = child.kill();
+                panic!("the server kept running after the panic");
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        };
+        // The supervisor restarts the server after any exit it did not ask for.
+        assert!(!status.success());
+    }
+}
+
+/// Ends the server process on any panic. A panic that only unwinds its own thread can leave the
+/// database or cluster lock poisoned: the process stays up, answers nothing, and is never
+/// restarted, because a restart follows an exit.
+pub fn exit_on_panic() {
+    let report = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        report(info);
+        std::process::abort();
+    }));
 }
 
 /// A normal close writes a quit signal. An unexpected window exit leaves the server running
