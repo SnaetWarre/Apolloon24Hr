@@ -72,13 +72,17 @@ apart. No measurement handoffs are submitted by the driver over HTTP. Spacing
 respects the existing 20-second short-lap protection; no auto-confirmation is
 used. Each run takes about five minutes. The measurement window starts before
 the first injection and ends 100ms after the final native lap pixel appears.
-Browser observations are retrieved after the rapid-press check, and can extend
+Final browser observations are retrieved after the rapid-press check, and can extend
 beyond that traffic window. Percentiles use nearest rank; overall pools all six
 surfaces (native pixels plus browser accessibility, not all-screen pixels).
 
-After each press, full histories fetched directly from all three replicas must
+After each press, the driver first waits for all five browser accessibility
+observations and the native lap-badge pixel change (10 s timeout). Only then
+does it fetch full histories directly from all three replicas. These histories must
 preserve every seeded lap ID and contain exactly one additional unique lap ID,
-identical across replicas. These driver reads bypass the counting proxies.
+identical across replicas. These driver reads bypass the counting proxies and
+never overlap the press-to-screen observation window. Each write records
+`screensObservedAt` before replica validation starts.
 After the final lap becomes visible, a separate Space press approximately
 300ms later must change the native lap-region pixels (short-lap modal) without
 adding a lap on any replica. Escape dismisses it and must restore the previous

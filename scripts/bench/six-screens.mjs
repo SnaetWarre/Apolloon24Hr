@@ -8,7 +8,13 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { chromium } from 'playwright';
-import { browserLatencies, nativeLatencies, percentile, validateReplicaLaps } from './metrics.mjs';
+import {
+  browserLatencies,
+  nativeLatencies,
+  percentile,
+  screenObservationsComplete,
+  validateReplicaLaps,
+} from './metrics.mjs';
 import { installBrowserTrace, stageMetrics, stageMarkdown } from './latency.mjs';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
@@ -378,17 +384,36 @@ benchmark: try {
   for (let i = 0; i < pressCount; i++) {
     await sleep((writes.at(-1)?.sentAt ?? startAt - spacingMs) + spacingMs - Date.now());
     const sentAt = await pressSpace();
-    const ids = await checkReplicas(i + 1);
-    const priorIds = new Set(replicaChecks.at(-2).addedIds);
-    const [lapId] = ids.filter((id) => !priorIds.has(id));
-    writes.push({
+    const write = {
       i,
       sentAt,
-      acknowledgedAt: Date.now(),
       total: 2241 + i,
       active: `Bench ${String(i + 1).padStart(2, '0')}`,
-      lapId,
-    });
+    };
+    writes.push(write);
+    await eventually(
+      async () => {
+        if (nativeLatencies(nativeEvents, [write], Date.now() + 1)[0] === null) return false;
+        const observed = await Promise.all(
+          screens.map(async (screen) => ({
+            name: screen.name,
+            frames: await screen.page.evaluate(
+              (sentAt) =>
+                window.benchFrames.filter((frame) => frame.at >= sentAt).map(({ at, text }) => ({ at, text })),
+              sentAt
+            ),
+          }))
+        );
+        return screenObservationsComplete(observed, nativeEvents, write, Date.now() + 1);
+      },
+      'all six screens observe press ' + (i + 1),
+      10000
+    );
+    write.screensObservedAt = Date.now();
+    const ids = await checkReplicas(i + 1);
+    const priorIds = new Set(replicaChecks.at(-2).addedIds);
+    [write.lapId] = ids.filter((id) => !priorIds.has(id));
+    write.acknowledgedAt = Date.now();
     console.log(`Press ${i + 1}/${pressCount}: exactly one lap on A/B/C`);
   }
   await eventually(() => nativeEvents.find((e) => e.hash && e.at >= writes.at(-1).sentAt), 'last lap pixels', 5000);

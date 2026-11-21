@@ -41,6 +41,14 @@ export function nativeLatencies(events, writes, endAt) {
   });
 }
 
+export function screenObservationsComplete(screens, nativeEvents, write, endAt) {
+  return (
+    screens.length > 0 &&
+    nativeLatencies(nativeEvents, [write], endAt)[0] !== null &&
+    screens.every(({ name, frames }) => browserLatencies(name, frames, [write])[0] !== null)
+  );
+}
+
 export function validateReplicaLaps(histories, initialIds, expectedAdded) {
   const initial = new Set(initialIds);
   let added;

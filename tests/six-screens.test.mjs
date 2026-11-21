@@ -6,6 +6,7 @@ import {
   displayedHandoff,
   nativeLatencies,
   percentile,
+  screenObservationsComplete,
   validateReplicaLaps,
 } from '../scripts/bench/metrics.mjs';
 
@@ -111,6 +112,43 @@ test('native ambiguous or missing pixel changes are invalid, not silently attrib
     ),
     [null, null]
   );
+});
+
+test('replica validation gate requires post-send observations on every browser and native pixels', () => {
+  const write = { i: 0, sentAt: 100 };
+  const screens = [
+    { name: '/display/inside', text: 'Rondes|2241' },
+    { name: '/display/competitions', text: 'Speedteam|2241' },
+    { name: '/display/outside', text: 'Nu op de piste|Bench 01' },
+    { name: '/queue', text: 'Klaar om te lopen|Bench 02' },
+    { name: '/timing', text: 'Laatste rondes|1|Bench 00|ronde 57' },
+  ].map(({ name, text }) => ({ name, frames: [{ at: 150, text }] }));
+  const native = [{ at: 160, hash: 'lap' }];
+  assert.equal(screenObservationsComplete(screens, native, write, 200), true);
+  assert.equal(screenObservationsComplete([], native, write, 200), false);
+  assert.equal(screenObservationsComplete(screens, [], write, 200), false);
+  assert.equal(screenObservationsComplete(screens, [{ at: 90, hash: 'old' }], write, 200), false);
+  assert.equal(screenObservationsComplete(screens, [...native, { at: 170, hash: 'ambiguous' }], write, 200), false);
+  for (const missing of screens) {
+    assert.equal(
+      screenObservationsComplete(
+        screens.map((s) => (s === missing ? { ...s, frames: [] } : s)),
+        native,
+        write,
+        200
+      ),
+      false
+    );
+    assert.equal(
+      screenObservationsComplete(
+        screens.map((s) => (s === missing ? { ...s, frames: [{ ...s.frames[0], at: 90 }] } : s)),
+        native,
+        write,
+        200
+      ),
+      false
+    );
+  }
 });
 
 test('replicas preserve seed IDs and agree on exactly one new unique lap per press', () => {
