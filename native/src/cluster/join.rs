@@ -442,6 +442,7 @@ impl Node {
     pub fn add_member(&self, member: &Member, auto: Option<&str>) -> Result<()> {
         let me = self.self_member();
         let origin = automatic_origin(&self.cfg.name);
+        let _writing = self.writing.lock().unwrap();
         let mut db = self.db.lock().unwrap();
         log::record(&mut db, "cluster.addMember", None, |db| {
             let stored = log::stored_members(db);
@@ -602,6 +603,7 @@ impl Node {
             .map(str::to_owned)
             .unwrap_or_else(|| automatic_origin(&self.cfg.name));
         let name = self.cfg.name.clone();
+        let _writing = self.writing.lock().unwrap();
         let mut db = self.db.lock().unwrap();
         log::record(&mut db, "cluster.continueAlone", None, |db| {
             db.exec(
@@ -822,6 +824,10 @@ impl Node {
             return;
         }
         let origin = automatic_origin(&self.cfg.name);
+        // A write on its way to the other laptops goes first; the next round lists the change.
+        let Ok(_writing) = self.writing.try_lock() else {
+            return;
+        };
         let _ = log::record(
             &mut self.db.lock().unwrap(),
             "cluster.reachability",

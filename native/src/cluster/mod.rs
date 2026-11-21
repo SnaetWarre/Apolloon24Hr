@@ -138,6 +138,8 @@ pub struct Node {
     weak: Weak<Node>,
     /// Since when this laptop, leading, has not heard from each other laptop.
     silent_since: Mutex<HashMap<String, Instant>>,
+    /// Held by the one write the leader is adding to the log (lock order: writing, raft, db).
+    writing: Mutex<()>,
 }
 
 /// An answer from another laptop: its HTTP status and JSON body.
@@ -194,6 +196,7 @@ impl Node {
             discovery: Mutex::new(None),
             weak: weak.clone(),
             silent_since: Mutex::default(),
+            writing: Mutex::default(),
         });
         node.start_raft();
         let weak = Arc::downgrade(&node);
@@ -712,8 +715,15 @@ impl Node {
             "race.clear" => Some("pre-clear"),
             _ => None,
         };
+        // A press on the Timing laptop is stored at once: that laptop goes on alone when it is
+        // cut off, and a lap clocked in the seconds before must still be there.
+        let keep = TIMING_PRESSES.contains(&method)
+            && self
+                .timing()
+                .is_some_and(|t| t["hostId"] == self.host_id.as_str());
+        let _writing = self.writing.lock().unwrap();
         let mut attempts = 0;
-        let (result, seq) = loop {
+        let (result, prepared, seq) = loop {
             attempts += 1;
             let mut safety = None;
             let mut before = None;
@@ -731,42 +741,67 @@ impl Node {
             }
             let mut db = self.db.lock().unwrap();
             if let Some(result) = log::forwarded_result(&db, request) {
-                break (result, log::head(&db).seq);
+                break (result, None, log::head(&db).seq);
             }
             if safety_reason.is_some() && log::head(&db).id != before && attempts < 20 {
                 continue;
             }
-            {
-                let result = if method.starts_with("cluster.") {
-                    let kind = method.to_owned();
-                    log::record(&mut db, &kind, Some(request), |db| {
-                        self.apply_cluster(db, method, input, origin)
-                    })
-                } else {
-                    *db.capture.borrow_mut() = Some(log::Capture {
-                        statements: Vec::new(),
-                        request_id: Some(request.to_owned()),
-                    });
-                    let result = db.mutation_from(method, input, origin);
-                    db.capture.borrow_mut().take();
-                    result
-                };
-                let mut result = result.map_err(Failure::refused)?;
-                if safety_reason.is_some() {
-                    result["safetyBackup"] = safety.unwrap_or(Value::Null);
-                    result["safetyHostUrl"] = json!(self.self_url());
-                    result["safetyHostName"] = json!(self.cfg.name);
-                }
-                break (result, log::head(&db).seq);
+            // The write runs and is taken back: it reaches this laptop's data, and its screens,
+            // only once a majority holds it.
+            let (mut result, mut prepared) = self
+                .run_write(&mut db, method, input, origin, request, keep)
+                .map_err(Failure::refused)?;
+            // A write too large for one message reaches a follower only inside a full copy of
+            // the leader's data, so the leader has to store it first.
+            if prepared.as_ref().is_some_and(|p| !p.fits_one_message()) {
+                (result, prepared) = self
+                    .run_write(&mut db, method, input, origin, request, true)
+                    .map_err(Failure::refused)?;
             }
+            if safety_reason.is_some() {
+                result["safetyBackup"] = safety.unwrap_or(Value::Null);
+                result["safetyHostUrl"] = json!(self.self_url());
+                result["safetyHostName"] = json!(self.cfg.name);
+            }
+            break (result, prepared, log::head(&db).seq);
         };
-        if !self.wait_for_commit(seq) {
+        let (confirmed, seq) = match prepared {
+            Some(prepared) => {
+                let seq = prepared.entry.seq;
+                (self.confirm(prepared), seq)
+            }
+            None => (self.wait_for_commit(seq), seq),
+        };
+        if !confirmed {
             return Err(Failure {
                 message: NOT_CONFIRMED_MESSAGE.into(),
                 retry: true,
             });
         }
         Ok((result, seq))
+    }
+
+    fn run_write(
+        &self,
+        db: &mut Db,
+        method: &str,
+        input: &Value,
+        origin: &str,
+        request: &str,
+        keep: bool,
+    ) -> Result<(Value, Option<log::Prepared>)> {
+        if method.starts_with("cluster.") {
+            return log::record_or_prepare(db, method, Some(request), keep, |db| {
+                self.apply_cluster(db, method, input, origin)
+            });
+        }
+        *db.capture.borrow_mut() = Some(log::Capture {
+            statements: Vec::new(),
+            request_id: Some(request.to_owned()),
+        });
+        let result = db.mutation_run(method, input, origin, keep);
+        db.capture.borrow_mut().take();
+        result
     }
 
     /// Passes a write to the leader, then waits until this laptop's copy has it.
