@@ -6,6 +6,10 @@ use super::chart_axis::{LabelSlot, visible_labels};
 use super::*;
 use rune::{Align, Color, Path, Shape, canvas, color::hex, el, oklch};
 use std::collections::{HashMap, HashSet};
+use std::{cell::RefCell, rc::Rc};
+
+#[cfg(test)]
+mod label_cache_test;
 
 const MIN_LAP_MS: i64 = 20_000;
 const MAX_PLAUSIBLE_LAP_MS: i64 = 600_000;
@@ -22,6 +26,7 @@ pub(super) struct Page {
     /// 0 day, 1 two hours, 2 hour.
     pub(super) window: u8,
     pub(super) export_open: bool,
+    labels: RefCell<Option<Labels>>,
 }
 impl Default for Page {
     fn default() -> Self {
@@ -32,6 +37,7 @@ impl Default for Page {
             sort: 0,
             window: 0,
             export_open: false,
+            labels: RefCell::default(),
         }
     }
 }
@@ -119,15 +125,29 @@ fn compare_labels(a: &Value, b: &Value) -> std::cmp::Ordering {
                 .cmp(&st(b, "name").to_lowercase())
         })
 }
+struct Labels {
+    history_version: u64,
+    current: Value,
+    values: Rc<Vec<Value>>,
+}
+
 /// collectRankingLabels: labels on laps, overridden by the current ones, in label order.
-fn analysis_labels(s: &State) -> Vec<Value> {
-    let mut by_id: Vec<(String, Value)> = Vec::new();
-    let mut put = |label: &Value| {
-        let id = st(label, "id").to_string();
-        match by_id.iter_mut().find(|(k, _)| *k == id) {
-            Some(slot) => slot.1 = label.clone(),
-            None => by_id.push((id, label.clone())),
-        }
+fn analysis_labels(s: &State) -> Rc<Vec<Value>> {
+    let mut cache = s.analysis_page.labels.borrow_mut();
+    if let Some(labels) = cache.as_ref()
+        && labels.history_version == s.history_version
+        && labels.current == s.snapshot["labels"]
+    {
+        return labels.values.clone();
+    }
+    let mut by_id: Vec<&Value> = Vec::new();
+    let mut indices = HashMap::new();
+    let mut put = |label| {
+        let index = *indices.entry(st(label, "id")).or_insert_with(|| {
+            by_id.push(label);
+            by_id.len() - 1
+        });
+        by_id[index] = label;
     };
     for lap in laps(s) {
         for label in lap["labels"].as_array().into_iter().flatten() {
@@ -137,9 +157,15 @@ fn analysis_labels(s: &State) -> Vec<Value> {
     for label in s.snapshot["labels"].as_array().into_iter().flatten() {
         put(label);
     }
-    let mut labels: Vec<Value> = by_id.into_iter().map(|(_, v)| v).collect();
+    let mut labels: Vec<Value> = by_id.into_iter().cloned().collect();
     labels.sort_by(compare_labels);
-    labels
+    let values = Rc::new(labels);
+    *cache = Some(Labels {
+        history_version: s.history_version,
+        current: s.snapshot["labels"].clone(),
+        values: values.clone(),
+    });
+    values
 }
 fn filter_laps<'a>(all: &[&'a Value], enabled: &Option<Vec<String>>) -> Vec<&'a Value> {
     let Some(ids) = enabled else {
@@ -475,6 +501,16 @@ fn number_nl(v: Option<f64>, digits: usize) -> String {
 // ---------- Header ----------
 
 pub(super) fn header_meta(s: &State) -> El {
+    rune::memo("analysis-header-derived", version(s), || header_meta_uncached(s))
+}
+
+fn version(s: &State) -> impl std::hash::Hash + '_ {
+    let p = &s.analysis_page;
+    let runners: Vec<_> = super::runners(s).iter().map(|r| json!([r["id"],r["name"],r["runnerNumber"]])).collect();
+    (s.history_version, json!([s.snapshot["race"],s.snapshot["labels"],runners,p.enabled,p.section,p.sort,p.window,s.dark,s.logos.len()]).to_string(), &p.search)
+}
+
+fn header_meta_uncached(s: &State) -> El {
     let all = laps(s);
     let labels = analysis_labels(s);
     let filtered = filter_laps(&all, &s.analysis_page.enabled);
@@ -921,6 +957,10 @@ fn section_nav(s: &State, p: &Pal) -> El {
 }
 
 pub(super) fn page(s: &State) -> El {
+    rune::memo("analysis-derived", version(s), || page_uncached(s))
+}
+
+fn page_uncached(s: &State) -> El {
     let p = pal(s.dark);
     let all = laps(s);
     let labels = analysis_labels(s);

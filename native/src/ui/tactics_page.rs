@@ -263,6 +263,50 @@ struct Lap {
     dur: f64,
 }
 
+struct LiveHistory {
+    clean: Vec<Lap>,
+    offsets: Vec<f64>,
+    curve: Vec<(f64, f64)>,
+    hourly: Vec<Option<f64>>,
+    quarters: Vec<Option<f64>>,
+    counts: Vec<usize>,
+}
+
+type HistoryKey = (u64, u64, u64, u64);
+
+fn live_history(s: &State, start: f64, min_s: f64, max_s: f64) -> Rc<LiveHistory> {
+    let key = (s.history_version, start.to_bits(), min_s.to_bits(), max_s.to_bits());
+    let mut cache = s.tactics.history_cache.borrow_mut();
+    if let Some((held, data)) = cache.as_ref()
+        && *held == key
+    {
+        return data.clone();
+    }
+    let clean = valid_laps(s, start, min_s, max_s);
+    let offsets: Vec<_> = clean.iter().map(|l| l.finished - start).filter(|o| *o >= 0.0).collect();
+    let mut hours = vec![Vec::new(); HOURS];
+    let mut quarters = vec![Vec::new(); 96];
+    for lap in &clean {
+        let h = (lap.finished - start) / 3_600_000.0;
+        if h >= 0.0 && h < HOURS as f64 {
+            hours[h.floor() as usize].push(lap.dur / 1000.0);
+            quarters[(h * 4.0).floor() as usize].push(lap.dur / 1000.0);
+        }
+    }
+    let mut curve = vec![(0.0, 0.0)];
+    curve.extend(clean.iter().enumerate().map(|(i, l)| (((l.finished - start) / 1000.0).max(0.0), i as f64 + 1.0)));
+    let data = Rc::new(LiveHistory {
+        clean,
+        offsets,
+        curve,
+        hourly: hours.iter().map(|d| median(d)).collect(),
+        quarters: quarters.iter().map(|d| median(d)).collect(),
+        counts: hours.iter().map(Vec::len).collect(),
+    });
+    *cache = Some((key, data.clone()));
+    data
+}
+
 fn valid_laps(s: &State, start: f64, min_s: f64, max_s: f64) -> Vec<Lap> {
     let mut v: Vec<Lap> = laps(s)
         .iter()
@@ -456,6 +500,7 @@ enum Window {
 }
 
 pub(super) struct Page {
+    history_cache: std::cell::RefCell<Option<(HistoryKey, Rc<LiveHistory>)>>,
     section: u8,
     custom: Option<(Race, String)>,
     error: Option<String>,
@@ -495,6 +540,7 @@ impl Default for Page {
         let mut edits: Vec<TextEdit> = vals.iter().map(|v| TextEdit::new(fmt_num(*v))).collect();
         edits.extend((0..HOURS).map(|_| TextEdit::new("")));
         Page {
+            history_cache: Default::default(),
             section: 0,
             custom: None,
             error: None,
@@ -1694,8 +1740,9 @@ fn live(s: &State, k: &Ink) -> El {
     let now = race["raceFinishedAt"].as_f64().unwrap_or(s.clock as f64);
     let elapsed = ((now - start) / 3_600_000.0).clamp(0.0, HOURS as f64);
     let (min_s, max_s, recent) = (p.vals[MIN_S], p.vals[MAX_S], p.vals[RECENT] as usize);
-    let clean = valid_laps(s, start, min_s, max_s);
-    let all_count = laps(s).len();
+    let data = live_history(s, start, min_s, max_s);
+    let clean = &data.clean;
+    let all_count = s.history["laps"].as_array().map_or(0, Vec::len);
     let suspicious = all_count.saturating_sub(clean.len());
     let paces = target_paces(p);
     let expected = target_laps_at(&paces, elapsed);
@@ -1793,7 +1840,7 @@ fn live(s: &State, k: &Ink) -> El {
             "Live tegenover doel en vorig jaar",
             "Hoeveel rondes je voor of achter staat, en per uur waar het verschil ontstaat.",
         ))
-        .child(timeline(s, k, &clean, start, elapsed, &paces, own, rival));
+        .child(timeline(s, k, start, elapsed, &paces, own, rival));
     stack = stack.child(
         row()
             .gap(16.0)
@@ -1804,7 +1851,7 @@ fn live(s: &State, k: &Ink) -> El {
     );
     stack = stack.child(hour_editor(s, k, start, elapsed, &paces));
     stack = stack.child(analysis_details(
-        s, k, &clean, start, elapsed, &paces, own, rival,
+        s, k, start, elapsed, &paces, own, rival,
     ));
     if let Some(race) = hist {
         stack = stack.child(dataset_manager(
@@ -1926,7 +1973,6 @@ fn scenario(s: &State, k: &Ink, has_own: bool, has_rival: bool) -> El {
 fn timeline(
     s: &State,
     k: &Ink,
-    clean: &[Lap],
     start: f64,
     elapsed: f64,
     paces: &[f64],
@@ -1962,11 +2008,8 @@ fn timeline(
         }
     };
     // Series values per minute or per hour.
-    let offsets: Vec<f64> = clean
-        .iter()
-        .map(|l| l.finished - start)
-        .filter(|o| *o >= 0.0)
-        .collect();
+    let data = live_history(s, start, p.vals[MIN_S], p.vals[MAX_S]);
+    let offsets = &data.offsets;
     let last = offsets.last().copied().unwrap_or(-1.0);
     let values = |key: usize, ms: f64| -> Option<f64> {
         match key {
@@ -1983,13 +2026,7 @@ fn timeline(
                 .map(|h| {
                     let y = match key {
                         0 => (h as f64 + 1.0 <= elapsed).then(|| {
-                            clean
-                                .iter()
-                                .filter(|l| {
-                                    ((l.finished - start) / 3_600_000.0).floor() as usize == h
-                                        && l.finished >= start
-                                })
-                                .count() as f64
+                            data.counts[h] as f64
                         }),
                         1 => Some(3600.0 / valid_pace(paces.get(h).copied())),
                         2 | 3 => (if key == 2 { own } else { rival }).map(|t| {
@@ -2587,7 +2624,6 @@ fn hour_editor(s: &State, k: &Ink, start: f64, elapsed: f64, _paces: &[f64]) -> 
 fn analysis_details(
     s: &State,
     k: &Ink,
-    clean: &[Lap],
     start: f64,
     elapsed: f64,
     paces: &[f64],
@@ -2627,13 +2663,7 @@ fn analysis_details(
     // Hourly pace comparison.
     let own_p = hourly_historical_paces(own);
     let rival_p = hourly_historical_paces(rival);
-    let mut live_by_hour = vec![Vec::new(); HOURS];
-    for l in clean {
-        let h = ((l.finished - start) / 3_600_000.0).floor();
-        if h >= 0.0 && (h as usize) < HOURS {
-            live_by_hour[h as usize].push(l.dur / 1000.0);
-        }
-    }
+    let data = live_history(s, start, p.vals[MIN_S], p.vals[MAX_S]);
     let hourly = |v: Vec<Option<f64>>| -> Vec<(f64, Option<f64>)> {
         v.into_iter()
             .enumerate()
@@ -2646,7 +2676,7 @@ fn analysis_details(
             color: k.live,
             width: 4.0,
             dash: None,
-            points: hourly(live_by_hour.iter().map(|d| median(d)).collect()),
+            points: hourly(data.hourly.clone()),
             dots: 3.0,
             hidden: false,
         },
@@ -2723,16 +2753,8 @@ fn analysis_details(
     let mut rival_q = Vec::new();
     for q in 0..96 {
         let h = q as f64 * 0.25;
-        let d: Vec<f64> = clean
-            .iter()
-            .filter(|l| {
-                let lh = (l.finished - start) / 3_600_000.0;
-                lh >= h && lh < h + 0.25
-            })
-            .map(|l| l.dur / 1000.0)
-            .collect();
         let x = h + 0.125;
-        live_q.push((x, if h <= elapsed { median(&d) } else { None }));
+        live_q.push((x, if h <= elapsed { data.quarters[q] } else { None }));
         own_q.push((
             x,
             own.and_then(|t| median(&durations_in_window(t, h, h + 0.25))),
@@ -2792,7 +2814,7 @@ fn analysis_details(
             )),
     );
     // Time gap on VTK.
-    let gap = rival_time_gap(clean, start, elapsed, paces, rival);
+    let gap = rival_time_gap(&data, elapsed, paces, rival);
     let mut gap_panel = panel(k).child(section_header(
         k,
         "Werkelijk en voorspeld verschil met VTK vorig jaar",
@@ -2879,8 +2901,7 @@ fn analysis_details(
 
 /// `buildLiveRivalTimeGap`: (hour, gap seconds, predicted).
 fn rival_time_gap(
-    clean: &[Lap],
-    start: f64,
+    data: &LiveHistory,
     elapsed: f64,
     paces: &[f64],
     rival: Option<&Team>,
@@ -2888,26 +2909,19 @@ fn rival_time_gap(
     let Some(rival) = rival else {
         return Vec::new();
     };
-    if clean.is_empty() {
+    if data.clean.is_empty() {
         return Vec::new();
     }
     let e = elapsed.clamp(0.0, 24.0);
-    let mut curve: Vec<(f64, f64)> = vec![(0.0, 0.0)];
-    curve.extend(
-        clean
-            .iter()
-            .enumerate()
-            .map(|(i, l)| (((l.finished - start) / 1000.0).max(0.0), i as f64 + 1.0)),
-    );
-    let done = clean.len() as f64;
+    let mut projected = Vec::new();
+    let done = data.clean.len() as f64;
     let target_now = target_laps_at(paces, e);
     let step = 5.0 / 60.0;
     let mut h = e;
     while h <= 24.0001 {
-        curve.push((h * 3600.0, done + target_laps_at(paces, h) - target_now));
+        projected.push((h * 3600.0, done + target_laps_at(paces, h) - target_now));
         h += step;
     }
-    curve.sort_by(|a, b| a.0.total_cmp(&b.0));
     // Trimmed cumulative seconds of the rival.
     let mut cum: Vec<f64> = rival.cum.iter().map(|t| t / 1000.0).collect();
     if cum.len() >= 6 {
@@ -2934,33 +2948,48 @@ fn rival_time_gap(
         let (a, b) = (cum[next - 1], cum[next]);
         next as f64 + (ts - a) / (b - a)
     };
-    let timestamp = |prog: f64| -> f64 {
-        if prog <= 0.0 {
-            return 0.0;
-        }
-        match curve.iter().position(|p| p.1 >= prog) {
-            Some(0) => curve[0].0,
-            None => {
-                let l = curve[curve.len() - 1];
-                let pv = curve[curve.len().saturating_sub(2)];
-                let pace = (l.0 - pv.0) / (l.1 - pv.1).max(0.001);
-                l.0 + (prog - l.1) * pace
-            }
-            Some(i) => {
-                let (a, b) = (curve[i - 1], curve[i]);
-                let f = (prog - a.1) / (b.1 - a.1).max(0.001);
-                a.0 + f * (b.0 - a.0)
-            }
-        }
-    };
     let mut out = Vec::new();
     let mut h = 0.0;
     while h <= 24.0001 {
         let ts = h * 3600.0;
-        out.push((h, timestamp(progress(ts)) - ts, h > e));
+        out.push((h, curve_timestamp(&data.curve, &projected, progress(ts)) - ts, h > e));
         h += step;
     }
     out
+}
+
+fn curve_timestamp(base: &[(f64, f64)], projected: &[(f64, f64)], progress: f64) -> f64 {
+    if progress <= 0.0 { return 0.0; }
+    let first = base.partition_point(|p| p.1 < progress);
+    let second = projected.partition_point(|p| p.1 < progress);
+    let next = match (base.get(first), projected.get(second)) {
+        (Some(a), Some(b)) if a.0 <= b.0 => Some((false, first)),
+        (Some(_), Some(_)) | (None, Some(_)) => Some((true, second)),
+        (Some(_), None) => Some((false, first)),
+        _ => None,
+    };
+    let (future, index) = next.unwrap_or_else(|| {
+        if projected.last().is_some_and(|p| p.0 >= base.last().unwrap().0) {
+            (true, projected.len() - 1)
+        } else { (false, base.len() - 1) }
+    });
+    let point = if future { projected[index] } else { base[index] };
+    let before_base = if future { base.partition_point(|p| p.0 <= point.0) } else { index };
+    let before_future = if future { index } else { projected.partition_point(|p| p.0 < point.0) };
+    let a = before_base.checked_sub(1).map(|i| base[i]);
+    let b = before_future.checked_sub(1).map(|i| projected[i]);
+    let previous = match (a, b) {
+        (Some(a), Some(b)) => if b.0 >= a.0 { b } else { a },
+        (Some(p), None) | (None, Some(p)) => p,
+        _ => return point.0,
+    };
+    if next.is_some() {
+        let fraction = (progress - previous.1) / (point.1 - previous.1).max(0.001);
+        previous.0 + fraction * (point.0 - previous.0)
+    } else {
+        let pace = (point.0 - previous.0) / (point.1 - previous.1).max(0.001);
+        point.0 + (progress - point.1) * pace
+    }
 }
 
 fn table(
@@ -2990,6 +3019,11 @@ fn table(
 }
 
 fn recent_laps(s: &State, k: &Ink) -> El {
+    let p = &s.tactics;
+    rune::memo("tactics-recent-derived", (s.history_version, p.vals[MIN_S].to_bits(), p.vals[MAX_S].to_bits(), p.suspicious_open, s.dark), || recent_laps_uncached(s, k))
+}
+
+fn recent_laps_uncached(s: &State, k: &Ink) -> El {
     let p = &s.tactics;
     let (min_s, max_s) = (p.vals[MIN_S], p.vals[MAX_S]);
     let mut all: Vec<&Value> = laps(s);
@@ -4225,6 +4259,63 @@ fn race_section(s: &State, k: &Ink, first: &Team, second: &Team) -> El {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cached_history_matches_a_fresh_derivation_and_ignores_notes_and_empty_changes() {
+        let mut s = init_with_url("http://127.0.0.1:0".into());
+        s.history = json!({"cursor":"e.1","revision":1,"laps":[{"id":"a","finishedAt":120000,"durationMs":60000},{"id":"b","finishedAt":60000,"durationMs":60000}],"events":[]});
+        let before = live_history(&s,0.0,55.0,140.0);
+        s.snapshot = json!({"runners":[{"notes":"changed"}]});
+        let empty = json!({"delta":true,"since":"e.1","cursor":"e.2","revision":2,"changes":{"laps":{"count":2,"changed":[],"removed":[]},"events":{"count":0,"changed":[],"removed":[]}}});
+        let mut index = history_sync::Index::new(&s.history);
+        assert_eq!(index.apply(&mut s.history,&empty),Some(false));
+        assert!(Rc::ptr_eq(&before,&live_history(&s,0.0,55.0,140.0)));
+        let lap = json!({"id":"c","finishedAt":180000,"durationMs":60000});
+        let push = json!({"delta":true,"since":"e.2","cursor":"e.3","revision":3,"changes":{"laps":{"count":3,"changed":[[0,lap]],"removed":[]},"events":{"count":0,"changed":[],"removed":[]}}});
+        let mut full = s.history.clone();
+        assert!(super::super::merge_history(&mut full,&push));
+        assert_eq!(index.apply(&mut s.history,&push),Some(true));
+        s.history_version += 1;
+        let incremental = live_history(&s,0.0,55.0,140.0);
+        assert!(!Rc::ptr_eq(&before,&incremental));
+        let mut fresh = init_with_url("http://127.0.0.1:0".into());
+        fresh.history = full;
+        let derived = live_history(&fresh,0.0,55.0,140.0);
+        let bytes = |data: &LiveHistory| serde_json::to_vec(&json!([data.clean.iter().map(|l| (l.finished,l.dur)).collect::<Vec<_>>(),data.offsets,data.curve,data.hourly,data.quarters,data.counts])).unwrap();
+        assert_eq!(bytes(&incremental),bytes(&derived));
+        assert!(!Rc::ptr_eq(&incremental,&live_history(&s,0.0,65.0,140.0)));
+    }
+
+    #[test]
+    fn split_curve_queries_match_the_full_stable_sort_byte_for_byte() {
+        let base = [(0.0,0.0),(0.0,1.0),(20.0,2.0),(20.0,3.0),(40.0,4.0),(100.0,5.0)];
+        for start in [0.0,10.0,20.0,30.0,100.0,200.0] {
+            let projected: Vec<_> = (0..20).map(|i| (start+i as f64*10.0,5.0+i as f64*0.7)).collect();
+            let mut full = base.to_vec();
+            full.extend(&projected);
+            full.sort_by(|a,b| a.0.total_cmp(&b.0));
+            for i in 0..250 {
+                let progress = i as f64/10.0;
+                let expected = if progress <= 0.0 {0.0} else {
+                    match full.iter().position(|p| p.1 >= progress) {
+                        Some(0) => full[0].0,
+                        None => {
+                            let l = full[full.len()-1];
+                            let pv = full[full.len()-2];
+                            let pace = (l.0-pv.0)/(l.1-pv.1).max(0.001);
+                            l.0+(progress-l.1)*pace
+                        }
+                        Some(i) => {
+                            let (a,b) = (full[i-1],full[i]);
+                            let f = (progress-a.1)/(b.1-a.1).max(0.001);
+                            a.0+f*(b.0-a.0)
+                        }
+                    }
+                };
+                assert_eq!(curve_timestamp(&base,&projected,progress).to_bits(),expected.to_bits());
+            }
+        }
+    }
 
     #[test]
     fn bundled_reference_parses_and_targets_last_year() {
