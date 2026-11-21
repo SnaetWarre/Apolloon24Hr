@@ -20,8 +20,12 @@ test('native frame stages separate prior presentation, apply and redraw work', (
     event('present_begin', 10),
     event('present_end', 20),
     event('build_begin', 21),
+    event('acquire_begin', 21),
+    event('acquire_end', 22),
+    event('runtime_begin', 22),
     event('apply_begin', 22, 'lap'),
     event('applied', 25, 'lap'),
+    event('runtime_end', 29),
     event('build_end', 30),
     event('submit_begin', 35),
     event('submit_end', 40),
@@ -39,12 +43,43 @@ test('native frame stages separate prior presentation, apply and redraw work', (
       applyUs: 3,
       otherBeforeApplyUs: 2,
       buildUs: 6,
+      acquireUs: 1,
+      runtimeUs: 4,
       encodeUs: 5,
       submitUs: 5,
       presentUs: 9,
     },
   ]);
   assert.deepEqual(nativeFrameMetrics([], []), []);
+  const [legacy] = nativeFrameMetrics(
+    events.filter((e) => !e.stage.startsWith('acquire_') && !e.stage.startsWith('runtime_')),
+    [{ lapId: 'lap' }]
+  );
+  assert.equal(legacy.acquireUs, undefined);
+  assert.equal(legacy.runtimeUs, undefined);
+  const [partial] = nativeFrameMetrics(
+    events.filter((e) => e.stage !== 'acquire_end'),
+    [{ lapId: 'lap' }]
+  );
+  assert.equal(partial.acquireUs, undefined);
+  assert.equal(partial.runtimeUs, 4);
+  for (const incomplete of [
+    events.filter((e) => e.stage !== 'acquire_begin'),
+    [...events, event('acquire_begin', 21.5)],
+  ]) {
+    assert.equal(nativeFrameMetrics(incomplete, [{ lapId: 'lap' }])[0].acquireUs, undefined);
+  }
+  const [retries] = nativeFrameMetrics(
+    [
+      ...events.filter((e) => !e.stage.startsWith('acquire_')),
+      event('acquire_begin', 21),
+      event('acquire_end', 21),
+      event('acquire_begin', 29),
+      event('acquire_end', 30),
+    ],
+    [{ lapId: 'lap' }]
+  );
+  assert.equal(retries.acquireUs, 1, 'all attempts in the same frame are measured, including zero-time ones');
   assert.deepEqual(nativeFrameMetrics(events.slice(1), [{ lapId: 'missing' }]), [{ lapId: 'missing' }]);
   assert.deepEqual(
     nativeFrameMetrics(
