@@ -36,11 +36,11 @@ resvg = { version = "0.45", default-features = false }
 csv = "1"
 calamine = { version = "0.38", features = ["dates"] }
 rust_xlsxwriter = "0.102"
-tower-http = { version = "0.6", features = ["fs"] }
+tower-http = { version = "0.6", features = ["fs", "compression-gzip", "compression-br"] }
 rusqlite = { version = "0.38", features = ["bundled", "backup"] }
 axum = "0.8"
 tokio = { version = "1", features = ["rt-multi-thread", "net", "sync", "time", "signal"] }
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "gzip", "json", "rustls-tls"] }
 uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(unix)'.dependencies]
@@ -92,3 +92,6 @@ winit = { path = "../.rune/vendor/winit" }
 parley_engine = { path = "../.rune/vendor/parley_engine" }
 accesskit_windows = { path = "../.rune/vendor/accesskit_windows" }
 accesskit_macos = { path = "../.rune/vendor/accesskit_macos" }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+tower = { version = "0.5", features = ["util"] }

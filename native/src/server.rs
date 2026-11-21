@@ -1,18 +1,26 @@
 use crate::db::{Db, Result, now};
 use axum::{
     Json, Router,
+    body::Bytes,
     extract::{Path, Query, State},
-    http::StatusCode,
+    http::{StatusCode, header},
+    response::{IntoResponse, Response},
     routing::{get, post},
 };
 use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
 
+/// Database version a cached read was built at. Replication and snapshot installation advance
+/// the revision; total_changes also covers local settings writes that keep the same revision.
+fn read_version(db: &Db) -> (i64, u64) {
+    (db.revision, db.conn.total_changes())
+}
+
+/// Serialized `/api/state` body without the per-request `host` and `cluster` fields.
 #[derive(Default)]
 struct ReadCache {
     version: Option<(i64, u64)>,
-    snapshot: Option<Value>,
-    history: Option<Value>,
+    snapshot: Option<Bytes>,
 }
 
 #[derive(Default)]
@@ -40,17 +48,146 @@ impl Screens {
     }
 }
 
-impl ReadCache {
-    fn refresh(&mut self, db: &Db) {
-        // Replication and snapshot installation advance the revision. total_changes also
-        // covers local settings writes that do not advance the operator-visible revision.
-        let version = (db.revision, db.conn.total_changes());
-        if self.version != Some(version) {
-            *self = Self {
-                version: Some(version),
-                ..Self::default()
-            };
+/// Every full history this server built, as numbered versions, so a client that holds one can
+/// fetch only the laps and events that changed since (`/api/history?since=<cursor>`).
+struct HistoryLog {
+    /// Random per server start: a cursor from another laptop or an earlier run never matches.
+    epoch: String,
+    version: Option<(i64, u64)>,
+    seq: u64,
+    current: Option<CurrentHistory>,
+    /// Ids of laps and events that changed (or disappeared) on the way to each `seq`.
+    steps: std::collections::VecDeque<(u64, Vec<String>, Vec<String>)>,
+    deltas: std::collections::HashMap<u64, Bytes>,
+}
+struct CurrentHistory {
+    value: Value,
+    body: Bytes,
+    laps: Rows,
+    events: Rows,
+}
+/// Row id to its position in the list and a fingerprint of its content.
+type Rows = std::collections::HashMap<String, (usize, u64)>;
+/// Older versions are dropped first; a client further behind gets the full history again.
+const HISTORY_STEPS: usize = 1024;
+const HISTORY_STEP_IDS: usize = 20_000;
+
+fn index_rows(rows: &Value) -> Rows {
+    use std::hash::{Hash, Hasher};
+    rows.as_array()
+        .into_iter()
+        .flatten()
+        .enumerate()
+        .filter_map(|(index, row)| {
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            row.to_string().hash(&mut hasher);
+            Some((row["id"].as_str()?.to_owned(), (index, hasher.finish())))
+        })
+        .collect()
+}
+fn touched(old: &Rows, new: &Rows) -> Vec<String> {
+    let changed = new
+        .iter()
+        .filter(|(id, (_, hash))| old.get(*id).is_none_or(|(_, before)| before != hash))
+        .map(|(id, _)| id.clone());
+    let removed = old.keys().filter(|id| !new.contains_key(*id)).cloned();
+    changed.chain(removed).collect()
+}
+
+impl HistoryLog {
+    fn new() -> Self {
+        Self {
+            epoch: uuid::Uuid::new_v4().simple().to_string()[..12].to_owned(),
+            version: None,
+            seq: 0,
+            current: None,
+            steps: Default::default(),
+            deltas: Default::default(),
         }
+    }
+    fn cursor(&self) -> String {
+        format!("{}.{}", self.epoch, self.seq)
+    }
+    fn refresh(&mut self, db: &Db) -> Result<()> {
+        let version = read_version(db);
+        if self.version == Some(version) && self.current.is_some() {
+            return Ok(());
+        }
+        let mut value = db.history()?;
+        let (laps, events) = (index_rows(&value["laps"]), index_rows(&value["events"]));
+        self.seq += 1;
+        if let Some(old) = &self.current {
+            self.steps.push_back((
+                self.seq,
+                touched(&old.laps, &laps),
+                touched(&old.events, &events),
+            ));
+        }
+        let mut ids: usize = self.steps.iter().map(|(_, l, e)| l.len() + e.len()).sum();
+        while self.steps.len() > HISTORY_STEPS || ids > HISTORY_STEP_IDS {
+            let (_, l, e) = self.steps.pop_front().unwrap();
+            ids -= l.len() + e.len();
+        }
+        value["cursor"] = json!(self.cursor());
+        let body = Bytes::from(serde_json::to_vec(&value).map_err(|e| e.to_string())?);
+        self.current = Some(CurrentHistory {
+            value,
+            body,
+            laps,
+            events,
+        });
+        self.version = Some(version);
+        self.deltas.clear();
+        Ok(())
+    }
+    /// The changes since `cursor`, or `None` when this server cannot tell them apart from a
+    /// full history (another epoch, or a version older than the steps it still keeps).
+    fn since(&mut self, cursor: &str) -> Option<Bytes> {
+        let (epoch, seq) = cursor.rsplit_once('.')?;
+        let since: u64 = seq.parse().ok()?;
+        let oldest = self.steps.front().map_or(self.seq, |(seq, ..)| seq - 1);
+        if epoch != self.epoch || since < oldest || since > self.seq {
+            return None;
+        }
+        if let Some(body) = self.deltas.get(&since) {
+            return Some(body.clone());
+        }
+        let current = self.current.as_ref()?;
+        let changes = |pick: fn(&(u64, Vec<String>, Vec<String>)) -> &Vec<String>,
+                       rows: &Rows,
+                       list: &Value| {
+            let ids: std::collections::BTreeSet<&String> = self
+                .steps
+                .iter()
+                .filter(|step| step.0 > since)
+                .flat_map(|step| pick(step))
+                .collect();
+            let mut changed: Vec<(usize, &Value)> = Vec::new();
+            let mut removed = Vec::new();
+            for id in ids {
+                match rows.get(id) {
+                    Some(&(index, _)) => changed.push((index, &list[index])),
+                    None => removed.push(id),
+                }
+            }
+            changed.sort_by_key(|(index, _)| *index);
+            json!({"changed":changed,"removed":removed,"count":rows.len()})
+        };
+        let value = &current.value;
+        let delta = json!({
+            "scope": "full",
+            "delta": true,
+            "since": cursor,
+            "cursor": self.cursor(),
+            "revision": value["revision"],
+            "changes": {
+                "laps": changes(|step| &step.1, &current.laps, &value["laps"]),
+                "events": changes(|step| &step.2, &current.events, &value["events"]),
+            },
+        });
+        let body = Bytes::from(serde_json::to_vec(&delta).ok()?);
+        self.deltas.insert(since, body.clone());
+        Some(body)
     }
 }
 
@@ -63,6 +200,7 @@ pub struct Host {
     /// Linked-laptop runtime (`CLUSTER_ENABLED=true`); writes then replicate to a majority.
     pub cluster: Option<Arc<crate::cluster::Node>>,
     reads: Arc<Mutex<ReadCache>>,
+    history: Arc<Mutex<HistoryLog>>,
     screens: Arc<Mutex<Screens>>,
 }
 impl Host {
@@ -91,25 +229,12 @@ impl Host {
             backups: Arc::new(crate::backup_service::Service::new(path)),
             cluster,
             reads: Arc::default(),
+            history: Arc::new(Mutex::new(HistoryLog::new())),
             screens: Arc::default(),
         }
     }
 }
 type Reply = std::result::Result<Json<Value>, (StatusCode, Json<Value>)>;
-
-async fn snapshot_request(
-    State(host): State<Host>,
-    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<std::net::SocketAddr>,
-    Query(query): Query<std::collections::HashMap<String, String>>,
-) -> Reply {
-    if let Some(kind) = query.get("screen") {
-        host.screens
-            .lock()
-            .unwrap()
-            .seen(kind, remote.ip().to_canonical());
-    }
-    snapshot(State(host)).await
-}
 fn reply(result: Result<Value>) -> Reply {
     result.map(Json).map_err(|message| {
         (
@@ -118,24 +243,65 @@ fn reply(result: Result<Value>) -> Reply {
         )
     })
 }
-async fn snapshot(State(host): State<Host>) -> Reply {
-    let read = || -> Result<Value> {
+fn json_body(body: Bytes) -> Response {
+    ([(header::CONTENT_TYPE, "application/json")], body).into_response()
+}
+fn error_body(message: String) -> Response {
+    (
+        StatusCode::CONFLICT,
+        Json(json!({"error":{"message":message}})),
+    )
+        .into_response()
+}
+async fn snapshot_request(
+    State(host): State<Host>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<std::net::SocketAddr>,
+    Query(query): Query<std::collections::HashMap<String, String>>,
+) -> Response {
+    if let Some(kind) = query.get("screen") {
+        host.screens
+            .lock()
+            .unwrap()
+            .seen(kind, remote.ip().to_canonical());
+    }
+    snapshot(State(host)).await
+}
+async fn snapshot(State(host): State<Host>) -> Response {
+    let read = || -> Result<Bytes> {
         let db = host.db.lock().unwrap();
         let mut cache = host.reads.lock().unwrap();
-        cache.refresh(&db);
-        if cache.snapshot.is_none() {
-            cache.snapshot = Some(db.race_snapshot()?);
+        let version = read_version(&db);
+        if cache.version != Some(version) || cache.snapshot.is_none() {
+            let body = serde_json::to_vec(&db.race_snapshot()?).map_err(|e| e.to_string())?;
+            *cache = ReadCache {
+                version: Some(version),
+                snapshot: Some(body.into()),
+            };
         }
-        Ok(cache.snapshot.as_ref().unwrap().clone())
+        Ok(cache.snapshot.clone().unwrap())
     };
-    reply(read().map(|mut value| {
-        value["host"] = crate::host::info(host.port);
-        value["screens"] = host.screens.lock().unwrap().active();
-        if let Some(node) = &host.cluster {
-            value["cluster"] = node.status();
+    match read() {
+        Ok(cached) => {
+            // The cached object is reused as bytes; only the live fields are appended.
+            let mut body = Vec::with_capacity(cached.len() + 512);
+            body.extend_from_slice(&cached[..cached.len() - 1]);
+            let mut field = |name: &str, value: &Value| {
+                if body.len() > 1 {
+                    body.push(b',');
+                }
+                body.extend_from_slice(format!("\"{name}\":").as_bytes());
+                serde_json::to_writer(&mut body, value).unwrap();
+            };
+            field("host", &crate::host::info(host.port));
+            if let Some(node) = &host.cluster {
+                field("cluster", &node.status());
+            }
+            field("screens", &host.screens.lock().unwrap().active());
+            body.push(b'}');
+            json_body(body.into())
         }
-        value
-    }))
+        Err(message) => error_body(message),
+    }
 }
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -143,26 +309,31 @@ struct HistoryQuery {
     scope: Option<String>,
     runner_id: Option<String>,
     limit: Option<usize>,
+    /// `cursor` of a full history the client holds: answer with only what changed since.
+    since: Option<String>,
 }
-async fn history(State(host): State<Host>, Query(query): Query<HistoryQuery>) -> Reply {
+async fn history(State(host): State<Host>, Query(query): Query<HistoryQuery>) -> Response {
     let db = host.db.lock().unwrap();
     let scope = query.scope.as_deref().unwrap_or("full");
     if scope != "full" {
-        return reply(db.history_scope(
+        return match db.history_scope(
             scope,
             query.runner_id.as_deref(),
             query.limit.unwrap_or(100),
-        ));
+        ) {
+            Ok(value) => Json(value).into_response(),
+            Err(message) => error_body(message),
+        };
     }
-    let mut cache = host.reads.lock().unwrap();
-    cache.refresh(&db);
-    if let Some(value) = &cache.history {
-        return reply(Ok(value.clone()));
+    let mut log = host.history.lock().unwrap();
+    if let Err(message) = log.refresh(&db) {
+        return error_body(message);
     }
-    reply(db.history().map(|value| {
-        cache.history = Some(value.clone());
-        value
-    }))
+    drop(db);
+    if let Some(delta) = query.since.as_deref().and_then(|cursor| log.since(cursor)) {
+        return json_body(delta);
+    }
+    json_body(log.current.as_ref().unwrap().body.clone())
 }
 async fn registrations(State(host): State<Host>) -> Reply {
     reply(host.db.lock().unwrap().registrations())
@@ -196,7 +367,6 @@ async fn query_rpc(
     )
 }
 async fn label_image(State(host): State<Host>, Path(id): Path<String>) -> axum::response::Response {
-    use axum::response::IntoResponse;
     use base64::Engine;
     let row = host.db.lock().unwrap().one(
         "SELECT mime,data_base64 FROM label_images WHERE id=?",
@@ -243,7 +413,6 @@ async fn net_action(
     axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<std::net::SocketAddr>,
     Json(input): Json<Value>,
 ) -> axum::response::Response {
-    use axum::response::IntoResponse;
     if !remote.ip().to_canonical().is_loopback() {
         return (StatusCode::FORBIDDEN, Json(json!({"ok":false,"error":"Alleen op deze laptop zelf."}))).into_response();
     }
@@ -415,7 +584,6 @@ async fn backup_download(
     State(host): State<Host>,
     Path(name): Path<String>,
 ) -> axum::response::Response {
-    use axum::response::IntoResponse;
     let path = crate::backups::database_path(&host.db.lock().unwrap())
         .and_then(|path| crate::backups::file(&path, &name));
     match path {
@@ -437,7 +605,6 @@ async fn backup_download(
     }
 }
 async fn export(State(host): State<Host>, Path(file): Path<String>) -> axum::response::Response {
-    use axum::response::IntoResponse;
     match host.db.lock().unwrap().download(&file, host.port) {
         Ok(download) => (
             [
@@ -459,7 +626,6 @@ async fn export(State(host): State<Host>, Path(file): Path<String>) -> axum::res
 }
 // These URLs also work when the installed binary starts outside the source checkout.
 fn bundled_asset(directory: &str, file: &str) -> axum::response::Response {
-    use axum::response::IntoResponse;
     let (mime, bytes): (&str, &[u8]) = match (directory, file) {
         ("labels", "hilok.png") => ("image/png", include_bytes!("../../public/labels/hilok.png")),
         ("labels", "kinesia.png") => (
@@ -559,9 +725,40 @@ async fn wrapped_card(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }
 
-pub fn router(host: Host) -> Router {
+/// JSON reads and actions, gzip or brotli compressed for clients that accept it. Images and
+/// spreadsheets are compressed already and pass through unchanged.
+fn api_routes() -> Router<Host> {
+    use tower_http::compression::{
+        CompressionLayer,
+        predicate::{DefaultPredicate, NotForContentType, Predicate},
+    };
     Router::new()
         .route("/api/health", get(health))
+        .route("/api/net/profile", get(net_profile))
+        .route("/api/net/{action}", post(net_action))
+        .route("/api/backups/status", get(system))
+        .route("/api/recovery", get(recovery_state))
+        .route("/api/backups/{name}", get(backup_download))
+        .route("/api/export/{file}", get(export))
+        .route("/api/clock", get(clock))
+        .route("/api/state", get(snapshot_request))
+        .route("/api/history", get(history))
+        .route("/api/registrations", get(registrations))
+        .route("/api/label-images/{id}", get(label_image))
+        .route("/api/action/{method}", post(mutation))
+        .route("/trpc/{method}", post(rpc).get(query_rpc))
+        .layer(
+            CompressionLayer::new().no_deflate().no_zstd().compress_when(
+                DefaultPredicate::new().and(NotForContentType::const_new(
+                    "application/vnd.openxmlformats",
+                )),
+            ),
+        )
+}
+
+pub fn router(host: Host) -> Router {
+    Router::new()
+        .merge(api_routes())
         .route("/wrapped/card", get(wrapped_card))
         .route(
             "/wrapped/{file}",
@@ -575,17 +772,6 @@ pub fn router(host: Host) -> Router {
             "/brand/{file}",
             get(|Path(file): Path<String>| async move { bundled_asset("brand", &file) }),
         )
-        .route("/api/net/profile", get(net_profile))
-        .route("/api/net/{action}", post(net_action))
-        .route("/api/backups/status", get(system))
-        .route("/api/recovery", get(recovery_state))
-        .route("/api/backups/{name}", get(backup_download))
-        .route("/api/export/{file}", get(export))
-        .route("/api/clock", get(clock))
-        .route("/api/state", get(snapshot_request))
-        .route("/api/history", get(history))
-        .route("/api/registrations", get(registrations))
-        .route("/api/label-images/{id}", get(label_image))
         .route(
             "/labels/{file}",
             get(|Path(file): Path<String>| async move { bundled_asset("labels", &file) }),
@@ -594,12 +780,11 @@ pub fn router(host: Host) -> Router {
             "/event-network/{file}",
             get(|Path(file): Path<String>| async move { bundled_asset("event-network", &file) }),
         )
-        .route("/api/action/{method}", post(mutation))
-        .route("/trpc/{method}", post(rpc).get(query_rpc))
         .fallback_service(
             tower_http::services::ServeDir::new(
                 crate::desktop::config::current_web_dir(),
             )
+            .precompressed_br()
             .precompressed_gzip()
             .fallback(tower_http::services::ServeFile::new(
                 std::path::Path::new(
@@ -699,42 +884,19 @@ mod read_cache_tests {
         }
     }
 
-    #[tokio::test]
-    async fn screen_presence_is_local_validated_refreshed_and_expires() {
-        let db = Arc::new(Mutex::new(
-            Db::open(std::path::Path::new(":memory:")).unwrap(),
-        ));
-        let host = Host::with_cluster(db.clone(), 5173, None);
-        let remote = "192.168.88.20:34567".parse().unwrap();
-        let register = |kind: &str| {
-            snapshot_request(
-                State(host.clone()),
-                axum::extract::ConnectInfo(remote),
-                Query(std::collections::HashMap::from([(
-                    "screen".into(),
-                    kind.into(),
-                )])),
-            )
-        };
-        assert_eq!(register("invalid").await.unwrap().0["screens"], json!([]));
-        let value = register("outside").await.unwrap().0;
-        assert_eq!(value["screens"][0]["kind"], "outside");
-        assert_eq!(value["screens"][0]["address"], "192.168.88.20");
-        assert_eq!(value["screens"], json!([{"kind":"outside","address":"192.168.88.20"}]));
-        assert_eq!(register("outside").await.unwrap().0, value);
-        assert_eq!(snapshot(State(host.clone())).await.unwrap().0, value);
-        let other = Host::with_cluster(db, 5174, None);
-        assert_eq!(
-            snapshot(State(other)).await.unwrap().0["screens"],
-            json!([])
-        );
-        host.screens
-            .lock()
-            .unwrap()
-            .0
-            .values_mut()
-            .for_each(|seen| *seen -= std::time::Duration::from_secs(16));
-        assert_eq!(snapshot(State(host)).await.unwrap().0["screens"], json!([]));
+    async fn body(response: Response) -> Value {
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        serde_json::from_slice(&bytes).unwrap()
+    }
+    fn query(scope: Option<&str>, limit: Option<usize>, since: Option<&str>) -> Query<HistoryQuery> {
+        Query(HistoryQuery {
+            scope: scope.map(Into::into),
+            runner_id: None,
+            limit,
+            since: since.map(Into::into),
+        })
     }
 
     #[tokio::test]
@@ -743,19 +905,12 @@ mod read_cache_tests {
             Db::open(std::path::Path::new(":memory:")).unwrap(),
         ));
         let host = Host::with_cluster(db.clone(), 5173, None);
-        let state = || snapshot(State(host.clone()));
-        let full_history = || {
-            history(
-                State(host.clone()),
-                Query(HistoryQuery {
-                    scope: None,
-                    runner_id: None,
-                    limit: None,
-                }),
-            )
-        };
-        assert_eq!(state().await.unwrap().0["runners"], json!([]));
-        assert_eq!(full_history().await.unwrap().0["laps"], json!([]));
+        let state = || async { body(snapshot(State(host.clone())).await).await };
+        let full_history = || async { body(history(State(host.clone()), query(None, None, None)).await).await };
+        let empty = state().await;
+        assert_eq!(empty["runners"], json!([]));
+        assert_eq!(empty["host"], crate::host::info(5173));
+        assert_eq!(full_history().await["laps"], json!([]));
 
         // Some local settings writes deliberately keep the same public revision.
         let revision = db.lock().unwrap().revision;
@@ -767,7 +922,7 @@ mod read_cache_tests {
                 &[],
             )
             .unwrap();
-        let state = state().await.unwrap().0;
+        let state = state().await;
         assert_eq!(state["runners"][0]["name"], "Cached runner");
         assert_eq!(state["revision"], revision);
         {
@@ -784,20 +939,149 @@ mod read_cache_tests {
             )
             .unwrap();
         }
-        let full = full_history().await.unwrap().0;
+        let full = full_history().await;
         assert_eq!(full["laps"][0]["runnerId"], "runner");
-        let recent = history(
-            State(host),
-            Query(HistoryQuery {
-                scope: Some("recent".into()),
-                runner_id: None,
-                limit: Some(1),
-            }),
-        )
-        .await
-        .unwrap()
-        .0;
+        let recent = body(history(State(host), query(Some("recent"), Some(1), None)).await).await;
         assert_eq!(recent["laps"], full["laps"]);
         assert_eq!(recent["limit"], 1);
+    }
+
+    #[tokio::test]
+    async fn screen_presence_is_local_validated_refreshed_and_expires() {
+        let db = Arc::new(Mutex::new(
+            Db::open(std::path::Path::new(":memory:")).unwrap(),
+        ));
+        let host = Host::with_cluster(db.clone(), 5173, None);
+        let remote = "192.168.88.20:34567".parse().unwrap();
+        let register = |kind: &str| {
+            let request = snapshot_request(
+                State(host.clone()),
+                axum::extract::ConnectInfo(remote),
+                Query(std::collections::HashMap::from([(
+                    "screen".into(),
+                    kind.into(),
+                )])),
+            );
+            async { body(request.await).await }
+        };
+        let state = |host: Host| async { body(snapshot(State(host)).await).await };
+        assert_eq!(register("invalid").await["screens"], json!([]));
+        let value = register("outside").await;
+        assert_eq!(value["screens"][0]["kind"], "outside");
+        assert_eq!(value["screens"][0]["address"], "192.168.88.20");
+        assert_eq!(value["screens"], json!([{"kind":"outside","address":"192.168.88.20"}]));
+        assert_eq!(register("outside").await, value);
+        assert_eq!(state(host.clone()).await, value);
+        let other = Host::with_cluster(db, 5174, None);
+        assert_eq!(state(other).await["screens"], json!([]));
+        host.screens
+            .lock()
+            .unwrap()
+            .0
+            .values_mut()
+            .for_each(|seen| *seen -= std::time::Duration::from_secs(16));
+        assert_eq!(state(host).await["screens"], json!([]));
+    }
+
+    #[tokio::test]
+    async fn history_since_a_cursor_sends_only_changed_and_removed_rows() {
+        let db = Arc::new(Mutex::new(
+            Db::open(std::path::Path::new(":memory:")).unwrap(),
+        ));
+        let host = Host::with_cluster(db.clone(), 5173, None);
+        let lap = |id: &str, finished: i64| {
+            db.lock()
+                .unwrap()
+                .exec(
+                    "INSERT INTO laps(id,runner_id,lap_number,started_at,finished_at,duration_ms,source,created_at,labels_json)
+                     VALUES(?,'runner',0,?,?,60000,'spacebar',?,'[]')",
+                    &[json!(id), json!(finished - 60_000), json!(finished), json!(finished)],
+                )
+                .unwrap();
+        };
+        db.lock()
+            .unwrap()
+            .exec(
+                "INSERT INTO runners(id,name,status,created_at,updated_at) VALUES ('runner','Jana','running',0,0)",
+                &[],
+            )
+            .unwrap();
+        for (id, at) in [("a", 100_000), ("b", 200_000), ("c", 300_000)] {
+            lap(id, at);
+        }
+        let get = |since: Option<String>| {
+            let host = host.clone();
+            async move { body(history(State(host), query(None, None, since.as_deref())).await).await }
+        };
+        let first = get(None).await;
+        let cursor = first["cursor"].as_str().unwrap().to_owned();
+        assert_eq!(first["laps"].as_array().unwrap().len(), 3);
+
+        let same = get(Some(cursor.clone())).await;
+        assert_eq!(same["delta"], true);
+        assert_eq!(same["cursor"], cursor);
+        assert_eq!(same["changes"]["laps"], json!({"changed":[],"removed":[],"count":3}));
+
+        lap("d", 250_000);
+        db.lock().unwrap().exec("DELETE FROM laps WHERE id='a'", &[]).unwrap();
+        db.lock().unwrap().exec("UPDATE laps SET duration_ms=61000 WHERE id='c'", &[]).unwrap();
+        let delta = get(Some(cursor.clone())).await;
+        let full = get(None).await;
+        assert_eq!(delta["revision"], full["revision"]);
+        assert_eq!(delta["cursor"], full["cursor"]);
+        let laps = &delta["changes"]["laps"];
+        assert_eq!(laps["removed"], json!(["a"]));
+        assert_eq!(laps["count"], 3);
+        assert_eq!(laps["changed"][0], json!([0, full["laps"][0]]));
+        assert_eq!(laps["changed"][1], json!([1, full["laps"][1]]));
+        assert_eq!(laps["changed"].as_array().unwrap().len(), 2);
+        assert!(delta.get("laps").is_none());
+        let mut held = first.clone();
+        assert!(crate::ui::merge_history(&mut held, &delta));
+        assert_eq!(held, full);
+        let mut wrong_count = first.clone();
+        let mut bad = delta.clone();
+        bad["changes"]["laps"]["count"] = json!(4);
+        assert!(!crate::ui::merge_history(&mut wrong_count, &bad));
+
+        db.lock().unwrap().exec("INSERT INTO race_events(id,type,message,occurred_at,created_at) VALUES('e1','burgie_gepakt','Burgie gepakt',5,5)", &[]).unwrap();
+        let events = get(Some(full["cursor"].as_str().unwrap().into())).await;
+        let mut after = full.clone();
+        assert!(crate::ui::merge_history(&mut after, &events));
+        assert_eq!(after, get(None).await);
+        assert_eq!(events["changes"]["laps"]["changed"], json!([]));
+
+        // A cursor from another server start or one older than the kept steps gets everything.
+        for cursor in ["elsewhere.1", "nonsense", &format!("{}.99", &cursor[..12])] {
+            let answer = get(Some(cursor.into())).await;
+            assert!(answer.get("delta").is_none());
+            assert_eq!(answer["laps"], full["laps"]);
+        }
+    }
+
+    #[tokio::test]
+    async fn json_replies_are_compressed_for_browsers_that_accept_it() {
+        use tower::ServiceExt;
+        let db = Arc::new(Mutex::new(
+            Db::open(std::path::Path::new(":memory:")).unwrap(),
+        ));
+        let app = router(Host::with_cluster(db, 5173, None));
+        let request = |encoding: &str| {
+            axum::http::Request::get("/api/state")
+                .header(header::ACCEPT_ENCODING, encoding)
+                .extension(axum::extract::ConnectInfo(std::net::SocketAddr::from((
+                    [127, 0, 0, 1],
+                    1,
+                ))))
+                .body(axum::body::Body::empty())
+                .unwrap()
+        };
+        let brotli = app.clone().oneshot(request("gzip, br")).await.unwrap();
+        assert_eq!(brotli.headers()[header::CONTENT_ENCODING], "br");
+        let gzip = app.clone().oneshot(request("gzip")).await.unwrap();
+        assert_eq!(gzip.headers()[header::CONTENT_ENCODING], "gzip");
+        let plain = app.oneshot(request("identity")).await.unwrap();
+        assert!(plain.headers().get(header::CONTENT_ENCODING).is_none());
+        assert!(body(plain).await["revision"].is_i64());
     }
 }
