@@ -570,13 +570,62 @@ impl Node {
     /// Makes this laptop a group of one when the others are gone. Only without a majority, and
     /// only on the Timing laptop unless Timing is taken over in the same step. Starts a new split.
     pub fn continue_alone(&self, origin: Option<&str>, take_over_timing: bool) -> Result<Value> {
-        if self.is_leader() {
+        self.go_alone(origin, take_over_timing, false)
+    }
+
+    /// A press on the Timing laptop that no majority can store: the laptop goes on alone now,
+    /// as it would by itself a little later, so the press is kept with its own time.
+    pub(super) fn press_goes_alone(&self) -> bool {
+        self.times_here()
+            && self.removed_by(self.electing_grace()).is_none()
+            && !self.majority_answers()
+            && self.go_alone(None, false, true).is_ok()
+    }
+
+    /// Asks every other laptop of the group at once; true when enough answer for a majority.
+    fn majority_answers(&self) -> bool {
+        let others: Vec<Member> = self
+            .members()
+            .into_iter()
+            .filter(|m| m.host_id != self.host_id)
+            .collect();
+        let cluster_id = self.cluster_id();
+        let answers = std::thread::scope(|scope| {
+            let asked: Vec<_> = others
+                .iter()
+                .map(|member| {
+                    let cluster_id = &cluster_id;
+                    scope.spawn(move || {
+                        self.request(
+                            reqwest::Method::GET,
+                            &format!("{}/api/cluster/status", member.url),
+                            None,
+                            self.cfg.election_timeout,
+                        )
+                        .is_ok_and(|a| a.status == 200 && a.body["clusterId"] == cluster_id.as_str())
+                    })
+                })
+                .collect();
+            asked
+                .into_iter()
+                .filter_map(|answer| answer.join().ok())
+                .filter(|answered| *answered)
+                .count()
+        });
+        answers + 1 >= self.majority()
+    }
+
+    fn go_alone(&self, origin: Option<&str>, take_over_timing: bool, press: bool) -> Result<Value> {
+        if self.is_leader() && !press {
             return Err("Deze laptop werkt al.".into());
         }
         if self.busy().is_some() {
             return Err(BUSY_MESSAGE.into());
         }
-        if self.status()["state"] != "no-majority" {
+        if press {
+            // A leader that lost the others starts over as the leader of a group of one.
+            self.step_down();
+        } else if self.status()["state"] != "no-majority" {
             return Err(
                 "Er zijn nog genoeg laptops bereikbaar; die kiezen zelf een hoofdlaptop.".into(),
             );
