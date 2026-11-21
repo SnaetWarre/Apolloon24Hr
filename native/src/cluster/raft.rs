@@ -237,6 +237,13 @@ impl Node {
             st.resync_problem = None;
             st.progress.clear();
             st.group_view.clear();
+            // The first entry of a leadership won by vote: nothing from an earlier term counts as
+            // confirmed until a majority holds it. A laptop going on alone was not elected and
+            // gets no such entry: if it stops before the split is stored, it must not outrank
+            // the group it is still in.
+            if was == Role::Candidate {
+                let _ = log::append_empty(&self.db.lock().unwrap(), "cluster.newLeader");
+            }
             self.set_discovery_leader(true);
             self.replicate_to_all(st);
             return true;
@@ -645,7 +652,13 @@ impl Node {
         }
         matched.sort_unstable_by(|a, b| b.cmp(a));
         let committed = matched.get(self.majority() - 1).copied().unwrap_or(0);
-        st.committed = st.committed.max(committed);
+        // A majority holding an entry of an earlier term proves nothing: a laptop that led in
+        // between can still win and replace it. Once an entry of this term is on a majority, no
+        // such laptop can win, and everything before that entry is confirmed with it.
+        let db = self.db.lock().unwrap();
+        if log::entry_term(&db, committed) == Some(log::term(&db)) {
+            st.committed = st.committed.max(committed);
+        }
     }
 
     /// Sends a write round and stores it here once a majority of the laptops hold it. False when
