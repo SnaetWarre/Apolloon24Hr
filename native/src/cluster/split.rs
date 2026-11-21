@@ -74,6 +74,29 @@ fn stays_out(statement: &Statement, clocked: &HashSet<String>) -> bool {
     false
 }
 
+/// A runner statement refused because its number went to another runner here meanwhile:
+/// the statement to run instead. A new runner comes in without the number, as when two
+/// registration lists are merged; a changed number is left as it is here (`None` inside).
+fn without_taken_number(statement: &Statement, refusal: &str) -> Option<Option<Statement>> {
+    if !refusal.contains("runners.runner_number") {
+        return None;
+    }
+    let sql = statement.sql.to_ascii_lowercase();
+    if sql.starts_with("update") {
+        return sql.contains("set runner_number=?").then_some(None);
+    }
+    let (columns, values) = sql.split_once('(')?.1.split_once(')')?;
+    let at = columns.split(',').position(|c| c.trim() == "runner_number")?;
+    let values = values.split_once('(')?.1;
+    let plain = values.split(',').take(at + 1).all(|v| v.trim() == "?");
+    let mut params = statement.params.clone();
+    *params.get_mut(at).filter(|_| plain)? = Value::Null;
+    Some(Some(Statement {
+        sql: statement.sql.clone(),
+        params,
+    }))
+}
+
 /// Runs one entry of the other split here, inside the write in progress. An entry that no
 /// longer fits (its runner was removed here meanwhile) is left out as a whole.
 fn replay(db: &Db, entry: &Entry, clocked: &HashSet<String>) -> bool {
@@ -112,7 +135,14 @@ fn replay(db: &Db, entry: &Entry, clocked: &HashSet<String>) -> bool {
             if !log::valid(statement) {
                 return Err("only application data changes can be replicated".to_string());
             }
-            db.exec(&statement.sql, &statement.params).map(|_| ())
+            match db.exec(&statement.sql, &statement.params) {
+                Ok(_) => Ok(()),
+                Err(refusal) => match without_taken_number(statement, &refusal) {
+                    Some(Some(instead)) => db.exec(&instead.sql, &instead.params).map(|_| ()),
+                    Some(None) => Ok(()),
+                    None => Err(refusal),
+                },
+            }
         });
     if ran.is_err() {
         let _ = db
@@ -331,6 +361,64 @@ mod tests {
         assert_eq!(laps(&db), 0);
         assert!(replay(&db, &correction("other"), &HashSet::new()));
         assert_eq!(laps(&db), 1);
+    }
+
+    #[test]
+    fn a_runner_whose_number_was_given_out_here_meanwhile_comes_in_without_it() {
+        let db = Db::open(std::path::Path::new(":memory:")).unwrap();
+        *db.capture.borrow_mut() = Some(Default::default());
+        let add = |id: &str, number: &str| {
+            statement(
+                "INSERT INTO runners(id,runner_number,name,status,created_at,updated_at) VALUES(?,?,?,'registered',0,0)",
+                json!([id, number, id]),
+            )
+        };
+        let here = add("here", "27");
+        db.exec(&here.sql, &here.params).unwrap();
+        let entry = |seq: i64, kind: &str, statements: Vec<Statement>| Entry {
+            seq,
+            id: seq.to_string(),
+            epoch: 1,
+            kind: kind.into(),
+            statements,
+            created_at: 0,
+        };
+        let lap = statement(
+            "INSERT INTO laps(id,runner_id,lap_number,started_at,finished_at,duration_ms,source,created_at) VALUES(?,?,?,?,?,?,?,?)",
+            json!(["lap", "there", 1, 0, 50, 50, "manual", 0]),
+        );
+        assert!(replay(
+            &db,
+            &entry(2, "runners.create", vec![add("there", "27"), lap]),
+            &HashSet::new()
+        ));
+        let renumber = statement(
+            "UPDATE runners SET runner_number=?,updated_at=? WHERE id=?",
+            json!(["27", 1, "there"]),
+        );
+        let rename = statement(
+            "UPDATE runners SET name=?,updated_at=? WHERE id=?",
+            json!(["Daar", 1, "there"]),
+        );
+        assert!(replay(
+            &db,
+            &entry(3, "runners.update", vec![renumber, rename]),
+            &HashSet::new()
+        ));
+        let rows = db
+            .rows("SELECT id,runner_number,name FROM runners ORDER BY id", &[])
+            .unwrap();
+        assert_eq!(
+            json!(rows),
+            json!([
+                {"id": "here", "runner_number": "27", "name": "here"},
+                {"id": "there", "runner_number": null, "name": "Daar"}
+            ])
+        );
+        assert_eq!(
+            db.one("SELECT COUNT(*) AS n FROM laps WHERE runner_id='there'", &[]).unwrap()["n"],
+            1
+        );
     }
 
     #[test]
