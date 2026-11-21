@@ -1621,14 +1621,15 @@ mod tests {
         );
         assert_eq!(
             checks.iter().find(|c| c.id == "screens").unwrap().level,
-            readiness::Level::Warning
+            readiness::Level::Info
         );
         state.snapshot["runners"] = json!([{"id":"runner"}]);
         assert!(!readiness::needs_attention(&state));
         let checks = readiness::checks(&state);
         assert_eq!(readiness::summary(&checks), readiness::Level::Ready);
         assert_eq!(readiness::open_count(&checks), 0);
-        assert_eq!(checks.iter().find(|c| c.id == "screens").unwrap().level, readiness::Level::Warning);
+        assert_eq!(checks.last().unwrap().id, "screens");
+        assert_eq!(checks.last().unwrap().level, readiness::Level::Info);
         state.snapshot["screens"] =
             json!([{"kind":"outside","address":"192.168.88.20"}]);
         let checks = readiness::checks(&state);
@@ -1646,11 +1647,11 @@ mod tests {
             readiness::Level::Ready
         );
         state.connected = false;
-        assert!(readiness::open_count(&readiness::checks(&state)) > 0);
-        assert_eq!(
-            readiness::summary(&readiness::checks(&state)),
-            readiness::Level::Blocked
-        );
+        let offline = readiness::checks(&state);
+        assert_eq!(offline.len(), 1);
+        assert_eq!(offline[0].id, "server-status");
+        assert_eq!(readiness::open_count(&offline), 1);
+        assert_eq!(readiness::summary(&offline), readiness::Level::Blocked);
     }
     #[test]
     fn space_records_a_lap_on_timing() {
@@ -2571,7 +2572,10 @@ fn start_transport(url: String, commands: Receiver<Command>, updates: Sender<Upd
         let fetch_history = full || synced.borrow().history_revision.is_none();
         let path = web_sys::window()
             .and_then(|w| w.location().pathname().ok())
-            .and_then(|p| p.strip_prefix("/display/").map(str::to_owned))
+            .and_then(|p| {
+                p.strip_prefix("/display/")
+                    .map(|kind| kind.trim_end_matches('/').to_owned())
+            })
             .filter(|kind| matches!(kind.as_str(), "inside" | "competitions" | "outside"))
             .map(|kind| format!("/api/state?screen={kind}"))
             .unwrap_or_else(|| "/api/state".into());
