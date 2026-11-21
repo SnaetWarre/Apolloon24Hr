@@ -4,7 +4,7 @@
 use super::*;
 
 pub(super) fn clocks(s: &State, clock: &mut clock::Sample) {
-    let total: i64 = runners(s).iter().filter_map(|r| r["lapCount"].as_i64()).sum();
+    let total = race_lap_total(s);
     if total > 0 && total % 100 == 0 {
         if let Some(at) = s.history["laps"][0]["finishedAt"].as_i64() {
             clock.until(at + 120_000);
@@ -12,11 +12,6 @@ pub(super) fn clocks(s: &State, clock: &mut clock::Sample) {
     }
     let page = &s.timing_page;
     let race = &s.snapshot["race"];
-    if s.connected && !cluster(s).blocked && !s.busy && page.dialog.is_none() {
-        if let Some(at) = active_runner(s).and_then(|runner| handoff_check_at(race, runner)) {
-            clock.until(at);
-        }
-    }
     if page.finish_stop.as_ref().is_some_and(|(_, started)| started == &race["activeStartedAt"]) { return; }
     let pending = page.pending.as_ref();
     let start = match pending {
@@ -29,8 +24,6 @@ pub(super) fn clocks(s: &State, clock: &mut clock::Sample) {
 
 const MIN_LAP_MS: i64 = 20_000;
 const TOUCH_TARGET: f32 = 44.0;
-
-mod handoff_sound;
 
 #[derive(Clone, PartialEq, Debug)]
 pub(super) enum Dialog {
@@ -51,7 +44,6 @@ pub(super) struct Page {
     /// A handoff on its way: the lap it ends, the runner it starts and when.
     pending: Option<(Value, Option<String>, i64)>,
     reopen: bool,
-    sound: handoff_sound::Click,
     pub(super) last_action: String,
     pub(super) error: String,
 }
@@ -163,25 +155,6 @@ fn active_runner(s: &State) -> Option<&Value> {
         return None;
     }
     s.snapshot["runners"].as_array()?.iter().find(|r| &r["id"] == id)
-}
-
-fn handoff_check_due(race: &Value, runner: &Value, clock: i64) -> bool {
-    handoff_check_at(race, runner).is_some_and(|at| clock >= at)
-}
-
-fn handoff_check_at(race: &Value, runner: &Value) -> Option<i64> {
-    if phase(race) != "running" {
-        return None;
-    }
-    let typical = ["averageLapMs", "historicalAvgMs"].into_iter().find_map(|key| {
-        runner[key]
-            .as_f64()
-            .filter(|ms| (MIN_LAP_MS as f64..=600_000.0).contains(ms))
-    });
-    race["activeStartedAt"]
-        .as_i64()
-        .zip(typical)
-        .and_then(|(start, typical)| start.checked_add((2.0 * typical).ceil() as i64))
 }
 
 pub(super) fn waiting(s: &State) -> Vec<&Value> {
@@ -412,9 +385,6 @@ fn confirm(s: &mut State) {
 /// An answer from the server to a Timing action.
 pub(super) fn succeeded(s: &mut State, method: &str, result: &Value) {
     let page = &mut s.timing_page;
-    if s.page == 2 && page.pending.is_some() && method == "race.handoff" && is_runner_handoff(result) {
-        page.sound.play();
-    }
     page.pending = None;
     page.error.clear();
     page.last_action = match method {
@@ -454,10 +424,7 @@ pub(super) fn succeeded(s: &mut State, method: &str, result: &Value) {
     };
 }
 
-fn is_runner_handoff(result: &Value) -> bool {
-    result["lapId"].is_string() && result["startedRunnerId"].is_string()
-}
-/// A Timing action that failed: the reason shows under the button, not at the top of the page.
+/// A failed Timing action shows its reason above the handoff button.
 pub(super) fn failed(s: &mut State, method: &str) {
     if !(method.starts_with("race.") && method != "race.clear"
         || method == "events.burgieGepakt"
@@ -505,37 +472,6 @@ fn off(button: El, disabled: bool, dark: bool) -> El {
         .opacity(0.75)
 }
 
-fn sound_switch(s: &State) -> El {
-    let t = tok::theme(s.dark);
-    let p = pal(s.dark);
-    let enabled = s.timing_page.sound.enabled();
-    row()
-        .key("timing-sound")
-        .role("switch")
-        .label("Wisselgeluid")
-        .checked(enabled)
-        .focusable(true)
-        .min_h(TOUCH_TARGET)
-        .px(14.0)
-        .gap(8.0)
-        .center_y()
-        .radius(9.0)
-        .fill(t.card)
-        .border(1.0, p.line2)
-        .hover(p.surface2)
-        .on_press_tx(|s: &mut State, tx| {
-            s.timing_page.sound.toggle();
-            if !tx.focus_visible() {
-                tx.focus("handoff", false);
-            }
-        })
-        .child(text("Wisselgeluid").font(ts(13.5, 500.0)).color(t.text))
-        .child(
-            text(if enabled { "Aan" } else { "Uit" })
-                .font(ts(12.5, 550.0))
-                .color(if enabled { p.brand_ink } else { p.ink3 }),
-        )
-}
 fn pill(label: &Value, s: &State) -> El {
     let t = tok::theme(s.dark);
     let mut badge = row()
@@ -576,6 +512,10 @@ fn body_text(value: impl Into<String>, color: rune::Color) -> El {
         .min_w(0.0)
 }
 
+pub(super) fn race_lap_total(s: &State) -> i64 {
+    runners(s).iter().filter_map(|r| r["lapCount"].as_i64()).sum()
+}
+
 pub(super) fn page(s: &State) -> El {
     let t = tok::theme(s.dark);
     let p = pal(s.dark);
@@ -584,7 +524,7 @@ pub(super) fn page(s: &State) -> El {
     let c = cluster(s);
     let active = active_runner(s);
     let queue = waiting(s);
-    let total: i64 = runners(s).iter().filter_map(|r| r["lapCount"].as_i64()).sum();
+    let total = race_lap_total(s);
     let pending = page
         .pending
         .as_ref()
@@ -687,16 +627,6 @@ pub(super) fn page(s: &State) -> El {
                 .color(if idle { p.surface3 } else { p.ink3 })
                 .mb(-2.0),
         );
-    let previous = shown
-        .and_then(|r| r["lastLapMs"].as_i64())
-        .filter(|ms| *ms > 0)
-        .map(lap_duration)
-        .unwrap_or_else(|| "—".into());
-    let best = shown
-        .and_then(|r| r["bestLapMs"].as_i64())
-        .filter(|ms| *ms > 0)
-        .map(lap_duration)
-        .unwrap_or_else(|| "—".into());
     let clock_row = col().w_full().pb(6.0).child(clock);
     let handoff_label = if let Some((name, _)) = &c.elsewhere {
         format!("Timing staat open op {name}")
@@ -810,26 +740,6 @@ pub(super) fn page(s: &State) -> El {
     if !page.error.is_empty() {
         feedback = feedback.child(banner(body_text(page.error.clone(), t.text), s.dark).key("timing-error").role("alert"));
     }
-    if s.connected
-        && !c.blocked
-        && !s.busy
-        && page.dialog.is_none()
-        && active.is_some_and(|runner| handoff_check_due(race, runner, s.clock))
-    {
-        feedback = feedback.child(
-            row()
-                .key("timing-handoff-check")
-                .role("status")
-                .radius(8.0)
-                .px(12.0)
-                .py(8.0)
-                .fill(p.surface2)
-                .child(body_text(
-                    "Even checken: is er al gewisseld? Zo niet, laat de klok gerust doorlopen.",
-                    t.text,
-                )),
-        );
-    }
     if pending.is_some() {
         feedback = feedback.child(body_text("Wissel wordt opgeslagen…", p.ink3).role("status"));
     } else if !page.last_action.is_empty() {
@@ -886,17 +796,8 @@ pub(super) fn page(s: &State) -> El {
         .min_w(0.0)
         .gap(16.0)
         .child(now_group)
-        .child(key)
         .child(feedback)
-        .child(row().child(sound_switch(s)))
-        .child(super::hex::stats(
-            s,
-            vec![
-                ("Eigen vorige ronde", previous),
-                ("Eigen snelste ronde", best),
-                ("Rondes in de race", total.to_string()),
-            ],
-        ));
+        .child(key);
 
     // Beside it: who is next and the last laps, as grouped rows.
     use super::hex;
@@ -1143,41 +1044,4 @@ pub(super) fn modal(s: &State) -> Option<El> {
 /// The reference sets tabular numbers on the whole body.
 fn ts(size: f32, weight: f32) -> rune::TextStyle {
     rune::TextStyle::new(size, weight).features("tnum")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn reminder_waits_for_twice_the_current_average_when_available() {
-        let race = json!({"raceStartedAt":1, "activeRunnerId":"a", "activeStartedAt":1_000});
-        let runner = json!({"averageLapMs":65_000.0, "historicalAvgMs":80_000});
-        assert!(!handoff_check_due(&race, &runner, 130_999));
-        assert!(handoff_check_due(&race, &runner, 131_000));
-    }
-
-    #[test]
-    fn reminder_can_use_a_historical_average_but_not_a_missing_or_invalid_one() {
-        let race = json!({"raceStartedAt":1, "activeRunnerId":"a", "activeStartedAt":1_000});
-        let runner = json!({"averageLapMs":null, "historicalAvgMs":75_000});
-        assert!(handoff_check_due(&race, &runner, 151_000));
-        assert!(!handoff_check_due(&race, &json!({"historicalAvgMs":15_000}), 500_000));
-        assert!(!handoff_check_due(&race, &json!({}), 500_000));
-        for race in [
-            json!({"activeRunnerId":"a", "activeStartedAt":1_000}),
-            json!({"raceStartedAt":1, "activeStartedAt":1_000}),
-            json!({"raceStartedAt":1, "activeRunnerId":"a"}),
-            json!({"raceStartedAt":1, "activeRunnerId":"a", "activeStartedAt":1_000, "raceFinishedAt":160_000}),
-        ] {
-            assert!(!handoff_check_due(&race, &runner, 500_000));
-        }
-    }
-
-    #[test]
-    fn sound_requires_both_a_saved_lap_and_a_new_runner() {
-        assert!(is_runner_handoff(&json!({"lapId":"lap", "startedRunnerId":"b"})));
-        assert!(!is_runner_handoff(&json!({"startedRunnerId":"a"})));
-        assert!(!is_runner_handoff(&json!({"lapId":"lap"})));
-    }
 }

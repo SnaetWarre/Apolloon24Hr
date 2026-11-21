@@ -111,10 +111,18 @@ try {
     return Array.from(context.getImageData(1330, 710, 1, 1).data);
   }, frame.toString('base64'));
   assert.deepEqual(color, [24, 24, 26, 255], `${renderer} keeps the dark page panel`);
-  await page.mouse.click(80, 178);
+  const clickCanvasButton = async (button) => {
+    await button.waitFor({ state: 'visible' });
+    const bounds = await button.boundingBox();
+    assert(bounds, 'Canvas button has visible bounds');
+    await page.mouse.click(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+  };
+  await clickCanvasButton(page.getByRole('button', { name: 'Timing', exact: true }));
+  const startButton = page.getByRole('button', { name: /^Start .+ Spatie \/ Enter$/ });
+  await startButton.waitFor({ state: 'visible' });
   await page.screenshot({ path: path.join(dir, 'timing-before.png') });
   const press = page.waitForResponse((r) => r.url().endsWith('/api/action/race.handoff'), { timeout: 10000 });
-  await page.mouse.click(780, 335);
+  await clickCanvasButton(startButton);
   const response = await press;
   assert(response.ok(), await response.text());
   const { pressedAt } = response.request().postDataJSON();
