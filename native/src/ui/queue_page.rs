@@ -10,6 +10,16 @@ use std::collections::HashMap;
 const LONG_WARM_UP_MS: i64 = 10 * 60_000;
 const SEARCH_PAGE: usize = 40;
 const TOAST_MS: i64 = 4_000;
+
+pub(super) fn clocks(s: &State, clock: &mut clock::Sample) {
+    clock.value(format!("{:?}", brussels_moment(s.clock)));
+    for r in runners(s) {
+        if matches!(st(r, "status"), "waiting" | "warming_up") {
+            if let Some(at) = r["statusSince"].as_i64() { clock.bucket(at, 1000); }
+        }
+    }
+    if let Some((_, at)) = &s.queue_page.toast { clock.until(*at + TOAST_MS); }
+}
 const DRAG_START: f32 = 6.0;
 
 #[derive(Default)]

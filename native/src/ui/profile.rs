@@ -9,6 +9,16 @@ use super::*;
 
 const WEEKDAYS: [&str; 7] = ["maandag", "dinsdag", "woensdag", "donderdag", "vrijdag", "zaterdag", "zondag"];
 
+pub(super) fn clocks(s: &State, clock: &mut clock::Sample) {
+    if let Some(form) = &s.profile {
+        if let Some(r) = runner(s, &form.id) {
+            if !matches!(st(r, "status"), "registered" | "ran") {
+                if let Some(at) = r["statusSince"].as_i64() { clock.bucket(at, 1000); }
+            }
+        }
+    }
+}
+
 pub(super) struct Form {
     id: String,
     pub(super) number: TextEdit,

@@ -21,11 +21,30 @@ index 9aeceb2..494fecc 100644
          Label::About(app) => format!("About {app}"),
          Label::Services => "Services".into(),
          Label::Hide(app) => format!("Hide {app}"),
+diff --git a/crates/rune/src/native_surface/pipeline.rs b/crates/rune/src/native_surface/pipeline.rs
+index 0fc3443..da3d6c3 100644
+--- a/crates/rune/src/native_surface/pipeline.rs
++++ b/crates/rune/src/native_surface/pipeline.rs
+@@ -514,7 +514,6 @@ impl SurfaceRenderer {
+     pub(super) fn live_planes(&self) -> usize {
+         self.importer.as_ref().map_or(0, |i| i.live_planes.load(std::sync::atomic::Ordering::SeqCst))
+     }
+-    #[cfg(any(target_os = "macos", target_os = "windows", target_arch = "wasm32"))]
+     pub(crate) fn draws_nothing(&self) -> bool {
+         self.draws.is_empty()
+     }
 diff --git a/crates/rune/src/platform/web.rs b/crates/rune/src/platform/web.rs
-index 4c797a0..a899f3f 100644
+index 4c797a0..df28fc7 100644
 --- a/crates/rune/src/platform/web.rs
 +++ b/crates/rune/src/platform/web.rs
-@@ -181,6 +181,7 @@ struct GpuSide {
+@@ -175,12 +175,14 @@ struct Browser<S: 'static> {
+ 
+ /// The GPU's side of the page: its device, the canvas's surface and Rune's renderer.
+ struct GpuSide {
++    damage: crate::window::damage::Damage,
+     gpu: Gpu,
+     surface: wgpu::Surface<'static>,
+     config: wgpu::SurfaceConfiguration,
      renderer: Renderer,
      /// The adapter is WebGL2's.
      gl: bool,
@@ -33,7 +52,15 @@ index 4c797a0..a899f3f 100644
  }
  
  /// Who draws the page's frames, and how far the GPU is (the native CPU-first window's
-@@ -430,10 +431,12 @@ fn gpu_side<S: 'static>(gpu: Gpu, surface: wgpu::Surface<'static>, size: (u32, u
+@@ -286,6 +288,7 @@ impl<S: 'static> Running<S> {
+         if let Some(side) = self.draw.gpu_mut() {
+             let (kept, reconfigure) = web_math::should_reconfigure_surface((side.config.width, side.config.height), next, document);
+             if reconfigure {
++                side.damage.reset();
+                 side.config.width = kept.0;
+                 side.config.height = kept.1;
+                 side.surface.configure(&side.gpu.device, &side.config);
+@@ -430,10 +433,12 @@ fn gpu_side<S: 'static>(gpu: Gpu, surface: wgpu::Surface<'static>, size: (u32, u
      surface.configure(&gpu.device, &config);
      health::watch(&gpu.device, lost);
      let mut renderer = Renderer::new(&gpu.device, format);
@@ -45,11 +72,11 @@ index 4c797a0..a899f3f 100644
 +    rt.set_srgb_blend(!format.is_srgb());
 +    renderer.set_srgb_blend(rt.srgb_blend());
 +    renderer.attach_text(&mut rt.text.atlas);
-+    Ok(GpuSide { gpu, surface, config, renderer, gl, cpu_srgb_blend })
++    Ok(GpuSide { damage: Default::default(), gpu, surface, config, renderer, gl, cpu_srgb_blend })
  }
  
  /// The canvas's configuration for `size`, and the format the renderer draws in: the canvas's,
-@@ -443,14 +446,19 @@ fn canvas_config(gpu: &Gpu, surface: &wgpu::Surface<'static>, size: (u32, u32),
+@@ -443,14 +448,20 @@ fn canvas_config(gpu: &Gpu, surface: &wgpu::Surface<'static>, size: (u32, u32),
      let mut config = surface.get_default_config(&gpu.adapter, size.0.clamp(1, max_dim), size.1.clamp(1, max_dim))?;
      config.present_mode = wgpu::PresentMode::Fifo;
      let caps = surface.get_capabilities(&gpu.adapter);
@@ -63,6 +90,7 @@ index 4c797a0..a899f3f 100644
      // A WebGPU canvas can be copied into (wgpu names only its render use): a loop-only step's
      // frame is the last one, kept, with its dots redrawn (`Renderer::arm_cycle`).
 -    if gpu.adapter.get_info().backend == wgpu::Backend::BrowserWebGpu { config.usage |= wgpu::TextureUsages::COPY_DST; }
++    config.usage |= caps.usages & wgpu::TextureUsages::COPY_DST;
 +    if !is_gl { config.usage |= wgpu::TextureUsages::COPY_DST; }
      // A canvas can always be copied from; the hand-over's drift count needs that.
      if drift_wanted() { config.usage |= wgpu::TextureUsages::COPY_SRC; }
@@ -71,7 +99,52 @@ index 4c797a0..a899f3f 100644
      let format = if wanted != config.format && !is_gl {
          config.view_formats.push(wanted);
          wanted
-@@ -530,7 +538,7 @@ impl Readback {
+@@ -468,6 +479,7 @@ fn gpu_frame<S: 'static>(side: &mut GpuSide, rt: &mut Runtime<S>, compositor: &m
+         if format != side.config.format && !side.config.view_formats.contains(&format) {
+             side.config.view_formats.push(format);
+             side.surface.configure(&side.gpu.device, &side.config);
++            side.damage.reset();
+         }
+         crate::window::rebuild_renderer(&side.gpu.device, &mut side.renderer, format, rt);
+     }
+@@ -475,20 +487,34 @@ fn gpu_frame<S: 'static>(side: &mut GpuSide, rt: &mut Runtime<S>, compositor: &m
+         wgpu::CurrentSurfaceTexture::Success(frame) | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => frame,
+         _ => return Err("WebGPU canvas acquisition failed".into()),
+     };
++    let images_changed = rt.images.pages.iter().any(|p| p.dirty.is_some())
++        || rt.text.atlas.dirty.is_some() || rt.text.atlas.pages.iter().any(|p| p.dirty.is_some());
+     side.renderer.upload_images(&side.gpu.device, &side.gpu.queue, &mut rt.images);
+     // A loop-only step (`runtime/paint/cycle.rs`) writes only the dots it changed, and redraws
+     // only where they are, into the last frame the renderer keeps, which is copied to the canvas.
+     let (paint, slots) = rt.cycle_paint();
+     let size = (side.config.width, side.config.height);
+-    let armed = tick && side.config.usage.contains(wgpu::TextureUsages::COPY_DST)
++    let mut armed = tick
+         && side.renderer.arm_cycle(&side.gpu.device, &side.gpu.queue, paint, &rt.instances, &slots, rt.clear_color(), size, side.config.format).is_ok();
++    if !armed {
++        let in_place = !images_changed && rt.clear_color()[3] == 1.0 && compositor.is_none();
++        if let crate::window::damage::Plan::Part { draw, .. } = side.damage.plan(&rt.instances, size, rt.clear_color(), in_place) {
++            side.renderer.arm_damage(&side.gpu.device, &side.gpu.queue, &draw, rt.clear_color(), size, side.config.format);
++            armed = true;
++        }
++    } else {
++        side.damage.reset();
++    }
+     side.renderer.next_instances(paint, tick.then_some(slots));
+     let mut encoder = side.gpu.device.create_command_encoder(&Default::default());
+     if armed {
+         // Rune's default frame (a compositor that drew its own would have kept this a whole one):
+         // nothing draws into the canvas but the copy of the kept frame.
+         side.renderer.prepare_ui(&side.gpu.device, &side.gpu.queue, &mut rt.text.atlas, &rt.instances, size);
+-        side.renderer.draw_armed(&mut encoder, &frame.texture);
++        if !side.renderer.draw_armed(&mut encoder, &frame.texture) {
++            let target = frame.texture.create_view(&wgpu::TextureViewDescriptor { format: Some(side.renderer.format()), ..Default::default() });
++            side.renderer.draw(&mut encoder, &target, rt.clear_color());
++        }
+     } else if let Some(compositor) = compositor {
+         let target = frame.texture.create_view(&wgpu::TextureViewDescriptor { format: Some(side.renderer.format()), ..Default::default() });
+         compositor.render(&mut crate::Frame { device: &side.gpu.device, queue: &side.gpu.queue, encoder: &mut encoder,
+@@ -530,7 +556,7 @@ impl Readback {
      /// appends `[differing, of, max]` to `globalThis.__runeDrift` once the copy is mapped.
      fn count(self, cpu: Vec<u8>) {
          let Readback { buffer, row, size: (w, h), rgba } = self;
@@ -80,7 +153,7 @@ index 4c797a0..a899f3f 100644
          let mapped = buffer.clone();
          buffer.slice(..).map_async(wgpu::MapMode::Read, move |result| {
              if result.is_err() { return; }
-@@ -571,17 +579,27 @@ fn drift_wanted() -> bool {
+@@ -571,17 +597,27 @@ fn drift_wanted() -> bool {
  }
  
  /// A flag the GPU's queue sets once the work submitted so far is done, waking the loop.
@@ -110,7 +183,7 @@ index 4c797a0..a899f3f 100644
  /// A value moved into a callback wgpu wants `Send`. In a page that callback runs on the page's
  /// one thread, from a promise.
  struct PageOnly<T>(T);
-@@ -629,6 +647,7 @@ impl<S: 'static> Browser<S> {
+@@ -629,6 +665,7 @@ impl<S: 'static> Browser<S> {
          web_sys::console::warn_1(&format!("rune: the GPU device was lost ({why}); the page draws on the CPU").into());
          crate::marks::mark("web.gpu.lost");
          side.gpu.device.destroy();
@@ -118,7 +191,7 @@ index 4c797a0..a899f3f 100644
          crate::render::cpu_boot::attach_text(&mut r.rt.text.atlas);
          r.rt.text.atlas.refill_gpu_masks();
          if let Some(c) = &canvas { let _ = c.style().set_property("opacity", "0"); }
-@@ -786,7 +805,7 @@ impl<S: 'static> Browser<S> {
+@@ -786,7 +823,7 @@ impl<S: 'static> Browser<S> {
          // The browser compiles the renderer's pipelines in its GPU process, in order: a submit
          // made after them is answered once they're built.
          side.gpu.queue.submit([]);
@@ -127,7 +200,7 @@ index 4c797a0..a899f3f 100644
          let Draw::Cpu { mut cpu, .. } = std::mem::replace(&mut r.draw, Draw::Moving) else { unreachable!("checked above") };
          cpu.half = crate::render::cpu_boot::HalfRounding::of_vendor(side.gpu.adapter.get_info().vendor);
          r.draw = Draw::HandingOver { cpu, side, built, done: None, since: Instant::now() };
-@@ -808,6 +827,7 @@ impl<S: 'static> Browser<S> {
+@@ -808,6 +845,7 @@ impl<S: 'static> Browser<S> {
              web_sys::console::warn_1(&"rune: the GPU didn't finish its first frame; the page draws on the CPU".into());
              crate::marks::mark("web.handover.failed");
              side.gpu.device.destroy();
@@ -135,7 +208,7 @@ index 4c797a0..a899f3f 100644
              crate::render::cpu_boot::attach_text(&mut r.rt.text.atlas);
              r.rt.text.atlas.refill_gpu_masks();
              r.draw = Draw::Cpu { cpu, failed: true };
-@@ -930,7 +950,7 @@ impl<S: 'static> Browser<S> {
+@@ -930,7 +968,7 @@ impl<S: 'static> Browser<S> {
                          Ok(_) if side.renderer.checking_gpu() => crate::marks::mark("web.handover.warming"),
                          Ok(copy) => {
                              if let Some(copy) = copy { copy.count(cpu.pixels().to_vec()); }
@@ -144,7 +217,7 @@ index 4c797a0..a899f3f 100644
                              *since = Instant::now();
                              let proxy = self.proxy.clone();
                              after(FINISH_LIMIT + Duration::from_millis(50), move || { let _ = proxy.send_event(Wake::App); });
-@@ -1187,6 +1207,21 @@ impl<S: 'static> ApplicationHandler<Wake> for Browser<S> {
+@@ -1187,6 +1225,21 @@ impl<S: 'static> ApplicationHandler<Wake> for Browser<S> {
  
      fn new_events(&mut self, _: &ActiveEventLoop, cause: winit::event::StartCause) {
          if matches!(cause, winit::event::StartCause::ResumeTimeReached { .. }) {
@@ -179,6 +252,73 @@ index f92fe81..e265013 100644
              if (!chord && !editing.includes(event.key)) return;
              if (chord && event.key.toLowerCase() === 'v') return;
              event.preventDefault();
+diff --git a/crates/rune/src/platform/web/platform.js b/crates/rune/src/platform/web/platform.js
+index b8d1fde..45d324e 100644
+--- a/crates/rune/src/platform/web/platform.js
++++ b/crates/rune/src/platform/web/platform.js
+@@ -2,7 +2,28 @@
+ // is '' and `png` empty otherwise). Empty text isn't written beside another form.
+ export async function writeClipboard(text, html, png) {
+     const clipboard = navigator.clipboard;
+-    if (!clipboard) throw new Error('Clipboard requires HTTPS.');
++    if (!clipboard) {
++        const active = document.activeElement;
++        const selection = document.getSelection();
++        const ranges = selection ? Array.from({ length: selection.rangeCount }, (_, i) => selection.getRangeAt(i).cloneRange()) : [];
++        const field = document.createElement('textarea');
++        field.value = text;
++        field.readOnly = true;
++        field.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0';
++        document.body.appendChild(field);
++        try {
++            field.select();
++            if (!document.execCommand('copy')) throw new Error('Clipboard copy failed.');
++        } finally {
++            field.remove();
++            if (active && typeof active.focus === 'function') active.focus({ preventScroll: true });
++            if (selection) {
++                selection.removeAllRanges();
++                for (const range of ranges) selection.addRange(range);
++            }
++        }
++        return;
++    }
+     if ((!html && !png.length) || typeof ClipboardItem === 'undefined') return clipboard.writeText(text);
+     const forms = {};
+     if (text) forms['text/plain'] = new Blob([text], { type: 'text/plain' });
+diff --git a/crates/rune/src/render.rs b/crates/rune/src/render.rs
+index 15826f0..1485c98 100644
+--- a/crates/rune/src/render.rs
++++ b/crates/rune/src/render.rs
+@@ -12,9 +12,7 @@ pub(crate) const ATLAS_START_ROWS: u32 = 256;
+ 
+ mod backdrop_blur;
+ mod breaker;
+-#[cfg(any(target_os = "windows", target_arch = "wasm32"))]
+ mod damaged;
+-#[cfg(target_os = "windows")]
+ pub(crate) use damaged::MAX_RECTS;
+ pub mod cpu_boot;
+ mod dxbc;
+@@ -800,10 +798,8 @@ pub struct Renderer {
+     /// limit from JavaScript (about 35 µs), which a frame's layers used to pay.
+     max_texture_dim: u32,
+     /// The one instance per rectangle that clears a damaged one (`arm_damage`), made on first use.
+-    #[cfg(any(target_os = "windows", target_arch = "wasm32"))]
+     clear_quad: std::sync::OnceLock<wgpu::Buffer>,
+     /// The kept frame and the rectangles the next `draw` may redraw alone (`damaged`).
+-    #[cfg(any(target_os = "windows", target_arch = "wasm32"))]
+     damage: std::sync::Mutex<damaged::DamageState>,
+ }
+ 
+@@ -1011,7 +1007,6 @@ impl Renderer {
+     }
+ 
+     pub fn draw(&self, encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView, clear: [f32; 4]) {
+-        #[cfg(any(target_os = "windows", target_arch = "wasm32"))]
+         if self.armed() && self.draw_armed(encoder, &view.texture()) { return; }
+         self.draw_timed(encoder, view, clear, None);
+     }
 diff --git a/crates/rune/src/render/cpu_boot.rs b/crates/rune/src/render/cpu_boot.rs
 index ad62076..1135c84 100644
 --- a/crates/rune/src/render/cpu_boot.rs
@@ -320,6 +460,164 @@ index faf139b..7e1c930 100644
              glyph_pages: self.glyph_pages.iter().map(Vec::as_slice).collect(),
              outlines: None,
              images: self.images.iter().map(|(width, data)| Image { width: *width, data, dirty: None }).collect(),
+diff --git a/crates/rune/src/render/damaged.rs b/crates/rune/src/render/damaged.rs
+index 4f0b75e..9549f8f 100644
+--- a/crates/rune/src/render/damaged.rs
++++ b/crates/rune/src/render/damaged.rs
+@@ -1,5 +1,5 @@
+ //! Redrawing part of a frame: the renderer keeps the window's last frame in a texture of its own
+-//! (`Retained`), redraws only the rectangles that changed into it, and copies it to the
++//! (`Retained`), redraws only the rectangles that changed into it, and copies or blits it to the
+ //! drawable. wgpu treats a drawable as holding nothing when it's acquired (a `LoadOp::Load` into
+ //! it loads zeros), so the frame can't be drawn over the drawable itself; the copy costs the GPU
+ //! a few hundred microseconds where the whole frame's raster costs milliseconds.
+@@ -13,6 +13,9 @@
+ 
+ use super::*;
+ 
++#[path = "damaged_blit.rs"]
++mod blit;
++
+ /// Rectangles a frame redraws at most.
+ pub(crate) const MAX_RECTS: usize = 4;
+ 
+@@ -23,6 +26,7 @@ pub(super) type Drawn = Result<(), &'static str>;
+ pub(super) struct Retained {
+     texture: wgpu::Texture,
+     view: wgpu::TextureView,
++    blit: blit::Blit,
+     current: bool,
+ }
+ 
+@@ -56,11 +60,12 @@ impl Renderer {
+                 sample_count: 1,
+                 dimension: wgpu::TextureDimension::D2,
+                 format,
+-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
++                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::TEXTURE_BINDING,
+                 view_formats: &[self.format],
+             });
+             let view = texture.create_view(&wgpu::TextureViewDescriptor { format: Some(self.format), ..Default::default() });
+-            d.retained = Some(Retained { texture, view, current: false });
++            let blit = blit::Blit::new(device, &view, self.format);
++            d.retained = Some(Retained { texture, view, blit, current: false });
+         }
+         let fills: Vec<Instance> = rects.iter().take(MAX_RECTS).map(|&[x, y, w, h]| Instance {
+             rect: [x as f32, y as f32, w as f32, h as f32],
+@@ -149,7 +154,7 @@ impl Renderer {
+     }
+ 
+     /// `draw`'s part, when armed: redraws the armed rectangles into the kept frame (all of it
+-    /// when it's behind) and copies it to `dst`. False when `draw` should draw whole.
++    /// when it's behind) and copies or blits it to `dst`. False when `draw` should draw whole.
+     pub(crate) fn draw_armed(&self, encoder: &mut wgpu::CommandEncoder, dst: &wgpu::Texture) -> bool {
+         let mut d = self.damage.lock().unwrap();
+         if d.armed.is_empty() { return false; }
+@@ -205,7 +210,12 @@ impl Renderer {
+             kept.current = true;
+         }
+         let whole = wgpu::Extent3d { width: dst.width(), height: dst.height(), depth_or_array_layers: 1 };
+-        encoder.copy_texture_to_texture(kept.texture.as_image_copy(), dst.as_image_copy(), whole);
++        if dst.usage().contains(wgpu::TextureUsages::COPY_DST) {
++            encoder.copy_texture_to_texture(kept.texture.as_image_copy(), dst.as_image_copy(), whole);
++        } else {
++            let target = dst.create_view(&wgpu::TextureViewDescriptor { format: Some(self.format), ..Default::default() });
++            kept.blit.draw(encoder, &target);
++        }
+         d.drawn = Some(Ok(()));
+         true
+     }
+diff --git a/crates/rune/src/render/damaged_blit.rs b/crates/rune/src/render/damaged_blit.rs
+new file mode 100644
+index 0000000..1e18f3f
+--- /dev/null
++++ b/crates/rune/src/render/damaged_blit.rs
+@@ -0,0 +1,59 @@
++pub(super) struct Blit {
++    pipeline: wgpu::RenderPipeline,
++    bind: wgpu::BindGroup,
++}
++
++impl Blit {
++    pub(super) fn new(device: &wgpu::Device, source: &wgpu::TextureView, format: wgpu::TextureFormat) -> Self {
++        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
++            label: Some("retained frame source"), entries: &[wgpu::BindGroupLayoutEntry {
++                binding: 0, visibility: wgpu::ShaderStages::FRAGMENT,
++                ty: wgpu::BindingType::Texture { sample_type: wgpu::TextureSampleType::Float { filterable: false },
++                    view_dimension: wgpu::TextureViewDimension::D2, multisampled: false }, count: None,
++            }],
++        });
++        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
++            label: Some("retained frame blit"), bind_group_layouts: &[Some(&layout)], immediate_size: 0,
++        });
++        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
++            label: Some("retained frame blit"), source: wgpu::ShaderSource::Wgsl(r#"
++@group(0) @binding(0) var source: texture_2d<f32>;
++@vertex fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4<f32> {
++    let x = f32(i & 1u) * 2.0 - 1.0;
++    let y = f32(i >> 1u) * 2.0 - 1.0;
++    return vec4<f32>(x, y, 0.0, 1.0);
++}
++@fragment fn fs(@builtin(position) p: vec4<f32>) -> @location(0) vec4<f32> {
++    return textureLoad(source, vec2<i32>(p.xy), 0);
++}
++"#.into()),
++        });
++        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
++            label: Some("retained frame blit"), layout: Some(&pipeline_layout),
++            vertex: wgpu::VertexState { module: &shader, entry_point: Some("vs"), compilation_options: Default::default(), buffers: &[] },
++            primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleStrip, ..Default::default() },
++            depth_stencil: None, multisample: Default::default(),
++            fragment: Some(wgpu::FragmentState { module: &shader, entry_point: Some("fs"), compilation_options: Default::default(),
++                targets: &[Some(wgpu::ColorTargetState { format, blend: None, write_mask: wgpu::ColorWrites::ALL })] }),
++            multiview_mask: None, cache: None,
++        });
++        let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
++            label: Some("retained frame source"), layout: &layout,
++            entries: &[wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(source) }],
++        });
++        Self { pipeline, bind }
++    }
++
++    pub(super) fn draw(&self, encoder: &mut wgpu::CommandEncoder, target: &wgpu::TextureView) {
++        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
++            label: Some("retained frame blit"),
++            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
++                view: target, depth_slice: None, resolve_target: None,
++                ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT), store: wgpu::StoreOp::Store },
++            })], depth_stencil_attachment: None, timestamp_writes: None, occlusion_query_set: None, multiview_mask: None,
++        });
++        pass.set_pipeline(&self.pipeline);
++        pass.set_bind_group(0, &self.bind, &[]);
++        pass.draw(0..4, 0..1);
++    }
++}
+diff --git a/crates/rune/src/render/layers.rs b/crates/rune/src/render/layers.rs
+index 1f43293..f8f2689 100644
+--- a/crates/rune/src/render/layers.rs
++++ b/crates/rune/src/render/layers.rs
+@@ -76,7 +76,6 @@ impl Layers {
+     /// parent's pass, or into a target composited back at its own place, neither turned nor
+     /// blurred, so a changed instance changes only the pixels its bounds cover
+     /// (`Renderer::redraws_in_place`).
+-    #[cfg(any(target_os = "windows", target_arch = "wasm32"))]
+     pub(super) fn in_place(&self) -> bool {
+         self.plan.iter().enumerate().all(|(i, l)| match self.planner.dispositions.get(i) {
+             Some(Disposition::Inline | Disposition::Skip) | None => true,
+diff --git a/crates/rune/src/render/pipelines.rs b/crates/rune/src/render/pipelines.rs
+index c82eaf3..f928ba4 100644
+--- a/crates/rune/src/render/pipelines.rs
++++ b/crates/rune/src/render/pipelines.rs
+@@ -94,9 +94,7 @@ impl Renderer {
+             fills: Default::default(),
+             device_key: crate::compose::DeviceKey::next(),
+             max_texture_dim: device.limits().max_texture_dimension_2d,
+-            #[cfg(any(target_os = "windows", target_arch = "wasm32"))]
+             clear_quad: std::sync::OnceLock::new(),
+-            #[cfg(any(target_os = "windows", target_arch = "wasm32"))]
+             damage: Default::default(),
+         }
+     }
 diff --git a/crates/rune/src/runtime/input/focus.rs b/crates/rune/src/runtime/input/focus.rs
 index 9e5edb8..1271b4b 100644
 --- a/crates/rune/src/runtime/input/focus.rs
@@ -353,8 +651,22 @@ index 5d67ada..9272000 100644
              "Insert" => crate::Key::Insert, "PrintScreen" => crate::Key::PrintScreen,
              "ScrollLock" => crate::Key::ScrollLock, "Pause" => crate::Key::Pause,
              name if name.chars().count() == 1 && mods.cmd => crate::Key::Command(name.chars().next().unwrap().to_ascii_lowercase()),
+diff --git a/crates/rune/src/window.rs b/crates/rune/src/window.rs
+index 6324374..9b5c690 100644
+--- a/crates/rune/src/window.rs
++++ b/crates/rune/src/window.rs
+@@ -58,8 +58,7 @@ use covered_draw::{CoveredDraw, CoveredDrawEvent};
+ mod look;
+ #[cfg(target_os = "windows")]
+ pub(crate) mod slot;
+-#[cfg(target_os = "windows")]
+-mod damage;
++pub(crate) mod damage;
+ use redraw::{Redraw, RedrawEffect, RedrawEvent};
+ mod presented;
+ pub(crate) use presented::Presented;
 diff --git a/crates/rune/src/window/create.rs b/crates/rune/src/window/create.rs
-index d1fd541..f11d4b9 100644
+index d1fd541..0ba6d77 100644
 --- a/crates/rune/src/window/create.rs
 +++ b/crates/rune/src/window/create.rs
 @@ -14,6 +14,10 @@ impl<S: 'static> Host<S> {
@@ -368,7 +680,15 @@ index d1fd541..f11d4b9 100644
          #[cfg(target_os = "macos")]
          if self.macos_window.nonactivating_panel { attrs = attrs.with_visible(false).with_active(false); }
          #[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
-@@ -252,6 +256,10 @@ impl<S: 'static> Host<S> {
+@@ -218,6 +222,7 @@ impl<S: 'static> Host<S> {
+         let prime = if visible && panel.is_none() { native::Prime::launching() } else { native::Prime::Steady };
+         #[cfg(target_os = "macos")]
+         let native = Native {
++            damage: Default::default(),
+             pacing: crate::platform::display_link::DisplayLink::new(&window, self.frame_wake.clone()),
+             present,
+             present_log: hook_log,
+@@ -252,6 +257,10 @@ impl<S: 'static> Host<S> {
              backoff: Backoff::default(),
              hidden_pace: HiddenPace::default(),
              cursor: crate::cursor::os::OsCursor::new(),
@@ -379,6 +699,253 @@ index d1fd541..f11d4b9 100644
              alpha,
              timer_frame: TimerFrame::default(),
              presented: None,
+@@ -391,7 +400,8 @@ impl<S: 'static> Host<S> {
+         w.surface_ok = true;
+         w.alpha = alpha;
+         #[cfg(target_os = "windows")]
+-        { w.native.slot.reset(); w.native.damage.reset(); }
++        w.native.slot.reset();
++        w.native.damage.reset();
+         #[cfg(target_os = "windows")]
+         w.native.mode.rebind();
+         #[cfg(target_os = "macos")]
+diff --git a/crates/rune/src/window/damage.rs b/crates/rune/src/window/damage.rs
+index e31747b..0c5c753 100644
+--- a/crates/rune/src/window/damage.rs
++++ b/crates/rune/src/window/damage.rs
+@@ -1,6 +1,6 @@
+-//! Windows: what part of a window a frame redraws and presents. The renderer redraws only what
+-//! changed into the frame it keeps (`render::damaged`), and the window presents only that
+-//! (`Present1` dirty rectangles), which is all DWM composes again.
++//! What part of a window a frame redraws. The renderer redraws only what changed into the
++//! frame it keeps (`render::damaged`), then copies it to the drawable. Windows also presents
++//! only that part (`Present1` dirty rectangles), which is all DWM composes again.
+ //!
+ //! What changed is the instances that differ from the last frame's. The lists' common start and
+ //! end are skipped; in what's left, an instance whose bytes are in both lists didn't change (its
+@@ -30,7 +30,7 @@ pub(super) const RECTS: usize = crate::render::MAX_RECTS;
+ 
+ /// The last frames' changes.
+ #[derive(Default)]
+-pub(super) struct Damage {
++pub(crate) struct Damage {
+     /// The last frame's instances, size and clear colour.
+     last: Vec<Instance>,
+     shape: Option<((u32, u32), [f32; 4])>,
+@@ -52,7 +52,7 @@ pub(super) enum Area {
+ 
+ /// What a frame draws.
+ #[derive(Clone, Debug, PartialEq, Eq)]
+-pub(super) enum Plan {
++pub(crate) enum Plan {
+     /// Everything, and why.
+     All(&'static str),
+     /// Redraw `draw` (`[x, y, width, height]` each), present `present` (`[x0, y0, x1, y1]` each).
+@@ -62,7 +62,7 @@ pub(super) enum Plan {
+ impl Damage {
+     /// The frame about to draw `instances` into a `size` target cleared to `clear`; `in_place`
+     /// when nothing but its instances draws there.
+-    pub(super) fn plan(&mut self, instances: &[Instance], size: (u32, u32), clear: [f32; 4], in_place: bool) -> Plan {
++    pub(crate) fn plan(&mut self, instances: &[Instance], size: (u32, u32), clear: [f32; 4], in_place: bool) -> Plan {
+         let (now, why) = match (in_place && !whole_frames(), self.shape == Some((size, clear))) {
+             (false, _) => (Area::All, "not in place"),
+             (_, false) => (Area::All, "new size or colour"),
+@@ -92,7 +92,7 @@ impl Damage {
+     }
+ 
+     /// A new swap chain: the next frame draws whole.
+-    pub(super) fn reset(&mut self) { self.shape = None; }
++    pub(crate) fn reset(&mut self) { self.shape = None; }
+ }
+ /// `RUNE_WHOLE_FRAMES=1`: every frame draws whole, to check partial frames against.
+ fn whole_frames() -> bool {
+@@ -219,3 +219,7 @@ fn bounds(i: &Instance, size: (u32, u32)) -> Option<[u32; 4]> {
+ }
+ 
+ fn area(r: [u32; 4]) -> u32 { (r[2] - r[0]) * (r[3] - r[1]) }
++
++#[cfg(test)]
++#[path = "damage_tests.rs"]
++mod tests;
+diff --git a/crates/rune/src/window/damage_tests.rs b/crates/rune/src/window/damage_tests.rs
+new file mode 100644
+index 0000000..e63ddf1
+--- /dev/null
++++ b/crates/rune/src/window/damage_tests.rs
+@@ -0,0 +1,106 @@
++use super::*;
++
++fn quad(x: f32) -> Instance {
++    Instance { rect: [x, 20.0, 10.0, 20.0], clip: [0.0, 0.0, 200.0, 200.0], ..bytemuck::Zeroable::zeroed() }
++}
++
++#[test]
++fn ordinary_frames_track_insertions_removals_and_unchanged_instances() {
++    let mut damage = Damage::default();
++    let clear = [0.0, 0.0, 0.0, 1.0];
++    let a = quad(20.0);
++    assert!(matches!(damage.plan(&[a], (200, 200), clear, true), Plan::All(_)));
++    for next in [vec![a, quad(60.0)], vec![a], vec![a]] {
++        assert!(matches!(damage.plan(&next, (200, 200), clear, true), Plan::Part { .. }));
++    }
++}
++
++#[test]
++fn reset_resize_colour_and_external_paint_require_whole_frames() {
++    let mut damage = Damage::default();
++    let clear = [0.0, 0.0, 0.0, 1.0];
++    damage.plan(&[], (200, 200), clear, true);
++    assert!(matches!(damage.plan(&[], (300, 200), clear, true), Plan::All(_)));
++    assert!(matches!(damage.plan(&[], (300, 200), [1.0; 4], true), Plan::All(_)));
++    assert!(matches!(damage.plan(&[], (300, 200), [1.0; 4], false), Plan::All(_)));
++    damage.reset();
++    assert!(matches!(damage.plan(&[], (300, 200), [1.0; 4], true), Plan::All(_)));
++}
++
++#[test]
++fn reordering_shared_instances_requires_a_whole_frame() {
++    let mut damage = Damage::default();
++    let clear = [0.0, 0.0, 0.0, 1.0];
++    damage.plan(&[quad(20.0), quad(60.0)], (200, 200), clear, true);
++    assert_eq!(damage.plan(&[quad(60.0), quad(20.0)], (200, 200), clear, true), Plan::All("reordered"));
++}
++
++#[test]
++fn retained_frames_match_whole_frames_pixel_for_pixel() {
++    retained_match(crate::render::OFFSCREEN_FORMAT, true);
++}
++
++#[test]
++fn blitted_frames_match_whole_frames_pixel_for_pixel() {
++    for format in [wgpu::TextureFormat::Rgba8Unorm, wgpu::TextureFormat::Rgba8UnormSrgb,
++        wgpu::TextureFormat::Bgra8Unorm, wgpu::TextureFormat::Bgra8UnormSrgb] {
++        retained_match(format, false);
++    }
++}
++
++fn retained_match(format: wgpu::TextureFormat, copies: bool) {
++    use crate::render::{Gpu, Offscreen, Renderer};
++    let gpu = Gpu::headless();
++    let mut partial = Renderer::new(&gpu.device, format);
++    let mut whole = Renderer::new(&gpu.device, format);
++    let mut atlas = crate::text::TextSystem::default().atlas;
++    let target = Offscreen::with_format(&gpu.device, 128, 128, format);
++    let texture = gpu.device.create_texture(&wgpu::TextureDescriptor {
++        label: None, size: wgpu::Extent3d { width: 128, height: 128, depth_or_array_layers: 1 },
++        mip_level_count: 1, sample_count: 1, dimension: wgpu::TextureDimension::D2,
++        format, usage: wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::RENDER_ATTACHMENT
++            | if copies { wgpu::TextureUsages::COPY_DST } else { wgpu::TextureUsages::empty() },
++        view_formats: &[],
++    });
++    let view = texture.create_view(&Default::default());
++    let buffer = gpu.device.create_buffer(&wgpu::BufferDescriptor {
++        label: None, size: 128 * 128 * 4, usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ, mapped_at_creation: false,
++    });
++    let mut damage = Damage::default();
++    let clear = [0.12, 0.2, 0.3, 1.0];
++    let mut a = quad(20.0);
++    a.fill = [0.8, 0.1, 0.2, 0.7];
++    let mut b = quad(25.0);
++    b.fill = [0.1, 0.8, 0.2, 0.6];
++    let mut frames = vec![vec![a], vec![a, b], vec![b], vec![b], vec![], vec![a, b], vec![b, a]];
++    let ramp: Vec<_> = (0..256).map(|n| {
++        let value = n as f32 / 255.0;
++        let value = if format.is_srgb() { crate::color::srgb_decode(value) } else { value };
++        Instance { rect: [(n % 128) as f32, 50.0 + (n / 128) as f32, 1.0, 1.0], fill: [value, value, value, 1.0], ..quad(0.0) }
++    }).collect();
++    frames.extend([ramp.clone(), ramp]);
++    for instances in frames {
++        let plan = damage.plan(&instances, (128, 128), clear, true);
++        if let Plan::Part { draw, .. } = &plan {
++            partial.arm_damage(&gpu.device, &gpu.queue, draw, clear, (128, 128), format);
++        }
++        partial.prepare(&gpu.device, &gpu.queue, &mut atlas, &instances, (128, 128));
++        whole.prepare(&gpu.device, &gpu.queue, &mut atlas, &instances, (128, 128));
++        let mut encoder = gpu.device.create_command_encoder(&Default::default());
++        partial.draw(&mut encoder, &view, clear);
++        whole.draw(&mut encoder, &target.view, clear);
++        target.copy(&mut encoder);
++        encoder.copy_texture_to_buffer(texture.as_image_copy(), wgpu::TexelCopyBufferInfo { buffer: &buffer,
++            layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(512), rows_per_image: Some(128) } },
++            wgpu::Extent3d { width: 128, height: 128, depth_or_array_layers: 1 });
++        let drawn = partial.damage_drawn();
++        if matches!(plan, Plan::Part { .. }) { assert!(drawn.is_ok()); }
++        partial.submit(&gpu.queue, encoder);
++        let expected = target.read(&gpu.device);
++        let slice = buffer.slice(..);
++        slice.map_async(wgpu::MapMode::Read, |r| r.unwrap());
++        gpu.device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
++        assert_eq!(&*slice.get_mapped_range().unwrap(), &expected);
++        buffer.unmap();
++    }
++}
+diff --git a/crates/rune/src/window/draw.rs b/crates/rune/src/window/draw.rs
+index b1ef8b0..e0d2349 100644
+--- a/crates/rune/src/window/draw.rs
++++ b/crates/rune/src/window/draw.rs
+@@ -345,8 +345,8 @@ impl<S: 'static> Host<S> {
+             ..Default::default()
+         });
+         // An image's pixels changed where its instances didn't: the whole frame draws (`damage`).
+-        #[cfg(target_os = "windows")]
+-        let images_changed = rt.images.pages.iter().any(|p| p.dirty.is_some());
++        let images_changed = rt.images.pages.iter().any(|p| p.dirty.is_some())
++            || rt.text.atlas.dirty.is_some() || rt.text.atlas.pages.iter().any(|p| p.dirty.is_some());
+         renderer.upload_images(&gpu.device, &gpu.queue, &mut rt.images);
+         renderer.build_surfaces(&gpu.device, &rt.surfaces, rt.live_notifier());
+         // Playing clips on their own layer (`video_layer`): the surfaces this frame punches out.
+@@ -363,7 +363,6 @@ impl<S: 'static> Host<S> {
+         #[cfg(feature = "frame-profile")]
+         let fp_uploaded = fp_start.map(|_| crate::frame::live_log::Stamp::now());
+         let mut enc = gpu.device.create_command_encoder(&Default::default());
+-        #[cfg(target_os = "windows")]
+         let mut present_rect = None;
+         // Why the frame drew all of the window (frame-profile).
+         #[allow(unused_mut)]
+@@ -374,10 +373,8 @@ impl<S: 'static> Host<S> {
+         // Only what changed is redrawn and presented (`damage`): the renderer's `draw` takes the
+         // armed rectangles when nothing but the instances draws there, a compositor's
+         // `Frame::draw_ui` included.
+-        #[cfg(target_os = "windows")]
+         let part = {
+-            let whole = if l.alpha.is_some() { Some("alpha") } else if images_changed { Some("image") }
+-                else if !l.config.usage.contains(wgpu::TextureUsages::COPY_DST) { Some("no copies") } else { None };
++            let whole = if l.alpha.is_some() || rt.clear_color()[3] != 1.0 { Some("alpha") } else if images_changed { Some("image") } else { None };
+             match l.native.damage.plan(&rt.instances, size, rt.clear_color(), whole.is_none()) {
+                 super::damage::Plan::All(why) => { whole_why = Some(whole.unwrap_or(why)); None }
+                 super::damage::Plan::Part { draw, present } => {
+@@ -406,14 +403,13 @@ impl<S: 'static> Host<S> {
+             renderer.draw(&mut enc, target, rt.clear_color());
+         }
+         // Every frame, so a frame drawn whole leaves the renderer's kept frame behind.
+-        #[cfg(target_os = "windows")]
+         match (renderer.damage_drawn(), part) {
+             (Ok(()), part) => present_rect = part,
+             (Err(why), Some(_)) => whole_why = Some(why),
+             (Err(_), None) => {}
+         }
+         #[cfg(not(feature = "frame-profile"))]
+-        let _ = whole_why;
++        let _ = (whole_why, &present_rect);
+         if let Some(alpha) = &l.alpha { alpha.draw(&mut enc, &view); }
+         #[cfg(feature = "frame-profile")]
+         let fp_encoded = fp_start.map(|_| crate::frame::live_log::Stamp::now());
+@@ -455,15 +451,9 @@ impl<S: 'static> Host<S> {
+                 entry: fp_entry.unwrap_or(start), start, acquired, built, uploaded, encoded, submitted, presented: crate::frame::live_log::Stamp::now(),
+                 phases: crate::frame::profile::take(), nodes: rt.nodes.len(), shaped: rt.stats.shaped, instances: rt.instances.len(),
+                 animating, why: std::mem::take(&mut rt.commit_why), next: 0, poll_due: None, loop_due: None, loops: Vec::new(),
+-                #[cfg(target_os = "windows")]
+                 damage: present_rect,
+-                #[cfg(not(target_os = "windows"))]
+-                damage: None,
+                 whole: whole_why,
+-                #[cfg(target_os = "windows")]
+                 change: l.native.damage.seen,
+-                #[cfg(not(target_os = "windows"))]
+-                change: None,
+             }),
+             _ => None,
+         };
 diff --git a/crates/rune/src/window/events.rs b/crates/rune/src/window/events.rs
 index acb321e..b6dde14 100644
 --- a/crates/rune/src/window/events.rs
@@ -396,6 +963,34 @@ index acb321e..b6dde14 100644
                              #[cfg(target_os = "macos")]
                              rt.set_native_titlebar_band(mac::native_titlebar_band(&l.window));
                              rt.pointer_down(x, y);
+diff --git a/crates/rune/src/window/native.rs b/crates/rune/src/window/native.rs
+index 5550891..5468665 100644
+--- a/crates/rune/src/window/native.rs
++++ b/crates/rune/src/window/native.rs
+@@ -9,6 +9,7 @@ use std::sync::Arc;
+ /// still exist.
+ #[cfg(target_os = "macos")]
+ pub(super) struct Native {
++    pub(super) damage: super::damage::Damage,
+     pub(super) pacing: Option<crate::platform::display_link::DisplayLink>,
+     /// Reports when each drawable reached the screen, while tracing or for `shadow`.
+     pub(super) present: Option<crate::frame::present_time::metal::LayerHook>,
+@@ -67,6 +68,7 @@ mod tests;
+ #[derive(Default)]
+ pub(super) struct Native {
+     pub(super) activator: Option<crate::platform::activation::Activator>,
++    pub(super) damage: super::damage::Damage,
+ }
+ 
+ #[cfg(target_os = "windows")]
+@@ -102,4 +104,6 @@ pub(super) enum A11yStart {
+ 
+ #[cfg(not(any(target_os = "macos", target_os = "windows", all(unix, not(target_os = "ios"), not(target_os = "android")))))]
+ #[derive(Default)]
+-pub(super) struct Native;
++pub(super) struct Native {
++    pub(super) damage: super::damage::Damage,
++}
 diff --git a/crates/rune/src/window/platform_sync.rs b/crates/rune/src/window/platform_sync.rs
 index 20ad389..de1b6cc 100644
 --- a/crates/rune/src/window/platform_sync.rs
@@ -519,41 +1114,8 @@ index 4820ba1..bf73f35 100644
          .child(symbol_el(button, caption.maximized, ink, (w, h), scales));
      // The mouse presses them through the window procedure; assistive technology invokes these.
      // A dimmed button has nothing to invoke.
-diff --git a/crates/rune/src/platform/web/platform.js b/crates/rune/src/platform/web/platform.js
---- a/crates/rune/src/platform/web/platform.js
-+++ b/crates/rune/src/platform/web/platform.js
-@@ -2,7 +2,28 @@
- // is '' and `png` empty otherwise). Empty text isn't written beside another form.
- export async function writeClipboard(text, html, png) {
-     const clipboard = navigator.clipboard;
--    if (!clipboard) throw new Error('Clipboard requires HTTPS.');
-+    if (!clipboard) {
-+        const active = document.activeElement;
-+        const selection = document.getSelection();
-+        const ranges = selection ? Array.from({ length: selection.rangeCount }, (_, i) => selection.getRangeAt(i).cloneRange()) : [];
-+        const field = document.createElement('textarea');
-+        field.value = text;
-+        field.readOnly = true;
-+        field.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0';
-+        document.body.appendChild(field);
-+        try {
-+            field.select();
-+            if (!document.execCommand('copy')) throw new Error('Clipboard copy failed.');
-+        } finally {
-+            field.remove();
-+            if (active && typeof active.focus === 'function') active.focus({ preventScroll: true });
-+            if (selection) {
-+                selection.removeAllRanges();
-+                for (const range of ranges) selection.addRange(range);
-+            }
-+        }
-+        return;
-+    }
-     if ((!html && !png.length) || typeof ClipboardItem === 'undefined') return clipboard.writeText(text);
-     const forms = {};
-     if (text) forms['text/plain'] = new Blob([text], { type: 'text/plain' });
 diff --git a/crates/rune/src/window/win.rs b/crates/rune/src/window/win.rs
-index 40208c2..1790b42 100644
+index 40208c2..bdf4451 100644
 --- a/crates/rune/src/window/win.rs
 +++ b/crates/rune/src/window/win.rs
 @@ -79,6 +79,10 @@ pub(super) struct Win {
@@ -567,3 +1129,11 @@ index 40208c2..1790b42 100644
      pub(super) alpha: Option<crate::render::surface_alpha::AlphaSurface>,
      /// The frame a due timer asked for, until the window draws it, and whether only it asked
      /// (`TimerFrame`).
+@@ -122,6 +126,7 @@ impl Win {
+         if (self.config.width, self.config.height) == (width, height) { return false; }
+         self.config.width = width;
+         self.config.height = height;
++        self.native.damage.reset();
+         // No surface: `Host::reattach` is between the old one and the new, and takes this size
+         // from the window itself; or the CPU renderer draws it, whose buffer follows this size.
+         let (Some(surface), Some(gpu)) = (&self.surface, gpu) else { return true };
