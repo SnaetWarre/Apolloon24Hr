@@ -1,5 +1,12 @@
 use serde_json::{Value, json};
 
+#[derive(Debug, Default, PartialEq)]
+pub(super) struct Delivery {
+    /// Acceptance order, independent of clock or image fetch completion.
+    pub(super) sequence: u64,
+    pub(super) body: Value,
+}
+
 fn row_index(row: &Value) -> Value {
     let mut indexed = json!({"id":row["id"]});
     let labels: Vec<_> = row["labels"]
@@ -40,30 +47,37 @@ pub(super) fn delta_index(delta: &Value) -> Value {
     delta
 }
 
-pub(super) fn apply(held: &mut Value, pending: &mut Vec<Value>, reply: Value) -> bool {
-    if reply.is_null() || reply["revision"].as_i64() < held["revision"].as_i64() {
+pub(super) fn apply(
+    held: &mut Value,
+    sequence: &mut u64,
+    pending: &mut Vec<Delivery>,
+    reply: Delivery,
+) -> bool {
+    if reply.body.is_null() || reply.sequence <= *sequence {
         return false;
     }
-    let mut changed = false;
-    if reply["delta"] == true {
-        if reply["cursor"] != held["cursor"]
-            && !pending.iter().any(|r| r["cursor"] == reply["cursor"])
-        {
-            pending.push(reply);
-        }
-    } else if *held != reply {
-        *held = reply;
-        changed = true;
+    if reply.body["delta"] != true {
+        *sequence = reply.sequence - 1;
     }
+    pending.push(reply);
+    let mut changed = false;
     loop {
-        pending.retain(|r| {
-            r["revision"].as_i64() >= held["revision"].as_i64() && r["cursor"] != held["cursor"]
-        });
-        let Some(at) = pending.iter().position(|r| r["since"] == held["cursor"]) else {
+        pending.retain(|r| r.sequence > *sequence);
+        let Some(at) = pending.iter().position(|r| r.sequence == *sequence + 1) else {
             break;
         };
-        let delta = pending.remove(at);
-        changed |= super::merge_history(held, &delta);
+        let reply = pending.remove(at);
+        *sequence = reply.sequence;
+        let body = reply.body;
+        if body["revision"].as_i64() < held["revision"].as_i64() {
+            continue;
+        }
+        if body["delta"] == true {
+            changed |= super::merge_history(held, &body);
+        } else if *held != body {
+            *held = body;
+            changed = true;
+        }
     }
     changed
 }
@@ -88,40 +102,60 @@ mod tests {
         let delivered = synced.take_history(reply).unwrap();
         assert_eq!(
             payload,
-            delivered["laps"][0]["payload"].as_str().unwrap().as_ptr()
+            delivered.body["laps"][0]["payload"]
+                .as_str()
+                .unwrap()
+                .as_ptr()
         );
         assert_eq!(
             synced.history["laps"],
             json!([{"id":"lap","labels":[{"imageUrl":"old.png"}]}])
         );
         let update = synced.take_history(delta(2, "next")).unwrap();
-        assert_eq!(update["delta"], true);
+        assert_eq!(update.body["delta"], true);
         assert_eq!(
             synced.history["laps"],
             json!([{"id":"next","labels":[{"imageUrl":"new.png"}]}])
         );
         assert!(!super::super::image_urls(&Value::Null, &synced.history).contains("old.png"));
-        assert!(super::super::image_urls(&Value::Null, &update).contains("new.png"));
+        assert!(super::super::image_urls(&Value::Null, &update.body).contains("new.png"));
     }
 
     #[test]
     fn reordered_deltas_and_full_recovery_keep_latest_history() {
         let mut synced = Synced::default();
-        let mut held = synced.take_history(full()).unwrap();
+        let initial = synced.take_history(full()).unwrap();
+        let mut sequence = initial.sequence;
+        let mut held = initial.body;
         let mut pending = Vec::new();
         let next = synced.take_history(delta(2, "next")).unwrap();
         let later = synced.take_history(delta(3, "last")).unwrap();
-        assert!(!apply(&mut held, &mut pending, later));
-        assert!(apply(&mut held, &mut pending, next));
+        assert!(!apply(&mut held, &mut sequence, &mut pending, later));
+        assert!(apply(&mut held, &mut sequence, &mut pending, next));
         assert_eq!(held["laps"][0]["id"], "last");
         assert_eq!(held["cursor"], "epoch.3");
         assert!(pending.is_empty());
-        assert!(!apply(&mut held, &mut pending, full()));
-        assert!(!apply(&mut held, &mut pending, Value::Null));
+        assert!(!apply(
+            &mut held,
+            &mut sequence,
+            &mut pending,
+            synced.take_history(full()).unwrap()
+        ));
+        assert!(!apply(
+            &mut held,
+            &mut sequence,
+            &mut pending,
+            Delivery::default()
+        ));
         let mut recovery = full();
         recovery["revision"] = json!(4);
         recovery["cursor"] = json!("new.1");
-        assert!(apply(&mut held, &mut pending, recovery));
+        assert!(apply(
+            &mut held,
+            &mut sequence,
+            &mut pending,
+            synced.take_history(recovery).unwrap()
+        ));
         assert_eq!(held["laps"][0]["id"], "lap");
     }
 
@@ -136,14 +170,39 @@ mod tests {
     }
 
     #[test]
+    fn overtaken_full_reply_cannot_rewind_the_base_for_a_new_epoch_delta() {
+        let mut synced = Synced::default();
+        let old = synced.take_history(full()).unwrap();
+        let mut recovery = full();
+        recovery["cursor"] = json!("new.1");
+        let newest = synced.take_history(recovery.clone()).unwrap();
+        let mut held = Value::Null;
+        let mut pending = Vec::new();
+        let mut sequence = 0;
+        assert!(apply(&mut held, &mut sequence, &mut pending, newest));
+        assert!(!apply(&mut held, &mut sequence, &mut pending, old));
+        assert_eq!(held, recovery);
+        let mut next = delta(2, "next");
+        next["since"] = json!("new.1");
+        next["cursor"] = json!("new.2");
+        let next = synced.take_history(next).unwrap();
+        assert!(apply(&mut held, &mut sequence, &mut pending, next));
+        assert_eq!(held["cursor"], "new.2");
+        assert_eq!(held["laps"][0]["id"], "next");
+        assert!(pending.is_empty());
+    }
+
+    #[test]
     fn empty_replies_and_unchanged_image_paths_preserve_delivery_semantics() {
         let mut synced = Synced::default();
-        assert_eq!(synced.take_history(Value::Null), Some(Value::Null));
+        assert_eq!(synced.take_history(Value::Null), Some(Delivery::default()));
         let empty = json!({"revision":0,"cursor":"epoch.0","laps":[],"events":[]});
         let mut held = Value::Null;
         let mut pending = Vec::new();
+        let mut sequence = 0;
         assert!(apply(
             &mut held,
+            &mut sequence,
             &mut pending,
             synced.take_history(empty.clone()).unwrap()
         ));
@@ -151,6 +210,7 @@ mod tests {
         let complete = full();
         assert!(apply(
             &mut held,
+            &mut sequence,
             &mut pending,
             synced.take_history(complete.clone()).unwrap()
         ));
@@ -158,6 +218,7 @@ mod tests {
         let unchanged = json!({"delta":true,"revision":2,"since":"epoch.1","cursor":"epoch.2","changes":{"laps":{"count":1,"removed":[],"changed":[]},"events":{"count":0,"removed":[],"changed":[]}}});
         assert!(apply(
             &mut held,
+            &mut sequence,
             &mut pending,
             synced.take_history(unchanged).unwrap()
         ));

@@ -71,7 +71,7 @@ struct Command {
 struct Update {
     partial: bool,
     snapshot: Value,
-    history: Value,
+    history: history_delivery::Delivery,
     outcome: Option<(String, Result<Value, String>)>,
     recovery: Value,
     images: Vec<(String, Vec<u8>)>,
@@ -128,7 +128,8 @@ pub struct State {
     dark: bool,
     snapshot: Value,
     history: Value,
-    history_pending: Vec<Value>,
+    history_sequence: u64,
+    history_pending: Vec<history_delivery::Delivery>,
     error: String,
     busy: bool,
     connected: bool,
@@ -287,6 +288,7 @@ fn init_with_url(url: String) -> State {
         dark: shell::initial_dark(),
         snapshot: Value::Null,
         history: json!({"laps":[]}),
+        history_sequence: 0,
         history_pending: Vec::new(),
         error: String::new(),
         busy: false,
@@ -457,7 +459,7 @@ fn poll(s: &mut State, _: f64, tx: &mut Tx) -> bool {
             s.snapshot = update.snapshot;
             changed = true;
         }
-        changed |= history_delivery::apply(&mut s.history, &mut s.history_pending, update.history);
+        changed |= history_delivery::apply(&mut s.history, &mut s.history_sequence, &mut s.history_pending, update.history);
         if !update.recovery.is_null() && s.recovery != update.recovery {
             s.recovery = update.recovery;
             changed |= !public;
@@ -1443,8 +1445,8 @@ mod tests {
     fn racing_history_deltas_request_a_full_recovery_instead_of_waiting_for_another_change() {
         let mut synced = Synced { history: json!({"cursor":"epoch.2", "revision":2}), ..Default::default() };
         assert_eq!(synced.take_history(json!({"delta":true,"since":"epoch.1","cursor":"epoch.3"})), None);
-        assert_eq!(synced.take_history(json!({"delta":true,"since":"epoch.1","cursor":"epoch.2"})), Some(Value::Null));
-        assert_eq!(synced.take_history(Value::Null), Some(Value::Null));
+        assert_eq!(synced.take_history(json!({"delta":true,"since":"epoch.1","cursor":"epoch.2"})), Some(Default::default()));
+        assert_eq!(synced.take_history(Value::Null), Some(Default::default()));
     }
 
     #[test]
@@ -2686,6 +2688,7 @@ fn clock_offset(samples: impl IntoIterator<Item = (i64, i64, i64)>) -> Option<i6
 #[derive(Default)]
 struct Synced {
     history_revision: Option<i64>,
+    history_sequence: u64,
     /// Identities validate deltas and image paths retain retries; payloads move to the UI.
     history: Value,
     images: std::collections::HashSet<String>,
@@ -2705,13 +2708,13 @@ impl Synced {
         }
     }
     /// Move a validated full or delta reply to the UI; `None` requests full recovery.
-    fn take_history(&mut self, reply: Value) -> Option<Value> {
+    fn take_history(&mut self, reply: Value) -> Option<history_delivery::Delivery> {
         if reply.is_null() {
-            return Some(Value::Null);
+            return Some(Default::default());
         }
         if reply["delta"] == true {
             if reply["cursor"] == self.history["cursor"] {
-                return Some(Value::Null);
+                return Some(Default::default());
             }
             if reply["since"] != self.history["cursor"] {
                 return None;
@@ -2723,10 +2726,11 @@ impl Synced {
         } else if reply["revision"].as_i64() >= self.history["revision"].as_i64() {
             self.history = history_delivery::index(&reply);
         } else {
-            return Some(Value::Null);
+            return Some(Default::default());
         }
         self.history_revision = self.history["revision"].as_i64();
-        Some(reply)
+        self.history_sequence += 1;
+        Some(history_delivery::Delivery { sequence: self.history_sequence, body: reply })
     }
 }
 /// Applies `/api/history?since=` changes to a full history; `false` when they do not line up.
@@ -2848,7 +2852,7 @@ fn start_transport(url: String, commands: Receiver<Command>, updates: Updates, _
             let history = synced.lock().unwrap().take_history(reply);
             history.unwrap_or_else(|| {
                 let full = get(client, url, "/api/history?scope=full");
-                synced.lock().unwrap().take_history(full).unwrap_or(Value::Null)
+                synced.lock().unwrap().take_history(full).unwrap_or_default()
             })
         } else if changed {
             let path = synced.lock().unwrap().history_path();
@@ -2856,10 +2860,10 @@ fn start_transport(url: String, commands: Receiver<Command>, updates: Updates, _
             let history = synced.lock().unwrap().take_history(reply);
             history.unwrap_or_else(|| {
                 let full = get(client, url, "/api/history?scope=full");
-                synced.lock().unwrap().take_history(full).unwrap_or(Value::Null)
+                synced.lock().unwrap().take_history(full).unwrap_or_default()
             })
         } else {
-            Value::Null
+            Default::default()
         };
         let recovery = Value::Null;
         crate::latency::snapshot("history_merged", &snapshot);
@@ -3027,7 +3031,7 @@ fn start_transport(url: String, commands: Receiver<Command>, updates: Updates, c
             Some(history) => history,
             None => {
                 let full = get(client, url, "/api/history?scope=full").await;
-                synced.borrow_mut().take_history(full).unwrap_or(Value::Null)
+                synced.borrow_mut().take_history(full).unwrap_or_default()
             }
         };
         crate::latency::snapshot("history_merged", &snapshot);
