@@ -38,6 +38,7 @@ use overview::overview;
 mod shell;
 mod tactics_page;
 mod timing_page;
+mod history_sync;
 #[cfg(test)]
 mod cluster_ui_test;
 #[cfg(test)]
@@ -71,6 +72,7 @@ struct Update {
     partial: bool,
     snapshot: Value,
     history: Value,
+    history_changes: Option<std::sync::Arc<std::sync::Mutex<history_sync::Pending>>>,
     outcome: Option<(String, Result<Value, String>)>,
     recovery: Value,
     images: Vec<(String, Vec<u8>)>,
@@ -126,6 +128,8 @@ pub struct State {
     dark: bool,
     snapshot: Value,
     history: Value,
+    history_version: u64,
+    history_index: history_sync::Index,
     error: String,
     busy: bool,
     connected: bool,
@@ -284,6 +288,8 @@ fn init_with_url(url: String) -> State {
         dark: shell::initial_dark(),
         snapshot: Value::Null,
         history: json!({"laps":[]}),
+        history_version: 0,
+        history_index: Default::default(),
         error: String::new(),
         busy: false,
         connected: false,
@@ -441,11 +447,44 @@ fn poll(s: &mut State, _: f64, tx: &mut Tx) -> bool {
             s.snapshot = update.snapshot;
             changed = true;
         }
+        if let Some(pending) = update.history_changes {
+            let mut pending = pending.lock().unwrap();
+            for reply in std::mem::take(&mut pending.replies) {
+                if reply["delta"] == true {
+                    match s.history_index.apply(&mut s.history, &reply) {
+                        Some(real_change) => {
+                            if real_change { s.history_version = s.history_version.wrapping_add(1); }
+                            changed |= real_change;
+                        }
+                        None => {
+                            pending.reset = true;
+                            s.history = Value::Null;
+                            s.history_index = Default::default();
+                            s.history_version = s.history_version.wrapping_add(1);
+                            changed = true;
+                            break;
+                        }
+                    }
+                } else {
+                    let real_change = s.history["laps"] != reply["laps"]
+                        || s.history["events"] != reply["events"]
+                        || s.history["error"] != reply["error"];
+                    changed |= s.history != reply;
+                    s.history = reply;
+                    if real_change {
+                        s.history_index = history_sync::Index::new(&s.history);
+                        s.history_version = s.history_version.wrapping_add(1);
+                    }
+                }
+            }
+        }
         if !update.history.is_null()
             && !older(&update.history, &s.history)
             && s.history != update.history
         {
             s.history = update.history;
+            s.history_index = history_sync::Index::new(&s.history);
+            s.history_version = s.history_version.wrapping_add(1);
             changed = true;
         }
         if !update.recovery.is_null() && s.recovery != update.recovery {
@@ -2564,6 +2603,9 @@ fn image_urls(snapshot: &Value, history: &Value) -> std::collections::HashSet<St
     for lap in history["laps"].as_array().into_iter().flatten() {
         collect(&lap["labels"]);
     }
+    for pair in history["changes"]["laps"]["changed"].as_array().into_iter().flatten() {
+        collect(&pair[1]["labels"]);
+    }
     urls
 }
 fn label_badge(value: &Value, s: &State) -> El {
@@ -2605,51 +2647,54 @@ fn clock_offset(samples: impl IntoIterator<Item = (i64, i64, i64)>) -> Option<i6
 #[derive(Default)]
 struct Synced {
     history_revision: Option<i64>,
-    /// The full history as last shown; later reads ask only for what changed since its cursor.
+    /// Last accepted cursor and revision; the UI owns the rows.
     history: Value,
+    pending: std::sync::Arc<std::sync::Mutex<history_sync::Pending>>,
     images: std::collections::HashSet<String>,
 }
 impl Synced {
     fn state_path(&self, after: Option<&str>, screen: Option<&str>) -> String {
         let mut path = String::from("/api/state?history=1");
-        if let Some(after) = after { path.push_str(&format!("&after={after}")); }
-        if let Some(cursor) = self.history["cursor"].as_str() { path.push_str(&format!("&since={cursor}")); }
+        if !self.pending.lock().unwrap().reset {
+            if let Some(after) = after { path.push_str(&format!("&after={after}")); }
+            if let Some(cursor) = self.history["cursor"].as_str() { path.push_str(&format!("&since={cursor}")); }
+        }
         if let Some(screen) = screen { path.push_str(&format!("&screen={screen}")); }
         path
     }
     fn history_path(&self) -> String {
+        if self.pending.lock().unwrap().reset { return "/api/history?scope=full".into(); }
         match self.history["cursor"].as_str() {
             Some(cursor) => format!("/api/history?scope=full&since={cursor}"),
             None => "/api/history?scope=full".into(),
         }
     }
-    /// The full history to show for a reply to `history_path`, or `None` when the changes did
-    /// not fit what is held and the full history has to be fetched again.
+    /// Queues a reply in acceptance order; None asks the caller for a full recovery.
     fn take_history(&mut self, reply: Value) -> Option<Value> {
         if reply.is_null() {
             return Some(Value::Null);
         }
         if reply["delta"] == true {
+            if self.pending.lock().unwrap().reset { return None; }
             if reply["cursor"] == self.history["cursor"] {
                 return Some(Value::Null);
             }
             if reply["since"] != self.history["cursor"] {
                 return None;
             }
-            if !merge_history(&mut self.history, &reply) {
-                self.history = Value::Null;
-                return None;
-            }
-        } else if reply["revision"].as_i64() >= self.history["revision"].as_i64() {
-            self.history = reply;
-        } else {
+        } else if reply["revision"].as_i64() < self.history["revision"].as_i64() {
             return Some(Value::Null);
         }
+        self.history = json!({"cursor":reply["cursor"],"revision":reply["revision"]});
         self.history_revision = self.history["revision"].as_i64();
-        Some(self.history.clone())
+        let mut pending = self.pending.lock().unwrap();
+        if reply["delta"] != true { pending.reset = false; pending.replies.clear(); }
+        pending.replies.push(reply.clone());
+        Some(reply)
     }
 }
 /// Applies `/api/history?since=` changes to a full history; `false` when they do not line up.
+#[cfg(test)]
 pub(crate) fn merge_history(held: &mut Value, delta: &Value) -> bool {
     fn merge(held: Value, change: &Value) -> Option<Value> {
         let Value::Array(held) = held else { return None };
@@ -2782,7 +2827,8 @@ fn start_transport(url: String, commands: Receiver<Command>, updates: Updates, _
         Update {
             partial: false,
             snapshot,
-            history,
+            history: Value::Null,
+            history_changes: Some(synced.lock().unwrap().pending.clone()),
             recovery,
             images,
             clock_offset: None,
@@ -2923,7 +2969,8 @@ fn start_transport(url: String, commands: Receiver<Command>, updates: Updates, c
         Update {
             partial: false,
             snapshot,
-            history,
+            history: Value::Null,
+            history_changes: Some(synced.borrow().pending.clone()),
             recovery: Value::Null,
             images,
             clock_offset: None,

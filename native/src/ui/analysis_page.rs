@@ -475,6 +475,16 @@ fn number_nl(v: Option<f64>, digits: usize) -> String {
 // ---------- Header ----------
 
 pub(super) fn header_meta(s: &State) -> El {
+    rune::memo("analysis-header-derived", version(s), || header_meta_uncached(s))
+}
+
+fn version(s: &State) -> impl std::hash::Hash + '_ {
+    let p = &s.analysis_page;
+    let runners: Vec<_> = super::runners(s).iter().map(|r| json!([r["id"],r["name"],r["runnerNumber"]])).collect();
+    (s.history_version, json!([s.snapshot["race"],s.snapshot["labels"],runners,p.enabled,p.section,p.sort,p.window,s.dark,s.logos.len()]).to_string(), &p.search)
+}
+
+fn header_meta_uncached(s: &State) -> El {
     let all = laps(s);
     let labels = analysis_labels(s);
     let filtered = filter_laps(&all, &s.analysis_page.enabled);
@@ -921,6 +931,10 @@ fn section_nav(s: &State, p: &Pal) -> El {
 }
 
 pub(super) fn page(s: &State) -> El {
+    rune::memo("analysis-derived", version(s), || page_uncached(s))
+}
+
+fn page_uncached(s: &State) -> El {
     let p = pal(s.dark);
     let all = laps(s);
     let labels = analysis_labels(s);
