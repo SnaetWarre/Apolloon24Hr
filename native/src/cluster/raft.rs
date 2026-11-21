@@ -237,9 +237,11 @@ impl Node {
             st.resync_problem = None;
             st.progress.clear();
             st.group_view.clear();
-            // The first entry of this leadership: nothing from an earlier term counts as
-            // confirmed until a majority holds it.
-            if self.members().len() > 1 {
+            // The first entry of a leadership won by vote: nothing from an earlier term counts as
+            // confirmed until a majority holds it. A laptop going on alone was not elected and
+            // gets no such entry: if it stops before the split is stored, it must not outrank
+            // the group it is still in.
+            if was == Role::Candidate {
                 let _ = log::append_empty(&self.db.lock().unwrap(), "cluster.newLeader");
             }
             self.set_discovery_leader(true);
