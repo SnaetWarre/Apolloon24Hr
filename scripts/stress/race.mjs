@@ -18,25 +18,29 @@ export function options(args) {
     binary: 'native/target/release/apolloon-native',
     seed: 'apolloon-24',
     backups: true,
+    chaos: 'on',
   };
   for (let i = 0; i < args.length; i += 2) {
     const key = args[i].slice(2);
     if (
-      !['hours', 'ratio', 'out', 'work', 'binary', 'seed', 'compare'].includes(key) ||
+      !['hours', 'ratio', 'out', 'work', 'binary', 'seed', 'compare', 'laps', 'chaos'].includes(key) ||
       !args[i].startsWith('--') ||
       !args[i + 1]
     )
       throw new Error(`Invalid flag: ${args[i]}`);
-    config[key] = ['hours', 'ratio'].includes(key) ? Number(args[i + 1]) : args[i + 1];
+    config[key] = ['hours', 'ratio', 'laps'].includes(key) ? Number(args[i + 1]) : args[i + 1];
   }
   if (![config.hours, config.ratio].every((n) => Number.isFinite(n) && n > 0))
     throw new Error('hours and ratio must be positive finite numbers');
+  if (config.laps !== undefined && (!Number.isSafeInteger(config.laps) || config.laps < 1))
+    throw new Error('laps must be a positive integer');
+  if (!['on', 'off'].includes(config.chaos)) throw new Error('chaos must be on or off');
   const nested = relative(resolve(config.out), resolve(config.work));
   if (!nested || (nested !== '..' && !nested.startsWith('../') && !isAbsolute(nested)))
     throw new Error('--work must be outside --out');
   return config;
 }
-export function schedule(hours, seed) {
+export function schedule(hours, seed, lapCount) {
   let x = 2166136261;
   for (const c of String(seed)) x = Math.imul(x ^ c.charCodeAt(0), 16777619);
   const random = () => {
@@ -46,12 +50,15 @@ export function schedule(hours, seed) {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
   const laps = [];
-  for (let seconds = 60 + random() * 30; seconds < hours * 3600; seconds += 60 + random() * 30) {
+  let seconds = 60 + random() * 30;
+  while (lapCount === undefined ? seconds < hours * 3600 : laps.length < lapCount) {
     laps.push(seconds);
-    if (laps.length % 80 === 0) for (let j = 1; j <= 3; j++) laps.push(seconds + j * 2);
+    if (laps.length % 80 === 0)
+      for (let j = 1; j <= 3 && (lapCount === undefined || laps.length < lapCount); j++) laps.push(seconds + j * 2);
+    seconds += 60 + random() * 30;
   }
   return {
-    laps,
+    laps: lapCount === undefined ? laps : laps.map((at) => at * ((hours * 3600) / seconds)),
     chaos: ['follower-freeze', 'leader-freeze', 'laptop-out', 'leader-terminate', 'two-down'].map((kind, i) => ({
       kind,
       raceSeconds: hours * 3600 * [0.12, 0.28, 0.45, 0.67, 0.84][i],
@@ -212,7 +219,8 @@ export async function main(args = process.argv.slice(2)) {
     ramBytes: os.totalmem(),
     platform: os.platform(),
   };
-  const plan = schedule(config.hours, config.seed);
+  const plan = schedule(config.hours, config.seed, config.laps);
+  if (config.chaos === 'off') plan.chaos = [];
   const out = resolve(config.out);
   const work = resolve(config.work);
   await Promise.all([mkdir(out, { recursive: true }), mkdir(work, { recursive: true })]);
@@ -613,6 +621,8 @@ export async function main(args = process.argv.slice(2)) {
     };
     if (!result.final.lapIds.every((ids) => JSON.stringify(ids) === JSON.stringify(result.final.lapIds[0])))
       result.failures.push('Nodes disagree on lap IDs/count');
+    if (config.laps !== undefined && config.chaos === 'off' && histories.some((h) => h.laps.length !== config.laps))
+      result.failures.push(`Expected ${config.laps} persisted laps on each node`);
     for (const ack of result.acknowledgements)
       if (histories.some((h) => h.laps.filter((l) => l.id === ack.lapId).length !== 1))
         result.failures.push(`Lost/duplicate acknowledged lap ${ack.lapId}`);

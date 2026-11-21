@@ -1,6 +1,13 @@
 //! Read contracts shared by the native operator UI and LAN clients.
 use crate::db::{Db, Result, parse_labels};
 use serde_json::{Value, json};
+const HISTORY_LAPS: &str =
+    "SELECT l.id,l.runner_id AS runnerId,r.runner_number AS runnerNumber,r.name AS runnerName,
+    l.lap_number AS lapNumber,l.started_at AS startedAt,l.finished_at AS finishedAt,
+    l.duration_ms AS durationMs,l.source,l.created_at AS createdAt,l.labels_json AS labels
+    FROM laps l JOIN runners r ON r.id=l.runner_id";
+const HISTORY_EVENTS: &str = "SELECT id,type,message,occurred_at AS occurredAt,runner_id AS runnerId,
+    runner_number AS runnerNumber,runner_name AS runnerName,created_at AS createdAt FROM race_events";
 impl Db {
     pub fn history(&self) -> Result<Value> {
         self.history_scope("full", None, 0)
@@ -24,12 +31,11 @@ impl Db {
             }
             _ => return Err("Onbekende geschiedenisselectie".into()),
         };
-        let mut laps = self.rows(&format!(
-            "SELECT l.id,l.runner_id AS runnerId,r.runner_number AS runnerNumber,r.name AS runnerName,
-             l.lap_number AS lapNumber,l.started_at AS startedAt,l.finished_at AS finishedAt,
-             l.duration_ms AS durationMs,l.source,l.created_at AS createdAt,l.labels_json AS labels
-             FROM laps l JOIN runners r ON r.id=l.runner_id{filter}
-             ORDER BY l.finished_at DESC,l.rowid DESC{limit_sql}"),
+        let mut laps = self.rows(
+            &format!(
+                "{HISTORY_LAPS}{filter}
+             ORDER BY l.finished_at DESC,l.rowid DESC{limit_sql}"
+            ),
             &args,
         )?;
         for lap in &mut laps {
@@ -39,9 +45,7 @@ impl Db {
             Vec::new()
         } else {
             self.rows(
-                "SELECT id,type,message,occurred_at AS occurredAt,runner_id AS runnerId,
-                 runner_number AS runnerNumber,runner_name AS runnerName,created_at AS createdAt
-                 FROM race_events ORDER BY occurred_at DESC,rowid DESC LIMIT ?",
+                &format!("{HISTORY_EVENTS} ORDER BY occurred_at DESC,rowid DESC LIMIT ?"),
                 &[json!(
                     reported_limit.map(|n| n.min(100) as i64).unwrap_or(-1)
                 )],
@@ -50,6 +54,38 @@ impl Db {
         Ok(
             json!({"scope":scope,"runnerId":runner_id,"limit":reported_limit,"laps":laps,"events":events,"revision":self.revision}),
         )
+    }
+    pub(crate) fn history_rows(
+        &self,
+        table: &str,
+        rowids: &std::collections::BTreeSet<i64>,
+    ) -> Result<Vec<Value>> {
+        let (select, rowid) = match table {
+            "laps" => (HISTORY_LAPS, "l.rowid"),
+            "race_events" => (HISTORY_EVENTS, "rowid"),
+            "runners" => (
+                "SELECT id,name,runner_number AS runnerNumber FROM runners",
+                "rowid",
+            ),
+            _ => return Err("Onbekende geschiedenistabel".into()),
+        };
+        let select = select.replacen("SELECT ", &format!("SELECT {rowid} AS _rowid,"), 1);
+        let ids: Vec<_> = rowids.iter().map(|id| json!(id)).collect();
+        let mut result = Vec::new();
+        for chunk in ids.chunks(500) {
+            let placeholders = vec!["?"; chunk.len()].join(",");
+            let mut rows = self.rows(
+                &format!("{select} WHERE {rowid} IN ({placeholders})"),
+                chunk,
+            )?;
+            if table == "laps" {
+                for row in &mut rows {
+                    row["labels"] = parse_labels(&row["labels"]);
+                }
+            }
+            result.extend(rows);
+        }
+        Ok(result)
     }
     pub fn registrations(&self) -> Result<Value> {
         let mut output = serde_json::Map::new();

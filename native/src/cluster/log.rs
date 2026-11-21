@@ -364,7 +364,16 @@ fn apply(db: &mut Db, entries: &[Entry]) -> Result<()> {
         insert(db, entry)?;
         expected += 1;
     }
+    let laps: Vec<String> = if crate::latency::enabled() {
+        entries.iter().filter(|e| e.kind == "race.handoff").flat_map(|e| e.statements.iter())
+            .filter(|s| s.sql.starts_with("INSERT INTO laps("))
+            .filter_map(|s| s.params.first().and_then(Value::as_str).map(str::to_owned)).collect()
+    } else { Vec::new() };
+    let _trace = if laps.is_empty() { None } else {
+        Some(crate::latency::commit_context(laps.iter().map(|id| (id.clone(), id.clone())).collect()))
+    };
     transaction.commit().map_err(err)?;
+    for lap in laps { crate::latency::emit("replica_apply", &lap, Some(&lap)); }
     db.revision += 1;
     Ok(())
 }

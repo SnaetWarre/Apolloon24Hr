@@ -1,4 +1,5 @@
 //! Schema-17 storage. Every operator action and its undo snapshot share one durable transaction.
+pub(crate) mod history_changes;
 use rusqlite::{
     Connection, params_from_iter,
     types::{Value as SqlValue, ValueRef},
@@ -38,6 +39,9 @@ fn sql_value(v: &Value) -> SqlValue {
 pub struct Db {
     pub conn: Connection,
     pub revision: i64,
+    changes: tokio::sync::watch::Sender<u64>,
+    epoch: String,
+    history_changes: std::sync::Arc<std::sync::Mutex<history_changes::Journal>>,
     /// Set by the linked-laptop runtime: every statement `exec` runs is recorded for replication.
     pub capture: std::cell::RefCell<Option<crate::cluster::log::Capture>>,
 }
@@ -72,11 +76,7 @@ impl Db {
             "INSERT OR IGNORE INTO race_state(id) VALUES(1); PRAGMA user_version=17;",
         )
         .map_err(err)?;
-        let db = Self {
-            conn,
-            revision: now(),
-            capture: Default::default(),
-        };
+        let db = Self::from_connection(conn, now())?;
         if tables == 0 {
             db.exec(
                 "INSERT INTO settings(key,value) VALUES('schema_version','17')",
@@ -92,6 +92,94 @@ impl Db {
             return Err("Databasecontrole mislukt".into());
         }
         Ok(db)
+    }
+    pub(crate) fn from_connection(conn: Connection, revision: i64) -> Result<Self> {
+        let (changes, _) = tokio::sync::watch::channel(0u64);
+        let history_changes = std::sync::Arc::new(std::sync::Mutex::new(
+            history_changes::Journal::new(conn.total_changes()),
+        ));
+        let updated = history_changes.clone();
+        conn.update_hook(Some(move |_action, schema: &str, table: &str, rowid| {
+            updated.lock().unwrap().update(schema, table, rowid);
+        })).map_err(err)?;
+        let committed_rows = history_changes.clone();
+        let committed = changes.clone();
+        conn.commit_hook(Some(move || {
+            committed_rows.lock().unwrap().commit();
+            committed.send_modify(|version| *version = version.wrapping_add(1));
+            crate::latency::notify();
+            false
+        })).map_err(err)?;
+        let rolled_back = changes.clone();
+        let rolled_back_rows = history_changes.clone();
+        conn.rollback_hook(Some(move || {
+            rolled_back_rows.lock().unwrap().rollback();
+            rolled_back.send_modify(|version| *version = version.wrapping_add(1));
+        }))
+        .map_err(err)?;
+        Ok(Self {
+            conn,
+            revision,
+            changes,
+            epoch: id(),
+            history_changes,
+            capture: Default::default(),
+        })
+    }
+    pub fn change_token(&self) -> String {
+        format!(
+            "{}.{}.{}.{}.{}.{}",
+            self.epoch,
+            self.revision,
+            self.conn.total_changes(),
+            self.history_generation(),
+            self.data_version().unwrap_or_default(),
+            self.schema_version().unwrap_or_default()
+        )
+    }
+    pub(crate) fn history_generation(&self) -> u64 {
+        let mut journal = self.history_changes.lock().unwrap();
+        journal.observe(self.conn.total_changes());
+        journal.generation
+    }
+    pub(crate) fn history_changes_since(
+        &self,
+        generation: Option<u64>,
+    ) -> Option<history_changes::Changes> {
+        self.history_changes.lock().unwrap().since(generation)
+    }
+    pub(crate) fn data_version(&self) -> Result<i64> {
+        self.conn
+            .pragma_query_value(None, "data_version", |r| r.get(0))
+            .map_err(err)
+    }
+    pub(crate) fn schema_version(&self) -> Result<i64> {
+        self.conn
+            .pragma_query_value(None, "schema_version", |r| r.get(0))
+            .map_err(err)
+    }
+    pub fn subscribe(&self) -> tokio::sync::watch::Receiver<u64> {
+        self.changes.subscribe()
+    }
+    pub(crate) fn read_snapshot(&self) -> Result<Self> {
+        let mode: String = self.conn.pragma_query_value(None, "journal_mode", |r| r.get(0)).map_err(err)?;
+        let conn = if mode.eq_ignore_ascii_case("wal") {
+            let conn = Connection::open_with_flags(
+                self.conn.path().ok_or("Databasepad ontbreekt")?,
+                rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+            ).map_err(err)?;
+            conn.busy_timeout(std::time::Duration::from_secs(5)).map_err(err)?;
+            conn.execute_batch("BEGIN").map_err(err)?;
+            conn.query_row("SELECT id FROM race_state LIMIT 1", [], |_| Ok(())).map_err(err)?;
+            conn
+        } else {
+            let mut conn = Connection::open_in_memory().map_err(err)?;
+            rusqlite::backup::Backup::new(&self.conn, &mut conn).map_err(err)?
+                .run_to_completion(128, std::time::Duration::from_millis(1), None).map_err(err)?;
+            conn
+        };
+        conn.execute_batch("PRAGMA query_only=ON").map_err(err)?;
+        Self::from_connection(conn, self.revision)
     }
     pub fn rows(&self, sql: &str, args: &[Value]) -> Result<Vec<Value>> {
         let mut stmt = self.conn.prepare(sql).map_err(err)?;
@@ -253,7 +341,18 @@ impl Db {
                 entry.map(|entry| crate::cluster::log::Prepared::new(self, entry)),
             ));
         }
+        let _trace = if crate::latency::enabled() && method == "race.handoff" {
+            result["lapId"].as_str().map(|lap| {
+                crate::latency::commit_context(vec![(
+                    crate::latency::handoff_id(input),
+                    lap.to_owned(),
+                )])
+            })
+        } else {
+            None
+        };
         transaction.commit().map_err(err)?;
+        if method == "race.handoff" { crate::latency::handoff("local_commit", input, result["lapId"].as_str()); }
         self.revision += 1;
         Ok((result, None))
     }
