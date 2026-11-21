@@ -453,6 +453,7 @@ impl Node {
                 if old.url == member.url
                     && old.host_id != member.host_id
                     && old.host_id != me.host_id
+                    && member.host_id != me.host_id
                 {
                     log::remove_member(db, &old.host_id)?;
                     change_timing(db, "release", &old.host_id, None)?;
