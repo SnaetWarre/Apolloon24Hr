@@ -536,6 +536,7 @@ impl Db {
             self.conn
                 .execute_batch("SAVEPOINT import_row")
                 .map_err(crate::db::err)?;
+            let recorded = self.capture.borrow().as_ref().map(|c| c.statements.len());
             match self.import_upsert(input, &earlier) {
                 Ok((created, rid, taken)) => {
                     self.conn
@@ -560,6 +561,12 @@ impl Db {
                     self.conn
                         .execute_batch("ROLLBACK TO import_row; RELEASE import_row")
                         .map_err(crate::db::err)?;
+                    // The other laptops replay what was recorded: a skipped row leaves nothing.
+                    if let (Some(capture), Some(kept)) =
+                        (self.capture.borrow_mut().as_mut(), recorded)
+                    {
+                        capture.statements.truncate(kept);
+                    }
                     summary["skipped"] = json!(summary["skipped"].as_u64().unwrap() + 1);
                     errors.push(format!("Rij {row_number}: {e}"));
                 }
