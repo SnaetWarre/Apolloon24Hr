@@ -437,6 +437,39 @@ impl Node {
         })
     }
 
+    /// The leader takes a laptop in after a link request. A laptop that is new to the group
+    /// replaces the one that has been silent longest, when one has been silent long enough to be
+    /// taken out: otherwise the group grows by a laptop that cannot vote and needs every other
+    /// one for a majority. Taking out and taking in are two writes, each changing the group by
+    /// one laptop; when the first fails the link is refused.
+    pub fn take_in(&self, member: &Member, auto: Option<&str>) -> Result<()> {
+        let group = self.members();
+        let new_here = !group
+            .iter()
+            .any(|m| m.host_id == member.host_id || m.url == member.url);
+        if new_here {
+            self.group_settled();
+            let silent = {
+                let st = self.raft.lock().unwrap();
+                self.view(&st)
+                    .into_iter()
+                    .filter(|v| {
+                        !v.reachable && v.silent_ms >= self.cfg.removable_after.as_millis() as u64
+                    })
+                    .max_by_key(|v| v.silent_ms)
+            };
+            if let Some(silent) = silent {
+                self.write(
+                    "cluster.removeLaptop",
+                    &json!({"hostId": silent.host_id}),
+                    &automatic_origin(&self.cfg.name),
+                    None,
+                )?;
+            }
+        }
+        self.add_member(member, auto)
+    }
+
     /// The leader takes a laptop in, or records its new address; a replicated write. A laptop
     /// whose data was wiped comes back with a new id at its old address: the old id is replaced.
     pub fn add_member(&self, member: &Member, auto: Option<&str>) -> Result<()> {

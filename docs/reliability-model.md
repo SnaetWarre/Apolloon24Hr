@@ -121,7 +121,7 @@ screen ──► own laptop ──► leader ──► other laptops
 | A laptop comes back | It catches up, or re-syncs after a backup of its own data. | Nothing. |
 | Two laptops are down | The last one shows "Te weinig laptops bereikbaar" and saves nothing. | Turn a second laptop on or fix the cable. Only if both others are truly gone: Beheer › Systeem › "Alleen verder werken". |
 | After "Alleen verder werken" the others return | They follow the laptop that went on alone and keep their own data in a `pre-resync` backup. | Nothing. |
-| One laptop is gone for good (broken, stolen, dropped) | The other two carry on, but a laptop that will never come back still counts. A spare linked next to it makes four laptops that need three for a majority, so it adds no safety. After 30 s without an answer, Beheer › Systeem offers "Uit de groep halen" next to it. | Click "Uit de groep halen" next to the dead laptop, then link a spare (an empty laptop links by itself; on a spare that holds runners or a practice race, press Koppelen, and it takes the group's race). The group is three laptops again and one more may fail. |
+| One laptop is gone for good (broken, stolen, dropped) | The other two carry on, but a laptop that will never come back still counts. When a spare links (an empty laptop links by itself) and a laptop has not answered for 30 s, the spare takes its place: the leader first takes the silent laptop out, then takes the spare in. The group is three laptops again and one more may fail. If taking it out fails, the spare is not linked and says why. | Start the spare. On a spare that holds runners or a practice race, press Koppelen, and it takes the group's race. Beheer › Systeem also offers "Uit de groep halen" next to a laptop that has not answered for 30 s, for when no spare is at hand. |
 | A laptop taken out of the group comes back | It is not taken back in by itself. It saves nothing and Beheer › Systeem on it says "Deze laptop is uit de groep gehaald". | Only if it works again: click "Opnieuw koppelen" on it. It takes the group's data and keeps its own in a `pre-join` backup. |
 
 "Alleen verder werken" is the one decision left to a person, because only a
@@ -138,7 +138,9 @@ majority, for a laptop the leader has not heard from for 30 seconds, and
 never for the leader itself; a laptop that just restarts or loses its cable
 for a moment is back well within that time. The group then needs a majority
 of the laptops that are left, so removing a dead laptop never takes safety
-away. The removed laptop stays on a replicated list
+away. The leader does the same by itself when a laptop that is new to the
+group links while one has been silent for 30 seconds, as a separate write
+before it takes the new laptop in, and Beheer › Activiteit lists it. The removed laptop stays on a replicated list
 (`cluster_removed_json`). When it asks for votes, the others answer that it
 was taken out, and the leader does not take it back in by itself, unlike a
 laptop left out by "Alleen verder werken". A laptop that broke once may break

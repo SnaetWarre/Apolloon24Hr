@@ -215,7 +215,7 @@ async fn members(
                 .as_str()
                 .map(|n| n.chars().take(64).collect()),
         };
-        match node.add_member(&member, request["autoLinkedWith"].as_str()) {
+        match node.take_in(&member, request["autoLinkedWith"].as_str()) {
             Ok(()) => Json(json!({"ok": true, "term": node.term()})).into_response(),
             Err(error) => refusal(StatusCode::CONFLICT, "refused", &error),
         }
