@@ -308,7 +308,7 @@ fn role_editor(s: &State, m: &Value, busy: bool) -> El {
         )
 }
 
-fn member_card(s: &State, c: &Value, m: &Value, busy: bool) -> El {
+fn member_card(s: &State, c: &Value, m: &Value, busy: bool, linked: bool) -> El {
     let p = kit::pal(s.dark);
     let (state, color) = member_state(s, c, m);
     let mut title = card_title(s, &laptop_label(m), (m["self"] == true).then_some("deze laptop"));
@@ -326,8 +326,11 @@ fn member_card(s: &State, c: &Value, m: &Value, busy: bool) -> El {
         .label(format!("{} {state}", laptop_label(m)))
         .child(title)
         .child(text(short_url(st(m, "url")).to_string()).font(kit::ts(12.5, 400.0)).color(p.t.ink3))
-        .child(chip(s, state, color))
-        .child(role_editor(s, m, busy));
+        .child(chip(s, state, color));
+    // A laptop that joins a group takes over that group's data, so roles wait until it is linked.
+    if linked {
+        el = el.child(role_editor(s, m, busy));
+    }
     if m["removable"] == true {
         let host_id = m["hostId"].clone();
         let name = laptop_label(m);
@@ -464,7 +467,7 @@ pub(super) fn panel(s: &State) -> El {
 
     let mut cards = row().key("setup-cards").w_full().gaps(12.0, 12.0).flex_wrap().mb(12.0);
     for m in &members {
-        cards = cards.child(member_card(s, c, m, busy));
+        cards = cards.child(member_card(s, c, m, busy, linked));
     }
     for found in &nearby {
         cards = cards.child(found_card(s, found, busy));

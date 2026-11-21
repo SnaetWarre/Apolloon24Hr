@@ -54,6 +54,9 @@ fn koppelen_links_two_laptops_and_alleen_verder_werken_leaves_the_group() {
 
     // Koppelen by address: confirm, then both laptops form one group.
     click(&mut rt, "cluster-manual");
+    for _ in 0..30 {
+        rt.frame(1.0 / 60.0);
+    }
     click(&mut rt, "cluster-url");
     rt.paste(&b.url);
     rt.frame(1.0 / 60.0);
