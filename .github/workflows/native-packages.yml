@@ -50,6 +50,8 @@ jobs:
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev libxi-dev libxcursor-dev libxrandr-dev
+      - name: Install Binaryen for the web bundle
+        run: npm install --global binaryen@130.0.0
       - name: Install wasm-bindgen CLI matching native/Cargo.lock
         uses: taiki-e/install-action@v2
         with:

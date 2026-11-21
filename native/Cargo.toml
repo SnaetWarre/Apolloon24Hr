@@ -80,6 +80,13 @@ crate-type = ["cdylib", "rlib"]
 [profile.dev]
 debug = 0
 
+[profile.wasm-release]
+inherits = "release"
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+
 # Dependencies build once with optimizations; our own code stays quick to rebuild. Rune renders
 # frame by frame in tests (motion gate), which runs about three times faster this way.
 [profile.dev.package."*"]
