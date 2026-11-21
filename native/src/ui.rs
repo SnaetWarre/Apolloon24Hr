@@ -439,7 +439,10 @@ fn poll(s: &mut State, _: f64, tx: &mut Tx) -> bool {
             s.connected = connected;
         }
         // Polls and actions fetch side by side: never let an older answer replace a newer one.
-        let older = |new: &Value, old: &Value| new["revision"].as_i64() < old["revision"].as_i64();
+        let older = |new: &Value, old: &Value| {
+            new["revision"].as_i64() < old["revision"].as_i64()
+                && same_run(&new["changeToken"], &old["changeToken"])
+        };
         if update.snapshot["unchanged"] == true {
             for key in ["host", "cluster", "screens"] {
                 if let Some(value) = update.snapshot.get(key)
@@ -1439,6 +1442,34 @@ mod tests {
         assert_eq!(state.snapshot["cluster"]["writable"], false);
         assert_eq!(state.snapshot["screens"], json!([{"kind":"inside"}]));
         assert!(state.snapshot.get("unchanged").is_none());
+    }
+
+    #[test]
+    fn a_restarted_server_at_a_lower_revision_replaces_what_the_screen_holds() {
+        let mut state = init_with_url("http://127.0.0.1:0".into());
+        let (sender, receiver) = std::sync::mpsc::channel();
+        state.rx = receiver;
+        state.connected = true;
+        state.snapshot = json!({"revision":9,"changeToken":"first.9.1","runners":[{"id":"old"}]});
+        // The same run: an answer that was overtaken is dropped.
+        sender.send(Update { snapshot: json!({"revision":8,"changeToken":"first.8.1","runners":[]}), ..Default::default() }).unwrap();
+        poll(&mut state, 0.0, &mut Tx::default());
+        assert_eq!(state.snapshot["revision"], 9);
+        // Restarted with an earlier clock: its revisions start lower, and it is still the truth.
+        sender.send(Update { snapshot: json!({"revision":3,"changeToken":"second.3.1","runners":[]}), ..Default::default() }).unwrap();
+        poll(&mut state, 0.0, &mut Tx::default());
+        assert_eq!(state.snapshot["revision"], 3);
+
+        let mut synced = Synced { history: json!({"cursor":"first.2", "revision":9, "laps":[1]}), ..Default::default() };
+        assert_eq!(synced.take_history(json!({"cursor":"first.1","revision":8,"laps":[]})), Some(Default::default()));
+        let restarted = json!({"cursor":"second.1","revision":3,"laps":[]});
+        let delivery = synced.take_history(restarted.clone()).unwrap();
+        assert_eq!(delivery.body, restarted);
+        // The screen takes it too, over the history of the earlier run it holds.
+        let mut held = json!({"cursor":"first.2","revision":9,"laps":[1]});
+        let (mut sequence, mut pending) = (delivery.sequence - 1, Vec::new());
+        assert!(history_delivery::apply(&mut held, &mut sequence, &mut pending, delivery));
+        assert_eq!(held, restarted);
     }
 
     #[test]
@@ -2723,7 +2754,9 @@ impl Synced {
                 self.history = Value::Null;
                 return None;
             }
-        } else if reply["revision"].as_i64() >= self.history["revision"].as_i64() {
+        } else if reply["revision"].as_i64() >= self.history["revision"].as_i64()
+            || !same_run(&reply["cursor"], &self.history["cursor"])
+        {
             self.history = history_delivery::index(&reply);
         } else {
             return Some(Default::default());
@@ -2731,6 +2764,15 @@ impl Synced {
         self.history_revision = self.history["revision"].as_i64();
         self.history_sequence += 1;
         Some(history_delivery::Delivery { sequence: self.history_sequence, body: reply })
+    }
+}
+/// Whether two change tokens or history cursors come from one run of one server. Revisions count
+/// up within a run only: a restarted server, or another laptop, may be at a lower one.
+fn same_run(new: &Value, old: &Value) -> bool {
+    let run = |token: &Value| token.as_str().and_then(|t| t.split('.').next().map(str::to_owned));
+    match (run(new), run(old)) {
+        (Some(new), Some(old)) => new == old,
+        _ => true,
     }
 }
 /// Applies `/api/history?since=` changes to a full history; `false` when they do not line up.
