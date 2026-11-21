@@ -215,7 +215,14 @@ async fn members(
                 .as_str()
                 .map(|n| n.chars().take(64).collect()),
         };
-        match node.take_in(&member, request["autoLinkedWith"].as_str()) {
+        if let Err(error) = node.make_room_for(&member) {
+            return refusal(StatusCode::CONFLICT, "refused", &error);
+        }
+        // Making room waits for the other laptops: this one may have stopped leading meanwhile.
+        if !node.is_leader() || node.busy().is_some() {
+            return not_leader();
+        }
+        match node.add_member(&member, request["autoLinkedWith"].as_str()) {
             Ok(()) => Json(json!({"ok": true, "term": node.term()})).into_response(),
             Err(error) => refusal(StatusCode::CONFLICT, "refused", &error),
         }
