@@ -1559,3 +1559,20 @@ fn a_laptop_alone_without_a_race_starts_on_its_own_clock() {
     assert_eq!(super::clock::offset(), 5000);
     super::clock::set_offset(0);
 }
+
+/// The full copy for a joining laptop is read while the leader's database stays free for
+/// saving and for the signs of life: it holds everything saved before the copy started.
+#[test]
+fn a_full_copy_does_not_need_the_leaders_database_lock() {
+    let _serial = serial();
+    let dir = Dir::new();
+    let a = TestServer::start(&dir.db("a"), free_port(), "Laptop A");
+    a.act("runners.create", json!({"name":"Zoë","status":"waiting"})).unwrap();
+    let held = a.db.lock().unwrap();
+    let image = super::log::serialize_file(&dir.db("a")).unwrap();
+    drop(held);
+    let mut target = Db::open(Path::new(":memory:")).unwrap();
+    super::log::install(&mut target, &image).unwrap();
+    assert_eq!(target.runners().unwrap().len(), 1);
+    assert_eq!(super::log::head(&target).seq, a.head());
+}
