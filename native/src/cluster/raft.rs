@@ -697,8 +697,8 @@ impl Node {
                 continue;
             }
             // Another laptop may hold this write. A later election decides whether it counts, so
-            // this laptop must not put a different write in its place in the same term.
-            let term = self.term();
+            // what this laptop stores next at that place (a Timing press) gets a new term.
+            let term = self.term() + 1;
             self.become_follower(&mut st, term, None);
             return false;
         }
