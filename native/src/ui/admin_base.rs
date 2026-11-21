@@ -7,6 +7,14 @@ use std::collections::HashMap;
 
 const TOAST_MS: i64 = 4_000;
 
+pub(super) fn clocks(s: &State, clock: &mut clock::Sample) {
+    if s.page == 8 {
+        if let Some(t) = &s.admin.toast {
+            if !t.error { clock.until(t.at + TOAST_MS); }
+        }
+    }
+}
+
 /// What a sent action does once the server answered.
 pub(super) enum Pending {
     Import,
@@ -526,12 +534,14 @@ pub(super) fn owns(s: &State) -> bool {
     s.admin.pending.is_some()
 }
 /// Registrations say when runners can run; fetched again whenever the data changed.
-pub(super) fn refresh(s: &mut State, tx: &Tx) {
-    s.admin.focused = tx.focused().map(str::to_owned);
+pub(super) fn refresh(s: &mut State, tx: &Tx) -> bool {
+    let focused = tx.focused().map(str::to_owned);
+    let changed = s.page == 8 && s.admin.focused != focused;
+    s.admin.focused = focused;
     profile::follow_stored(s);
     admin_system::refresh(s);
     if s.busy || !s.connected || s.page != 8 || !matches!(s.admin_section, 1 | 3) {
-        return;
+        return changed;
     }
     let revision = s.snapshot["revision"].as_i64().unwrap_or(0);
     if s.admin.regs_revision != Some(revision) {
@@ -543,6 +553,7 @@ pub(super) fn refresh(s: &mut State, tx: &Tx) {
             Pending::Registrations,
         );
     }
+    changed
 }
 pub(super) fn succeeded(s: &mut State, result: &Value) {
     match s.admin.pending.take() {

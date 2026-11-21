@@ -10,6 +10,16 @@ use std::collections::HashMap;
 const LONG_WARM_UP_MS: i64 = 10 * 60_000;
 const SEARCH_PAGE: usize = 40;
 const TOAST_MS: i64 = 4_000;
+
+pub(super) fn clocks(s: &State, clock: &mut clock::Sample) {
+    clock.value(format!("{:?}", brussels_moment(s.clock)));
+    for r in runners(s) {
+        if matches!(st(r, "status"), "waiting" | "warming_up") {
+            if let Some(at) = r["statusSince"].as_i64() { clock.bucket(at, 1000); }
+        }
+    }
+    if let Some((_, at)) = &s.queue_page.toast { clock.until(*at + TOAST_MS); }
+}
 const DRAG_START: f32 = 6.0;
 
 #[derive(Default)]
@@ -554,7 +564,6 @@ pub(super) fn page(s: &State) -> El {
     col()
         .key("queue-page")
         .pb(24.0)
-        .child(super::hex::now_block(s).mb(20.0))
         .child(board(s))
         .child(available_now(s).mt(12.0))
 }
@@ -1120,7 +1129,7 @@ pub(super) fn failed(s: &mut State, method: &str) {
 }
 
 fn rows_height(s: &State) -> f32 {
-    (s.queue_page.window_h - 365.0).max(280.0)
+    (s.queue_page.window_h - 205.0).max(280.0)
 }
 
 fn board(s: &State) -> El {
@@ -1415,42 +1424,50 @@ fn runner_row(s: &State, r: &Value, b: &Board, drop: Option<&(String, Drop)>) ->
                 ),
         );
     }
-    let mut details = row()
-        .gap(8.0)
-        .center_y()
-        .min_h(18.0)
-        .pl(name_indent(r, 14.0))
-        .flex_wrap();
-    for l in r["labels"].as_array().into_iter().flatten() {
-        details = details.child(pill(s, l));
-    }
+    let mut details: Vec<El> = r["labels"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|l| pill(s, l))
+        .collect();
     let laps = r["lapCount"].as_i64().unwrap_or(0);
     let small = rune::TextStyle::new(12.0, 400.0).lh(18.0);
     if laps > 0 {
-        details = details.child(
+        details.push(
             text(plural(laps as usize, "ronde", "rondes"))
                 .font(small)
                 .color(p.t.ink3),
         );
     }
     if let Some(pace) = r["estimatedPace"].as_str().filter(|v| !v.is_empty()) {
-        details = details.child(text(format!("~{pace}")).font(small).color(p.t.ink3));
+        details.push(text(format!("~{pace}")).font(small).color(p.t.ink3));
     }
     let profile_id = id.clone();
-    line = line.child(
-        col()
-            .key(format!("queue-identity-{id}"))
-            .role("button")
-            .label(format!("{}: profiel openen", st(r, "name")))
-            .focusable(true)
-            .grow(1.0)
-            .min_w(0.0)
-            .py(2.0)
-            .gap(3.0)
-            .on_press(move |s: &mut State| s.send("runners.profile", json!({"id":profile_id})))
-            .child(title)
-            .child(details),
-    );
+    let mut identity = col()
+        .key(format!("queue-identity-{id}"))
+        .role("button")
+        .label(format!("{}: profiel openen", st(r, "name")))
+        .focusable(true)
+        .grow(1.0)
+        .min_w(0.0)
+        .py(2.0)
+        .gap(3.0)
+        .on_press(move |s: &mut State| s.send("runners.profile", json!({"id":profile_id})))
+        .child(title);
+    // No empty second line without labels, laps or pace, so the name lines up with the place in
+    // line and the timer.
+    if !details.is_empty() {
+        identity = identity.child(
+            row()
+                .gap(8.0)
+                .center_y()
+                .min_h(18.0)
+                .pl(name_indent(r, 14.0))
+                .flex_wrap()
+                .children(details),
+        );
+    }
+    line = line.child(identity);
     // TimerBadge: time in this lane, amber after ten minutes of warming up.
     let mut timer = row().w(70.0).gap(4.0).center_y().justify_end();
     if let Some(at) = r["statusSince"].as_i64().filter(|_| status != "ran") {

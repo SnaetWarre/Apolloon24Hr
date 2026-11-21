@@ -22,6 +22,7 @@ mod admin_kit;
 mod analysis_page;
 mod admin_system;
 mod chart_axis;
+mod clock;
 mod cluster_setup;
 mod group_view;
 mod hex;
@@ -379,7 +380,6 @@ fn poll(s: &mut State, _: f64, tx: &mut Tx) -> bool {
     if s.fixture {
         return changed;
     }
-    tx.wake_after(Duration::from_millis(100));
     let public = (5..=7).contains(&s.page);
     while let Ok(file) = s.file_rx.try_recv() {
         changed = true;
@@ -398,7 +398,6 @@ fn poll(s: &mut State, _: f64, tx: &mut Tx) -> bool {
             && s.clock_offset.abs_diff(offset) >= 16
         {
             s.clock_offset = offset;
-            changed = true;
         }
         let connected = !update.snapshot.is_null();
         changed |= s.connected != connected;
@@ -407,20 +406,21 @@ fn poll(s: &mut State, _: f64, tx: &mut Tx) -> bool {
         let older = |new: &Value, old: &Value| new["revision"].as_i64() < old["revision"].as_i64();
         if s.connected
             && !older(&update.snapshot, &s.snapshot)
-            && (!public || s.snapshot != update.snapshot)
+            && s.snapshot != update.snapshot
         {
             s.snapshot = update.snapshot;
             changed = true;
         }
         if !update.history.is_null()
             && !older(&update.history, &s.history)
-            && (!public || s.history != update.history)
+            && s.history != update.history
         {
             s.history = update.history;
             changed = true;
         }
-        if !update.recovery.is_null() {
+        if !update.recovery.is_null() && s.recovery != update.recovery {
             s.recovery = update.recovery;
+            changed |= !public;
         }
         if let Some(cache) = &s.image_cache {
             for (url, bytes) in update.images {
@@ -535,16 +535,19 @@ fn poll(s: &mut State, _: f64, tx: &mut Tx) -> bool {
             }
         }
     }
+    changed |= clock::advance(s, tx);
     if group_view::observe(s) {
         tx.animated();
         changed = true;
     }
+    let was_busy = s.busy;
     activity_panel::refresh(s);
     queue_page::refresh(s);
-    admin_base::refresh(s, tx);
+    changed |= admin_base::refresh(s, tx);
     laps_panel::sync_hold(s);
-    tactics_page::refresh(s);
-    public_screens::poll(s, changed, s.server_now())
+    changed |= tactics_page::refresh(s);
+    changed |= was_busy != s.busy;
+    public_screens::poll(s, changed, s.clock)
 }
 fn button(
     key: impl Into<String>,
