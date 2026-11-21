@@ -2,7 +2,7 @@ import { spawn, execFileSync } from 'node:child_process';
 import { once } from 'node:events';
 import { createServer } from 'node:net';
 import { mkdir, readFile, readdir, stat, writeFile, open } from 'node:fs/promises';
-import { resolve, join } from 'node:path';
+import { resolve, join, relative, isAbsolute } from 'node:path';
 import os from 'node:os';
 import { pathToFileURL } from 'node:url';
 
@@ -11,7 +11,8 @@ export function options(args) {
   const config = {
     hours: 24,
     ratio: 60,
-    out: '.tmp-stress',
+    out: '.tmp-stress-results',
+    work: '.tmp-stress',
     binary: 'native/target/release/apolloon-native',
     seed: 'apolloon-24',
     backups: true,
@@ -19,7 +20,7 @@ export function options(args) {
   for (let i = 0; i < args.length; i += 2) {
     const key = args[i].slice(2);
     if (
-      !['hours', 'ratio', 'out', 'binary', 'seed', 'compare'].includes(key) ||
+      !['hours', 'ratio', 'out', 'work', 'binary', 'seed', 'compare'].includes(key) ||
       !args[i].startsWith('--') ||
       !args[i + 1]
     )
@@ -28,6 +29,9 @@ export function options(args) {
   }
   if (![config.hours, config.ratio].every((n) => Number.isFinite(n) && n > 0))
     throw new Error('hours and ratio must be positive finite numbers');
+  const nested = relative(resolve(config.out), resolve(config.work));
+  if (!nested || (nested !== '..' && !nested.startsWith('../') && !isAbsolute(nested)))
+    throw new Error('--work must be outside --out');
   return config;
 }
 export function schedule(hours, seed) {
@@ -58,6 +62,102 @@ export function distribution(values) {
   const p = (fraction) => (sorted.length ? sorted[Math.max(0, Math.ceil(sorted.length * fraction) - 1)] : null);
   return { count: sorted.length, p50: p(0.5), p95: p(0.95), p99: p(0.99), max: p(1) };
 }
+export function errorClass(record, injectedUnavailable) {
+  if (record.status !== undefined) return 'liveResponse';
+  return injectedUnavailable ? 'injectedUnavailable' : 'liveTransport';
+}
+export function writeErrorSummary(requests) {
+  const errors = requests.filter((r) => r.write && r.error);
+  const count = (rows) => ({
+    insideChaos: rows.filter((r) => r.chaos).length,
+    outsideChaos: rows.filter((r) => !r.chaos).length,
+    total: rows.length,
+  });
+  return {
+    ...count(errors),
+    byCause: Object.fromEntries(
+      ['injectedUnavailable', 'liveResponse', 'liveTransport', 'noWritableLeader'].map((cause) => [
+        cause,
+        count(errors.filter((r) => r.errorClass === cause)),
+      ])
+    ),
+  };
+}
+export function recoveryTiming(began, downAt, restoreAt, caughtUpAt, recoveredAt) {
+  return {
+    timingOrigin: 'restore',
+    outageMs: restoreAt - downAt,
+    caughtUpMs: caughtUpAt - restoreAt,
+    recoveryMs: recoveredAt - restoreAt,
+    disruptionMs: recoveredAt - began,
+  };
+}
+export function compactSummary(result) {
+  const {
+    requests,
+    acknowledgements,
+    schedule: plan,
+    final,
+    histories: _histories,
+    resources,
+    events,
+    ...summary
+  } = result;
+  const sampled = [];
+  for (const name of new Set(resources.map((r) => r.node))) {
+    const rows = resources.filter((r) => r.node === name);
+    const count = Math.min(rows.length, 120);
+    for (let i = 0; i < count; i++)
+      sampled.push(rows[count === 1 ? 0 : Math.round((i * (rows.length - 1)) / (count - 1))]);
+  }
+  return {
+    ...summary,
+    kind: 'apolloon-race-stress',
+    schemaVersion: 2,
+    counts: {
+      requests: requests.length,
+      acknowledgedLaps: acknowledgements.length,
+      scheduledLaps: plan.laps.length,
+      failedAttempts: events.filter((e) => e.kind === 'write-attempt-error').length,
+    },
+    resources: sampled,
+    resourceSampling: {
+      originalCount: resources.length,
+      retainedCount: sampled.length,
+      method: 'uniform per node, max 120; growth/peaks use all samples',
+    },
+    events: events.filter((e) => e.kind !== 'write-attempt-error'),
+    final: final ? { statuses: final.statuses, lapCounts: final.lapIds.map((ids) => ids.length) } : null,
+  };
+}
+export function isRunSummary(value) {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    typeof value.passed === 'boolean' &&
+    value.config &&
+    value.metrics &&
+    Array.isArray(value.growth) &&
+    Array.isArray(value.events)
+  );
+}
+export async function latestRun(out) {
+  const candidates = await Promise.all(
+    (await readdir(out))
+      .filter((f) => f.endsWith('.json'))
+      .map(async (f) => {
+        const file = join(out, f);
+        try {
+          return isRunSummary(JSON.parse(await readFile(file, 'utf8')))
+            ? { file, time: (await stat(file)).mtimeMs }
+            : null;
+        } catch {
+          return null;
+        }
+      })
+  );
+  return candidates.filter(Boolean).sort((a, b) => b.time - a.time)[0]?.file;
+}
 export async function main(args = process.argv.slice(2)) {
   const config = options(args);
   config.binary = resolve(config.binary);
@@ -70,9 +170,10 @@ export async function main(args = process.argv.slice(2)) {
   };
   const plan = schedule(config.hours, config.seed);
   const out = resolve(config.out);
-  await mkdir(out, { recursive: true });
+  const work = resolve(config.work);
+  await Promise.all([mkdir(out, { recursive: true }), mkdir(work, { recursive: true })]);
   const id = new Date().toISOString().replaceAll(':', '-');
-  const directory = join(out, `run-${id}`);
+  const directory = join(work, `run-${id}`);
   await mkdir(directory);
   const result = {
     config,
@@ -99,6 +200,8 @@ export async function main(args = process.argv.slice(2)) {
     const start = performance.now(),
       window = chaos;
     const record = { ...stamp(), node: node.name, endpoint: path, write: body !== undefined };
+    const wasUnavailable = node.injectedUnavailable,
+      interruptions = node.interruptions;
     try {
       const response = await fetch(node.url + path, {
         method: body === undefined ? 'GET' : 'POST',
@@ -106,13 +209,17 @@ export async function main(args = process.argv.slice(2)) {
         body: body === undefined ? undefined : JSON.stringify(body),
         signal: AbortSignal.timeout(1800),
       });
+      record.status = response.status;
       const raw = await response.text();
       record.bytes = Buffer.byteLength(raw);
-      record.status = response.status;
       if (!response.ok) throw new Error(`HTTP ${response.status}: ${raw.slice(0, 400)}`);
       return JSON.parse(raw);
     } catch (error) {
       record.error = error.message;
+      record.errorClass = errorClass(
+        record,
+        wasUnavailable || node.injectedUnavailable || interruptions !== node.interruptions
+      );
       throw error;
     } finally {
       record.ms = performance.now() - start;
@@ -152,6 +259,7 @@ export async function main(args = process.argv.slice(2)) {
     node.child.on('error', (error) => result.failures.push(`${node.name}: ${error.message}`));
     await log.close();
     await until(() => request(node, '/api/health'), `${node.name} startup`);
+    node.injectedUnavailable = false;
   }
   async function kill(node, signal) {
     const child = node.child;
@@ -187,7 +295,24 @@ export async function main(args = process.argv.slice(2)) {
   }
   let probe;
   async function timing(method) {
-    const current = await leader();
+    const began = performance.now(),
+      at = stamp(),
+      window = chaos;
+    let current;
+    try {
+      current = await leader();
+    } catch (error) {
+      result.requests.push({
+        ...at,
+        endpoint: `/api/action/${method}`,
+        write: true,
+        error: error.message,
+        errorClass: 'noWritableLeader',
+        chaos: window?.kind ?? chaos?.kind ?? null,
+        ms: performance.now() - began,
+      });
+      throw error;
+    }
     const { race } = await request(current, '/api/state');
     const response = await action(nodes[rotation++ % 3], method, {
       activeRunnerId: race.activeRunnerId,
@@ -211,6 +336,7 @@ export async function main(args = process.argv.slice(2)) {
         : [event.kind === 'follower-freeze' || event.kind === 'laptop-out' ? followers[0] : oldLeader];
     entry.targets = targets.map((n) => n.name);
     entry.oldLeader = oldLeader.name;
+    let restoreBegan = null;
     let observing = true;
     const observer = (async () => {
       await sleep(250);
@@ -223,11 +349,18 @@ export async function main(args = process.argv.slice(2)) {
           }
           await action(next, 'runners.setStatus', { id: probe, status: 'registered' });
           if (entry.firstWriteMs === undefined) entry.firstWriteMs = performance.now() - began;
+          if (restoreBegan !== null && entry.firstWriteAfterRestoreMs === undefined)
+            entry.firstWriteAfterRestoreMs = performance.now() - restoreBegan;
         } catch {}
         await sleep(150);
       }
     })();
     try {
+      const downAt = performance.now();
+      for (const node of targets) {
+        node.injectedUnavailable = true;
+        node.interruptions++;
+      }
       if (event.kind.includes('freeze')) targets.forEach((n) => n.child.kill('SIGSTOP'));
       else await Promise.all(targets.map((n) => kill(n, event.kind === 'leader-terminate' ? 'SIGTERM' : 'SIGKILL')));
       await sleep(
@@ -258,12 +391,19 @@ export async function main(args = process.argv.slice(2)) {
         }
       }
       entry.restoreAt = stamp();
-      if (event.kind.includes('freeze')) targets.forEach((n) => n.child.kill('SIGCONT'));
+      restoreBegan = performance.now();
+      if (event.kind.includes('freeze'))
+        targets.forEach((n) => {
+          n.child.kill('SIGCONT');
+          n.injectedUnavailable = false;
+        });
       else await Promise.all(targets.map(start));
       await until(healthy, `${event.kind} catch-up`);
-      entry.caughtUpMs = performance.now() - began;
+      const caughtUpAt = performance.now();
       await action(await leader(), 'runners.setStatus', { id: probe, status: 'registered' });
-      entry.recoveryMs = performance.now() - began;
+      const recoveredAt = performance.now();
+      entry.firstWriteAfterRestoreMs ??= recoveredAt - restoreBegan;
+      Object.assign(entry, recoveryTiming(began, downAt, restoreBegan, caughtUpAt, recoveredAt));
     } finally {
       observing = false;
       await observer;
@@ -345,7 +485,14 @@ export async function main(args = process.argv.slice(2)) {
       await once(server, 'listening');
       const { port } = server.address();
       await new Promise((done) => server.close(done));
-      const node = { name, port, url: `http://127.0.0.1:${port}`, db: join(directory, `${name}.db`) };
+      const node = {
+        name,
+        port,
+        url: `http://127.0.0.1:${port}`,
+        db: join(directory, `${name}.db`),
+        injectedUnavailable: false,
+        interruptions: 0,
+      };
       nodes.push(node);
       await start(node);
     }
@@ -395,6 +542,7 @@ export async function main(args = process.argv.slice(2)) {
     await Promise.all(loops);
     await until(healthy, 'final group');
     const histories = await Promise.all(nodes.map((n) => request(n, '/api/history?scope=full')));
+    result.histories = histories;
     result.final = {
       statuses: await Promise.all(nodes.map(status)),
       lapIds: histories.map((h) => h.laps.map((l) => l.id).sort()),
@@ -413,11 +561,7 @@ export async function main(args = process.argv.slice(2)) {
     await Promise.allSettled(loops);
     await Promise.allSettled(nodes.map((n) => kill(n, 'SIGKILL')));
   }
-  const writes = result.requests.filter((r) => r.write && r.error);
-  result.writeErrors = {
-    insideChaos: writes.filter((r) => r.chaos).length,
-    outsideChaos: writes.filter((r) => !r.chaos).length,
-  };
+  result.writeErrors = writeErrorSummary(result.requests);
   if (result.writeErrors.outsideChaos)
     result.failures.push(`${result.writeErrors.outsideChaos} write errors outside chaos`);
   result.metrics = {};
@@ -460,18 +604,12 @@ export async function main(args = process.argv.slice(2)) {
     return growth;
   });
   let baseline = config.compare;
-  if (!baseline) {
-    const candidates = await Promise.all(
-      (await readdir(out))
-        .filter((f) => f.endsWith('.json'))
-        .map(async (f) => ({ file: join(out, f), time: (await stat(join(out, f))).mtimeMs }))
-    );
-    baseline = candidates.sort((a, b) => b.time - a.time)[0]?.file;
-  }
+  if (!baseline) baseline = await latestRun(out);
   result.comparison = { baseline: baseline ?? null, rows: [] };
   if (baseline) {
     try {
       const before = JSON.parse(await readFile(baseline, 'utf8'));
+      if (!isRunSummary(before)) throw new Error('Not a race stress run summary');
       const add = (key, old, current) =>
         result.comparison.rows.push({
           key,
@@ -499,8 +637,16 @@ export async function main(args = process.argv.slice(2)) {
         for (const field of ['rssBytes', 'cpuPercent'])
           for (const p of ['peak', 'last'])
             add(`${g.node} ${field} ${p}`, before.growth?.find((v) => v.node === g.node)?.[field]?.[p], g[field][p]);
-      for (const e of result.events.filter((e) => e.recoveryMs))
-        add(`${e.kind} recoveryMs`, before.events?.find((v) => v.kind === e.kind)?.recoveryMs, e.recoveryMs);
+      for (const e of result.events.filter((e) => e.recoveryMs)) {
+        const old = before.events.find((v) => v.kind === e.kind);
+        const previous =
+          old?.timingOrigin === 'restore'
+            ? old.recoveryMs
+            : old?.restoreAt
+              ? old.recoveryMs - (old.restoreAt.wallMs - old.wallMs)
+              : null;
+        add(`${e.kind} recoveryMs (from restore)`, previous, e.recoveryMs);
+      }
     } catch (error) {
       result.comparison.error = error.message;
       result.failures.push(`Comparison failed: ${error.message}`);
@@ -508,16 +654,31 @@ export async function main(args = process.argv.slice(2)) {
   }
   result.passed = result.failures.length === 0;
   const file = join(out, `${id}.json`);
-  await writeFile(file, JSON.stringify(result, null, 2) + '\n');
+  const summary = compactSummary(result);
+  await writeFile(join(directory, 'raw.json'), JSON.stringify(result) + '\n');
+  await writeFile(
+    file,
+    JSON.stringify(summary, (_key, value) => (typeof value === 'number' ? Math.round(value * 1000) / 1000 : value)) +
+      '\n'
+  );
   console.log(
     `Race stress ${result.passed ? 'PASS' : 'FAIL'}: ${config.hours}h at ${config.ratio}x, seed ${config.seed}`
   );
+  for (const [cause, counts] of Object.entries(result.writeErrors.byCause))
+    console.log(`Write errors ${cause}: ${counts.total} (chaos/outside ${counts.insideChaos}/${counts.outsideChaos})`);
+  for (const endpoint of ['/api/action/race.handoff', '/api/state', '/api/history?scope=full']) {
+    const metric = result.metrics[endpoint];
+    const fmt = (value) => (value == null ? 'n/a' : value.toFixed(2));
+    console.log(
+      `${endpoint}: latency p50/p95/max ${fmt(metric?.latencyMs.p50)}/${fmt(metric?.latencyMs.p95)}/${fmt(metric?.latencyMs.max)}ms; peak payload ${metric?.payloadBytes.max ?? 'n/a'} bytes`
+    );
+  }
   console.log(
     `Acknowledged laps: ${result.acknowledgements.length}/${plan.laps.length} scheduled; write errors chaos/outside: ${result.writeErrors.insideChaos}/${result.writeErrors.outsideChaos}`
   );
   for (const e of result.events.filter((e) => e.recoveryMs))
     console.log(
-      `${e.kind}: recovered ${Math.round(e.recoveryMs)}ms; new leader ${e.newLeaderMs === undefined ? 'n/a' : Math.round(e.newLeaderMs) + 'ms'}`
+      `${e.kind}: outage ${Math.round(e.outageMs)}ms; caught up/recovered from restore ${Math.round(e.caughtUpMs)}/${Math.round(e.recoveryMs)}ms; new leader ${e.newLeaderMs === undefined ? 'n/a' : Math.round(e.newLeaderMs) + 'ms'}`
     );
   for (const g of result.growth)
     console.log(
@@ -526,8 +687,9 @@ export async function main(args = process.argv.slice(2)) {
   if (result.comparison.rows.length) console.table(result.comparison.rows);
   for (const failure of result.failures) console.error(failure);
   console.log(`Run JSON: ${file}`);
+  console.log(`Work artifacts: ${directory}`);
   if (!result.passed) process.exitCode = 1;
-  return result;
+  return summary;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href)
