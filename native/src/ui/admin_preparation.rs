@@ -4,6 +4,9 @@ use super::admin_base::{Kind, Pending, banner, btn, copy, h2, pal, send, stack, 
 use super::*;
 
 fn import(s: &mut State) {
+    if s.busy || !s.connected {
+        return;
+    }
     let Some((name, bytes)) = &s.import_file else {
         return;
     };
@@ -17,8 +20,10 @@ fn import(s: &mut State) {
         ("runners.importCsv", json!({"csvText":decode_csv(bytes)}))
     };
     send(s, method, input, Pending::Import);
-    s.import_file = None;
-    s.import_preview = None;
+    if s.busy {
+        s.import_file = None;
+        s.import_preview = None;
+    }
 }
 
 pub(super) fn analysis(s: &State) -> Option<Result<Value, String>> {
@@ -300,4 +305,36 @@ fn group_card(s: &State) -> Option<El> {
                 ),
             ),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unsent_import_preserves_the_file_and_preview() {
+        let mut s = init_with_url("http://127.0.0.1:1".into());
+        s.fixture = true;
+        let file = ("lopers.csv".to_string(), b"nummer,naam\n1,Demo Ster".to_vec());
+        s.import_file = Some(file.clone());
+        s.import_preview = analysis(&s);
+        let preview = s.import_preview.clone();
+        for (connected, busy) in [(false, false), (true, true)] {
+            s.connected = connected;
+            s.busy = busy;
+            import(&mut s);
+            assert_eq!(s.import_file, Some(file.clone()));
+            assert_eq!(s.import_preview, preview);
+            assert!(s.admin.pending.is_none());
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        s.tx = tx;
+        s.connected = true;
+        s.busy = false;
+        import(&mut s);
+        assert_eq!(rx.try_recv().unwrap().method, "runners.importCsv");
+        assert!(s.import_file.is_none());
+        assert!(s.import_preview.is_none());
+        assert!(matches!(s.admin.pending, Some(Pending::Import)));
+    }
 }
