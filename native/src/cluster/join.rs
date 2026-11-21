@@ -464,7 +464,14 @@ impl Node {
         if known {
             return Ok(());
         }
-        self.group_settled();
+        // A change the others have not confirmed yet may be an earlier laptop being taken in: a
+        // second one on top of it would change the group by two laptops at once.
+        if !self.group_settled() {
+            return Err(
+                "De laptops zijn nog bezig met een vorige wijziging. Probeer het zo opnieuw."
+                    .into(),
+            );
+        }
         let silent = {
             let st = self.raft.lock().unwrap();
             self.view(&st)
