@@ -19,6 +19,8 @@ pub fn routes() -> Router<Host> {
         .route("/api/cluster/members", post(members))
         .route("/api/cluster/invite", post(invite))
         .route("/api/cluster/write", post(write))
+        .route("/api/cluster/split/common", post(split_common))
+        .route("/api/cluster/split/merge", post(split_merge))
         .route("/api/cluster/probe", get(probe))
         .route("/api/time", get(time))
 }
@@ -286,6 +288,51 @@ async fn write(
                     "refused"
                 },
                 &failure.message,
+            ),
+        }
+    })
+    .await
+}
+
+/// Where the log of another split of this group still matches this leader's.
+async fn split_common(
+    State(host): State<Host>,
+    headers: HeaderMap,
+    Json(request): Json<Value>,
+) -> Response {
+    let node = match node(&host, &headers) {
+        Ok(node) => node,
+        Err(refused) => return refused,
+    };
+    blocking(move || {
+        if !node.is_leader() || node.busy().is_some() {
+            return not_leader();
+        }
+        Json(json!({"ok": true, "seq": node.common_entry(&request["marks"])})).into_response()
+    })
+    .await
+}
+
+/// What another split of this group saved while apart, added here before that split follows.
+async fn split_merge(
+    State(host): State<Host>,
+    headers: HeaderMap,
+    Json(request): Json<Value>,
+) -> Response {
+    let node = match node(&host, &headers) {
+        Ok(node) => node,
+        Err(refused) => return refused,
+    };
+    blocking(move || {
+        if !node.is_leader() || node.busy().is_some() {
+            return not_leader();
+        }
+        match node.merge_split(&request) {
+            Ok(result) => Json(result).into_response(),
+            Err((retry, message)) => refusal(
+                StatusCode::CONFLICT,
+                if retry { "unavailable" } else { "refused" },
+                &message,
             ),
         }
     })

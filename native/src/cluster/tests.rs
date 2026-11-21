@@ -392,6 +392,86 @@ fn a_cut_off_leader_saves_nothing_and_takes_the_majority_data_when_it_returns() 
 }
 
 #[test]
+fn a_write_the_majority_never_confirmed_is_not_kept_on_the_leader() {
+    let _serial = serial();
+    let dir = Dir::new();
+    let (a, b, c) = linked_three(&dir);
+    assert!(a.node.is_leader());
+    let off = |s: &TestServer, v: bool| {
+        s.node
+            .isolated
+            .store(v, std::sync::atomic::Ordering::Relaxed)
+    };
+    let named = |s: &TestServer, name: &str| {
+        s.count(&format!(
+            "SELECT COUNT(*) AS n FROM runners WHERE name='{name}'"
+        ))
+    };
+    let head = a.head();
+    off(&b, true);
+    off(&c, true);
+    let refused = a.act("runners.create", json!({"name":"Onbevestigd"}));
+    let answer = refused.unwrap_err();
+    assert!(
+        [super::NOT_CONFIRMED_MESSAGE, super::NO_LEADER_MESSAGE].contains(&answer.as_str()),
+        "{answer}"
+    );
+    // The leader's own data, which its screens read, never held the write.
+    assert_eq!(named(&a, "Onbevestigd"), 0);
+    assert_eq!(a.head(), head);
+    let state: Value = reqwest::blocking::get(format!("{}/api/state", a.url))
+        .unwrap()
+        .json()
+        .unwrap();
+    assert!(!state.to_string().contains("Onbevestigd"));
+
+    // A press on the Timing laptop is the exception: the lap stays, also without the others.
+    a.act("runners.create", json!({"name":"Te laat"})).unwrap_err();
+    off(&b, false);
+    off(&c, false);
+    wait_until("the group works again", Duration::from_secs(15), || {
+        all_healthy(&[&a, &b, &c]) && same_heads(&[&a, &b, &c])
+    });
+    let timing = [&a, &b, &c][leader_index(&[&a, &b, &c]).unwrap()];
+    let others: Vec<&TestServer> = [&a, &b, &c]
+        .into_iter()
+        .filter(|s| s.port != timing.port)
+        .collect();
+    for name in ["Zoë", "Wout"] {
+        timing
+            .act("runners.create", json!({"name":name,"status":"waiting"}))
+            .unwrap();
+    }
+    timing
+        .act("cluster.openTiming", json!({"takeOver": false}))
+        .unwrap();
+    press(timing, "race.handoff").unwrap();
+    off(others[0], true);
+    off(others[1], true);
+    let _ = press(timing, "race.handoff");
+    assert_eq!(timing.count("SELECT COUNT(*) AS n FROM laps"), 1);
+    assert_eq!(named(timing, "Te laat"), 0);
+
+    // The others return: the write that was answered as not saved appears nowhere.
+    off(others[0], false);
+    off(others[1], false);
+    wait_until("the group works again", Duration::from_secs(20), || {
+        all_healthy(&[&a, &b, &c]) && same_heads(&[&a, &b, &c])
+    });
+    let leader = [&a, &b, &c][leader_index(&[&a, &b, &c]).unwrap()];
+    leader
+        .act("runners.create", json!({"name":"Bevestigd"}))
+        .unwrap();
+    wait_until("every laptop holds the next write", Duration::from_secs(5), || {
+        same_heads(&[&a, &b, &c]) && [&a, &b, &c].iter().all(|s| named(s, "Bevestigd") == 1)
+    });
+    for server in [&a, &b, &c] {
+        assert_eq!(named(server, "Onbevestigd"), 0);
+        assert_eq!(named(server, "Te laat"), 0);
+    }
+}
+
+#[test]
 fn the_timing_laptop_goes_on_alone_by_itself_and_the_splits_join_again() {
     let _serial = serial();
     let dir = Dir::new();
@@ -437,7 +517,15 @@ fn the_timing_laptop_goes_on_alone_by_itself_and_the_splits_join_again() {
     b.act("runners.create", json!({"name":"Alleen bij A en B"}))
         .unwrap();
 
-    // The network returns: C's split holds the Timing laptop, so A and B follow it.
+    // B also sends Wout back to the registrations, not knowing C just put Wout on the track.
+    let wout = b.db.lock().unwrap().rows("SELECT id FROM runners WHERE name='Wout'", &[]).unwrap()
+        [0]["id"]
+        .clone();
+    b.act("runners.setStatus", json!({"id": wout, "status": "registered"}))
+        .unwrap();
+
+    // The network returns: C's split holds the Timing laptop, so A and B follow it, and C
+    // first takes what A and B saved meanwhile.
     c.node
         .isolated
         .store(false, std::sync::atomic::Ordering::Relaxed);
@@ -445,14 +533,21 @@ fn the_timing_laptop_goes_on_alone_by_itself_and_the_splits_join_again() {
         let split = c.status()["split"]["id"].clone();
         [&a, &b].iter().all(|s| s.status()["split"]["id"] == split) && all_healthy(&[&a, &b, &c])
     });
-    for server in [&a, &b] {
+    for server in [&a, &b, &c] {
+        // The lap the Timing laptop clocked alone stays, and so does the runner it put on the track.
         assert_eq!(server.count("SELECT COUNT(*) AS n FROM laps"), 1);
         assert_eq!(
+            server
+                .count("SELECT COUNT(*) AS n FROM runners WHERE name='Wout' AND status='running'"),
+            1
+        );
+        // What the majority confirmed while C was away is kept, once.
+        assert_eq!(
             server.count("SELECT COUNT(*) AS n FROM runners WHERE name='Alleen bij A en B'"),
-            0
+            1
         );
     }
-    // The laptop that led the other split says what it gave up, and where it went.
+    // The laptops that followed say they worked apart, and where their own copy went.
     let notices: Vec<Value> = [&a, &b]
         .iter()
         .map(|s| s.status()["notice"].clone())

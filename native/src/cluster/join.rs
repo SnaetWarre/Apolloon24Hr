@@ -298,8 +298,11 @@ impl Node {
                         } else {
                             leader.url.clone()
                         };
-                        if let Some((term, backup)) =
-                            self.join_through(&leader_url, options.auto_linked_with.as_deref())?
+                        // Another split of this group first takes what this split saved while apart.
+                        let handed = options.split.is_none() || self.hand_over_split(&leader_url);
+                        if handed
+                            && let Some((term, backup)) = self
+                                .join_through(&leader_url, options.auto_linked_with.as_deref())?
                         {
                             joined = Some((
                                 term,
@@ -442,6 +445,7 @@ impl Node {
     pub fn add_member(&self, member: &Member, auto: Option<&str>) -> Result<()> {
         let me = self.self_member();
         let origin = automatic_origin(&self.cfg.name);
+        let _writing = self.writing.lock().unwrap();
         let mut db = self.db.lock().unwrap();
         log::record(&mut db, "cluster.addMember", None, |db| {
             let stored = log::stored_members(db);
@@ -651,6 +655,7 @@ impl Node {
             .map(str::to_owned)
             .unwrap_or_else(|| automatic_origin(&self.cfg.name));
         let name = self.cfg.name.clone();
+        let _writing = self.writing.lock().unwrap();
         let mut db = self.db.lock().unwrap();
         log::record(&mut db, "cluster.continueAlone", None, |db| {
             db.exec(
@@ -871,6 +876,10 @@ impl Node {
             return;
         }
         let origin = automatic_origin(&self.cfg.name);
+        // A write on its way to the other laptops goes first; the next round lists the change.
+        let Ok(_writing) = self.writing.try_lock() else {
+            return;
+        };
         let _ = log::record(
             &mut self.db.lock().unwrap(),
             "cluster.reachability",
