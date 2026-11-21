@@ -298,8 +298,11 @@ impl Node {
                         } else {
                             leader.url.clone()
                         };
-                        if let Some((term, backup)) =
-                            self.join_through(&leader_url, options.auto_linked_with.as_deref())?
+                        // Another split of this group first takes what this split saved while apart.
+                        let handed = options.split.is_none() || self.hand_over_split(&leader_url);
+                        if handed
+                            && let Some((term, backup)) = self
+                                .join_through(&leader_url, options.auto_linked_with.as_deref())?
                         {
                             joined = Some((
                                 term,

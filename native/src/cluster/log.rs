@@ -286,7 +286,7 @@ pub fn record(
     Ok(result)
 }
 
-fn valid(statement: &Statement) -> bool {
+pub(super) fn valid(statement: &Statement) -> bool {
     let sql = statement.sql.trim_start().to_ascii_lowercase();
     ["insert", "update", "delete", "replace"]
         .iter()

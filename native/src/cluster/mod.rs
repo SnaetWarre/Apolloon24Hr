@@ -10,6 +10,7 @@ pub mod log;
 mod probe;
 mod raft;
 pub mod routes;
+mod split;
 #[cfg(test)]
 pub(crate) mod tests;
 
