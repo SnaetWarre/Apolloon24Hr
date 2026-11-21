@@ -144,6 +144,18 @@ async fn snapshot_request(
                 }
             }
         }).await;
+        if host.db.lock().unwrap().change_token() == *after {
+            let mut state = json!({
+                "unchanged": true,
+                "changeToken": after,
+                "host": crate::host::info(host.port),
+                "screens": host.screens.lock().unwrap().active(),
+            });
+            if let Some(node) = &host.cluster {
+                state["cluster"] = node.status();
+            }
+            return json_body(serde_json::to_vec(&state).unwrap().into());
+        }
     }
     snapshot_with_history(host, &query).await
 }
@@ -969,10 +981,19 @@ mod read_cache_tests {
         let host = Host::with_cluster(db, 5173, None);
         let initial = pushed(host.clone(), Some("foreign-or-restarted".into()), false).await;
         let started = std::time::Instant::now();
-        let current = pushed(host, initial["changeToken"].as_str().map(str::to_owned), false).await;
+        let current = pushed(host.clone(), initial["changeToken"].as_str().map(str::to_owned), true).await;
         assert!(started.elapsed() >= std::time::Duration::from_millis(1900));
         assert!(started.elapsed() < std::time::Duration::from_secs(4));
-        assert_eq!(initial, current);
+        assert_eq!(current["unchanged"], true);
+        assert_eq!(current["changeToken"], initial["changeToken"]);
+        assert_eq!(current["host"], initial["host"]);
+        assert_eq!(current["screens"], initial["screens"]);
+        assert!(current.get("runners").is_none());
+        assert!(current.get("stateHistory").is_none());
+        let legacy = pushed(host, None, true).await;
+        assert_eq!(legacy["runners"], json!([]));
+        assert!(legacy.get("unchanged").is_none());
+        assert!(legacy["stateHistory"]["laps"].is_array());
         let other = Db::open(std::path::Path::new(":memory:")).unwrap();
         assert_ne!(other.change_token(), current["changeToken"].as_str().unwrap());
     }
