@@ -21,6 +21,7 @@ mod admin_runners;
 mod admin_kit;
 mod analysis_page;
 mod admin_system;
+mod chart_axis;
 mod group_view;
 mod hex;
 mod label_editor;
