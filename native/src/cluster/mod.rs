@@ -22,7 +22,7 @@ use serde_json::{Value, json};
 use std::{
     collections::HashMap,
     sync::{
-        Arc, Mutex, OnceLock, Weak, mpsc,
+        Arc, Condvar, Mutex, OnceLock, Weak, mpsc,
         atomic::{AtomicBool, Ordering},
     },
     time::{Duration, Instant},
@@ -130,6 +130,9 @@ pub struct Node {
     pub(crate) host_id: String,
     self_url: Mutex<String>,
     raft: Mutex<raft::State>,
+    /// Signalled when another laptop answered or this laptop's role changed, so a write waiting
+    /// for the majority looks again at once.
+    raft_changed: Condvar,
     notes: Mutex<Notes>,
     /// Test hook: a pulled network cable. Requests to and from other laptops fail.
     pub isolated: AtomicBool,
@@ -199,6 +202,7 @@ impl Node {
         let node = Arc::new_cyclic(|weak| Self {
             db,
             raft: Mutex::new(raft::State::new(&cfg)),
+            raft_changed: Condvar::new(),
             self_url: Mutex::new(cfg.self_url.clone()),
             cfg,
             host_id,
