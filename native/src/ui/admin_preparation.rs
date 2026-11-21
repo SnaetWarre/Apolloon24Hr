@@ -46,53 +46,6 @@ pub(super) fn analysis(s: &State) -> Option<Result<Value, String>> {
     ))
 }
 
-fn template(s: &mut State, tx: &mut Tx) {
-    #[cfg(not(target_arch = "wasm32"))]
-    tx.save_file(
-        rune::FileDialogOptions {
-            file_name: Some("voorbeeld-lopers.csv".into()),
-            ..Default::default()
-        },
-        |s: &mut State, result, _| match result {
-            Ok(Some(path)) => {
-                if let Err(e) = std::fs::write(path, crate::runner_import::TEMPLATE) {
-                    s.error = format!("Voorbeeldbestand opslaan mislukt: {e}");
-                }
-            }
-            Err(e) => s.error = e.to_string(),
-            _ => {}
-        },
-    );
-    #[cfg(target_arch = "wasm32")]
-    {
-        use wasm_bindgen::JsCast;
-        let _ = tx;
-        let result = (|| -> Result<(), wasm_bindgen::JsValue> {
-            let document = web_sys::window().unwrap().document().unwrap();
-            let a = document
-                .create_element("a")?
-                .dyn_into::<web_sys::HtmlElement>()?;
-            a.set_attribute(
-                "href",
-                &format!(
-                    "data:text/csv;base64,{}",
-                    base64::engine::general_purpose::STANDARD
-                        .encode(crate::runner_import::TEMPLATE)
-                ),
-            )?;
-            a.set_attribute("download", "voorbeeld-lopers.csv")?;
-            document.body().unwrap().append_child(&a)?;
-            a.click();
-            a.remove();
-            Ok(())
-        })();
-        if result.is_err() {
-            s.error = "Voorbeeldbestand downloaden mislukt.".into();
-        }
-    }
-    let _ = s;
-}
-
 pub(super) fn section(s: &State) -> El {
     let p = pal(s.dark);
     let importing = matches!(s.admin.pending, Some(Pending::Import));
@@ -146,18 +99,6 @@ pub(super) fn section(s: &State) -> El {
                 )
                 .child(import_button),
         );
-    card = card.child(
-        btn(
-            s,
-            "download-template",
-            "Voorbeeldbestand downloaden",
-            Kind::Plain,
-            false,
-            false,
-        )
-        .mt(12.0)
-        .on_press_tx(template),
-    );
     if let Some(preview) = preview {
         let mut panel = super::admin_base::panel(s)
             .mt(12.0)

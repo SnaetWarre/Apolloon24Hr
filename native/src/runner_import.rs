@@ -14,7 +14,6 @@ use std::{
 };
 
 type Row = Vec<(String, String)>;
-pub const TEMPLATE: &str = "runner_number,name,labels,historical_avg,historical_best\n901,Demo Ster,Dames,1:35,1:25\n902,Demo Maan,Speedteam,1:40,1:30\n";
 
 fn mapping(header: &str, is_form: bool) -> &str {
     let key = canonical(header).replace(' ', "_");
@@ -598,13 +597,6 @@ mod tests {
             .unwrap()["rowCount"],
             0
         );
-    }
-    #[test]
-    fn template_has_no_problems() {
-        let p = preview("runners.importCsv", &json!({"csvText":TEMPLATE}), &[]).unwrap();
-        assert_eq!(p["rowCount"], 2);
-        assert_eq!(p["problems"], json!([]));
-        assert_eq!(p["duplicates"], json!([]));
     }
     #[test]
     fn preview_only_maps_profile_fields_for_form_exports() {
