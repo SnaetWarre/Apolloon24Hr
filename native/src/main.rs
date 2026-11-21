@@ -47,6 +47,8 @@ fn app() -> db::Result<()> {
     let server_only = std::env::args().any(|s| s == "--server");
     if server_only {
         desktop::supervisor::exit_on_panic();
+        #[cfg(all(target_os = "linux", target_env = "gnu"))]
+        tune_server_allocator();
         desktop::supervisor::follow_lifeline();
         return server::serve(database()?, port()?);
     }
@@ -80,6 +82,30 @@ fn app() -> db::Result<()> {
     #[cfg(not(feature = "desktop"))]
     Err("Build with the desktop feature or pass --server".into())
 }
+
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+fn tune_server_allocator() {
+    let tunables = std::env::var_os("GLIBC_TUNABLES").unwrap_or_default();
+    let configured = |env, prefix: &[u8]| {
+        std::env::var_os(env).is_some()
+            || tunables
+                .as_encoded_bytes()
+                .split(|&b| b == b':')
+                .any(|entry| entry.starts_with(prefix))
+    };
+    // Large temporary buffers can be unmapped when freed instead of leaving pages
+    // that cannot be reused by workers allocating from other arenas.
+    // SAFETY: Set these process-wide defaults before opening SQLite or spawning workers.
+    unsafe {
+        if !configured("MALLOC_MMAP_THRESHOLD_", b"glibc.malloc.mmap_threshold=") {
+            libc::mallopt(libc::M_MMAP_THRESHOLD, 128 * 1024);
+        }
+        if !configured("MALLOC_ARENA_MAX", b"glibc.malloc.arena_max=") {
+            libc::mallopt(libc::M_ARENA_MAX, 2);
+        }
+    }
+}
+
 fn main() {
     if let Err(error) = app() {
         eprintln!("Apolloon: {error}");
