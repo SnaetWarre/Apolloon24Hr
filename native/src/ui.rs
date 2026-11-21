@@ -2864,8 +2864,9 @@ fn start_transport(url: String, commands: Receiver<Command>, updates: Sender<Upd
                     Some(offset) => Some(offset),
                     None => sample_clock(&client, &url).await,
                 };
+                // A browser whose clock is off must not time a handoff before the offset is known.
                 next_clock_sync = Instant::now()
-                    + Duration::from_secs(if update.clock_offset.is_some() { 60 } else { 5 });
+                    + Duration::from_millis(if update.clock_offset.is_some() { 60_000 } else { 500 });
             }
             if updates.send(update).is_err() {
                 break;
