@@ -1163,3 +1163,151 @@ index 40208c2..bdf4451 100644
          // No surface: `Host::reattach` is between the old one and the new, and takes this size
          // from the window itself; or the CPU renderer draws it, whose buffer follows this size.
          let (Some(surface), Some(gpu)) = (&self.surface, gpu) else { return true };
+diff --git a/crates/rune/src/app.rs b/crates/rune/src/app.rs
+--- a/crates/rune/src/app.rs
++++ b/crates/rune/src/app.rs
+@@ -81,6 +81,7 @@
+     pub(crate) on_ready: Option<OnWindow>,
+     pub(crate) on_frame_encoded: Option<crate::frame::encoded::OnFrameEncoded>,
+     pub(crate) on_frame_drawn: Option<crate::frame::encoded::OnFrameDrawn<S>>,
++    pub(crate) on_frame_stage: Option<Box<dyn FnMut(&'static str)>>,
+     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+     pub(crate) same_tab_router: Option<Box<dyn Fn(&str) -> bool>>,
+     pub(crate) macos_window: crate::MacWindowOptions,
+@@ -144,6 +145,7 @@
+             on_ready: None,
+             on_frame_encoded: None,
+             on_frame_drawn: None,
++            on_frame_stage: None,
+             same_tab_router: None,
+             macos_window: crate::MacWindowOptions::default(),
+             compositor: None,
+@@ -560,6 +562,12 @@
+     /// or what the window draws, and only desktop windows call it.
+     pub fn on_frame_drawn(mut self, f: impl FnMut(&crate::Runtime<S>) + 'static) -> Self {
+         self.on_frame_drawn = Some(Box::new(f));
++        self
++    }
++
++    /// Observes CPU wall-time boundaries of GPU frames without scheduling frames.
++    pub fn on_frame_stage(mut self, f: impl FnMut(&'static str) + 'static) -> Self {
++        self.on_frame_stage = Some(Box::new(f));
+         self
+     }
+ 
+diff --git a/crates/rune/src/frame/encoded.rs b/crates/rune/src/frame/encoded.rs
+--- a/crates/rune/src/frame/encoded.rs
++++ b/crates/rune/src/frame/encoded.rs
+@@ -81,10 +81,10 @@
+ 
+ /// A window's hooks and the count it numbers reports with. Without a hook every call is one
+ /// `Option` check and nothing else, so reporting never changes how the window draws.
+-pub(crate) struct FrameReports<S: 'static>(Option<Reporter>, Option<OnFrameDrawn<S>>);
++pub(crate) struct FrameReports<S: 'static>(Option<Reporter>, Option<OnFrameDrawn<S>>, Option<Box<dyn FnMut(&'static str)>>);
+ 
+ impl<S: 'static> Default for FrameReports<S> {
+-    fn default() -> Self { Self(None, None) }
++    fn default() -> Self { Self(None, None, None) }
+ }
+ 
+ struct Reporter {
+@@ -96,12 +96,21 @@
+ 
+ impl<S: 'static> FrameReports<S> {
+     pub(crate) fn new(hook: Option<OnFrameEncoded>, window: Option<&str>) -> Self {
+-        Self(hook.map(|hook| Reporter { hook, window: window.map(Rc::from), seq: 0, refresh_hz: None }), None)
++        Self(hook.map(|hook| Reporter { hook, window: window.map(Rc::from), seq: 0, refresh_hz: None }), None, None)
+     }
+ 
+     pub(crate) fn inspecting(mut self, drawn: Option<OnFrameDrawn<S>>) -> Self {
+         self.1 = drawn;
+         self
++    }
++
++    pub(crate) fn staging(mut self, hook: Option<Box<dyn FnMut(&'static str)>>) -> Self {
++        self.2 = hook;
++        self
++    }
++
++    pub(crate) fn stage(&mut self, name: &'static str) {
++        if let Some(hook) = &mut self.2 { hook(name); }
+     }
+ 
+     /// The time to report a `Drawn` frame at, taken only when there's a hook.
+diff --git a/crates/rune/src/window/draw.rs b/crates/rune/src/window/draw.rs
+--- a/crates/rune/src/window/draw.rs
++++ b/crates/rune/src/window/draw.rs
+@@ -182,6 +182,7 @@
+         let live_resize = resizing;
+         // The frame moves before the drawable is acquired, so it has the new size; never while
+         // the user holds the window's edge in a live resize.
++        self.frame_reports.stage("build_begin");
+         if !hidden && !live_resize { self.step_frame(target.unwrap_or_else(Instant::now)); }
+         let (Some(l), Some((gpu, renderer))) = (self.win.as_mut(), self.gpu.as_mut()) else { return };
+         #[cfg(target_os = "macos")]
+@@ -336,6 +337,7 @@
+         l.backoff_step(BackoffEvent::Presented);
+         if hidden { l.hidden_pace.rendered(now); }
+         let update_ms = now.elapsed().as_secs_f64() * 1000.0;
++        self.frame_reports.stage("build_end");
+         #[cfg(feature = "frame-profile")]
+         let fp_built = fp_start.map(|_| crate::frame::live_log::Stamp::now());
+         sync_platform(l, rt, &mut self.secure_input, &mut self.ime_allowed, &self.clipboard);
+@@ -413,12 +415,15 @@
+         if let Some(alpha) = &l.alpha { alpha.draw(&mut enc, &view); }
+         #[cfg(feature = "frame-profile")]
+         let fp_encoded = fp_start.map(|_| crate::frame::live_log::Stamp::now());
++        self.frame_reports.stage("submit_begin");
+         renderer.submit(&gpu.queue, enc);
++        self.frame_reports.stage("submit_end");
+         #[cfg(feature = "frame-profile")]
+         let fp_submitted = fp_start.map(|_| crate::frame::live_log::Stamp::now());
+         crate::marks::mark_once(&FIRST_ENCODED, "frame.first.encoded");
+         let encoded = self.frame_reports.stamp();
+         l.window.pre_present_notify();
++        self.frame_reports.stage("present_begin");
+         #[cfg(target_os = "macos")]
+         l.native.materials.present(&rt.materials, rt.env.scale, || gpu.queue.present(frame));
+         #[cfg(target_os = "windows")]
+@@ -430,6 +435,7 @@
+         }
+         #[cfg(not(target_os = "macos"))]
+         gpu.queue.present(frame);
++        self.frame_reports.stage("present_end");
+         #[cfg(target_os = "windows")]
+         l.native.slot.presented();
+         // A swap chain made again on a handed-over window's visual takes over now (`cpu_frame`).
+diff --git a/crates/rune/src/window.rs b/crates/rune/src/window.rs
+--- a/crates/rune/src/window.rs
++++ b/crates/rune/src/window.rs
+@@ -553,7 +553,7 @@
+         let mut args = app.resolve_args(args);
+         let on_window = app.on_window.take();
+         let on_ready = app.on_ready.take();
+-        let frame_reports = crate::frame::encoded::FrameReports::new(app.on_frame_encoded.take(), Some(native_handle.key())).inspecting(app.on_frame_drawn.take());
++        let frame_reports = crate::frame::encoded::FrameReports::new(app.on_frame_encoded.take(), Some(native_handle.key())).inspecting(app.on_frame_drawn.take()).staging(app.on_frame_stage.take());
+         let macos_window = std::mem::take(&mut app.macos_window);
+         // Before the menu guard, so custom items in Edit or Window join these menus.
+         #[cfg(target_os = "macos")]
+diff --git a/crates/rune/src/frame/encoded_tests.rs b/crates/rune/src/frame/encoded_tests.rs
+--- a/crates/rune/src/frame/encoded_tests.rs
++++ b/crates/rune/src/frame/encoded_tests.rs
+@@ -6,6 +6,18 @@
+ use crate::{App, AppSpec, WindowSpec};
+ 
+ type Log = Rc<RefCell<Vec<FrameEncoded>>>;
++
++#[test]
++fn stage_hook_is_optional_and_reports_only_called_boundaries() {
++    let log = Rc::new(RefCell::new(Vec::new()));
++    let sink = log.clone();
++    let mut reports = FrameReports::<()>::default().staging(Some(Box::new(move |stage| sink.borrow_mut().push(stage))));
++    reports.stage("submit_begin");
++    reports.stage("submit_end");
++    assert_eq!(*log.borrow(), ["submit_begin", "submit_end"]);
++    assert!(!reports.wanted());
++    FrameReports::<()>::default().stage("present_begin");
++}
+ 
+ fn logging() -> (Log, OnFrameEncoded) {
+     let log = Log::default();

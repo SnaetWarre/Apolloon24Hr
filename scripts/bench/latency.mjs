@@ -73,6 +73,64 @@ function stats(values) {
   return { n: values.length, p50: percentile(values, 0.5), p95: percentile(values, 0.95), max: percentile(values, 1) };
 }
 
+export function nativeFrameMetrics(events, writes) {
+  const native = events.filter((e) => e.source === 'native').sort((a, b) => a.us - b.us);
+  const first = (stage, lap, after = 0) =>
+    native.find((e) => e.stage === stage && e.lapId === lap && e.us >= after)?.us;
+  const previous = (stage, at) => native.findLast((e) => e.stage === stage && e.us <= at)?.us;
+  const overlap = (stage, from, to) => {
+    let begin;
+    let total = 0;
+    for (const event of native) {
+      if (event.stage === stage + '_begin') begin = event.us;
+      if (event.stage === stage + '_end' && begin !== undefined) {
+        total += Math.max(0, Math.min(to, event.us) - Math.max(from, begin));
+        begin = undefined;
+      }
+    }
+    return total;
+  };
+  return writes.map((w) => {
+    const push = first('push_received', w.lapId);
+    const apply = first('apply_begin', w.lapId, push);
+    const applied = first('applied', w.lapId, apply);
+    const frame = first('frame', w.lapId, applied);
+    const end = previous('present_end', frame);
+    const present = previous('present_begin', end);
+    const submitted = previous('submit_end', present);
+    const submit = previous('submit_begin', submitted);
+    const built = previous('build_end', submit);
+    const build = previous('build_begin', built);
+    const valid =
+      [push, apply, applied, frame, build, built, submit, submitted, present, end].every(Number.isFinite) &&
+      push <= apply &&
+      apply <= applied &&
+      build <= built &&
+      applied <= built &&
+      built <= submit &&
+      submit <= submitted &&
+      submitted <= present &&
+      present <= end &&
+      end <= frame;
+    if (!valid) return { lapId: w.lapId };
+    const previousSubmitUs = overlap('submit', push, apply);
+    const previousPresentUs = overlap('present', push, apply);
+    const applyUs = applied - apply;
+    return {
+      lapId: w.lapId,
+      pushAppliedUs: applied - push,
+      previousSubmitUs,
+      previousPresentUs,
+      applyUs,
+      otherBeforeApplyUs: apply - push - previousSubmitUs - previousPresentUs,
+      buildUs: built - build - Math.max(0, Math.min(built, applied) - Math.max(build, apply)),
+      encodeUs: submit - built,
+      submitUs: submitted - submit,
+      presentUs: end - present,
+    };
+  });
+}
+
 export function stageMetrics(events, writes, results, leader, refresh = []) {
   const ids = new Map(events.filter((e) => e.stage === 'local_commit' && e.lapId).map((e) => [e.id, e.lapId]));
   const rows = events.map((e) => ({ ...e, lapId: e.lapId ?? ids.get(e.id) }));
@@ -150,8 +208,27 @@ export function stageMetrics(events, writes, results, leader, refresh = []) {
     .filter((e) => e.source === 'native' && e.stage === 'cadence')
     .map((e) => e.us)
     .sort((a, b) => a - b);
+  const nativeFrames = nativeFrameMetrics(rows, writes);
+  const nativeScreen = results.find((screen) => screen.name === 'native Timing');
+  nativeFrames.forEach((frame, i) => {
+    const at = first(writes[i].lapId, 'frame', 'native', first(writes[i].lapId, 'applied', 'native'));
+    if (nativeScreen?.values[i] != null && Number.isFinite(at))
+      frame.framePixelsUs = (writes[i].sentAt + nativeScreen.values[i]) * 1000 - at;
+  });
+  for (const [key, name] of Object.entries({
+    previousSubmitUs: 'native push→apply waiting on previous submit',
+    previousPresentUs: 'native push→apply waiting on previous present',
+    applyUs: 'native own apply',
+    otherBeforeApplyUs: 'native push→apply other transport/scheduling',
+    buildUs: 'native view build/acquire excluding apply',
+    encodeUs: 'native upload/encode',
+    submitUs: 'native GPU submit (CPU wall time)',
+    presentUs: 'native present (CPU wall time)',
+  }))
+    stages.push({ name, ...stats(nativeFrames.map((f) => f[key]).filter(Number.isFinite)) });
   return {
     stages,
+    nativeFrames,
     nativeDrawnFrameIntervalsUs: stats(cadence.slice(1).map((at, i) => at - cadence[i])),
     browserRafIntervalsUs: refresh.map((r) => ({
       screen: r.screen,

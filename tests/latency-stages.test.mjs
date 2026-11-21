@@ -13,10 +13,10 @@ test('latency stages join handoff tokens to lap ids and preserve microseconds', 
   ];
   const { stages } = stageMetrics(events, [{ lapId: 'lap' }], [], 'A');
   assert.deepEqual(
-    stages.map((s) => s.p50),
+    stages.filter((s) => s.n).map((s) => s.p50),
     [25, 35, 40, 50, 20]
   );
-  assert(stages.every((s) => s.n === 1 && s.p95 === s.max));
+  assert(stages.every((s) => (s.n === 1 || s.n === 0) && s.p95 === s.max));
 });
 
 test('missing or empty trace stages are unavailable rather than zero or inferred frames', () => {

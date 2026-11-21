@@ -421,6 +421,7 @@ fn poll(s: &mut State, _: f64, tx: &mut Tx) -> bool {
     }
     while let Ok(update) = s.rx.try_recv() {
         let traced = crate::latency::enabled() && !update.snapshot.is_null();
+        if traced { crate::latency::snapshot("apply_begin", &update.snapshot); }
         if let Some(offset) = update.clock_offset
             && s.clock_offset.abs_diff(offset) >= 16
         {
@@ -1219,6 +1220,7 @@ pub fn run() {
     #[cfg(not(target_arch = "wasm32"))]
     crate::desktop::chrome::run(spec, |app| if crate::latency::enabled() {
         app.on_frame_drawn(|rt| crate::latency::snapshot("frame", &rt.state.snapshot))
+            .on_frame_stage(crate::latency::frame_stage)
             .on_frame_encoded(|frame| {
                 if frame.outcome() == rune::FrameOutcome::Drawn { crate::latency::emit("cadence", "native", None); }
             })

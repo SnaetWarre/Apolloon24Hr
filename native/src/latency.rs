@@ -9,6 +9,10 @@ pub fn enabled() -> bool {
     ENABLED.load(Ordering::Relaxed)
 }
 
+pub fn frame_stage(stage: &'static str) {
+    emit(stage, "native-frame", None);
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 static WRITER: std::sync::OnceLock<std::sync::mpsc::SyncSender<Value>> = std::sync::OnceLock::new();
 

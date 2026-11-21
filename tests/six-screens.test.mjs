@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { nativeFrameMetrics } from '../scripts/bench/latency.mjs';
 import {
   browserLatencies,
   displayedHandoff,
@@ -7,6 +8,49 @@ import {
   percentile,
   validateReplicaLaps,
 } from '../scripts/bench/metrics.mjs';
+
+test('native frame stages separate prior presentation, apply and redraw work', () => {
+  const event = (stage, us, lapId) => ({ stage, us, lapId, source: 'native' });
+  const events = [
+    event('submit_begin', 0),
+    event('push_received', 5, 'lap'),
+    event('submit_end', 10),
+    event('present_begin', 10),
+    event('present_end', 20),
+    event('build_begin', 21),
+    event('apply_begin', 22, 'lap'),
+    event('applied', 25, 'lap'),
+    event('build_end', 30),
+    event('submit_begin', 35),
+    event('submit_end', 40),
+    event('present_begin', 41),
+    event('present_end', 50),
+    event('frame', 51, 'lap'),
+  ];
+  assert.deepEqual(nativeFrameMetrics(events, [{ lapId: 'lap' }]), [
+    {
+      lapId: 'lap',
+      pushAppliedUs: 20,
+      previousSubmitUs: 5,
+      previousPresentUs: 10,
+      applyUs: 3,
+      otherBeforeApplyUs: 2,
+      buildUs: 6,
+      encodeUs: 5,
+      submitUs: 5,
+      presentUs: 9,
+    },
+  ]);
+  assert.deepEqual(nativeFrameMetrics([], []), []);
+  assert.deepEqual(nativeFrameMetrics(events.slice(1), [{ lapId: 'missing' }]), [{ lapId: 'missing' }]);
+  assert.deepEqual(
+    nativeFrameMetrics(
+      events.filter((e) => e.stage !== 'submit_end'),
+      [{ lapId: 'lap' }]
+    ),
+    [{ lapId: 'lap' }]
+  );
+});
 
 test('screen observations follow rendered totals, active runner and waiting lane', () => {
   assert.equal(displayedHandoff('/timing', { text: 'Hierna|Bench 01|Laatste rondes|1|Bench 00|ronde 57|12:34' }), 0);
