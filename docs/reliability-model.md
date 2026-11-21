@@ -61,7 +61,7 @@ are therefore not enough: then losing either one stops saving.
   itself; a laptop that joins a group receives that group's key in the answer
   to its join, so Koppelen (or linking by itself) sets it up and there is
   nothing to type or copy. The key is kept in its own file next to the
-  database (`group-keys.json`), so it is in no backup and in no copy of the
+  database (`app.group-keys.json`), so it is in no backup and in no copy of the
   data. Every request between laptops (heartbeats, votes,
   changes, passed-on saves, full copies, bringing splits back together) is
   signed with it and refused without it, and an announcement only moves a

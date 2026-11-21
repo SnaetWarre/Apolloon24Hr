@@ -17,7 +17,7 @@ const KEPT: usize = 4;
 fn file(db: &Db) -> Option<std::path::PathBuf> {
     crate::backups::database_path(db)
         .ok()
-        .map(|path| path.with_file_name("group-keys.json"))
+        .map(|path| path.with_extension("group-keys.json"))
 }
 
 fn stored(db: &Db) -> Vec<String> {
@@ -31,14 +31,25 @@ fn save(db: &Db, keys: &[String]) -> Result<()> {
     let Some(file) = file(db) else {
         return Ok(());
     };
+    // Flushed like the database: after a power cut the laptop must still hold its group's key.
     let pending = file.with_extension("json.tmp");
-    std::fs::write(&pending, json!(keys).to_string()).map_err(|e| e.to_string())?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&pending, std::fs::Permissions::from_mode(0o600));
-    }
-    std::fs::rename(&pending, &file).map_err(|e| e.to_string())
+    let write = || -> std::io::Result<()> {
+        use std::io::Write;
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+        let mut out = options.open(&pending)?;
+        out.write_all(json!(keys).to_string().as_bytes())?;
+        out.sync_all()?;
+        std::fs::rename(&pending, &file)?;
+        #[cfg(unix)]
+        if let Some(dir) = file.parent() {
+            std::fs::File::open(dir)?.sync_all()?;
+        }
+        Ok(())
+    };
+    write().map_err(|e| e.to_string())
 }
 
 /// The keys at startup. A group linked by a version without keys gets the same first key on
