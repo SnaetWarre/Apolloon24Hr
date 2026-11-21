@@ -517,7 +517,15 @@ fn the_timing_laptop_goes_on_alone_by_itself_and_the_splits_join_again() {
     b.act("runners.create", json!({"name":"Alleen bij A en B"}))
         .unwrap();
 
-    // The network returns: C's split holds the Timing laptop, so A and B follow it.
+    // B also sends Wout back to the registrations, not knowing C just put Wout on the track.
+    let wout = b.db.lock().unwrap().rows("SELECT id FROM runners WHERE name='Wout'", &[]).unwrap()
+        [0]["id"]
+        .clone();
+    b.act("runners.setStatus", json!({"id": wout, "status": "registered"}))
+        .unwrap();
+
+    // The network returns: C's split holds the Timing laptop, so A and B follow it, and C
+    // first takes what A and B saved meanwhile.
     c.node
         .isolated
         .store(false, std::sync::atomic::Ordering::Relaxed);
@@ -525,14 +533,21 @@ fn the_timing_laptop_goes_on_alone_by_itself_and_the_splits_join_again() {
         let split = c.status()["split"]["id"].clone();
         [&a, &b].iter().all(|s| s.status()["split"]["id"] == split) && all_healthy(&[&a, &b, &c])
     });
-    for server in [&a, &b] {
+    for server in [&a, &b, &c] {
+        // The lap the Timing laptop clocked alone stays, and so does the runner it put on the track.
         assert_eq!(server.count("SELECT COUNT(*) AS n FROM laps"), 1);
         assert_eq!(
+            server
+                .count("SELECT COUNT(*) AS n FROM runners WHERE name='Wout' AND status='running'"),
+            1
+        );
+        // What the majority confirmed while C was away is kept, once.
+        assert_eq!(
             server.count("SELECT COUNT(*) AS n FROM runners WHERE name='Alleen bij A en B'"),
-            0
+            1
         );
     }
-    // The laptop that led the other split says what it gave up, and where it went.
+    // The laptops that followed say they worked apart, and where their own copy went.
     let notices: Vec<Value> = [&a, &b]
         .iter()
         .map(|s| s.status()["notice"].clone())

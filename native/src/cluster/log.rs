@@ -327,7 +327,7 @@ pub fn apply_own(db: &mut Db, entry: &Entry) -> Result<()> {
     apply(db, std::slice::from_ref(entry))
 }
 
-fn valid(statement: &Statement) -> bool {
+pub(super) fn valid(statement: &Statement) -> bool {
     let sql = statement.sql.trim_start().to_ascii_lowercase();
     ["insert", "update", "delete", "replace"]
         .iter()
