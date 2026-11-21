@@ -475,7 +475,7 @@ impl Db {
                 )?;
             }
             for (index,note) in [
-                "Tijdcoëfficiënt = 1 + factor × (referentietijd − rondetijd). Een ronde trager dan de referentietijd krijgt 1.",
+                "Tijdcoëfficiënt = 1 + factor × (referentietijd − rondetijd), met een minimum van 1.",
                 "Het dagdeel hangt af van het uur waarop de ronde startte, in Belgische tijd.",
                 "Een dubbele druk (korter dan 20 s) en de tweede helft van een gesplitste ronde krijgen coëfficiënt 1.",
                 "Verander een getal in kolom B of een factor in kolom D: Punten per ronde en Puntenlijst rekenen opnieuw."

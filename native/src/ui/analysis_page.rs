@@ -1071,7 +1071,7 @@ fn race_section(s: &State, laps: &[&Value], k: &Kpis, no_labels: bool, p: &Pal) 
         ));
     }
     if k.over_limit > 0 {
-        out = out.child(warning(format!("{} ronde(s) langer dan 10 minuten gevonden. Waarschijnlijk werd er niet gewisseld; die tijden tellen niet mee in gemiddelden, traagste en grafieken.", k.over_limit), s));
+        out = out.child(warning(format!("{} ronde(s) langer dan 10 minuten gevonden. Waarschijnlijk werd er niet gewisseld; die tijden tellen niet mee in gemiddelden, maximumtijden en grafieken.", k.over_limit), s));
     }
     // Rondeverdeling
     let bins = distribution(laps);
@@ -1397,7 +1397,7 @@ fn teams_section(s: &State, labels: &[&Value], laps: &[&Value], p: &Pal) -> El {
                 "Gemiddeld",
                 "Mediaan",
                 "Snelste",
-                "Traagste",
+                "Maximumtijd",
             ],
             rows,
             p,
