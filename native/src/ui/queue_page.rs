@@ -8,6 +8,10 @@ use std::collections::HashMap;
 
 /// Warming up this long is worth a glance; it never blocks anything.
 const LONG_WARM_UP_MS: i64 = 10 * 60_000;
+/// About as long as a warm-up takes: when the line runs out sooner, someone should start now.
+const WARM_UP_LEAD_MS: i64 = 10 * 60_000;
+/// The rolling team average for runners with no lap time of their own yet.
+const ROLLING_LAPS: usize = 10;
 const SEARCH_PAGE: usize = 40;
 const TOAST_MS: i64 = 4_000;
 const DRAG_START: f32 = 6.0;
@@ -246,6 +250,105 @@ fn can_check_in(status: &str) -> bool {
 }
 fn plural(n: usize, one: &str, many: &str) -> String {
     format!("{n} {}", if n == 1 { one } else { many })
+}
+
+// ---------- Turn estimates: when each runner in line is up ----------
+
+fn usable_lap(ms: Option<i64>) -> Option<i64> {
+    ms.filter(|ms| (20_000..=600_000).contains(ms))
+}
+/// The runner's own lap time: this race's average, else the one from earlier races.
+fn own_lap_ms(r: &Value) -> Option<i64> {
+    usable_lap(r["averageLapMs"].as_f64().map(|v| v.round() as i64))
+        .or_else(|| usable_lap(r["historicalAvgMs"].as_f64().map(|v| v.round() as i64)))
+}
+/// Average of the last laps (history is newest first), else of the runners' own times.
+fn team_lap_ms(laps: &Value, runners: &[&Value]) -> Option<i64> {
+    let mean = |v: Vec<i64>| (!v.is_empty()).then(|| v.iter().sum::<i64>() / v.len() as i64);
+    mean(
+        laps.as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|l| usable_lap(l["durationMs"].as_i64()))
+            .take(ROLLING_LAPS)
+            .collect(),
+    )
+    .or_else(|| mean(runners.iter().filter_map(|r| own_lap_ms(r)).collect()))
+}
+/// When each runner's turn starts, counted from now: what is left of the lap on the track,
+/// then one lap per runner ahead. `None` once a lap time is unknown.
+fn turn_starts(left_on_track: i64, laps: &[Option<i64>]) -> (Vec<Option<i64>>, Option<i64>) {
+    let mut at = Some(left_on_track.max(0));
+    let starts = laps
+        .iter()
+        .map(|lap| {
+            let start = at;
+            at = at.zip(*lap).map(|(a, l)| a + l);
+            start
+        })
+        .collect();
+    (starts, at)
+}
+#[derive(Default)]
+struct Turns {
+    starts: HashMap<String, i64>,
+    /// Until the last runner in Klaar om te lopen is done.
+    line_ms: Option<i64>,
+    /// Until everyone in line and warming up is done.
+    cover_ms: Option<i64>,
+}
+/// Turns follow the whole queue, then Opwarming in its order, whatever the board's filter.
+fn turns(s: &State) -> Turns {
+    let all = runners(s);
+    let race = &s.snapshot["race"];
+    let (Some(current), Some(started)) = (
+        all.iter()
+            .find(|r| !race["activeRunnerId"].is_null() && r["id"] == race["activeRunnerId"]),
+        race["activeStartedAt"].as_i64(),
+    ) else {
+        return Turns::default();
+    };
+    let team = team_lap_ms(&s.history["laps"], &all);
+    let lap = |r: &Value| own_lap_ms(r).or(team);
+    let Some(current_lap) = lap(current) else {
+        return Turns::default();
+    };
+    let line = waiting(s);
+    let mut warming: Vec<&Value> = all
+        .iter()
+        .copied()
+        .filter(|r| r["status"] == "warming_up")
+        .collect();
+    warming.sort_by(|a, b| {
+        since(a)
+            .cmp(&since(b))
+            .then(number_value(a).cmp(&number_value(b)))
+    });
+    let order: Vec<&Value> = line.iter().chain(warming.iter()).copied().collect();
+    let laps: Vec<Option<i64>> = order.iter().map(|r| lap(r)).collect();
+    let (starts, cover_ms) = turn_starts(current_lap - (s.clock - started), &laps);
+    let line_ms = starts.get(line.len()).copied().unwrap_or(cover_ms);
+    Turns {
+        starts: order
+            .iter()
+            .zip(starts)
+            .filter_map(|(r, at)| Some((st(r, "id").to_string(), at?)))
+            .collect(),
+        line_ms,
+        cover_ms,
+    }
+}
+/// "± 12 min", rounded to the minute; an hour or more reads "± 1 u 05".
+fn eta_text(ms: i64) -> String {
+    if ms < 60_000 {
+        return "< 1 min".into();
+    }
+    let min = (ms + 30_000) / 60_000;
+    if min >= 60 {
+        format!("± {} u {:02}", min / 60, min % 60)
+    } else {
+        format!("± {min} min")
+    }
 }
 
 // ---------- Icons (src/components/Icon.tsx), in any colour ----------
@@ -868,13 +971,13 @@ fn available_now(s: &State) -> El {
     )
 }
 
-
 struct Board<'a> {
     filtered: Vec<&'a Value>,
     warming: Vec<&'a Value>,
     waiting: Vec<&'a Value>,
     ran: Vec<&'a Value>,
     positions: HashMap<String, usize>,
+    turns: Turns,
 }
 fn board_data(s: &State) -> Board<'_> {
     let q = s.queue_page.filter.text.trim().to_string();
@@ -935,6 +1038,7 @@ fn board_data(s: &State) -> Board<'_> {
         waiting: waiting_rows,
         ran,
         positions,
+        turns: turns(s),
     }
 }
 
@@ -1133,11 +1237,14 @@ fn board(s: &State) -> El {
             .iter()
             .filter(|r| r["status"] == key && r["hiddenFromQueue"] != true)
             .count();
-        let count = if q.is_empty() {
+        let mut count = if q.is_empty() {
             plural(list.len(), "loper", "lopers")
         } else {
             format!("{} van {total} lopers", list.len())
         };
+        if let Some(line) = b.turns.line_ms.filter(|_| key == "waiting" && total > 0) {
+            count = format!("{count} · {}", eta_text(line));
+        }
         let mut rows = col().pr(15.0);
         for r in list.iter() {
             rows = rows.child(runner_row(s, r, &b, drop_action.as_ref()));
@@ -1288,8 +1395,68 @@ fn board(s: &State) -> El {
                 .min_w(0.0),
         );
     }
+    if let Some(nudge) = warm_up_nudge(s, &b) {
+        workspace = workspace.child(nudge);
+    }
     let _ = &b.filtered;
     workspace.child(lanes).child(completed)
+}
+
+/// The line runs out before a fresh runner could finish warming up: say so, and offer the
+/// runners who can run this hour, so one click sends them to Opwarming.
+fn warm_up_nudge(s: &State, b: &Board) -> Option<El> {
+    let cover = b.turns.cover_ms.filter(|ms| *ms < WARM_UP_LEAD_MS)?;
+    if !s.snapshot["race"]["raceFinishedAt"].is_null() {
+        return None;
+    }
+    let p = pal(s.dark);
+    let (hour, weekday) = brussels_moment(s.clock);
+    let message = if b.turns.starts.is_empty() {
+        "Na deze ronde staat er niemand klaar. Laat nu iemand opwarmen.".to_string()
+    } else {
+        format!(
+            "Over {} staat er niemand meer klaar. Laat nu iemand opwarmen.",
+            eta_text(cover).trim_start_matches("± ")
+        )
+    };
+    let mut line = row()
+        .gap(8.0)
+        .center_y()
+        .flex_wrap()
+        .child(icon(s, "timing", p.brand_ink, 14.0, 1.75))
+        .child(
+            text(message)
+                .font(rune::TextStyle::new(13.0, 550.0).lh(18.0))
+                .color(p.brand_ink)
+                .wrap()
+                .min_w(0.0),
+        );
+    for (r, _, _) in available_runners(s, hour, weekday).into_iter().take(3) {
+        let id = st(r, "id").to_string();
+        let warm_id = id.clone();
+        line = line.child(
+            btn(
+                s,
+                format!("queue-warm-up-{id}"),
+                &runner_label(r),
+                Kind::Plain,
+                true,
+            )
+            .label(format!("{} laten opwarmen", runner_label(r)))
+            .on_press(move |s: &mut State| set_status(s, &warm_id, "warming_up", Pending::Board)),
+        );
+    }
+    Some(
+        col()
+            .key("queue-warm-up-nudge")
+            .role("status")
+            .px(14.0)
+            .py(10.0)
+            .radius(8.0)
+            .fill(p.brand_wash)
+            .border(1.0, p.brand.alpha(0.35))
+            .child(line),
+    )
 }
 
 fn empty(s: &State, message: &str) -> El {
@@ -1382,7 +1549,32 @@ fn runner_row(s: &State, r: &Value, b: &Board, drop: Option<&(String, Drop)>) ->
                 ),
         );
     }
+    if position == Some(1) {
+        title = title.child(
+            row()
+                .key(format!("queue-then-{id}"))
+                .h(18.0)
+                .px(6.0)
+                .radius(4.0)
+                .fill(p.brand_wash)
+                .border(1.0, p.brand.alpha(0.35))
+                .center()
+                .child(
+                    text("Daarna")
+                        .font(rune::TextStyle::new(11.0, 550.0))
+                        .color(p.brand_ink),
+                ),
+        );
+    }
     let mut details = row().gap(8.0).center_y().min_h(18.0).flex_wrap();
+    if let Some(at) = b.turns.starts.get(&id).copied() {
+        details = details.child(
+            text(format!("aan de beurt over {}", eta_text(at)))
+                .key(format!("queue-eta-{id}"))
+                .font(rune::TextStyle::new(12.0, 500.0).lh(18.0).features("tnum"))
+                .color(if next { p.brand_ink } else { p.t.ink2 }),
+        );
+    }
     for l in r["labels"].as_array().into_iter().flatten() {
         details = details.child(pill(s, l));
     }
@@ -2071,7 +2263,11 @@ fn search_dialog(s: &State, search: &Search) -> El {
                     format!(
                         "{} {}",
                         found.len(),
-                        if found.len() == 1 { "resultaat" } else { "resultaten" }
+                        if found.len() == 1 {
+                            "resultaat"
+                        } else {
+                            "resultaten"
+                        }
                     )
                 } else {
                     format!("{} lopers in de databank", found.len())
@@ -3075,6 +3271,88 @@ mod tests {
         click(&mut rt, "add-hour-dinsdag-21");
 
         assert!(add_mut(&mut rt.state).hours.is_empty());
+    }
+
+    #[test]
+    fn turn_estimates_add_one_lap_per_runner_ahead() {
+        let (starts, end) = turn_starts(-5_000, &[Some(90_000), Some(60_000), None, Some(1)]);
+        assert_eq!(starts, vec![Some(0), Some(90_000), Some(150_000), None]);
+        assert_eq!(end, None);
+        assert_eq!(turn_starts(30_000, &[]), (vec![], Some(30_000)));
+        assert_eq!(eta_text(59_000), "< 1 min");
+        assert_eq!(eta_text(90_000), "± 2 min");
+        assert_eq!(eta_text(65 * 60_000), "± 1 u 05");
+        // Only real laps count, newest first; runners' own times fill in before any lap.
+        let laps = json!([{"durationMs":100_000},{"durationMs":5_000},{"durationMs":80_000}]);
+        assert_eq!(team_lap_ms(&laps, &[]), Some(90_000));
+        let fien = json!({"averageLapMs":null,"historicalAvgMs":70_000});
+        assert_eq!(own_lap_ms(&fien), Some(70_000));
+        assert_eq!(team_lap_ms(&json!([]), &[&fien]), Some(70_000));
+        assert_eq!(own_lap_ms(&json!({"averageLapMs":75_000.0})), Some(75_000));
+    }
+
+    #[test]
+    fn waiting_runners_see_their_turn_and_a_short_line_asks_for_a_warm_up() {
+        let (mut rt, db) = start();
+        let now = crate::db::now();
+        {
+            let mut db = db.lock().unwrap();
+            for name in ["Anna", "Bram", "Cas", "Dirk"] {
+                db.mutation("runners.create", &json!({"name":name,"status":"waiting"}))
+                    .unwrap();
+            }
+            let race = db.race().unwrap();
+            db.mutation("race.handoff", &json!({"activeRunnerId":race["activeRunnerId"],"activeStartedAt":race["activeStartedAt"],"pressedAt":now})).unwrap();
+            // Anna has been out for her usual 90 s lap.
+            db.exec("UPDATE runners SET historical_avg_ms=90000", &[])
+                .unwrap();
+            db.exec(
+                "UPDATE race_state SET active_started_at=?, race_started_at=? WHERE id=1",
+                &[json!(now - 90_000), json!(now - 90_000)],
+            )
+            .unwrap();
+        }
+        update(&mut rt, |s| {
+            s.snapshot["race"]["activeStartedAt"].as_i64() == Some(now - 90_000)
+                && waiting(s).len() == 3
+        });
+        let ids: Vec<String> = waiting(&rt.state)
+            .iter()
+            .map(|r| st(r, "id").to_string())
+            .collect();
+        let t = turns(&rt.state);
+        // Bram is up as soon as Anna is in, then one lap per runner ahead.
+        assert!(t.starts[&ids[0]] < 1_000);
+        assert!((89_000..=90_000).contains(&t.starts[&ids[1]]));
+        assert!((179_000..=180_000).contains(&t.starts[&ids[2]]));
+        assert!(t.cover_ms.unwrap() < WARM_UP_LEAD_MS);
+        rt.frame(1.0 / 60.0);
+        assert!(rt.find(&format!("queue-eta-{}", ids[0])).is_some());
+        assert!(rt.find(&format!("queue-eta-{}", ids[1])).is_some());
+        assert!(rt.find(&format!("queue-then-{}", ids[1])).is_some());
+        assert!(rt.find("queue-warm-up-nudge").is_some());
+        // One click sends a runner who can run this hour to Opwarming.
+        let emma = db
+            .lock()
+            .unwrap()
+            .mutation(
+                "runners.create",
+                &json!({"name":"Emma","status":"registered","registrationDetails":{"availableHours":["0-24u"]}}),
+            )
+            .unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let key = format!("queue-warm-up-{emma}");
+        update(&mut rt, |s| {
+            s.queue_page.registrations[emma.as_str()]["availableHours"].is_array()
+        });
+        click(&mut rt, &key);
+        update(&mut rt, |s| {
+            runners(s)
+                .iter()
+                .any(|r| r["id"] == emma.as_str() && r["status"] == "warming_up")
+        });
     }
 
     #[test]
