@@ -4,6 +4,10 @@ export function percentile(values, p) {
 }
 
 export function displayedHandoff(screen, frame) {
+  if (screen === '/timing') {
+    const lap = frame.text.split('Laatste rondes|')[1]?.match(/Bench (\d+)\|ronde (\d+)/);
+    return lap ? (Number(lap[2]) - 1) * 40 + Number(lap[1]) - 2240 : null;
+  }
   if (screen === '/queue') {
     const next = frame.text.match(/Bench (\d+)/)?.[1];
     return next === undefined ? null : Number(next) - 2;
@@ -35,6 +39,14 @@ export function nativeLatencies(events, writes, endAt) {
     const changes = events.filter((e) => e.hash && e.at >= write.sentAt && e.at < next);
     return changes.length === 1 ? changes[0].at - write.sentAt : null;
   });
+}
+
+export function screenObservationsComplete(screens, nativeEvents, write, endAt) {
+  return (
+    screens.length > 0 &&
+    nativeLatencies(nativeEvents, [write], endAt)[0] !== null &&
+    screens.every(({ name, frames }) => browserLatencies(name, frames, [write])[0] !== null)
+  );
 }
 
 export function validateReplicaLaps(histories, initialIds, expectedAdded) {

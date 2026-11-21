@@ -11,7 +11,7 @@ use axum::{
 use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
 mod history;
-use history::HistoryLog;
+use history::{HistoryBody, HistoryLog};
 
 type ReadVersion = (i64, u64, u64, i64, i64);
 
@@ -32,6 +32,9 @@ fn read_version(db: &Db) -> Result<ReadVersion> {
 struct ReadCache {
     version: Option<ReadVersion>,
     snapshot: Option<Bytes>,
+    latency_lap: Option<String>,
+    #[cfg(test)]
+    snapshot_reads: usize,
 }
 
 #[derive(Default)]
@@ -132,6 +135,7 @@ async fn snapshot_request(
             .unwrap()
             .seen(kind, remote.ip().to_canonical());
     }
+    let mut wake = None;
     if let Some(after) = query.get("after") {
         let mut changes = host.db.lock().unwrap().subscribe();
         let _ = tokio::time::timeout(std::time::Duration::from_secs(2), async {
@@ -142,6 +146,7 @@ async fn snapshot_request(
                 if changes.changed().await.is_err() {
                     break;
                 }
+                wake = crate::latency::enabled().then(crate::latency::realtime_us);
             }
         }).await;
         if host.db.lock().unwrap().change_token() == *after {
@@ -157,28 +162,63 @@ async fn snapshot_request(
             return json_body(serde_json::to_vec(&state).unwrap().into());
         }
     }
-    snapshot_with_history(host, &query).await
+    snapshot_traced(host, &query, wake).await
 }
 async fn snapshot(State(host): State<Host>) -> Response {
     snapshot_with_history(host, &Default::default()).await
 }
 async fn snapshot_with_history(host: Host, query: &std::collections::HashMap<String, String>) -> Response {
+    snapshot_traced(host, query, None).await
+}
+async fn snapshot_traced(host: Host, query: &std::collections::HashMap<String, String>, wake: Option<f64>) -> Response {
     let query = query.clone();
-    let result = tokio::task::spawn_blocking(move || snapshot_read(host, &query)).await;
+    let dispatch = crate::latency::enabled().then(crate::latency::realtime_us);
+    let result = tokio::task::spawn_blocking(move || snapshot_read(host, &query, wake, dispatch)).await;
     match result {
         Ok(response) => response,
         Err(error) => error_body(error.to_string()),
     }
 }
-fn snapshot_read(host: Host, query: &std::collections::HashMap<String, String>) -> Response {
-    let read = || -> Result<(Bytes, Option<Bytes>)> {
+fn snapshot_read(host: Host, query: &std::collections::HashMap<String, String>, wake: Option<f64>, dispatch: Option<f64>) -> Response {
+    static NEXT_REQUEST: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let request = crate::latency::enabled().then(|| format!("{}-{}", std::process::id(), NEXT_REQUEST.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
+    let mut marks = Vec::new();
+    if let Some(dispatch) = dispatch { marks.push(("snapshot_dispatch", dispatch)); }
+    let mut mark = |stage| if crate::latency::enabled() { marks.push((stage, crate::latency::realtime_us())); };
+    mark("snapshot_worker");
+    let mut read = || -> Result<(Bytes, Option<HistoryBody>, Option<String>)> {
+        mark("history_lock_begin");
         let mut history = query
             .contains_key("history")
             .then(|| host.history.lock().unwrap());
+        mark("history_lock_ready");
         let (db, version, token, changes) = {
+            mark("writer_lock_begin");
             let writer = host.db.lock().unwrap();
+            mark("writer_lock_ready");
             let version = read_version(&writer)?;
+            mark("read_cache_lookup_begin");
+            let cached = host.reads.try_lock().ok().filter(|cache| {
+                cache.version == Some(version)
+                    && cache.snapshot.is_some()
+                    && history.as_ref().is_none_or(|log| log.is_current(version))
+            });
+            mark("read_cache_lookup_ready");
+            if let Some(cache) = cached {
+                let cached = cache.snapshot.clone().unwrap();
+                let lap = cache.latency_lap.clone();
+                drop(cache);
+                drop(writer);
+                mark("snapshot_read_ready");
+                let history = if let Some(log) = history.as_mut() {
+                    mark("history_built");
+                    Some(log.response(query.get("since").map(String::as_str))?)
+                } else { None };
+                return Ok((cached, history, lap));
+            }
+            mark("read_connection_begin");
             let db = writer.read_snapshot()?;
+            mark("read_connection_ready");
             if version != read_version(&writer)? {
                 return Err("Database gewijzigd tijdens het lezen".into());
             }
@@ -186,37 +226,43 @@ fn snapshot_read(host: Host, query: &std::collections::HashMap<String, String>) 
                 .history_changes_since(history.as_ref().and_then(|log| log.generation(version)));
             (db, version, writer.change_token(), changes)
         };
+        mark("read_cache_lock_begin");
         let mut cache = host.reads.lock().unwrap();
+        mark("read_cache_lock_ready");
+        #[cfg(test)]
+        { cache.snapshot_reads += 1; }
+        mark("snapshot_read_ready");
         if cache.version != Some(version) || cache.snapshot.is_none() {
             let mut state = db.race_snapshot()?;
             state["changeToken"] = json!(token);
             if crate::latency::enabled() {
                 state["latencyLap"] = db.rows("SELECT id FROM laps ORDER BY rowid DESC LIMIT 1", &[])?.first().map_or(Value::Null, |row| row["id"].clone());
             }
+            mark("snapshot_built");
             let body = serde_json::to_vec(&state).map_err(|e| e.to_string())?;
-            *cache = ReadCache {
-                version: Some(version),
-                snapshot: Some(body.into()),
-            };
+            mark("snapshot_serialized");
+            cache.version = Some(version);
+            cache.snapshot = Some(body.into());
+            cache.latency_lap = state["latencyLap"].as_str().map(str::to_owned);
         }
         let cached = cache.snapshot.clone().unwrap();
+        let lap = cache.latency_lap.clone();
         drop(cache);
         let history = if let Some(log) = history.as_mut() {
             log.refresh(&db, version, changes)?;
-            Some(
-                query
-                    .get("since")
-                    .and_then(|cursor| log.since(cursor))
-                    .map(Ok)
-                    .unwrap_or_else(|| log.full_body())?,
-            )
+            mark("history_built");
+            Some(log.response(query.get("since").map(String::as_str))?)
         } else {
             None
         };
-        Ok((cached, history))
+        Ok((cached, history, lap))
     };
-    match read() {
-        Ok((cached, history)) => {
+    let result = read().and_then(|(cached, history, lap)| {
+        Ok((cached, history.map(HistoryBody::bytes).transpose()?, lap))
+    });
+    mark("history_ready");
+    match result {
+        Ok((cached, history, lap)) => {
             // The cached object is reused as bytes; only the live fields are appended.
             let mut body = Vec::with_capacity(cached.len() + 512);
             body.extend_from_slice(&cached[..cached.len() - 1]);
@@ -237,7 +283,14 @@ fn snapshot_read(host: Host, query: &std::collections::HashMap<String, String>) 
                 body.extend_from_slice(&history);
             }
             body.push(b'}');
-            json_body(body.into())
+            mark("response_ready");
+            if let Some(lap) = lap {
+                if let Some(wake) = wake { crate::latency::emit_at_request("waiter_wake", &lap, Some(&lap), wake, request.as_deref()); }
+                for (stage, us) in marks { crate::latency::emit_at_request(stage, &lap, Some(&lap), us, request.as_deref()); }
+            }
+            let mut response = json_body(body.into());
+            if let Some(request) = request { response.headers_mut().insert("x-apolloon-trace-request", request.parse().unwrap()); }
+            response
         }
         Err(message) => error_body(message),
     }
@@ -264,10 +317,17 @@ fn history_read(host: Host, query: HistoryQuery) -> Response {
     }
 }
 fn history_result(host: &Host, query: HistoryQuery) -> Result<Bytes> {
+    let scope = query.scope.as_deref().unwrap_or("full");
     let mut log = host.history.lock().unwrap();
     let (db, version, changes) = {
         let writer = host.db.lock().unwrap();
         let version = read_version(&writer)?;
+        if scope == "full" && log.is_current(version) {
+            drop(writer);
+            let body = log.response(query.since.as_deref())?;
+            drop(log);
+            return body.bytes();
+        }
         let db = writer.read_snapshot()?;
         if version != read_version(&writer)? {
             return Err("Database gewijzigd tijdens het lezen".into());
@@ -275,7 +335,6 @@ fn history_result(host: &Host, query: HistoryQuery) -> Result<Bytes> {
         let changes = writer.history_changes_since(log.generation(version));
         (db, version, changes)
     };
-    let scope = query.scope.as_deref().unwrap_or("full");
     if scope != "full" {
         return db
             .history_scope(
@@ -290,10 +349,9 @@ fn history_result(host: &Host, query: HistoryQuery) -> Result<Bytes> {
             });
     }
     log.refresh(&db, version, changes)?;
-    if let Some(delta) = query.since.as_deref().and_then(|cursor| log.since(cursor)) {
-        return Ok(delta);
-    }
-    log.full_body()
+    let body = log.response(query.since.as_deref())?;
+    drop(log);
+    body.bytes()
 }
 async fn registrations(State(host): State<Host>) -> Reply {
     reply(host.db.lock().unwrap().registrations())
@@ -873,6 +931,47 @@ mod read_cache_tests {
         let state = tokio::time::timeout(std::time::Duration::from_secs(1), pushed(host.clone(), None, false)).await.unwrap();
         assert_eq!(state["runners"], json!([]));
         assert!(state.get("stateHistory").is_none());
+    }
+
+    #[tokio::test]
+    async fn same_version_waiters_share_reads_but_local_commits_invalidate_them() {
+        let db = Arc::new(Mutex::new(Db::open(std::path::Path::new(":memory:")).unwrap()));
+        let host = Host::with_cluster(db.clone(), 5173, None);
+        let (initial, parallel) = tokio::join!(pushed(host.clone(), None, true), pushed(host.clone(), None, true));
+        assert_eq!(initial["stateHistory"], parallel["stateHistory"]);
+        let cursor = initial["stateHistory"]["cursor"].as_str().unwrap();
+        let mut query = std::collections::HashMap::from([
+            ("history".into(), "1".into()), ("since".into(), cursor.to_owned())
+        ]);
+        for since in [cursor, "unknown.0", cursor] {
+            query.insert("since".into(), since.to_owned());
+            let answer = body(snapshot_with_history(host.clone(), &query).await).await;
+            assert_eq!(answer["revision"], initial["revision"]);
+            if since == cursor {
+                assert_eq!(answer["stateHistory"]["changes"]["laps"]["count"], 0);
+            } else { assert_eq!(answer["stateHistory"], initial["stateHistory"]); }
+        }
+        let plain = pushed(host.clone(), None, false).await;
+        assert_eq!(plain["changeToken"], initial["changeToken"]);
+        assert_eq!(host.reads.lock().unwrap().snapshot_reads, 1);
+        db.lock().unwrap().exec("INSERT INTO settings VALUES('shared-read-test','yes')", &[]).unwrap();
+        let updated = pushed(host.clone(), None, true).await;
+        assert_eq!(updated["revision"], initial["revision"]);
+        assert_ne!(updated["changeToken"], initial["changeToken"]);
+        assert_eq!(host.reads.lock().unwrap().snapshot_reads, 2);
+        pushed(host.clone(), None, true).await;
+        assert_eq!(host.reads.lock().unwrap().snapshot_reads, 2);
+    }
+
+    #[tokio::test]
+    async fn warm_state_does_not_hide_a_schema_error() {
+        let db = Arc::new(Mutex::new(Db::open(std::path::Path::new(":memory:")).unwrap()));
+        let host = Host::with_cluster(db.clone(), 5173, None);
+        pushed(host.clone(), None, true).await;
+        db.lock().unwrap().exec("DROP TABLE race_state", &[]).unwrap();
+        let failed = pushed(host, None, true).await;
+        assert!(failed["error"]["message"].as_str().unwrap().contains("race_state"));
+        assert!(failed["changeToken"].is_null());
     }
 
     #[test]
