@@ -352,7 +352,6 @@ fn nav_link(s: &State, i: usize) -> El {
         .on_press_tx(move |s: &mut State, tx: &mut Tx| {
             tx.instant();
             s.page = i;
-            s.error.clear();
             s.confirm = None;
         });
     if s.collapsed {
@@ -444,7 +443,6 @@ fn footer(s: &State) -> El {
         card = card.on_press_tx(|s: &mut State, tx: &mut Tx| {
             tx.instant();
             s.page = 8;
-            s.error.clear();
             s.confirm = None;
         });
     }

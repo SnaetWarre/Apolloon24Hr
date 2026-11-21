@@ -73,6 +73,7 @@ struct Update {
 }
 pub struct State {
     page: usize,
+    page_seen: usize,
     profile: Option<profile::Form>,
     activity: Vec<Value>,
     activity_search: TextEdit,
@@ -141,7 +142,6 @@ const SECTIONS: [&str; 7] = [
     "system",
 ];
 fn apply_route(state: &mut State, route: &str) {
-    state.error.clear();
     let (path, query) = route.split_once('?').unwrap_or((route, ""));
     state.page = ROUTES.iter().position(|r| *r == path).unwrap_or(0);
     if state.page == 8 {
@@ -227,6 +227,7 @@ fn init_with_url(url: String) -> State {
     #[allow(unused_mut)]
     let mut state = State {
         page: 0,
+        page_seen: 0,
         profile: None,
         activity: Vec::new(),
         activity_search: TextEdit::new(""),
@@ -290,6 +291,7 @@ fn init_with_url(url: String) -> State {
             .filter(|i: &usize| *i < PAGES.len())
             .unwrap_or(0);
     }
+    state.page_seen = state.page;
     state
 }
 impl State {
@@ -352,6 +354,16 @@ impl State {
     }
 }
 fn poll(s: &mut State, _: f64, tx: &mut Tx) -> bool {
+    let mut changed = false;
+    #[cfg(target_arch = "wasm32")]
+    if !s.fixture && sync_route(s) {
+        changed = true;
+    }
+    if s.page != s.page_seen {
+        s.page_seen = s.page;
+        s.error.clear();
+        changed = true;
+    }
     #[cfg(not(target_arch = "wasm32"))]
     if !s.fixture {
         crate::desktop::pulse_window();
@@ -363,12 +375,7 @@ fn poll(s: &mut State, _: f64, tx: &mut Tx) -> bool {
         crate::desktop::remember_route(route, &mut s.route_seen);
     }
     if s.fixture {
-        return false;
-    }
-    let mut changed = false;
-    #[cfg(target_arch = "wasm32")]
-    if sync_route(s) {
-        changed = true;
+        return changed;
     }
     tx.wake_after(Duration::from_millis(100));
     let public = (5..=7).contains(&s.page);
@@ -1643,6 +1650,7 @@ mod tests {
         let mut state = init_with_url("http://127.0.0.1:1".into());
         state.fixture = true;
         state.page = 8;
+        state.page_seen = state.page;
         state.error = "no XDG desktop portal FileChooser is available".into();
         let mut rt = Runtime::new(state, view, (1366.0, 768.0), Env { system_dark: false, scale: 1.0 });
         rt.frame(0.0);
@@ -1651,10 +1659,33 @@ mod tests {
         assert!(rt.find("error-dismiss").is_none());
         rt.update(|s, _| s.error = "Picker failed".into());
         click(&mut rt, "nav-2");
+        rt.update(|s, tx| { poll(s, 0.0, tx); });
         assert!(rt.state.error.is_empty());
         rt.state.error = "Picker failed".into();
         apply_route(&mut rt.state, "/queue");
+        rt.update(|s, tx| { poll(s, 0.0, tx); });
         assert!(rt.state.error.is_empty());
+        rt.update(|s, tx| {
+            s.page = 0;
+            s.welcome_skipped = true;
+            poll(s, 0.0, tx);
+            s.error = "Picker failed".into();
+        });
+        click(&mut rt, "overview-ready");
+        rt.update(|s, tx| { poll(s, 0.0, tx); });
+        assert_eq!(rt.state.page, 1);
+        assert!(rt.state.error.is_empty());
+        rt.update(|s, tx| {
+            s.page = 0;
+            s.error = "Old error".into();
+            s.file_tx.send(Err("New picker error".into())).unwrap();
+            s.fixture = false;
+            poll(s, 0.0, tx);
+            s.fixture = true;
+        });
+        assert_eq!(rt.state.error, "New picker error");
+        rt.update(|s, tx| { poll(s, 0.0, tx); });
+        assert_eq!(rt.state.error, "New picker error");
     }
     #[test]
     fn space_presses_a_tab_focused_button_outside_timing() {
