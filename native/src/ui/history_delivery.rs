@@ -1,4 +1,6 @@
 use serde_json::{Value, json};
+mod images;
+pub(super) use images::Images;
 
 #[derive(Debug, Default, PartialEq)]
 pub(super) struct Delivery {
@@ -51,10 +53,12 @@ pub(super) fn apply(
     held: &mut Value,
     sequence: &mut u64,
     pending: &mut Vec<Delivery>,
+    index: &mut super::history_sync::Index,
+    version: &mut u64,
     reply: Delivery,
-) -> bool {
+) -> Option<bool> {
     if reply.body.is_null() || reply.sequence <= *sequence {
-        return false;
+        return Some(false);
     }
     if reply.body["delta"] != true {
         *sequence = reply.sequence - 1;
@@ -75,19 +79,46 @@ pub(super) fn apply(
             continue;
         }
         if body["delta"] == true {
-            changed |= super::merge_history(held, &body);
-        } else if *held != body {
+            let Some(real_change) = index.apply(held, &body) else {
+                *held = Value::Null;
+                *index = Default::default();
+                *version = version.wrapping_add(1);
+                pending.clear();
+                return None;
+            };
+            changed |= real_change;
+            if real_change {
+                *version = version.wrapping_add(1);
+            }
+        } else {
+            let real_change = held["laps"] != body["laps"]
+                || held["events"] != body["events"]
+                || held["error"] != body["error"];
+            changed |= *held != body;
             *held = body;
-            changed = true;
+            if real_change {
+                *index = super::history_sync::Index::new(held);
+                *version = version.wrapping_add(1);
+            }
         }
     }
-    changed
+    Some(changed)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::ui::Synced;
+
+    fn apply(
+        held: &mut Value,
+        sequence: &mut u64,
+        pending: &mut Vec<Delivery>,
+        reply: Delivery,
+    ) -> bool {
+        let mut index = super::super::history_sync::Index::new(held);
+        super::apply(held, sequence, pending, &mut index, &mut 0, reply).unwrap()
+    }
 
     fn full() -> Value {
         json!({"revision":1,"cursor":"epoch.1","laps":[{"id":"lap","labels":[{"imageUrl":"old.png"}],"payload":"x".repeat(100_000)}],"events":[]})
@@ -218,7 +249,7 @@ mod tests {
         ));
         assert_eq!(held, complete);
         let unchanged = json!({"delta":true,"revision":2,"since":"epoch.1","cursor":"epoch.2","changes":{"laps":{"count":1,"removed":[],"changed":[]},"events":{"count":0,"removed":[],"changed":[]}}});
-        assert!(apply(
+        assert!(!apply(
             &mut held,
             &mut sequence,
             &mut pending,

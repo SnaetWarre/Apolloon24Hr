@@ -39,6 +39,7 @@ use overview::overview;
 mod shell;
 mod tactics_page;
 mod timing_page;
+mod history_sync;
 #[cfg(test)]
 mod cluster_ui_test;
 #[cfg(test)]
@@ -72,6 +73,7 @@ struct Update {
     partial: bool,
     snapshot: Value,
     history: history_delivery::Delivery,
+    history_changes: Option<std::sync::Arc<std::sync::Mutex<history_sync::Pending>>>,
     outcome: Option<(String, Result<Value, String>)>,
     recovery: Value,
     images: Vec<(String, Vec<u8>)>,
@@ -128,6 +130,8 @@ pub struct State {
     dark: bool,
     snapshot: Value,
     history: Value,
+    history_version: u64,
+    history_index: history_sync::Index,
     history_sequence: u64,
     history_pending: Vec<history_delivery::Delivery>,
     error: String,
@@ -288,6 +292,8 @@ fn init_with_url(url: String) -> State {
         dark: shell::initial_dark(),
         snapshot: Value::Null,
         history: json!({"laps":[]}),
+        history_version: 0,
+        history_index: Default::default(),
         history_sequence: 0,
         history_pending: Vec::new(),
         error: String::new(),
@@ -462,7 +468,19 @@ fn poll(s: &mut State, _: f64, tx: &mut Tx) -> bool {
             s.snapshot = update.snapshot;
             changed = true;
         }
-        changed |= history_delivery::apply(&mut s.history, &mut s.history_sequence, &mut s.history_pending, update.history);
+        let full_history = !update.history.body.is_null() && update.history.body["delta"] != true
+            && update.history.sequence > s.history_sequence;
+        match history_delivery::apply(&mut s.history, &mut s.history_sequence, &mut s.history_pending,
+            &mut s.history_index, &mut s.history_version, update.history) {
+            Some(applied) => {
+                changed |= applied;
+                if full_history && let Some(pending) = update.history_changes { pending.lock().unwrap().reset = false; }
+            }
+            None => {
+                if let Some(pending) = update.history_changes { pending.lock().unwrap().reset = true; }
+                changed = true;
+            }
+        }
         if !update.recovery.is_null() && s.recovery != update.recovery {
             s.recovery = update.recovery;
             changed |= !public;
@@ -1469,8 +1487,11 @@ mod tests {
         // The screen takes it too, over the history of the earlier run it holds.
         let mut held = json!({"cursor":"first.2","revision":9,"laps":[1]});
         let (mut sequence, mut pending) = (delivery.sequence - 1, Vec::new());
-        assert!(history_delivery::apply(&mut held, &mut sequence, &mut pending, delivery));
+        let mut index = history_sync::Index::new(&held);
+        let mut version = 0;
+        assert_eq!(history_delivery::apply(&mut held, &mut sequence, &mut pending, &mut index, &mut version, delivery), Some(true));
         assert_eq!(held, restarted);
+        assert_eq!(version, 1);
     }
 
     #[test]
@@ -2769,17 +2790,23 @@ struct Synced {
     history_sequence: u64,
     /// Identities validate deltas and image paths retain retries; payloads move to the UI.
     history: Value,
+    history_index: history_sync::Index,
+    history_images: history_delivery::Images,
+    pending: std::sync::Arc<std::sync::Mutex<history_sync::Pending>>,
     images: std::collections::HashSet<String>,
 }
 impl Synced {
     fn state_path(&self, after: Option<&str>, screen: Option<&str>) -> String {
         let mut path = String::from("/api/state?history=1");
-        if let Some(after) = after { path.push_str(&format!("&after={after}")); }
-        if let Some(cursor) = self.history["cursor"].as_str() { path.push_str(&format!("&since={cursor}")); }
+        if !self.pending.lock().unwrap().reset {
+            if let Some(after) = after { path.push_str(&format!("&after={after}")); }
+            if let Some(cursor) = self.history["cursor"].as_str() { path.push_str(&format!("&since={cursor}")); }
+        }
         if let Some(screen) = screen { path.push_str(&format!("&screen={screen}")); }
         path
     }
     fn history_path(&self) -> String {
+        if self.pending.lock().unwrap().reset { return "/api/history?scope=full".into(); }
         match self.history["cursor"].as_str() {
             Some(cursor) => format!("/api/history?scope=full&since={cursor}"),
             None => "/api/history?scope=full".into(),
@@ -2791,24 +2818,30 @@ impl Synced {
             return Some(Default::default());
         }
         if reply["delta"] == true {
+            if self.pending.lock().unwrap().reset { return None; }
             if reply["cursor"] == self.history["cursor"] {
                 return Some(Default::default());
             }
             if reply["since"] != self.history["cursor"] {
                 return None;
             }
-            if !merge_history(&mut self.history, &history_delivery::delta_index(&reply)) {
+            if self.history_index.apply(&mut self.history, &history_delivery::delta_index(&reply)).is_none() {
                 self.history = Value::Null;
+                self.history_index = Default::default();
+                self.pending.lock().unwrap().reset = true;
                 return None;
             }
         } else if reply["revision"].as_i64() >= self.history["revision"].as_i64()
             || !same_run(&reply["cursor"], &self.history["cursor"])
         {
             self.history = history_delivery::index(&reply);
+            self.history_index = history_sync::Index::new(&self.history);
+            self.pending.lock().unwrap().reset = false;
         } else {
             return Some(Default::default());
         }
         self.history_revision = self.history["revision"].as_i64();
+        self.history_images.accept(&reply, &self.images);
         self.history_sequence += 1;
         Some(history_delivery::Delivery { sequence: self.history_sequence, body: reply })
     }
@@ -2823,6 +2856,7 @@ fn same_run(new: &Value, old: &Value) -> bool {
     }
 }
 /// Applies `/api/history?since=` changes to a full history; `false` when they do not line up.
+#[cfg(test)]
 pub(crate) fn merge_history(held: &mut Value, delta: &Value) -> bool {
     fn merge(held: Value, change: &Value) -> Option<Value> {
         let Value::Array(held) = held else { return None };
@@ -2956,7 +2990,8 @@ fn start_transport(url: String, commands: Receiver<Command>, updates: Updates, _
         };
         let recovery = Value::Null;
         crate::latency::snapshot("history_merged", &snapshot);
-        let mut paths = image_urls(&snapshot, &synced.lock().unwrap().history);
+        let mut paths = image_urls(&snapshot, &Value::Null);
+        paths.extend(synced.lock().unwrap().history_images.pending());
         paths.extend(extra_image);
         paths.retain(|path| !synced.lock().unwrap().images.contains(path));
         let images = paths
@@ -2970,6 +3005,7 @@ fn start_transport(url: String, commands: Receiver<Command>, updates: Updates, _
                     .and_then(|r| r.bytes())
                     .ok()?;
                 synced.lock().unwrap().images.insert(path.clone());
+                synced.lock().unwrap().history_images.loaded(&path);
                 Some((path, bytes.to_vec()))
             })
             .collect();
@@ -2977,6 +3013,7 @@ fn start_transport(url: String, commands: Receiver<Command>, updates: Updates, _
             partial: false,
             snapshot,
             history,
+            history_changes: Some(synced.lock().unwrap().pending.clone()),
             recovery,
             images,
             clock_offset: None,
@@ -3124,7 +3161,8 @@ fn start_transport(url: String, commands: Receiver<Command>, updates: Updates, c
             }
         };
         crate::latency::snapshot("history_merged", &snapshot);
-        let mut paths = image_urls(&snapshot, &synced.borrow().history);
+        let mut paths = image_urls(&snapshot, &Value::Null);
+        paths.extend(synced.borrow().history_images.pending());
         paths.extend(extra_image);
         paths.retain(|path| !synced.borrow().images.contains(path));
         let mut images = Vec::new();
@@ -3134,6 +3172,7 @@ fn start_transport(url: String, commands: Receiver<Command>, updates: Updates, c
                 && let Ok(bytes) = response.bytes().await
             {
                 synced.borrow_mut().images.insert(path.clone());
+                synced.borrow_mut().history_images.loaded(&path);
                 images.push((path, bytes.to_vec()));
             }
         }
@@ -3141,6 +3180,7 @@ fn start_transport(url: String, commands: Receiver<Command>, updates: Updates, c
             partial: false,
             snapshot,
             history,
+            history_changes: Some(synced.borrow().pending.clone()),
             recovery: Value::Null,
             images,
             clock_offset: None,
