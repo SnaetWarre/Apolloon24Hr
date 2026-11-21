@@ -41,7 +41,7 @@ impl Db {
             self.rows(
                 "SELECT id,type,message,occurred_at AS occurredAt,runner_id AS runnerId,
                  runner_number AS runnerNumber,runner_name AS runnerName,created_at AS createdAt
-                 FROM race_events ORDER BY occurred_at DESC LIMIT ?",
+                 FROM race_events ORDER BY occurred_at DESC,rowid DESC LIMIT ?",
                 &[json!(
                     reported_limit.map(|n| n.min(100) as i64).unwrap_or(-1)
                 )],
