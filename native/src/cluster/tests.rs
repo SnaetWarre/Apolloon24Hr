@@ -1501,3 +1501,34 @@ fn a_vote_that_cannot_be_stored_is_not_given() {
     b.act("runners.create", json!({"name":"Wout","status":"waiting"}))
         .unwrap();
 }
+
+/// A laptop is not taken in on top of a change the others have not confirmed: that change may be
+/// another laptop being taken in, and the group changes by one laptop at a time.
+#[test]
+fn a_new_laptop_is_not_taken_in_before_earlier_changes_are_confirmed() {
+    let _serial = serial();
+    let dir = Dir::new();
+    let (a, b, c) = linked_three_with(&dir, |cfg| {
+        cfg.removable_after = Duration::from_secs(60);
+    });
+    let (a, b, c) = match leader_index(&[&a, &b, &c]).unwrap() {
+        0 => (a, b, c),
+        1 => (b, a, c),
+        _ => (c, a, b),
+    };
+    let new = super::Member {
+        host_id: "new-laptop".into(),
+        url: "http://127.0.0.1:9".into(),
+        name: None,
+    };
+    a.node.make_room_for(&new).unwrap();
+    let b_id = b.status()["hostId"].as_str().unwrap().to_owned();
+    let b_url = b.url.clone();
+    drop(b);
+    drop(c);
+    // A change of the group that no other laptop has.
+    a.node
+        .add_member(&super::Member { host_id: b_id, url: format!("{b_url}0"), name: None }, None)
+        .unwrap();
+    assert!(a.node.make_room_for(&new).is_err());
+}
