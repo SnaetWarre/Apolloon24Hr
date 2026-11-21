@@ -49,7 +49,7 @@ jobs:
           key: rune-${{ github.job }}-${{ runner.os }}-${{ hashFiles('native/patches/rune/revision', 'native/patches/rune/apolloon.patch') }}
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev libxi-dev libxcursor-dev libxrandr-dev
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libxkbcommon-dev libwayland-dev libx11-dev libxi-dev libxcursor-dev libxrandr-dev
       - name: Install wasm-bindgen CLI matching native/Cargo.lock
         uses: taiki-e/install-action@v2
         with:
