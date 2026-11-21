@@ -41,6 +41,24 @@ pub(super) fn analysis(s: &State) -> Option<Result<Value, String>> {
     ))
 }
 
+pub(super) fn demo_available(s: &State) -> bool {
+    runners(s).is_empty() && laps(s).is_empty() && s.snapshot["race"]["raceStartedAt"].is_null()
+}
+
+pub(super) fn load_demo(s: &mut State) {
+    if demo_available(s) {
+        send(
+            s,
+            "demo.load",
+            json!({}),
+            Pending::Status {
+                ok: "Oefenrace geladen.".into(),
+                failure: "Oefenrace laden mislukt",
+            },
+        );
+    }
+}
+
 fn template(s: &mut State, tx: &mut Tx) {
     #[cfg(not(target_arch = "wasm32"))]
     tx.save_file(
@@ -237,13 +255,11 @@ pub(super) fn section(s: &State) -> El {
         }
         card = card.child(problems);
     }
-    let occupied = !runners(s).is_empty()
-        || !laps(s).is_empty()
-        || s.snapshot["race"]["raceStartedAt"].is_number();
+    let occupied = !demo_available(s);
     let demo = super::admin_kit::panel()
         .child(h2(s, "Oefenen met fictieve gegevens"))
         .child(copy(s, "Laad 30 fictieve lopers en enkele uren rondes om de schermen te verkennen. Je verwijdert de oefenrace via de bestaande actie Wedstrijd wissen in Systeem & herstel."))
-        .child(btn(s, "load-demo", "Oefenrace laden", Kind::Plain, false, occupied || s.busy).mt(12.0).on_press(|s: &mut State| send(s, "demo.load", json!({}), Pending::Status { ok: "Oefenrace geladen.".into(), failure: "Oefenrace laden mislukt" })))
+        .child(btn(s, "load-demo", "Oefenrace laden", Kind::Plain, false, occupied || s.busy).mt(12.0).on_press(load_demo))
         .child(copy(s, if occupied { "Alleen beschikbaar wanneer er geen lopers en geen rondes zijn. Wis eerst de wedstrijd als je wilt oefenen." } else { "Alleen voor een lege wedstrijd. Dit zijn geen echte inschrijvingen." }));
     let mut page = vec![readiness::panel(s)];
     if let Some(group) = group_card(s) {
