@@ -3,6 +3,25 @@
 //! src/styles/timing.css; sizes are the reference's at 1366×768.
 use super::*;
 
+pub(super) fn clocks(s: &State, clock: &mut clock::Sample) {
+    let total = race_lap_total(s);
+    if total > 0 && total % 100 == 0 {
+        if let Some(at) = s.history["laps"][0]["finishedAt"].as_i64() {
+            clock.until(at + 120_000);
+        }
+    }
+    let page = &s.timing_page;
+    let race = &s.snapshot["race"];
+    if page.finish_stop.as_ref().is_some_and(|(_, started)| started == &race["activeStartedAt"]) { return; }
+    let pending = page.pending.as_ref();
+    let start = match pending {
+        Some((_, id, at)) => id.as_ref().filter(|id| runners(s).iter().any(|r| st(r, "id") == id.as_str())).map(|_| *at),
+        None if runners(s).iter().any(|r| !race["activeRunnerId"].is_null() && r["id"] == race["activeRunnerId"]) => race["activeStartedAt"].as_i64(),
+        None => None,
+    };
+    if let Some(start) = start { clock.bucket(start, 100); }
+}
+
 const MIN_LAP_MS: i64 = 20_000;
 const TOUCH_TARGET: f32 = 44.0;
 

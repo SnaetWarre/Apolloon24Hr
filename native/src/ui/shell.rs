@@ -140,6 +140,20 @@ fn copied(which: u8, s: &State) -> bool {
     let (w, at) = COPIED.with(Cell::get);
     w == which && s.clock - at < 1600
 }
+
+pub(super) fn clocks(s: &State, clock: &mut clock::Sample) {
+    if s.snapshot["race"]["raceFinishedAt"].is_null() {
+        if let Some(start) = s.snapshot["race"]["raceStartedAt"].as_i64() {
+            clock.bucket(start, 1000);
+        }
+    }
+    let (_, at) = COPIED.with(Cell::get);
+    clock.until(at + 1600);
+    if let Some(status) = system_status(s) {
+        clock.value(status.title);
+        clock.value(status.detail);
+    }
+}
 fn copy_host(which: u8) -> impl Fn(&mut State, &mut Tx) {
     move |s: &mut State, tx: &mut Tx| {
         if let Some(url) = s.snapshot["host"]["url"].as_str() {

@@ -6,6 +6,10 @@ The patch preserves Apolloon's existing window controls, browser keyboard behavi
 
 ## Update Rune
 
+Ordinary native and browser GPU frames use Rune's retained damage renderer. Surfaces with `COPY_DST` receive a texture copy; others, including WebGL2, receive a full-screen textured-quad blit. The retained texture is sampled with `textureLoad`, without filtering or blending, through matching source and target view formats. Only Windows additionally supplies dirty presentation rectangles. Transparent clears, changed image/glyph atlases and renderer effects/layers/springs/surfaces retain whole-frame fallbacks. Resizing or replacing a surface discards its damage history.
+
+Damage planning and retained/whole pixel equivalence tests run with `cargo test --manifest-path .rune/Cargo.toml -p rune --lib window::damage::tests` after preparing Rune.
+
 1. Check out the new Rune commit in a separate clone. Reapply the patch there, drop fixes that landed upstream, and save the remaining diff with `git diff --binary HEAD -- crates/rune > /path/to/Apolloon24Hr/native/patches/rune/apolloon.patch`.
 2. Put the new full commit SHA in `revision` and run `bash native/scripts/prepare-rune.sh` from Apolloon's root.
 3. Run `cargo update --workspace --manifest-path native/Cargo.toml` to refresh the lockfile. Run `npm run build`, `npm run test:native`, and `npm run test:browser`.
