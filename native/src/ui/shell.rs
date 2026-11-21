@@ -573,7 +573,12 @@ pub(super) fn header_meta(s: &State) -> Option<El> {
     match s.page {
         0 if super::overview::show_welcome(s) => meta("Nog niet ingesteld"),
         3 => Some(super::analysis_page::header_meta(s)),
-        2 => meta("Spatie of Enter wisselt"),
+        2 => Some(
+            text(format!("Rondes in de race: {}", super::timing_page::race_lap_total(s)))
+                .key("timing-race-total")
+                .font(rune::TextStyle::new(12.5, 400.0))
+                .color(c.ink3),
+        ),
         4 => Some(header_tag(
             &if s.history["laps"].is_null() {
                 "Live data laden".to_string()

@@ -492,6 +492,10 @@ fn body_text(value: impl Into<String>, color: rune::Color) -> El {
         .min_w(0.0)
 }
 
+pub(super) fn race_lap_total(s: &State) -> i64 {
+    runners(s).iter().filter_map(|r| r["lapCount"].as_i64()).sum()
+}
+
 pub(super) fn page(s: &State) -> El {
     let t = tok::theme(s.dark);
     let p = pal(s.dark);
@@ -500,7 +504,7 @@ pub(super) fn page(s: &State) -> El {
     let c = cluster(s);
     let active = active_runner(s);
     let queue = waiting(s);
-    let total: i64 = runners(s).iter().filter_map(|r| r["lapCount"].as_i64()).sum();
+    let total = race_lap_total(s);
     let pending = page
         .pending
         .as_ref()
@@ -772,12 +776,8 @@ pub(super) fn page(s: &State) -> El {
         .min_w(0.0)
         .gap(16.0)
         .child(now_group)
-        .child(key)
         .child(feedback)
-        .child(super::hex::stats(
-            s,
-            vec![("Rondes in de race", total.to_string())],
-        ));
+        .child(key);
 
     // Beside it: who is next and the last laps, as grouped rows.
     use super::hex;

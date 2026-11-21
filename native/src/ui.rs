@@ -1692,11 +1692,14 @@ mod tests {
         update(&mut rt, |s| s.connected && !s.snapshot["race"]["activeRunnerId"].is_null());
         let laps = || db.lock().unwrap().rows("SELECT id FROM laps", &[]).unwrap().len();
         assert_eq!(laps(), 0);
+        assert!(rt.find("timing-race-total").is_some());
+        assert_eq!(timing_page::race_lap_total(&rt.state), 0);
         rt.key(rune::Key::Text(" ".into()).into());
         rt.frame(1.0 / 60.0);
         assert!(rt.state.busy, "Space on Timing sends the handoff");
         update(&mut rt, |s| !s.busy && s.history["laps"].as_array().is_some_and(|l| l.len() == 1));
         assert_eq!(laps(), 1, "Space on Timing clocks the runner off");
+        assert_eq!(timing_page::race_lap_total(&rt.state), 1);
 
         rt.key(rune::Key::Text(" ".into()).into());
         rt.frame(1.0 / 60.0);
@@ -1705,6 +1708,7 @@ mod tests {
         click(&mut rt, "timing-cancel");
         assert!(rt.state.timing_page.dialog.is_none());
         assert_eq!(laps(), 1);
+        assert_eq!(timing_page::race_lap_total(&rt.state), 1);
     }
     #[test]
     fn errors_can_be_dismissed_and_do_not_follow_navigation() {
