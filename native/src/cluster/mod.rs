@@ -169,7 +169,15 @@ impl Node {
             if log::setting(&db, "replication_cluster_id").is_none() {
                 log::set_local(&db, "replication_cluster_id", &host_id)?;
             }
-            if let Some(offset) =
+            // The offset to a group's clock keeps the times of a race continuous. A laptop that is
+            // alone and has no race yet has nothing to stay continuous with: it shows its own time.
+            let alone = log::stored_members(&db).iter().all(|m| m.host_id == host_id);
+            if alone && !Self::race_progress(&db).0 {
+                if log::setting(&db, "cluster_clock_offset_ms").is_some() {
+                    log::set_local(&db, "cluster_clock_offset_ms", "0")?;
+                }
+                clock::set_offset(0);
+            } else if let Some(offset) =
                 log::setting(&db, "cluster_clock_offset_ms").and_then(|v| v.parse().ok())
             {
                 clock::set_offset(offset);
