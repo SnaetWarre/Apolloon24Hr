@@ -1911,6 +1911,9 @@ mod tests {
         let duration = lap[0]["duration_ms"].as_i64().unwrap();
         assert!((duration - (pressed - started)).abs() < 100, "The lap ends at the press, not when it was sent: {duration}");
         assert!(rt.state.timing_page.error.is_empty());
+        let (at, _) = rt.state.last_press.unwrap();
+        let since_press = rt.state.server_now() - pressed;
+        assert!((at.elapsed().as_millis() as i64 - since_press).abs() < 100, "The next lap counts from the press");
     }
     #[test]
     fn space_records_one_lap_and_guards_an_immediate_second_press() {

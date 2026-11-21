@@ -214,7 +214,10 @@ fn send_handoff(s: &mut State, mut input: Value) {
     input["nextRunnerId"] = json!(next);
     let pressed = input["pressedAt"].as_i64().unwrap_or_else(now);
     s.timing_page.pending = Some((s.snapshot["race"]["activeStartedAt"].clone(), next, pressed));
-    s.last_press = Some((Instant::now(), pressed));
+    // A press that waited is sent later than it was made: the next lap still counts from the press.
+    let waited = Duration::from_millis((s.server_now() - pressed).max(0) as u64);
+    let at = Instant::now();
+    s.last_press = Some((at.checked_sub(waited).unwrap_or(at), pressed));
     s.send("race.handoff", input);
     if !s.busy {
         s.timing_page.pending = None;
