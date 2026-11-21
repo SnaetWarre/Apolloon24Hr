@@ -342,9 +342,7 @@ impl Db {
             || input["activeRunnerId"] != race["activeRunnerId"]
             || input["activeStartedAt"] != race["activeStartedAt"]
         {
-            return Err(
-                "Timingstatus is gewijzigd. Controleer de huidige loper en probeer opnieuw.".into(),
-            );
+            return Err(TIMING_CHANGED.into());
         }
         if method == "race.undoLastHandoff" {
             let entry=self.one("SELECT id,payload_json AS payload FROM handoff_history WHERE undone=0 ORDER BY created_at DESC,rowid DESC LIMIT 1", &[])?;
@@ -396,7 +394,17 @@ impl Db {
         let next = if finishing {
             Value::Null
         } else {
-            self.rows("SELECT id FROM runners WHERE status='waiting' ORDER BY queue_index,status_since LIMIT 1", &[])?.first().map(|r|r["id"].clone()).unwrap_or(Value::Null)
+            let first = self.rows("SELECT id FROM runners WHERE status='waiting' ORDER BY queue_index,status_since LIMIT 1", &[])?.first().map(|r|r["id"].clone()).unwrap_or(Value::Null);
+            // The baton went to the runner the Timing screen showed, even if the queue moved since.
+            match input.get("nextRunnerId").filter(|shown| !shown.is_null() && **shown != first) {
+                Some(shown) => {
+                    if self.rows("SELECT id FROM runners WHERE id=? AND status='waiting'", std::slice::from_ref(shown))?.is_empty() {
+                        return Err(TIMING_CHANGED.into());
+                    }
+                    shown.clone()
+                }
+                None => first,
+            }
         };
         if !finishing && race["activeRunnerId"].is_null() && next.is_null() {
             return Err("Niemand staat klaar in de wachtrij".into());
@@ -442,6 +450,8 @@ impl Db {
         Ok(json!({"ok":true,"lapId":lap,"startedRunnerId":next}))
     }
 }
+const TIMING_CHANGED: &str =
+    "Timingstatus is gewijzigd. Controleer de huidige loper en probeer opnieuw.";
 pub fn required<'a>(v: &'a Value, key: &str) -> Result<&'a str> {
     v[key]
         .as_str()
@@ -503,6 +513,49 @@ mod tests {
     fn press(db: &mut Db, method: &str, at: i64) -> Result<Value> {
         let race = db.race()?;
         db.mutation(method,&json!({"activeRunnerId":race["activeRunnerId"],"activeStartedAt":race["activeStartedAt"],"pressedAt":at}))
+    }
+    fn press_showing(db: &mut Db, seen: &Value, next: &str) -> Result<Value> {
+        db.mutation("race.handoff", &json!({"activeRunnerId":seen["activeRunnerId"],"activeStartedAt":seen["activeStartedAt"],"nextRunnerId":next}))
+    }
+    #[test]
+    fn handoff_starts_the_runner_the_timing_screen_showed_after_a_queue_reorder() {
+        let mut f = Fixture::new();
+        let a = create(&mut f.db, "A");
+        let x = create(&mut f.db, "X");
+        let y = create(&mut f.db, "Y");
+        press(&mut f.db, "race.handoff", now()).unwrap();
+        // The Timing screen's last poll: A runs, X is next.
+        let seen = f.db.race().unwrap();
+        // The queue desk moves Y to the front before the press arrives.
+        f.db.mutation("runners.reorder", &json!({"ids":[y, x]})).unwrap();
+        let answer = press_showing(&mut f.db, &seen, &x).unwrap();
+        assert_eq!(answer["startedRunnerId"], x);
+        assert_eq!(f.db.race().unwrap()["activeRunnerId"], x);
+        assert_eq!(f.db.history().unwrap()["laps"][0]["runnerId"], a);
+        let status = |db: &Db, id: &str| db.one("SELECT status,queue_index FROM runners WHERE id=?", &[json!(id)]).unwrap();
+        assert_eq!(status(&f.db, &y)["status"], "waiting");
+        // Undo puts X back in line and A back on the track.
+        press(&mut f.db, "race.undoLastHandoff", now()).unwrap();
+        assert_eq!(f.db.race().unwrap()["activeRunnerId"], a);
+        assert_eq!(status(&f.db, &x)["status"], "waiting");
+        assert_eq!(status(&f.db, &y)["status"], "waiting");
+        // The press after that starts Y, who is first now.
+        let answer = press(&mut f.db, "race.handoff", now()).unwrap();
+        assert_eq!(answer["startedRunnerId"], y);
+    }
+    #[test]
+    fn handoff_is_refused_when_the_shown_runner_left_the_queue() {
+        let mut f = Fixture::new();
+        let a = create(&mut f.db, "A");
+        let x = create(&mut f.db, "X");
+        let y = create(&mut f.db, "Y");
+        press(&mut f.db, "race.handoff", now()).unwrap();
+        let seen = f.db.race().unwrap();
+        f.db.mutation("runners.setStatus", &json!({"id":x,"status":"registered"})).unwrap();
+        assert!(press_showing(&mut f.db, &seen, &x).is_err());
+        assert_eq!(f.db.race().unwrap()["activeRunnerId"], a);
+        assert_eq!(f.db.history().unwrap()["laps"].as_array().unwrap().len(), 0);
+        assert_eq!(press_showing(&mut f.db, &seen, &y).unwrap()["startedRunnerId"], y);
     }
     #[test]
     fn handoff_and_undo_restore_the_exact_runner_and_queue() {
