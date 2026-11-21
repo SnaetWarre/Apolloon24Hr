@@ -27,6 +27,14 @@ const observer = new PerformanceObserver(() => {
   if (firstFrame()) observer.disconnect();
 });
 observer.observe({ type: 'mark', buffered: true });
-try { const { default: init } = await import('/app.js'); await init(); if (firstFrame()) observer.disconnect(); }
+try {
+  const { default: init } = await import('/app.js');
+  await init();
+  if (firstFrame()) observer.disconnect();
+  else setTimeout(() => {
+    observer.disconnect();
+    document.querySelector('#status')?.remove();
+  }, 3000);
+}
 catch (error) { observer.disconnect(); document.querySelector('#message').textContent='Apolloon kon niet starten: '+error; console.error(error); }
 </script></body></html>

@@ -27,11 +27,12 @@ test('splash theme follows the URL, then the system preference', () => {
   }
 });
 
-test('splash remains after init and is removed only after a presented frame', async () => {
+test('splash waits for a presented frame, with a three-second fallback after init', async () => {
   let presented = false;
   let removed = false;
   let disconnected = false;
   let notify;
+  const timers = [];
   const source = scripts[1]
     .replace("import { followGroup } from '/failover.js';", '')
     .replace("await import('/app.js')", 'await loadApp()');
@@ -40,6 +41,7 @@ test('splash remains after init and is removed only after a presented frame', as
     followGroup() {},
     performance: { getEntriesByName: () => (presented ? [{}] : []) },
     requestAnimationFrame: (callback) => callback(),
+    setTimeout: (callback, delay) => timers.push({ callback, delay }),
     document: { querySelector: (selector) => (selector === '#message' ? message : { remove: () => (removed = true) }) },
     PerformanceObserver: class {
       constructor(callback) {
@@ -64,10 +66,38 @@ test('splash remains after init and is removed only after a presented frame', as
 
   removed = false;
   presented = false;
+  disconnected = false;
+  timers.length = 0;
+  let finishInit;
+  let startedInit;
+  const initStarted = new Promise((resolve) => (startedInit = resolve));
+  context.loadApp = async () => ({
+    default: () =>
+      new Promise((resolve) => {
+        finishInit = resolve;
+        startedInit();
+      }),
+  });
+  const initializing = vm.runInNewContext(`(async () => {${source}})()`, context);
+  await initStarted;
+  assert.equal(timers.length, 0, 'the fallback must not start before init resolves');
+  assert.equal(removed, false);
+  finishInit();
+  await initializing;
+  assert.equal(removed, false, 'the splash stays visible during the fallback window');
+  assert.equal(timers.length, 1);
+  assert.equal(timers[0].delay, 3000);
+  timers[0].callback();
+  assert.equal(removed, true, 'a missing presentation mark must not cover the app forever');
+  assert.equal(disconnected, true);
+
+  removed = false;
+  timers.length = 0;
   context.loadApp = async () => {
     throw new Error('network unavailable');
   };
   await vm.runInNewContext(`(async () => {${source}})()`, context);
   assert.equal(removed, false);
+  assert.equal(timers.length, 0, 'startup errors must remain visible');
   assert.match(message.textContent, /Apolloon kon niet starten: Error: network unavailable/);
 });
