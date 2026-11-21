@@ -148,6 +148,25 @@ export function nativeFrameMetrics(events, writes) {
     const previousSubmitUs = overlap('submit', ready, apply);
     const previousPresentUs = overlap('present', ready, apply);
     const applyUs = applied - apply;
+    const phaseWork = (stage, excludeApply = false) => {
+      let start, total;
+      for (const event of native) {
+        if (event.us < build || event.us > built) continue;
+        if (event.stage === stage + '_begin') {
+          if (start !== undefined) return undefined;
+          start = event.us;
+        }
+        if (event.stage === stage + '_end') {
+          if (start === undefined) return undefined;
+          total = (total ?? 0) + event.us - start;
+          if (excludeApply) total -= Math.max(0, Math.min(event.us, applied) - Math.max(start, apply));
+          start = undefined;
+        }
+      }
+      return start === undefined ? total : undefined;
+    };
+    const acquireUs = phaseWork('acquire');
+    const runtimeUs = phaseWork('runtime', true);
     return {
       lapId: w.lapId,
       pushAppliedUs: applied - push,
@@ -157,6 +176,8 @@ export function nativeFrameMetrics(events, writes) {
       applyUs,
       otherBeforeApplyUs: apply - ready - previousSubmitUs - previousPresentUs,
       buildUs: built - build - Math.max(0, Math.min(built, applied) - Math.max(build, apply)),
+      ...(acquireUs === undefined ? {} : { acquireUs }),
+      ...(runtimeUs === undefined ? {} : { runtimeUs }),
       encodeUs: submit - built,
       submitUs: submitted - submit,
       presentUs: end - present,
@@ -340,6 +361,8 @@ export function stageMetrics(events, writes, results, leader, refresh = []) {
     applyUs: 'native own apply',
     otherBeforeApplyUs: 'native push→apply other transport/scheduling',
     buildUs: 'native view build/acquire excluding apply',
+    acquireUs: 'native drawable acquisition (CPU wall time)',
+    runtimeUs: 'native runtime view/layout/paint excluding apply',
     encodeUs: 'native upload/encode',
     submitUs: 'native GPU submit (CPU wall time)',
     presentUs: 'native present (CPU wall time)',
@@ -388,6 +411,10 @@ export function stageMarkdown(metrics) {
           ].join(' | ') +
           ' |'
       )
+      .join('\n') +
+    '\n\n## Native build phases per press (µs)\n\n| Lap | Acquire | Runtime excl. apply |\n|---|---:|---:|\n' +
+    metrics.nativeFrames
+      .map((f) => '| ' + f.lapId + ' | ' + (f.acquireUs ?? 'N/A') + ' | ' + (f.runtimeUs ?? 'N/A') + ' |')
       .join('\n') +
     '\n\nState response body sizes (bytes, measured requests only): ' +
     JSON.stringify(

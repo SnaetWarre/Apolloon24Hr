@@ -13,7 +13,12 @@ npm run bench:screens -- --followers --trace
 
 Tracing is off by default. With `--trace`, the report includes per-press native
 previous-frame submit/present overlap, own apply, view build/acquire (excluding
-apply), upload/encode, submit, present and frame-to-pixels time. Submit/present
+apply), upload/encode, submit, present and frame-to-pixels time. Separate
+drawable-acquisition and runtime view/layout/paint brackets split build/acquire.
+Runtime excludes the measured apply interval; acquisition includes reconfiguration
+and drawable/GPU waits. Both are subsets of build/acquire, not additional time.
+Old or incomplete traces leave these columns N/A. Raw redraw-entry and macOS
+display-link pacing markers distinguish delivery/startup from building. Submit/present
 are CPU wall times, not GPU execution or physical scanout. Missing boundaries
 remain N/A. Request IDs join server waiter/worker/snapshot/serialization markers
 to client headers/body/JSON parsing and history/apply markers. Proxy body byte

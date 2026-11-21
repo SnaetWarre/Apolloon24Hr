@@ -6,6 +6,8 @@ The patch preserves Apolloon's existing window controls, browser keyboard behavi
 
 ## Update Rune
 
+The opt-in frame hook reports redraw entry, macOS display-link pacing, drawable acquisition, and runtime view/layout/paint separately. Acquisition includes surface reconfiguration and any GPU/drawable wait; runtime includes application polling. These CPU wall-time brackets do not measure physical scanout. Timer-only frames can run the runtime before acquisition; input and app wakes normally acquire first.
+
 Native surfaces retain upstream AutoVsync presentation and desired frame latency (one on Windows, two elsewhere). `RUNE_SURFACE_LOG=1` reports supported and selected modes. Apolloon's opt-in latency trace observes GPU frame build, submit and present boundaries through `App::on_frame_stage`; the hook does not schedule frames.
 
 Ordinary native and browser GPU frames use Rune's retained damage renderer. Surfaces with `COPY_DST` receive a texture copy; others, including WebGL2, receive a full-screen textured-quad blit. The retained texture is sampled with `textureLoad`, without filtering or blending, through matching source and target view formats. Only Windows additionally supplies dirty presentation rectangles. Transparent clears, changed image/glyph atlases and renderer effects/layers/springs/surfaces retain whole-frame fallbacks. Resizing or replacing a surface discards its damage history.
