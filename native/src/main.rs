@@ -5,6 +5,7 @@ mod backup_service;
 mod backups;
 mod cluster;
 mod db;
+mod demo;
 mod desktop;
 mod discovery;
 mod exports;
