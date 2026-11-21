@@ -73,7 +73,9 @@ pub(super) fn apply(
         let reply = pending.remove(at);
         *sequence = reply.sequence;
         let body = reply.body;
-        if body["revision"].as_i64() < held["revision"].as_i64() {
+        if body["revision"].as_i64() < held["revision"].as_i64()
+            && super::same_run(&body["cursor"], &held["cursor"])
+        {
             continue;
         }
         if body["delta"] == true {
