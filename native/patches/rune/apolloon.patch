@@ -1314,47 +1314,14 @@ diff --git a/crates/rune/src/frame/encoded_tests.rs b/crates/rune/src/frame/enco
 diff --git a/crates/rune/src/window.rs b/crates/rune/src/window.rs
 --- a/crates/rune/src/window.rs
 +++ b/crates/rune/src/window.rs
-@@ -719,8 +719,12 @@
- 
- /// Frames a window's swap chain may hold that the compositor hasn't shown. Windows: one, so a
- /// frame shows at the first composition after it's done, and the window waits for room itself
--/// (`slot`) rather than in `acquire`. Elsewhere two.
--pub(crate) const FRAME_LATENCY: u32 = if cfg!(target_os = "windows") { 1 } else { 2 };
-+/// (`slot`) rather than in `acquire`.
-+pub(crate) const FRAME_LATENCY: u32 = 1;
-+
-+fn low_latency_present_mode(modes: &[wgpu::PresentMode]) -> wgpu::PresentMode {
-+    if modes.contains(&wgpu::PresentMode::Mailbox) { wgpu::PresentMode::Mailbox } else { wgpu::PresentMode::Fifo }
-+}
- 
- /// A vsynced sRGB (or non-sRGB when `srgb_blend` is set) configuration for the surface, and the
- /// first alpha mode it supports that composites translucent pixels.
-@@ -747,8 +751,11 @@
+@@ -747,7 +747,10 @@
      // A frame that redrew part of itself is copied in whole from the one the renderer keeps
      // (`render::damaged`).
      config.usage |= caps.usages & wgpu::TextureUsages::COPY_DST;
--    config.present_mode = wgpu::PresentMode::AutoVsync;
-+    config.present_mode = low_latency_present_mode(&caps.present_modes);
+     config.present_mode = wgpu::PresentMode::AutoVsync;
      config.desired_maximum_frame_latency = FRAME_LATENCY;
 +    if std::env::var_os("RUNE_SURFACE_LOG").is_some() {
 +        eprintln!("rune surface: supported={:?} selected={:?} desired_maximum_frame_latency={}", caps.present_modes, config.present_mode, config.desired_maximum_frame_latency);
 +    }
      Some((config, crate::render::translucency::mode(surface, adapter)))
  }
- 
-diff --git a/crates/rune/src/window/tests.rs b/crates/rune/src/window/tests.rs
---- a/crates/rune/src/window/tests.rs
-+++ b/crates/rune/src/window/tests.rs
-@@ -1,3 +1,12 @@
-+#[test]
-+fn low_latency_presentation_never_selects_tearing() {
-+    use wgpu::PresentMode::{Fifo, Immediate, Mailbox};
-+    assert_eq!(super::low_latency_present_mode(&[Fifo, Mailbox, Immediate]), Mailbox);
-+    assert_eq!(super::low_latency_present_mode(&[Fifo, Immediate]), Fifo);
-+    assert_eq!(super::low_latency_present_mode(&[]), Fifo);
-+    assert_eq!(super::FRAME_LATENCY, 1);
-+}
-+
- use super::*;
- 
- #[test]
