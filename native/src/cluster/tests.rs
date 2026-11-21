@@ -1460,7 +1460,6 @@ fn an_announcement_without_the_group_key_does_not_move_a_laptop() {
     wait_until("healthy", Duration::from_secs(5), || all_healthy(&[&a, &b]));
     assert_eq!(b.count("SELECT COUNT(*) AS n FROM runners"), 1);
 }
-||||||| parent of b32c33a (Do not count a vote or a term that could not be stored)
 
 
 /// A laptop whose disk refuses the vote neither gives it nor stands: counted and then given
