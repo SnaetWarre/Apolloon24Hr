@@ -46,6 +46,7 @@ fn port() -> db::Result<u16> {
 fn app() -> db::Result<()> {
     let server_only = std::env::args().any(|s| s == "--server");
     if server_only {
+        desktop::supervisor::exit_on_panic();
         desktop::supervisor::follow_lifeline();
         return server::serve(database()?, port()?);
     }
