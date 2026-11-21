@@ -1877,7 +1877,7 @@ mod tests {
     #[test]
     fn a_press_while_another_action_is_on_its_way_is_kept_with_its_own_time() {
         let mut initial = crate::db::Db::open(std::path::Path::new(":memory:")).unwrap();
-        for (number, name) in [("1", "Eerste"), ("2", "Tweede")] {
+        for (number, name) in [("1", "Eerste"), ("2", "Tweede"), ("3", "Derde")] {
             initial.mutation("runners.create", &json!({"runnerNumber":number,"name":name,"status":"waiting"})).unwrap();
         }
         initial
@@ -1902,7 +1902,11 @@ mod tests {
         });
         assert!(rt.state.busy, "Burgie gepakt is on its way");
         let pressed = rt.state.server_now();
+        let shown = timing_page::waiting(&rt.state)[0]["id"].as_str().unwrap().to_string();
         rt.key(rune::Key::Text(" ".into()).into());
+        // The queue desk moves the other runner to the front while the press waits.
+        let other = timing_page::waiting(&rt.state)[1]["id"].as_str().unwrap().to_string();
+        db.lock().unwrap().mutation("runners.reorder", &json!({"ids":[other, shown]})).unwrap();
         rt.frame(1.0 / 60.0);
         std::thread::sleep(Duration::from_millis(300));
         update(&mut rt, |s| !s.busy && s.history["laps"].as_array().is_some_and(|l| l.len() == 1));
@@ -1911,6 +1915,7 @@ mod tests {
         let duration = lap[0]["duration_ms"].as_i64().unwrap();
         assert!((duration - (pressed - started)).abs() < 100, "The lap ends at the press, not when it was sent: {duration}");
         assert!(rt.state.timing_page.error.is_empty());
+        assert_eq!(db.lock().unwrap().race().unwrap()["activeRunnerId"], shown, "The runner shown at the press starts");
         let (at, _) = rt.state.last_press.unwrap();
         let since_press = rt.state.server_now() - pressed;
         assert!((at.elapsed().as_millis() as i64 - since_press).abs() < 100, "The next lap counts from the press");

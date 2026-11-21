@@ -43,8 +43,8 @@ pub(super) struct Page {
     finish_step_at: Option<Instant>,
     /// A handoff on its way: the lap it ends, the runner it starts and when.
     pending: Option<(Value, Option<String>, i64)>,
-    /// A press made while another action was on its way: when it was pressed. It is sent next.
-    waiting_press: Option<i64>,
+    /// A press made while another action was on its way: when it was pressed and the runner shown as next. It is sent next.
+    waiting_press: Option<(i64, Option<String>)>,
     reopen: bool,
     pub(super) last_action: String,
     pub(super) error: String,
@@ -210,13 +210,15 @@ fn base_input(s: &State, pressed: i64) -> Value {
     input
 }
 fn send_handoff(s: &mut State, mut input: Value) {
-    let next = waiting(s).first().map(|r| st(r, "id").to_string());
+    let next = match input["nextRunnerId"].as_str() {
+        Some(shown) => Some(shown.to_string()),
+        None => waiting(s).first().map(|r| st(r, "id").to_string()),
+    };
     input["nextRunnerId"] = json!(next);
     let pressed = input["pressedAt"].as_i64().unwrap_or_else(now);
     s.timing_page.pending = Some((s.snapshot["race"]["activeStartedAt"].clone(), next, pressed));
     // A press that waited is sent later than it was made: the next lap still counts from the press.
-    // The server keeps a press up to 20 s old; an older one counts from when it is sent.
-    let waited = Some((s.server_now() - pressed).max(0) as u64).filter(|ms| *ms < 20_000).unwrap_or(0);
+    let waited = (s.server_now() - pressed).max(0) as u64;
     let at = Instant::now();
     s.last_press = Some((at.checked_sub(Duration::from_millis(waited)).unwrap_or(at), pressed));
     s.send("race.handoff", input);
@@ -243,17 +245,17 @@ pub(super) fn key_press(s: &mut State) {
 /// The big button: clock the runner off and start the next, start the first, or resume.
 pub(super) fn press(s: &mut State) {
     let pressed = s.server_now();
-    press_at(s, pressed);
+    press_at(s, pressed, None);
 }
 /// Sends the press that had to wait for another action, with the time it was pressed.
 pub(super) fn send_waiting_press(s: &mut State) {
     if !s.busy
-        && let Some(pressed) = s.timing_page.waiting_press.take()
+        && let Some((pressed, shown)) = s.timing_page.waiting_press.take()
     {
-        press_at(s, pressed);
+        press_at(s, pressed, shown);
     }
 }
-fn press_at(s: &mut State, pressed: i64) {
+fn press_at(s: &mut State, pressed: i64, shown: Option<String>) {
     let race = s.snapshot["race"].clone();
     if s.timing_page.dialog.is_some()
         || cluster(s).blocked
@@ -265,14 +267,18 @@ fn press_at(s: &mut State, pressed: i64) {
         return;
     }
     if s.busy {
-        s.timing_page.waiting_press.get_or_insert(pressed);
+        let next = waiting(s).first().map(|r| st(r, "id").to_string());
+        s.timing_page.waiting_press.get_or_insert((pressed, next));
         return;
     }
     if phase(&race) == "finished" {
         s.timing_page.dialog = Some(Dialog::Resume);
         return;
     }
-    let input = base_input(s, pressed);
+    let mut input = base_input(s, pressed);
+    if shown.is_some() {
+        input["nextRunnerId"] = json!(shown);
+    }
     let lap_ms = input["measuredDurationMs"].as_i64().or_else(|| {
         race["activeStartedAt"]
             .as_i64()
