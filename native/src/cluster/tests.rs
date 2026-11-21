@@ -174,9 +174,16 @@ fn same_heads(servers: &[&TestServer]) -> bool {
 }
 /// Three laptops linked from the follower side: B and C each press Koppelen next to A.
 fn linked_three(dir: &Dir) -> (TestServer, TestServer, TestServer) {
-    let a = TestServer::start(&dir.db("a"), free_port(), "Laptop A");
-    let b = TestServer::start(&dir.db("b"), free_port(), "Laptop B");
-    let c = TestServer::start(&dir.db("c"), free_port(), "Laptop C");
+    linked_three_with(dir, |_| {})
+}
+
+fn linked_three_with(
+    dir: &Dir,
+    tune: impl Fn(&mut Config) + Copy,
+) -> (TestServer, TestServer, TestServer) {
+    let a = TestServer::start_with(&dir.db("a"), free_port(), "Laptop A", tune);
+    let b = TestServer::start_with(&dir.db("b"), free_port(), "Laptop B", tune);
+    let c = TestServer::start_with(&dir.db("c"), free_port(), "Laptop C", tune);
     a.act("runners.create", json!({"name":"Zoë","status":"waiting"}))
         .unwrap();
     // A holds a runner, so B and C (untouched) take A's data whichever laptop the press is on.
@@ -187,6 +194,65 @@ fn linked_three(dir: &Dir) -> (TestServer, TestServer, TestServer) {
         all_healthy(&[&a, &b, &c])
     });
     (a, b, c)
+}
+
+#[test]
+fn frozen_leader_does_not_hold_up_an_election_or_a_timing_press() {
+    let _serial = serial();
+    let dir = Dir::new();
+    let (a, b, c) = linked_three_with(&dir, |cfg| {
+        cfg.election_timeout = Duration::from_secs(1);
+    });
+    b.act("runners.create", json!({"name":"Wout","status":"waiting"}))
+        .unwrap();
+    press(&b, "race.handoff").unwrap();
+    press(&b, "race.handoff").unwrap();
+    let laps = |s: &TestServer| s.db.lock().unwrap().history().unwrap()["laps"].clone();
+    let before = laps(&b);
+    let term = a.node.term();
+    assert_eq!(before.as_array().unwrap().len(), 1);
+    wait_until("the first lap on all laptops", Duration::from_secs(2), || {
+        [&a, &c].iter().all(|s| laps(s) == before)
+    });
+
+    // The server keeps accepting TCP connections, but cannot answer votes or writes.
+    {
+        let _frozen = a.node.raft.lock().unwrap();
+        std::thread::sleep(a.node.cfg.heartbeat * 3);
+        for follower in [&b, &c] {
+            assert_eq!(follower.node.term(), term);
+            assert_eq!(follower.status()["leader"]["hostId"], a.node.host_id);
+        }
+    }
+    wait_until("three healthy laptops", Duration::from_secs(2), || {
+        all_healthy(&[&a, &b, &c])
+    });
+
+    std::thread::scope(|scope| {
+        let _frozen = a.node.raft.lock().unwrap();
+        let deadline = Instant::now() + Duration::from_millis(2_800);
+        let (send, saved) = std::sync::mpsc::channel();
+        let follower = &b;
+        scope.spawn(move || {
+            let _ = send.send(press(follower, "race.handoff"));
+        });
+        while leader_index(&[&b, &c]).is_none() {
+            assert!(Instant::now() < deadline, "the frozen peer delayed the election");
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        saved
+            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+            .expect("the press waited for the frozen leader's HTTP response")
+            .unwrap();
+    });
+
+    let after = laps(&b);
+    let after = after.as_array().unwrap();
+    assert_eq!(after.len(), 2);
+    assert!(after.contains(&before[0]));
+    wait_until("the same two laps on all laptops", Duration::from_secs(5), || {
+        [&a, &c].iter().all(|s| laps(s).as_array() == Some(after))
+    });
 }
 
 #[test]
