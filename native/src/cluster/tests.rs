@@ -1532,3 +1532,30 @@ fn a_new_laptop_is_not_taken_in_before_earlier_changes_are_confirmed() {
         .unwrap();
     assert!(a.node.make_room_for(&new).is_err());
 }
+
+
+/// The offset to an earlier group's clock is kept across a restart while a race depends on it,
+/// and dropped by a laptop that starts alone without a race.
+#[test]
+fn a_laptop_alone_without_a_race_starts_on_its_own_clock() {
+    let _serial = serial();
+    let dir = Dir::new();
+    let restart_with_offset = |server: TestServer, name: &str| {
+        super::log::set_local(&server.db.lock().unwrap(), "cluster_clock_offset_ms", "5000")
+            .unwrap();
+        server.kill();
+        TestServer::start(&dir.db(name), free_port(), "Laptop")
+    };
+    let idle = restart_with_offset(TestServer::start(&dir.db("idle"), free_port(), "Laptop"), "idle");
+    assert_eq!(super::clock::offset(), 0);
+    assert_eq!(
+        super::log::setting(&idle.db.lock().unwrap(), "cluster_clock_offset_ms").as_deref(),
+        Some("0")
+    );
+    let racing = TestServer::start(&dir.db("racing"), free_port(), "Laptop");
+    racing.act("runners.create", json!({"name":"Zoë","status":"waiting"})).unwrap();
+    press(&racing, "race.handoff").unwrap();
+    let _racing = restart_with_offset(racing, "racing");
+    assert_eq!(super::clock::offset(), 5000);
+    super::clock::set_offset(0);
+}
