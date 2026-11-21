@@ -131,7 +131,7 @@ impl Node {
     /// The laptop at `raw`, checked to be another laptop that can be linked with this one.
     fn other_laptop(&self, raw: &str) -> Result<(String, Value)> {
         let url = normalize_url(raw).ok_or("Vul het adres van een andere laptop in.")?;
-        if url == self.cfg.self_url {
+        if url == self.self_url() {
             return Err("Vul het adres van een andere laptop in.".into());
         }
         let status = self
@@ -197,7 +197,7 @@ impl Node {
                     .post(
                         &url,
                         "/api/cluster/invite",
-                        &json!({"url": self.cfg.self_url, "clusterId": self.cluster_id()}),
+                        &json!({"url": self.self_url(), "clusterId": self.cluster_id()}),
                         INVITE_TIMEOUT,
                     )
                     .map_err(|_| "Koppelen mislukt.".to_string())?;
@@ -454,6 +454,7 @@ impl Node {
                 if old.url == member.url
                     && old.host_id != member.host_id
                     && old.host_id != me.host_id
+                    && member.host_id != me.host_id
                 {
                     log::remove_member(db, &old.host_id)?;
                     change_timing(db, "release", &old.host_id, None)?;
