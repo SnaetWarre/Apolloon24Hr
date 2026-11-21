@@ -403,6 +403,9 @@ fn image_picker(
             Some(img) => preview.pixels_fit(img.pixels(), rune::SurfaceFit::Fit),
             None => preview,
         });
+    } else if compact {
+        // An empty slot, so Logo kiezen lines up with Ander logo in the rows above and below.
+        picker = picker.child(rune::el().size(28.0, 28.0));
     }
     let title = if loading {
         "Logo laden..."
@@ -683,7 +686,7 @@ fn members_panel(s: &State, l: &Value) -> El {
 }
 
 /// `LabelAdminRow`: the badge, the member count that opens the members, the logo and Verwijder.
-fn label_row(s: &State, l: &Value, first: bool, last: bool) -> El {
+fn label_row(s: &State, l: &Value, last: bool) -> El {
     let p = pal(s.dark);
     let id = st(l, "id").to_string();
     let open = s.label_form.open.contains(&id);
@@ -710,11 +713,7 @@ fn label_row(s: &State, l: &Value, first: bool, last: bool) -> El {
             s.label_form.open.insert(toggle.clone());
         }
     });
-    let mut logo = col().gap(4.0).w(200.0);
-    if first {
-        logo = logo.child(text("Logo").font(ts(12.0, 400.0).lh(18.0)).color(p.t.ink3));
-    }
-    logo = logo.child(image_picker(
+    let logo = col().w(200.0).child(image_picker(
         s,
         &format!("label-{id}"),
         l["imageUrl"].as_str(),
@@ -841,7 +840,7 @@ pub(super) fn panel_view(s: &State) -> El {
         let mut group = col().child(h3(s, kind_title(&kind)).color(p.t.ink2).mt(16.0).mb(4.0));
         let n = labels.len();
         for (i, l) in labels.into_iter().enumerate() {
-            group = group.child(label_row(s, l, i == 0, i + 1 == n));
+            group = group.child(label_row(s, l, i + 1 == n));
         }
         list = list.child(group);
     }

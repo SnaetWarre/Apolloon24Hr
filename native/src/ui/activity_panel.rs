@@ -23,7 +23,7 @@ pub(super) fn panel(s: &State) -> El {
     let p = kit::pal(s.dark);
     let empty = s.activity.is_empty();
     // An empty table shares its width out as the browser's auto layout does; a full one keeps
-    // the time and origin on one line and lets the summary wrap.
+    // the time on one line and lets the summary and a long origin wrap.
     let cell = |el: El, col: usize| -> El {
         let el = el.min_w(0.0);
         match (empty, col) {
@@ -69,7 +69,8 @@ pub(super) fn panel(s: &State) -> El {
                 .child(cell(
                     text(entry["origin"].as_str().unwrap_or("").to_string())
                         .font(kit::ts(13.0, 400.0).lh(19.5))
-                        .color(p.t.ink3),
+                        .color(p.t.ink3)
+                        .wrap(),
                     2,
                 )),
         );
