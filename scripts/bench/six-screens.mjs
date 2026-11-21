@@ -267,26 +267,30 @@ benchmark: try {
   execFileSync('xdotool', ['mousemove', '--window', windowId, '80', '178', 'click', '1']);
   await sleep(5000);
   execFileSync('import', ['-window', windowId, path.join(out, 'native-before.png')]);
-  // Attached native app has the same content layout as browser Timing. Locate the static total digits.
+  // Attached native app has the same content layout as browser Timing.
   const timing = followers
     ? await browser.newPage({ viewport: { width: 1366, height: 768 }, colorScheme: 'dark' })
     : screens.at(-1).page;
   if (followers) {
     await timing.goto(origins.get(leader) + '/timing');
-    await timing.waitForFunction(() =>
-      [...document.querySelectorAll('[data-rune-a11y] *')].some((e) => !e.children.length && e.textContent === '2240')
-    );
   }
+  await timing.waitForFunction(() =>
+    [...document.querySelectorAll('[data-rune-a11y] *')].some((e) => !e.children.length && e.textContent === 'Bench 39')
+  );
   const rect = await timing.evaluate(() => {
     const leaf = [...document.querySelectorAll('[data-rune-a11y] *')].find(
-      (e) => !e.children.length && e.textContent === 'Rondes in de race'
+      (e) => !e.children.length && e.textContent === 'Laatste rondes'
     );
-    if (!leaf) throw new Error('Timing lap-total label missing');
-    const value = [...leaf.parentElement.querySelectorAll('*')].find(
-      (e) => !e.children.length && e.textContent === '2240'
+    if (!leaf) throw new Error('Timing recent-laps label missing');
+    const runner = [...document.querySelectorAll('[data-rune-a11y] *')].find(
+      (e) => !e.children.length && e.textContent === 'Bench 39'
     );
-    if (!value) throw new Error('Timing lap-total value missing');
-    const r = value.getBoundingClientRect();
+    let latest = runner?.parentElement;
+    const badgeIn = (row) => [...row.querySelectorAll('*')].find((e) => !e.children.length && e.textContent === '40');
+    while (latest && !badgeIn(latest)) latest = latest.parentElement;
+    if (!latest || !latest.textContent.includes('ronde 56')) throw new Error('Timing newest seeded lap missing');
+    const badge = badgeIn(latest);
+    const r = badge.getBoundingClientRect();
     return { x: r.x, y: r.y, width: r.width, height: r.height };
   });
   if (followers) await timing.close();
@@ -448,7 +452,8 @@ benchmark: try {
       r.values.filter((v) => v !== null),
       1
     );
-    r.signal = r.name === 'native Timing' ? 'X11 lap-total pixels' : 'Rune accessibility mirror (not pixels)';
+    r.signal =
+      r.name === 'native Timing' ? 'X11 newest-lap runner badge pixels' : 'Rune accessibility mirror (not pixels)';
   }
   const seconds = (endAt - startAt) / 1000;
   const rates = Object.fromEntries(

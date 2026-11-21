@@ -4,6 +4,10 @@ export function percentile(values, p) {
 }
 
 export function displayedHandoff(screen, frame) {
+  if (screen === '/timing') {
+    const lap = frame.text.split('Laatste rondes|')[1]?.match(/Bench (\d+)\|ronde (\d+)/);
+    return lap ? (Number(lap[2]) - 1) * 40 + Number(lap[1]) - 2240 : null;
+  }
   if (screen === '/queue') {
     const next = frame.text.match(/Bench (\d+)/)?.[1];
     return next === undefined ? null : Number(next) - 2;

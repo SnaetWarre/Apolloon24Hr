@@ -9,7 +9,10 @@ import {
 } from '../scripts/bench/metrics.mjs';
 
 test('screen observations follow rendered totals, active runner and waiting lane', () => {
-  assert.equal(displayedHandoff('/timing', { text: 'Rondes in de race|2241' }), 0);
+  assert.equal(displayedHandoff('/timing', { text: 'Hierna|Bench 01|Laatste rondes|1|Bench 00|ronde 57|12:34' }), 0);
+  assert.equal(displayedHandoff('/timing', { text: 'Laatste rondes|40|Bench 39|ronde 56|12:34' }), -1);
+  assert.equal(displayedHandoff('/timing', { text: 'Laatste rondes|2|Bench 01|ronde 57|12:34' }), 1);
+  assert.equal(displayedHandoff('/timing', { text: 'Laatste rondes|Bench 00' }), null);
   assert.equal(displayedHandoff('/display/inside', { text: 'Rondes|2.242' }), 1);
   assert.equal(displayedHandoff('/display/competitions', { text: 'Speedteam|2 243' }), 2);
   assert.equal(displayedHandoff('/display/outside', { text: 'Nu op de piste|Bench 01|Volgende|Bench 02' }), 0);
@@ -31,8 +34,9 @@ test('later rendered state covers coalesced writes, never pre-send state', () =>
     { i: 1, sentAt: 200 },
   ];
   const frames = [
-    { at: 50, text: '2242' },
-    { at: 250, text: '2242' },
+    { at: 50, text: 'Laatste rondes|2|Bench 01|ronde 57' },
+    { at: 150, text: 'Laatste rondes|40|Bench 39|ronde 56' },
+    { at: 250, text: 'Laatste rondes|2|Bench 01|ronde 57' },
   ];
   assert.deepEqual(browserLatencies('/timing', frames, writes), [150, 50]);
   assert.equal(percentile([300, 100, 200], 0.95), 300);

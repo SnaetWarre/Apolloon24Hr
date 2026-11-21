@@ -76,7 +76,8 @@ require explicit confirmation. The separate 500ms double-click guard applies
 to finishing the race, not ordinary handoffs.
 
 Browser timestamps are MutationObserver observations of Rune's accessibility
-mirror, not HTTP response completions: total laps for Timing/inside/competitions,
+mirror, not HTTP response completions: the newest lap's runner and personal lap
+number for Timing, total laps for inside/competitions,
 current runner for outside, and the first remaining waiting runner for queue.
 Later rendered states can cover multiple handoffs. These are accessibility-tree
 commit times, not physical monitor scan-out times. Raw trees are retained to
@@ -86,7 +87,8 @@ deliberately disabled for covered windows.
 Native crop calibration always uses leader Timing's layout (follower Timing
 has a timing-owner warning that shifts its layout). In follower mode a temporary
 leader page is opened and closed before measurement, leaving five browser screens.
-Native captures use XGetImage of only the static lap-total digits, with a 5ms
+Native captures use XGetImage of only the newest completed lap's runner badge
+(40 for the final seeded lap, then 1–15 for the measured laps), with a 5ms
 target period. Changed crops and their timestamps are retained. Exactly one
 change between sends is required for each latency; zero/multiple changes make
 that observation invalid rather than guessing. The summary reports maximum
