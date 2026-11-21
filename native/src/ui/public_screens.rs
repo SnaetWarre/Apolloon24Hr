@@ -1381,7 +1381,7 @@ fn inside_empty(message: &str, p: &Pal) -> El {
 fn recent_panel(s: &State, p: &Pal) -> El {
     let inner = box_w() - 4.0 * vw_unit() - 1.2 * vw_unit();
     let inner = inner * 1.5 / 2.5 - 2.0 - 2.6 * vw_unit();
-    let w = [0.11, 0.42, 0.14, 0.09, 0.12, 0.12].map(|f| f * inner);
+    let w = [0.16, 0.37, 0.14, 0.09, 0.12, 0.12].map(|f| f * inner);
     let title = format!("Laatste {INSIDE_LIST_LENGTH} lopers");
     let mut panel = panel(p)
         .role("region")

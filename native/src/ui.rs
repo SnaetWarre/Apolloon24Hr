@@ -73,6 +73,7 @@ struct Update {
 }
 pub struct State {
     page: usize,
+    page_seen: usize,
     profile: Option<profile::Form>,
     activity: Vec<Value>,
     activity_search: TextEdit,
@@ -226,6 +227,7 @@ fn init_with_url(url: String) -> State {
     #[allow(unused_mut)]
     let mut state = State {
         page: 0,
+        page_seen: 0,
         profile: None,
         activity: Vec::new(),
         activity_search: TextEdit::new(""),
@@ -289,6 +291,7 @@ fn init_with_url(url: String) -> State {
             .filter(|i: &usize| *i < PAGES.len())
             .unwrap_or(0);
     }
+    state.page_seen = state.page;
     state
 }
 impl State {
@@ -351,6 +354,16 @@ impl State {
     }
 }
 fn poll(s: &mut State, _: f64, tx: &mut Tx) -> bool {
+    let mut changed = false;
+    #[cfg(target_arch = "wasm32")]
+    if !s.fixture && sync_route(s) {
+        changed = true;
+    }
+    if s.page != s.page_seen {
+        s.page_seen = s.page;
+        s.error.clear();
+        changed = true;
+    }
     #[cfg(not(target_arch = "wasm32"))]
     if !s.fixture {
         crate::desktop::pulse_window();
@@ -362,12 +375,7 @@ fn poll(s: &mut State, _: f64, tx: &mut Tx) -> bool {
         crate::desktop::remember_route(route, &mut s.route_seen);
     }
     if s.fixture {
-        return false;
-    }
-    let mut changed = false;
-    #[cfg(target_arch = "wasm32")]
-    if sync_route(s) {
-        changed = true;
+        return changed;
     }
     tx.wake_after(Duration::from_millis(100));
     let public = (5..=7).contains(&s.page);
@@ -987,7 +995,11 @@ fn view(s: &State, _cx: &mut Cx<State>) -> El {
         content = content.child(label(&s.notice, s.dark).role("status").wrap().min_w(0.0));
     }
     if !s.error.is_empty() {
-        content = content.child(label(&s.error, s.dark).role("alert").wrap().min_w(0.0));
+        content = content.child(
+            row().gap(12.0).center_y()
+                .child(label(&s.error, s.dark).role("alert").wrap().min_w(0.0).grow(1.0))
+                .child(button("error-dismiss", "Sluiten", s.dark, |s| s.error.clear())),
+        );
     }
     let modal = if let Some(modal) = admin_system::modal(s) {
         Some(modal)
@@ -1634,6 +1646,48 @@ mod tests {
         assert_eq!(laps(), 1, "Space on Timing clocks the runner off");
     }
     #[test]
+    fn errors_can_be_dismissed_and_do_not_follow_navigation() {
+        let mut state = init_with_url("http://127.0.0.1:1".into());
+        state.fixture = true;
+        state.page = 8;
+        state.page_seen = state.page;
+        state.error = "no XDG desktop portal FileChooser is available".into();
+        let mut rt = Runtime::new(state, view, (1366.0, 768.0), Env { system_dark: false, scale: 1.0 });
+        rt.frame(0.0);
+        click(&mut rt, "error-dismiss");
+        assert!(rt.state.error.is_empty());
+        assert!(rt.find("error-dismiss").is_none());
+        rt.update(|s, _| s.error = "Picker failed".into());
+        click(&mut rt, "nav-2");
+        rt.update(|s, tx| { poll(s, 0.0, tx); });
+        assert!(rt.state.error.is_empty());
+        rt.state.error = "Picker failed".into();
+        apply_route(&mut rt.state, "/queue");
+        rt.update(|s, tx| { poll(s, 0.0, tx); });
+        assert!(rt.state.error.is_empty());
+        rt.update(|s, tx| {
+            s.page = 0;
+            s.welcome_skipped = true;
+            poll(s, 0.0, tx);
+            s.error = "Picker failed".into();
+        });
+        click(&mut rt, "overview-ready");
+        rt.update(|s, tx| { poll(s, 0.0, tx); });
+        assert_eq!(rt.state.page, 1);
+        assert!(rt.state.error.is_empty());
+        rt.update(|s, tx| {
+            s.page = 0;
+            s.error = "Old error".into();
+            s.file_tx.send(Err("New picker error".into())).unwrap();
+            s.fixture = false;
+            poll(s, 0.0, tx);
+            s.fixture = true;
+        });
+        assert_eq!(rt.state.error, "New picker error");
+        rt.update(|s, tx| { poll(s, 0.0, tx); });
+        assert_eq!(rt.state.error, "New picker error");
+    }
+    #[test]
     fn space_presses_a_tab_focused_button_outside_timing() {
         let mut initial = crate::db::Db::open(std::path::Path::new(":memory:")).unwrap();
         let id = initial.mutation("runners.create", &json!({"runnerNumber":"5","name":"Tab Loper"})).unwrap()["id"].as_str().unwrap().to_owned();
@@ -2075,6 +2129,12 @@ mod tests {
             a
         );
         click(&mut rt, "undo");
+        click(&mut rt, "timing-cancel");
+        rt.key(rune::Key::Enter.into());
+        rt.frame(1.0 / 60.0);
+        assert!(matches!(rt.state.timing_page.dialog, Some(timing_page::Dialog::ShortLap(_))));
+        click(&mut rt, "timing-cancel");
+        click(&mut rt, "undo");
         click(&mut rt, "timing-confirm");
         update(&mut rt, |s| {
             !s.busy && s.snapshot["race"]["activeRunnerId"] == a
@@ -2085,6 +2145,9 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+        rt.key(rune::Key::Text(" ".into()).into());
+        rt.frame(1.0 / 60.0);
+        assert!(matches!(rt.state.timing_page.dialog, Some(timing_page::Dialog::ShortLap(_))));
     }
     fn scroll_to(rt: &mut Runtime<State>, key: &str) {
         for _ in 0..20 {

@@ -2069,9 +2069,9 @@ fn search_dialog(s: &State, search: &Search) -> El {
                 "{}{}",
                 if has_query {
                     format!(
-                        "{} resultaat{}",
+                        "{} {}",
                         found.len(),
-                        if found.len() == 1 { "" } else { "en" }
+                        if found.len() == 1 { "resultaat" } else { "resultaten" }
                     )
                 } else {
                     format!("{} lopers in de databank", found.len())
