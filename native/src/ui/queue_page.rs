@@ -1532,7 +1532,8 @@ fn runner_row(s: &State, r: &Value, b: &Board, drop: Option<&(String, Drop)>) ->
         .gap(8.0)
         .center_y()
         .min_w(0.0)
-        .h(21.0)
+        .min_h(21.0)
+        .flex_wrap()
         .child(runner_name(s, r, 14.0, 550.0));
     if next {
         title = title.child(
