@@ -21,6 +21,7 @@ mod admin_runners;
 mod admin_kit;
 mod analysis_page;
 mod admin_system;
+mod chart_axis;
 mod group_view;
 mod hex;
 mod label_editor;
@@ -73,6 +74,7 @@ struct Update {
 }
 pub struct State {
     page: usize,
+    page_seen: usize,
     profile: Option<profile::Form>,
     activity: Vec<Value>,
     activity_search: TextEdit,
@@ -226,6 +228,7 @@ fn init_with_url(url: String) -> State {
     #[allow(unused_mut)]
     let mut state = State {
         page: 0,
+        page_seen: 0,
         profile: None,
         activity: Vec::new(),
         activity_search: TextEdit::new(""),
@@ -289,6 +292,7 @@ fn init_with_url(url: String) -> State {
             .filter(|i: &usize| *i < PAGES.len())
             .unwrap_or(0);
     }
+    state.page_seen = state.page;
     state
 }
 impl State {
@@ -351,6 +355,16 @@ impl State {
     }
 }
 fn poll(s: &mut State, _: f64, tx: &mut Tx) -> bool {
+    let mut changed = false;
+    #[cfg(target_arch = "wasm32")]
+    if !s.fixture && sync_route(s) {
+        changed = true;
+    }
+    if s.page != s.page_seen {
+        s.page_seen = s.page;
+        s.error.clear();
+        changed = true;
+    }
     #[cfg(not(target_arch = "wasm32"))]
     if !s.fixture {
         crate::desktop::pulse_window();
@@ -362,12 +376,7 @@ fn poll(s: &mut State, _: f64, tx: &mut Tx) -> bool {
         crate::desktop::remember_route(route, &mut s.route_seen);
     }
     if s.fixture {
-        return false;
-    }
-    let mut changed = false;
-    #[cfg(target_arch = "wasm32")]
-    if sync_route(s) {
-        changed = true;
+        return changed;
     }
     tx.wake_after(Duration::from_millis(100));
     let public = (5..=7).contains(&s.page);
@@ -987,7 +996,11 @@ fn view(s: &State, _cx: &mut Cx<State>) -> El {
         content = content.child(label(&s.notice, s.dark).role("status").wrap().min_w(0.0));
     }
     if !s.error.is_empty() {
-        content = content.child(label(&s.error, s.dark).role("alert").wrap().min_w(0.0));
+        content = content.child(
+            row().gap(12.0).center_y()
+                .child(label(&s.error, s.dark).role("alert").wrap().min_w(0.0).grow(1.0))
+                .child(button("error-dismiss", "Sluiten", s.dark, |s| s.error.clear())),
+        );
     }
     let modal = if let Some(modal) = admin_system::modal(s) {
         Some(modal)
@@ -1603,6 +1616,57 @@ mod tests {
         assert_eq!((rt.state.page, rt.state.admin_section), (8, 0));
     }
     #[test]
+    fn readiness_counts_registrations_and_local_screens() {
+        let mut state = init_with_url("http://127.0.0.1:1".into());
+        state.fixture = true;
+        state.connected = true;
+        state.clock = 1000;
+        state.recovery = json!({"status":{"enabled":true,"latest":{"createdAt":1000},"diskFreeBytes":1000000000}});
+        state.snapshot = json!({"runners":[],"screens":[],"cluster":{"enabled":true,"state":"healthy","members":[{"reachable":true},{"reachable":true},{"reachable":true}]}});
+        let checks = readiness::checks(&state);
+        assert_eq!(
+            checks
+                .iter()
+                .find(|c| c.id == "registrations")
+                .unwrap()
+                .level,
+            readiness::Level::Blocked
+        );
+        assert_eq!(
+            checks.iter().find(|c| c.id == "screens").unwrap().level,
+            readiness::Level::Info
+        );
+        state.snapshot["runners"] = json!([{"id":"runner"}]);
+        assert!(!readiness::needs_attention(&state));
+        let checks = readiness::checks(&state);
+        assert_eq!(readiness::summary(&checks), readiness::Level::Ready);
+        assert_eq!(readiness::open_count(&checks), 0);
+        assert_eq!(checks.last().unwrap().id, "screens");
+        assert_eq!(checks.last().unwrap().level, readiness::Level::Info);
+        state.snapshot["screens"] =
+            json!([{"kind":"outside","address":"192.168.88.20"}]);
+        let checks = readiness::checks(&state);
+        let screens = checks.iter().find(|c| c.id == "screens").unwrap();
+        assert_eq!(screens.level, readiness::Level::Ready);
+        assert_eq!(readiness::summary(&checks), readiness::Level::Ready);
+        assert_eq!(readiness::open_count(&checks), 0);
+        assert!(screens.detail.contains("Buitenscherm (192.168.88.20)"));
+        assert_eq!(
+            checks
+                .iter()
+                .find(|c| c.id == "registrations")
+                .unwrap()
+                .level,
+            readiness::Level::Ready
+        );
+        state.connected = false;
+        let offline = readiness::checks(&state);
+        assert_eq!(offline.len(), 1);
+        assert_eq!(offline[0].id, "server-status");
+        assert_eq!(readiness::open_count(&offline), 1);
+        assert_eq!(readiness::summary(&offline), readiness::Level::Blocked);
+    }
+    #[test]
     fn space_records_a_lap_on_timing() {
         let mut initial = crate::db::Db::open(std::path::Path::new(":memory:")).unwrap();
         for (number, name) in [("1", "Eerste"), ("2", "Tweede")] {
@@ -1632,6 +1696,48 @@ mod tests {
         assert!(rt.state.busy, "Space on Timing sends the handoff");
         update(&mut rt, |s| !s.busy && s.history["laps"].as_array().is_some_and(|l| l.len() == 1));
         assert_eq!(laps(), 1, "Space on Timing clocks the runner off");
+    }
+    #[test]
+    fn errors_can_be_dismissed_and_do_not_follow_navigation() {
+        let mut state = init_with_url("http://127.0.0.1:1".into());
+        state.fixture = true;
+        state.page = 8;
+        state.page_seen = state.page;
+        state.error = "no XDG desktop portal FileChooser is available".into();
+        let mut rt = Runtime::new(state, view, (1366.0, 768.0), Env { system_dark: false, scale: 1.0 });
+        rt.frame(0.0);
+        click(&mut rt, "error-dismiss");
+        assert!(rt.state.error.is_empty());
+        assert!(rt.find("error-dismiss").is_none());
+        rt.update(|s, _| s.error = "Picker failed".into());
+        click(&mut rt, "nav-2");
+        rt.update(|s, tx| { poll(s, 0.0, tx); });
+        assert!(rt.state.error.is_empty());
+        rt.state.error = "Picker failed".into();
+        apply_route(&mut rt.state, "/queue");
+        rt.update(|s, tx| { poll(s, 0.0, tx); });
+        assert!(rt.state.error.is_empty());
+        rt.update(|s, tx| {
+            s.page = 0;
+            s.welcome_skipped = true;
+            poll(s, 0.0, tx);
+            s.error = "Picker failed".into();
+        });
+        click(&mut rt, "overview-ready");
+        rt.update(|s, tx| { poll(s, 0.0, tx); });
+        assert_eq!(rt.state.page, 1);
+        assert!(rt.state.error.is_empty());
+        rt.update(|s, tx| {
+            s.page = 0;
+            s.error = "Old error".into();
+            s.file_tx.send(Err("New picker error".into())).unwrap();
+            s.fixture = false;
+            poll(s, 0.0, tx);
+            s.fixture = true;
+        });
+        assert_eq!(rt.state.error, "New picker error");
+        rt.update(|s, tx| { poll(s, 0.0, tx); });
+        assert_eq!(rt.state.error, "New picker error");
     }
     #[test]
     fn space_presses_a_tab_focused_button_outside_timing() {
@@ -2075,6 +2181,12 @@ mod tests {
             a
         );
         click(&mut rt, "undo");
+        click(&mut rt, "timing-cancel");
+        rt.key(rune::Key::Enter.into());
+        rt.frame(1.0 / 60.0);
+        assert!(matches!(rt.state.timing_page.dialog, Some(timing_page::Dialog::ShortLap(_))));
+        click(&mut rt, "timing-cancel");
+        click(&mut rt, "undo");
         click(&mut rt, "timing-confirm");
         update(&mut rt, |s| {
             !s.busy && s.snapshot["race"]["activeRunnerId"] == a
@@ -2085,6 +2197,9 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+        rt.key(rune::Key::Text(" ".into()).into());
+        rt.frame(1.0 / 60.0);
+        assert!(matches!(rt.state.timing_page.dialog, Some(timing_page::Dialog::ShortLap(_))));
     }
     fn scroll_to(rt: &mut Runtime<State>, key: &str) {
         for _ in 0..20 {
@@ -2125,6 +2240,7 @@ mod tests {
         update(&mut rt, |s| s.connected && s.recovery["backups"].is_array());
         click(&mut rt, "nav-8");
         click(&mut rt, "admin-tab-6");
+        scroll_to(&mut rt, "backup-create");
         click(&mut rt, "backup-create");
         update(&mut rt, |s| {
             !s.busy
@@ -2518,7 +2634,16 @@ fn start_transport(url: String, commands: Receiver<Command>, updates: Sender<Upd
         extra_image: Option<String>,
     ) -> Update {
         let fetch_history = full || synced.borrow().history_revision.is_none();
-        let state = get(client, url, "/api/state");
+        let path = web_sys::window()
+            .and_then(|w| w.location().pathname().ok())
+            .and_then(|p| {
+                p.strip_prefix("/display/")
+                    .map(|kind| kind.trim_end_matches('/').to_owned())
+            })
+            .filter(|kind| matches!(kind.as_str(), "inside" | "competitions" | "outside"))
+            .map(|kind| format!("/api/state?screen={kind}"))
+            .unwrap_or_else(|| "/api/state".into());
+        let state = get(client, url, &path);
         let history = get(client, url, "/api/history?scope=full");
         let recover = get(client, url, "/api/recovery");
         let (snapshot, (history, recovery)) = if fetch_history {

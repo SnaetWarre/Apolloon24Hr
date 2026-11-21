@@ -2,6 +2,7 @@
 //! styles in src/styles/tactics.css. Live laps against a target schedule and last year's Quivr
 //! reference, plus the historical deep dive. Charts are drawn with Rune shapes on the same
 //! geometry Chart.js uses (title band, tick labels, nice ticks, grace).
+use super::chart_axis::{LabelSlot, visible_labels};
 use super::*;
 use rune::{Color, LineCap, Shape, TextStyle, canvas, el, oklch};
 use std::collections::HashMap;
@@ -1483,13 +1484,18 @@ fn chart(s: &State, k: &Ink, spec: ChartSpec) -> El {
             s.tactics.widths.insert(key, r[2]);
         }
     });
-    for (x, lines) in &spec.x_ticks {
-        let xx = px(*x);
+    let slots: Vec<_> = spec
+        .x_ticks
+        .iter()
+        .map(|(x, lines)| LabelSlot::new(px(*x), lines.iter().map(String::as_str), font(12.0, 400.0)))
+        .collect();
+    for i in visible_labels(&slots) {
+        let slot = &slots[i];
         let mut c = col()
-            .w(80.0)
+            .w(slot.width)
             .items_center()
-            .absolute(xx - 40.0, top + ph + 11.0);
-        for l in lines {
+            .absolute(slot.x - slot.width / 2.0, top + ph + 11.0);
+        for l in &spec.x_ticks[i].1 {
             c = c.child(
                 row()
                     .h(14.4)
@@ -1724,11 +1730,11 @@ fn live(s: &State, k: &Ink) -> El {
             ),
             stat(
                 k,
-                "Op schema",
+                "Verschil met planning",
                 &signed_laps(Some(n - expected)),
                 Some("rondes"),
                 &format!("{} verwacht op dit moment", nl(expected, 1, true)),
-                Some(n >= expected),
+                None,
             ),
             stat(
                 k,
@@ -2785,8 +2791,8 @@ fn analysis_details(
     let gap = rival_time_gap(clean, start, elapsed, paces, rival);
     let mut gap_panel = panel(k).child(section_header(
         k,
-        "Werkelijke en voorspelde achterstand op VTK vorig jaar",
-        "Positief is achterstand. Vanaf nu rekent de stippellijn met het doeltempo per uur.",
+        "Werkelijk en voorspeld verschil met VTK vorig jaar",
+        "Verschil in seconden bij gelijke rondeafstand: Apolloon min VTK vorig jaar. Vanaf nu rekent de stippellijn met het doeltempo per uur.",
     ));
     if gap.is_empty() {
         gap_panel = gap_panel.child(
@@ -3226,7 +3232,7 @@ fn historical(s: &State, k: &Ink) -> El {
         ("Alle teams", "Rangschikking en spreiding"),
         ("Tempo A vs. B", "Kwartieren, consistentie en nacht"),
         ("Raceverloop", "Tijdskloof en gewonnen rondes"),
-        ("Diagnostiek", "Trage rondes en break-even"),
+        ("Diagnostiek", "Rondetijden en break-even"),
         ("Volgeffect", "Nabijheid en statistiek"),
     ];
     let mut nav = row()
@@ -3365,8 +3371,8 @@ fn diagnostics(s: &State, k: &Ink, first: &Team, second: &Team) -> El {
         .w(0.0)
     };
     let controls = panel(k)
-        .child(section_header(k, "Zoek de verliesmomenten", "Trage rondes zijn absolute uitschieters. Temposprongen wijken af van de vijf vorige rondes."))
-        .child(row().gap(12.0).child(input(DIAG_SLOW, "Trage ronde vanaf (s)")).child(input(DIAG_JUMP, "Temposprong vanaf (s)")));
+        .child(section_header(k, "Bekijk de rondetijden", "Selecteer rondes op duur. Tempoverschillen vergelijken met de vijf vorige rondes."))
+        .child(row().gap(12.0).child(input(DIAG_SLOW, "Rondeduur vanaf (s)")).child(input(DIAG_JUMP, "Tempoverschil vanaf (s)")));
     let mut totals = Vec::new();
     let mut series = Vec::new();
     let mut tables = row().gap(16.0);
@@ -3374,8 +3380,8 @@ fn diagnostics(s: &State, k: &Ink, first: &Team, second: &Team) -> El {
         let (slow_laps, jumps) = diagnostic_laps(team, p.vals[DIAG_SLOW], p.vals[DIAG_JUMP]);
         let mut column = col().gap(14.0).grow(1.0).w(0.0).min_w(0.0);
         for (title, laps, is_jump) in [
-            ("Trage rondes", &slow_laps, false),
-            ("Temposprongen", &jumps, true),
+            ("Rondes vanaf gekozen duur", &slow_laps, false),
+            ("Tempoverschillen", &jumps, true),
         ] {
             let name = format!("{title} {}", team.name);
             totals.push(stat(k, &name, &laps.len().to_string(), None, "", None));
@@ -3426,8 +3432,8 @@ fn diagnostics(s: &State, k: &Ink, first: &Team, second: &Team) -> El {
     let timeline = panel(k)
         .child(section_header(
             k,
-            "Trage rondes en plotse temposprongen",
-            "De punten tonen op welk moment in de race elke afwijking viel.",
+            "Rondeduur en tempoverschillen",
+            "De punten tonen de geselecteerde rondes op de tijdlijn.",
         ))
         .child(chart(
             s,

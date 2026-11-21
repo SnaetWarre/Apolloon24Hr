@@ -15,6 +15,31 @@ struct ReadCache {
     history: Option<Value>,
 }
 
+#[derive(Default)]
+struct Screens(std::collections::BTreeMap<(String, std::net::IpAddr), std::time::Instant>);
+
+impl Screens {
+    fn seen(&mut self, kind: &str, address: std::net::IpAddr) {
+        if matches!(kind, "inside" | "competitions" | "outside") {
+            self.0
+                .insert((kind.into(), address), std::time::Instant::now());
+        }
+    }
+
+    fn active(&mut self) -> Value {
+        self.0
+            .retain(|_, seen| seen.elapsed() < std::time::Duration::from_secs(15));
+        json!(
+            self.0
+                .iter()
+                .map(|((kind, address), _)| {
+                    json!({"kind":kind,"address":address.to_string()})
+                })
+                .collect::<Vec<_>>()
+        )
+    }
+}
+
 impl ReadCache {
     fn refresh(&mut self, db: &Db) {
         // Replication and snapshot installation advance the revision. total_changes also
@@ -38,6 +63,7 @@ pub struct Host {
     /// Linked-laptop runtime (`CLUSTER_ENABLED=true`); writes then replicate to a majority.
     pub cluster: Option<Arc<crate::cluster::Node>>,
     reads: Arc<Mutex<ReadCache>>,
+    screens: Arc<Mutex<Screens>>,
 }
 impl Host {
     fn new(db: Arc<Mutex<Db>>, port: u16) -> Self {
@@ -65,10 +91,25 @@ impl Host {
             backups: Arc::new(crate::backup_service::Service::new(path)),
             cluster,
             reads: Arc::default(),
+            screens: Arc::default(),
         }
     }
 }
 type Reply = std::result::Result<Json<Value>, (StatusCode, Json<Value>)>;
+
+async fn snapshot_request(
+    State(host): State<Host>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<std::net::SocketAddr>,
+    Query(query): Query<std::collections::HashMap<String, String>>,
+) -> Reply {
+    if let Some(kind) = query.get("screen") {
+        host.screens
+            .lock()
+            .unwrap()
+            .seen(kind, remote.ip().to_canonical());
+    }
+    snapshot(State(host)).await
+}
 fn reply(result: Result<Value>) -> Reply {
     result.map(Json).map_err(|message| {
         (
@@ -89,6 +130,7 @@ async fn snapshot(State(host): State<Host>) -> Reply {
     };
     reply(read().map(|mut value| {
         value["host"] = crate::host::info(host.port);
+        value["screens"] = host.screens.lock().unwrap().active();
         if let Some(node) = &host.cluster {
             value["cluster"] = node.status();
         }
@@ -540,7 +582,7 @@ pub fn router(host: Host) -> Router {
         .route("/api/backups/{name}", get(backup_download))
         .route("/api/export/{file}", get(export))
         .route("/api/clock", get(clock))
-        .route("/api/state", get(snapshot))
+        .route("/api/state", get(snapshot_request))
         .route("/api/history", get(history))
         .route("/api/registrations", get(registrations))
         .route("/api/label-images/{id}", get(label_image))
@@ -655,6 +697,44 @@ mod read_cache_tests {
                 .unwrap();
             assert_eq!(body.as_ref(), expected);
         }
+    }
+
+    #[tokio::test]
+    async fn screen_presence_is_local_validated_refreshed_and_expires() {
+        let db = Arc::new(Mutex::new(
+            Db::open(std::path::Path::new(":memory:")).unwrap(),
+        ));
+        let host = Host::with_cluster(db.clone(), 5173, None);
+        let remote = "192.168.88.20:34567".parse().unwrap();
+        let register = |kind: &str| {
+            snapshot_request(
+                State(host.clone()),
+                axum::extract::ConnectInfo(remote),
+                Query(std::collections::HashMap::from([(
+                    "screen".into(),
+                    kind.into(),
+                )])),
+            )
+        };
+        assert_eq!(register("invalid").await.unwrap().0["screens"], json!([]));
+        let value = register("outside").await.unwrap().0;
+        assert_eq!(value["screens"][0]["kind"], "outside");
+        assert_eq!(value["screens"][0]["address"], "192.168.88.20");
+        assert_eq!(value["screens"], json!([{"kind":"outside","address":"192.168.88.20"}]));
+        assert_eq!(register("outside").await.unwrap().0, value);
+        assert_eq!(snapshot(State(host.clone())).await.unwrap().0, value);
+        let other = Host::with_cluster(db, 5174, None);
+        assert_eq!(
+            snapshot(State(other)).await.unwrap().0["screens"],
+            json!([])
+        );
+        host.screens
+            .lock()
+            .unwrap()
+            .0
+            .values_mut()
+            .for_each(|seen| *seen -= std::time::Duration::from_secs(16));
+        assert_eq!(snapshot(State(host)).await.unwrap().0["screens"], json!([]));
     }
 
     #[tokio::test]
