@@ -1668,7 +1668,7 @@ mod tests {
         assert_eq!(readiness::summary(&offline), readiness::Level::Blocked);
     }
     #[test]
-    fn space_records_a_lap_on_timing() {
+    fn space_records_one_lap_and_guards_an_immediate_second_press() {
         let mut initial = crate::db::Db::open(std::path::Path::new(":memory:")).unwrap();
         for (number, name) in [("1", "Eerste"), ("2", "Tweede")] {
             initial.mutation("runners.create", &json!({"runnerNumber":number,"name":name,"status":"waiting"})).unwrap();
@@ -1697,6 +1697,14 @@ mod tests {
         assert!(rt.state.busy, "Space on Timing sends the handoff");
         update(&mut rt, |s| !s.busy && s.history["laps"].as_array().is_some_and(|l| l.len() == 1));
         assert_eq!(laps(), 1, "Space on Timing clocks the runner off");
+
+        rt.key(rune::Key::Text(" ".into()).into());
+        rt.frame(1.0 / 60.0);
+        assert!(rt.find("timing-dialog-overlay").is_some(), "A second press asks before saving a short lap");
+        assert!(!rt.state.busy, "No second handoff is sent");
+        click(&mut rt, "timing-cancel");
+        assert!(rt.state.timing_page.dialog.is_none());
+        assert_eq!(laps(), 1);
     }
     #[test]
     fn errors_can_be_dismissed_and_do_not_follow_navigation() {

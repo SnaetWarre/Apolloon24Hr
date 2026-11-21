@@ -141,21 +141,6 @@ fn active_runner(s: &State) -> Option<&Value> {
     s.snapshot["runners"].as_array()?.iter().find(|r| &r["id"] == id)
 }
 
-fn handoff_check_due(race: &Value, runner: &Value, clock: i64) -> bool {
-    if phase(race) != "running" {
-        return false;
-    }
-    let typical = ["averageLapMs", "historicalAvgMs"].into_iter().find_map(|key| {
-        runner[key]
-            .as_f64()
-            .filter(|ms| (MIN_LAP_MS as f64..=600_000.0).contains(ms))
-    });
-    race["activeStartedAt"]
-        .as_i64()
-        .zip(typical)
-        .is_some_and(|(start, typical)| clock.saturating_sub(start) as f64 >= 2.0 * typical)
-}
-
 pub(super) fn waiting(s: &State) -> Vec<&Value> {
     let mut list: Vec<&Value> = runners(s)
         .into_iter()
@@ -781,26 +766,6 @@ pub(super) fn page(s: &State) -> El {
     if !page.error.is_empty() {
         feedback = feedback.child(banner(body_text(page.error.clone(), t.text), s.dark).key("timing-error").role("alert"));
     }
-    if s.connected
-        && !c.blocked
-        && !s.busy
-        && page.dialog.is_none()
-        && active.is_some_and(|runner| handoff_check_due(race, runner, s.clock))
-    {
-        feedback = feedback.child(
-            row()
-                .key("timing-handoff-check")
-                .role("status")
-                .radius(8.0)
-                .px(12.0)
-                .py(8.0)
-                .fill(p.surface2)
-                .child(body_text(
-                    "Even checken: is er al gewisseld? Zo niet, laat de klok gerust doorlopen.",
-                    t.text,
-                )),
-        );
-    }
     if pending.is_some() {
         feedback = feedback.child(body_text("Wissel wordt opgeslagen…", p.ink3).role("status"));
     } else if !page.last_action.is_empty() {
@@ -1119,31 +1084,6 @@ fn ts(size: f32, weight: f32) -> rune::TextStyle {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn reminder_waits_for_twice_the_current_average_when_available() {
-        let race = json!({"raceStartedAt":1, "activeRunnerId":"a", "activeStartedAt":1_000});
-        let runner = json!({"averageLapMs":65_000.0, "historicalAvgMs":80_000});
-        assert!(!handoff_check_due(&race, &runner, 130_999));
-        assert!(handoff_check_due(&race, &runner, 131_000));
-    }
-
-    #[test]
-    fn reminder_can_use_a_historical_average_but_not_a_missing_or_invalid_one() {
-        let race = json!({"raceStartedAt":1, "activeRunnerId":"a", "activeStartedAt":1_000});
-        let runner = json!({"averageLapMs":null, "historicalAvgMs":75_000});
-        assert!(handoff_check_due(&race, &runner, 151_000));
-        assert!(!handoff_check_due(&race, &json!({"historicalAvgMs":15_000}), 500_000));
-        assert!(!handoff_check_due(&race, &json!({}), 500_000));
-        for race in [
-            json!({"activeRunnerId":"a", "activeStartedAt":1_000}),
-            json!({"raceStartedAt":1, "activeStartedAt":1_000}),
-            json!({"raceStartedAt":1, "activeRunnerId":"a"}),
-            json!({"raceStartedAt":1, "activeRunnerId":"a", "activeStartedAt":1_000, "raceFinishedAt":160_000}),
-        ] {
-            assert!(!handoff_check_due(&race, &runner, 500_000));
-        }
-    }
 
     #[test]
     fn sound_requires_both_a_saved_lap_and_a_new_runner() {
