@@ -109,8 +109,7 @@ impl HistoryLog {
     fn cursor(&self) -> String {
         format!("{}.{}", self.epoch, self.seq)
     }
-    fn refresh(&mut self, db: &Db) -> Result<()> {
-        let version = read_version(db);
+    fn refresh(&mut self, db: &Db, version: (i64, u64)) -> Result<()> {
         if self.version == Some(version) && self.current.is_some() {
             return Ok(());
         }
@@ -284,13 +283,24 @@ async fn snapshot(State(host): State<Host>) -> Response {
     snapshot_with_history(host, &Default::default()).await
 }
 async fn snapshot_with_history(host: Host, query: &std::collections::HashMap<String, String>) -> Response {
+    let query = query.clone();
+    let result = tokio::task::spawn_blocking(move || snapshot_read(host, &query)).await;
+    match result {
+        Ok(response) => response,
+        Err(error) => error_body(error.to_string()),
+    }
+}
+fn snapshot_read(host: Host, query: &std::collections::HashMap<String, String>) -> Response {
     let read = || -> Result<(Bytes, Option<Bytes>)> {
-        let db = host.db.lock().unwrap();
+        let mut history = query.contains_key("history").then(|| host.history.lock().unwrap());
+        let (db, version, token) = {
+            let writer = host.db.lock().unwrap();
+            (writer.read_snapshot()?, read_version(&writer), writer.change_token())
+        };
         let mut cache = host.reads.lock().unwrap();
-        let version = read_version(&db);
         if cache.version != Some(version) || cache.snapshot.is_none() {
             let mut state = db.race_snapshot()?;
-            state["changeToken"] = json!(db.change_token());
+            state["changeToken"] = json!(token);
             if crate::latency::enabled() {
                 state["latencyLap"] = db.rows("SELECT id FROM laps ORDER BY rowid DESC LIMIT 1", &[])?.first().map_or(Value::Null, |row| row["id"].clone());
             }
@@ -300,13 +310,14 @@ async fn snapshot_with_history(host: Host, query: &std::collections::HashMap<Str
                 snapshot: Some(body.into()),
             };
         }
-        let history = if query.contains_key("history") {
-            let mut log = host.history.lock().unwrap();
-            log.refresh(&db)?;
+        let cached = cache.snapshot.clone().unwrap();
+        drop(cache);
+        let history = if let Some(log) = history.as_mut() {
+            log.refresh(&db, version)?;
             Some(query.get("since").and_then(|cursor| log.since(cursor))
                 .unwrap_or_else(|| log.current.as_ref().unwrap().body.clone()))
         } else { None };
-        Ok((cache.snapshot.clone().unwrap(), history))
+        Ok((cached, history))
     };
     match read() {
         Ok((cached, history)) => {
@@ -345,27 +356,36 @@ struct HistoryQuery {
     since: Option<String>,
 }
 async fn history(State(host): State<Host>, Query(query): Query<HistoryQuery>) -> Response {
-    let db = host.db.lock().unwrap();
+    match tokio::task::spawn_blocking(move || history_read(host, query)).await {
+        Ok(response) => response,
+        Err(error) => error_body(error.to_string()),
+    }
+}
+fn history_read(host: Host, query: HistoryQuery) -> Response {
+    match history_result(&host, query) {
+        Ok(body) => json_body(body),
+        Err(message) => error_body(message),
+    }
+}
+fn history_result(host: &Host, query: HistoryQuery) -> Result<Bytes> {
+    let mut log = host.history.lock().unwrap();
+    let (db, version) = {
+        let writer = host.db.lock().unwrap();
+        (writer.read_snapshot()?, read_version(&writer))
+    };
     let scope = query.scope.as_deref().unwrap_or("full");
     if scope != "full" {
-        return match db.history_scope(
+        return db.history_scope(
             scope,
             query.runner_id.as_deref(),
             query.limit.unwrap_or(100),
-        ) {
-            Ok(value) => Json(value).into_response(),
-            Err(message) => error_body(message),
-        };
+        ).and_then(|value| serde_json::to_vec(&value).map(Bytes::from).map_err(|e| e.to_string()));
     }
-    let mut log = host.history.lock().unwrap();
-    if let Err(message) = log.refresh(&db) {
-        return error_body(message);
-    }
-    drop(db);
+    log.refresh(&db, version)?;
     if let Some(delta) = query.since.as_deref().and_then(|cursor| log.since(cursor)) {
-        return json_body(delta);
+        return Ok(delta);
     }
-    json_body(log.current.as_ref().unwrap().body.clone())
+    Ok(log.current.as_ref().unwrap().body.clone())
 }
 async fn registrations(State(host): State<Host>) -> Reply {
     reply(host.db.lock().unwrap().registrations())
@@ -935,6 +955,32 @@ mod read_cache_tests {
             limit,
             since: since.map(Into::into),
         })
+    }
+
+    #[tokio::test]
+    async fn plain_state_does_not_wait_for_the_history_lane() {
+        let db = Arc::new(Mutex::new(Db::open(std::path::Path::new(":memory:")).unwrap()));
+        let host = Host::with_cluster(db, 5173, None);
+        let _history = host.history.lock().unwrap();
+        let state = tokio::time::timeout(std::time::Duration::from_secs(1), pushed(host.clone(), None, false)).await.unwrap();
+        assert_eq!(state["runners"], json!([]));
+        assert!(state.get("stateHistory").is_none());
+    }
+
+    #[test]
+    fn wal_reader_is_read_only_and_does_not_hold_up_a_writer() {
+        let path = std::env::temp_dir().join(format!("apolloon-reader-{}.sqlite", uuid::Uuid::new_v4()));
+        {
+            let writer = Db::open(&path).unwrap();
+            assert_eq!(writer.one("PRAGMA journal_mode", &[]).unwrap()["journal_mode"], "wal");
+            assert_eq!(writer.one("PRAGMA synchronous", &[]).unwrap()["synchronous"], 2);
+            let reader = writer.read_snapshot().unwrap();
+            assert!(reader.exec("INSERT INTO settings VALUES('forbidden','x')", &[]).is_err());
+            writer.exec("INSERT INTO settings VALUES('concurrent','yes')", &[]).unwrap();
+            assert!(reader.rows("SELECT * FROM settings WHERE key='concurrent'", &[]).unwrap().is_empty());
+            assert_eq!(writer.read_snapshot().unwrap().one("SELECT value FROM settings WHERE key='concurrent'", &[]).unwrap()["value"], "yes");
+        }
+        std::fs::remove_file(path).unwrap();
     }
 
     #[tokio::test]

@@ -111,6 +111,26 @@ impl Db {
     pub fn subscribe(&self) -> tokio::sync::watch::Receiver<u64> {
         self.changes.subscribe()
     }
+    pub(crate) fn read_snapshot(&self) -> Result<Self> {
+        let mode: String = self.conn.pragma_query_value(None, "journal_mode", |r| r.get(0)).map_err(err)?;
+        let conn = if mode.eq_ignore_ascii_case("wal") {
+            let conn = Connection::open_with_flags(
+                self.conn.path().ok_or("Databasepad ontbreekt")?,
+                rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+            ).map_err(err)?;
+            conn.busy_timeout(std::time::Duration::from_secs(5)).map_err(err)?;
+            conn.execute_batch("BEGIN").map_err(err)?;
+            conn.query_row("SELECT id FROM race_state LIMIT 1", [], |_| Ok(())).map_err(err)?;
+            conn
+        } else {
+            let mut conn = Connection::open_in_memory().map_err(err)?;
+            rusqlite::backup::Backup::new(&self.conn, &mut conn).map_err(err)?
+                .run_to_completion(128, std::time::Duration::from_millis(1), None).map_err(err)?;
+            conn
+        };
+        conn.execute_batch("PRAGMA query_only=ON").map_err(err)?;
+        Self::from_connection(conn, self.revision)
+    }
     pub fn rows(&self, sql: &str, args: &[Value]) -> Result<Vec<Value>> {
         let mut stmt = self.conn.prepare(sql).map_err(err)?;
         let names: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
