@@ -660,7 +660,8 @@ pub(super) fn page(s: &State) -> El {
             .hover(oklch_hover(s.dark))
             .on_press(press)
             .on_key(|s: &mut State, event, tx| {
-                if event.key != Key::Enter || event.mods != rune::Mods::default() {
+                let space = matches!(&event.key, Key::Text(v) if v == " ");
+                if !(event.key == Key::Enter || space) || event.mods != rune::Mods::default() {
                     return false;
                 }
                 if !tx.key_repeat() {
