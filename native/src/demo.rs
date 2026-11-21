@@ -36,7 +36,7 @@ impl Db {
         for (i, duration) in durations.iter().enumerate() {
             let rid = &runners[i % runners.len()];
             let labels = self.labels(rid.as_str())?;
-            self.exec("INSERT INTO laps(id,runner_id,lap_number,started_at,finished_at,duration_ms,source,created_at,labels_json) VALUES(?,?,?,?,?,?,'spacebar',?,?)", &[json!(id()), rid.clone(), json!(i / 30 + 1), json!(at), json!(at + duration), json!(duration), json!(at + duration), json!(labels)])?;
+            self.exec("INSERT INTO laps(id,runner_id,lap_number,started_at,finished_at,duration_ms,source,created_at,labels_json) VALUES(?,?,?,?,?,?,'spacebar',?,?)", &[json!(id()), rid.clone(), json!(i / 30 + 1), json!(at), json!(at + duration), json!(duration), json!(at + duration), json!(serde_json::to_string(&labels).map_err(crate::db::err)?)])?;
             at += duration;
         }
         for (i, rid) in runners.iter().enumerate() {
@@ -63,7 +63,7 @@ impl Db {
                 ],
             )?;
         }
-        self.exec("UPDATE race_state SET active_runner_id=?,active_started_at=?,race_started_at=?,race_finished_at=NULL,active_labels_json=? WHERE id=1", &[runners[0].clone(), json!(end), json!(start), json!(self.labels(runners[0].as_str())?)])?;
+        self.exec("UPDATE race_state SET active_runner_id=?,active_started_at=?,race_started_at=?,race_finished_at=NULL,active_labels_json=? WHERE id=1", &[runners[0].clone(), json!(end), json!(start), json!(serde_json::to_string(&self.labels(runners[0].as_str())?).map_err(crate::db::err)?)])?;
         Ok(json!({"runners":30,"laps":120}))
     }
 }
@@ -110,18 +110,12 @@ mod tests {
     fn demo_writes_replay_identically_on_a_linked_laptop() {
         let mut leader = db();
         let mut follower = db();
-        crate::cluster::log::install(
-            &mut follower,
-            &crate::cluster::log::serialize(&leader).unwrap(),
-        )
-        .unwrap();
         *leader.capture.borrow_mut() = Some(Default::default());
         leader.mutation("demo.load", &json!({})).unwrap();
-        let capture = leader.capture.borrow_mut().take().unwrap();
-        assert!(!capture.statements.is_empty());
-        for statement in capture.statements {
-            follower.exec(&statement.sql, &statement.params).unwrap();
-        }
+        let entries = crate::cluster::log::entries_after(&leader, 0).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].kind, "demo.load");
+        crate::cluster::log::append_from_leader(&mut follower, 0, None, &entries).unwrap();
         assert_eq!(leader.runners().unwrap(), follower.runners().unwrap());
         assert_eq!(leader.race().unwrap(), follower.race().unwrap());
         assert_eq!(
