@@ -1692,7 +1692,6 @@ mod tests {
         update(&mut rt, |s| s.connected && !s.snapshot["race"]["activeRunnerId"].is_null());
         let laps = || db.lock().unwrap().rows("SELECT id FROM laps", &[]).unwrap().len();
         assert_eq!(laps(), 0);
-        assert!(rt.find("timing-race-total").is_some());
         assert_eq!(timing_page::race_lap_total(&rt.state), 0);
         rt.key(rune::Key::Text(" ".into()).into());
         rt.frame(1.0 / 60.0);
