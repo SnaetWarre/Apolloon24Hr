@@ -921,6 +921,13 @@ impl Node {
         }
         self.change_role(&mut st, Role::Leader, None)
     }
+    pub(super) fn step_down(&self) {
+        let mut st = self.raft.lock().unwrap();
+        if st.role == Role::Leader {
+            let term = self.term();
+            self.become_follower(&mut st, term, None);
+        }
+    }
     /// Stops taking part in this laptop's own group while it joins another one.
     pub(super) fn start_joining(&self) -> bool {
         let mut st = self.raft.lock().unwrap();

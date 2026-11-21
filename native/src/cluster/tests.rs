@@ -561,6 +561,98 @@ fn the_timing_laptop_goes_on_alone_by_itself_and_the_splits_join_again() {
     assert!(c.node.is_leader());
 }
 
+/// The Timing laptop loses the other two and the handoff is pressed in the same moment.
+fn press_right_after_the_timing_laptop_is_cut_off(timing_leads: bool) {
+    let _serial = serial();
+    let dir = Dir::new();
+    let (a, b, c) = linked_three(&dir);
+    a.act("runners.create", json!({"name":"Wout","status":"waiting"}))
+        .unwrap();
+    let (timing, others) = if timing_leads { (&a, [&b, &c]) } else { (&c, [&a, &b]) };
+    assert_eq!(timing.node.is_leader(), timing_leads);
+    timing
+        .act("cluster.openTiming", json!({"takeOver": false}))
+        .unwrap();
+    press(timing, "race.handoff").unwrap();
+    wait_until("the start on every laptop", Duration::from_secs(5), || {
+        same_heads(&[&a, &b, &c])
+    });
+
+    timing
+        .node
+        .isolated
+        .store(true, std::sync::atomic::Ordering::Relaxed);
+    let race = timing.db.lock().unwrap().race().unwrap();
+    let pressed_at = crate::db::now();
+    let pressed = Instant::now();
+    timing
+        .act(
+            "race.handoff",
+            json!({"activeRunnerId":race["activeRunnerId"],"activeStartedAt":race["activeStartedAt"],"pressedAt":pressed_at}),
+        )
+        .expect("a press right after the outage began was refused");
+    // Well inside the time a write may wait, and long before the laptop goes on alone unasked.
+    assert!(
+        pressed.elapsed() < timing.node.cfg.write_deadline / 2,
+        "the press took {:?}",
+        pressed.elapsed()
+    );
+    assert_eq!(timing.count("SELECT COUNT(*) AS n FROM laps"), 1);
+    assert_eq!(
+        timing.count("SELECT finished_at AS n FROM laps"),
+        pressed_at,
+        "the lap ends when the key was pressed"
+    );
+    assert_eq!(timing.status()["state"], "solo");
+    // It keeps clocking, and the others take its laps when the network is back.
+    press(timing, "race.handoff").unwrap();
+    timing
+        .node
+        .isolated
+        .store(false, std::sync::atomic::Ordering::Relaxed);
+    wait_until("one group again", Duration::from_secs(20), || {
+        let split = timing.status()["split"]["id"].clone();
+        others.iter().all(|s| s.status()["split"]["id"] == split) && all_healthy(&[&a, &b, &c])
+    });
+    for server in others {
+        assert_eq!(server.count("SELECT COUNT(*) AS n FROM laps"), 2);
+    }
+}
+
+#[test]
+fn a_press_right_after_the_timing_laptop_is_cut_off_is_kept() {
+    press_right_after_the_timing_laptop_is_cut_off(false);
+}
+
+#[test]
+fn a_press_right_after_the_leading_timing_laptop_is_cut_off_is_kept() {
+    press_right_after_the_timing_laptop_is_cut_off(true);
+}
+
+/// The leader fails while the Timing laptop still reaches a second laptop: the press waits for
+/// the takeover and the group stays whole.
+#[test]
+fn a_press_during_a_takeover_does_not_split_the_group() {
+    let _serial = serial();
+    let dir = Dir::new();
+    let (a, b, c) = linked_three(&dir);
+    a.act("runners.create", json!({"name":"Wout","status":"waiting"}))
+        .unwrap();
+    c.act("cluster.openTiming", json!({"takeOver": false}))
+        .unwrap();
+    press(&c, "race.handoff").unwrap();
+    wait_until("the start on every laptop", Duration::from_secs(5), || {
+        same_heads(&[&a, &b, &c])
+    });
+    a.kill();
+    press(&c, "race.handoff").unwrap();
+    assert_eq!(c.status()["split"]["rank"], 0);
+    assert_eq!(c.status()["members"].as_array().unwrap().len(), 3);
+    wait_until("the lap on B", Duration::from_secs(5), || {
+        b.count("SELECT COUNT(*) AS n FROM laps") == 1
+    });
+}
+
 #[test]
 fn a_lost_laptop_is_taken_out_and_a_spare_takes_its_place() {
     let _serial = serial();
