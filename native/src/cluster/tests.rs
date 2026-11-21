@@ -592,8 +592,17 @@ fn the_timing_laptop_goes_on_alone_by_itself_and_the_splits_join_again() {
     wait_until("A and B elect", Duration::from_secs(10), || {
         leader_index(&[&a, &b]).is_some()
     });
-    b.act("runners.create", json!({"name":"Alleen bij A en B"}))
-        .unwrap();
+    b.act(
+        "runners.create",
+        json!({"name":"Alleen bij A en B", "runnerNumber":"88"}),
+    )
+    .unwrap();
+    // C hands out the same number meanwhile, to someone else.
+    c.act(
+        "runners.create",
+        json!({"name":"Alleen bij C", "runnerNumber":"88"}),
+    )
+    .unwrap();
 
     // B also sends Wout back to the registrations, not knowing C just put Wout on the track.
     let wout = b.db.lock().unwrap().rows("SELECT id FROM runners WHERE name='Wout'", &[]).unwrap()
@@ -619,9 +628,18 @@ fn the_timing_laptop_goes_on_alone_by_itself_and_the_splits_join_again() {
                 .count("SELECT COUNT(*) AS n FROM runners WHERE name='Wout' AND status='running'"),
             1
         );
-        // What the majority confirmed while C was away is kept, once.
+        // What the majority confirmed while C was away is kept, once: also the runner whose
+        // number C gave to someone else meanwhile, who comes in without that number.
         assert_eq!(
-            server.count("SELECT COUNT(*) AS n FROM runners WHERE name='Alleen bij A en B'"),
+            server.count(
+                "SELECT COUNT(*) AS n FROM runners WHERE name='Alleen bij A en B' AND runner_number IS NULL"
+            ),
+            1
+        );
+        assert_eq!(
+            server.count(
+                "SELECT COUNT(*) AS n FROM runners WHERE name='Alleen bij C' AND runner_number='88'"
+            ),
             1
         );
     }
