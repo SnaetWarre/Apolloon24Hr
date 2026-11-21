@@ -1738,7 +1738,7 @@ fn live(s: &State, k: &Ink) -> El {
             ),
             stat(
                 k,
-                "Eindstand op doelschema",
+                "Verwachte eindstand",
                 &nl(range.1.round(), 0, false),
                 None,
                 &format!(

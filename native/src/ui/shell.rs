@@ -493,6 +493,19 @@ fn footer(s: &State) -> El {
                 )
                 .child(text(value).font(type_::LABEL_REGULAR).color(c.ink2)),
         );
+        if let Some(role) = super::cluster_setup::own_role(s) {
+            footer = footer.child(
+                sidebar_row("laptop-role")
+                    .label(format!("Rol van deze laptop: {role}"))
+                    .child(
+                        text("Rol")
+                            .font(type_::LABEL_REGULAR)
+                            .color(c.ink3)
+                            .grow(1.0),
+                    )
+                    .child(text(role).font(type_::LABEL_REGULAR).color(c.ink2).truncate().min_w(0.0)),
+            );
+        }
         if let Some(url) = s.snapshot["host"]["url"].as_str() {
             let shown = url
                 .trim_start_matches("http://")

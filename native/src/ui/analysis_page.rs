@@ -696,16 +696,18 @@ fn segmented(s: &State, key: &str, options: &[&str], active: u8, set: fn(&mut St
     bar
 }
 
+/// A logo or a colour dot in the same 16px slot, so every label name starts at the same x.
 fn label_mark(s: &State, label: &Value, on: bool) -> El {
     let alpha = if on { 1.0 } else { 0.45 };
-    if let Some(image) = label["imageUrl"].as_str().and_then(|u| s.logos.get(u)) {
+    let mark = if let Some(image) = label["imageUrl"].as_str().and_then(|u| s.logos.get(u)) {
         el().size(16.0, 16.0)
             .opacity(alpha)
             .pixels_fit(image.pixels(), rune::SurfaceFit::Fit)
     } else {
         let color = hex(st(label, "color")).unwrap_or(tok::theme(s.dark).text);
         el().size(7.0, 7.0).radius(3.5).fill(color).opacity(alpha)
-    }
+    };
+    el().size(16.0, 16.0).center().child(mark)
 }
 
 fn scope(s: &State, labels: &[Value]) -> El {
