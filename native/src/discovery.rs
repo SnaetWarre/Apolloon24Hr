@@ -30,6 +30,9 @@ struct Beacon {
     race_started: bool,
     #[serde(default)]
     race_running: bool,
+    /// Signed with the group key, so laptops of the group can believe a new address.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    proof: Option<String>,
 }
 
 #[derive(Default)]
@@ -117,7 +120,9 @@ impl Discovery {
                                 changed: state["runners"] != 0 || started || state["logged"] == 1,
                                 race_started: started,
                                 race_running: started && state["race_finished_at"].is_null(),
+                                proof: None,
                             };
+                            let key = crate::cluster::group_key(&db);
                             let targets = if let Some(address) = loopback_target {
                                 vec![(address, self_url.clone().unwrap_or_else(|| format!("http://127.0.0.1:{port}")))]
                             } else {
@@ -127,6 +132,7 @@ impl Discovery {
                             };
                             drop(db);
                             for (address, url) in targets {
+                                beacon.proof = key.as_deref().map(|key| crate::cluster::beacon_proof(key, &beacon.host_id, &url));
                                 beacon.url = url;
                                 if let Ok(bytes) = serde_json::to_vec(&beacon) {
                                     let _ = socket.send_to(&bytes, (address, discovery_port));

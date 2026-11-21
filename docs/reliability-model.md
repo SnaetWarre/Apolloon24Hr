@@ -57,6 +57,19 @@ are therefore not enough: then losing either one stops saving.
   that is back within two seconds keeps its browser screen. When the others cannot
   say (too few laptops left, or they still reach it), the browser moves after
   eight seconds. The desktop app always stays on its own laptop.
+- Linked laptops only listen to each other. Every laptop makes a group key by
+  itself; a laptop that joins a group receives that group's key in the answer
+  to its join, so Koppelen (or linking by itself) sets it up and there is
+  nothing to type or copy. Every request between laptops (heartbeats, votes,
+  changes, passed-on saves, full copies, bringing splits back together) is
+  signed with it and refused without it, and an announcement only moves a
+  laptop of the group to a new address when it is signed too. A group linked
+  by a version without keys keeps working after the update. Two things stay
+  open to the network on purpose: joining (a laptop that is not in the group
+  yet has no key; every join is listed in Beheer › Activiteit) and saving
+  from a browser (`/api/action/*`). Once the race started on a laptop, only a
+  laptop of its own group can ask it to join elsewhere; otherwise that is a
+  press on Koppelen on that laptop.
 - Every laptop announces itself on the LAN every two seconds (UDP broadcast,
   port 45737). Laptops of a group use the announcements to find each other
   again when their addresses change. A laptop on its own lists the laptops it

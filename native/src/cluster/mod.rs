@@ -6,6 +6,12 @@
 //! messages and their meaning are the same, the bytes are not (mixed TS/Rust groups are not a goal).
 pub mod clock;
 mod join;
+mod key;
+pub(crate) use key::beacon_proof;
+/// The key this laptop signs with, when linking made one.
+pub(crate) fn group_key(db: &crate::db::Db) -> Option<String> {
+    key::stored(db).into_iter().next()
+}
 pub mod log;
 mod probe;
 mod raft;
@@ -141,6 +147,8 @@ pub struct Node {
     silent_since: Mutex<HashMap<String, Instant>>,
     /// Held by the one write the leader is adding to the log (lock order: writing, raft, db).
     writing: Mutex<()>,
+    /// The group keys this laptop holds, newest first (see `key`).
+    keys: Mutex<Vec<String>>,
 }
 
 /// An answer from another laptop: its HTTP status and JSON body.
@@ -152,7 +160,7 @@ pub(crate) struct Answer {
 
 impl Node {
     pub fn start(db: Arc<Mutex<Db>>, cfg: Config) -> Result<Arc<Self>> {
-        let host_id = {
+        let (host_id, keys) = {
             let db = db.lock().unwrap();
             let host_id = match log::setting(&db, "host_id") {
                 Some(id) => id,
@@ -170,7 +178,9 @@ impl Node {
             {
                 clock::set_offset(offset);
             }
-            host_id
+            let cluster_id = log::setting(&db, "replication_cluster_id").unwrap_or_default();
+            let keys = key::ensure(&db, &host_id, &cluster_id)?;
+            (host_id, keys)
         };
         // reqwest's blocking client must be built outside an async runtime.
         let client = std::thread::spawn(|| {
@@ -198,6 +208,7 @@ impl Node {
             weak: weak.clone(),
             silent_since: Mutex::default(),
             writing: Mutex::default(),
+            keys: Mutex::new(keys),
         });
         node.start_raft();
         let weak = Arc::downgrade(&node);
@@ -241,16 +252,29 @@ impl Node {
         if self.offline() {
             return Err("isolated".into());
         }
+        let body = match body {
+            Some(body) => serde_json::to_vec(body).map_err(|e| e.to_string())?,
+            None => Vec::new(),
+        };
+        let path = reqwest::Url::parse(url)
+            .map(|u| match u.query() {
+                Some(query) => format!("{}?{query}", u.path()),
+                None => u.path().to_owned(),
+            })
+            .unwrap_or_default();
         let mut request = self
             .client
             .get()
             .ok_or("geen HTTP-client")?
-            .request(method, url)
+            .request(method.clone(), url)
             .header("x-apolloon-app-version", APP_VERSION)
             .header("x-apolloon-schema-version", SCHEMA_VERSION.to_string())
+            .header(key::HEADER, self.signatures(method.as_str(), &path, &body))
             .timeout(timeout);
-        if let Some(body) = body {
-            request = request.json(body);
+        if method != reqwest::Method::GET {
+            request = request
+                .header("content-type", "application/json")
+                .body(body);
         }
         let response = request.send().map_err(|e| e.to_string())?;
         let status = response.status().as_u16();
@@ -322,7 +346,7 @@ impl Node {
         remote: Option<std::net::IpAddr>,
     ) -> String {
         let announced: Vec<reqwest::Url> = self
-            .beacons()
+            .group_beacons()
             .iter()
             .filter(|b| b["hostId"] == host_id)
             .filter_map(|b| reqwest::Url::parse(b["url"].as_str()?).ok())
@@ -368,7 +392,7 @@ impl Node {
     /// The group from the replicated table; a laptop that never joined one is a group of one.
     pub fn members(&self) -> Vec<Member> {
         let mut stored = log::stored_members(&self.db.lock().unwrap());
-        let beacons = self.beacons();
+        let beacons = self.group_beacons();
         for member in &mut stored {
             if let Some(url) = beacons
                 .iter()
@@ -575,6 +599,12 @@ impl Node {
                 ))
             })
             .collect()
+    }
+    /// Announcements signed with a key of this group: only those say where its laptops are.
+    fn group_beacons(&self) -> Vec<Value> {
+        let mut beacons = self.beacons();
+        beacons.retain(|beacon| self.proves(beacon));
+        beacons
     }
     fn beacons(&self) -> Vec<Value> {
         self.discovery
