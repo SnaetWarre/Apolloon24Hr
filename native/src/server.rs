@@ -10,17 +10,27 @@ use axum::{
 };
 use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
+mod history;
+use history::HistoryLog;
+
+type ReadVersion = (i64, u64, u64, i64, i64);
 
 /// Database version a cached read was built at. Replication and snapshot installation advance
 /// the revision; total_changes also covers local settings writes that keep the same revision.
-fn read_version(db: &Db) -> (i64, u64) {
-    (db.revision, db.conn.total_changes())
+fn read_version(db: &Db) -> Result<ReadVersion> {
+    Ok((
+        db.revision,
+        db.conn.total_changes(),
+        db.history_generation(),
+        db.data_version()?,
+        db.schema_version()?,
+    ))
 }
 
 /// Serialized `/api/state` body without the per-request `host` and `cluster` fields.
 #[derive(Default)]
 struct ReadCache {
-    version: Option<(i64, u64)>,
+    version: Option<ReadVersion>,
     snapshot: Option<Bytes>,
 }
 
@@ -46,148 +56,6 @@ impl Screens {
                 })
                 .collect::<Vec<_>>()
         )
-    }
-}
-
-/// Every full history this server built, as numbered versions, so a client that holds one can
-/// fetch only the laps and events that changed since (`/api/history?since=<cursor>`).
-struct HistoryLog {
-    /// Random per server start: a cursor from another laptop or an earlier run never matches.
-    epoch: String,
-    version: Option<(i64, u64)>,
-    seq: u64,
-    current: Option<CurrentHistory>,
-    /// Ids of laps and events that changed (or disappeared) on the way to each `seq`.
-    steps: std::collections::VecDeque<(u64, Vec<String>, Vec<String>)>,
-    deltas: std::collections::HashMap<u64, Bytes>,
-}
-struct CurrentHistory {
-    value: Value,
-    body: Bytes,
-    laps: Rows,
-    events: Rows,
-}
-/// Row id to its position in the list and a fingerprint of its content.
-type Rows = std::collections::HashMap<String, (usize, u64)>;
-/// Older versions are dropped first; a client further behind gets the full history again.
-const HISTORY_STEPS: usize = 1024;
-const HISTORY_STEP_IDS: usize = 20_000;
-
-fn index_rows(rows: &Value) -> Rows {
-    use std::hash::{Hash, Hasher};
-    rows.as_array()
-        .into_iter()
-        .flatten()
-        .enumerate()
-        .filter_map(|(index, row)| {
-            let mut hasher = std::collections::hash_map::DefaultHasher::new();
-            row.to_string().hash(&mut hasher);
-            Some((row["id"].as_str()?.to_owned(), (index, hasher.finish())))
-        })
-        .collect()
-}
-fn touched(old: &Rows, new: &Rows) -> Vec<String> {
-    let changed = new
-        .iter()
-        .filter(|(id, (_, hash))| old.get(*id).is_none_or(|(_, before)| before != hash))
-        .map(|(id, _)| id.clone());
-    let removed = old.keys().filter(|id| !new.contains_key(*id)).cloned();
-    changed.chain(removed).collect()
-}
-
-impl HistoryLog {
-    fn new() -> Self {
-        Self {
-            epoch: uuid::Uuid::new_v4().simple().to_string()[..12].to_owned(),
-            version: None,
-            seq: 0,
-            current: None,
-            steps: Default::default(),
-            deltas: Default::default(),
-        }
-    }
-    fn cursor(&self) -> String {
-        format!("{}.{}", self.epoch, self.seq)
-    }
-    fn refresh(&mut self, db: &Db, version: (i64, u64)) -> Result<()> {
-        if self.version == Some(version) && self.current.is_some() {
-            return Ok(());
-        }
-        let mut value = db.history()?;
-        let (laps, events) = (index_rows(&value["laps"]), index_rows(&value["events"]));
-        self.seq += 1;
-        if let Some(old) = &self.current {
-            self.steps.push_back((
-                self.seq,
-                touched(&old.laps, &laps),
-                touched(&old.events, &events),
-            ));
-        }
-        let mut ids: usize = self.steps.iter().map(|(_, l, e)| l.len() + e.len()).sum();
-        while self.steps.len() > HISTORY_STEPS || ids > HISTORY_STEP_IDS {
-            let (_, l, e) = self.steps.pop_front().unwrap();
-            ids -= l.len() + e.len();
-        }
-        value["cursor"] = json!(self.cursor());
-        let body = Bytes::from(serde_json::to_vec(&value).map_err(|e| e.to_string())?);
-        self.current = Some(CurrentHistory {
-            value,
-            body,
-            laps,
-            events,
-        });
-        self.version = Some(version);
-        self.deltas.clear();
-        Ok(())
-    }
-    /// The changes since `cursor`, or `None` when this server cannot tell them apart from a
-    /// full history (another epoch, or a version older than the steps it still keeps).
-    fn since(&mut self, cursor: &str) -> Option<Bytes> {
-        let (epoch, seq) = cursor.rsplit_once('.')?;
-        let since: u64 = seq.parse().ok()?;
-        let oldest = self.steps.front().map_or(self.seq, |(seq, ..)| seq - 1);
-        if epoch != self.epoch || since < oldest || since > self.seq {
-            return None;
-        }
-        if let Some(body) = self.deltas.get(&since) {
-            return Some(body.clone());
-        }
-        let current = self.current.as_ref()?;
-        let changes = |pick: fn(&(u64, Vec<String>, Vec<String>)) -> &Vec<String>,
-                       rows: &Rows,
-                       list: &Value| {
-            let ids: std::collections::BTreeSet<&String> = self
-                .steps
-                .iter()
-                .filter(|step| step.0 > since)
-                .flat_map(|step| pick(step))
-                .collect();
-            let mut changed: Vec<(usize, &Value)> = Vec::new();
-            let mut removed = Vec::new();
-            for id in ids {
-                match rows.get(id) {
-                    Some(&(index, _)) => changed.push((index, &list[index])),
-                    None => removed.push(id),
-                }
-            }
-            changed.sort_by_key(|(index, _)| *index);
-            json!({"changed":changed,"removed":removed,"count":rows.len()})
-        };
-        let value = &current.value;
-        let delta = json!({
-            "scope": "full",
-            "delta": true,
-            "since": cursor,
-            "cursor": self.cursor(),
-            "revision": value["revision"],
-            "changes": {
-                "laps": changes(|step| &step.1, &current.laps, &value["laps"]),
-                "events": changes(|step| &step.2, &current.events, &value["events"]),
-            },
-        });
-        let body = Bytes::from(serde_json::to_vec(&delta).ok()?);
-        self.deltas.insert(since, body.clone());
-        Some(body)
     }
 }
 
@@ -292,10 +160,19 @@ async fn snapshot_with_history(host: Host, query: &std::collections::HashMap<Str
 }
 fn snapshot_read(host: Host, query: &std::collections::HashMap<String, String>) -> Response {
     let read = || -> Result<(Bytes, Option<Bytes>)> {
-        let mut history = query.contains_key("history").then(|| host.history.lock().unwrap());
-        let (db, version, token) = {
+        let mut history = query
+            .contains_key("history")
+            .then(|| host.history.lock().unwrap());
+        let (db, version, token, changes) = {
             let writer = host.db.lock().unwrap();
-            (writer.read_snapshot()?, read_version(&writer), writer.change_token())
+            let version = read_version(&writer)?;
+            let db = writer.read_snapshot()?;
+            if version != read_version(&writer)? {
+                return Err("Database gewijzigd tijdens het lezen".into());
+            }
+            let changes = writer
+                .history_changes_since(history.as_ref().and_then(|log| log.generation(version)));
+            (db, version, writer.change_token(), changes)
         };
         let mut cache = host.reads.lock().unwrap();
         if cache.version != Some(version) || cache.snapshot.is_none() {
@@ -313,10 +190,17 @@ fn snapshot_read(host: Host, query: &std::collections::HashMap<String, String>) 
         let cached = cache.snapshot.clone().unwrap();
         drop(cache);
         let history = if let Some(log) = history.as_mut() {
-            log.refresh(&db, version)?;
-            Some(query.get("since").and_then(|cursor| log.since(cursor))
-                .unwrap_or_else(|| log.current.as_ref().unwrap().body.clone()))
-        } else { None };
+            log.refresh(&db, version, changes)?;
+            Some(
+                query
+                    .get("since")
+                    .and_then(|cursor| log.since(cursor))
+                    .map(Ok)
+                    .unwrap_or_else(|| log.full_body())?,
+            )
+        } else {
+            None
+        };
         Ok((cached, history))
     };
     match read() {
@@ -369,23 +253,35 @@ fn history_read(host: Host, query: HistoryQuery) -> Response {
 }
 fn history_result(host: &Host, query: HistoryQuery) -> Result<Bytes> {
     let mut log = host.history.lock().unwrap();
-    let (db, version) = {
+    let (db, version, changes) = {
         let writer = host.db.lock().unwrap();
-        (writer.read_snapshot()?, read_version(&writer))
+        let version = read_version(&writer)?;
+        let db = writer.read_snapshot()?;
+        if version != read_version(&writer)? {
+            return Err("Database gewijzigd tijdens het lezen".into());
+        }
+        let changes = writer.history_changes_since(log.generation(version));
+        (db, version, changes)
     };
     let scope = query.scope.as_deref().unwrap_or("full");
     if scope != "full" {
-        return db.history_scope(
-            scope,
-            query.runner_id.as_deref(),
-            query.limit.unwrap_or(100),
-        ).and_then(|value| serde_json::to_vec(&value).map(Bytes::from).map_err(|e| e.to_string()));
+        return db
+            .history_scope(
+                scope,
+                query.runner_id.as_deref(),
+                query.limit.unwrap_or(100),
+            )
+            .and_then(|value| {
+                serde_json::to_vec(&value)
+                    .map(Bytes::from)
+                    .map_err(|e| e.to_string())
+            });
     }
-    log.refresh(&db, version)?;
+    log.refresh(&db, version, changes)?;
     if let Some(delta) = query.since.as_deref().and_then(|cursor| log.since(cursor)) {
         return Ok(delta);
     }
-    Ok(log.current.as_ref().unwrap().body.clone())
+    log.full_body()
 }
 async fn registrations(State(host): State<Host>) -> Reply {
     reply(host.db.lock().unwrap().registrations())

@@ -1,4 +1,5 @@
 //! Schema-17 storage. Every operator action and its undo snapshot share one durable transaction.
+pub(crate) mod history_changes;
 use rusqlite::{
     Connection, params_from_iter,
     types::{Value as SqlValue, ValueRef},
@@ -40,6 +41,7 @@ pub struct Db {
     pub revision: i64,
     changes: tokio::sync::watch::Sender<u64>,
     epoch: String,
+    history_changes: std::sync::Arc<std::sync::Mutex<history_changes::Journal>>,
     /// Set by the linked-laptop runtime: every statement `exec` runs is recorded for replication.
     pub capture: std::cell::RefCell<Option<crate::cluster::log::Capture>>,
 }
@@ -93,20 +95,68 @@ impl Db {
     }
     pub(crate) fn from_connection(conn: Connection, revision: i64) -> Result<Self> {
         let (changes, _) = tokio::sync::watch::channel(0u64);
+        let history_changes = std::sync::Arc::new(std::sync::Mutex::new(
+            history_changes::Journal::new(conn.total_changes()),
+        ));
+        let updated = history_changes.clone();
+        conn.update_hook(Some(move |_action, schema: &str, table: &str, rowid| {
+            updated.lock().unwrap().update(schema, table, rowid);
+        })).map_err(err)?;
+        let committed_rows = history_changes.clone();
         let committed = changes.clone();
         conn.commit_hook(Some(move || {
+            committed_rows.lock().unwrap().commit();
             committed.send_modify(|version| *version = version.wrapping_add(1));
             crate::latency::notify();
             false
         })).map_err(err)?;
         let rolled_back = changes.clone();
+        let rolled_back_rows = history_changes.clone();
         conn.rollback_hook(Some(move || {
+            rolled_back_rows.lock().unwrap().rollback();
             rolled_back.send_modify(|version| *version = version.wrapping_add(1));
-        })).map_err(err)?;
-        Ok(Self { conn, revision, changes, epoch: id(), capture: Default::default() })
+        }))
+        .map_err(err)?;
+        Ok(Self {
+            conn,
+            revision,
+            changes,
+            epoch: id(),
+            history_changes,
+            capture: Default::default(),
+        })
     }
     pub fn change_token(&self) -> String {
-        format!("{}.{}.{}", self.epoch, self.revision, self.conn.total_changes())
+        format!(
+            "{}.{}.{}.{}.{}.{}",
+            self.epoch,
+            self.revision,
+            self.conn.total_changes(),
+            self.history_generation(),
+            self.data_version().unwrap_or_default(),
+            self.schema_version().unwrap_or_default()
+        )
+    }
+    pub(crate) fn history_generation(&self) -> u64 {
+        let mut journal = self.history_changes.lock().unwrap();
+        journal.observe(self.conn.total_changes());
+        journal.generation
+    }
+    pub(crate) fn history_changes_since(
+        &self,
+        generation: Option<u64>,
+    ) -> Option<history_changes::Changes> {
+        self.history_changes.lock().unwrap().since(generation)
+    }
+    pub(crate) fn data_version(&self) -> Result<i64> {
+        self.conn
+            .pragma_query_value(None, "data_version", |r| r.get(0))
+            .map_err(err)
+    }
+    pub(crate) fn schema_version(&self) -> Result<i64> {
+        self.conn
+            .pragma_query_value(None, "schema_version", |r| r.get(0))
+            .map_err(err)
     }
     pub fn subscribe(&self) -> tokio::sync::watch::Receiver<u64> {
         self.changes.subscribe()
@@ -272,8 +322,15 @@ impl Db {
             crate::cluster::log::seal(self, method, &result)?;
         }
         let _trace = if crate::latency::enabled() && method == "race.handoff" {
-            result["lapId"].as_str().map(|lap| crate::latency::commit_context(vec![(crate::latency::handoff_id(input), lap.to_owned())]))
-        } else { None };
+            result["lapId"].as_str().map(|lap| {
+                crate::latency::commit_context(vec![(
+                    crate::latency::handoff_id(input),
+                    lap.to_owned(),
+                )])
+            })
+        } else {
+            None
+        };
         transaction.commit().map_err(err)?;
         if method == "race.handoff" { crate::latency::handoff("local_commit", input, result["lapId"].as_str()); }
         self.revision += 1;
