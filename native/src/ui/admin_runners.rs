@@ -524,6 +524,7 @@ pub(super) fn section(s: &State) -> El {
                     .font(ts(13.0, 500.0).lh(19.5))
                     .color(p.ink)
                     .wrap()
+                    .grow(1.0)
                     .min_w(0.0)
                     .on_press(move |s: &mut State| profile::open(s, &pid))
             }))
@@ -533,6 +534,7 @@ pub(super) fn section(s: &State) -> El {
                         .font(ts(13.0, 400.0).lh(19.5))
                         .color(p.t.ink3)
                         .wrap()
+                        .grow(1.0)
                         .min_w(0.0),
                 ),
             )
