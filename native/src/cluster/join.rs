@@ -214,7 +214,16 @@ impl Node {
 
     /// Another laptop pressed Koppelen next to this one and keeps its data, or a laptop of this
     /// group joined another group (`follow`) or another split (`split`): this laptop joins too.
-    pub fn accept_invite(&self, request: &Value) -> Result<bool> {
+    pub fn accept_invite(&self, request: &Value, signed: bool) -> Result<bool> {
+        // Only a laptop of this group may tell this one to follow it. Once the race started here,
+        // nobody else moves this laptop either: joining another group is a press on this laptop.
+        if !signed
+            && (request["split"].is_string()
+                || request["follow"].is_string()
+                || self.own_side().race_started)
+        {
+            return Err("Deze laptops horen bij een andere groep.".into());
+        }
         self.wait_while_joining();
         let url = request["url"].as_str().unwrap_or("");
         let cluster_id = request["clusterId"].as_str().unwrap_or("");
@@ -409,6 +418,9 @@ impl Node {
                 .as_str()
                 .unwrap_or("Koppelen mislukt.")
                 .into());
+        }
+        if let Some(key) = answer.body["groupKey"].as_str() {
+            self.adopt_group_key(key);
         }
         match self.copy_from(leader_url, "pre-join") {
             Ok(copied) => Ok(Some(copied)),
@@ -765,7 +777,7 @@ impl Node {
                 add(member.host_id, member.url);
             }
         }
-        for beacon in self.beacons() {
+        for beacon in self.group_beacons() {
             if beacon["clusterId"] == cluster_id.as_str() {
                 if let (Some(h), Some(u)) = (beacon["hostId"].as_str(), beacon["url"].as_str()) {
                     add(h.into(), u.into());
@@ -825,7 +837,7 @@ impl Node {
         if stored.iter().find(|m| m.host_id == me.host_id) != Some(&me) {
             let _ = self.add_member(&me, None);
         }
-        let beacons = self.beacons();
+        let beacons = self.group_beacons();
         for member in stored.iter().filter(|m| m.host_id != me.host_id) {
             let Some(beacon) = beacons
                 .iter()
