@@ -311,12 +311,19 @@ async fn history(State(host): State<Host>, Query(query): Query<HistoryQuery>) ->
     }
 }
 fn history_read(host: Host, query: HistoryQuery) -> Response {
-    match history_result(&host, query) {
-        Ok(body) => json_body(body),
+    match history_result(&host, query).and_then(|body| {
+        let encoded = body.encoded();
+        let mut response = json_body(body.bytes()?);
+        if let Some(encoded) = encoded {
+            response.extensions_mut().insert(encoded);
+        }
+        Ok(response)
+    }) {
+        Ok(response) => response,
         Err(message) => error_body(message),
     }
 }
-fn history_result(host: &Host, query: HistoryQuery) -> Result<Bytes> {
+fn history_result(host: &Host, query: HistoryQuery) -> Result<HistoryBody> {
     let scope = query.scope.as_deref().unwrap_or("full");
     let mut log = host.history.lock().unwrap();
     let (db, version, changes) = {
@@ -326,7 +333,7 @@ fn history_result(host: &Host, query: HistoryQuery) -> Result<Bytes> {
             drop(writer);
             let body = log.response(query.since.as_deref())?;
             drop(log);
-            return body.bytes();
+            return Ok(body);
         }
         let db = writer.read_snapshot()?;
         if version != read_version(&writer)? {
@@ -345,13 +352,41 @@ fn history_result(host: &Host, query: HistoryQuery) -> Result<Bytes> {
             .and_then(|value| {
                 serde_json::to_vec(&value)
                     .map(Bytes::from)
+                    .map(HistoryBody::Cached)
                     .map_err(|e| e.to_string())
             });
     }
     log.refresh(&db, version, changes)?;
     let body = log.response(query.since.as_deref())?;
     drop(log);
-    body.bytes()
+    Ok(body)
+}
+
+async fn cache_history_encoding(mut response: Response) -> Response {
+    let Some(cache) = response.extensions_mut().remove::<history::EncodedHistory>() else {
+        return response;
+    };
+    let slot = match response
+        .headers()
+        .get(header::CONTENT_ENCODING)
+        .and_then(|value| value.to_str().ok())
+    {
+        Some("gzip") => 0,
+        Some("br") => 1,
+        _ => return response,
+    };
+    let (parts, body) = response.into_parts();
+    let mut encoded = cache.0.lock().await;
+    if encoded[slot].is_none() {
+        match axum::body::to_bytes(body, usize::MAX).await {
+            Ok(bytes) => encoded[slot] = Some(bytes),
+            Err(error) => return error_body(error.to_string()),
+        }
+    }
+    Response::from_parts(
+        parts,
+        axum::body::Body::from(encoded[slot].as_ref().unwrap().clone()),
+    )
 }
 async fn registrations(State(host): State<Host>) -> Reply {
     reply(host.db.lock().unwrap().registrations())
@@ -753,7 +788,7 @@ async fn wrapped_card(
 /// spreadsheets are compressed already and pass through unchanged.
 fn api_routes() -> Router<Host> {
     use tower_http::compression::{
-        CompressionLayer,
+        CompressionLayer, CompressionLevel,
         predicate::{DefaultPredicate, NotForContentType, Predicate},
     };
     Router::new()
@@ -772,12 +807,17 @@ fn api_routes() -> Router<Host> {
         .route("/api/action/{method}", post(mutation))
         .route("/trpc/{method}", post(rpc).get(query_rpc))
         .layer(
-            CompressionLayer::new().no_deflate().no_zstd().compress_when(
-                DefaultPredicate::new().and(NotForContentType::const_new(
-                    "application/vnd.openxmlformats",
-                )),
-            ),
+            CompressionLayer::new()
+                .quality(CompressionLevel::Fastest)
+                .no_deflate()
+                .no_zstd()
+                .compress_when(
+                    DefaultPredicate::new().and(NotForContentType::const_new(
+                        "application/vnd.openxmlformats",
+                    )),
+                ),
         )
+        .layer(axum::middleware::map_response(cache_history_encoding))
 }
 
 pub fn router(host: Host) -> Router {
@@ -1203,19 +1243,25 @@ mod read_cache_tests {
         assert_eq!(laps["changed"][1], json!([1, full["laps"][1]]));
         assert_eq!(laps["changed"].as_array().unwrap().len(), 2);
         assert!(delta.get("laps").is_none());
-        let mut held = first.clone();
-        assert!(crate::ui::merge_history(&mut held, &delta));
-        assert_eq!(held, full);
-        let mut wrong_count = first.clone();
-        let mut bad = delta.clone();
-        bad["changes"]["laps"]["count"] = json!(4);
-        assert!(!crate::ui::merge_history(&mut wrong_count, &bad));
+        #[cfg(feature = "desktop")]
+        {
+            let mut held = first.clone();
+            assert!(crate::ui::merge_history(&mut held, &delta));
+            assert_eq!(held, full);
+            let mut wrong_count = first.clone();
+            let mut bad = delta.clone();
+            bad["changes"]["laps"]["count"] = json!(4);
+            assert!(!crate::ui::merge_history(&mut wrong_count, &bad));
+        }
 
         db.lock().unwrap().exec("INSERT INTO race_events(id,type,message,occurred_at,created_at) VALUES('e1','burgie_gepakt','Burgie gepakt',5,5)", &[]).unwrap();
         let events = get(Some(full["cursor"].as_str().unwrap().into())).await;
-        let mut after = full.clone();
-        assert!(crate::ui::merge_history(&mut after, &events));
-        assert_eq!(after, get(None).await);
+        #[cfg(feature = "desktop")]
+        {
+            let mut after = full.clone();
+            assert!(crate::ui::merge_history(&mut after, &events));
+            assert_eq!(after, get(None).await);
+        }
         assert_eq!(events["changes"]["laps"]["changed"], json!([]));
 
         // A cursor from another server start or one older than the kept steps gets everything.
@@ -1224,6 +1270,52 @@ mod read_cache_tests {
             assert!(answer.get("delta").is_none());
             assert_eq!(answer["laps"], full["laps"]);
         }
+    }
+
+    #[tokio::test]
+    async fn full_history_reuses_encoded_bodies_and_invalidates_them_with_history() {
+        use tower::ServiceExt;
+        let db = Arc::new(Mutex::new(Db::open(std::path::Path::new(":memory:")).unwrap()));
+        let host = Host::with_cluster(db.clone(), 5173, None);
+        let app = router(host.clone());
+        let request = |path: &str, encoding: &str| {
+            axum::http::Request::get(path)
+                .header(header::ACCEPT_ENCODING, encoding)
+                .body(axum::body::Body::empty()).unwrap()
+        };
+        let empty = body(app.clone().oneshot(request("/api/history", "identity")).await.unwrap()).await;
+        assert_eq!(empty["laps"], json!([]));
+        let cache = host.history.lock().unwrap().response(None).unwrap().encoded().unwrap();
+        assert!(cache.0.lock().await.iter().all(Option::is_none));
+        for (slot, encoding) in ["gzip", "br"].into_iter().enumerate() {
+            for _ in 0..2 {
+                let response = app.clone().oneshot(request("/api/history", encoding)).await.unwrap();
+                assert_eq!(response.headers()[header::CONTENT_ENCODING], encoding);
+                assert!(response.headers()[header::VARY].to_str().unwrap().contains("accept-encoding"));
+                let bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+                let cached = cache.0.lock().await[slot].clone().unwrap();
+                assert_eq!(bytes, cached);
+                assert_eq!(bytes.as_ptr(), cached.as_ptr());
+            }
+        }
+        let delta_path = format!("/api/history?since={}", empty["cursor"].as_str().unwrap());
+        let delta = body(app.clone().oneshot(request(&delta_path, "identity")).await.unwrap()).await;
+        assert!(delta.get("changes").is_some());
+        db.lock().unwrap().exec("INSERT INTO settings VALUES('encoded-history-test','yes')", &[]).unwrap();
+        let updated = body(app.clone().oneshot(request("/api/history", "identity")).await.unwrap()).await;
+        assert_ne!(updated["cursor"], empty["cursor"]);
+        let refreshed = host.history.lock().unwrap().response(None).unwrap().encoded().unwrap();
+        assert!(!Arc::ptr_eq(&cache.0, &refreshed.0));
+        assert!(refreshed.0.lock().await.iter().all(Option::is_none));
+        let weighted = app.clone().oneshot(request("/api/history", "br;q=0, gzip;q=1")).await.unwrap();
+        assert_eq!(weighted.headers()[header::CONTENT_ENCODING], "gzip");
+        axum::body::to_bytes(weighted.into_body(), usize::MAX).await.unwrap();
+        assert!(refreshed.0.lock().await[0].is_some());
+        assert!(refreshed.0.lock().await[1].is_none());
+        db.lock().unwrap().conn.execute_batch("DROP TABLE laps").unwrap();
+        let failed = app.oneshot(request("/api/history", "identity")).await.unwrap();
+        assert_eq!(failed.status(), StatusCode::CONFLICT);
+        assert!(body(failed).await.get("error").is_some());
     }
 
     #[tokio::test]
@@ -1247,6 +1339,9 @@ mod read_cache_tests {
         assert_eq!(brotli.headers()[header::CONTENT_ENCODING], "br");
         let gzip = app.clone().oneshot(request("gzip")).await.unwrap();
         assert_eq!(gzip.headers()[header::CONTENT_ENCODING], "gzip");
+        let compressed = axum::body::to_bytes(gzip.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(&compressed[..3], &[0x1f, 0x8b, 8]);
+        assert_eq!(compressed[8], 4);
         let plain = app.oneshot(request("identity")).await.unwrap();
         assert!(plain.headers().get(header::CONTENT_ENCODING).is_none());
         assert!(body(plain).await["revision"].is_i64());
