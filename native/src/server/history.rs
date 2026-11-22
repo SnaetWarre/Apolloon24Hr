@@ -21,6 +21,7 @@ pub(super) struct HistoryLog {
 struct CurrentHistory {
     value: Arc<Value>,
     body: Arc<Mutex<Option<Bytes>>>,
+    encoded: EncodedHistory,
     laps: Rows,
     events: Rows,
     lap_order: std::collections::HashMap<String, i64>,
@@ -28,18 +29,28 @@ struct CurrentHistory {
     runners: std::collections::HashMap<i64, Value>,
 }
 
+#[derive(Clone, Default)]
+pub(super) struct EncodedHistory(pub(super) Arc<tokio::sync::Mutex<[Option<Bytes>; 2]>>);
+
 pub(super) enum HistoryBody {
     Cached(Bytes),
     Full {
         value: Arc<Value>,
         body: Arc<Mutex<Option<Bytes>>>,
+        encoded: EncodedHistory,
     },
 }
 impl HistoryBody {
+    pub(super) fn encoded(&self) -> Option<EncodedHistory> {
+        match self {
+            Self::Full { encoded, .. } => Some(encoded.clone()),
+            Self::Cached(_) => None,
+        }
+    }
     pub(super) fn bytes(self) -> Result<Bytes> {
         match self {
             Self::Cached(body) => Ok(body),
-            Self::Full { value, body } => {
+            Self::Full { value, body, .. } => {
                 let mut body = body.lock().unwrap();
                 if body.is_none() {
                     *body = Some(
@@ -129,6 +140,7 @@ impl HistoryLog {
                 value["revision"] = json!(db.revision);
                 value["cursor"] = json!(format!("{}.{}", self.epoch, self.seq));
                 current.body = Default::default();
+                current.encoded = Default::default();
                 self.steps.push_back((self.seq, laps, events));
                 self.version = Some(version);
                 self.prune();
@@ -171,6 +183,7 @@ impl HistoryLog {
         self.current = Some(CurrentHistory {
             value: Arc::new(value),
             body: Default::default(),
+            encoded: Default::default(),
             laps,
             events,
             lap_order,
@@ -197,6 +210,7 @@ impl HistoryLog {
         Ok(HistoryBody::Full {
             value: current.value.clone(),
             body: current.body.clone(),
+            encoded: current.encoded.clone(),
         })
     }
     #[cfg(test)]
@@ -348,11 +362,18 @@ mod tests {
         let cursor = log.cursor();
         let old = log.response(None).unwrap();
         let same = log.response(None).unwrap();
+        let encoded = old.encoded().unwrap();
+        assert!(Arc::ptr_eq(&encoded.0, &same.encoded().unwrap().0));
+        encoded.0.try_lock().unwrap()[0] = Some(Bytes::from_static(b"old gzip"));
         db.exec("INSERT INTO race_events(id,type,message,occurred_at,created_at) VALUES('event','burgie_gepakt','new',1,1)", &[]).unwrap();
         let version = read_version(&db).unwrap();
         let changes = db.history_changes_since(log.generation(version));
         log.refresh(&db, version, changes).unwrap();
         assert_eq!(log.incremental_refreshes, 1);
+        let refreshed = log.response(None).unwrap().encoded().unwrap();
+        assert!(!Arc::ptr_eq(&encoded.0, &refreshed.0));
+        assert!(refreshed.0.try_lock().unwrap().iter().all(Option::is_none));
+        assert_eq!(encoded.0.try_lock().unwrap()[0].as_deref(), Some(b"old gzip".as_slice()));
         let current = log.response(None).unwrap().bytes().unwrap();
         let old = old.bytes().unwrap();
         let same = same.bytes().unwrap();
