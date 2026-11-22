@@ -379,6 +379,7 @@ fn apply(db: &mut Db, entries: &[Entry]) -> Result<()> {
                 entry.seq
             ));
         }
+        db.begin_runner_write(&entry.kind);
         for statement in &entry.statements {
             if !valid(statement) {
                 return Err("only application data changes can be replicated".into());
