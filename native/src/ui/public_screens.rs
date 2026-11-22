@@ -10,6 +10,9 @@ use rune::{Align, Color, TextStyle, oklch, oklcha};
 use std::collections::{HashMap, HashSet};
 
 pub(super) mod settings;
+mod tick_cache;
+#[cfg(test)]
+mod tick_cache_tests;
 
 /// The rows of both lists on the Binnenscherm.
 const INSIDE_LIST_LENGTH: usize = 25;
@@ -1308,12 +1311,12 @@ fn inside(s: &State) -> El {
     let width = box_w() - 4.0 * vw_unit() - 1.2 * vw_unit();
     let left_w = width * 1.5 / 2.5;
     let right_w = width - left_w;
-    let board = row()
+    let board = rune::memo("inside-board", tick_cache::version(s), || row()
         .grow(1.0)
         .min_h(0.0)
         .gap(1.2 * vw_unit())
         .child(recent_panel(s, &p).w(left_w))
-        .child(points_panel(s, &p).w(right_w));
+        .child(points_panel(s, &p).w(right_w)));
     screen(&p).child(
         col()
             .grow(1.0)
@@ -1614,6 +1617,17 @@ fn points_panel(s: &State, p: &Pal) -> El {
 
 fn competitions(s: &State) -> El {
     let p = pal(!s.public_screens.settings.light(6, false));
+    let title = t("Competities", score_font(clamp(26.0, 2.0 * vw_unit(), 44.0), 800.0), p.ink).role("heading");
+    screen(&p).child(
+        col().grow(1.0).min_h(0.0).w_full()
+            .pt(2.2 * vh_unit()).pb(2.2 * vh_unit()).px(2.0 * vw_unit()).gap(1.6 * vh_unit())
+            .child(header(s, &p, row().child(title)))
+            .child(rune::memo("competitions-board", tick_cache::version(s), || competition_board(s))),
+    )
+}
+
+fn competition_board(s: &State) -> El {
+    let p = pal(!s.public_screens.settings.light(6, false));
     let labels = snapshot_list(s, "labels");
     let ids: Vec<Vec<String>> = s.snapshot["settings"]["competitions"]
         .as_array()
@@ -1622,12 +1636,6 @@ fn competitions(s: &State) -> El {
         .map(|c| c.as_array().into_iter().flatten().map(str_of).collect())
         .collect();
     let can_add = ids.len() < MAX_COMPETITIONS && labels.len() >= 2;
-    let title = t(
-        "Competities",
-        score_font(clamp(26.0, 2.0 * vw_unit(), 44.0), 800.0),
-        p.ink,
-    )
-    .role("heading");
     let width = box_w() - 4.0 * vw_unit() - 1.2 * vw_unit();
     let left_w = width * 2.3 / 3.3;
     let right_w = width - left_w;
@@ -1791,25 +1799,12 @@ fn competitions(s: &State) -> El {
         right = right.child(list);
     }
 
-    screen(&p).child(
-        col()
-            .grow(1.0)
-            .min_h(0.0)
-            .w_full()
-            .pt(2.2 * vh_unit())
-            .pb(2.2 * vh_unit())
-            .px(2.0 * vw_unit())
-            .gap(1.6 * vh_unit())
-            .child(header(s, &p, row().child(title)))
-            .child(
                 row()
                     .grow(1.0)
                     .min_h(0.0)
                     .gap(1.2 * vw_unit())
                     .child(left)
-                    .child(right),
-            ),
-    )
+                    .child(right)
 }
 
 fn plus_icon(size: f32, color: Color) -> El {

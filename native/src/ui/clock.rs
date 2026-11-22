@@ -1,18 +1,22 @@
 use super::*;
+use std::hash::{DefaultHasher, Hash, Hasher};
 
 pub(super) struct Sample {
     now: i64,
-    values: Vec<String>,
+    values: u64,
     due: i64,
 }
 
 impl Sample {
     fn new(now: i64) -> Self {
-        Self { now, values: Vec::new(), due: i64::MAX }
+        Self { now, values: 0, due: i64::MAX }
     }
 
-    pub(super) fn value(&mut self, value: impl ToString) {
-        self.values.push(value.to_string());
+    pub(super) fn value(&mut self, value: impl Hash) {
+        let mut hash = DefaultHasher::new();
+        self.values.hash(&mut hash);
+        value.hash(&mut hash);
+        self.values = hash.finish();
     }
 
     pub(super) fn bucket(&mut self, start: i64, width: i64) {
@@ -40,15 +44,15 @@ fn sample(s: &State) -> Sample {
     profile::clocks(s, &mut out);
     admin_base::clocks(s, &mut out);
     match s.page {
-        0 | 1 => {
+        0 => {
             let race = &s.snapshot["race"];
             if runners(s).iter().any(|r| !race["activeRunnerId"].is_null() && r["id"] == race["activeRunnerId"]) {
                 if let Some(start) = race["activeStartedAt"].as_i64() {
                     out.bucket(start, 100);
                 }
             }
-            if s.page == 1 { queue_page::clocks(s, &mut out); }
         }
+        1 => queue_page::clocks(s, &mut out),
         2 => timing_page::clocks(s, &mut out),
         4 if s.snapshot["race"]["raceStartedAt"].is_number()
             && s.snapshot["race"]["raceFinishedAt"].is_null() => out.bucket(0, 1000),
@@ -59,8 +63,13 @@ fn sample(s: &State) -> Sample {
 }
 
 pub(super) fn advance(s: &mut State, tx: &mut Tx) -> bool {
+    let now = s.server_now();
+    advance_at(s, now, tx)
+}
+
+fn advance_at(s: &mut State, now: i64, tx: &mut Tx) -> bool {
     let before = sample(s);
-    s.clock = s.server_now();
+    s.clock = now;
     let after = sample(s);
     // The transport's mpsc receiver also needs servicing when no display clock is running.
     let due = after.due.min(s.clock + 200);
@@ -83,7 +92,7 @@ mod tests {
         assert_eq!(key(100), key(136));
         assert_ne!(key(136).0, key(137).0);
         assert_ne!(key(249).0, key(250).0);
-        assert_eq!(Sample::new(0).values, Vec::<String>::new());
+        assert_eq!(Sample::new(0).values, 0);
     }
 
     #[test]
@@ -95,7 +104,7 @@ mod tests {
             s.clock = 100;
             let initial = sample(&s).values;
             s.clock = 137;
-            assert_eq!(initial == sample(&s).values, matches!(page, 5 | 6));
+            assert_eq!(initial == sample(&s).values, matches!(page, 1 | 5 | 6));
             s.clock = 1037;
             assert_ne!(initial, sample(&s).values, "page {page}");
         }
@@ -125,6 +134,28 @@ mod tests {
         let before = sample(&s).values;
         s.clock = 4037;
         assert_ne!(before, sample(&s).values);
+    }
+
+    #[test]
+    fn queue_clock_only_wakes_redraw_once_per_displayed_second_not_active_tenth() {
+        let mut s = init_with_url("http://127.0.0.1:0".into());
+        s.page = 1;
+        s.clock = 10_000;
+        s.snapshot = json!({"race":{"raceStartedAt":37,"activeRunnerId":"active","activeStartedAt":45},
+            "runners":[{"id":"active","status":"running"},{"id":"waiting","status":"waiting","statusSince":37}]});
+        let mut changed = Vec::new();
+        for now in 10_001..=13_000 {
+            let mut tx = Tx::default();
+            if advance_at(&mut s, now, &mut tx) { changed.push(now); }
+            assert!(!advance_at(&mut s, now, &mut tx), "duplicate wake at {now}");
+        }
+        assert_eq!(changed, [10_037, 11_037, 12_037]);
+        for snapshot in [Value::Null, json!({"error":"unavailable"})] {
+            s.snapshot = snapshot;
+            for now in 14_000..15_000 {
+                assert!(!advance_at(&mut s, now, &mut Tx::default()));
+            }
+        }
     }
 
     #[test]

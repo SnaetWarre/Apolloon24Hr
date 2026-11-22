@@ -600,7 +600,7 @@ fn poll(s: &mut State, _: f64, tx: &mut Tx) -> bool {
         }
         if traced { crate::latency::snapshot("applied", &s.snapshot); }
     }
-    changed |= clock::advance(s, tx);
+    let clock_changed = clock::advance(s, tx);
     if group_view::observe(s) {
         tx.animated();
         changed = true;
@@ -613,7 +613,7 @@ fn poll(s: &mut State, _: f64, tx: &mut Tx) -> bool {
     laps_panel::sync_hold(s);
     changed |= tactics_page::refresh(s);
     changed |= was_busy != s.busy;
-    public_screens::poll(s, changed, s.clock)
+    public_screens::poll(s, changed, s.clock) || clock_changed
 }
 fn button(
     key: impl Into<String>,
