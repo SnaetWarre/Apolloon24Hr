@@ -1082,6 +1082,9 @@ pub(super) fn succeeded(s: &mut State, method: &str, result: &Value) {
     if method == "runners.registrations" {
         s.queue_page.regs_pending = false;
         s.queue_page.registrations = result.clone();
+        if s.profile.is_some() {
+            s.admin.registrations = result.clone();
+        }
         return;
     }
     match s.queue_page.pending.take() {

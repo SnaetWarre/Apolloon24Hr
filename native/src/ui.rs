@@ -536,6 +536,7 @@ fn poll(s: &mut State, _: f64, tx: &mut Tx) -> bool {
                         s.notice = "Label opgeslagen.".into();
                     }
                     "runners.profile" => {
+                        s.admin.registrations[admin_base::st(&result["runner"], "id")] = result["registration"].clone();
                         s.profile = Some(profile::Form::new(
                             &result["runner"],
                             &result["registration"],
@@ -2392,6 +2393,46 @@ mod tests {
         click(&mut rt, "admin-confirm-ok");
         update(&mut rt, |s| !s.busy && super::runners(s).is_empty());
         assert!(db.lock().unwrap().runners().unwrap().is_empty());
+    }
+
+    fn queue_contact_profile() -> (Runtime<State>, Arc<Mutex<crate::db::Db>>, String, crate::server::ServerHandle) {
+        let mut db = crate::db::Db::open(std::path::Path::new(":memory:")).unwrap();
+        let id = db.mutation("runners.create", &json!({"name":"Queue contact","status":"waiting"})).unwrap()["id"].as_str().unwrap().to_owned();
+        db.mutation("runners.update", &json!({"id":id,"fields":{"registrationDetails":{"phone":"0471","email":"queue@example.be","availableHours":["20-21u (dinsdag)"]}}})).unwrap();
+        let db = Arc::new(Mutex::new(db));
+        let socket = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = socket.local_addr().unwrap().port();
+        drop(socket);
+        let host = crate::server::start(db.clone(), port).unwrap();
+        let mut state = init_with_url(format!("http://127.0.0.1:{port}"));
+        state.page = 1;
+        let mut rt = Runtime::new(state, view, (1366.0, 1080.0), Env { system_dark:false, scale:1.0 });
+        rt.frame(0.0);
+        update(&mut rt, |s| s.connected && !s.busy);
+        assert!(rt.state.admin.registrations.is_null());
+        rt.update_if(|s, _| { s.send("runners.profile",json!({"id":id})); true });
+        update(&mut rt, |s| !s.busy && s.profile.is_some());
+        (rt, db, id, host)
+    }
+
+    #[test]
+    fn queue_profile_save_preserves_fetched_contact_without_visiting_admin() {
+        let (mut rt, db, id, _host) = queue_contact_profile();
+        let before = db.lock().unwrap().registrations().unwrap()[&id].clone();
+        assert_eq!(rt.state.admin.registrations[&id],before);
+        db.lock().unwrap().mutation("runners.update", &json!({"id":id,"fields":{"registrationDetails":{"phone":"0472","email":"updated@example.be","availableHours":["21-22u (dinsdag)"]}}})).unwrap();
+        update(&mut rt, |s| !s.busy && s.admin.registrations[&id]["email"] == "updated@example.be");
+        let before = db.lock().unwrap().registrations().unwrap()[&id].clone();
+        profile::follow_stored(&mut rt.state);
+        click(&mut rt,"profile-name");
+        rt.paste(" edited");
+        rt.frame(0.2);
+        rt.wheel(700.0,670.0,-900.0);
+        rt.frame(0.2);
+        click(&mut rt,"profile-save");
+        update(&mut rt, |s| !s.busy && s.profile.is_none());
+        assert_eq!(db.lock().unwrap().registrations().unwrap()[&id],before);
+        assert_eq!(db.lock().unwrap().runner(&id).unwrap()["name"],"Queue contact edited");
     }
     #[test]
     fn file_picker_imports_and_reimports_through_the_real_http_server() {
