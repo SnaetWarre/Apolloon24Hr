@@ -812,7 +812,7 @@ fn toast_view(s: &State, t: &Toast) -> El {
 /// Everything these sections draw over the page; `None` when nothing is open.
 pub(super) fn modal(s: &State) -> Option<El> {
     if s.page != 8 {
-        return None;
+        return (s.page == 1 && s.profile.is_some()).then(|| profile::modal(s));
     }
     if let Some(c) = &s.admin.confirm {
         return Some(confirm_dialog(s, c));
@@ -841,4 +841,38 @@ pub(super) fn modal(s: &State) -> Option<El> {
         layer = layer.child(l);
     }
     Some(layer)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rune::{Env, Runtime};
+
+    #[test]
+    fn queue_profile_renders_and_closes_with_or_without_laps() {
+        for has_laps in [false, true] {
+            let db = crate::db::Db::open(std::path::Path::new(":memory:")).unwrap();
+            db.exec("INSERT INTO runners(id,name,runner_number,status,created_at,updated_at) VALUES('a','Alpha','1','waiting',0,0)", &[]).unwrap();
+            if has_laps {
+                db.exec("INSERT INTO laps(id,runner_id,lap_number,started_at,finished_at,duration_ms,source,created_at,labels_json) VALUES('lap','a',1,0,60000,60000,'spacebar',0,'[]')", &[]).unwrap();
+            }
+            let mut s = init_with_url("http://127.0.0.1:0".into());
+            s.fixture = true;
+            s.connected = true;
+            s.page = 1;
+            s.snapshot = db.race_snapshot().unwrap();
+            s.history = db.history().unwrap();
+            assert!(modal(&s).is_none());
+            profile::open(&mut s, "a");
+            let mut rt = Runtime::new(s, view, (1366.0, 768.0), Env { system_dark: false, scale: 1.0 });
+            rt.on_key = Some(on_key);
+            rt.frame(0.0);
+            assert!(rt.elements().iter().any(|e| e.role == "dialog" && e.label.as_deref() == Some("Lopersprofiel")));
+            assert!(rt.elements().iter().any(|e| e.key.as_deref() == Some("profile-number")));
+            rt.key(rune::Key::Escape.into());
+            for _ in 0..3 { rt.frame(0.2); }
+            assert!(rt.state.profile.is_none());
+            assert!(!rt.elements().iter().any(|e| e.role == "dialog"));
+        }
+    }
 }
