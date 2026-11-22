@@ -53,3 +53,17 @@ run means in ms/s, min–max spread, and a deterministic 20,000-resample paired
 percentile bootstrap 95% CI for median(head) minus median(base). These are
 pointwise intervals, not multiplicity adjusted. Keep all observations. First-pair
 screenshots and per-run server logs live beside the raw results.
+
+The frame counters separately record Rune rAF requests, rAF callbacks and WASM
+callbacks containing WebGL draw/clear/blit calls. They count submitted work, not
+GPU completion or physical display presentation. The GL probe also records each
+draw callback's scissor bounding coverage, clipped to the canvas dimensions,
+including intermediate framebuffer passes. This is a raster-work coverage proxy,
+not Rune's logical damage rectangles; full-sized intermediate passes can make it
+the whole viewport even when only a small area of the final image changed.
+`scissorPixelsPerSec` sums those per-callback bounds. GPU-process CPU is reported
+separately from renderer-only and whole-browser CPU.
+
+`--diagnostic-clock-step-ms 1000` is an explicit control that advances the app's
+clock in one-second steps while keeping the real browser scheduler. Its results
+are marked diagnostic and must not be mixed with real-time performance samples.

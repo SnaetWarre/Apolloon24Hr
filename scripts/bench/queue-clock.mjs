@@ -27,6 +27,7 @@ const { values: args } = parseArgs({
       default: '500:queue,3000:queue,10000:queue,3000:display/inside,3000:display/competitions',
     },
     renderer: { type: 'string', default: 'webgl2' },
+    'diagnostic-clock-step-ms': { type: 'string', default: '0' },
   },
 });
 for (const key of ['fixtures', 'base-binary', 'base-web']) assert(args[key], `--${key} is required`);
@@ -35,10 +36,12 @@ const root = path.resolve(import.meta.dirname, '../..'),
   pairs = Number(args.pairs),
   seconds = Number(args.seconds),
   warmup = Number(args.warmup),
+  clockStepMs = Number(args['diagnostic-clock-step-ms']),
   expected = args.renderer === 'cpu' ? 'CPU' : 'WebGL2';
 assert(['webgl2', 'cpu'].includes(args.renderer));
 assert(Number.isInteger(pairs) && pairs >= 2);
 assert(Number.isFinite(seconds) && seconds > 0 && Number.isFinite(warmup) && warmup >= 0);
+assert(Number.isFinite(clockStepMs) && clockStepMs >= 0);
 const cases = args.cases.split(',').map((entry) => {
   const [n, route] = entry.split(':');
   assert(Number.isInteger(Number(n)) && Number(n) > 0);
@@ -138,7 +141,7 @@ async function run(version, n, route, pair) {
       await request.fulfill({ response: reply, body: instrumentBindings(await reply.text()) });
     });
     await page.addInitScript({
-      content: `(${installHistoryProbe.toString()})(${JSON.stringify({ initial, cpuOnly: expected === 'CPU' })});(${installClockProbe.toString()})(${JSON.stringify({ now })});`,
+      content: `(${installHistoryProbe.toString()})(${JSON.stringify({ initial, cpuOnly: expected === 'CPU' })});(${installClockProbe.toString()})(${JSON.stringify({ now, stepMs: clockStepMs })});`,
     });
     // Registration data belongs to the deterministic snapshot, not the live DB's older statuses.
     await page.route('**/api/action/runners.registrations', (request) => request.fulfill({ json: {} }));
@@ -176,7 +179,7 @@ async function run(version, n, route, pair) {
     assert.equal(sample.renderer.kind, expected);
     assert.deepEqual(sample.renderer.marks, renderer.marks, 'renderer changed during measurement');
     assert(sample.callbacks > 0 && sample.workMs > 0);
-    assert(Math.abs(sample.clockElapsedMs - sample.elapsedMs) < 10, 'real-time clocks must advance');
+    assert(Math.abs(sample.clockElapsedMs - sample.elapsedMs) < Math.max(10, clockStepMs + 1), 'clocks must advance');
     const a = new Map(after.map((p) => [p.id, p]));
     assert(
       before.every((p) => a.has(p.id)),
@@ -203,6 +206,12 @@ async function run(version, n, route, pair) {
       serverBefore,
       serverAfter,
       appMsPerSec: sample.workMs / elapsed,
+      framesPerSec: sample.frames / elapsed,
+      requestedFramesPerSec: sample.requestedFrames / elapsed,
+      drawFramesPerSec: sample.drawFrames / elapsed,
+      scissorPixelsPerSec: sample.scissorPixels / elapsed,
+      gpuCpuMsPerSec:
+        (cpu.filter((p) => p.type === 'GPU').reduce((sum, p) => sum + p.seconds, 0) * 1e6) / counterElapsedMs,
       serverCpuMsPerSec: (((serverAfter - serverBefore) / ticksPerSecond) * 1e6) / counterElapsedMs,
       browserCpuMsPerSec: (cpu.reduce((sum, p) => sum + p.seconds, 0) * 1e6) / counterElapsedMs,
       rendererCpuMsPerSec:
@@ -244,7 +253,17 @@ const summary = [];
 for (const { n, route } of cases) {
   const selected = rows.filter((r) => r.n === n && r.route === route);
   assert.equal(selected.length, pairs * 2);
-  for (const metric of ['appMsPerSec', 'browserCpuMsPerSec', 'rendererCpuMsPerSec', 'serverCpuMsPerSec']) {
+  for (const metric of [
+    'framesPerSec',
+    'requestedFramesPerSec',
+    'drawFramesPerSec',
+    'scissorPixelsPerSec',
+    'appMsPerSec',
+    'rendererCpuMsPerSec',
+    'gpuCpuMsPerSec',
+    'browserCpuMsPerSec',
+    'serverCpuMsPerSec',
+  ]) {
     const values = Object.fromEntries(
       ['base', 'head'].map((version) => [
         version,
@@ -279,14 +298,15 @@ await writeFile(
     {
       args,
       renderer: expected,
-      description:
-        'Sequential alternating base/head pairs. Real-time clocks; deterministic retained history and runner data; no pushes during measurement. In-page outermost WASM callback wall time; browser and renderer process CPU from CDP cumulative process counters; server CPU from Linux /proc ticks (idle backend, no state pushes). Pointwise paired bootstrap difference of medians, 20000 resamples.',
+      diagnostic: clockStepMs > 0,
+      description: `${clockStepMs ? `DIAGNOSTIC ${clockStepMs}ms stepped clocks` : 'Real-time clocks'}. Sequential alternating base/head pairs; deterministic retained history and runner data; no pushes during measurement. In-page outermost WASM callback wall time; browser, GPU and renderer process CPU from CDP cumulative process counters; server CPU from Linux /proc ticks (idle backend, no state pushes). Frame callbacks and GL scissor bounding coverage are submission/work proxies, not completion or logical damage. Pointwise paired bootstrap difference of medians, 20000 resamples.`,
     },
     null,
     2
   )
 );
 console.log('SUMMARY', JSON.stringify(summary));
+if (clockStepMs) console.log('DIAGNOSTIC ONLY: stepped clock; not a real-time performance result');
 console.log(
-  `PASS: ${rows.length} runs, ${cases.length} cases, ${pairs} interleaved pairs, ${seconds}s racing/run; ${expected} throughout`
+  `${clockStepMs ? 'DIAGNOSTIC' : 'PASS'}: ${rows.length} runs, ${cases.length} cases, ${pairs} interleaved pairs, ${seconds}s racing/run; ${expected} throughout`
 );

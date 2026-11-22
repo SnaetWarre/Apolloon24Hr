@@ -80,3 +80,24 @@ fn unchanged_ticks_reuse_queue_order_and_data_changes_replace_it() {
     s.snapshot = Value::Null;
     assert!(board_data(&s).positions.is_empty());
 }
+
+#[test]
+fn only_mounted_intersecting_queue_rows_supply_clock_deadlines() {
+    let mut s = state();
+    let runner = s.snapshot["runners"][0].clone();
+    assert!(tick_cache::clock_visible(&s, &runner), "first layout is conservative");
+    s.queue_page.rects.insert("lane-waiting".into(), [100.0, 200.0, 400.0, 300.0]);
+    for rect in [[110.0, 250.0, 380.0, 53.0], [110.0, 490.0, 380.0, 53.0]] {
+        s.queue_page.rects.insert("row-a".into(), rect);
+        assert!(tick_cache::clock_visible(&s, &runner));
+    }
+    for rect in [[110.0, 500.0, 380.0, 53.0], [110.0, 140.0, 380.0, 53.0], [501.0, 250.0, 380.0, 53.0]] {
+        s.queue_page.rects.insert("row-a".into(), rect);
+        assert!(!tick_cache::clock_visible(&s, &runner));
+    }
+    s.queue_page.filter = TextEdit::new("no matching runner");
+    assert!(board_data(&s).waiting.is_empty());
+    assert!(board_data(&s).warming.is_empty());
+    s.snapshot = Value::Null;
+    assert!(board_data(&s).waiting.is_empty());
+}

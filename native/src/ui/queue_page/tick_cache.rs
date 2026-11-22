@@ -49,3 +49,12 @@ pub(super) fn available_version(s: &State) -> impl Hash + '_ {
         q.available_open, brussels_moment(s.clock), s.dark, s.connected, s.busy, s.logos.len(),
     )
 }
+
+pub(super) fn clock_visible(s: &State, r: &Value) -> bool {
+    let rects = &s.queue_page.rects;
+    let Some(viewport) = rects.get(&format!("lane-{}", st(r, "status"))) else { return true };
+    let Some(row) = rects.get(&format!("row-{}", st(r, "id"))) else { return true };
+    row[0] < viewport[0] + viewport[2] && row[0] + row[2] > viewport[0]
+        && row[1] < (viewport[1] + viewport[3]).min(s.queue_page.window_h)
+        && row[1] + row[3] > viewport[1].max(0.0)
+}

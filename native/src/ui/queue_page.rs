@@ -16,8 +16,9 @@ const TOAST_MS: i64 = 4_000;
 
 pub(super) fn clocks(s: &State, clock: &mut clock::Sample) {
     clock.value(brussels_moment(s.clock));
-    for r in runners(s) {
-        if matches!(st(r, "status"), "waiting" | "warming_up") {
+    let board = board_data(s);
+    for r in board.waiting.iter().chain(&board.warming) {
+        if tick_cache::clock_visible(s, r) {
             if let Some(at) = r["statusSince"].as_i64() { clock.bucket(at, 1000); }
         }
     }
