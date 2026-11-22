@@ -93,6 +93,7 @@ fn touched(old: &Rows, new: &Rows) -> Vec<String> {
 }
 
 impl HistoryLog {
+    pub(super) fn epoch(&self) -> &str { &self.epoch }
     pub(super) fn new() -> Self {
         Self {
             epoch: uuid::Uuid::new_v4().simple().to_string()[..12].to_owned(),

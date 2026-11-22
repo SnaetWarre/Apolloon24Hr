@@ -58,6 +58,7 @@ fn stored_key(r: &Value, reg: &Value) -> String {
     .join("\u{1}")
 }
 impl Form {
+    pub(super) fn runner_id(&self) -> &str { &self.id }
     pub(super) fn new(runner: &Value, registration: &Value) -> Self {
         Self {
             id: st(runner, "id").to_string(),
@@ -97,6 +98,11 @@ fn registration<'a>(s: &'a State, id: &str) -> &'a Value {
     &s.admin.registrations[id]
 }
 pub(super) fn open(s: &mut State, id: &str) {
+    #[cfg(target_arch = "wasm32")]
+    if s.history["scope"] != "full" {
+        s.send("runners.profile", json!({"id":id}));
+        return;
+    }
     let Some(r) = runner(s, id) else { return };
     let form = Form::new(r, registration(s, id));
     s.profile = Some(form);

@@ -818,6 +818,11 @@ pub(super) fn modal(s: &State) -> Option<El> {
         return Some(confirm_dialog(s, c));
     }
     if s.profile.is_some() {
+        #[cfg(target_arch = "wasm32")]
+        if s.history["scope"] != "full" && !s.profile.as_ref().is_some_and(|f|
+            s.history["scope"] == "runner" && s.history["runnerId"] == f.runner_id()) {
+            return None;
+        }
         return Some(profile::modal(s));
     }
     if s.page != 8 {

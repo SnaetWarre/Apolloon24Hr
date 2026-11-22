@@ -10,6 +10,10 @@ const directory = resolve('.tmp-bench', 'push-recovery-' + new Date().toISOStrin
 await mkdir(directory, { recursive: true });
 const laptops = [];
 const longPollTimeoutMs = 2000;
+const maxIdlePolls = (elapsed) => Math.floor((elapsed + 250) / longPollTimeoutMs) + 1;
+assert.equal(maxIdlePolls(5999.5), 4);
+assert.equal(maxIdlePolls(6000), 4);
+assert(6000 / 333 > maxIdlePolls(6000));
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 async function eventually(fn, timeout = 20000) {
   const until = Date.now() + timeout;
@@ -183,7 +187,7 @@ try {
   const pollElapsedMs = performance.now() - pollStarted;
   const headRequests = stateRequests - headStart;
   // A partial first poll can complete immediately; subsequent idle polls wait server::state's timeout.
-  const maxRequests = Math.floor(pollElapsedMs / longPollTimeoutMs) + 1;
+  const maxRequests = maxIdlePolls(pollElapsedMs);
   assert(
     headRequests >= 1 && headRequests <= maxRequests,
     `${headRequests} unchanged polls in ${Math.round(pollElapsedMs)}ms (limit ${maxRequests})`
