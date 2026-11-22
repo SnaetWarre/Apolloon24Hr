@@ -193,6 +193,7 @@ export function nativeFrameMetrics(events, writes) {
     const runtimeCpuUs = phaseWork('runtime', false, true);
     return {
       lapId: w.lapId,
+      urgentStateRequests: native.filter((e) => e.stage === 'urgent_state_request' && e.lapId === w.lapId).length,
       urgentStateAdmission: Number(
         native.some(
           (e) =>
@@ -429,7 +430,7 @@ export function stageMarkdown(metrics) {
     metrics.stages
       .map((s) => `| ${s.name} | ${s.n} | ${s.p50 ?? 'N/A'} | ${s.p95 ?? 'N/A'} | ${s.max ?? 'N/A'} |`)
       .join('\n') +
-    '\n\n## Native per press (µs)\n\n| Lap | Urgent (0/1) | Push→apply | Transport ready | Prior submit | Prior present | Own apply | Other before apply | Build/acquire excl. apply | Upload/encode | Submit | Present | Frame→pixels |\n|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n' +
+    '\n\n## Native per press (µs)\n\n| Lap | Urgent requests | Urgent (0/1) | Push→apply | Transport ready | Prior submit | Prior present | Own apply | Other before apply | Build/acquire excl. apply | Upload/encode | Submit | Present | Frame→pixels |\n|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n' +
     metrics.nativeFrames
       .map(
         (f) =>
@@ -437,6 +438,7 @@ export function stageMarkdown(metrics) {
           [
             f.lapId,
             ...[
+              'urgentStateRequests',
               'urgentStateAdmission',
               'pushAppliedUs',
               'transportReadyUs',

@@ -42,6 +42,7 @@ mod tactics_page;
 mod timing_page;
 mod timing_text;
 mod history_sync;
+mod state_wake;
 #[cfg(test)]
 mod cluster_ui_test;
 #[cfg(test)]
@@ -81,7 +82,7 @@ struct Update {
     images: Vec<(String, Vec<u8>)>,
     clock_offset: Option<i64>,
 }
-type WakeSlot = std::sync::Arc<std::sync::Mutex<Option<rune::Waker>>>;
+type WakeSlot = std::sync::Arc<std::sync::Mutex<state_wake::Wakes>>;
 type CommandWake = std::sync::Arc<std::sync::Mutex<Option<std::task::Waker>>>;
 #[derive(Clone)]
 struct Updates {
@@ -91,8 +92,23 @@ struct Updates {
 impl Updates {
     fn send(&self, update: Update) -> Result<(), mpsc::SendError<Update>> {
         crate::latency::snapshot("update_ready", &update.snapshot);
-        self.sender.send(update)?;
-        if let Some(wake) = self.wake.lock().unwrap().clone() { wake(); }
+        let wake = {
+            let mut wakes = self.wake.lock().unwrap();
+            let wake = if wakes.urgent.is_some() {
+                let request = wakes.request(&update.snapshot, update.partial);
+                crate::latency::state_wake(&update.snapshot, match request {
+                    state_wake::Request::Urgent => None,
+                    state_wake::Request::Ordinary(reason) => Some(reason),
+                });
+                match request {
+                    state_wake::Request::Urgent => wakes.urgent.clone(),
+                    state_wake::Request::Ordinary(_) => wakes.ordinary.clone(),
+                }
+            } else { wakes.ordinary.clone() };
+            self.sender.send(update)?;
+            wake
+        };
+        if let Some(wake) = wake { wake(); }
         Ok(())
     }
 }
@@ -491,6 +507,7 @@ fn poll(s: &mut State, _: f64, tx: &mut Tx) -> bool {
             s.snapshot = update.snapshot;
             changed = true;
         }
+        if s.urgent_state_wake.is_some() { s.transport_wake.lock().unwrap().applied(&s.snapshot); }
         #[cfg(target_arch = "wasm32")]
         if !update.history.body.is_null() && update.history.body["delta"] != true && update.history.body["scope"] != "full"
             && (s.history["scope"] == "full" || !history_need::wanted(s).matches(&update.history.body)) {
@@ -1312,7 +1329,12 @@ fn desktop_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
 fn setup(s: &mut State, waker: rune::Waker) {
     #[cfg(not(target_arch = "wasm32"))]
     timing_text::prepare();
-    *s.transport_wake.lock().unwrap() = Some(s.urgent_state_wake.clone().unwrap_or_else(|| waker.clone()));
+    {
+        let mut wakes = s.transport_wake.lock().unwrap();
+        wakes.ordinary = Some(waker.clone());
+        wakes.urgent = s.urgent_state_wake.clone();
+        if wakes.urgent.is_some() { wakes.applied(&s.snapshot); }
+    }
     waker();
     let cache = rune::ImageCache::new(waker);
     s.icons = vec![
@@ -1553,7 +1575,9 @@ mod tests {
         let count = Arc::new(AtomicUsize::new(0));
         let called = count.clone();
         let (sender, receiver) = mpsc::channel();
-        let updates = Updates { sender, wake: Arc::new(Mutex::new(Some(Arc::new(move || { called.fetch_add(1, Ordering::SeqCst); })))) };
+        let mut wakes = state_wake::Wakes::default();
+        wakes.ordinary = Some(Arc::new(move || { called.fetch_add(1, Ordering::SeqCst); }));
+        let updates = Updates { sender, wake: Arc::new(Mutex::new(wakes)) };
         updates.send(Update { partial: true, recovery: json!({"available":true}), ..Default::default() }).unwrap();
         assert_eq!(count.load(Ordering::SeqCst), 1);
         let mut state = init_with_url("http://127.0.0.1:0".into());
@@ -1596,7 +1620,7 @@ mod tests {
         });
         let (_commands, commands) = mpsc::channel();
         let (sender, receiver) = mpsc::channel();
-        start_transport(url, commands, Updates { sender, wake: Arc::new(Mutex::new(None)) }, Default::default(), Default::default());
+        start_transport(url, commands, Updates { sender, wake: Default::default() }, Default::default(), Default::default());
         sampled.recv_timeout(Duration::from_secs(5)).unwrap();
         let premature = receiver.try_recv();
         release.send(()).unwrap();
@@ -1640,7 +1664,7 @@ mod tests {
         });
         let (_commands, commands) = mpsc::channel();
         let (sender, receiver) = mpsc::channel();
-        start_transport(url, commands, Updates { sender, wake: Arc::new(Mutex::new(None)) }, Default::default(), Default::default());
+        start_transport(url, commands, Updates { sender, wake: Default::default() }, Default::default(), Default::default());
         let mut unchanged = 0;
         while unchanged < 2 {
             let update = receiver.recv_timeout(Duration::from_secs(5)).unwrap();

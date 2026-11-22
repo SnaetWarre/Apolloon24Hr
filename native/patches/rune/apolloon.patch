@@ -1888,7 +1888,7 @@ new file mode 100644
 index 0000000..c0f1b7d
 --- /dev/null
 +++ b/crates/rune/src/app/urgent_state_tests.rs
-@@ -0,0 +1,92 @@
+@@ -0,0 +1,111 @@
 +use super::*;
 +
 +#[test]
@@ -1980,6 +1980,25 @@ index 0000000..c0f1b7d
 +            assert!(!handle.shared.urgent_state.admit(true, &mut last, Instant::now()));
 +        }
 +    }
++}
++
++#[test]
++fn b4_4_ordinary_duplicate_and_recovery_wakes_admit_exactly_one_urgent_frame() {
++    let mut shared = super::super::Shared::<()>::default();
++    shared.urgent_state = Pending::new(true);
++    let handle = AppHandle { shared: Arc::new(shared) };
++    let request = handle.urgent_state_waker().unwrap();
++    let now = Instant::now();
++    let mut last = None;
++    request();
++    let mut admissions = 0;
++    for delivery in 0..3 {
++        if delivery > 0 { handle.wake(); }
++        admissions += usize::from(handle.shared.urgent_state.admit(true, &mut last, now));
++    }
++    assert_eq!(admissions, 1);
++    assert_eq!(last, Some(now));
++    assert!(!handle.shared.urgent_state.admit(true, &mut last, now));
 +}
 diff --git a/crates/rune/src/platform/display_link.rs b/crates/rune/src/platform/display_link.rs
 index ccdd682..544757c 100644

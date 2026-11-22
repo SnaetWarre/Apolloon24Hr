@@ -36,6 +36,7 @@ test('native frame stages separate prior presentation, apply and redraw work', (
   assert.deepEqual(nativeFrameMetrics(events, [{ lapId: 'lap' }]), [
     {
       lapId: 'lap',
+      urgentStateRequests: 0,
       urgentStateAdmission: 0,
       pushAppliedUs: 20,
       transportReadyUs: 1,
@@ -53,6 +54,9 @@ test('native frame stages separate prior presentation, apply and redraw work', (
   ]);
   assert.deepEqual(nativeFrameMetrics([], []), []);
   const withUrgent = [...events, event('redraw_begin', 20.5), event('urgent_state_admission', 20.75)];
+  assert.equal(nativeFrameMetrics([...withUrgent, event('urgent_state_request', 6.5, 'lap'),
+    { ...event('urgent_state_downgraded', 27, 'lap'), reason: 'duplicate_revision' },
+    event('urgent_state_request', 53, 'other-lap')], [{ lapId: 'lap' }])[0].urgentStateRequests, 1);
   assert.equal(nativeFrameMetrics(withUrgent, [{ lapId: 'lap' }])[0].urgentStateAdmission, 1);
   assert.equal(
     nativeFrameMetrics([...withUrgent, event('redraw_begin', 20.9)], [{ lapId: 'lap' }])[0].urgentStateAdmission,
