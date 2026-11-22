@@ -17,6 +17,13 @@ apply), upload/encode, submit, present and frame-to-pixels time. Separate
 drawable-acquisition and runtime view/layout/paint brackets split build/acquire.
 Runtime excludes the measured apply interval; acquisition includes reconfiguration
 and drawable/GPU waits. Both are subsets of build/acquire, not additional time.
+Fine runtime stages cover view/tree construction, commit, layout, text shaping,
+cold system-font fallback, glyph preparation/rasterization, atlas allocation and
+paint preparation. Commit includes view/layout/text; paint includes glyph/atlas.
+These overlapping columns must not be summed. A fully traced frame with no work
+in a fine phase reports zero; an incomplete phase remains N/A. Unix frame events
+also carry thread CPU microseconds, allowing wall-time stalls to be distinguished
+from computation; runtime CPU includes apply, unlike the wall-time runtime column.
 Old or incomplete traces leave these columns N/A. Raw redraw-entry and macOS
 display-link pacing markers distinguish delivery/startup from building. Submit/present
 are CPU wall times, not GPU execution or physical scanout. Missing boundaries

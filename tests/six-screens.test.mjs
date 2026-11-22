@@ -51,12 +51,49 @@ test('native frame stages separate prior presentation, apply and redraw work', (
     },
   ]);
   assert.deepEqual(nativeFrameMetrics([], []), []);
+  const detail = [
+    event('view_begin', 25),
+    event('view_end', 25.5),
+    event('layout_begin', 25.5),
+    event('text_begin', 25.5),
+    event('text_begin', 26),
+    event('text_end', 26.25),
+    event('text_end', 26.5),
+    event('layout_end', 27),
+    event('paint_begin', 27),
+    event('glyph_begin', 27),
+    event('atlas_begin', 27.25),
+    event('atlas_end', 27.25),
+    event('glyph_end', 28),
+    event('paint_end', 29),
+  ].map((e) => ({ ...e, cpuUs: e.us / 2 }));
+  const [detailed] = nativeFrameMetrics([...events, ...detail], [{ lapId: 'lap' }]);
+  assert.equal(detailed.viewUs, 0.5);
+  assert.equal(detailed.layoutUs, 1.5);
+  assert.equal(detailed.textUs, 1, 'nested shaping spans count their union, not their sum');
+  assert.equal(detailed.textCpuUs, 0.5);
+  assert.equal(detailed.paintUs, 2);
+  assert.equal(detailed.glyphUs, 1);
+  assert.equal(detailed.atlasUs, 0);
+  assert.equal(detailed.fontFallbackUs, 0, 'no cold fallback in a traced frame is zero');
+  assert.equal(detailed.runtimeCpuUs, undefined, 'legacy CPU clocks remain unavailable');
+  const [broken] = nativeFrameMetrics(
+    [...events, ...detail.filter((e) => e.stage !== 'layout_end'), event('font_fallback_end', 28)],
+    [{ lapId: 'lap' }]
+  );
+  assert.equal(broken.layoutUs, undefined);
+  assert.equal(broken.fontFallbackUs, undefined);
+  const [noCpu] = nativeFrameMetrics([...events, ...detail.map((e) => ({ ...e, cpuUs: null }))], [{ lapId: 'lap' }]);
+  assert.equal(noCpu.textUs, 1);
+  assert.equal(noCpu.textCpuUs, undefined);
   const [legacy] = nativeFrameMetrics(
     events.filter((e) => !e.stage.startsWith('acquire_') && !e.stage.startsWith('runtime_')),
     [{ lapId: 'lap' }]
   );
   assert.equal(legacy.acquireUs, undefined);
   assert.equal(legacy.runtimeUs, undefined);
+  assert.equal(legacy.fontFallbackUs, undefined);
+  assert.equal(legacy.paintUs, undefined);
   const [partial] = nativeFrameMetrics(
     events.filter((e) => e.stage !== 'acquire_end'),
     [{ lapId: 'lap' }]

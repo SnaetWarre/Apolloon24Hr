@@ -1421,3 +1421,299 @@ diff --git a/crates/rune/src/window.rs b/crates/rune/src/window.rs
 +    }
      Some((config, crate::render::translucency::mode(surface, adapter)))
  }
+diff --git a/crates/rune/src/frame/encoded.rs b/crates/rune/src/frame/encoded.rs
+--- a/crates/rune/src/frame/encoded.rs
++++ b/crates/rune/src/frame/encoded.rs
+@@ -81,7 +81,7 @@
+ 
+ /// A window's hooks and the count it numbers reports with. Without a hook every call is one
+ /// `Option` check and nothing else, so reporting never changes how the window draws.
+-pub(crate) struct FrameReports<S: 'static>(Option<Reporter>, Option<OnFrameDrawn<S>>, Option<Box<dyn FnMut(&'static str)>>);
++pub(crate) struct FrameReports<S: 'static>(Option<Reporter>, Option<OnFrameDrawn<S>>, Option<super::profile::StageHook>);
+ 
+ impl<S: 'static> Default for FrameReports<S> {
+     fn default() -> Self { Self(None, None, None) }
+@@ -105,12 +105,19 @@
+     }
+ 
+     pub(crate) fn staging(mut self, hook: Option<Box<dyn FnMut(&'static str)>>) -> Self {
+-        self.2 = hook;
++        self.2 = hook.map(|hook| Rc::new(std::cell::RefCell::new(hook)));
+         self
+     }
+ 
+     pub(crate) fn stage(&mut self, name: &'static str) {
+-        if let Some(hook) = &mut self.2 { hook(name); }
++        if let Some(hook) = &self.2 {
++            match name {
++                "runtime_begin" => super::profile::stage_hook(Some(hook.clone())),
++                "runtime_end" => super::profile::stage_hook(None),
++                _ => {},
++            }
++            (hook.borrow_mut())(name);
++        }
+     }
+ 
+     /// The time to report a `Drawn` frame at, taken only when there's a hook.
+diff --git a/crates/rune/src/frame/profile.rs b/crates/rune/src/frame/profile.rs
+--- a/crates/rune/src/frame/profile.rs
++++ b/crates/rune/src/frame/profile.rs
+@@ -3,6 +3,44 @@
+ #[derive(Clone, Copy)]
+ pub(crate) enum Phase { View, Commit, Layout, Text, Paint, Apply }
+ 
++pub(crate) type StageHook = std::rc::Rc<std::cell::RefCell<Box<dyn FnMut(&'static str)>>>;
++
++thread_local! {
++    static STAGE_HOOK: std::cell::RefCell<Option<StageHook>> = const { std::cell::RefCell::new(None) };
++}
++
++pub(crate) fn stage_hook(hook: Option<StageHook>) {
++    STAGE_HOOK.with(|current| *current.borrow_mut() = hook);
++}
++
++pub(crate) struct TraceScope(Option<(StageHook, &'static str)>);
++
++impl TraceScope {
++    pub(crate) fn new(begin: &'static str, end: &'static str) -> Self {
++        let hook = STAGE_HOOK.with(|current| current.borrow().clone());
++        if let Some(hook) = &hook { (hook.borrow_mut())(begin); }
++        Self(hook.map(|hook| (hook, end)))
++    }
++
++    fn phase(phase: Phase) -> Self {
++        let (begin, end) = match phase {
++            Phase::View => ("view_begin", "view_end"),
++            Phase::Commit => ("commit_begin", "commit_end"),
++            Phase::Layout => ("layout_begin", "layout_end"),
++            Phase::Text => ("text_begin", "text_end"),
++            Phase::Paint => ("paint_begin", "paint_end"),
++            Phase::Apply => ("runtime_apply_begin", "runtime_apply_end"),
++        };
++        Self::new(begin, end)
++    }
++}
++
++impl Drop for TraceScope {
++    fn drop(&mut self) {
++        if let Some((hook, end)) = &self.0 { (hook.borrow_mut())(end); }
++    }
++}
++
+ /// Phases timed, each with a wall and a CPU column.
+ #[cfg_attr(not(feature = "frame-profile"), allow(dead_code))]
+ pub const PHASES: usize = 6;
+@@ -27,9 +65,9 @@
+         static TIMES: Cell<[f64; 2 * PHASES]> = const { Cell::new([0.0; 2 * PHASES]) };
+     }
+ 
+-    pub(crate) struct Scope(Phase, Instant, Option<f64>);
++    pub(crate) struct Scope(Phase, Instant, Option<f64>, #[allow(dead_code)] super::TraceScope);
+     impl Scope {
+-        pub(crate) fn new(phase: Phase) -> Self { Self(phase, Instant::now(), cpu_ms()) }
++        pub(crate) fn new(phase: Phase) -> Self { Self(phase, Instant::now(), cpu_ms(), super::TraceScope::phase(phase)) }
+     }
+     impl Drop for Scope {
+         fn drop(&mut self) {
+@@ -146,12 +184,12 @@
+ /// (`perf_warn::budget`) and in a frame interaction timing follows (`tooling::interaction`),
+ /// and otherwise costs a cached flag and a thread-local one.
+ #[cfg(not(feature = "frame-profile"))]
+-pub(crate) struct Scope(Option<(Phase, crate::time::Instant)>);
++pub(crate) struct Scope(Option<(Phase, crate::time::Instant)>, #[allow(dead_code)] TraceScope);
+ #[cfg(not(feature = "frame-profile"))]
+ impl Scope {
+     #[inline(always)]
+     pub(crate) fn new(phase: Phase) -> Self {
+-        Self((crate::tooling::perf_warn::budget::on() || crate::tooling::interaction::active()).then(|| (phase, crate::time::Instant::now())))
++        Self((crate::tooling::perf_warn::budget::on() || crate::tooling::interaction::active()).then(|| (phase, crate::time::Instant::now())), TraceScope::phase(phase))
+     }
+ }
+ #[cfg(not(feature = "frame-profile"))]
+@@ -164,3 +202,7 @@
+         if crate::tooling::interaction::active() { crate::tooling::interaction::add(phase, ms); }
+     }
+ }
++
++#[cfg(test)]
++#[path = "profile_tests.rs"]
++mod tests;
+diff --git a/crates/rune/src/frame/profile_tests.rs b/crates/rune/src/frame/profile_tests.rs
+new file mode 100644
+--- /dev/null
++++ b/crates/rune/src/frame/profile_tests.rs
+@@ -0,0 +1,36 @@
++use super::*;
++use std::{cell::RefCell, rc::Rc};
++
++#[test]
++fn runtime_scopes_use_only_the_current_windows_hook() {
++    let seen = Rc::new(RefCell::new(Vec::new()));
++    let events = seen.clone();
++    let mut reports = crate::frame::encoded::FrameReports::<()>::default()
++        .staging(Some(Box::new(move |stage| events.borrow_mut().push(stage))));
++    reports.stage("runtime_begin");
++    {
++        let _view = Scope::new(Phase::View);
++        let _text = Scope::new(Phase::Text);
++    }
++    reports.stage("runtime_end");
++    drop(Scope::new(Phase::Paint));
++    assert_eq!(*seen.borrow(), ["runtime_begin", "view_begin", "text_begin", "text_end", "view_end", "runtime_end"]);
++}
++
++#[test]
++fn untraced_runtime_scopes_have_no_hook() {
++    stage_hook(None);
++    assert!(TraceScope::new("glyph_begin", "glyph_end").0.is_none());
++}
++
++#[test]
++fn an_empty_runtime_clears_its_hook() {
++    let seen = Rc::new(RefCell::new(Vec::new()));
++    let events = seen.clone();
++    let mut reports = crate::frame::encoded::FrameReports::<()>::default()
++        .staging(Some(Box::new(move |stage| events.borrow_mut().push(stage))));
++    reports.stage("runtime_begin");
++    reports.stage("runtime_end");
++    assert!(TraceScope::new("atlas_begin", "atlas_end").0.is_none());
++    assert_eq!(*seen.borrow(), ["runtime_begin", "runtime_end"]);
++}
+diff --git a/crates/rune/src/runtime/commit/text_layout.rs b/crates/rune/src/runtime/commit/text_layout.rs
+--- a/crates/rune/src/runtime/commit/text_layout.rs
++++ b/crates/rune/src/runtime/commit/text_layout.rs
+@@ -346,6 +346,7 @@
+ /// Lays out the flattened tree in `room`, measuring text leaves. Not generic over the app state,
+ /// so Taffy's layout code is instantiated once, not once per `Runtime<S>`.
+ pub(super) fn compute_layout(taffy: &mut LayoutEngine, root: SlotId, room: Size<AvailableSpace>, nodes: &[Node], text: &mut TextSystem, scale: f32) {
++    let _trace = crate::frame::profile::TraceScope::new("layout_begin", "layout_end");
+     text.forget_diff();
+     taffy.compute_layout(root, room, |inputs, ctx, style| {
+         taffy::compute_leaf_layout(inputs, style, |_, _| 0.0, |known, avail| {
+diff --git a/crates/rune/src/text/atlas.rs b/crates/rune/src/text/atlas.rs
+--- a/crates/rune/src/text/atlas.rs
++++ b/crates/rune/src/text/atlas.rs
+@@ -371,6 +371,7 @@
+     /// first mask, so a text system that only measures (`measure`'s, on each thread that calls it)
+     /// never holds its 4 MiB.
+     pub(super) fn alloc(&mut self, w: u32, h: u32) -> Option<(usize, u32, u32)> {
++        let _trace = crate::frame::profile::TraceScope::new("atlas_begin", "atlas_end");
+         let placed = self.place(w, h);
+         if placed.is_some_and(|(page, ..)| page == 0) && self.data.is_empty() {
+             self.data = vec![0; (ATLAS_SIZE * ATLAS_SIZE) as usize];
+diff --git a/crates/rune/src/text/glyph_cache.rs b/crates/rune/src/text/glyph_cache.rs
+--- a/crates/rune/src/text/glyph_cache.rs
++++ b/crates/rune/src/text/glyph_cache.rs
+@@ -217,6 +217,7 @@
+         band: std::ops::Range<f32>,
+         out: &mut Vec<GlyphQuad>,
+     ) {
++        let _trace = crate::frame::profile::TraceScope::new("glyph_begin", "glyph_end");
+         let mut cache = std::mem::take(&mut self.glyph_cache);
+         let skia = self.direct_write();
+         let tag = self.smoothing.outline_key().unwrap_or_else(|| self.apple.key());
+diff --git a/crates/rune/src/text/glyph_emit.rs b/crates/rune/src/text/glyph_emit.rs
+--- a/crates/rune/src/text/glyph_emit.rs
++++ b/crates/rune/src/text/glyph_emit.rs
+@@ -53,6 +53,7 @@
+         band: std::ops::Range<f32>,
+         out: &mut Vec<GlyphQuad>,
+     ) {
++        let _trace = crate::frame::profile::TraceScope::new("glyph_begin", "glyph_end");
+         let mut table = std::mem::take(&mut self.cluster_scratch);
+         let mut coords = std::mem::take(&mut self.coords_scratch);
+         let mut lo = 0;
+diff --git a/crates/rune/src/text/system_fonts.rs b/crates/rune/src/text/system_fonts.rs
+--- a/crates/rune/src/text/system_fonts.rs
++++ b/crates/rune/src/text/system_fonts.rs
+@@ -276,6 +276,7 @@
+             return;
+         }
+         // The first system font a launch loads, for its trace (`marks`).
++        let _trace = crate::frame::profile::TraceScope::new("font_fallback_begin", "font_fallback_end");
+         crate::marks::mark("text.fallback.begin");
+         for (i, ch) in scripts {
+             register_script_fallbacks(&mut self.font_cx.collection, &mut self.font_files, &fallback::SCRIPT_FONTS[i], ch, locale.as_deref());
+diff --git a/crates/rune/src/tooling.rs b/crates/rune/src/tooling.rs
+--- a/crates/rune/src/tooling.rs
++++ b/crates/rune/src/tooling.rs
+@@ -29,6 +29,7 @@
+     pub fonts: &'static [&'static [u8]],
+     pub families: (&'static str, &'static str),
+     /// Called once with a waker other threads use when new data arrives.
++    /// Text measurements here use the window's own cache, before its first frame.
+     pub setup: Option<fn(&mut S, Waker)>,
+     /// Called at the start of every frame with seconds since start (virtual when headless);
+     /// true when state changed.
+@@ -152,7 +153,7 @@
+     }
+     if let Some(f) = spec.setup {
+         crate::marks::mark("app.setup");
+-        f(&mut rt.state, waker);
++        crate::text::lend(&mut rt.text, || f(&mut rt.state, waker));
+         crate::marks::mark("app.setup.done");
+     }
+     rt
+@@ -547,3 +548,7 @@
+ #[cfg(test)]
+ #[path = "tooling/tests.rs"]
+ mod tests;
++
++#[cfg(test)]
++#[path = "tooling/text_setup_tests.rs"]
++mod text_setup_tests;
+diff --git a/crates/rune/src/tooling/text_setup_tests.rs b/crates/rune/src/tooling/text_setup_tests.rs
+new file mode 100644
+--- /dev/null
++++ b/crates/rune/src/tooling/text_setup_tests.rs
+@@ -0,0 +1,50 @@
++use super::*;
++
++const SAMPLE: &str = "✓";
++
++fn spec() -> AppSpec<()> {
++    AppSpec::new("text setup", (100.0, 100.0), || (), |_, _| crate::el())
++}
++
++fn runtime(spec: &AppSpec<()>) -> Runtime<()> {
++    runtime_for(spec, (), spec.size, Env::default(), std::sync::Arc::new(|| {}))
++}
++
++#[test]
++fn setup_measurements_warm_the_windows_text_cache() {
++    let mut spec = spec();
++    spec.setup = Some(|_, _| { crate::text::measure(SAMPLE, &[], crate::TextStyle::new(13.5, 700.0), None); });
++    let mut warmed = runtime(&spec);
++    assert_eq!(warmed.text.shaped, 1);
++    let style = crate::TextStyle::new(13.5, 700.0);
++    warmed.text.layout_rich(SAMPLE, &[], style, 1.0, None);
++    assert_eq!(warmed.text.shaped, 1, "the setup layout belongs to this window");
++    let mut cold = runtime(&self::spec());
++    let (mut a, mut b) = (Vec::new(), Vec::new());
++    warmed.text.glyphs(SAMPLE, style, 1.0, [0.0; 2], &mut a);
++    cold.text.glyphs(SAMPLE, style, 1.0, [0.0; 2], &mut b);
++    assert_eq!(a.len(), b.len());
++    assert!(!a.is_empty());
++    for (a, b) in a.iter().zip(&b) {
++        assert_eq!(a.rect, b.rect);
++        assert_eq!(a.uv, b.uv);
++    }
++    assert_eq!(warmed.text.atlas.data, cold.text.atlas.data);
++}
++
++#[test]
++fn absent_and_empty_setup_do_not_shape_text() {
++    let mut spec = spec();
++    assert_eq!(runtime(&spec).text.shaped, 0);
++    spec.setup = Some(|_, _| {});
++    assert_eq!(runtime(&spec).text.shaped, 0);
++}
++
++#[test]
++fn panicking_setup_restores_the_measurement_context() {
++    let mut spec = spec();
++    spec.setup = Some(|_, _| panic!("setup failed"));
++    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| runtime(&spec))).is_err());
++    let size = crate::text::measure("after setup", &[], crate::TextStyle::new(14.0, 400.0), None);
++    assert!(size.0 > 0.0 && size.1 > 0.0);
++}
