@@ -768,17 +768,30 @@ impl Node {
     }
     /// True while this laptop leads and a majority holds its whole log.
     pub fn log_settled(&self) -> bool {
-        let st = self.raft.lock().unwrap();
+        self.settled(&self.raft.lock().unwrap())
+    }
+    fn settled(&self, st: &State) -> bool {
         st.role == Role::Leader
             && (self.members().len() == 1
                 || st.committed >= log::head(&self.db.lock().unwrap()).seq)
     }
+    /// Waits up to three seconds for that. What the others still miss is sent to them right away,
+    /// not at the next sign of life, so taking in a laptop does not wait for one.
     pub fn group_settled(&self) -> bool {
         let deadline = Instant::now() + Duration::from_secs(3);
-        while !self.log_settled() && Instant::now() < deadline {
-            std::thread::sleep(Duration::from_millis(20));
+        let mut st = self.raft.lock().unwrap();
+        loop {
+            if self.settled(&st) {
+                return true;
+            }
+            if Instant::now() >= deadline {
+                return false;
+            }
+            if st.role == Role::Leader {
+                self.replicate_to_all(&mut st);
+            }
+            st = self.raft_changed.wait_timeout(st, WAIT_STEP).unwrap().0;
         }
-        self.log_settled()
     }
 
     // Follower side.
