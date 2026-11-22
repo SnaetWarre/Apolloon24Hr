@@ -1,6 +1,6 @@
 # Demand-driven history
 
-Base: `6635497992edd24470f6dd4222834ef7f8bdf325` (main before this change).
+Original tables: base `6635497992edd24470f6dd4222834ef7f8bdf325` (main before this change).
 Both server binaries and WASM assets were built from their corresponding source.
 
 ## Reproduction
@@ -59,6 +59,28 @@ laps and historical label edits. Browser checks cover Queue's main-equivalent
 profile laps/stats and contact preservation, deferred opening, failed scoped requests, lean/full transitions
 and a scope-unaware server. Existing state-push verification covers markers,
 restart and follower failover. No new loading text was added.
+
+## Queue-only refresh after merging main
+
+Five interleaved pairs at 3,000 laps, comparing main `5633391` with the
+merged application at `2d6c13a`. Main's WASM assets were built from the identical
+tree at `f299b6b`. Only Queue was open, with the same 150-runner fixture,
+CPU canvas, 1366×768 viewport and five acknowledged pushes per run.
+The modal starts closed; opening it now requests ten runner rows, waits for
+them before showing the profile, and falls back to sticky full history on failure.
+
+| Metric | Main | Head |
+|---|---:|---:|
+| First-load decoded history B | 1,085,297 | 0 |
+| Equivalent standalone encoded history B | 89,414 | 0 |
+| Actual encoded first-state transfer B | 91,893 | 3,343 |
+| WASM linear-memory capacity MiB | 41.81 | 32.88 |
+| Retained lap rows | 3,000 | 0 |
+
+These are medians of five observations per version. Absolute memory capacities
+are not directly comparable with the original ten-screen runs below: this
+refresh runs Queue alone. Raw results and the Queue-only harness are retained at
+`/home/ubuntu/history-queue-merged-bench/`.
 
 ## Standalone results
 

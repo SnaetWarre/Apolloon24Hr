@@ -89,8 +89,16 @@ async function page() {
   return p;
 }
 async function ready(p, admin = false) {
+  let registrations = false;
+  const initialized = p.waitForResponse((r) => {
+    const u = new URL(r.url());
+    if (u.pathname === '/api/action/runners.registrations' && r.ok()) registrations = true;
+    return registrations && u.pathname === '/api/state' && r.ok() && !u.searchParams.has('after');
+  });
   await p.goto(url + (admin ? '/admin?section=runners' : '/queue'));
+  await (await initialized).finished();
   await p.getByRole('button', { name: admin ? 'Alpha' : 'Alpha: profiel openen', exact: true }).waitFor();
+  await p.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
 }
 async function navigate(p, path) {
   await p.evaluate((path) => {
