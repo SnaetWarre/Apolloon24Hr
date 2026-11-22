@@ -148,6 +148,49 @@ export function nativeFrameMetrics(events, writes) {
     const previousSubmitUs = overlap('submit', ready, apply);
     const previousPresentUs = overlap('present', ready, apply);
     const applyUs = applied - apply;
+    const detailed = native.some((e) => e.us >= build && e.us <= built && e.stage === 'paint_begin');
+    const phaseWork = (stage, excludeApply = false, cpu = false) => {
+      let start,
+        total,
+        depth = 0;
+      for (const event of native) {
+        if (event.us < build || event.us > built) continue;
+        if (event.stage === stage + '_begin') {
+          if (depth++ === 0) start = event;
+        }
+        if (event.stage === stage + '_end') {
+          if (depth === 0) return undefined;
+          if (--depth !== 0) continue;
+          const from = cpu ? start.cpuUs : start.us;
+          const to = cpu ? event.cpuUs : event.us;
+          if (![from, to].every(Number.isFinite) || to < from) return undefined;
+          total = (total ?? 0) + to - from;
+          if (excludeApply) total -= Math.max(0, Math.min(event.us, applied) - Math.max(start.us, apply));
+        }
+      }
+      return depth === 0 ? total : undefined;
+    };
+    const acquireUs = phaseWork('acquire');
+    const runtimeUs = phaseWork('runtime', true);
+    const phases = {};
+    for (const [key, stage] of Object.entries({
+      view: 'view',
+      commit: 'commit',
+      layout: 'layout',
+      text: 'text',
+      fontFallback: 'font_fallback',
+      glyph: 'glyph',
+      atlas: 'atlas',
+      paint: 'paint',
+    })) {
+      const work = phaseWork(stage);
+      const present = native.some((e) => e.us >= build && e.us <= built && e.stage.startsWith(stage + '_'));
+      if (work !== undefined) phases[key + 'Us'] = work;
+      else if (detailed && !present) phases[key + 'Us'] = 0;
+      const cpu = phaseWork(stage, false, true);
+      if (cpu !== undefined) phases[key + 'CpuUs'] = cpu;
+    }
+    const runtimeCpuUs = phaseWork('runtime', false, true);
     return {
       lapId: w.lapId,
       pushAppliedUs: applied - push,
@@ -157,6 +200,10 @@ export function nativeFrameMetrics(events, writes) {
       applyUs,
       otherBeforeApplyUs: apply - ready - previousSubmitUs - previousPresentUs,
       buildUs: built - build - Math.max(0, Math.min(built, applied) - Math.max(build, apply)),
+      ...(acquireUs === undefined ? {} : { acquireUs }),
+      ...(runtimeUs === undefined ? {} : { runtimeUs }),
+      ...(runtimeCpuUs === undefined ? {} : { runtimeCpuUs }),
+      ...phases,
       encodeUs: submit - built,
       submitUs: submitted - submit,
       presentUs: end - present,
@@ -340,6 +387,17 @@ export function stageMetrics(events, writes, results, leader, refresh = []) {
     applyUs: 'native own apply',
     otherBeforeApplyUs: 'native push→apply other transport/scheduling',
     buildUs: 'native view build/acquire excluding apply',
+    acquireUs: 'native drawable acquisition (CPU wall time)',
+    runtimeUs: 'native runtime view/layout/paint excluding apply',
+    runtimeCpuUs: 'native runtime thread CPU including apply (Unix)',
+    viewUs: 'native view/tree build',
+    commitUs: 'native commit inclusive',
+    layoutUs: 'native layout inclusive of text',
+    textUs: 'native text shaping/line breaking',
+    fontFallbackUs: 'native cold system font fallback',
+    glyphUs: 'native glyph preparation/rasterization',
+    atlasUs: 'native glyph atlas allocation',
+    paintUs: 'native paint preparation inclusive of glyphs',
     encodeUs: 'native upload/encode',
     submitUs: 'native GPU submit (CPU wall time)',
     presentUs: 'native present (CPU wall time)',
@@ -385,6 +443,30 @@ export function stageMarkdown(metrics) {
               'presentUs',
               'framePixelsUs',
             ].map((k) => f[k] ?? 'N/A'),
+          ].join(' | ') +
+          ' |'
+      )
+      .join('\n') +
+    '\n\n## Native build phases per press (µs)\n\n| Lap | Acquire | Runtime excl. apply | Runtime CPU incl. apply | View | Commit | Layout | Text | Font fallback | Glyph | Atlas | Paint |\n|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n' +
+    metrics.nativeFrames
+      .map(
+        (f) =>
+          '| ' +
+          [
+            f.lapId,
+            ...[
+              'acquireUs',
+              'runtimeUs',
+              'runtimeCpuUs',
+              'viewUs',
+              'commitUs',
+              'layoutUs',
+              'textUs',
+              'fontFallbackUs',
+              'glyphUs',
+              'atlasUs',
+              'paintUs',
+            ].map((key) => f[key] ?? 'N/A'),
           ].join(' | ') +
           ' |'
       )

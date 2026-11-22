@@ -10,7 +10,19 @@ pub fn enabled() -> bool {
 }
 
 pub fn frame_stage(stage: &'static str) {
-    emit(stage, "native-frame", None);
+    if !enabled() { return; }
+    send_event(json!({"stage":stage,"id":"native-frame","lapId":null,"us":realtime_us(),"cpuUs":thread_cpu_us()}));
+}
+
+fn thread_cpu_us() -> Option<f64> {
+    #[cfg(unix)]
+    {
+        let mut time = libc::timespec { tv_sec: 0, tv_nsec: 0 };
+        if unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut time) } != 0 { return None; }
+        Some(time.tv_sec as f64 * 1_000_000.0 + time.tv_nsec as f64 / 1000.0)
+    }
+    #[cfg(not(unix))]
+    { None }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -165,6 +177,13 @@ pub fn notify() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
+    #[test]
+    fn frame_thread_cpu_clock_is_monotonic() {
+        let before = thread_cpu_us().unwrap();
+        assert!(thread_cpu_us().unwrap() >= before);
+    }
+
     #[test]
     fn trace_records_are_complete_lines_before_writing() {
         for event in [Value::Null, json!({}), json!({"stage":"http_body","id":"line\nbreak"})] {

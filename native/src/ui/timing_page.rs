@@ -775,7 +775,7 @@ pub(super) fn page(s: &State) -> El {
                 .key("timing-done")
                 .role("status")
                 .gap(8.0)
-                .child(text("✓").font(ts(13.5, 700.0).lh(20.25)).color(p.go))
+                .child(text(timing_text::SUCCESS_MARK).font(ts(13.5, 700.0).lh(20.25)).color(p.go))
                 .child(body_text(page.last_action.clone(), p.ink2)),
         );
     }

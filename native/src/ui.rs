@@ -39,6 +39,7 @@ use overview::overview;
 mod shell;
 mod tactics_page;
 mod timing_page;
+mod timing_text;
 mod history_sync;
 #[cfg(test)]
 mod cluster_ui_test;
@@ -1267,6 +1268,8 @@ fn desktop_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
 }
 
 fn setup(s: &mut State, waker: rune::Waker) {
+    #[cfg(not(target_arch = "wasm32"))]
+    timing_text::prepare();
     *s.transport_wake.lock().unwrap() = Some(waker.clone());
     waker();
     let cache = rune::ImageCache::new(waker);
