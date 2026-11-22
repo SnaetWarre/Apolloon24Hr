@@ -193,6 +193,12 @@ export function nativeFrameMetrics(events, writes) {
     const runtimeCpuUs = phaseWork('runtime', false, true);
     return {
       lapId: w.lapId,
+      urgentStateAdmission: Number(
+        native.some(
+          (e) =>
+            e.stage === 'urgent_state_admission' && e.us >= (previous('redraw_begin', build) ?? build) && e.us <= build
+        )
+      ),
       pushAppliedUs: applied - push,
       transportReadyUs: ready - push,
       previousSubmitUs,
@@ -423,7 +429,7 @@ export function stageMarkdown(metrics) {
     metrics.stages
       .map((s) => `| ${s.name} | ${s.n} | ${s.p50 ?? 'N/A'} | ${s.p95 ?? 'N/A'} | ${s.max ?? 'N/A'} |`)
       .join('\n') +
-    '\n\n## Native per press (µs)\n\n| Lap | Push→apply | Transport ready | Prior submit | Prior present | Own apply | Other before apply | Build/acquire excl. apply | Upload/encode | Submit | Present | Frame→pixels |\n|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n' +
+    '\n\n## Native per press (µs)\n\n| Lap | Urgent (0/1) | Push→apply | Transport ready | Prior submit | Prior present | Own apply | Other before apply | Build/acquire excl. apply | Upload/encode | Submit | Present | Frame→pixels |\n|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n' +
     metrics.nativeFrames
       .map(
         (f) =>
@@ -431,6 +437,7 @@ export function stageMarkdown(metrics) {
           [
             f.lapId,
             ...[
+              'urgentStateAdmission',
               'pushAppliedUs',
               'transportReadyUs',
               'previousSubmitUs',

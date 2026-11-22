@@ -36,6 +36,7 @@ test('native frame stages separate prior presentation, apply and redraw work', (
   assert.deepEqual(nativeFrameMetrics(events, [{ lapId: 'lap' }]), [
     {
       lapId: 'lap',
+      urgentStateAdmission: 0,
       pushAppliedUs: 20,
       transportReadyUs: 1,
       previousSubmitUs: 4,
@@ -51,6 +52,13 @@ test('native frame stages separate prior presentation, apply and redraw work', (
     },
   ]);
   assert.deepEqual(nativeFrameMetrics([], []), []);
+  const withUrgent = [...events, event('redraw_begin', 20.5), event('urgent_state_admission', 20.75)];
+  assert.equal(nativeFrameMetrics(withUrgent, [{ lapId: 'lap' }])[0].urgentStateAdmission, 1);
+  assert.equal(
+    nativeFrameMetrics([...withUrgent, event('redraw_begin', 20.9)], [{ lapId: 'lap' }])[0].urgentStateAdmission,
+    0,
+    'an override for an earlier redraw is not attributed to this lap frame'
+  );
   const detail = [
     event('view_begin', 25),
     event('view_end', 25.5),

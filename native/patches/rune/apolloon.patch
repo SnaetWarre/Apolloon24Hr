@@ -1772,3 +1772,259 @@ new file mode 100644
 +        assert_eq!(parse(value), super::super::FRAME_LATENCY);
 +    }
 +}
+diff --git a/crates/rune/src/app.rs b/crates/rune/src/app.rs
+index 50c671a..29a51d5 100644
+--- a/crates/rune/src/app.rs
++++ b/crates/rune/src/app.rs
+@@ -687,12 +687,6 @@ impl<S> Clone for AppHandle<S> {
+ }
+ 
+ impl<S: 'static> AppHandle<S> {
+-    /// Wake the event loop so `AppSpec::poll` runs, also while the window is hidden; for a
+-    /// background thread that queued work for `poll` to drain.
+-    pub fn wake(&self) {
+-        self.request(|q| q.woken = true);
+-    }
+-
+     /// Show the window (creating it if needed), restore it if minimized, and activate the app
+     /// with it in front, including the first open of a window that doesn't exist yet. A
+     /// nonactivating panel takes keys without activating. The window open at launch doesn't
+@@ -817,6 +811,7 @@ impl<S: 'static> AppHandle<S> {
+ }
+ 
+ mod requests;
++pub(crate) mod urgent_state;
+ pub(crate) use requests::{window_request_order, Activation, Requests, Shared, WindowRequest};
+ 
+ #[cfg(test)]
+diff --git a/crates/rune/src/app/requests.rs b/crates/rune/src/app/requests.rs
+index fd39061..20cfb26 100644
+--- a/crates/rune/src/app/requests.rs
++++ b/crates/rune/src/app/requests.rs
+@@ -81,6 +81,7 @@ impl<S> Default for Requests<S> {
+ }
+ 
+ pub(crate) struct Shared<S> {
++    pub(crate) urgent_state: super::urgent_state::Pending,
+     pub(crate) menus: crate::native_menu::Hub<S>,
+     pub(crate) shortcuts: crate::shortcuts::Hub<S>,
+     pub(super) requests: Mutex<Requests<S>>,
+@@ -95,6 +96,7 @@ pub(crate) struct Shared<S> {
+ impl<S> Default for Shared<S> {
+     fn default() -> Self {
+         Shared {
++            urgent_state: super::urgent_state::Pending::default(),
+             menus: crate::native_menu::Hub::default(),
+             shortcuts: crate::shortcuts::Hub::default(),
+             requests: Mutex::default(),
+diff --git a/crates/rune/src/app/urgent_state.rs b/crates/rune/src/app/urgent_state.rs
+new file mode 100644
+index 0000000..6fad851
+--- /dev/null
++++ b/crates/rune/src/app/urgent_state.rs
+@@ -0,0 +1,60 @@
++use super::AppHandle;
++use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
++use std::time::Instant;
++
++pub(crate) struct Pending(Option<AtomicBool>);
++
++impl Default for Pending {
++    fn default() -> Self {
++        Self::new(parse(std::env::var("APOLLOON_URGENT_STATE_FRAME").ok().as_deref()))
++    }
++}
++
++impl Pending {
++    fn new(enabled: bool) -> Self { Self(enabled.then(|| AtomicBool::new(false))) }
++
++    fn request(&self) {
++        if let Some(pending) = &self.0 { pending.store(true, Ordering::Release); }
++    }
++
++    pub(crate) fn clear(&self) {
++        if let Some(pending) = &self.0 { pending.store(false, Ordering::Release); }
++    }
++
++    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
++    pub(crate) fn admit(&self, waiting: bool, last_target: &mut Option<Instant>, now: Instant) -> bool {
++        let pending = self.0.as_ref().is_some_and(|pending| pending.swap(false, Ordering::AcqRel));
++        if waiting && pending {
++            *last_target = Some(now);
++            true
++        } else { false }
++    }
++}
++
++fn parse(value: Option<&str>) -> bool {
++    value.and_then(|value| value.parse::<u32>().ok()) == Some(1)
++}
++
++impl<S: 'static> AppHandle<S> {
++    /// Wake the event loop so `AppSpec::poll` runs, also while the window is hidden; for a
++    /// background thread that queued work for `poll` to drain.
++    pub fn wake(&self) {
++        self.request(|q| q.woken = true);
++    }
++
++    /// A wake for queued authoritative state, with one-shot immediate Metal admission when
++    /// `APOLLOON_URGENT_STATE_FRAME=1`. Other wakes and subsequent animation frames stay paced.
++    /// Returns `None` when the experiment is disabled. Create before running the app.
++    pub fn urgent_state_waker(&self) -> Option<crate::runtime::Waker> {
++        self.shared.urgent_state.0.as_ref()?;
++        let handle = self.clone();
++        Some(Arc::new(move || {
++            handle.shared.urgent_state.request();
++            handle.wake();
++        }))
++    }
++}
++
++#[cfg(test)]
++#[path = "urgent_state_tests.rs"]
++mod tests;
+diff --git a/crates/rune/src/app/urgent_state_tests.rs b/crates/rune/src/app/urgent_state_tests.rs
+new file mode 100644
+index 0000000..c0f1b7d
+--- /dev/null
++++ b/crates/rune/src/app/urgent_state_tests.rs
+@@ -0,0 +1,92 @@
++use super::*;
++
++#[test]
++fn parser_requires_one_and_rejects_absent_empty_zero_or_invalid() {
++    for value in [None, Some(""), Some("0"), Some("2"), Some("-1"), Some("true"), Some(" 1"), Some("4294967296")] {
++        assert!(!parse(value), "{value:?}");
++    }
++    assert!(parse(Some("1")));
++}
++
++#[test]
++fn disabled_requests_and_unrequested_frames_never_override_wait() {
++    let now = Instant::now();
++    for enabled in [false, true] {
++        let pending = Pending::new(enabled);
++        let mut last = None;
++        assert!(!pending.admit(true, &mut last, now));
++        assert_eq!(last, None);
++        if !enabled {
++            pending.request();
++            assert!(!pending.admit(true, &mut last, now));
++            assert_eq!(last, None);
++        }
++    }
++}
++
++#[test]
++fn repeated_sends_coalesce_and_only_the_next_wait_is_overridden() {
++    let pending = Pending::new(true);
++    let now = Instant::now();
++    let mut last = None;
++    for _ in 0..10 { pending.request(); }
++    assert!(pending.admit(true, &mut last, now));
++    assert_eq!(last, Some(now));
++    assert!(!pending.admit(true, &mut last, now));
++    pending.request();
++    assert!(pending.admit(true, &mut last, now));
++}
++
++#[test]
++fn naturally_admitted_frame_consumes_urgency_without_changing_target() {
++    let pending = Pending::new(true);
++    let now = Instant::now();
++    let target = now + std::time::Duration::from_millis(16);
++    let mut last = Some(target);
++    pending.request();
++    assert!(!pending.admit(false, &mut last, now));
++    assert_eq!(last, Some(target));
++    assert!(!pending.admit(true, &mut last, now));
++}
++
++#[test]
++fn covered_or_unpaced_poll_clears_urgency_but_later_sends_still_qualify() {
++    let pending = Pending::new(true);
++    let now = Instant::now();
++    let mut last = None;
++    pending.request();
++    pending.clear();
++    assert!(!pending.admit(true, &mut last, now));
++    pending.request();
++    assert!(pending.admit(true, &mut last, now));
++}
++
++#[test]
++fn ordinary_wakes_do_not_mark_state_urgent() {
++    let spec = crate::AppSpec::new("test", (100.0, 100.0), || (), |_, _| crate::text("test"));
++    let app = crate::App::new(spec);
++    let handle = app.handle();
++    let pending = &handle.shared.urgent_state;
++    let mut last = None;
++    handle.wake();
++    assert!(!pending.admit(true, &mut last, Instant::now()));
++}
++
++#[test]
++fn only_qualified_waker_requests_urgent_admission() {
++    for enabled in [false, true] {
++        let mut shared = super::super::Shared::<()>::default();
++        shared.urgent_state = Pending::new(enabled);
++        let handle = AppHandle { shared: Arc::new(shared) };
++        let wake = handle.urgent_state_waker();
++        assert_eq!(wake.is_some(), enabled);
++        if let Some(wake) = wake {
++            for _ in 0..10 { wake(); }
++            assert!(handle.shared.take().woken);
++            let mut last = None;
++            assert!(handle.shared.urgent_state.admit(true, &mut last, Instant::now()));
++            handle.wake();
++            assert!(!handle.shared.urgent_state.admit(true, &mut last, Instant::now()));
++        }
++    }
++}
+diff --git a/crates/rune/src/platform/display_link.rs b/crates/rune/src/platform/display_link.rs
+index ccdd682..544757c 100644
+--- a/crates/rune/src/platform/display_link.rs
++++ b/crates/rune/src/platform/display_link.rs
+@@ -173,6 +173,12 @@ impl DisplayLink {
+         next
+     }
+ 
++    pub(crate) fn next_state_frame(&mut self, pending: &crate::app::urgent_state::Pending) -> (Opportunity, bool) {
++        let next = self.next_frame();
++        let urgent = pending.admit(next == Opportunity::Wait, &mut self.last_target, Instant::now());
++        (if urgent { Opportunity::Now } else { next }, urgent)
++    }
++
+     /// Whether a frame that may draw nothing (a timer's, on a resting surface) can decide that
+     /// before starting the link: it's stopped, and `next_frame` would answer `Now` whenever
+     /// asked from here on, so starting it once the frame turns out to draw paces it the same.
+diff --git a/crates/rune/src/window/draw.rs b/crates/rune/src/window/draw.rs
+index 514a994..ac0656d 100644
+--- a/crates/rune/src/window/draw.rs
++++ b/crates/rune/src/window/draw.rs
+@@ -47,6 +47,7 @@ impl<S: 'static> Host<S> {
+     /// would have run runs without drawing (`covered_step`). It isn't live: a minimize X11
+     /// reports with no event lands here first, and the frame that next draws settles.
+     pub(super) fn covered_frame(&mut self) {
++        self.shared.urgent_state.clear();
+         let Some(l) = self.win.as_mut() else { return };
+         l.timer_frame.drawn();
+         l.presented = None;
+@@ -154,7 +155,8 @@ impl<S: 'static> Host<S> {
+                 None
+             } else {
+                 self.frame_reports.stage("pacing_begin");
+-                let next = pacing.next_frame();
++                let (next, urgent) = pacing.next_state_frame(&self.shared.urgent_state);
++                if urgent { self.frame_reports.stage("urgent_state_admission"); }
+                 self.frame_reports.stage("pacing_end");
+                 let Some(target) = next.target() else { return };
+                 target
+@@ -187,6 +189,7 @@ impl<S: 'static> Host<S> {
+         // The frame moves before the drawable is acquired, so it has the new size; never while
+         // the user holds the window's edge in a live resize.
+         self.frame_reports.stage("build_begin");
++        self.shared.urgent_state.clear();
+         if !hidden && !live_resize { self.step_frame(target.unwrap_or_else(Instant::now)); }
+         let (Some(l), Some((gpu, renderer))) = (self.win.as_mut(), self.gpu.as_mut()) else { return };
+         #[cfg(target_os = "macos")]

@@ -146,6 +146,7 @@ pub struct State {
 
     tx: Sender<Command>,
     transport_wake: WakeSlot,
+    urgent_state_wake: Option<rune::Waker>,
     command_wake: CommandWake,
     rx: Receiver<Update>,
     confirm: Option<Command>,
@@ -316,6 +317,7 @@ fn init_with_url(url: String) -> State {
 
         tx,
         transport_wake,
+        urgent_state_wake: None,
         command_wake,
         rx,
         confirm: None,
@@ -1272,13 +1274,22 @@ pub fn run() {
         ..AppSpec::new("Apolloon Telsysteem", (1366.0, 768.0), init, desktop_view)
     };
     #[cfg(not(target_arch = "wasm32"))]
-    crate::desktop::chrome::run(spec, |app| if crate::latency::enabled() {
-        app.on_frame_drawn(|rt| crate::latency::snapshot("frame", &rt.state.snapshot))
-            .on_frame_stage(crate::latency::frame_stage)
-            .on_frame_encoded(|frame| {
-                if frame.outcome() == rune::FrameOutcome::Drawn { crate::latency::emit("cadence", "native", None); }
+    crate::desktop::chrome::run(spec, |app| {
+        let app = if let Some(wake) = app.handle().urgent_state_waker() {
+            app.init(move || {
+                let mut s = init();
+                s.urgent_state_wake = Some(wake);
+                s
             })
-    } else { app });
+        } else { app };
+        if crate::latency::enabled() {
+            app.on_frame_drawn(|rt| crate::latency::snapshot("frame", &rt.state.snapshot))
+                .on_frame_stage(crate::latency::frame_stage)
+                .on_frame_encoded(|frame| {
+                    if frame.outcome() == rune::FrameOutcome::Drawn { crate::latency::emit("cadence", "native", None); }
+                })
+        } else { app }
+    });
     #[cfg(target_arch = "wasm32")]
     rune::run(spec);
 }
@@ -1301,7 +1312,7 @@ fn desktop_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
 fn setup(s: &mut State, waker: rune::Waker) {
     #[cfg(not(target_arch = "wasm32"))]
     timing_text::prepare();
-    *s.transport_wake.lock().unwrap() = Some(waker.clone());
+    *s.transport_wake.lock().unwrap() = Some(s.urgent_state_wake.clone().unwrap_or_else(|| waker.clone()));
     waker();
     let cache = rune::ImageCache::new(waker);
     s.icons = vec![
