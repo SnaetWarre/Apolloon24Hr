@@ -359,7 +359,7 @@ impl State {
         self.notice.clear();
         self.busy = true;
         #[cfg(target_arch = "wasm32")]
-        if method == "runners.profile" && self.page != 1 {
+        if method == "runners.profile" {
             self.pending_profile = input["id"].as_str().map(str::to_owned);
             history_need::publish(self);
         }
@@ -562,13 +562,8 @@ fn poll(s: &mut State, _: f64, tx: &mut Tx) -> bool {
                         s.notice = "Label opgeslagen.".into();
                     }
                     "runners.profile" => {
-                        if s.page == 1 {
-                            s.profile = Some(profile::Form::new(&result["runner"], &result["registration"]));
-                            tx.focus_when_shown("profile-number", false);
-                        } else {
-                            s.admin.registrations[admin_base::st(&result["runner"], "id")] = result["registration"].clone();
-                            s.pending_profile_data = Some(result);
-                        }
+                        s.admin.registrations[admin_base::st(&result["runner"], "id")] = result["registration"].clone();
+                        s.pending_profile_data = Some(result);
                     }
                     "runners.create" | "runners.update" => {
                         s.profile = None;
@@ -2429,6 +2424,88 @@ mod tests {
         update(&mut rt, |s| !s.busy && super::runners(s).is_empty());
         assert!(db.lock().unwrap().runners().unwrap().is_empty());
     }
+
+    fn queue_contact_profile() -> (Runtime<State>, Arc<Mutex<crate::db::Db>>, String, crate::server::ServerHandle) {
+        let mut db = crate::db::Db::open(std::path::Path::new(":memory:")).unwrap();
+        let id = db.mutation("runners.create", &json!({"name":"Queue contact","status":"waiting"})).unwrap()["id"].as_str().unwrap().to_owned();
+        db.mutation("runners.update", &json!({"id":id,"fields":{"registrationDetails":{"phone":"0471","email":"queue@example.be","availableHours":["20-21u (dinsdag)"]}}})).unwrap();
+        let db = Arc::new(Mutex::new(db));
+        let socket = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = socket.local_addr().unwrap().port();
+        drop(socket);
+        let host = crate::server::start(db.clone(), port).unwrap();
+        let mut state = init_with_url(format!("http://127.0.0.1:{port}"));
+        state.page = 1;
+        let mut rt = Runtime::new(state, view, (1366.0, 1080.0), Env { system_dark:false, scale:1.0 });
+        rt.frame(0.0);
+        update(&mut rt, |s| s.connected && !s.busy);
+        assert!(rt.state.admin.registrations.is_null());
+        rt.update_if(|s, _| { s.send("runners.profile",json!({"id":id})); true });
+        update(&mut rt, |s| !s.busy && s.profile.is_some());
+        (rt, db, id, host)
+    }
+
+    #[test]
+    fn queue_profile_save_preserves_fetched_contact_without_visiting_admin() {
+        let (mut rt, db, id, _host) = queue_contact_profile();
+        let before = db.lock().unwrap().registrations().unwrap()[&id].clone();
+        assert_eq!(rt.state.admin.registrations[&id],before);
+        db.lock().unwrap().mutation("runners.update", &json!({"id":id,"fields":{"registrationDetails":{"phone":"0472","email":"updated@example.be","availableHours":["21-22u (dinsdag)"]}}})).unwrap();
+        update(&mut rt, |s| !s.busy && s.admin.registrations[&id]["email"] == "updated@example.be");
+        let before = db.lock().unwrap().registrations().unwrap()[&id].clone();
+        profile::follow_stored(&mut rt.state);
+        click(&mut rt,"profile-name");
+        rt.paste(" edited");
+        rt.frame(0.2);
+        rt.wheel(700.0,670.0,-900.0);
+        rt.frame(0.2);
+        click(&mut rt,"profile-save");
+        update(&mut rt, |s| !s.busy && s.profile.is_none());
+        assert_eq!(db.lock().unwrap().registrations().unwrap()[&id],before);
+        assert_eq!(db.lock().unwrap().runner(&id).unwrap()["name"],"Queue contact edited");
+    }
+    #[test]
+    fn queue_profile_remove_confirmation_cancels_then_removes_through_http() {
+        let (mut rt, db, id, _host) = queue_contact_profile();
+        click(&mut rt,"profile-queue-action");
+        click(&mut rt,"admin-confirm-cancel");
+        assert_eq!(db.lock().unwrap().runner(&id).unwrap()["status"],"waiting");
+        assert!(rt.state.profile.is_some());
+        click(&mut rt,"profile-queue-action");
+        click(&mut rt,"admin-confirm-ok");
+        update(&mut rt, |s| !s.busy && s.snapshot["runners"][0]["status"] == "registered");
+        assert!(rt.state.admin.confirm.is_none());
+        assert_eq!(db.lock().unwrap().runner(&id).unwrap()["status"],"registered");
+    }
+
+    #[test]
+    fn queue_profile_latest_confirmation_cancels_then_loads_remote_contact() {
+        let (mut rt, db, id, _host) = queue_contact_profile();
+        click(&mut rt,"profile-name");
+        rt.paste(" draft");
+        rt.frame(0.2);
+        db.lock().unwrap().mutation("runners.update", &json!({"id":id,"fields":{"name":"Remote contact","registrationDetails":{"email":"remote@example.be","phone":"0472","availableHours":["21-22u (dinsdag)"]}}})).unwrap();
+        update(&mut rt, |s| !s.busy && s.admin.registrations[&id]["email"] == "remote@example.be");
+        rt.wheel(700.0,670.0,-1600.0);
+        rt.frame(0.2);
+        click(&mut rt,"profile-load-latest");
+        click(&mut rt,"admin-confirm-cancel");
+        assert!(rt.state.profile.is_some());
+        click(&mut rt,"profile-load-latest");
+        click(&mut rt,"admin-confirm-ok");
+        rt.wheel(700.0,670.0,1600.0);
+        rt.frame(0.2);
+        click(&mut rt,"profile-name");
+        rt.paste(" saved");
+        rt.frame(0.2);
+        rt.wheel(700.0,670.0,-1600.0);
+        rt.frame(0.2);
+        click(&mut rt,"profile-save");
+        update(&mut rt, |s| !s.busy && s.profile.is_none());
+        assert_eq!(db.lock().unwrap().runner(&id).unwrap()["name"],"Remote contact saved");
+        assert_eq!(db.lock().unwrap().registrations().unwrap()[&id]["email"],"remote@example.be");
+    }
+
     #[test]
     fn file_picker_imports_and_reimports_through_the_real_http_server() {
         let path =

@@ -78,7 +78,6 @@ pub(super) fn wanted(s: &State) -> Need {
         format!("/admin?section={}", SECTIONS.get(s.admin_section).unwrap_or(&"unknown"))
     } else { ROUTES.get(s.page).unwrap_or(&"unknown").to_string() };
     let need = Need::route(&route);
-    if s.page == 1 { return need; }
     match s.pending_profile.as_deref().or_else(|| s.profile.as_ref().map(|f| f.runner_id())) {
         Some(id) => need.profile(id),
         None => need,
@@ -114,6 +113,13 @@ mod tests {
         for section in SECTIONS { assert_eq!(Need::route(&format!("/admin?section={section}")), if section == "laps" { Need::Full } else { Need::None }); }
         assert_eq!(Need::None.profile("a"), Need::Runner("a".into(), 10));
         assert_eq!(Need::Recent(5).profile("a"), Need::Full);
+        let mut queue = init_with_url("http://127.0.0.1:0".into());
+        queue.page = 1;
+        assert_eq!(wanted(&queue), Need::None);
+        queue.pending_profile = Some("a".into());
+        assert_eq!(wanted(&queue), Need::Runner("a".into(), 10));
+        queue.history = json!({"scope":"full"});
+        assert_eq!(wanted(&queue), Need::Full);
         let mut path = "/api/state?history=1".into();
         Need::Runner("a&scope=full ?/é".into(), 10).append(&mut path);
         let url = reqwest::Url::parse(&format!("http://localhost{path}")).unwrap();

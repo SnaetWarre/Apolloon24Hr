@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { spawn, execFileSync } from 'node:child_process';
 import { once } from 'node:events';
 import { createServer } from 'node:net';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import { chromium } from 'playwright';
 
@@ -112,22 +112,14 @@ try {
     args: ['--disable-background-timer-throttling', '--disable-renderer-backgrounding'],
   });
   {
-    const p = await page();
-    let runnerRequests = 0;
-    p.on('request', (r) => {
-      if (new URL(r.url()).searchParams.get('historyScope') === 'runner') runnerRequests++;
+    await action('runners.update', {
+      id: 'alpha',
+      fields: {
+        registrationDetails: { phone: '0471', email: 'queue@example.be', availableHours: ['20-21u (dinsdag)'] },
+      },
     });
-    await ready(p);
-    const response = p.waitForResponse((r) => r.url().endsWith('/api/action/runners.profile'));
-    await p.getByRole('button', { name: 'Alpha: profiel openen', exact: true }).click({ force: true });
-    assert((await response).ok());
-    await eventually(
-      async () => (await p.getByRole('button', { name: 'Alpha: profiel openen', exact: true }).count()) === 0,
-      'inert queue'
-    );
-    assert.equal(await dialog(p).count(), 0);
-    assert.equal(runnerRequests, 0);
-    await p.screenshot({ path: join(out, 'queue-inert-unchanged.png') });
+    const before = (await action('runners.profile', { id: 'alpha' })).registration;
+    const p = await page();
     let requested = false,
       release;
     const gate = new Promise((r) => (release = r));
@@ -138,16 +130,52 @@ try {
       }
       await route.continue();
     });
-    await navigate(p, '/admin?section=runners');
-    await eventually(() => requested, 'hidden Queue profile enters Beheer');
+    await ready(p);
+    await p.getByRole('button', { name: 'Alpha: profiel openen', exact: true }).click({ force: true });
+    await eventually(() => requested, 'Queue runner subscription');
     assert.equal(await dialog(p).count(), 0);
     release();
     await dialog(p).waitFor();
     assert.equal(await dialog(p).getByText('Nog geen rondes geregistreerd.', { exact: true }).count(), 0);
+    const full = await page();
+    await full.route('**/api/state?**', async (route) => {
+      const u = new URL(route.request().url());
+      for (const key of ['historyScope', 'historyLimit', 'historyRunnerId']) u.searchParams.delete(key);
+      await route.continue({ url: u.href });
+    });
+    if (process.env.HISTORY_BASE_ASSETS) {
+      for (const file of ['app.js', 'app_bg.wasm'])
+        await full.route('**/' + file, async (route) =>
+          route.fulfill({
+            body: await readFile(join(process.env.HISTORY_BASE_ASSETS, file)),
+            contentType: file.endsWith('.wasm') ? 'application/wasm' : 'text/javascript',
+          })
+        );
+    }
+    await ready(full);
+    await full.getByRole('button', { name: 'Alpha: profiel openen', exact: true }).click({ force: true });
+    await dialog(full).waitFor();
+    const stable = (text) => text.replace(/voor [\d:]+/g, 'voor CLOCK');
+    assert.equal(stable(await dialog(p).innerText()), stable(await dialog(full).innerText()));
+    await full.close();
+    await p.screenshot({ path: join(out, 'queue-scoped-profile.png') });
+    const label = await dialog(p).getByText('Naam', { exact: true }).boundingBox();
+    await p.mouse.click(label.x + 40, label.y + label.height + 20);
+    await p.locator('textarea[aria-label="Naam"]').waitFor({ state: 'attached' });
+    await p.keyboard.press('End');
+    await p.keyboard.type(' edited');
+    await p.waitForTimeout(150);
+    await p.mouse.move(800, 600);
+    await p.mouse.wheel(0, 1800);
+    await p.waitForTimeout(150);
+    await dialog(p).getByRole('button', { name: 'Opslaan', exact: true }).click({ force: true });
+    await dialog(p).waitFor({ state: 'hidden' });
+    assert.deepEqual((await action('runners.profile', { id: 'alpha' })).registration, before);
+    await action('runners.update', { id: 'alpha', fields: { name: 'Alpha' } });
     await p.unrouteAll({ behavior: 'ignoreErrors' });
     await p.close();
     console.log(
-      'PASS: Queue preserves main behavior: successful profile RPC, inert board, no modal and no runner history fetch'
+      'PASS: Queue waits for runner history, matches full-history main laps/stats, and preserves contact details on save'
     );
   }
   {
@@ -174,7 +202,7 @@ try {
     await p.close();
     console.log('PASS: Beheer profile waits for bounded runner history before opening, without empty statistics');
   }
-  {
+  for (const admin of [false, true]) {
     const p = await page();
     let fullFetch = false;
     p.on('request', (r) => {
@@ -185,14 +213,18 @@ try {
         await route.fulfill({ status: 503, json: { error: { message: 'injected failure' } } });
       else await route.continue();
     });
-    await ready(p, true);
-    await p.getByRole('button', { name: 'Alpha', exact: true }).click({ force: true });
+    await ready(p, admin);
+    await p
+      .getByRole('button', { name: admin ? 'Alpha' : 'Alpha: profiel openen', exact: true })
+      .click({ force: true });
     await dialog(p).waitFor();
     assert(fullFetch);
     assert.equal(await dialog(p).getByText('Nog geen rondes geregistreerd.', { exact: true }).count(), 0);
     await p.unrouteAll({ behavior: 'ignoreErrors' });
     await p.close();
-    console.log('PASS: failed runner subscription falls back to full history before opening the profile');
+    console.log(
+      `PASS: failed ${admin ? 'Beheer' : 'Queue'} runner subscription falls back to full history before opening the profile`
+    );
   }
   {
     const p = await page();

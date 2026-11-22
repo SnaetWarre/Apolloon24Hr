@@ -48,17 +48,15 @@ memory and push observations.
 
 ## Compatibility and visible behavior
 
-Queue deliberately retains main's existing profile behavior: the RPC succeeds,
-`State.profile` is populated, the board becomes inert, and no modal is rendered.
-It does not request runner history. Beheer's lean profiles wait for their ten
+Queue and Beheer's lean profiles wait for their ten
 rows and recover with full history on failure. Profiles over Timing/Overview
 request full history to preserve the background page as well. Full routes keep
 the existing deltas. Scope changes bypass old unchanged tokens, and scoped/full
 cursors share a server epoch but cannot be used interchangeably for deltas.
 
 Native element comparisons cover ties, duration corrections, removed/inserted
-laps and historical label edits. Browser checks cover the existing Queue
-behavior, deferred Beheer opening, failed scoped requests, lean/full transitions
+laps and historical label edits. Browser checks cover Queue's main-equivalent
+profile laps/stats and contact preservation, deferred opening, failed scoped requests, lean/full transitions
 and a scope-unaware server. Existing state-push verification covers markers,
 restart and follower failover. No new loading text was added.
 
