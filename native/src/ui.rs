@@ -27,6 +27,7 @@ mod cluster_setup;
 mod group_view;
 mod hex;
 mod history_delivery;
+mod history_need;
 mod label_editor;
 mod laps_panel;
 mod profile;
@@ -135,6 +136,9 @@ pub struct State {
     history_index: history_sync::Index,
     history_sequence: u64,
     history_pending: Vec<history_delivery::Delivery>,
+    history_request: history_need::Request,
+    pending_profile: Option<String>,
+    pending_profile_data: Option<Value>,
     error: String,
     busy: bool,
     connected: bool,
@@ -255,11 +259,19 @@ fn init_with_url(url: String) -> State {
     let (updates, rx) = mpsc::channel();
     let transport_wake = WakeSlot::default();
     let command_wake = CommandWake::default();
-    start_transport(url, commands, Updates { sender: updates, wake: transport_wake.clone() }, command_wake.clone());
+    #[cfg(target_arch = "wasm32")]
+    let need = history_need::Need::route(&browser_route());
+    #[cfg(not(target_arch = "wasm32"))]
+    let need = history_need::Need::Full;
+    let history_request = std::sync::Arc::new(std::sync::Mutex::new(need));
+    start_transport(url, commands, Updates { sender: updates, wake: transport_wake.clone() }, command_wake.clone(), history_request.clone());
     let (file_tx, file_rx) = mpsc::channel();
     #[allow(unused_mut)]
     let mut state = State {
         page: 0,
+        history_request,
+        pending_profile: None,
+        pending_profile_data: None,
         page_seen: 0,
         profile: None,
         activity: Vec::new(),
@@ -346,6 +358,11 @@ impl State {
         self.error.clear();
         self.notice.clear();
         self.busy = true;
+        #[cfg(target_arch = "wasm32")]
+        if method == "runners.profile" && self.page != 1 {
+            self.pending_profile = input["id"].as_str().map(str::to_owned);
+            history_need::publish(self);
+        }
         if self
             .tx
             .send(Command {
@@ -400,6 +417,8 @@ fn poll(s: &mut State, _: f64, tx: &mut Tx) -> bool {
     if !s.fixture && sync_route(s) {
         changed = true;
     }
+    #[cfg(target_arch = "wasm32")]
+    if !s.fixture { history_need::publish(s); }
     if s.page != s.page_seen {
         s.page_seen = s.page;
         s.error.clear();
@@ -432,7 +451,8 @@ fn poll(s: &mut State, _: f64, tx: &mut Tx) -> bool {
             Err(e) => s.error = e,
         }
     }
-    while let Ok(update) = s.rx.try_recv() {
+    #[allow(unused_mut)]
+    while let Ok(mut update) = s.rx.try_recv() {
         let traced = crate::latency::enabled() && !update.snapshot.is_null();
         if traced { crate::latency::snapshot("apply_begin", &update.snapshot); }
         if let Some(offset) = update.clock_offset
@@ -469,6 +489,11 @@ fn poll(s: &mut State, _: f64, tx: &mut Tx) -> bool {
             s.snapshot = update.snapshot;
             changed = true;
         }
+        #[cfg(target_arch = "wasm32")]
+        if !update.history.body.is_null() && update.history.body["delta"] != true && update.history.body["scope"] != "full"
+            && (s.history["scope"] == "full" || !history_need::wanted(s).matches(&update.history.body)) {
+            update.history = Default::default();
+        }
         let full_history = !update.history.body.is_null() && update.history.body["delta"] != true
             && update.history.sequence > s.history_sequence;
         match history_delivery::apply(&mut s.history, &mut s.history_sequence, &mut s.history_pending,
@@ -493,6 +518,7 @@ fn poll(s: &mut State, _: f64, tx: &mut Tx) -> bool {
             }
         }
         if let Some((method, outcome)) = update.outcome {
+            if method == "runners.profile" && outcome.is_err() { s.pending_profile = None; s.pending_profile_data = None; }
             changed = true;
             if method == "cluster.testGroup" {
                 s.group.testing = false;
@@ -536,11 +562,10 @@ fn poll(s: &mut State, _: f64, tx: &mut Tx) -> bool {
                         s.notice = "Label opgeslagen.".into();
                     }
                     "runners.profile" => {
-                        s.profile = Some(profile::Form::new(
-                            &result["runner"],
-                            &result["registration"],
-                        ));
-                        tx.focus_when_shown("profile-number", false);
+                        if s.page == 1 {
+                            s.profile = Some(profile::Form::new(&result["runner"], &result["registration"]));
+                            tx.focus_when_shown("profile-number", false);
+                        } else { s.pending_profile_data = Some(result); }
                     }
                     "runners.create" | "runners.update" => {
                         s.profile = None;
@@ -599,6 +624,14 @@ fn poll(s: &mut State, _: f64, tx: &mut Tx) -> bool {
             }
         }
         if traced { crate::latency::snapshot("applied", &s.snapshot); }
+    }
+    if let Some(result) = &s.pending_profile_data
+        && (s.history["scope"] == "full" || (s.history["scope"] == "runner" && s.history["runnerId"] == result["runner"]["id"])) {
+        s.profile = Some(profile::Form::new(&result["runner"], &result["registration"]));
+        s.pending_profile = None;
+        s.pending_profile_data = None;
+        tx.focus_when_shown("profile-number", false);
+        changed = true;
     }
     let clock_changed = clock::advance(s, tx);
     if group_view::observe(s) {
@@ -1554,7 +1587,7 @@ mod tests {
         });
         let (_commands, commands) = mpsc::channel();
         let (sender, receiver) = mpsc::channel();
-        start_transport(url, commands, Updates { sender, wake: Arc::new(Mutex::new(None)) }, Default::default());
+        start_transport(url, commands, Updates { sender, wake: Arc::new(Mutex::new(None)) }, Default::default(), Default::default());
         sampled.recv_timeout(Duration::from_secs(5)).unwrap();
         let premature = receiver.try_recv();
         release.send(()).unwrap();
@@ -1598,7 +1631,7 @@ mod tests {
         });
         let (_commands, commands) = mpsc::channel();
         let (sender, receiver) = mpsc::channel();
-        start_transport(url, commands, Updates { sender, wake: Arc::new(Mutex::new(None)) }, Default::default());
+        start_transport(url, commands, Updates { sender, wake: Arc::new(Mutex::new(None)) }, Default::default(), Default::default());
         let mut unchanged = 0;
         while unchanged < 2 {
             let update = receiver.recv_timeout(Duration::from_secs(5)).unwrap();
@@ -2789,6 +2822,9 @@ fn clock_offset(samples: impl IntoIterator<Item = (i64, i64, i64)>) -> Option<i6
 /// history follows the server revision, label images are fetched once, recovery every few seconds.
 #[derive(Default)]
 struct Synced {
+    request: history_need::Request,
+    loaded_need: Option<history_need::Need>,
+    full_loaded: bool,
     history_revision: Option<i64>,
     history_sequence: u64,
     /// Identities validate deltas and image paths retain retries; payloads move to the UI.
@@ -2799,12 +2835,26 @@ struct Synced {
     images: std::collections::HashSet<String>,
 }
 impl Synced {
+    fn need(&self) -> history_need::Need {
+        if self.full_loaded { history_need::Need::Full } else { self.request.lock().unwrap().clone() }
+    }
+    fn take_scoped(&mut self, reply: Value, need: &history_need::Need) -> Option<history_delivery::Delivery> {
+        let full = reply["scope"] == "full" || reply["delta"] == true;
+        if !full && &self.need() != need { return Some(Default::default()); }
+        if reply["revision"].as_i64().is_none() { return None; }
+        if !full && !need.matches(&reply) { return None; }
+        let result = self.take_history(reply);
+        if result.as_ref().is_some_and(|r| r.sequence > 0) { self.loaded_need = Some(if full { history_need::Need::Full } else { need.clone() }); }
+        result
+    }
     fn state_path(&self, after: Option<&str>, screen: Option<&str>) -> String {
         let mut path = String::from("/api/state?history=1");
-        if !self.pending.lock().unwrap().reset {
+        let need = self.need();
+        if !self.pending.lock().unwrap().reset && (self.loaded_need.as_ref() == Some(&need) || (need == history_need::Need::Full && self.loaded_need.is_none())) {
             if let Some(after) = after { path.push_str(&format!("&after={after}")); }
-            if let Some(cursor) = self.history["cursor"].as_str() { path.push_str(&format!("&since={cursor}")); }
+            if need == history_need::Need::Full && let Some(cursor) = self.history["cursor"].as_str() { path.push_str(&format!("&since={cursor}")); }
         }
+        need.append(&mut path);
         if let Some(screen) = screen { path.push_str(&format!("&screen={screen}")); }
         path
     }
@@ -2843,6 +2893,7 @@ impl Synced {
         } else {
             return Some(Default::default());
         }
+        if reply["scope"] == "full" { self.full_loaded = true; self.loaded_need = Some(history_need::Need::Full); }
         self.history_revision = self.history["revision"].as_i64();
         self.history_images.accept(&reply, &self.images);
         self.history_sequence += 1;
@@ -2922,7 +2973,7 @@ fn absolute(url: &str, path: &str) -> String {
 
 /// Actions run on their own thread and never wait behind a long-poll.
 #[cfg(not(target_arch = "wasm32"))]
-fn start_transport(url: String, commands: Receiver<Command>, updates: Updates, _command_wake: CommandWake) {
+fn start_transport(url: String, commands: Receiver<Command>, updates: Updates, _command_wake: CommandWake, request: history_need::Request) {
     use reqwest::blocking::Client;
     use std::sync::{Arc, Mutex};
     let client = Client::builder()
@@ -2930,7 +2981,7 @@ fn start_transport(url: String, commands: Receiver<Command>, updates: Updates, _
         .timeout(Duration::from_secs(25))
         .build()
         .unwrap();
-    let synced = Arc::new(Mutex::new(Synced::default()));
+    let synced = Arc::new(Mutex::new(Synced { request, ..Default::default() }));
     fn get(client: &Client, url: &str, path: &str) -> Value {
         if crate::latency::enabled() && path.starts_with("/api/state") {
             let read = || -> std::result::Result<Value, reqwest::Error> {
@@ -3094,7 +3145,7 @@ fn start_transport(url: String, commands: Receiver<Command>, updates: Updates, _
     });
 }
 #[cfg(target_arch = "wasm32")]
-fn start_transport(url: String, commands: Receiver<Command>, updates: Updates, command_wake: CommandWake) {
+fn start_transport(url: String, commands: Receiver<Command>, updates: Updates, command_wake: CommandWake, request: history_need::Request) {
     use std::{cell::RefCell, rc::Rc};
     async fn get(client: &reqwest::Client, url: &str, path: &str) -> Value {
         if crate::latency::enabled() && path.starts_with("/api/state") {
@@ -3139,23 +3190,24 @@ fn start_transport(url: String, commands: Receiver<Command>, updates: Updates, c
             })
             .filter(|kind| matches!(kind.as_str(), "inside" | "competitions" | "outside"))
             ;
+        let need = synced.borrow().need();
         let path = synced.borrow().state_path(after, screen.as_deref());
         let mut snapshot = get(client, url, &path).await;
         if snapshot["unchanged"] == true {
             return Update { snapshot, ..Default::default() };
         }
-        let bundled = snapshot.as_object_mut().and_then(|s| s.remove("stateHistory"));
+        let bundled = need.reply(&mut snapshot);
         let revision = snapshot["revision"].as_i64();
         let changed = full || (revision.is_some() && synced.borrow().history_revision != revision);
         let history = match bundled {
-            Some(reply) => reply,
-            None if changed => {
+            reply if !reply.is_null() => reply,
+            _ if changed || synced.borrow().loaded_need.as_ref() != Some(&need) => {
                 let path = synced.borrow().history_path();
                 get(client, url, &path).await
             }
-            None => Value::Null,
+            _ => Value::Null,
         };
-        let history = synced.borrow_mut().take_history(history);
+        let history = if history.is_null() { Some(Default::default()) } else { synced.borrow_mut().take_scoped(history, &need) };
         let history = match history {
             Some(history) => history,
             None => {
@@ -3228,7 +3280,7 @@ fn start_transport(url: String, commands: Receiver<Command>, updates: Updates, c
         clock_offset(samples)
     }
     let client = reqwest::Client::new();
-    let synced = Rc::new(RefCell::new(Synced::default()));
+    let synced = Rc::new(RefCell::new(Synced { request, ..Default::default() }));
     {
         let (client, url, synced, updates) =
             (client.clone(), url.clone(), synced.clone(), updates.clone());
@@ -3264,6 +3316,10 @@ fn start_transport(url: String, commands: Receiver<Command>, updates: Updates, c
                 if command.method == "race.handoff" { crate::latency::handoff("client_response", &command.input, result.as_ref().ok().and_then(|r| r["lapId"].as_str())); }
                 let image = result.as_ref().ok().and_then(|r| r["imageUrl"].as_str()).map(str::to_owned);
                 let mut update = refresh(&client, &url, &synced, !reads_only(&command.method), image, None).await;
+                let result = if command.method == "runners.profile" && result.is_ok()
+                    && synced.borrow().loaded_need.as_ref() != Some(&synced.borrow().need()) {
+                    Err("Verbinding verbroken".into())
+                } else { result };
                 let recovery = !reads_only(&command.method);
                 update.outcome = Some((command.method, result));
                 if updates.send(update).is_err() {

@@ -27,7 +27,11 @@ impl Db {
                     .filter(|id| !id.is_empty())
                     .ok_or("Loper ontbreekt")?;
                 args.push(json!(id));
-                (" WHERE l.runner_id=?", "", Some(id), None)
+                if limit == 0 { (" WHERE l.runner_id=?", "", Some(id), None) } else {
+                let limit = limit.clamp(1, 1000);
+                args.push(json!(limit));
+                (" WHERE l.runner_id=?", " LIMIT ?", Some(id), Some(limit))
+                }
             }
             _ => return Err("Onbekende geschiedenisselectie".into()),
         };

@@ -72,6 +72,7 @@ pub struct Host {
     pub cluster: Option<Arc<crate::cluster::Node>>,
     reads: Arc<Mutex<ReadCache>>,
     history: Arc<Mutex<HistoryLog>>,
+    history_epoch: String,
     screens: Arc<Mutex<Screens>>,
 }
 impl Host {
@@ -93,6 +94,8 @@ impl Host {
         if let Some(node) = &cluster {
             node.set_discovery(discovery.clone());
         }
+        let history = HistoryLog::new();
+        let history_epoch = history.epoch().to_owned();
         Self {
             db,
             discovery,
@@ -100,7 +103,8 @@ impl Host {
             backups: Arc::new(crate::backup_service::Service::new(path)),
             cluster,
             reads: Arc::default(),
-            history: Arc::new(Mutex::new(HistoryLog::new())),
+            history: Arc::new(Mutex::new(history)),
+            history_epoch,
             screens: Arc::default(),
         }
     }
@@ -186,10 +190,13 @@ fn snapshot_read(host: Host, query: &std::collections::HashMap<String, String>, 
     if let Some(dispatch) = dispatch { marks.push(("snapshot_dispatch", dispatch)); }
     let mut mark = |stage| if crate::latency::enabled() { marks.push((stage, crate::latency::realtime_us())); };
     mark("snapshot_worker");
+    let scope = query.get("historyScope").map(String::as_str).unwrap_or("full");
+    if !matches!(scope, "full" | "none" | "recent" | "runner") {
+        return error_body("Onbekende geschiedenisselectie".into());
+    }
     let mut read = || -> Result<(Bytes, Option<HistoryBody>, Option<String>)> {
         mark("history_lock_begin");
-        let mut history = query
-            .contains_key("history")
+        let mut history = (query.contains_key("history") && scope == "full")
             .then(|| host.history.lock().unwrap());
         mark("history_lock_ready");
         let (db, version, token, changes) = {
@@ -201,6 +208,7 @@ fn snapshot_read(host: Host, query: &std::collections::HashMap<String, String>, 
             let cached = host.reads.try_lock().ok().filter(|cache| {
                 cache.version == Some(version)
                     && cache.snapshot.is_some()
+                    && !matches!(scope, "recent" | "runner")
                     && history.as_ref().is_none_or(|log| log.is_current(version))
             });
             mark("read_cache_lookup_ready");
@@ -252,6 +260,13 @@ fn snapshot_read(host: Host, query: &std::collections::HashMap<String, String>, 
             log.refresh(&db, version, changes)?;
             mark("history_built");
             Some(log.response(query.get("since").map(String::as_str))?)
+        } else if matches!(scope, "recent" | "runner") {
+            let mut value = db.history_scope(scope, query.get("historyRunnerId").map(String::as_str),
+                query.get("historyLimit").and_then(|v| v.parse().ok()).unwrap_or(100))?;
+            value["cursor"] = json!(format!("{}.lean-{scope}:{}:{}", host.history_epoch,
+                query.get("historyLimit").map(String::as_str).unwrap_or("100"),
+                query.get("historyRunnerId").map(String::as_str).unwrap_or("")));
+            Some(HistoryBody::Cached(serde_json::to_vec(&value).map_err(|e| e.to_string())?.into()))
         } else {
             None
         };
@@ -278,6 +293,10 @@ fn snapshot_read(host: Host, query: &std::collections::HashMap<String, String>, 
                 field("cluster", &node.status());
             }
             field("screens", &host.screens.lock().unwrap().active());
+            if query.contains_key("historyScope") {
+                field("historyScope", &json!(scope));
+                field("historyEpoch", &json!(host.history_epoch));
+            }
             if let Some(history) = history {
                 body.extend_from_slice(b",\"stateHistory\":");
                 body.extend_from_slice(&history);
@@ -347,7 +366,7 @@ fn history_result(host: &Host, query: HistoryQuery) -> Result<HistoryBody> {
             .history_scope(
                 scope,
                 query.runner_id.as_deref(),
-                query.limit.unwrap_or(100),
+                query.limit.unwrap_or(if scope == "runner" { 0 } else { 100 }),
             )
             .and_then(|value| {
                 serde_json::to_vec(&value)
@@ -1001,6 +1020,42 @@ mod read_cache_tests {
         assert_eq!(host.reads.lock().unwrap().snapshot_reads, 2);
         pushed(host.clone(), None, true).await;
         assert_eq!(host.reads.lock().unwrap().snapshot_reads, 2);
+    }
+
+    #[tokio::test]
+    async fn opt_in_history_scopes_are_atomic_bounded_and_keep_markers() {
+        let db = Arc::new(Mutex::new(Db::open(std::path::Path::new(":memory:")).unwrap()));
+        db.lock().unwrap().exec("INSERT INTO runners(id,name,status,created_at,updated_at) VALUES('a','Alpha','registered',0,0)", &[]).unwrap();
+        for i in 0..15 {
+            db.lock().unwrap().exec("INSERT INTO laps(id,runner_id,lap_number,started_at,finished_at,duration_ms,source,created_at,labels_json) VALUES(?,'a',?,0,?,60000,'spacebar',?,'[]')", &[json!(format!("l{i}")),json!(i),json!(i/2),json!(i)]).unwrap();
+        }
+        let host = Host::with_cluster(db.clone(),5173,None);
+        let scoped = |scope: &str| std::collections::HashMap::from([("history".into(),"1".into()),("historyScope".into(),scope.into()),("historyLimit".into(),"5".into()),("historyRunnerId".into(),"a".into())]);
+        let full = body(snapshot_with_history(host.clone(), &scoped("full")).await).await;
+        assert_eq!(full["stateHistory"]["laps"].as_array().unwrap().len(),15);
+        let recent = body(snapshot_with_history(host.clone(), &scoped("recent")).await).await;
+        let runner = body(snapshot_with_history(host.clone(), &scoped("runner")).await).await;
+        for value in [&recent, &runner] {
+            assert_eq!(value["stateHistory"]["laps"], json!(full["stateHistory"]["laps"].as_array().unwrap()[..5]));
+            assert_eq!(value["stateHistory"]["revision"],value["revision"]);
+            assert_ne!(value["stateHistory"]["cursor"],full["stateHistory"]["cursor"]);
+            assert_eq!(value["stateHistory"]["cursor"].as_str().unwrap().split('.').next(),full["stateHistory"]["cursor"].as_str().unwrap().split('.').next());
+        }
+        let none = body(snapshot_with_history(host.clone(), &scoped("none")).await).await;
+        assert_eq!(none["historyScope"],"none");
+        assert!(none["stateHistory"].is_null());
+        let mut marker_query = scoped("recent");
+        marker_query.insert("after".into(), recent["changeToken"].as_str().unwrap().into());
+        let marker = body(snapshot_request(State(host.clone()),axum::extract::ConnectInfo("127.0.0.1:1234".parse().unwrap()),Query(marker_query)).await).await;
+        assert_eq!(marker["unchanged"],true);
+        assert!(marker["stateHistory"].is_null());
+        let legacy = body(snapshot_with_history(host.clone(), &std::collections::HashMap::from([("history".into(),"1".into())])).await).await;
+        assert_eq!(legacy["stateHistory"],full["stateHistory"]);
+        assert!(legacy["historyScope"].is_null());
+        assert_eq!(db.lock().unwrap().history_scope("runner",Some("a"),0).unwrap()["laps"].as_array().unwrap().len(),15);
+        let mut bad = scoped("runner"); bad.remove("historyRunnerId");
+        assert!(body(snapshot_with_history(host.clone(), &bad).await).await["error"].is_object());
+        assert!(body(snapshot_with_history(host, &scoped("unknown")).await).await["error"].is_object());
     }
 
     #[tokio::test]
