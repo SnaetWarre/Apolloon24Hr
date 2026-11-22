@@ -725,6 +725,66 @@ fn a_press_right_after_the_leading_timing_laptop_is_cut_off_is_kept() {
     press_right_after_the_timing_laptop_is_cut_off(true);
 }
 
+/// The leading Timing laptop's disk stalls on its own copy of a press: the press is confirmed
+/// by the two others, and shows there, without waiting for it.
+fn press_while_the_timing_laptop_disk_stalls(dir: &Dir) -> (TestServer, TestServer, TestServer, Duration) {
+    let (a, b, c) = linked_three(dir);
+    a.act("runners.create", json!({"name":"Wout","status":"waiting"}))
+        .unwrap();
+    assert!(a.node.is_leader());
+    a.act("cluster.openTiming", json!({"takeOver": false})).unwrap();
+    press(&a, "race.handoff").unwrap();
+    wait_until("the start on every laptop", Duration::from_secs(5), || {
+        same_heads(&[&a, &b, &c])
+    });
+    let stall = Duration::from_secs(3);
+    *a.node.slow_disk.lock().unwrap() = stall;
+    let pressed = Instant::now();
+    let lap = press(&a, "race.handoff").unwrap()["lapId"].clone();
+    let took = pressed.elapsed();
+    assert!(lap.is_string());
+    for other in [&b, &c] {
+        assert_eq!(other.count("SELECT COUNT(*) AS n FROM laps"), 1);
+    }
+    (a, b, c, took)
+}
+
+#[test]
+fn a_slow_disk_on_the_timing_laptop_does_not_hold_up_its_press() {
+    let _serial = serial();
+    let dir = Dir::new();
+    let (a, b, c, took) = press_while_the_timing_laptop_disk_stalls(&dir);
+    assert!(took < Duration::from_millis(1_500), "the press took {took:?}");
+    wait_until("the lap on the Timing laptop", Duration::from_secs(5), || {
+        a.count("SELECT COUNT(*) AS n FROM laps") == 1
+    });
+    *a.node.slow_disk.lock().unwrap() = Duration::ZERO;
+    press(&a, "race.handoff").unwrap();
+    wait_until("two laps on every laptop", Duration::from_secs(5), || {
+        same_heads(&[&a, &b, &c]) && [&a, &b, &c].iter().all(|s| s.count("SELECT COUNT(*) AS n FROM laps") == 2)
+    });
+}
+
+#[test]
+fn a_press_confirmed_by_the_others_survives_the_timing_laptop_failing() {
+    let _serial = serial();
+    let dir = Dir::new();
+    let (a, b, c, _) = press_while_the_timing_laptop_disk_stalls(&dir);
+    let lap = b.db.lock().unwrap().one("SELECT id AS n FROM laps", &[]).unwrap()["n"].clone();
+    a.kill();
+    wait_until("a new leader", Duration::from_secs(10), || {
+        leader_index(&[&b, &c]).is_some()
+    });
+    b.act("runners.create", json!({"name":"Mitras","status":"waiting"}))
+        .unwrap();
+    for server in [&b, &c] {
+        assert_eq!(
+            server.db.lock().unwrap().one("SELECT id AS n FROM laps", &[]).unwrap()["n"],
+            lap
+        );
+    }
+}
+
 /// The leader fails while the Timing laptop still reaches a second laptop: the press waits for
 /// the takeover and the group stays whole.
 #[test]

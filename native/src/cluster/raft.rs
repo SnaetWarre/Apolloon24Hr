@@ -569,23 +569,18 @@ impl Node {
                         entries.push(pending.entry.clone());
                     }
                 }
-                let split = log::json_setting(&db, "cluster_split_json")["id"].clone();
-                let cluster_id = log::setting(&db, "replication_cluster_id").unwrap_or_default();
+                let group = log_group(&db);
                 drop(db);
-                let url = p.member.url.clone();
-                let request = json!({
-                    "clusterId": cluster_id,
-                    "term": term,
-                    "leaderId": self.host_id,
-                    "leaderUrl": self.self_url(),
-                    "prevSeq": prev_seq,
-                    "prevId": prev_id,
-                    "entries": entries.unwrap_or_default(),
-                    "resync": resync,
-                    "group": self.view(&st),
-                    "split": if split.is_string() { split } else { json!("") },
-                });
-                (url, request)
+                let request = self.append_request(
+                    &st,
+                    group,
+                    term,
+                    prev_seq,
+                    prev_id,
+                    entries.unwrap_or_default(),
+                    resync,
+                );
+                (p.member.url.clone(), request)
             };
             let answer = self.post(
                 &url,
@@ -651,6 +646,31 @@ impl Node {
             p.needs_resync = reason == "behind" || reason == "diverged";
             return;
         }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn append_request(
+        &self,
+        st: &State,
+        (cluster_id, split): (String, Value),
+        term: i64,
+        prev_seq: i64,
+        prev_id: Option<String>,
+        entries: Vec<log::Entry>,
+        resync: bool,
+    ) -> Value {
+        json!({
+            "clusterId": cluster_id,
+            "term": term,
+            "leaderId": self.host_id,
+            "leaderUrl": self.self_url(),
+            "prevSeq": prev_seq,
+            "prevId": prev_id,
+            "entries": entries,
+            "resync": resync,
+            "group": self.view(st),
+            "split": if split.is_string() { split } else { json!("") },
+        })
     }
 
     fn advance_commit(&self, st: &mut State) {
@@ -737,12 +757,157 @@ impl Node {
         }
     }
 
+    /// A Timing press on the Timing laptop. It goes to the others while this laptop stores its
+    /// own copy, so a slow disk here alone does not hold it up. Confirmed once a majority stored
+    /// it on disk, this laptop counting once its own copy is there. That copy is stored whatever
+    /// the others do: a Timing laptop that is cut off goes on alone with every press it clocked.
+    pub(super) fn confirm_kept(
+        &self,
+        prepared: log::Prepared,
+        stored: impl FnOnce() + Send + 'static,
+    ) -> bool {
+        let seq = prepared.entry.seq;
+        let deadline = Instant::now() + self.cfg.commit_timeout;
+        let needed = prepared.voters.len() / 2 + 1;
+        let (answers, holders) = mpsc::channel::<(String, bool)>();
+        {
+            let mut st = self.raft.lock().unwrap();
+            let (head, term, group) = {
+                let db = self.db.lock().unwrap();
+                (log::head(&db), log::term(&db), log_group(&db))
+            };
+            if st.role != Role::Leader || term != prepared.entry.epoch || head.seq + 1 != seq {
+                return false;
+            }
+            // Each laptop that holds everything before the press gets it at once, built before
+            // this laptop's own copy takes the database. The raft lock keeps the log as it is.
+            for member in self.others() {
+                let in_step = prepared.voters.contains(&member.host_id)
+                    && st
+                        .progress
+                        .get(&member.host_id)
+                        .is_some_and(|p| p.match_seq == Some(head.seq));
+                if !in_step {
+                    continue;
+                }
+                let request = self.append_request(
+                    &st,
+                    group.clone(),
+                    term,
+                    head.seq,
+                    head.id.clone(),
+                    vec![prepared.entry.clone()],
+                    false,
+                );
+                let (node, answers) = (self.arc(), answers.clone());
+                std::thread::spawn(move || {
+                    node.send_kept(&member, term, seq, &request, &answers)
+                });
+            }
+            st.pending = Some(prepared.clone());
+        }
+        let node = self.arc();
+        let own = answers;
+        let entry = prepared.entry;
+        std::thread::spawn(move || {
+            let mut st = node.raft.lock().unwrap();
+            let ours = st.pending.as_ref().is_some_and(|p| p.entry.id == entry.id);
+            let kept = ours && {
+                let mut db = node.db.lock().unwrap();
+                #[cfg(test)]
+                std::thread::sleep(*node.slow_disk.lock().unwrap());
+                log::apply_own(&mut db, &entry).is_ok()
+            };
+            if ours {
+                st.pending = None;
+                if kept {
+                    node.advance_commit(&mut st);
+                } else {
+                    // As in `confirm`: another laptop may hold it, and a later election decides.
+                    let term = node.term() + 1;
+                    node.become_follower(&mut st, term, None);
+                }
+            }
+            drop(st);
+            if kept {
+                stored();
+            }
+            let _ = own.send((node.host_id.clone(), kept));
+            node.raft_changed.notify_all();
+        });
+        let mut holding = std::collections::HashSet::new();
+        let mut own = None;
+        while holding.len() < needed {
+            match holders.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+                Ok((host, kept)) => {
+                    if host == self.host_id {
+                        own = Some(kept);
+                    }
+                    if kept {
+                        holding.insert(host);
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+        if holding.len() >= needed {
+            return true;
+        }
+        // Not confirmed in time: before the press is tried again it is in this laptop's data.
+        let own = own.or_else(|| {
+            holders
+                .iter()
+                .find(|(host, _)| *host == self.host_id)
+                .map(|(_, kept)| kept)
+        });
+        own == Some(true) && self.wait_for_commit_until(seq, deadline)
+    }
+
+    /// Sends a kept press to a laptop that holds everything before it, and answers whether that
+    /// laptop stored it.
+    fn send_kept(
+        &self,
+        member: &Member,
+        term: i64,
+        seq: i64,
+        request: &Value,
+        answers: &mpsc::Sender<(String, bool)>,
+    ) {
+        let answer = self.post(
+            &member.url,
+            "/api/cluster/peer",
+            &json!({"type":"append","body":request}),
+            self.cfg.election_timeout.max(Duration::from_secs(2)),
+        );
+        let head = answer
+            .ok()
+            .filter(|a| a.status == 200 && a.body["ok"] == true && a.body["term"].as_i64() == Some(term))
+            .and_then(|a| a.body["head"]["seq"].as_i64());
+        let _ = answers.send((member.host_id.clone(), head.is_some_and(|h| h >= seq)));
+        let mut st = self.raft.lock().unwrap();
+        if let Some(head) = head
+            && st.role == Role::Leader
+            && self.term() == term
+        {
+            if let Some(p) = st.progress.get_mut(&member.host_id) {
+                // A laptop never drops what the leader of its term sent it.
+                p.match_seq = p.match_seq.max(Some(head));
+                p.last_ack = Some(Instant::now());
+            }
+            self.advance_commit(&mut st);
+        }
+        drop(st);
+        self.raft_changed.notify_all();
+    }
+
     /// True once a majority stored entry `seq`; false when that fails in time or leadership is lost.
     pub fn wait_for_commit(&self, seq: i64) -> bool {
+        self.wait_for_commit_until(seq, Instant::now() + self.cfg.commit_timeout)
+    }
+    fn wait_for_commit_until(&self, seq: i64, deadline: Instant) -> bool {
         if self.members().len() == 1 {
             return true;
         }
-        let deadline = Instant::now() + self.cfg.commit_timeout;
         {
             let mut st = self.raft.lock().unwrap();
             if st.role != Role::Leader {
@@ -991,4 +1156,12 @@ impl Node {
             self.become_follower(&mut st, term, Some(leader));
         }
     }
+}
+
+/// The group and split an append names.
+fn log_group(db: &crate::db::Db) -> (String, Value) {
+    (
+        log::setting(db, "replication_cluster_id").unwrap_or_default(),
+        log::json_setting(db, "cluster_split_json")["id"].clone(),
+    )
 }
