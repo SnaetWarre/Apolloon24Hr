@@ -1,18 +1,22 @@
 use super::*;
+use std::hash::{DefaultHasher, Hash, Hasher};
 
 pub(super) struct Sample {
     now: i64,
-    values: Vec<String>,
+    values: u64,
     due: i64,
 }
 
 impl Sample {
     fn new(now: i64) -> Self {
-        Self { now, values: Vec::new(), due: i64::MAX }
+        Self { now, values: 0, due: i64::MAX }
     }
 
-    pub(super) fn value(&mut self, value: impl ToString) {
-        self.values.push(value.to_string());
+    pub(super) fn value(&mut self, value: impl Hash) {
+        let mut hash = DefaultHasher::new();
+        self.values.hash(&mut hash);
+        value.hash(&mut hash);
+        self.values = hash.finish();
     }
 
     pub(super) fn bucket(&mut self, start: i64, width: i64) {
@@ -83,7 +87,7 @@ mod tests {
         assert_eq!(key(100), key(136));
         assert_ne!(key(136).0, key(137).0);
         assert_ne!(key(249).0, key(250).0);
-        assert_eq!(Sample::new(0).values, Vec::<String>::new());
+        assert_eq!(Sample::new(0).values, 0);
     }
 
     #[test]

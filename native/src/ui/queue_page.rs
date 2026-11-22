@@ -5,6 +5,9 @@
 use super::*;
 use std::cell::RefCell;
 use std::collections::HashMap;
+mod tick_cache;
+#[cfg(test)]
+mod tick_cache_tests;
 
 /// Warming up this long is worth a glance; it never blocks anything.
 const LONG_WARM_UP_MS: i64 = 10 * 60_000;
@@ -12,7 +15,7 @@ const SEARCH_PAGE: usize = 40;
 const TOAST_MS: i64 = 4_000;
 
 pub(super) fn clocks(s: &State, clock: &mut clock::Sample) {
-    clock.value(format!("{:?}", brussels_moment(s.clock)));
+    clock.value(brussels_moment(s.clock));
     for r in runners(s) {
         if matches!(st(r, "status"), "waiting" | "warming_up") {
             if let Some(at) = r["statusSince"].as_i64() { clock.bucket(at, 1000); }
@@ -101,6 +104,7 @@ pub(super) struct Page {
     available_search: TextEdit,
     /// Clicks made while an earlier one is on its way go out in click order, so the board never locks.
     queued: std::collections::VecDeque<(String, Value, Pending)>,
+    board_cache: RefCell<tick_cache::BoardCache>,
 }
 impl Default for Page {
     fn default() -> Self {
@@ -121,6 +125,7 @@ impl Default for Page {
             available_open: true,
             available_search: TextEdit::new(""),
             queued: Default::default(),
+            board_cache: RefCell::default(),
         }
     }
 }
@@ -565,7 +570,7 @@ pub(super) fn page(s: &State) -> El {
         .key("queue-page")
         .pb(24.0)
         .child(board(s))
-        .child(available_now(s).mt(12.0))
+        .child(rune::memo("available-now", tick_cache::available_version(s), || available_now(s)).mt(12.0))
 }
 
 // ---------- Nu beschikbaar, nog niet opgeroepen (AvailableNowPanel.tsx, lib/availability.ts) ----------
@@ -898,9 +903,12 @@ struct Board<'a> {
     warming: Vec<&'a Value>,
     waiting: Vec<&'a Value>,
     ran: Vec<&'a Value>,
-    positions: HashMap<String, usize>,
+    positions: std::rc::Rc<HashMap<String, usize>>,
 }
 fn board_data(s: &State) -> Board<'_> {
+    s.queue_page.board_cache.borrow_mut().get(s)
+}
+fn board_data_uncached(s: &State) -> Board<'_> {
     let q = s.queue_page.filter.text.trim().to_string();
     let filtered: Vec<&Value> = runners(s)
         .into_iter()
@@ -926,7 +934,7 @@ fn board_data(s: &State) -> Board<'_> {
             .then(number_value(a).cmp(&number_value(b)))
     });
     let all_waiting = waiting(s);
-    let positions = all_waiting
+    let positions: HashMap<String, usize> = all_waiting
         .iter()
         .enumerate()
         .map(|(i, r)| (st(r, "id").to_string(), i))
@@ -958,7 +966,7 @@ fn board_data(s: &State) -> Board<'_> {
         warming,
         waiting: waiting_rows,
         ran,
-        positions,
+        positions: positions.into(),
     }
 }
 
@@ -1327,6 +1335,20 @@ fn empty(s: &State, message: &str) -> El {
 
 /// `.queue-runner`: handle, place in line, identity, time in this lane and the row's buttons.
 fn runner_row(s: &State, r: &Value, b: &Board, drop: Option<&(String, Drop)>) -> El {
+    let id = st(r, "id");
+    let key = format!("queue-card-{id}");
+    let build = || runner_row_uncached(s, r, b, drop);
+    if drop.is_some() || s.queue_page.drag.as_ref().is_some_and(|d| d.active) {
+        return build().key(key);
+    }
+    let seconds = if st(r, "status") == "ran" {
+        0
+    } else {
+        r["statusSince"].as_i64().map_or(0, |at| (s.clock - at).max(0) / 1000)
+    };
+    rune::memo(key, (r, b.positions.get(id), seconds, s.dark, s.connected, s.busy, s.logos.len()), build)
+}
+fn runner_row_uncached(s: &State, r: &Value, b: &Board, drop: Option<&(String, Drop)>) -> El {
     let p = pal(s.dark);
     let id = st(r, "id").to_string();
     let status = st(r, "status");
@@ -1385,149 +1407,160 @@ fn runner_row(s: &State, r: &Value, b: &Board, drop: Option<&(String, Drop)>) ->
         );
     }
     // Identity: name (with the Volgende tag) over the labels, laps and pace.
-    let mut title = row()
-        .gap(8.0)
-        .center_y()
-        .min_w(0.0)
-        .min_h(21.0)
-        .flex_wrap()
-        .child(runner_name(s, r, 14.0, 550.0));
-    if next {
-        title = title.child(
-            row()
-                .h(18.0)
-                .px(6.0)
-                .radius(4.0)
-                .fill(p.brand)
-                .center()
-                .child(
-                    text("Volgende")
-                        .font(rune::TextStyle::new(11.0, 550.0))
-                        .color(p.on_brand),
-                ),
-        );
-    }
-    if position == Some(1) {
-        title = title.child(
-            row()
-                .key(format!("queue-then-{id}"))
-                .h(18.0)
-                .px(6.0)
-                .radius(4.0)
-                .fill(p.brand_wash)
-                .border(1.0, p.brand.alpha(0.35))
-                .center()
-                .child(
-                    text("Daarna")
-                        .font(rune::TextStyle::new(11.0, 550.0))
-                        .color(p.brand_ink),
-                ),
-        );
-    }
-    let mut details: Vec<El> = r["labels"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .map(|l| pill(s, l))
-        .collect();
-    let laps = r["lapCount"].as_i64().unwrap_or(0);
-    let small = rune::TextStyle::new(12.0, 400.0).lh(18.0);
-    if laps > 0 {
-        details.push(
-            text(plural(laps as usize, "ronde", "rondes"))
-                .font(small)
-                .color(p.t.ink3),
-        );
-    }
-    if let Some(pace) = r["estimatedPace"].as_str().filter(|v| !v.is_empty()) {
-        details.push(text(format!("~{pace}")).font(small).color(p.t.ink3));
-    }
-    let profile_id = id.clone();
-    let mut identity = col()
-        .key(format!("queue-identity-{id}"))
-        .role("button")
-        .label(format!("{}: profiel openen", st(r, "name")))
-        .focusable(true)
-        .grow(1.0)
-        .min_w(0.0)
-        .py(2.0)
-        .gap(3.0)
-        .on_press(move |s: &mut State| s.send("runners.profile", json!({"id":profile_id})))
-        .child(title);
-    // No empty second line without labels, laps or pace, so the name lines up with the place in
-    // line and the timer.
-    if !details.is_empty() {
-        identity = identity.child(
-            row()
-                .gap(8.0)
-                .center_y()
-                .min_h(18.0)
-                .pl(name_indent(r, 14.0))
-                .flex_wrap()
-                .children(details),
-        );
-    }
+    let identity = rune::memo(format!("queue-identity-{id}"), (r, position, s.dark, s.logos.len()), || {
+        let mut title = row()
+            .gap(8.0)
+            .center_y()
+            .min_w(0.0)
+            .min_h(21.0)
+            .flex_wrap()
+            .child(runner_name(s, r, 14.0, 550.0));
+        if next {
+            title = title.child(
+                row()
+                    .h(18.0)
+                    .px(6.0)
+                    .radius(4.0)
+                    .fill(p.brand)
+                    .center()
+                    .child(
+                        text("Volgende")
+                            .font(rune::TextStyle::new(11.0, 550.0))
+                            .color(p.on_brand),
+                    ),
+            );
+        }
+        if position == Some(1) {
+            title = title.child(
+                row()
+                    .key(format!("queue-then-{id}"))
+                    .h(18.0)
+                    .px(6.0)
+                    .radius(4.0)
+                    .fill(p.brand_wash)
+                    .border(1.0, p.brand.alpha(0.35))
+                    .center()
+                    .child(
+                        text("Daarna")
+                            .font(rune::TextStyle::new(11.0, 550.0))
+                            .color(p.brand_ink),
+                    ),
+            );
+        }
+        let mut details: Vec<El> = r["labels"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|l| pill(s, l))
+            .collect();
+        let laps = r["lapCount"].as_i64().unwrap_or(0);
+        let small = rune::TextStyle::new(12.0, 400.0).lh(18.0);
+        if laps > 0 {
+            details.push(
+                text(plural(laps as usize, "ronde", "rondes"))
+                    .font(small)
+                    .color(p.t.ink3),
+            );
+        }
+        if let Some(pace) = r["estimatedPace"].as_str().filter(|v| !v.is_empty()) {
+            details.push(text(format!("~{pace}")).font(small).color(p.t.ink3));
+        }
+        let profile_id = id.clone();
+        let mut identity = col()
+            .key(format!("queue-identity-{id}"))
+            .role("button")
+            .label(format!("{}: profiel openen", st(r, "name")))
+            .focusable(true)
+            .grow(1.0)
+            .min_w(0.0)
+            .py(2.0)
+            .gap(3.0)
+            .on_press(move |s: &mut State| s.send("runners.profile", json!({"id":profile_id})))
+            .child(title);
+        // No empty second line without labels, laps or pace, so the name lines up with the place in
+        // line and the timer.
+        if !details.is_empty() {
+            identity = identity.child(
+                row()
+                    .gap(8.0)
+                    .center_y()
+                    .min_h(18.0)
+                    .pl(name_indent(r, 14.0))
+                    .flex_wrap()
+                    .children(details),
+            );
+        }
+        identity
+    });
     line = line.child(identity);
     // TimerBadge: time in this lane, amber after ten minutes of warming up.
-    let mut timer = row().w(70.0).gap(4.0).center_y().justify_end();
-    if let Some(at) = r["statusSince"].as_i64().filter(|_| status != "ran") {
-        let elapsed = (s.clock - at).max(0);
-        let long = status == "warming_up" && elapsed >= LONG_WARM_UP_MS;
-        let ink = if long { p.t.warn_ink } else { p.t.ink2 };
-        timer = timer
-            .child(icon(
-                s,
-                "timing",
-                if long { p.t.warn_ink } else { p.t.ink3 },
-                12.0,
-                1.75,
-            ))
-            .child(
-                text(duration(elapsed))
-                    .font(rune::TextStyle::new(13.0, 500.0).features("tnum"))
-                    .color(ink),
-            );
-    }
+    let elapsed = (s.clock - r["statusSince"].as_i64().unwrap_or(s.clock)).max(0);
+    let seconds = if status == "ran" { 0 } else { elapsed / 1000 };
+    let timer = rune::memo(format!("queue-timer-{id}"), (&r["statusSince"], status, seconds, s.dark), || {
+        let mut timer = row().w(70.0).gap(4.0).center_y().justify_end();
+        if let Some(at) = r["statusSince"].as_i64().filter(|_| status != "ran") {
+            let elapsed = (s.clock - at).max(0);
+            let long = status == "warming_up" && elapsed >= LONG_WARM_UP_MS;
+            let ink = if long { p.t.warn_ink } else { p.t.ink2 };
+            timer = timer
+                .child(icon(
+                    s,
+                    "timing",
+                    if long { p.t.warn_ink } else { p.t.ink3 },
+                    12.0,
+                    1.75,
+                ))
+                .child(
+                    text(duration(elapsed))
+                        .font(rune::TextStyle::new(13.0, 500.0).features("tnum"))
+                        .color(ink),
+                );
+        }
+        timer
+    });
     line = line.child(timer);
-    let mut actions = row().gap(4.0);
-    if let Some(to) = next_lane(status) {
-        let move_id = id.clone();
-        actions = actions.child(
-            btn(
-                s,
-                format!("queue-advance-{id}"),
-                if to == "waiting" {
-                    "Naar wachtrij"
-                } else {
-                    "Opwarmen"
-                },
-                Kind::Plain,
-                true,
-            )
-            .on_press(move |s: &mut State| set_status(s, &move_id, to, Pending::Board)),
-        );
-    }
-    if status == "ran" {
-        let hidden = r["hiddenFromQueue"] == true;
-        let hide_id = id.clone();
-        actions = actions.child(
-            btn(
-                s,
-                format!("queue-hide-{id}"),
-                if hidden { "Terug tonen" } else { "Verberg" },
-                Kind::Quiet,
-                true,
-            )
-            .on_press(move |s: &mut State| {
-                let method = if hidden {
-                    "runners.unhide"
-                } else {
-                    "runners.hide"
-                };
-                send(s, method, json!({"id":hide_id}), Pending::Board)
-            }),
-        );
-    }
+    let actions = rune::memo(format!("queue-actions-{id}"), (status, &r["hiddenFromQueue"], s.dark, s.connected, s.busy), || {
+        let mut actions = row().gap(4.0);
+        if let Some(to) = next_lane(status) {
+            let move_id = id.clone();
+            actions = actions.child(
+                btn(
+                    s,
+                    format!("queue-advance-{id}"),
+                    if to == "waiting" {
+                        "Naar wachtrij"
+                    } else {
+                        "Opwarmen"
+                    },
+                    Kind::Plain,
+                    true,
+                )
+                .on_press(move |s: &mut State| set_status(s, &move_id, to, Pending::Board)),
+            );
+        }
+        if status == "ran" {
+            let hidden = r["hiddenFromQueue"] == true;
+            let hide_id = id.clone();
+            actions = actions.child(
+                btn(
+                    s,
+                    format!("queue-hide-{id}"),
+                    if hidden { "Terug tonen" } else { "Verberg" },
+                    Kind::Quiet,
+                    true,
+                )
+                .on_press(move |s: &mut State| {
+                    let method = if hidden {
+                        "runners.unhide"
+                    } else {
+                        "runners.hide"
+                    };
+                    send(s, method, json!({"id":hide_id}), Pending::Board)
+                }),
+            );
+        }
+        actions
+    });
     line = line.child(actions);
 
     let drag_id = id.clone();
