@@ -1576,3 +1576,28 @@ fn a_full_copy_does_not_need_the_leaders_database_lock() {
     assert_eq!(target.runners().unwrap().len(), 1);
     assert_eq!(super::log::head(&target).seq, a.head());
 }
+
+/// Taking in a laptop right after another one does not wait for the next sign of life: what the
+/// first one still misses is sent to it at once.
+#[test]
+fn a_second_new_laptop_does_not_wait_for_the_next_sign_of_life() {
+    let _serial = serial();
+    let dir = Dir::new();
+    let tune = |cfg: &mut Config| {
+        cfg.heartbeat = Duration::from_secs(2);
+        cfg.election_timeout = Duration::from_secs(30);
+    };
+    let a = TestServer::start_with(&dir.db("a"), free_port(), "Laptop A", tune);
+    let b = TestServer::start_with(&dir.db("b"), free_port(), "Laptop B", tune);
+    // A holds a runner, so B takes A's data and A keeps leading.
+    a.act("runners.create", json!({"name":"Zoë","status":"waiting"}))
+        .unwrap();
+    b.act("cluster.joinGroup", json!({"url": a.url})).unwrap();
+    let at = Instant::now();
+    assert!(a.node.group_settled());
+    assert!(
+        at.elapsed() < Duration::from_secs(1),
+        "waited {:?} for the next sign of life",
+        at.elapsed()
+    );
+}
