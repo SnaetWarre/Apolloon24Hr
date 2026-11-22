@@ -152,6 +152,26 @@ mod tests {
         assert!(synced.state_path(Some("token"), None).contains("since=other.1"));
     }
 
+    #[test]
+    fn deferred_profile_adopts_fetched_registration_before_following_stored_data() {
+        let mut s = init_with_url("http://127.0.0.1:0".into());
+        s.page = 8;
+        s.admin_section = 1;
+        s.connected = true;
+        let runner = json!({"id":"a","name":"Updated Alpha","runnerNumber":"1","labels":[]});
+        s.snapshot = json!({"revision":2,"runners":[runner]});
+        s.history = json!({"scope":"runner","runnerId":"a","laps":[],"events":[]});
+        s.admin.registrations = json!({"other":{"email":"kept@example.be"}});
+        let (sender, receiver) = std::sync::mpsc::channel();
+        s.rx = receiver;
+        sender.send(Update { snapshot:s.snapshot.clone(), outcome:Some(("runners.profile".into(),Ok(json!({"runner":runner,"registration":{"email":"new@example.be"}})))), ..Default::default() }).unwrap();
+        poll(&mut s,0.0,&mut Tx::default());
+        assert_eq!(s.admin.registrations["a"]["email"],"new@example.be");
+        assert_eq!(s.admin.registrations["other"]["email"],"kept@example.be");
+        assert!(s.profile.is_some());
+        assert!(s.pending_profile_data.is_none());
+    }
+
     fn render(snapshot: &Value, history: &Value, page: usize, section: usize, profile: Option<&str>) -> Vec<u8> {
         let mut s = init_with_url("http://127.0.0.1:0".into());
         s.fixture = true;

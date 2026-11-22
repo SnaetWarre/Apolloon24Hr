@@ -240,6 +240,49 @@ try {
     await p.close();
     console.log('PASS: scope-unaware server retains full history and opens the unchanged profile');
   }
+  {
+    await action('runners.update', { id: 'alpha', fields: { registrationDetails: { email: 'old@example.be' } } });
+    const p = await page();
+    let profiles = 0,
+      registrations = 0;
+    p.on('request', (r) => {
+      if (r.url().includes('/api/action/runners.profile')) profiles++;
+      if (r.url().includes('/api/action/runners.registrations')) registrations++;
+    });
+    await ready(p, true);
+    await p.getByRole('button', { name: 'Alpha', exact: true }).click({ force: true });
+    await dialog(p).waitFor();
+    const before = { profiles, registrations };
+    await action('runners.update', {
+      id: 'alpha',
+      fields: { name: 'Updated Alpha', registrationDetails: { email: 'new@example.be' } },
+    });
+    await eventually(
+      async () =>
+        registrations > before.registrations &&
+        (await dialog(p).getByRole('heading', { name: '1 Updated Alpha', exact: true }).count()),
+      'registration refresh after remote profile edit'
+    );
+    assert(profiles - before.profiles <= 3, `profile reload storm: ${profiles - before.profiles}`);
+    assert.equal(await dialog(p).getByText('Nieuwste profiel laden', { exact: true }).count(), 0);
+    const label = await dialog(p).getByText('E-mail', { exact: true }).boundingBox();
+    await p.mouse.click(label.x + 40, label.y + label.height + 20);
+    await eventually(async () => (await p.locator('textarea[aria-label="E-mail"]').count()) > 0, 'email focus');
+    assert.equal(await p.locator('textarea[aria-label="E-mail"]').inputValue(), 'new@example.be');
+    await p.waitForTimeout(200);
+    await p.mouse.move(800, 600);
+    await p.mouse.wheel(0, 1800);
+    await p.waitForTimeout(150);
+    const saved = p.waitForResponse((r) => r.url().includes('/api/action/runners.update') && r.ok());
+    await dialog(p).getByRole('button', { name: 'Opslaan', exact: true }).click({ force: true });
+    await saved;
+    await dialog(p).waitFor({ state: 'hidden' });
+    assert.equal((await action('runners.profile', { id: 'alpha' })).registration.email, 'new@example.be');
+    await p.close();
+    console.log(
+      'PASS: lean Beheer profile follows remote name/email edits without starving registration refresh or disabling save'
+    );
+  }
   console.log('Evidence: ' + out);
 } catch (error) {
   for (const [i, p] of browser

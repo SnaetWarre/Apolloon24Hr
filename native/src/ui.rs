@@ -565,7 +565,10 @@ fn poll(s: &mut State, _: f64, tx: &mut Tx) -> bool {
                         if s.page == 1 {
                             s.profile = Some(profile::Form::new(&result["runner"], &result["registration"]));
                             tx.focus_when_shown("profile-number", false);
-                        } else { s.pending_profile_data = Some(result); }
+                        } else {
+                            s.admin.registrations[admin_base::st(&result["runner"], "id")] = result["registration"].clone();
+                            s.pending_profile_data = Some(result);
+                        }
                     }
                     "runners.create" | "runners.update" => {
                         s.profile = None;
