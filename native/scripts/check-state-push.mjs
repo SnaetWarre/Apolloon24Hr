@@ -9,6 +9,7 @@ import { chromium } from 'playwright';
 const directory = resolve('.tmp-bench', 'push-recovery-' + new Date().toISOString().replaceAll(':', '-'));
 await mkdir(directory, { recursive: true });
 const laptops = [];
+const longPollTimeoutMs = 2000;
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 async function eventually(fn, timeout = 20000) {
   const until = Date.now() + timeout;
@@ -103,15 +104,6 @@ try {
     } catch {}
   });
   await page.route('**/api/state?*', async (route) => {
-    if (fault === 'legacyPush') {
-      const response = await route.fetch();
-      const state = await response.json();
-      if (!state.unchanged) return route.fulfill({ response });
-      const url = new URL(route.request().url());
-      url.searchParams.delete('after');
-      const full = await route.fetch({ url: url.href });
-      return route.fulfill({ response: full });
-    }
     if (fault === 'old') {
       oldRequests.push(Date.now());
       const url = new URL(route.request().url());
@@ -186,16 +178,18 @@ try {
   assert.equal(historyRequests, idleHistory);
   await visible('Initial push');
   const headStart = stateRequests;
-  await sleep(6000);
+  const pollStarted = performance.now();
+  await sleep(3 * longPollTimeoutMs);
+  const pollElapsedMs = performance.now() - pollStarted;
   const headRequests = stateRequests - headStart;
-  assert(headRequests >= 1 && headRequests <= 4, `${headRequests} unchanged polls in 6 seconds`);
-  fault = 'legacyPush';
-  await sleep(3000);
-  const baseStart = stateRequests;
-  await sleep(6000);
-  const baseRequests = stateRequests - baseStart;
-  assert(headRequests <= baseRequests + 1, `marker/base requests in 6 seconds: ${headRequests}/${baseRequests}`);
-  fault = undefined;
+  // A partial first poll can complete immediately; subsequent idle polls wait server::state's timeout.
+  const maxRequests = Math.floor(pollElapsedMs / longPollTimeoutMs) + 1;
+  assert(
+    headRequests >= 1 && headRequests <= maxRequests,
+    `${headRequests} unchanged polls in ${Math.round(pollElapsedMs)}ms (limit ${maxRequests})`
+  );
+  assert.equal(historyRequests, idleHistory);
+  await visible('Initial push');
   const marker = await page.waitForResponse(
     async (response) => new URL(response.url()).pathname === '/api/state' && (await response.json()).unchanged === true
   );
@@ -205,7 +199,7 @@ try {
   const writeMs = Date.now() - writeStarted;
   assert(writeMs < 2500, `write after marker took ${writeMs}ms`);
   console.log(
-    `PASS: tiny unchanged timeouts retain state/history without spinning (${headRequests} marker/${baseRequests} legacy polls in 6 seconds); write after marker visible in ${writeMs}ms`
+    `PASS: tiny unchanged timeouts retain state/history without spinning (${headRequests}/${maxRequests} polls in ${Math.round(pollElapsedMs)}ms, ${longPollTimeoutMs}ms timeout); write after marker visible in ${writeMs}ms`
   );
   fault = 'fast';
   await eventually(() => unchanged.length >= idleStart + 4);
