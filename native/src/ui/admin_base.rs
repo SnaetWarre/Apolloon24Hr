@@ -811,14 +811,17 @@ fn toast_view(s: &State, t: &Toast) -> El {
 }
 /// Everything these sections draw over the page; `None` when nothing is open.
 pub(super) fn modal(s: &State) -> Option<El> {
-    if s.page != 8 {
-        return (s.page == 1 && s.profile.is_some()).then(|| profile::modal(s));
+    if s.page != 8 && s.page != 1 {
+        return None;
     }
     if let Some(c) = &s.admin.confirm {
         return Some(confirm_dialog(s, c));
     }
     if s.profile.is_some() {
         return Some(profile::modal(s));
+    }
+    if s.page != 8 {
+        return None;
     }
     let mut layers: Vec<El> = Vec::new();
     if let Some(key) = &s.admin.select {

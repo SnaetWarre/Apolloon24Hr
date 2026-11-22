@@ -2435,6 +2435,48 @@ mod tests {
         assert_eq!(db.lock().unwrap().runner(&id).unwrap()["name"],"Queue contact edited");
     }
     #[test]
+    fn queue_profile_remove_confirmation_cancels_then_removes_through_http() {
+        let (mut rt, db, id, _host) = queue_contact_profile();
+        click(&mut rt,"profile-queue-action");
+        click(&mut rt,"admin-confirm-cancel");
+        assert_eq!(db.lock().unwrap().runner(&id).unwrap()["status"],"waiting");
+        assert!(rt.state.profile.is_some());
+        click(&mut rt,"profile-queue-action");
+        click(&mut rt,"admin-confirm-ok");
+        update(&mut rt, |s| !s.busy && s.snapshot["runners"][0]["status"] == "registered");
+        assert!(rt.state.admin.confirm.is_none());
+        assert_eq!(db.lock().unwrap().runner(&id).unwrap()["status"],"registered");
+    }
+
+    #[test]
+    fn queue_profile_latest_confirmation_cancels_then_loads_remote_contact() {
+        let (mut rt, db, id, _host) = queue_contact_profile();
+        click(&mut rt,"profile-name");
+        rt.paste(" draft");
+        rt.frame(0.2);
+        db.lock().unwrap().mutation("runners.update", &json!({"id":id,"fields":{"name":"Remote contact","registrationDetails":{"email":"remote@example.be","phone":"0472","availableHours":["21-22u (dinsdag)"]}}})).unwrap();
+        update(&mut rt, |s| !s.busy && s.admin.registrations[&id]["email"] == "remote@example.be");
+        rt.wheel(700.0,670.0,-1600.0);
+        rt.frame(0.2);
+        click(&mut rt,"profile-load-latest");
+        click(&mut rt,"admin-confirm-cancel");
+        assert!(rt.state.profile.is_some());
+        click(&mut rt,"profile-load-latest");
+        click(&mut rt,"admin-confirm-ok");
+        rt.wheel(700.0,670.0,1600.0);
+        rt.frame(0.2);
+        click(&mut rt,"profile-name");
+        rt.paste(" saved");
+        rt.frame(0.2);
+        rt.wheel(700.0,670.0,-1600.0);
+        rt.frame(0.2);
+        click(&mut rt,"profile-save");
+        update(&mut rt, |s| !s.busy && s.profile.is_none());
+        assert_eq!(db.lock().unwrap().runner(&id).unwrap()["name"],"Remote contact saved");
+        assert_eq!(db.lock().unwrap().registrations().unwrap()[&id]["email"],"remote@example.be");
+    }
+
+    #[test]
     fn file_picker_imports_and_reimports_through_the_real_http_server() {
         let path =
             std::env::temp_dir().join(format!("apolloon-import-{}.csv", uuid::Uuid::new_v4()));
