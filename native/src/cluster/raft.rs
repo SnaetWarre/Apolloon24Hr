@@ -837,7 +837,7 @@ impl Node {
         });
         let mut holding = std::collections::HashSet::new();
         let mut own = None;
-        while holding.len() < needed {
+        while holding.len() < needed && own.is_none() {
             match holders.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
                 Ok((host, kept)) => {
                     if host == self.host_id {
@@ -853,7 +853,9 @@ impl Node {
         if holding.len() >= needed {
             return true;
         }
-        // Not confirmed in time: before the press is tried again it is in this laptop's data.
+        // Once this laptop holds it the usual rounds take over, also reaching a laptop that was
+        // behind. Not confirmed in time: before the press is tried again it is in this laptop's
+        // data.
         let own = own.or_else(|| {
             holders
                 .iter()
