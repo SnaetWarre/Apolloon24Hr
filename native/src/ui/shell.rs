@@ -281,7 +281,10 @@ pub(super) fn sidebar(s: &State) -> El {
         .center()
         .radius(6.0)
         .hover(c.surface3)
-        .on_press(|s: &mut State| s.collapsed = !s.collapsed)
+        .on_press_tx(|s: &mut State, tx: &mut Tx| {
+            s.collapsed = !s.collapsed;
+            leave_keys_to_timing(tx);
+        })
         .child(icon("panelLeft", s.dark, 2, 18.0));
     let top = if collapsed {
         col().items_center().child(toggle)
@@ -304,6 +307,7 @@ pub(super) fn sidebar(s: &State) -> El {
                         tx.instant();
                         s.page = 0;
                         s.confirm = None;
+                        leave_keys_to_timing(tx);
                     })
                     .child(match s.icons.get(27 + usize::from(s.dark)) {
                         Some(image) => rune::el()
@@ -348,6 +352,14 @@ pub(super) fn sidebar(s: &State) -> El {
     side.child(footer(s))
 }
 
+/// A click leaves nothing focused, so Space and Enter go on to clock the handoff instead of
+/// pressing the clicked control again. A control reached by keyboard keeps its focus.
+pub(super) fn leave_keys_to_timing(tx: &mut Tx) {
+    if !tx.by_keys() {
+        tx.blur();
+    }
+}
+
 fn nav_link(s: &State, i: usize) -> El {
     let t = tok::theme(s.dark);
     let c = tok::tones(s.dark);
@@ -367,6 +379,7 @@ fn nav_link(s: &State, i: usize) -> El {
             tx.instant();
             s.page = i;
             s.confirm = None;
+            leave_keys_to_timing(tx);
         });
     if s.collapsed {
         link = link.w(40.0).center();
