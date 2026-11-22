@@ -1717,3 +1717,58 @@ new file mode 100644
 +    let size = crate::text::measure("after setup", &[], crate::TextStyle::new(14.0, 400.0), None);
 +    assert!(size.0 > 0.0 && size.1 > 0.0);
 +}
+diff --git a/crates/rune/src/window.rs b/crates/rune/src/window.rs
+--- a/crates/rune/src/window.rs
++++ b/crates/rune/src/window.rs
+@@ -47,6 +47,7 @@
+ mod win;
+ use win::{SurfaceRetries, SurfaceStep, SURFACE_TRIES, Win};
+ mod first_frame;
++mod frame_latency;
+ use first_frame::FirstFrame;
+ mod draw;
+ mod redraw;
+@@ -748,7 +749,7 @@
+     // (`render::damaged`).
+     config.usage |= caps.usages & wgpu::TextureUsages::COPY_DST;
+     config.present_mode = wgpu::PresentMode::AutoVsync;
+-    config.desired_maximum_frame_latency = FRAME_LATENCY;
++    config.desired_maximum_frame_latency = frame_latency::desired();
+     if std::env::var_os("RUNE_SURFACE_LOG").is_some() {
+         eprintln!("rune surface: supported={:?} selected={:?} desired_maximum_frame_latency={}", caps.present_modes, config.present_mode, config.desired_maximum_frame_latency);
+     }
+diff --git a/crates/rune/src/window/frame_latency.rs b/crates/rune/src/window/frame_latency.rs
+new file mode 100644
+--- /dev/null
++++ b/crates/rune/src/window/frame_latency.rs
+@@ -0,0 +1,11 @@
++pub(super) fn desired() -> u32 {
++    parse(std::env::var("APOLLOON_FRAME_LATENCY").ok().as_deref())
++}
++
++fn parse(value: Option<&str>) -> u32 {
++    value.and_then(|value| value.parse::<u32>().ok()).filter(|value| *value > 0)
++        .unwrap_or(super::FRAME_LATENCY)
++}
++
++#[cfg(test)]
++mod tests;
+diff --git a/crates/rune/src/window/frame_latency/tests.rs b/crates/rune/src/window/frame_latency/tests.rs
+new file mode 100644
+--- /dev/null
++++ b/crates/rune/src/window/frame_latency/tests.rs
+@@ -0,0 +1,14 @@
++use super::parse;
++
++#[test]
++fn positive_override_selects_the_requested_latency() {
++    assert_eq!(parse(Some("1")), 1);
++    assert_eq!(parse(Some("2")), 2);
++}
++
++#[test]
++fn absent_empty_or_invalid_override_preserves_the_platform_default() {
++    for value in [None, Some(""), Some("0"), Some("-1"), Some("invalid"), Some("4294967296")] {
++        assert_eq!(parse(value), super::super::FRAME_LATENCY);
++    }
++}
