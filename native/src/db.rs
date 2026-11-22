@@ -42,12 +42,21 @@ pub struct Db {
     changes: tokio::sync::watch::Sender<u64>,
     epoch: String,
     history_changes: std::sync::Arc<std::sync::Mutex<history_changes::Journal>>,
+    runner_totals: std::sync::Arc<std::sync::Mutex<runner_totals::Cache>>,
     /// Set by the linked-laptop runtime: every statement `exec` runs is recorded for replication.
     pub capture: std::cell::RefCell<Option<crate::cluster::log::Capture>>,
 }
-macro_rules! runner_select {
-    () => { "SELECT r.id,r.runner_number AS runnerNumber,r.name,r.target_laps AS targetLaps,r.historical_avg_ms AS historicalAvgMs,r.historical_best_ms AS historicalBestMs,r.registration_source AS registrationSource,COALESCE(r.notes,'') AS notes,json_extract(r.registration_json,'$.estimatedPace') AS estimatedPace,r.created_at AS createdAt,r.updated_at AS updatedAt,r.status,r.status_since AS statusSince,r.queue_index AS queueIndex,r.hidden_at AS queueHiddenAt,COUNT(l.id) AS lapCount,MIN(CASE WHEN l.duration_ms BETWEEN 20000 AND 600000 THEN l.duration_ms END) AS bestLapMs,MAX(CASE WHEN l.duration_ms BETWEEN 20000 AND 600000 THEN l.duration_ms END) AS slowestLapMs,ROUND(AVG(CASE WHEN l.duration_ms BETWEEN 20000 AND 600000 THEN l.duration_ms END)) AS averageLapMs,COALESCE(SUM(l.duration_ms),0) AS totalTimeMs,(SELECT duration_ms FROM laps WHERE runner_id=r.id ORDER BY finished_at DESC LIMIT 1) AS lastLapMs FROM runners r LEFT JOIN laps l ON l.runner_id=r.id" };
+macro_rules! runner_fields {
+    () => { "SELECT r.id,r.runner_number AS runnerNumber,r.name,r.target_laps AS targetLaps,r.historical_avg_ms AS historicalAvgMs,r.historical_best_ms AS historicalBestMs,r.registration_source AS registrationSource,COALESCE(r.notes,'') AS notes,json_extract(r.registration_json,'$.estimatedPace') AS estimatedPace,r.created_at AS createdAt,r.updated_at AS updatedAt,r.status,r.status_since AS statusSince,r.queue_index AS queueIndex,r.hidden_at AS queueHiddenAt" };
 }
+macro_rules! runner_select {
+    () => { concat!(runner_fields!(), ",COUNT(l.id) AS lapCount,MIN(CASE WHEN l.duration_ms BETWEEN 20000 AND 600000 THEN l.duration_ms END) AS bestLapMs,MAX(CASE WHEN l.duration_ms BETWEEN 20000 AND 600000 THEN l.duration_ms END) AS slowestLapMs,ROUND(AVG(CASE WHEN l.duration_ms BETWEEN 20000 AND 600000 THEN l.duration_ms END)) AS averageLapMs,COALESCE(SUM(l.duration_ms),0) AS totalTimeMs,(SELECT duration_ms FROM laps WHERE runner_id=r.id ORDER BY finished_at DESC LIMIT 1) AS lastLapMs FROM runners r LEFT JOIN laps l ON l.runner_id=r.id") };
+}
+mod runner_totals;
+#[cfg(test)]
+#[path = "db/runner_totals_bench.rs"]
+mod runner_totals_bench;
+const HANDOFF_LAP_INSERT: &str = "INSERT INTO laps(id,runner_id,lap_number,started_at,finished_at,duration_ms,source,created_at,labels_json) VALUES(?,?,(SELECT COUNT(*)+1 FROM laps WHERE runner_id=?),?,?,?,'spacebar',?,?)";
 impl Db {
     pub fn open(path: &Path) -> Result<Self> {
         if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
@@ -98,22 +107,31 @@ impl Db {
         let history_changes = std::sync::Arc::new(std::sync::Mutex::new(
             history_changes::Journal::new(conn.total_changes()),
         ));
+        let runner_totals = std::sync::Arc::new(std::sync::Mutex::new(
+            runner_totals::Cache::new(conn.total_changes()),
+        ));
         let updated = history_changes.clone();
-        conn.update_hook(Some(move |_action, schema: &str, table: &str, rowid| {
+        let totals_updated = runner_totals.clone();
+        conn.update_hook(Some(move |action, schema: &str, table: &str, rowid| {
             updated.lock().unwrap().update(schema, table, rowid);
+            totals_updated.lock().unwrap().update(action, schema, table, rowid);
         })).map_err(err)?;
         let committed_rows = history_changes.clone();
         let committed = changes.clone();
+        let totals_committed = runner_totals.clone();
         conn.commit_hook(Some(move || {
             committed_rows.lock().unwrap().commit();
+            totals_committed.lock().unwrap().commit();
             committed.send_modify(|version| *version = version.wrapping_add(1));
             crate::latency::notify();
             false
         })).map_err(err)?;
         let rolled_back = changes.clone();
         let rolled_back_rows = history_changes.clone();
+        let totals_rolled_back = runner_totals.clone();
         conn.rollback_hook(Some(move || {
             rolled_back_rows.lock().unwrap().rollback();
+            totals_rolled_back.lock().unwrap().rollback();
             rolled_back.send_modify(|version| *version = version.wrapping_add(1));
         }))
         .map_err(err)?;
@@ -123,6 +141,7 @@ impl Db {
             changes,
             epoch: id(),
             history_changes,
+            runner_totals,
             capture: Default::default(),
         })
     }
@@ -162,6 +181,7 @@ impl Db {
         self.changes.subscribe()
     }
     pub(crate) fn read_snapshot(&self) -> Result<Self> {
+        let totals_version = (self.data_version()?, self.schema_version()?);
         let mode: String = self.conn.pragma_query_value(None, "journal_mode", |r| r.get(0)).map_err(err)?;
         let conn = if mode.eq_ignore_ascii_case("wal") {
             let conn = Connection::open_with_flags(
@@ -179,7 +199,9 @@ impl Db {
             conn
         };
         conn.execute_batch("PRAGMA query_only=ON").map_err(err)?;
-        Self::from_connection(conn, self.revision)
+        let snapshot = Self::from_connection(conn, self.revision)?;
+        *snapshot.runner_totals.lock().unwrap() = runner_totals::Cache::fork(self, totals_version)?;
+        Ok(snapshot)
     }
     pub fn rows(&self, sql: &str, args: &[Value]) -> Result<Vec<Value>> {
         let mut stmt = self.conn.prepare(sql).map_err(err)?;
@@ -211,10 +233,12 @@ impl Db {
     }
     pub fn exec(&self, sql: &str, args: &[Value]) -> Result<usize> {
         let values: Vec<_> = args.iter().map(sql_value).collect();
+        self.runner_totals.lock().unwrap().append = sql == HANDOFF_LAP_INSERT;
         let changed = self
             .conn
-            .execute(sql, params_from_iter(values.iter()))
-            .map_err(err)?;
+            .execute(sql, params_from_iter(values.iter()));
+        self.runner_totals.lock().unwrap().append = false;
+        let changed = changed.map_err(err)?;
         if let Some(capture) = self.capture.borrow_mut().as_mut() {
             capture.record(sql, args);
         }
@@ -230,7 +254,9 @@ impl Db {
         Ok(v)
     }
     pub fn runners(&self) -> Result<Vec<Value>> {
-        let mut runners = self.rows(concat!(runner_select!(), " GROUP BY r.id ORDER BY CASE r.status WHEN 'running' THEN 0 WHEN 'waiting' THEN 1 WHEN 'warming_up' THEN 2 WHEN 'ran' THEN 3 ELSE 4 END,r.queue_index,r.name"), &[])?;
+        self.with_runner_labels(runner_totals::runners(self)?)
+    }
+    fn with_runner_labels(&self, mut runners: Vec<Value>) -> Result<Vec<Value>> {
         let mut labels = std::collections::HashMap::<String, Vec<Value>>::new();
         for mut label in self.rows(
             "SELECT rl.runner_id AS runnerId, l.id,l.name,l.color,l.icon,l.kind,l.image_url AS imageUrl,l.target_laps AS targetLaps,l.sort_order AS sortOrder,l.created_at AS createdAt,l.updated_at AS updatedAt
@@ -289,6 +315,9 @@ impl Db {
             ),
         )
     }
+    pub(crate) fn begin_runner_write(&self, method: &str) {
+        self.runner_totals.lock().unwrap().begin_write(method);
+    }
     pub fn mutation_from(&mut self, method: &str, input: &Value, origin: &str) -> Result<Value> {
         self.mutation_run(method, input, origin, true)
             .map(|(result, _)| result)
@@ -306,6 +335,7 @@ impl Db {
             rusqlite::TransactionBehavior::Immediate,
         )
         .map_err(err)?;
+        self.begin_runner_write(method);
         // Existing group databases require the replicated runtime, never silently operate solo.
         let replicated = self.capture.borrow().is_some();
         if !replicated
@@ -552,7 +582,7 @@ impl Db {
                 .as_i64()
                 .filter(|d| *d >= 0 && (*d - (pressed - started)).abs() <= 250)
                 .unwrap_or(pressed - started);
-            self.exec("INSERT INTO laps(id,runner_id,lap_number,started_at,finished_at,duration_ms,source,created_at,labels_json) VALUES(?,?,(SELECT COUNT(*)+1 FROM laps WHERE runner_id=?),?,?,?,'spacebar',?,?)", &[lap.clone(),race["activeRunnerId"].clone(),race["activeRunnerId"].clone(),json!(started),json!(pressed),json!(duration),json!(pressed),json!(historical_labels(&race["activeLabels"]))])?;
+            self.exec(HANDOFF_LAP_INSERT, &[lap.clone(),race["activeRunnerId"].clone(),race["activeRunnerId"].clone(),json!(started),json!(pressed),json!(duration),json!(pressed),json!(historical_labels(&race["activeLabels"]))])?;
         }
         if !race["activeRunnerId"].is_null() {
             self.exec("UPDATE runners SET status='ran',queue_index=NULL,status_since=?,hidden_at=NULL WHERE id=? AND status='running'", &[json!(pressed),race["activeRunnerId"].clone()])?;
