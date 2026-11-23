@@ -781,8 +781,8 @@ impl Node {
             if st.role != Role::Leader || term != prepared.entry.epoch || head.seq + 1 != seq {
                 return false;
             }
-            // Each laptop that holds everything before the press, with nothing else on its way
-            // to it, gets it at once; the usual rounds bring it to the others.
+            // Each laptop that holds everything before the press gets it at once; the usual
+            // rounds bring it to the others.
             for member in self.others() {
                 let request = self.append_request(
                     &st,
@@ -793,14 +793,11 @@ impl Node {
                     vec![prepared.entry.clone()],
                     false,
                 );
-                let Some(p) = st.progress.get_mut(&member.host_id).filter(|p| {
-                    prepared.voters.contains(&member.host_id)
-                        && !p.in_flight
-                        && p.match_seq == Some(head.seq)
-                }) else {
+                if !prepared.voters.contains(&member.host_id)
+                    || st.progress.get(&member.host_id).and_then(|p| p.match_seq) != Some(head.seq)
+                {
                     continue;
-                };
-                p.in_flight = true;
+                }
                 let (node, answers) = (self.arc(), answers.clone());
                 std::thread::spawn(move || node.send_kept(&member, term, seq, &request, &answers));
             }
@@ -891,12 +888,11 @@ impl Node {
         let _ = answers.send((member.host_id.clone(), head.is_some_and(|h| h >= seq)));
         let mut st = self.raft.lock().unwrap();
         let leading = st.role == Role::Leader && self.term() == term;
-        if let Some(p) = st.progress.get_mut(&member.host_id) {
-            p.in_flight = false;
-            if let Some(head) = head.filter(|_| leading) {
-                p.match_seq = p.match_seq.max(Some(head));
-                p.last_ack = Some(Instant::now());
-            }
+        if let Some(p) = st.progress.get_mut(&member.host_id).filter(|_| leading)
+            && let Some(head) = head
+        {
+            p.match_seq = p.match_seq.max(Some(head));
+            p.last_ack = Some(Instant::now());
         }
         if leading && head.is_some() {
             self.advance_commit(&mut st);
@@ -1024,6 +1020,7 @@ impl Node {
         };
         let outcome = log::append_from_leader(
             &mut self.db.lock().unwrap(),
+            term,
             request["prevSeq"].as_i64().unwrap_or(0),
             request["prevId"].as_str(),
             &entries,
