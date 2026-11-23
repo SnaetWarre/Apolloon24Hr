@@ -2105,3 +2105,158 @@ index b6dde14..c55512d 100644
                  let mut redraw = false;
                  // A menu item handing Rune its key: it acts after, if no handler takes it. So does
                  // the window menu's Alt+Space, posted rather than run inside the key's message.
+diff --git a/crates/rune/src/window.rs b/crates/rune/src/window.rs
+index 2641f05..466a97a 100644
+--- a/crates/rune/src/window.rs
++++ b/crates/rune/src/window.rs
+@@ -48,6 +48,7 @@ mod win;
+ use win::{SurfaceRetries, SurfaceStep, SURFACE_TRIES, Win};
+ mod first_frame;
+ mod frame_latency;
++mod immediate_input;
+ use first_frame::FirstFrame;
+ mod draw;
+ mod redraw;
+diff --git a/crates/rune/src/window/events.rs b/crates/rune/src/window/events.rs
+index c55512d..2b65b38 100644
+--- a/crates/rune/src/window/events.rs
++++ b/crates/rune/src/window/events.rs
+@@ -433,6 +433,10 @@ impl<S: 'static> Host<S> {
+                     redraw |= pressed;
+                 }
+                 if redraw { l.request_redraw(); }
++                if immediate_input::dispatch(rt, immediate_input::enabled()) {
++                    self.clipboard.flush(rt);
++                    self.shell(event_loop);
++                }
+             }
+             WindowEvent::Ime(ime) => {
+                 // A reconversion the input method confirmed comes first: the composition it
+diff --git a/crates/rune/src/window/immediate_input.rs b/crates/rune/src/window/immediate_input.rs
+new file mode 100644
+index 0000000..4398c06
+--- /dev/null
++++ b/crates/rune/src/window/immediate_input.rs
+@@ -0,0 +1,18 @@
++use crate::Runtime;
++
++pub(super) fn enabled() -> bool {
++    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
++    *ENABLED.get_or_init(|| parse(std::env::var("APOLLOON_IMMEDIATE_INPUT").ok().as_deref()))
++}
++
++fn parse(value: Option<&str>) -> bool { value == Some("1") }
++
++pub(super) fn dispatch<S: 'static>(rt: &mut Runtime<S>, enabled: bool) -> bool {
++    if !enabled || !rt.keys_queued() { return false; }
++    rt.hidden_timer_frame();
++    true
++}
++
++#[cfg(test)]
++#[path = "immediate_input_tests.rs"]
++mod tests;
+diff --git a/crates/rune/src/window/immediate_input_tests.rs b/crates/rune/src/window/immediate_input_tests.rs
+new file mode 100644
+index 0000000..348b479
+--- /dev/null
++++ b/crates/rune/src/window/immediate_input_tests.rs
+@@ -0,0 +1,98 @@
++use super::*;
++use crate::{Cx, El, Env, Ime, Key, KeyEvent, Mods, PhysicalInput, PhysicalKeyCode, TextEdit, TextStyle, el, text_input};
++
++#[derive(Default)]
++struct State { keys: usize, releases: usize, edit: TextEdit }
++
++fn view(_: &State, _: &mut Cx<State>) -> El {
++    el().on_key_up(|s: &mut State, _, _| { s.releases += 1; true })
++}
++
++fn runtime() -> Runtime<State> {
++    let mut rt = Runtime::new(State::default(), view, (300.0, 100.0), Env::new(true, 1.0));
++    rt.on_key = Some(|s, _, _| { s.keys += 1; true });
++    rt.frame(0.0);
++    rt
++}
++
++fn space(rt: &mut Runtime<State>, pressed: bool, repeat: bool) {
++    rt.physical_with_fallback(PhysicalInput::Key {
++        key: PhysicalKeyCode::Space, mods: Mods::default(), pressed, repeat,
++    }, Some(KeyEvent { key: Key::Text(" ".into()), mods: Mods::default() }));
++}
++
++#[test]
++fn only_exactly_one_enables_immediate_input() {
++    assert!(parse(Some("1")));
++    for value in [None, Some(""), Some("0"), Some("2"), Some("01"), Some("true"), Some(" 1")] {
++        assert!(!parse(value));
++    }
++}
++
++#[test]
++fn early_dispatched_key_is_handled_once_across_the_frame_drain() {
++    let mut rt = runtime();
++    space(&mut rt, true, false);
++    assert_eq!(rt.state.keys, 0);
++    assert!(dispatch(&mut rt, true));
++    assert_eq!(rt.state.keys, 1);
++    assert!(!rt.keys_queued());
++    assert!(!dispatch(&mut rt, true));
++    rt.frame(1.0 / 60.0);
++    assert_eq!(rt.state.keys, 1);
++}
++
++#[test]
++fn disabled_dispatch_leaves_input_for_the_frame() {
++    let mut rt = runtime();
++    space(&mut rt, true, false);
++    assert!(!dispatch(&mut rt, false));
++    assert_eq!(rt.state.keys, 0);
++    assert!(rt.keys_queued());
++    rt.frame(0.0);
++    assert_eq!(rt.state.keys, 1);
++}
++
++#[test]
++fn empty_dispatch_does_not_poll_or_run_a_frame() {
++    let mut rt = runtime();
++    rt.poll = Some(|_, _, _| panic!("empty input must not poll"));
++    assert!(!dispatch(&mut rt, true));
++}
++
++#[test]
++fn repeats_and_releases_keep_the_normal_routing_once_each() {
++    let mut early = runtime();
++    let mut paced = runtime();
++    for (pressed, repeat) in [(true, false), (true, true), (false, false)] {
++        for rt in [&mut early, &mut paced] { space(rt, pressed, repeat); }
++        assert!(dispatch(&mut early, true));
++        paced.frame(0.0);
++        assert_eq!((early.state.keys, early.state.releases), (paced.state.keys, paced.state.releases));
++    }
++    assert_eq!((early.state.keys, early.state.releases), (2, 1));
++    early.frame(0.0);
++    assert_eq!((early.state.keys, early.state.releases), (2, 1));
++}
++
++fn field(s: &State, _: &mut Cx<State>) -> El {
++    text_input(&s.edit, TextStyle::new(14.0, 400.0)).key("edit").size(200.0, 40.0)
++        .on_edit(|s: &mut State| &mut s.edit)
++}
++
++#[test]
++fn queued_focus_and_ime_stay_ahead_of_the_early_key() {
++    let mut rt = Runtime::new(State::default(), field, (300.0, 100.0), Env::new(true, 1.0));
++    rt.on_key = Some(|s, _, _| { s.keys += 1; true });
++    rt.frame(0.0);
++    let (x, y) = rt.find("edit").unwrap();
++    rt.pointer_down(x, y);
++    rt.pointer_up(x, y);
++    rt.ime(Ime::Commit("字".into()));
++    space(&mut rt, true, false);
++    assert!(dispatch(&mut rt, true));
++    assert_eq!(rt.state.edit.text, "字 ");
++    assert_eq!(rt.state.keys, 0, "the focused field takes the key, not the app");
++    rt.frame(0.0);
++    assert_eq!(rt.state.edit.text, "字 ");
++}
