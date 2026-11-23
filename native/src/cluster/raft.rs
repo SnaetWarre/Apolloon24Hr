@@ -110,6 +110,12 @@ impl State {
     }
 }
 
+/// The answers to a (pre-)vote request: votes given, and laptops that did not answer at all.
+struct Votes {
+    granted: usize,
+    silent: usize,
+}
+
 fn rand_unit() -> f64 {
     (uuid::Uuid::new_v4().as_u128() % 1_000_000) as f64 / 1_000_000.0
 }
@@ -372,14 +378,16 @@ impl Node {
     fn run_election(&self) {
         let pre = self.ask_for_votes(&self.vote_request(true, self.term() + 1));
         let mut st = self.raft.lock().unwrap();
-        let proceed = st.role == Role::Follower
-            && !st.alive()
-            && pre + 1 >= self.majority()
-            && !st.joining
-            && st.copying.is_none();
-        if !proceed {
+        let could_run =
+            st.role == Role::Follower && !st.alive() && !st.joining && st.copying.is_none();
+        if !could_run || pre.granted + 1 < self.majority() {
             st.electing = false;
-            if st.role != Role::Leader {
+            if could_run && pre.granted + pre.silent + 1 >= self.majority() {
+                // Only laptops that are off kept the pre-vote short. Asking again is harmless (a
+                // pre-vote changes no term and no vote), so ask at every heartbeat: a laptop
+                // restarted in the meantime is asked within one heartbeat of answering.
+                st.deadline = Instant::now() + self.cfg.heartbeat;
+            } else if st.role != Role::Leader {
                 st.reset_deadline();
             }
             return;
@@ -392,7 +400,7 @@ impl Node {
         }
         self.change_role(&mut st, Role::Candidate, None);
         drop(st);
-        let votes = self.ask_for_votes(&self.vote_request(false, term));
+        let votes = self.ask_for_votes(&self.vote_request(false, term)).granted;
         let mut st = self.raft.lock().unwrap();
         let candidate = st.role == Role::Candidate && self.term() == term;
         let won = candidate
@@ -407,7 +415,7 @@ impl Node {
         }
     }
 
-    fn ask_for_votes(&self, request: &Value) -> usize {
+    fn ask_for_votes(&self, request: &Value) -> Votes {
         let peers = self.others();
         let quorum = (peers.len() + 1) / 2 + 1;
         let (send, answers) = mpsc::channel();
@@ -430,9 +438,13 @@ impl Node {
         }
         drop(send);
         let mut granted = 0;
+        let mut silent = 0;
         let mut someone_leads = false;
         for (member, answer) in answers {
-            let Some(answer) = answer else { continue };
+            let Some(answer) = answer else {
+                silent += 1;
+                continue;
+            };
             let mut st = self.raft.lock().unwrap();
             let term = answer["term"].as_i64().unwrap_or(0);
             if answer["removed"] == true {
@@ -448,11 +460,18 @@ impl Node {
             } else if answer["granted"] == true {
                 granted += 1;
                 if !someone_leads && granted + 1 >= quorum {
-                    return granted;
+                    return Votes { granted, silent };
                 }
             }
         }
-        if someone_leads { 0 } else { granted }
+        if someone_leads {
+            Votes {
+                granted: 0,
+                silent: 0,
+            }
+        } else {
+            Votes { granted, silent }
+        }
     }
 
     /// Answers another laptop's (pre-)vote request.
