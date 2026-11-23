@@ -158,7 +158,7 @@ impl Db {
     }
     pub(crate) fn history_generation(&self) -> u64 {
         let mut journal = self.history_changes.lock().unwrap();
-        journal.observe(self.conn.total_changes());
+        journal.observe(self.conn.total_changes(), self.conn.is_autocommit());
         journal.generation
     }
     pub(crate) fn history_changes_since(
