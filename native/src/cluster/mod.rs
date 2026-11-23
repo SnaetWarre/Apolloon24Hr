@@ -136,6 +136,9 @@ pub struct Node {
     notes: Mutex<Notes>,
     /// Test hook: a pulled network cable. Requests to and from other laptops fail.
     pub isolated: AtomicBool,
+    /// Test hook: how long this laptop's own copy of a Timing press takes to reach its disk.
+    #[cfg(test)]
+    pub slow_disk: Mutex<Duration>,
     stopped: AtomicBool,
     started: Instant,
     clock: clock::Samples,
@@ -208,6 +211,8 @@ impl Node {
             host_id,
             notes: Mutex::default(),
             isolated: AtomicBool::new(false),
+            #[cfg(test)]
+            slow_disk: Mutex::new(Duration::ZERO),
             stopped: AtomicBool::new(false),
             started: Instant::now(),
             clock: clock::Samples::default(),
@@ -766,8 +771,8 @@ impl Node {
             "race.clear" => Some("pre-clear"),
             _ => None,
         };
-        // A press on the Timing laptop is stored at once: that laptop goes on alone when it is
-        // cut off, and a lap clocked in the seconds before must still be there.
+        // A press on the Timing laptop is always stored here as well: that laptop goes on alone
+        // when it is cut off, and a lap clocked in the seconds before must still be there.
         let keep = TIMING_PRESSES.contains(&method)
             && self
                 .timing()
@@ -798,9 +803,9 @@ impl Node {
                 continue;
             }
             // The write runs and is taken back: it reaches this laptop's data, and its screens,
-            // only once a majority holds it.
+            // only once a majority holds it, or (a kept press) while it goes round.
             let (mut result, mut prepared) = self
-                .run_write(&mut db, method, input, origin, request, keep)
+                .run_write(&mut db, method, input, origin, request, false)
                 .map_err(Failure::refused)?;
             // A write too large for one message reaches a follower only inside a full copy of
             // the leader's data, so the leader has to store it first.
@@ -817,6 +822,17 @@ impl Node {
             break (result, prepared, log::head(&db).seq);
         };
         let (confirmed, seq) = match prepared {
+            Some(prepared) if keep => {
+                let seq = prepared.entry.seq;
+                let trace = (method == "race.handoff")
+                    .then(|| (input.clone(), result["lapId"].as_str().map(str::to_owned)));
+                let stored = move || {
+                    if let Some((input, lap)) = trace {
+                        crate::latency::handoff("local_commit", &input, lap.as_deref());
+                    }
+                };
+                (self.confirm_kept(prepared, stored), seq)
+            }
             Some(prepared) => {
                 let seq = prepared.entry.seq;
                 (self.confirm(prepared), seq)
