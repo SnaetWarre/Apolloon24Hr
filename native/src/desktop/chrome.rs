@@ -63,8 +63,15 @@ pub fn run<S: 'static>(mut spec: AppSpec<S>, configure: impl FnOnce(rune::App<S>
         return;
     }
     #[cfg(any(windows, target_os = "macos"))]
-    if let Err(error) = rune::set_app_icon(&include_bytes!("../../../build/icon.png")[..]) {
-        supervisor::desktop_log(&format!("App icon: {error}"));
+    {
+        #[cfg(windows)]
+        let icon = &include_bytes!("../../../build/icon.png")[..];
+        // Rune replaces the bundle's Dock icon when the app starts.
+        #[cfg(target_os = "macos")]
+        let icon = &include_bytes!("../../packaging/macos/icon.png")[..];
+        if let Err(error) = rune::set_app_icon(icon) {
+            supervisor::desktop_log(&format!("App icon: {error}"));
+        }
     }
     spec.size = window_state::DEFAULT_WINDOW_SIZE;
     spec.min_size = Some((

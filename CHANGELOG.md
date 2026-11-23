@@ -4,6 +4,10 @@ All notable changes to Apolloon Telsysteem will be documented in this file.
 
 ## [Unreleased]
 
+## [6.1.1]
+
+- Het Apolloon-pictogram in het macOS-Dock is kleiner en past beter bij de andere app-pictogrammen.
+
 ## [6.1.0]
 
 - Timing verwerkt de spatiebalk meteen, toont bevestigde rondes sneller en houdt toetsaanslagen bij terwijl een vorige actie nog wordt opgeslagen.

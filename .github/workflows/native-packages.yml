@@ -112,6 +112,11 @@ jobs:
           cp -R "$scratch/mount/Apolloon Telsysteem.app" "$scratch/"
           test -s "$scratch/mount/.DS_Store"
           codesign --verify --deep --strict --verbose=2 "$scratch/Apolloon Telsysteem.app"
+          iconutil -c iconset -o "$scratch/Apolloon.iconset" "$scratch/Apolloon Telsysteem.app/Contents/Resources/Apolloon.icns"
+          icon_info=$(sips -g pixelWidth -g pixelHeight -g hasAlpha "$scratch/Apolloon.iconset/icon_512x512@2x.png")
+          grep -Fx '  pixelWidth: 1024' <<< "$icon_info"
+          grep -Fx '  pixelHeight: 1024' <<< "$icon_info"
+          grep -Fx '  hasAlpha: yes' <<< "$icon_info"
           python3 native/scripts/check-package.py "$scratch/Apolloon Telsysteem.app/Contents/MacOS/apolloon-native"
       - name: Archive Unix package
         if: runner.os != 'Windows'
