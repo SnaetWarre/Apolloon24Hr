@@ -16,11 +16,11 @@ use history::{HistoryBody, HistoryLog};
 type ReadVersion = (i64, u64, u64, i64, i64);
 
 /// Database version a cached read was built at. Replication and snapshot installation advance
-/// the revision; total_changes also covers local settings writes that keep the same revision.
+/// the revision; the commit count also covers local settings writes that keep the same revision.
 fn read_version(db: &Db) -> Result<ReadVersion> {
     Ok((
         db.revision,
-        db.conn.total_changes(),
+        db.commits(),
         db.history_generation(),
         db.data_version()?,
         db.schema_version()?,
@@ -1193,7 +1193,7 @@ mod read_cache_tests {
     }
 
     #[test]
-    fn commit_and_rollback_notifiers_cover_direct_connection_writes() {
+    fn commits_wake_screens_and_rolled_back_writes_do_not() {
         let db = Db::open(std::path::Path::new(":memory:")).unwrap();
         let mut changes = db.subscribe();
         let before = db.change_token();
@@ -1201,10 +1201,11 @@ mod read_cache_tests {
         assert!(changes.has_changed().unwrap());
         changes.borrow_and_update();
         assert_ne!(before, db.change_token());
-        let before = db.change_token();
+        let (before, read) = (db.change_token(), read_version(&db).unwrap());
         db.conn.execute_batch("BEGIN; UPDATE settings SET value='rolled back' WHERE key='push_test'; ROLLBACK;").unwrap();
-        assert!(changes.has_changed().unwrap());
-        assert_ne!(before, db.change_token());
+        assert!(!changes.has_changed().unwrap());
+        assert_eq!(before, db.change_token());
+        assert_eq!(read, read_version(&db).unwrap(), "a cached read stays valid");
         assert_eq!(db.one("SELECT value FROM settings WHERE key='push_test'", &[]).unwrap()["value"], "first");
     }
 

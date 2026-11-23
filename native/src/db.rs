@@ -126,13 +126,11 @@ impl Db {
             crate::latency::notify();
             false
         })).map_err(err)?;
-        let rolled_back = changes.clone();
         let rolled_back_rows = history_changes.clone();
         let totals_rolled_back = runner_totals.clone();
         conn.rollback_hook(Some(move || {
             rolled_back_rows.lock().unwrap().rollback();
             totals_rolled_back.lock().unwrap().rollback();
-            rolled_back.send_modify(|version| *version = version.wrapping_add(1));
         }))
         .map_err(err)?;
         Ok(Self {
@@ -150,11 +148,15 @@ impl Db {
             "{}.{}.{}.{}.{}.{}",
             self.epoch,
             self.revision,
-            self.conn.total_changes(),
+            self.commits(),
             self.history_generation(),
             self.data_version().unwrap_or_default(),
             self.schema_version().unwrap_or_default()
         )
+    }
+    /// Commits on this connection; a rolled-back write leaves it, so it wakes and invalidates nothing.
+    pub(crate) fn commits(&self) -> u64 {
+        *self.changes.borrow()
     }
     pub(crate) fn history_generation(&self) -> u64 {
         let mut journal = self.history_changes.lock().unwrap();
