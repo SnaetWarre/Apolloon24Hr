@@ -406,6 +406,7 @@ fn apply(db: &mut Db, entries: &[Entry]) -> Result<()> {
 /// Stores a leader's entries that follow (`prev_seq`, `prev_id`); the reason when they do not fit.
 pub fn append_from_leader(
     db: &mut Db,
+    term: i64,
     prev_seq: i64,
     prev_id: Option<&str>,
     entries: &[Entry],
@@ -418,7 +419,9 @@ pub fn append_from_leader(
         return Err("diverged");
     }
     let covered = entries.last().map_or(prev_seq, |e| e.seq);
-    if head_seq > covered {
+    // Entries past what was sent are kept when this same leader sent them: a request of its
+    // that arrives late says nothing against them.
+    if head_seq > covered && entry_term(db, covered + 1) != Some(term) {
         return Err("diverged");
     }
     for entry in entries {

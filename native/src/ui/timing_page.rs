@@ -13,8 +13,7 @@ pub(super) fn clocks(s: &State, clock: &mut clock::Sample) {
     let page = &s.timing_page;
     let race = &s.snapshot["race"];
     if page.finish_stop.as_ref().is_some_and(|(_, started)| started == &race["activeStartedAt"]) { return; }
-    let pending = page.pending.as_ref();
-    let start = match pending {
+    let start = match shown_press(s) {
         Some((_, id, at)) => id.as_ref().filter(|id| runners(s).iter().any(|r| st(r, "id") == id.as_str())).map(|_| *at),
         None if runners(s).iter().any(|r| !race["activeRunnerId"].is_null() && r["id"] == race["activeRunnerId"]) => race["activeStartedAt"].as_i64(),
         None => None,
@@ -43,11 +42,40 @@ pub(super) struct Page {
     finish_step_at: Option<Instant>,
     /// A handoff on its way: the lap it ends, the runner it starts and when.
     pending: Option<(Value, Option<String>, i64)>,
+    /// A handoff a majority confirmed that this laptop's own data does not show yet.
+    saved: Option<Saved>,
     /// A press made while another action was on its way: when it was pressed and the runner shown as next. It is sent next.
     waiting_press: Option<(i64, Option<String>)>,
     reopen: bool,
     pub(super) last_action: String,
     pub(super) error: String,
+}
+
+/// A confirmed handoff, shown until this laptop's own data has it: its press, the lap it saved
+/// and when the answer came.
+struct Saved {
+    press: (Value, Option<String>, i64),
+    lap: Value,
+    at: Instant,
+}
+/// How long a confirmed handoff is shown without this laptop's data catching up.
+const CATCH_UP: Duration = Duration::from_secs(5);
+
+/// The confirmed handoff while this laptop's own data does not have it yet.
+fn saved(s: &State) -> Option<&Saved> {
+    s.timing_page.saved.as_ref().filter(|v| {
+        v.at.elapsed() < CATCH_UP
+            && v.press.0 == s.snapshot["race"]["activeStartedAt"]
+            && !laps(s).iter().any(|l| l["id"] == v.lap["id"])
+    })
+}
+/// The handoff the screen shows ahead of this laptop's data: one on its way, or one confirmed.
+fn shown_press(s: &State) -> Option<&(Value, Option<String>, i64)> {
+    s.timing_page
+        .pending
+        .as_ref()
+        .filter(|(from, _, _)| s.busy && from == &s.snapshot["race"]["activeStartedAt"])
+        .or_else(|| saved(s).map(|v| &v.press))
 }
 
 struct Pal {
@@ -250,6 +278,7 @@ pub(super) fn press(s: &mut State) {
 /// Sends the press that had to wait for another action, with the time it was pressed.
 pub(super) fn send_waiting_press(s: &mut State) {
     if !s.busy
+        && saved(s).is_none()
         && let Some((pressed, shown)) = s.timing_page.waiting_press.take()
     {
         press_at(s, pressed, shown);
@@ -266,8 +295,12 @@ fn press_at(s: &mut State, pressed: i64, shown: Option<String>) {
     if unreachable(s) {
         return;
     }
-    if s.busy {
-        let next = waiting(s).first().map(|r| st(r, "id").to_string());
+    if s.busy || saved(s).is_some() {
+        let started = saved(s).and_then(|v| v.press.1.clone());
+        let next = waiting(s)
+            .into_iter()
+            .map(|r| st(r, "id").to_string())
+            .find(|id| started.as_ref() != Some(id));
         s.timing_page.waiting_press.get_or_insert((pressed, next));
         return;
     }
@@ -411,8 +444,31 @@ fn confirm(s: &mut State) {
 
 /// An answer from the server to a Timing action.
 pub(super) fn succeeded(s: &mut State, method: &str, result: &Value) {
+    let press = s.timing_page.pending.take();
+    // This laptop's own copy of a confirmed press can reach its disk after the answer: the
+    // screen shows the saved lap and the started runner from the answer meanwhile.
+    s.timing_page.saved = match (method, press, active_runner(s)) {
+        ("race.handoff", Some(press), Some(runner))
+            if result["lapId"].is_string()
+                && press.0 == s.snapshot["race"]["activeStartedAt"]
+                && result["startedRunnerId"].as_str() == press.1.as_deref() =>
+        {
+            let started = press.0.as_i64().unwrap_or(press.2);
+            let lap = json!({
+                "id": result["lapId"],
+                "runnerId": runner["id"],
+                "runnerNumber": runner["runnerNumber"],
+                "runnerName": runner["name"],
+                "lapNumber": runner["lapCount"].as_i64().unwrap_or(0) + 1,
+                "startedAt": started,
+                "finishedAt": press.2,
+                "durationMs": press.2 - started,
+            });
+            Some(Saved { press, lap, at: Instant::now() })
+        }
+        _ => None,
+    };
     let page = &mut s.timing_page;
-    page.pending = None;
     page.error.clear();
     page.last_action = match method {
         "race.handoff" | "race.startNext" => {
@@ -460,6 +516,7 @@ pub(super) fn failed(s: &mut State, method: &str) {
         return;
     }
     s.timing_page.pending = None;
+    s.timing_page.saved = None;
     s.timing_page.last_action.clear();
     s.timing_page.error = if method == "events.burgieGepakt" {
         format!("Burgie gepakt niet opgeslagen: {}", s.error)
@@ -555,10 +612,7 @@ pub(super) fn page(s: &State) -> El {
     let active = active_runner(s);
     let queue = waiting(s);
     let total = race_lap_total(s);
-    let pending = page
-        .pending
-        .as_ref()
-        .filter(|(from, _, _)| s.busy && from == &race["activeStartedAt"]);
+    let pending = shown_press(s);
     let shown: Option<&Value> = match pending {
         Some((_, Some(id), _)) => queue.iter().copied().find(|r| st(r, "id") == id),
         Some((_, None, _)) => None,
@@ -770,7 +824,7 @@ pub(super) fn page(s: &State) -> El {
     if !page.error.is_empty() {
         feedback = feedback.child(banner(body_text(page.error.clone(), t.text), s.dark).key("timing-error").role("alert"));
     }
-    if pending.is_some() || page.waiting_press.is_some() {
+    if (pending.is_some() && saved(s).is_none()) || page.waiting_press.is_some() {
         feedback = feedback.child(body_text("Wissel wordt opgeslagen…", p.ink3).role("status"));
     } else if !page.last_action.is_empty() {
         feedback = feedback.child(
@@ -858,7 +912,7 @@ pub(super) fn page(s: &State) -> El {
                 )
         );
     }
-    let recent: Vec<&Value> = laps(s).into_iter().take(5).collect();
+    let recent: Vec<&Value> = saved(s).map(|v| &v.lap).into_iter().chain(laps(s)).take(5).collect();
     let mut log = hex::group(s).key("timing-log");
     if recent.is_empty() {
         log = log.child(hex::item(s, true).child(body_text("Nog geen rondes geregistreerd", p.ink3)));
@@ -1074,4 +1128,47 @@ pub(super) fn modal(s: &State) -> Option<El> {
 /// The reference sets tabular numbers on the whole body.
 fn ts(size: f32, weight: f32) -> rune::TextStyle {
     rune::TextStyle::new(size, weight).features("tnum")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_confirmed_handoff_shows_before_this_laptops_data_has_it() {
+        let mut s = init_with_url("http://127.0.0.1:0".into());
+        s.connected = true;
+        s.snapshot = json!({
+            "race": {"activeRunnerId": "a", "activeStartedAt": 1_000},
+            "runners": [
+                {"id": "a", "runnerNumber": "7", "name": "Ann", "lapCount": 2, "status": "running"},
+                {"id": "b", "runnerNumber": "8", "name": "Bo", "lapCount": 0, "status": "waiting"},
+                {"id": "c", "runnerNumber": "9", "name": "Cas", "lapCount": 0, "status": "waiting"}
+            ]
+        });
+        s.history = json!({"laps": []});
+        s.timing_page.pending = Some((json!(1_000), Some("b".into()), 61_000));
+        succeeded(&mut s, "race.handoff", &json!({"ok": true, "lapId": "L1", "startedRunnerId": "b"}));
+
+        assert_eq!(shown_press(&s), Some(&(json!(1_000), Some("b".to_string()), 61_000)));
+        let lap = &saved(&s).unwrap().lap;
+        assert_eq!((lap["runnerName"].as_str(), lap["lapNumber"].as_i64(), lap["durationMs"].as_i64()), (Some("Ann"), Some(3), Some(60_000)));
+
+        // A press now waits for this laptop's data, and starts the runner after the one shown.
+        press_at(&mut s, 90_000, None);
+        assert_eq!(s.timing_page.waiting_press, Some((90_000, Some("c".into()))));
+
+        s.history = json!({"laps": [{"id": "L1"}]});
+        assert!(shown_press(&s).is_none(), "The screen follows this laptop's data once it has the lap");
+    }
+
+    #[test]
+    fn an_answer_the_data_already_shows_adds_nothing() {
+        let mut s = init_with_url("http://127.0.0.1:0".into());
+        s.snapshot = json!({"race": {"activeRunnerId": "b", "activeStartedAt": 61_000}, "runners": [{"id": "b", "status": "running"}]});
+        s.timing_page.pending = Some((json!(1_000), Some("b".into()), 61_000));
+        succeeded(&mut s, "race.handoff", &json!({"ok": true, "lapId": "L1", "startedRunnerId": "b"}));
+        assert!(s.timing_page.saved.is_none());
+        assert!(shown_press(&s).is_none());
+    }
 }

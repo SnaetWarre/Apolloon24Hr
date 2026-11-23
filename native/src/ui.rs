@@ -3277,10 +3277,15 @@ fn start_transport(url: String, commands: Receiver<Command>, updates: Updates, _
                 });
                 if command.method == "race.handoff" { crate::latency::handoff("client_response", &command.input, result.as_ref().ok().and_then(|r| r["lapId"].as_str())); }
                 let image = result.as_ref().ok().and_then(|r| r["imageUrl"].as_str()).map(str::to_owned);
+                // A confirmed lap is on screen before this laptop's own copy of it can be read.
+                let early = command.method == "race.handoff" && result.is_ok();
+                if early && updates.send(Update { partial: true, outcome: Some((command.method.clone(), result.clone())), ..Default::default() }).is_err() {
+                    break;
+                }
                 let path = synced.lock().unwrap().state_path(None, None);
                 let mut update = refresh(&client, &url, &synced, !reads_only(&command.method), image, &path);
                 let recovery = !reads_only(&command.method);
-                update.outcome = Some((command.method, result));
+                update.outcome = (!early).then_some((command.method, result));
                 if updates.send(update).is_err() {
                     break;
                 }
