@@ -116,6 +116,20 @@ fn send_event(event: Value) {
     }
 }
 
+/// A Space or Enter press as the window got it from the system, before Rune routes it, so a
+/// trace can tell a press the window never got from one a control took before `on_key`.
+pub fn window_key(key: &str, repeat: bool, control_focused: bool) {
+    if enabled() {
+        send_event(json!({"stage":"window_key","id":"native-input","lapId":null,"key":key,"repeat":repeat,"controlFocused":control_focused,"us":realtime_us()}));
+    }
+}
+
+pub fn window_focus(focused: bool) {
+    if enabled() {
+        send_event(json!({"stage":"window_focus","id":"native-input","lapId":null,"focused":focused,"us":realtime_us()}));
+    }
+}
+
 pub fn http_stage(stage: &str, snapshot: &Value, us: f64, request: Option<&str>) {
     if let Some(lap) = snapshot["latencyLap"].as_str() {
         emit_at_request(stage, lap, Some(lap), us, request);
