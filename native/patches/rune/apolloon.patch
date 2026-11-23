@@ -1,8 +1,94 @@
+diff --git a/crates/rune-text/src/atlas.rs b/crates/rune-text/src/atlas.rs
+index a584ca91..332b8968 100644
+--- a/crates/rune-text/src/atlas.rs
++++ b/crates/rune-text/src/atlas.rs
+@@ -386,6 +386,7 @@ impl Atlas {
+     /// first mask, so a text system that only measures (`measure`'s, on each thread that calls it)
+     /// never holds its 4 MiB.
+     pub(super) fn alloc(&mut self, w: u32, h: u32) -> Option<(usize, u32, u32)> {
++        let _trace = crate::profile::FrameStage::new("atlas_begin", "atlas_end");
+         let placed = self.place(w, h);
+         if placed.is_some_and(|(page, ..)| page == 0) && self.data.is_empty() {
+             self.data = vec![0; (ATLAS_SIZE * ATLAS_SIZE) as usize];
+diff --git a/crates/rune-text/src/atlas/glyph_cache.rs b/crates/rune-text/src/atlas/glyph_cache.rs
+index c23914eb..21441922 100644
+--- a/crates/rune-text/src/atlas/glyph_cache.rs
++++ b/crates/rune-text/src/atlas/glyph_cache.rs
+@@ -210,6 +210,7 @@ impl TextSystem {
+         band: std::ops::Range<f32>,
+         out: &mut Vec<GlyphQuad>,
+     ) {
++        let _trace = crate::profile::FrameStage::new("glyph_begin", "glyph_end");
+         let mut cache = std::mem::take(&mut self.glyph_cache);
+         let skia = self.direct_write();
+         let tag = self.smoothing.outline_key().unwrap_or_else(|| self.apple.key());
+diff --git a/crates/rune-text/src/atlas/glyph_emit.rs b/crates/rune-text/src/atlas/glyph_emit.rs
+index 5352be5c..dce0c959 100644
+--- a/crates/rune-text/src/atlas/glyph_emit.rs
++++ b/crates/rune-text/src/atlas/glyph_emit.rs
+@@ -92,6 +92,7 @@ impl TextSystem {
+         band: std::ops::Range<f32>,
+         out: &mut Vec<GlyphQuad>,
+     ) {
++        let _trace = crate::profile::FrameStage::new("glyph_begin", "glyph_end");
+         let mut table = std::mem::take(&mut self.cluster_scratch);
+         let mut coords = std::mem::take(&mut self.coords_scratch);
+         let mut lo = 0;
+diff --git a/crates/rune-text/src/fonts/system_fonts.rs b/crates/rune-text/src/fonts/system_fonts.rs
+index a04c45e9..0a9bb766 100644
+--- a/crates/rune-text/src/fonts/system_fonts.rs
++++ b/crates/rune-text/src/fonts/system_fonts.rs
+@@ -277,6 +277,7 @@ impl TextSystem {
+             return;
+         }
+         // The first system font a launch loads, for its trace (`marks`).
++        let _trace = crate::profile::FrameStage::new("font_fallback_begin", "font_fallback_end");
+         rune_core::marks::mark("text.fallback.begin");
+         for (i, ch) in scripts {
+             register_script_fallbacks(&mut self.font_cx.collection, &mut self.font_files, &fallback::SCRIPT_FONTS[i], ch, locale.as_deref());
+diff --git a/crates/rune-text/src/profile.rs b/crates/rune-text/src/profile.rs
+index e1448b24..6b73d025 100644
+--- a/crates/rune-text/src/profile.rs
++++ b/crates/rune-text/src/profile.rs
+@@ -14,6 +14,33 @@ type ExitFn = fn(Token);
+ 
+ static HOOKS: OnceLock<(EnterFn, ExitFn)> = OnceLock::new();
+ 
++type Stage = fn(&'static str);
++
++thread_local! {
++    static FRAME_STAGE: std::cell::Cell<Option<Stage>> = const { std::cell::Cell::new(None) };
++}
++
++#[doc(hidden)]
++pub fn set_frame_stage_hook(hook: Option<Stage>) {
++    FRAME_STAGE.set(hook);
++}
++
++pub(crate) struct FrameStage(Option<(Stage, &'static str)>);
++
++impl FrameStage {
++    pub(crate) fn new(begin: &'static str, end: &'static str) -> Self {
++        let hook = FRAME_STAGE.get();
++        if let Some(hook) = hook { hook(begin); }
++        Self(hook.map(|hook| (hook, end)))
++    }
++}
++
++impl Drop for FrameStage {
++    fn drop(&mut self) {
++        if let Some((hook, end)) = self.0 { hook(end); }
++    }
++}
++
+ /// Installs the enter/exit hooks called around text shaping and line breaking. The first call
+ /// wins; later calls change nothing.
+ #[doc(hidden)]
 diff --git a/crates/rune/src/app.rs b/crates/rune/src/app.rs
-index fe03f60..29a51d5 100644
+index 5c6383d5..4da8a179 100644
 --- a/crates/rune/src/app.rs
 +++ b/crates/rune/src/app.rs
-@@ -81,6 +81,7 @@ pub struct App<S: 'static> {
+@@ -76,6 +76,7 @@ pub struct App<S: 'static> {
      pub(crate) on_ready: Option<OnWindow>,
      pub(crate) on_frame_encoded: Option<crate::frame::encoded::OnFrameEncoded>,
      pub(crate) on_frame_drawn: Option<crate::frame::encoded::OnFrameDrawn<S>>,
@@ -10,7 +96,7 @@ index fe03f60..29a51d5 100644
      #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
      pub(crate) same_tab_router: Option<Box<dyn Fn(&str) -> bool>>,
      pub(crate) macos_window: crate::MacWindowOptions,
-@@ -144,6 +145,7 @@ impl<S: 'static> App<S> {
+@@ -131,6 +132,7 @@ impl<S: 'static> App<S> {
              on_ready: None,
              on_frame_encoded: None,
              on_frame_drawn: None,
@@ -18,7 +104,7 @@ index fe03f60..29a51d5 100644
              same_tab_router: None,
              macos_window: crate::MacWindowOptions::default(),
              compositor: None,
-@@ -563,6 +565,12 @@ impl<S: 'static> App<S> {
+@@ -546,6 +548,12 @@ impl<S: 'static> App<S> {
          self
      }
  
@@ -31,53 +117,32 @@ index fe03f60..29a51d5 100644
      /// Draw every frame of the app's window (and headless renders) through `compositor`
      /// instead of Rune's default pass (see `compose`).
      pub fn compositor(mut self, compositor: impl crate::compose::Compositor<S>) -> Self {
-@@ -679,12 +687,6 @@ impl<S> Clone for AppHandle<S> {
- }
- 
- impl<S: 'static> AppHandle<S> {
--    /// Wake the event loop so `AppSpec::poll` runs, also while the window is hidden; for a
--    /// background thread that queued work for `poll` to drain.
--    pub fn wake(&self) {
--        self.request(|q| q.woken = true);
--    }
--
-     /// Show the window (creating it if needed), restore it if minimized, and activate the app
-     /// with it in front, including the first open of a window that doesn't exist yet. A
-     /// nonactivating panel takes keys without activating. The window open at launch doesn't
-@@ -809,6 +811,7 @@ impl<S: 'static> AppHandle<S> {
- }
- 
+@@ -772,6 +780,7 @@ impl<S: 'static> AppHandle<S> {
+ mod config;
+ pub(crate) use config::RuntimeConfig;
  mod requests;
 +pub(crate) mod urgent_state;
- pub(crate) use requests::{window_request_order, Activation, Requests, Shared, WindowRequest};
+ pub(crate) use requests::{window_request_order, Activation, Shared, SharedCore, WindowRequest, WindowRequests};
  
  #[cfg(test)]
 diff --git a/crates/rune/src/app/requests.rs b/crates/rune/src/app/requests.rs
-index fd39061..20cfb26 100644
+index 2f8d7705..729edd57 100644
 --- a/crates/rune/src/app/requests.rs
 +++ b/crates/rune/src/app/requests.rs
-@@ -81,6 +81,7 @@ impl<S> Default for Requests<S> {
- }
- 
- pub(crate) struct Shared<S> {
+@@ -92,6 +92,7 @@ impl<S> std::ops::Deref for Requests<S> {
+ /// Non-generic shared state backing [`AppHandle<S>`] and the window host.
+ #[derive(Default)]
+ pub(crate) struct SharedCore {
 +    pub(crate) urgent_state: super::urgent_state::Pending,
-     pub(crate) menus: crate::native_menu::Hub<S>,
-     pub(crate) shortcuts: crate::shortcuts::Hub<S>,
-     pub(super) requests: Mutex<Requests<S>>,
-@@ -95,6 +96,7 @@ pub(crate) struct Shared<S> {
- impl<S> Default for Shared<S> {
-     fn default() -> Self {
-         Shared {
-+            urgent_state: super::urgent_state::Pending::default(),
-             menus: crate::native_menu::Hub::default(),
-             shortcuts: crate::shortcuts::Hub::default(),
-             requests: Mutex::default(),
+     requests: Mutex<WindowRequests>,
+     pub(super) wake: Mutex<Option<crate::runtime::Waker>>,
+     /// Published by the window host for `AppHandle::is_visible` / `window_error`.
 diff --git a/crates/rune/src/app/urgent_state.rs b/crates/rune/src/app/urgent_state.rs
 new file mode 100644
-index 0000000..6fad851
+index 00000000..dce0bc76
 --- /dev/null
 +++ b/crates/rune/src/app/urgent_state.rs
-@@ -0,0 +1,60 @@
+@@ -0,0 +1,54 @@
 +use super::AppHandle;
 +use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 +use std::time::Instant;
@@ -116,20 +181,14 @@ index 0000000..6fad851
 +}
 +
 +impl<S: 'static> AppHandle<S> {
-+    /// Wake the event loop so `AppSpec::poll` runs, also while the window is hidden; for a
-+    /// background thread that queued work for `poll` to drain.
-+    pub fn wake(&self) {
-+        self.request(|q| q.woken = true);
-+    }
-+
 +    /// A wake for queued authoritative state, with one-shot immediate Metal admission when
 +    /// `APOLLOON_URGENT_STATE_FRAME=1`. Other wakes and subsequent animation frames stay paced.
 +    /// Returns `None` when the experiment is disabled. Create before running the app.
 +    pub fn urgent_state_waker(&self) -> Option<crate::runtime::Waker> {
-+        self.shared.urgent_state.0.as_ref()?;
++        self.shared.core.urgent_state.0.as_ref()?;
 +        let handle = self.clone();
 +        Some(Arc::new(move || {
-+            handle.shared.urgent_state.request();
++            handle.shared.core.urgent_state.request();
 +            handle.wake();
 +        }))
 +    }
@@ -140,7 +199,7 @@ index 0000000..6fad851
 +mod tests;
 diff --git a/crates/rune/src/app/urgent_state_tests.rs b/crates/rune/src/app/urgent_state_tests.rs
 new file mode 100644
-index 0000000..58eaa44
+index 00000000..d133e3ec
 --- /dev/null
 +++ b/crates/rune/src/app/urgent_state_tests.rs
 @@ -0,0 +1,111 @@
@@ -222,7 +281,7 @@ index 0000000..58eaa44
 +fn only_qualified_waker_requests_urgent_admission() {
 +    for enabled in [false, true] {
 +        let mut shared = super::super::Shared::<()>::default();
-+        shared.urgent_state = Pending::new(enabled);
++        Arc::get_mut(&mut shared.core).unwrap().urgent_state = Pending::new(enabled);
 +        let handle = AppHandle { shared: Arc::new(shared) };
 +        let wake = handle.urgent_state_waker();
 +        assert_eq!(wake.is_some(), enabled);
@@ -240,7 +299,7 @@ index 0000000..58eaa44
 +#[test]
 +fn b4_4_ordinary_duplicate_and_recovery_wakes_admit_exactly_one_urgent_frame() {
 +    let mut shared = super::super::Shared::<()>::default();
-+    shared.urgent_state = Pending::new(true);
++    Arc::get_mut(&mut shared.core).unwrap().urgent_state = Pending::new(true);
 +    let handle = AppHandle { shared: Arc::new(shared) };
 +    let request = handle.urgent_state_waker().unwrap();
 +    let now = Instant::now();
@@ -256,42 +315,33 @@ index 0000000..58eaa44
 +    assert!(!handle.shared.urgent_state.admit(true, &mut last, now));
 +}
 diff --git a/crates/rune/src/frame/encoded.rs b/crates/rune/src/frame/encoded.rs
-index 22ed634..a180cd8 100644
+index b90f7dc0..4b19148d 100644
 --- a/crates/rune/src/frame/encoded.rs
 +++ b/crates/rune/src/frame/encoded.rs
-@@ -81,10 +81,10 @@ impl FrameEncoded {
- 
- /// A window's hooks and the count it numbers reports with. Without a hook every call is one
+@@ -82,7 +82,7 @@ impl FrameEncoded {
+ /// A window's hook and the count it numbers reports with. Without a hook every call is one
  /// `Option` check and nothing else, so reporting never changes how the window draws.
--pub(crate) struct FrameReports<S: 'static>(Option<Reporter>, Option<OnFrameDrawn<S>>);
-+pub(crate) struct FrameReports<S: 'static>(Option<Reporter>, Option<OnFrameDrawn<S>>, Option<super::profile::StageHook>);
- 
- impl<S: 'static> Default for FrameReports<S> {
--    fn default() -> Self { Self(None, None) }
-+    fn default() -> Self { Self(None, None, None) }
- }
+ #[derive(Default)]
+-pub(crate) struct FrameReports(Option<Reporter>);
++pub(crate) struct FrameReports(Option<Reporter>, Option<super::profile::StageHook>);
  
  struct Reporter {
-@@ -96,7 +96,7 @@ struct Reporter {
+     hook: OnFrameEncoded,
+@@ -93,7 +93,23 @@ struct Reporter {
  
- impl<S: 'static> FrameReports<S> {
+ impl FrameReports {
      pub(crate) fn new(hook: Option<OnFrameEncoded>, window: Option<&str>) -> Self {
--        Self(hook.map(|hook| Reporter { hook, window: window.map(Rc::from), seq: 0, refresh_hz: None }), None)
-+        Self(hook.map(|hook| Reporter { hook, window: window.map(Rc::from), seq: 0, refresh_hz: None }), None, None)
-     }
- 
-     pub(crate) fn inspecting(mut self, drawn: Option<OnFrameDrawn<S>>) -> Self {
-@@ -104,6 +104,22 @@ impl<S: 'static> FrameReports<S> {
-         self
-     }
- 
+-        Self(hook.map(|hook| Reporter { hook, window: window.map(Rc::from), seq: 0, refresh_hz: None }))
++        Self(hook.map(|hook| Reporter { hook, window: window.map(Rc::from), seq: 0, refresh_hz: None }), None)
++    }
++
 +    pub(crate) fn staging(mut self, hook: Option<Box<dyn FnMut(&'static str)>>) -> Self {
-+        self.2 = hook.map(|hook| Rc::new(std::cell::RefCell::new(hook)));
++        self.1 = hook.map(|hook| Rc::new(std::cell::RefCell::new(hook)));
 +        self
 +    }
 +
 +    pub(crate) fn stage(&mut self, name: &'static str) {
-+        if let Some(hook) = &self.2 {
++        if let Some(hook) = &self.1 {
 +            match name {
 +                "runtime_begin" => super::profile::stage_hook(Some(hook.clone())),
 +                "runtime_end" => super::profile::stage_hook(None),
@@ -299,13 +349,11 @@ index 22ed634..a180cd8 100644
 +            }
 +            (hook.borrow_mut())(name);
 +        }
-+    }
-+
-     /// The time to report a `Drawn` frame at, taken only when there's a hook.
-     pub(crate) fn stamp(&self) -> Option<Instant> { self.0.as_ref().map(|_| Instant::now()) }
+     }
  
+     /// The time to report a `Drawn` frame at, taken only when there's a hook.
 diff --git a/crates/rune/src/frame/encoded_tests.rs b/crates/rune/src/frame/encoded_tests.rs
-index d0f04bf..95e8032 100644
+index be84be47..086e56c2 100644
 --- a/crates/rune/src/frame/encoded_tests.rs
 +++ b/crates/rune/src/frame/encoded_tests.rs
 @@ -7,6 +7,18 @@ use crate::{App, AppSpec, WindowSpec};
@@ -316,22 +364,22 @@ index d0f04bf..95e8032 100644
 +fn stage_hook_is_optional_and_reports_only_called_boundaries() {
 +    let log = Rc::new(RefCell::new(Vec::new()));
 +    let sink = log.clone();
-+    let mut reports = FrameReports::<()>::default().staging(Some(Box::new(move |stage| sink.borrow_mut().push(stage))));
++    let mut reports = FrameReports::default().staging(Some(Box::new(move |stage| sink.borrow_mut().push(stage))));
 +    reports.stage("submit_begin");
 +    reports.stage("submit_end");
 +    assert_eq!(*log.borrow(), ["submit_begin", "submit_end"]);
 +    assert!(!reports.wanted());
-+    FrameReports::<()>::default().stage("present_begin");
++    FrameReports::default().stage("present_begin");
 +}
 +
  fn logging() -> (Log, OnFrameEncoded) {
      let log = Log::default();
      let sink = log.clone();
 diff --git a/crates/rune/src/frame/profile.rs b/crates/rune/src/frame/profile.rs
-index 18ef665..634af93 100644
+index 0977f81f..e2cc4db8 100644
 --- a/crates/rune/src/frame/profile.rs
 +++ b/crates/rune/src/frame/profile.rs
-@@ -3,6 +3,44 @@
+@@ -3,6 +3,50 @@
  #[derive(Clone, Copy)]
  pub(crate) enum Phase { View, Commit, Layout, Text, Paint, Apply }
  
@@ -342,7 +390,13 @@ index 18ef665..634af93 100644
 +}
 +
 +pub(crate) fn stage_hook(hook: Option<StageHook>) {
++    let enabled = hook.is_some();
 +    STAGE_HOOK.with(|current| *current.borrow_mut() = hook);
++    crate::text::profile::set_frame_stage_hook(enabled.then_some(|name| {
++        STAGE_HOOK.with(|current| {
++            if let Some(hook) = current.borrow().as_ref() { (hook.borrow_mut())(name); }
++        });
++    }));
 +}
 +
 +pub(crate) struct TraceScope(Option<(StageHook, &'static str)>);
@@ -376,7 +430,7 @@ index 18ef665..634af93 100644
  /// Phases timed, each with a wall and a CPU column.
  #[cfg_attr(not(feature = "frame-profile"), allow(dead_code))]
  pub const PHASES: usize = 6;
-@@ -27,9 +65,9 @@ mod enabled {
+@@ -28,9 +72,9 @@ mod enabled {
          static TIMES: Cell<[f64; 2 * PHASES]> = const { Cell::new([0.0; 2 * PHASES]) };
      }
  
@@ -388,7 +442,7 @@ index 18ef665..634af93 100644
      }
      impl Drop for Scope {
          fn drop(&mut self) {
-@@ -146,12 +184,12 @@ pub fn thread_cpu_ms() -> f64 { cpu_ms().unwrap_or(0.0) }
+@@ -151,12 +195,12 @@ pub fn thread_cpu_ms() -> f64 { cpu_ms().unwrap_or(0.0) }
  /// (`perf_warn::budget`) and in a frame interaction timing follows (`tooling::interaction`),
  /// and otherwise costs a cached flag and a thread-local one.
  #[cfg(not(feature = "frame-profile"))]
@@ -403,8 +457,8 @@ index 18ef665..634af93 100644
      }
  }
  #[cfg(not(feature = "frame-profile"))]
-@@ -164,3 +202,7 @@ impl Drop for Scope {
-         if crate::tooling::interaction::active() { crate::tooling::interaction::add(phase, ms); }
+@@ -196,3 +240,7 @@ pub(crate) fn install_text_hook() {
+         crate::text::profile::set_text_phase_hooks(enter_text_phase, exit_text_phase);
      }
  }
 +
@@ -413,7 +467,7 @@ index 18ef665..634af93 100644
 +mod tests;
 diff --git a/crates/rune/src/frame/profile_tests.rs b/crates/rune/src/frame/profile_tests.rs
 new file mode 100644
-index 0000000..dbbee6e
+index 00000000..66ed48ce
 --- /dev/null
 +++ b/crates/rune/src/frame/profile_tests.rs
 @@ -0,0 +1,36 @@
@@ -424,7 +478,7 @@ index 0000000..dbbee6e
 +fn runtime_scopes_use_only_the_current_windows_hook() {
 +    let seen = Rc::new(RefCell::new(Vec::new()));
 +    let events = seen.clone();
-+    let mut reports = crate::frame::encoded::FrameReports::<()>::default()
++    let mut reports = crate::frame::encoded::FrameReports::default()
 +        .staging(Some(Box::new(move |stage| events.borrow_mut().push(stage))));
 +    reports.stage("runtime_begin");
 +    {
@@ -446,7 +500,7 @@ index 0000000..dbbee6e
 +fn an_empty_runtime_clears_its_hook() {
 +    let seen = Rc::new(RefCell::new(Vec::new()));
 +    let events = seen.clone();
-+    let mut reports = crate::frame::encoded::FrameReports::<()>::default()
++    let mut reports = crate::frame::encoded::FrameReports::default()
 +        .staging(Some(Box::new(move |stage| events.borrow_mut().push(stage))));
 +    reports.stage("runtime_begin");
 +    reports.stage("runtime_end");
@@ -454,7 +508,7 @@ index 0000000..dbbee6e
 +    assert_eq!(*seen.borrow(), ["runtime_begin", "runtime_end"]);
 +}
 diff --git a/crates/rune/src/labels.rs b/crates/rune/src/labels.rs
-index 9aeceb2..494fecc 100644
+index ae48b0b8..c13e342a 100644
 --- a/crates/rune/src/labels.rs
 +++ b/crates/rune/src/labels.rs
 @@ -38,6 +38,9 @@ pub enum Label<'a> {
@@ -467,7 +521,7 @@ index 9aeceb2..494fecc 100644
      /// The app menu's items; some carry the app's name.
      About(&'a str),
      Services,
-@@ -116,6 +119,8 @@ fn english(label: Label<'_>) -> String {
+@@ -118,6 +121,8 @@ fn english(label: Label<'_>) -> String {
          Label::Menu(name) => name.into(),
          Label::Minimize => "Minimize".into(),
          Label::Close => "Close".into(),
@@ -476,58 +530,49 @@ index 9aeceb2..494fecc 100644
          Label::About(app) => format!("About {app}"),
          Label::Services => "Services".into(),
          Label::Hide(app) => format!("Hide {app}"),
+diff --git a/crates/rune/src/lib.rs b/crates/rune/src/lib.rs
+index 85e59ae2..28161fa3 100644
+--- a/crates/rune/src/lib.rs
++++ b/crates/rune/src/lib.rs
+@@ -270,7 +270,7 @@ pub use rune_core::growth;
+ pub use rune_core::latest;
+ pub use rune_core::live;
+ pub use rune_core::machine;
+-pub use rune_core::marks;
++pub mod marks;
+ pub use rune_core::prefs;
+ pub use rune_core::shape;
+ pub use rune_core::task;
 diff --git a/crates/rune/src/marks.rs b/crates/rune/src/marks.rs
-index 4f458fb..c0a7f3f 100644
---- a/crates/rune/src/marks.rs
+new file mode 100644
+index 00000000..c190f361
+--- /dev/null
 +++ b/crates/rune/src/marks.rs
-@@ -160,6 +160,33 @@ pub(crate) fn input_handled(key: bool) {
-     if key { mark_once(&KEY_HANDLED, "input.key.handled") } else { mark_once(&PRESS_HANDLED, "input.press.handled") }
- }
- 
+@@ -0,0 +1,22 @@
++pub use rune_core::marks::*;
++
 +static WINDOW_KEY: std::sync::OnceLock<fn(&crate::KeyEvent, bool, bool)> = std::sync::OnceLock::new();
 +static WINDOW_FOCUS: std::sync::OnceLock<fn(bool)> = std::sync::OnceLock::new();
 +
-+/// For an app's input trace: `hook` hears each key press the window gets from the system,
-+/// before Rune routes it, with whether it repeats and whether a control holds keyboard focus.
-+/// A press it hears that never reaches the app's `on_key` went to a control; one it never hears
-+/// never reached the window. Set once; later calls change nothing.
++/// Observes native key receipt before routing, with repeat and control-focus flags.
 +pub fn on_window_key(hook: fn(&crate::KeyEvent, bool, bool)) {
 +    let _ = WINDOW_KEY.set(hook);
 +}
 +
-+/// For an app's input trace: `hook` hears each time the window gains or loses key focus, as the
-+/// system reports it. Set once; later calls change nothing.
++/// Observes native window focus changes.
 +pub fn on_window_focus(hook: fn(bool)) {
 +    let _ = WINDOW_FOCUS.set(hook);
 +}
 +
-+/// See [`on_window_key`].
 +pub(crate) fn window_key(event: &crate::KeyEvent, repeat: bool, control_focused: bool) {
 +    if let Some(hook) = WINDOW_KEY.get() { hook(event, repeat, control_focused) }
 +}
 +
-+/// See [`on_window_focus`].
 +pub(crate) fn window_focus(focused: bool) {
 +    if let Some(hook) = WINDOW_FOCUS.get() { hook(focused) }
 +}
-+
- /// The event loop is about to wait for input: after the first present, `input.ready`.
- pub(crate) fn loop_waits() {
-     if !counting() {
-diff --git a/crates/rune/src/native_surface/pipeline.rs b/crates/rune/src/native_surface/pipeline.rs
-index 0fc3443..da3d6c3 100644
---- a/crates/rune/src/native_surface/pipeline.rs
-+++ b/crates/rune/src/native_surface/pipeline.rs
-@@ -514,7 +514,6 @@ impl SurfaceRenderer {
-     pub(super) fn live_planes(&self) -> usize {
-         self.importer.as_ref().map_or(0, |i| i.live_planes.load(std::sync::atomic::Ordering::SeqCst))
-     }
--    #[cfg(any(target_os = "macos", target_os = "windows", target_arch = "wasm32"))]
-     pub(crate) fn draws_nothing(&self) -> bool {
-         self.draws.is_empty()
-     }
 diff --git a/crates/rune/src/platform/display_link.rs b/crates/rune/src/platform/display_link.rs
-index ccdd682..544757c 100644
+index ccdd6821..544757c2 100644
 --- a/crates/rune/src/platform/display_link.rs
 +++ b/crates/rune/src/platform/display_link.rs
 @@ -173,6 +173,12 @@ impl DisplayLink {
@@ -544,190 +589,10 @@ index ccdd682..544757c 100644
      /// before starting the link: it's stopped, and `next_frame` would answer `Now` whenever
      /// asked from here on, so starting it once the frame turns out to draw paces it the same.
 diff --git a/crates/rune/src/platform/web.rs b/crates/rune/src/platform/web.rs
-index 4c797a0..df28fc7 100644
+index ff52effc..093646eb 100644
 --- a/crates/rune/src/platform/web.rs
 +++ b/crates/rune/src/platform/web.rs
-@@ -175,12 +175,14 @@ struct Browser<S: 'static> {
- 
- /// The GPU's side of the page: its device, the canvas's surface and Rune's renderer.
- struct GpuSide {
-+    damage: crate::window::damage::Damage,
-     gpu: Gpu,
-     surface: wgpu::Surface<'static>,
-     config: wgpu::SurfaceConfiguration,
-     renderer: Renderer,
-     /// The adapter is WebGL2's.
-     gl: bool,
-+    cpu_srgb_blend: bool,
- }
- 
- /// Who draws the page's frames, and how far the GPU is (the native CPU-first window's
-@@ -286,6 +288,7 @@ impl<S: 'static> Running<S> {
-         if let Some(side) = self.draw.gpu_mut() {
-             let (kept, reconfigure) = web_math::should_reconfigure_surface((side.config.width, side.config.height), next, document);
-             if reconfigure {
-+                side.damage.reset();
-                 side.config.width = kept.0;
-                 side.config.height = kept.1;
-                 side.surface.configure(&side.gpu.device, &side.config);
-@@ -430,10 +433,12 @@ fn gpu_side<S: 'static>(gpu: Gpu, surface: wgpu::Surface<'static>, size: (u32, u
-     surface.configure(&gpu.device, &config);
-     health::watch(&gpu.device, lost);
-     let mut renderer = Renderer::new(&gpu.device, format);
--    renderer.set_srgb_blend(!format.is_srgb());
--    renderer.attach_text(&mut rt.text.atlas);
-     let gl = gpu.adapter.get_info().backend == wgpu::Backend::Gl;
--    Ok(GpuSide { gpu, surface, config, renderer, gl })
-+    let cpu_srgb_blend = rt.srgb_blend();
-+    rt.set_srgb_blend(!format.is_srgb());
-+    renderer.set_srgb_blend(rt.srgb_blend());
-+    renderer.attach_text(&mut rt.text.atlas);
-+    Ok(GpuSide { damage: Default::default(), gpu, surface, config, renderer, gl, cpu_srgb_blend })
- }
- 
- /// The canvas's configuration for `size`, and the format the renderer draws in: the canvas's,
-@@ -443,14 +448,20 @@ fn canvas_config(gpu: &Gpu, surface: &wgpu::Surface<'static>, size: (u32, u32),
-     let mut config = surface.get_default_config(&gpu.adapter, size.0.clamp(1, max_dim), size.1.clamp(1, max_dim))?;
-     config.present_mode = wgpu::PresentMode::Fifo;
-     let caps = surface.get_capabilities(&gpu.adapter);
-+    let is_gl = gpu.adapter.get_info().backend == wgpu::Backend::Gl;
-+    // GLES presents its sRGB surface after sampling it as linear, so the instances
-+    // must be linear as well. Passing the CPU's sRGB instances through it encodes twice.
-+    if is_gl && caps.formats.contains(&wgpu::TextureFormat::Rgba8UnormSrgb) {
-+        config.format = wgpu::TextureFormat::Rgba8UnormSrgb;
-+    }
-     config.usage |= caps.usages & wgpu::TextureUsages::COPY_SRC;
-     // A WebGPU canvas can be copied into (wgpu names only its render use): a loop-only step's
-     // frame is the last one, kept, with its dots redrawn (`Renderer::arm_cycle`).
--    if gpu.adapter.get_info().backend == wgpu::Backend::BrowserWebGpu { config.usage |= wgpu::TextureUsages::COPY_DST; }
-+    config.usage |= caps.usages & wgpu::TextureUsages::COPY_DST;
-+    if !is_gl { config.usage |= wgpu::TextureUsages::COPY_DST; }
-     // A canvas can always be copied from; the hand-over's drift count needs that.
-     if drift_wanted() { config.usage |= wgpu::TextureUsages::COPY_SRC; }
-     let wanted = if srgb_blend { config.format.remove_srgb_suffix() } else { config.format.add_srgb_suffix() };
--    let is_gl = gpu.adapter.get_info().backend == wgpu::Backend::Gl;
-     let format = if wanted != config.format && !is_gl {
-         config.view_formats.push(wanted);
-         wanted
-@@ -468,6 +479,7 @@ fn gpu_frame<S: 'static>(side: &mut GpuSide, rt: &mut Runtime<S>, compositor: &m
-         if format != side.config.format && !side.config.view_formats.contains(&format) {
-             side.config.view_formats.push(format);
-             side.surface.configure(&side.gpu.device, &side.config);
-+            side.damage.reset();
-         }
-         crate::window::rebuild_renderer(&side.gpu.device, &mut side.renderer, format, rt);
-     }
-@@ -475,20 +487,34 @@ fn gpu_frame<S: 'static>(side: &mut GpuSide, rt: &mut Runtime<S>, compositor: &m
-         wgpu::CurrentSurfaceTexture::Success(frame) | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => frame,
-         _ => return Err("WebGPU canvas acquisition failed".into()),
-     };
-+    let images_changed = rt.images.pages.iter().any(|p| p.dirty.is_some())
-+        || rt.text.atlas.dirty.is_some() || rt.text.atlas.pages.iter().any(|p| p.dirty.is_some());
-     side.renderer.upload_images(&side.gpu.device, &side.gpu.queue, &mut rt.images);
-     // A loop-only step (`runtime/paint/cycle.rs`) writes only the dots it changed, and redraws
-     // only where they are, into the last frame the renderer keeps, which is copied to the canvas.
-     let (paint, slots) = rt.cycle_paint();
-     let size = (side.config.width, side.config.height);
--    let armed = tick && side.config.usage.contains(wgpu::TextureUsages::COPY_DST)
-+    let mut armed = tick
-         && side.renderer.arm_cycle(&side.gpu.device, &side.gpu.queue, paint, &rt.instances, &slots, rt.clear_color(), size, side.config.format).is_ok();
-+    if !armed {
-+        let in_place = !images_changed && rt.clear_color()[3] == 1.0 && compositor.is_none();
-+        if let crate::window::damage::Plan::Part { draw, .. } = side.damage.plan(&rt.instances, size, rt.clear_color(), in_place) {
-+            side.renderer.arm_damage(&side.gpu.device, &side.gpu.queue, &draw, rt.clear_color(), size, side.config.format);
-+            armed = true;
-+        }
-+    } else {
-+        side.damage.reset();
-+    }
-     side.renderer.next_instances(paint, tick.then_some(slots));
-     let mut encoder = side.gpu.device.create_command_encoder(&Default::default());
-     if armed {
-         // Rune's default frame (a compositor that drew its own would have kept this a whole one):
-         // nothing draws into the canvas but the copy of the kept frame.
-         side.renderer.prepare_ui(&side.gpu.device, &side.gpu.queue, &mut rt.text.atlas, &rt.instances, size);
--        side.renderer.draw_armed(&mut encoder, &frame.texture);
-+        if !side.renderer.draw_armed(&mut encoder, &frame.texture) {
-+            let target = frame.texture.create_view(&wgpu::TextureViewDescriptor { format: Some(side.renderer.format()), ..Default::default() });
-+            side.renderer.draw(&mut encoder, &target, rt.clear_color());
-+        }
-     } else if let Some(compositor) = compositor {
-         let target = frame.texture.create_view(&wgpu::TextureViewDescriptor { format: Some(side.renderer.format()), ..Default::default() });
-         compositor.render(&mut crate::Frame { device: &side.gpu.device, queue: &side.gpu.queue, encoder: &mut encoder,
-@@ -530,7 +556,7 @@ impl Readback {
-     /// appends `[differing, of, max]` to `globalThis.__runeDrift` once the copy is mapped.
-     fn count(self, cpu: Vec<u8>) {
-         let Readback { buffer, row, size: (w, h), rgba } = self;
--        let buffer = Rc::new(buffer);
-+        let buffer = std::sync::Arc::new(buffer);
-         let mapped = buffer.clone();
-         buffer.slice(..).map_async(wgpu::MapMode::Read, move |result| {
-             if result.is_err() { return; }
-@@ -571,17 +597,27 @@ fn drift_wanted() -> bool {
- }
- 
- /// A flag the GPU's queue sets once the work submitted so far is done, waking the loop.
--fn when_done(queue: &wgpu::Queue, proxy: &EventLoopProxy<Wake>) -> Rc<Cell<bool>> {
-+fn when_done(gpu: &Gpu, proxy: &EventLoopProxy<Wake>) -> Rc<Cell<bool>> {
-     let flag = Rc::new(Cell::new(false));
-     let set = PageOnly((flag.clone(), proxy.clone()));
--    queue.on_submitted_work_done(move || {
-+    gpu.queue.on_submitted_work_done(move || {
-         let PageOnly((flag, proxy)) = &set;
-         flag.set(true);
-         let _ = proxy.send_event(Wake::App);
-     });
-+    // WebGPU answers from a promise; WebGL2 answers only when the device is polled (its fence is
-+    // checked there), so a GL page polls until the work is done.
-+    if gpu.adapter.get_info().backend == wgpu::Backend::Gl { poll_until(gpu.device.clone(), flag.clone()); }
-     flag
- }
- 
-+/// Polls `device` each frame-ish until `done` is set (WebGL2 runs submitted-work callbacks only in a poll).
-+fn poll_until(device: wgpu::Device, done: Rc<Cell<bool>>) {
-+    let _ = device.poll(wgpu::PollType::Poll);
-+    if done.get() { return; }
-+    after(Duration::from_millis(16), move || poll_until(device, done));
-+}
-+
- /// A value moved into a callback wgpu wants `Send`. In a page that callback runs on the page's
- /// one thread, from a promise.
- struct PageOnly<T>(T);
-@@ -629,6 +665,7 @@ impl<S: 'static> Browser<S> {
-         web_sys::console::warn_1(&format!("rune: the GPU device was lost ({why}); the page draws on the CPU").into());
-         crate::marks::mark("web.gpu.lost");
-         side.gpu.device.destroy();
-+        r.rt.set_srgb_blend(side.cpu_srgb_blend);
-         crate::render::cpu_boot::attach_text(&mut r.rt.text.atlas);
-         r.rt.text.atlas.refill_gpu_masks();
-         if let Some(c) = &canvas { let _ = c.style().set_property("opacity", "0"); }
-@@ -786,7 +823,7 @@ impl<S: 'static> Browser<S> {
-         // The browser compiles the renderer's pipelines in its GPU process, in order: a submit
-         // made after them is answered once they're built.
-         side.gpu.queue.submit([]);
--        let built = when_done(&side.gpu.queue, &self.proxy);
-+        let built = when_done(&side.gpu, &self.proxy);
-         let Draw::Cpu { mut cpu, .. } = std::mem::replace(&mut r.draw, Draw::Moving) else { unreachable!("checked above") };
-         cpu.half = crate::render::cpu_boot::HalfRounding::of_vendor(side.gpu.adapter.get_info().vendor);
-         r.draw = Draw::HandingOver { cpu, side, built, done: None, since: Instant::now() };
-@@ -808,6 +845,7 @@ impl<S: 'static> Browser<S> {
-             web_sys::console::warn_1(&"rune: the GPU didn't finish its first frame; the page draws on the CPU".into());
-             crate::marks::mark("web.handover.failed");
-             side.gpu.device.destroy();
-+            r.rt.set_srgb_blend(side.cpu_srgb_blend);
-             crate::render::cpu_boot::attach_text(&mut r.rt.text.atlas);
-             r.rt.text.atlas.refill_gpu_masks();
-             r.draw = Draw::Cpu { cpu, failed: true };
-@@ -930,7 +968,7 @@ impl<S: 'static> Browser<S> {
-                         Ok(_) if side.renderer.checking_gpu() => crate::marks::mark("web.handover.warming"),
-                         Ok(copy) => {
-                             if let Some(copy) = copy { copy.count(cpu.pixels().to_vec()); }
--                            *done = Some(when_done(&side.gpu.queue, &self.proxy));
-+                            *done = Some(when_done(&side.gpu, &self.proxy));
-                             *since = Instant::now();
-                             let proxy = self.proxy.clone();
-                             after(FINISH_LIMIT + Duration::from_millis(50), move || { let _ = proxy.send_event(Wake::App); });
-@@ -1187,6 +1225,21 @@ impl<S: 'static> ApplicationHandler<Wake> for Browser<S> {
+@@ -565,6 +565,22 @@ impl ApplicationHandler<Wake> for Browser {
  
      fn new_events(&mut self, _: &ActiveEventLoop, cause: winit::event::StartCause) {
          if matches!(cause, winit::event::StartCause::ResumeTimeReached { .. }) {
@@ -735,35 +600,153 @@ index 4c797a0..df28fc7 100644
 +                && r.presented && !r.suspended && !r.full_redraw
 +                && matches!(&r.draw, Draw::Cpu { .. } | Draw::Gpu(_))
 +                && !r.draw.gpu().is_some_and(|side| side.renderer.checking_gpu())
-+                && r.compositor.as_ref().is_none_or(|c| !c.animating() && !c.draws_own())
-+                && let Some(stale) = r.rt.resting_wake()
++                && !r.app.compositor_animating() && !r.app.compositor_draws_own()
++                && let Some(stale) = r.app.resting_wake()
 +            {
 +                // A due poll on a resting canvas only needs a frame if it changed the view.
-+                r.clipboard.flush(&mut r.rt);
++                r.clipboard.flush_core(r.app.rt_mut());
 +                if let Some(window) = &self.window { r.apply_frame_requests(window); }
-+                r.rt.refuse_file_dialog("native file dialogs are unsupported on web");
-+                let frame = stale || r.rt.stale() || r.rt.shell_request.is_some() || r.rt.popup_menu().is_some();
-+                r.rt.resting_wake_frame(frame);
++                let rt = r.app.rt_mut();
++                rt.refuse_file_dialog("native file dialogs are unsupported on web");
++                let frame = stale || rt.stale() || rt.shell_request.is_some() || rt.popup_menu().is_some();
++                rt.resting_wake_frame(frame);
 +                if !frame { return; }
 +            }
              if let Some(window) = &self.window { window.request_redraw(); }
          }
      }
+diff --git a/crates/rune/src/platform/web/app.rs b/crates/rune/src/platform/web/app.rs
+index 4210f033..9923e1bb 100644
+--- a/crates/rune/src/platform/web/app.rs
++++ b/crates/rune/src/platform/web/app.rs
+@@ -106,6 +106,10 @@ impl dyn WebApp + '_ {
+         self.driver(|rt, app| rt.frame(app, dt))
+     }
+ 
++    pub(super) fn resting_wake(&mut self) -> Option<bool> {
++        self.driver(|rt, app| rt.resting_wake(app))
++    }
++
+     pub(super) fn clock_advance(&mut self, clock: &mut FrameClock, at: Instant, compositing: bool) -> (bool, f64) {
+         self.driver(|rt, app| clock.advance_core(rt, app, at, compositing))
+     }
 diff --git a/crates/rune/src/platform/web/bridge.js b/crates/rune/src/platform/web/bridge.js
-index f92fe81..e265013 100644
+index 2a461b4e..c4c0d743 100644
 --- a/crates/rune/src/platform/web/bridge.js
 +++ b/crates/rune/src/platform/web/bridge.js
-@@ -176,6 +176,8 @@ export function mount(canvas, callback, embedded, fitHeight, page) {
-             const chord = event.metaKey || event.ctrlKey;
+@@ -205,6 +205,7 @@ export function mount(canvas, callback, embedded, fitHeight, page) {
+             // On Windows European layouts AltGr sets both ctrlKey and altKey; let those characters type.
+             const chord = (event.metaKey || event.ctrlKey) && !event.getModifierState?.('AltGraph');
              const editing = ['Enter', 'Tab', 'Escape', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown'];
-             if (field === password) editing.push('Backspace', 'Delete');
-+            // With no Rune field to type into, Space presses the focused control, as on a page.
 +            if (!h.key) editing.push(' ');
+             if (field === password) editing.push('Backspace', 'Delete');
              if (!chord && !editing.includes(event.key)) return;
              if (chord && event.key.toLowerCase() === 'v') return;
-             event.preventDefault();
+diff --git a/crates/rune/src/platform/web/frame.rs b/crates/rune/src/platform/web/frame.rs
+index f6df557b..f41c135d 100644
+--- a/crates/rune/src/platform/web/frame.rs
++++ b/crates/rune/src/platform/web/frame.rs
+@@ -33,6 +33,7 @@ impl Running {
+         if let Some(side) = self.draw.gpu_mut() {
+             let (kept, reconfigure) = web_math::should_reconfigure_surface((side.config.width, side.config.height), next, document);
+             if reconfigure {
++                side.damage.reset();
+                 side.config.width = kept.0;
+                 side.config.height = kept.1;
+                 side.surface.configure(&side.gpu.device, &side.config);
+diff --git a/crates/rune/src/platform/web/gpu.rs b/crates/rune/src/platform/web/gpu.rs
+index 90a26383..f1589775 100644
+--- a/crates/rune/src/platform/web/gpu.rs
++++ b/crates/rune/src/platform/web/gpu.rs
+@@ -9,6 +9,7 @@ use super::{Wake, app::{CompositorFrame, WebApp}, cpu_canvas, health};
+ 
+ /// The GPU's side of the page: its device, the canvas's surface and Rune's renderer.
+ pub(super) struct GpuSide {
++    pub(super) damage: crate::window::damage::Damage,
+     pub(super) gpu: Gpu,
+     pub(super) surface: wgpu::Surface<'static>,
+     pub(super) config: wgpu::SurfaceConfiguration,
+@@ -175,7 +176,7 @@ pub(super) fn gpu_side(gpu: Gpu, surface: wgpu::Surface<'static>, size: (u32, u3
+     // Re-upload every placed glyph row and outline record on a fresh renderer (for example after
+     // a WebGL2 context restore, where a previous renderer had already cleared `atlas.dirty`).
+     rt.text.atlas.invalidate();
+-    Ok(GpuSide { gpu, surface, config, renderer, backend })
++    Ok(GpuSide { damage: Default::default(), gpu, surface, config, renderer, backend })
+ }
+ 
+ /// The canvas's configuration for `size`, and the format the renderer draws in: the canvas's,
+@@ -187,7 +188,7 @@ pub(super) fn canvas_config(gpu: &Gpu, surface: &wgpu::Surface<'static>, size: (
+     config.present_mode = wgpu::PresentMode::Fifo;
+     let caps = surface.get_capabilities(&gpu.adapter);
+     let backend = gpu.adapter.get_info().backend;
+-    config.usage = super::web_math::surface_usage(caps.usages, backend, drift_wanted());
++    config.usage = super::web_math::surface_usage(caps.usages, backend, drift_wanted()) | caps.usages & wgpu::TextureUsages::COPY_DST;
+     let chosen = super::web_math::select_surface_formats(config.format, &caps.formats, backend, srgb_blend);
+     config.format = chosen.surface;
+     if let Some(view) = chosen.view_format {
+@@ -217,6 +218,7 @@ pub(super) fn gpu_frame(side: &mut GpuSide, app: &mut dyn WebApp, now: Instant,
+                 reconfigure = true;
+             }
+             if reconfigure {
++                side.damage.reset();
+                 side.surface.configure(&side.gpu.device, &side.config);
+             }
+             if side.renderer.format() != chosen.render {
+@@ -230,14 +232,26 @@ pub(super) fn gpu_frame(side: &mut GpuSide, app: &mut dyn WebApp, now: Instant,
+         _ => return Err("WebGPU canvas acquisition failed".into()),
+     };
+     let size = (side.config.width, side.config.height);
++    let in_place = !app.has_compositor();
+     let armed = {
+         let rt = app.rt_mut();
++        let images_changed = rt.images.pages.iter().any(|p| p.dirty.is_some())
++            || rt.text.atlas.dirty.is_some() || rt.text.atlas.pages.iter().any(|p| p.dirty.is_some());
+         side.renderer.upload_images(&side.gpu.device, &side.gpu.queue, &mut rt.images);
+         // A loop-only step (`runtime/paint/cycle.rs`) writes only the dots it changed, and redraws
+         // only where they are, into the last frame the renderer keeps, which is copied to the canvas.
+         let (paint, slots) = rt.cycle_paint();
+-        let armed = tick && side.config.usage.contains(wgpu::TextureUsages::COPY_DST)
++        let mut armed = tick
+             && side.renderer.arm_cycle(&side.gpu.device, &side.gpu.queue, paint, &rt.instances, &slots, rt.clear_color(), size, side.config.format).is_ok();
++        if !armed {
++            let can_draw_part = in_place && !images_changed && rt.clear_color()[3] == 1.0;
++            if let crate::window::damage::Plan::Part { draw, .. } = side.damage.plan(&rt.instances, size, rt.clear_color(), 0, can_draw_part) {
++                side.renderer.arm_damage(&side.gpu.device, &side.gpu.queue, &draw, rt.clear_color(), size, side.config.format);
++                armed = true;
++            }
++        } else {
++            side.damage.reset();
++        }
+         side.renderer.next_instances(paint, tick.then_some(slots));
+         armed
+     };
+@@ -247,7 +261,8 @@ pub(super) fn gpu_frame(side: &mut GpuSide, app: &mut dyn WebApp, now: Instant,
+         // nothing draws into the canvas but the copy of the kept frame.
+         let rt = app.rt_mut();
+         side.renderer.prepare_ui(&side.gpu.device, &side.gpu.queue, &mut rt.text.atlas, &rt.instances, size);
+-        side.renderer.draw_armed(&mut encoder, &frame.texture);
++        let target = frame.texture.create_view(&wgpu::TextureViewDescriptor { format: Some(side.renderer.format()), ..Default::default() });
++        side.renderer.draw(&mut encoder, &target, rt.clear_color());
+     } else if app.has_compositor() {
+         let target = frame.texture.create_view(&wgpu::TextureViewDescriptor { format: Some(side.renderer.format()), ..Default::default() });
+         app.render_compositor(CompositorFrame {
+@@ -301,11 +316,12 @@ impl Readback {
+     /// appends `[differing, of, max]` to `globalThis.__runeDrift` once the copy is mapped.
+     pub(super) fn count(self, cpu: Vec<u8>) {
+         let Readback { buffer, row, size: (w, h), rgba, poll_device } = self;
+-        let buffer = Rc::new(buffer);
++        let buffer = std::sync::Arc::new(buffer);
+         let mapped = buffer.clone();
+         let done = Rc::new(Cell::new(false));
+-        let mark_done = done.clone();
++        let mark_done = PageOnly(done.clone());
+         buffer.slice(..).map_async(wgpu::MapMode::Read, move |result| {
++            let PageOnly(mark_done) = &mark_done;
+             mark_done.set(true);
+             if result.is_err() { return; }
+             let (mut differing, mut max) = (0u32, 0u8);
 diff --git a/crates/rune/src/platform/web/platform.js b/crates/rune/src/platform/web/platform.js
-index b8d1fde..45d324e 100644
+index 4b15bfe5..b1724485 100644
 --- a/crates/rune/src/platform/web/platform.js
 +++ b/crates/rune/src/platform/web/platform.js
 @@ -2,7 +2,28 @@
@@ -797,20 +780,34 @@ index b8d1fde..45d324e 100644
      const forms = {};
      if (text) forms['text/plain'] = new Blob([text], { type: 'text/plain' });
 diff --git a/crates/rune/src/render.rs b/crates/rune/src/render.rs
-index 15826f0..1485c98 100644
+index 0d3a3c32..f86f34d1 100644
 --- a/crates/rune/src/render.rs
 +++ b/crates/rune/src/render.rs
-@@ -12,9 +12,7 @@ pub(crate) const ATLAS_START_ROWS: u32 = 256;
+@@ -5,7 +5,6 @@ use crate::text::{ATLAS_SIZE, Atlas};
  
  mod backdrop_blur;
  mod breaker;
 -#[cfg(any(target_os = "windows", target_arch = "wasm32"))]
  mod damaged;
+ mod device;
+ mod dxbc;
+@@ -20,7 +19,6 @@ mod outlines;
+ mod pass;
+ mod pipelines;
+ // The kept frame it checks exists only where partial frames do (`damaged`).
+-#[cfg(any(target_os = "windows", target_arch = "wasm32"))]
+ mod pixel_check;
+ #[cfg(target_os = "macos")]
+ mod prewarm;
+@@ -65,7 +63,6 @@ mod warm_tests;
+ 
+ use pass::{ActivePass, Backdrop};
+ 
 -#[cfg(target_os = "windows")]
  pub(crate) use damaged::MAX_RECTS;
- pub mod cpu_boot;
- mod dxbc;
-@@ -800,10 +798,8 @@ pub struct Renderer {
+ pub(crate) use device::choose_gpu_backend;
+ pub(crate) use device::discard_prewarm;
+@@ -324,10 +321,8 @@ pub struct Renderer {
      /// limit from JavaScript (about 35 µs), which a frame's layers used to pay.
      max_texture_dim: u32,
      /// The one instance per rectangle that clears a damaged one (`arm_damage`), made on first use.
@@ -821,7 +818,7 @@ index 15826f0..1485c98 100644
      damage: std::sync::Mutex<damaged::DamageState>,
  }
  
-@@ -1011,7 +1007,6 @@ impl Renderer {
+@@ -567,7 +562,6 @@ impl Renderer {
      }
  
      pub fn draw(&self, encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView, clear: [f32; 4]) {
@@ -830,19 +827,19 @@ index 15826f0..1485c98 100644
          self.draw_timed(encoder, view, clear, None);
      }
 diff --git a/crates/rune/src/render/cpu_boot.rs b/crates/rune/src/render/cpu_boot.rs
-index ad62076..1135c84 100644
+index 282fbd9a..7dda9fbd 100644
 --- a/crates/rune/src/render/cpu_boot.rs
 +++ b/crates/rune/src/render/cpu_boot.rs
 @@ -24,7 +24,7 @@
  
  use crate::time::Instant;
  
--use super::{Instance, KIND_BACKDROP_BLUR, KIND_EFFECT, KIND_GLYPH, KIND_LAYER, KIND_LAYER_END};
-+use super::{Instance, KIND_BACKDROP_BLUR, KIND_EFFECT, KIND_GLYPH, KIND_LAYER, KIND_LAYER_END, NO_CLIP};
+-use super::{Instance, Kind};
++use super::{Instance, Kind, NO_CLIP, KIND_GLYPH, KIND_LAYER, KIND_LAYER_END};
  use crate::pixels::ImageAtlas;
  use crate::text::{Atlas, FontSmoothing};
  
-@@ -49,7 +49,7 @@ pub use painter::{CpuPainter, Painted};
+@@ -52,7 +52,7 @@ pub use painter::{CpuPainter, Painted};
  
  /// One frame's draw data, borrowed from the runtime that built it.
  pub struct Scene<'a> {
@@ -851,7 +848,7 @@ index ad62076..1135c84 100644
      glyph_pages: Vec<&'a [u8]>,
      /// The outline store, for glyphs drawn from their outlines (text whose scale moves).
      outlines: Option<&'a crate::text::outline::OutlineStore>,
-@@ -125,7 +125,7 @@ impl<'a> Scene<'a> {
+@@ -128,7 +128,7 @@ impl<'a> Scene<'a> {
      pub fn new(instances: &'a [Instance], atlas: &'a Atlas, images: &'a ImageAtlas, size: (u32, u32), clear: [f32; 4]) -> Self {
          let glyph_pages = (0..atlas.page_count()).filter_map(|p| atlas.page_data(p)).collect();
          let images = images.pages.iter().map(|p| Image { width: p.width, data: &p.data, dirty: p.dirty }).collect();
@@ -860,15 +857,15 @@ index ad62076..1135c84 100644
      }
  
      /// Whether the frame blends in sRGB encoding (`Runtime::srgb_blend`). Linear blending needs
-@@ -181,7 +181,6 @@ impl<'a> Scene<'a> {
+@@ -184,7 +184,6 @@ impl<'a> Scene<'a> {
          let mut depth = 0u32;
-         self.instances.iter().find_map(|i| match i.params[1] {
-             k if k == KIND_LAYER && i.params[2] != 0.0 => Some(NeedsGpu::LayerBlur),
--            k if k == KIND_LAYER && i.border[1] != 0.0 => Some(NeedsGpu::TurnedLayer),
-             k if k == KIND_LAYER => { depth += 1; None }
-             k if k == KIND_LAYER_END => { depth = depth.saturating_sub(1); None }
-             k if k == KIND_BACKDROP_BLUR && depth > 0 => Some(NeedsGpu::BackdropBlur),
-@@ -194,6 +193,53 @@ impl<'a> Scene<'a> {
+         self.instances.iter().find_map(|i| match i.kind() {
+             Some(Kind::Layer) if i.params[2] != 0.0 => Some(NeedsGpu::LayerBlur),
+-            Some(Kind::Layer) if i.border[1] != 0.0 => Some(NeedsGpu::TurnedLayer),
+             Some(Kind::Layer) => { depth += 1; None }
+             Some(Kind::LayerEnd) => { depth = depth.saturating_sub(1); None }
+             Some(Kind::BackdropBlur) if depth > 0 => Some(NeedsGpu::BackdropBlur),
+@@ -201,6 +200,53 @@ impl<'a> Scene<'a> {
      }
  }
  
@@ -923,20 +920,20 @@ index ad62076..1135c84 100644
  #[derive(Clone, Copy, Debug, PartialEq, Eq)]
  pub enum NeedsGpu {
 diff --git a/crates/rune/src/render/cpu_boot/bin.rs b/crates/rune/src/render/cpu_boot/bin.rs
-index 52afca5..4f519de 100644
+index 926f6c2a..c2a18d8a 100644
 --- a/crates/rune/src/render/cpu_boot/bin.rs
 +++ b/crates/rune/src/render/cpu_boot/bin.rs
-@@ -135,7 +135,7 @@ impl Bins {
+@@ -136,7 +136,7 @@ impl Bins {
          let (cols, rows) = (w.div_ceil(TILE_W), h.div_ceil(TILE_H));
          let tiles = (cols * rows) as usize;
          let mut bounds: Vec<[i32; 4]> = scene.instances.iter().map(|i| pixel_bounds(i, w as i32, h as i32)).collect();
 -        let (layers, scope) = plan_layers(scene.instances, (w, h));
 +        let (layers, scope) = plan_layers(&scene.instances, (w, h));
-         // Within a layer drawn to its own target, nothing reaches past the layer's bounds, and
-         // nothing there can stand in for what's under the layer.
+         // Within a layer drawn to its own target or scissored flat, nothing reaches past its
+         // bounds; inside a target of its own, nothing stands in for what's under the layer.
          let mut within = vec![TOP; scene.instances.len()];
 diff --git a/crates/rune/src/render/cpu_boot/painter.rs b/crates/rune/src/render/cpu_boot/painter.rs
-index b7f275b..66b671e 100644
+index 03d30307..e80be99d 100644
 --- a/crates/rune/src/render/cpu_boot/painter.rs
 +++ b/crates/rune/src/render/cpu_boot/painter.rs
 @@ -180,7 +180,7 @@ impl CpuPainter {
@@ -949,7 +946,7 @@ index b7f275b..66b671e 100644
              report.raster_ns = 0;
              return Some(Painted { tiles: report.tiles, hash_ns: report.total_ns, report, ..Painted::default() });
 diff --git a/crates/rune/src/render/cpu_boot/record.rs b/crates/rune/src/render/cpu_boot/record.rs
-index faf139b..7e1c930 100644
+index faf139b7..7e1c930a 100644
 --- a/crates/rune/src/render/cpu_boot/record.rs
 +++ b/crates/rune/src/render/cpu_boot/record.rs
 @@ -27,7 +27,7 @@ pub fn encode(scene: &Scene<'_>) -> Vec<u8> {
@@ -971,7 +968,7 @@ index faf139b..7e1c930 100644
              outlines: None,
              images: self.images.iter().map(|(width, data)| Image { width: *width, data, dirty: None }).collect(),
 diff --git a/crates/rune/src/render/damaged.rs b/crates/rune/src/render/damaged.rs
-index 4f0b75e..9549f8f 100644
+index aae32160..84623407 100644
 --- a/crates/rune/src/render/damaged.rs
 +++ b/crates/rune/src/render/damaged.rs
 @@ -1,5 +1,5 @@
@@ -999,7 +996,7 @@ index 4f0b75e..9549f8f 100644
      current: bool,
  }
  
-@@ -56,11 +60,12 @@ impl Renderer {
+@@ -61,11 +65,12 @@ impl Renderer {
                  sample_count: 1,
                  dimension: wgpu::TextureDimension::D2,
                  format,
@@ -1014,18 +1011,9 @@ index 4f0b75e..9549f8f 100644
          }
          let fills: Vec<Instance> = rects.iter().take(MAX_RECTS).map(|&[x, y, w, h]| Instance {
              rect: [x as f32, y as f32, w as f32, h as f32],
-@@ -149,7 +154,7 @@ impl Renderer {
-     }
- 
-     /// `draw`'s part, when armed: redraws the armed rectangles into the kept frame (all of it
--    /// when it's behind) and copies it to `dst`. False when `draw` should draw whole.
-+    /// when it's behind) and copies or blits it to `dst`. False when `draw` should draw whole.
-     pub(crate) fn draw_armed(&self, encoder: &mut wgpu::CommandEncoder, dst: &wgpu::Texture) -> bool {
-         let mut d = self.damage.lock().unwrap();
-         if d.armed.is_empty() { return false; }
-@@ -205,7 +210,12 @@ impl Renderer {
-             kept.current = true;
-         }
+@@ -264,7 +269,12 @@ impl Renderer {
+         // `RUNE_LOOP_CHECK=2`: this loop-only frame's picture, and the whole frame's beside it.
+         if looped && partial && let Some(c) = d.pixel.as_mut() { self.pixel_check_encode(encoder, c, &kept.texture, clear, &rects); }
          let whole = wgpu::Extent3d { width: dst.width(), height: dst.height(), depth_or_array_layers: 1 };
 -        encoder.copy_texture_to_texture(kept.texture.as_image_copy(), dst.as_image_copy(), whole);
 +        if dst.usage().contains(wgpu::TextureUsages::COPY_DST) {
@@ -1039,7 +1027,7 @@ index 4f0b75e..9549f8f 100644
      }
 diff --git a/crates/rune/src/render/damaged_blit.rs b/crates/rune/src/render/damaged_blit.rs
 new file mode 100644
-index 0000000..1e18f3f
+index 00000000..1e18f3fc
 --- /dev/null
 +++ b/crates/rune/src/render/damaged_blit.rs
 @@ -0,0 +1,59 @@
@@ -1102,11 +1090,23 @@ index 0000000..1e18f3f
 +        pass.draw(0..4, 0..1);
 +    }
 +}
+diff --git a/crates/rune/src/render/instance.rs b/crates/rune/src/render/instance.rs
+index d07773c1..15f6fb38 100644
+--- a/crates/rune/src/render/instance.rs
++++ b/crates/rune/src/render/instance.rs
+@@ -567,7 +567,6 @@ impl Instance {
+ 
+     /// Pre-clip bounds for Windows damage (`window/win32/damage.rs`): `quad_bounds` plus
+     /// `Kind::Effect` (`params[2].max(0) + 1`) and `Kind::BackdropBlur` (`1`).
+-    #[cfg(target_os = "windows")]
+     #[inline(always)]
+     pub(crate) fn damage_quad_bounds(&self) -> Option<(f32, f32, f32, f32)> {
+         self.bounds_core::<true>(0.0)
 diff --git a/crates/rune/src/render/layers.rs b/crates/rune/src/render/layers.rs
-index 1f43293..f8f2689 100644
+index 858cd87f..6c52b8a2 100644
 --- a/crates/rune/src/render/layers.rs
 +++ b/crates/rune/src/render/layers.rs
-@@ -76,7 +76,6 @@ impl Layers {
+@@ -79,7 +79,6 @@ impl Layers {
      /// parent's pass, or into a target composited back at its own place, neither turned nor
      /// blurred, so a changed instance changes only the pixels its bounds cover
      /// (`Renderer::redraws_in_place`).
@@ -1115,10 +1115,10 @@ index 1f43293..f8f2689 100644
          self.plan.iter().enumerate().all(|(i, l)| match self.planner.dispositions.get(i) {
              Some(Disposition::Inline | Disposition::Skip) | None => true,
 diff --git a/crates/rune/src/render/pipelines.rs b/crates/rune/src/render/pipelines.rs
-index c82eaf3..68c7815 100644
+index a4821eb8..ee730e27 100644
 --- a/crates/rune/src/render/pipelines.rs
 +++ b/crates/rune/src/render/pipelines.rs
-@@ -94,9 +94,7 @@ impl Renderer {
+@@ -103,9 +103,7 @@ impl Renderer {
              fills: Default::default(),
              device_key: crate::compose::DeviceKey::next(),
              max_texture_dim: device.limits().max_texture_dimension_2d,
@@ -1128,109 +1128,56 @@ index c82eaf3..68c7815 100644
              damage: Default::default(),
          }
      }
-@@ -223,6 +221,7 @@ impl Renderer {
-         let old = std::mem::replace(&mut self.pipeline, next);
-         self.extra.push((self.format, old));
+@@ -234,6 +232,7 @@ impl Renderer {
+         // The pinned pipelines go with the frame pipeline: kept for the old format, made on their thread for a new one.
+         if let Some(pinned) = self.pinned.take() { self.pinned_extra.push((self.format, pinned)); }
          self.format = format;
 +        *self.damage.lock().unwrap() = Default::default();
          self.lcd = variant::Lcd::Unbuilt;
-         self.srgb_blend = !format.is_srgb();
-         if self.layer_stats().targets > 0 { self.add_layer_format(device, format); }
+         match self.pinned_extra.iter().position(|(f, _)| *f == format) {
+             Some(i) => self.pinned = Some(self.pinned_extra.swap_remove(i).1),
 diff --git a/crates/rune/src/runtime/commit/text_layout.rs b/crates/rune/src/runtime/commit/text_layout.rs
-index 091d355..ce94258 100644
+index 5c589b63..fd044ed9 100644
 --- a/crates/rune/src/runtime/commit/text_layout.rs
 +++ b/crates/rune/src/runtime/commit/text_layout.rs
-@@ -346,6 +346,7 @@ pub(super) fn edited(was: &str, now: &str) -> bool {
+@@ -345,6 +345,7 @@ pub(in crate::runtime) fn edited(was: &str, now: &str) -> bool {
  /// Lays out the flattened tree in `room`, measuring text leaves. Not generic over the app state,
  /// so Taffy's layout code is instantiated once, not once per `Runtime<S>`.
- pub(super) fn compute_layout(taffy: &mut LayoutEngine, root: SlotId, room: Size<AvailableSpace>, nodes: &[Node], text: &mut TextSystem, scale: f32) {
+ pub(in crate::runtime) fn compute_layout(taffy: &mut LayoutEngine, root: SlotId, room: Size<AvailableSpace>, nodes: &[Node], text: &mut TextSystem, scale: f32) {
 +    let _trace = crate::frame::profile::TraceScope::new("layout_begin", "layout_end");
      text.forget_diff();
      taffy.compute_layout(root, room, |inputs, ctx, style| {
          taffy::compute_leaf_layout(inputs, style, |_, _| 0.0, |known, avail| {
 diff --git a/crates/rune/src/runtime/input/focus.rs b/crates/rune/src/runtime/input/focus.rs
-index 9e5edb8..1271b4b 100644
+index 01c9634e..9ff0cc87 100644
 --- a/crates/rune/src/runtime/input/focus.rs
 +++ b/crates/rune/src/runtime/input/focus.rs
-@@ -670,10 +670,12 @@ impl<S: 'static> Runtime<S> {
-             if let Some(f) = self.nodes[i].handlers.on_press.clone() { f(states!(self), tx); }
+@@ -676,10 +676,11 @@ impl RuntimeCore {
+             if let Some(f) = self.tree.nodes[i].handlers.on_press.clone() { f(app.states(), tx); }
              return true;
          }
 -        // Space presses the focused control. Return presses only rows and links; for a button
 -        // it goes on to the default button (`default_button_key`, which ran first) or `on_key`.
-+        // Space presses the focused control. Return presses rows and links, and a control the
-+        // keyboard focused when no default button took it (`default_button_key` ran first), as
-+        // an HTML button does; else it goes on to `on_key`.
-         let space = ev.key == Key::Text(" ".into());
--        if self.nodes[i].input.is_none() && (space || (ev.key == Key::Enter && self.takes_return(i))) {
-+        let enter = ev.key == Key::Enter && (self.takes_return(i) || (self.focus.keyboard() && self.nodes[i].handlers.on_press.is_some()));
-+        if self.nodes[i].input.is_none() && (space || enter) {
++        // Space presses the focused control. Return also presses keyboard-focused controls
++        // when no default button handled it.
+         let space = ev.key == Key::Text(" ".into()) && !self.scrolls_on_space(i);
+-        if self.tree.nodes[i].input.is_none() && (space || (ev.key == Key::Enter && self.takes_return(i))) {
++        let enter = ev.key == Key::Enter && (self.takes_return(i) || (self.kbd.focus.keyboard() && self.tree.nodes[i].handlers.on_press.is_some()));
++        if self.tree.nodes[i].input.is_none() && (space || enter) {
              // A row the user cannot see highlighted (the pointer left it) chooses nothing.
-             if self.nodes[i].focus.highlight.is_some() && !shown { self.focus.step(focus_machine::FocusEvent::Pointed); return true; }
+             if self.tree.nodes[i].focus.highlight.is_some() && !shown { self.kbd.focus.step(focus_machine::FocusEvent::Pointed); return true; }
              if repeat { return true; }
-diff --git a/crates/rune/src/runtime/web/runtime.rs b/crates/rune/src/runtime/web/runtime.rs
-index 5d67ada..9272000 100644
---- a/crates/rune/src/runtime/web/runtime.rs
-+++ b/crates/rune/src/runtime/web/runtime.rs
-@@ -275,7 +275,7 @@ impl<S: 'static> Runtime<S> {
-             "Home" => crate::Key::Home, "End" => crate::Key::End,
-             "PageUp" => crate::Key::PageUp, "PageDown" => crate::Key::PageDown,
-             "Backspace" => crate::Key::Backspace, "Delete" => crate::Key::Delete,
--            "ContextMenu" => crate::Key::ContextMenu,
-+            "ContextMenu" => crate::Key::ContextMenu, " " => crate::Key::Text(" ".into()),
-             "Insert" => crate::Key::Insert, "PrintScreen" => crate::Key::PrintScreen,
-             "ScrollLock" => crate::Key::ScrollLock, "Pause" => crate::Key::Pause,
-             name if name.chars().count() == 1 && mods.cmd => crate::Key::Command(name.chars().next().unwrap().to_ascii_lowercase()),
-diff --git a/crates/rune/src/text/atlas.rs b/crates/rune/src/text/atlas.rs
-index 782c1e2..a83cb54 100644
---- a/crates/rune/src/text/atlas.rs
-+++ b/crates/rune/src/text/atlas.rs
-@@ -371,6 +371,7 @@ impl Atlas {
-     /// first mask, so a text system that only measures (`measure`'s, on each thread that calls it)
-     /// never holds its 4 MiB.
-     pub(super) fn alloc(&mut self, w: u32, h: u32) -> Option<(usize, u32, u32)> {
-+        let _trace = crate::frame::profile::TraceScope::new("atlas_begin", "atlas_end");
-         let placed = self.place(w, h);
-         if placed.is_some_and(|(page, ..)| page == 0) && self.data.is_empty() {
-             self.data = vec![0; (ATLAS_SIZE * ATLAS_SIZE) as usize];
-diff --git a/crates/rune/src/text/glyph_cache.rs b/crates/rune/src/text/glyph_cache.rs
-index 326b7ee..8c16a60 100644
---- a/crates/rune/src/text/glyph_cache.rs
-+++ b/crates/rune/src/text/glyph_cache.rs
-@@ -217,6 +217,7 @@ impl TextSystem {
-         band: std::ops::Range<f32>,
-         out: &mut Vec<GlyphQuad>,
-     ) {
-+        let _trace = crate::frame::profile::TraceScope::new("glyph_begin", "glyph_end");
-         let mut cache = std::mem::take(&mut self.glyph_cache);
-         let skia = self.direct_write();
-         let tag = self.smoothing.outline_key().unwrap_or_else(|| self.apple.key());
-diff --git a/crates/rune/src/text/glyph_emit.rs b/crates/rune/src/text/glyph_emit.rs
-index fd0ac8c..f5f0654 100644
---- a/crates/rune/src/text/glyph_emit.rs
-+++ b/crates/rune/src/text/glyph_emit.rs
-@@ -53,6 +53,7 @@ impl TextSystem {
-         band: std::ops::Range<f32>,
-         out: &mut Vec<GlyphQuad>,
-     ) {
-+        let _trace = crate::frame::profile::TraceScope::new("glyph_begin", "glyph_end");
-         let mut table = std::mem::take(&mut self.cluster_scratch);
-         let mut coords = std::mem::take(&mut self.coords_scratch);
-         let mut lo = 0;
-diff --git a/crates/rune/src/text/system_fonts.rs b/crates/rune/src/text/system_fonts.rs
-index 3dd6391..fe1d710 100644
---- a/crates/rune/src/text/system_fonts.rs
-+++ b/crates/rune/src/text/system_fonts.rs
-@@ -276,6 +276,7 @@ impl TextSystem {
-             return;
-         }
-         // The first system font a launch loads, for its trace (`marks`).
-+        let _trace = crate::frame::profile::TraceScope::new("font_fallback_begin", "font_fallback_end");
-         crate::marks::mark("text.fallback.begin");
-         for (i, ch) in scripts {
-             register_script_fallbacks(&mut self.font_cx.collection, &mut self.font_files, &fallback::SCRIPT_FONTS[i], ch, locale.as_deref());
+@@ -1529,7 +1530,7 @@ mod tests {
+         hold(&mut rt, Key::Text(" ".into()));
+         assert_eq!(rt.state.presses, 1, "Space presses a button once per press");
+         hold(&mut rt, Key::Enter);
+-        assert_eq!(rt.state.presses, 1, "Return passes a focused button by");
++        assert_eq!(rt.state.presses, 2, "Return presses a keyboard-focused button once per press");
+         press(&mut rt, Key::Tab); assert_eq!(focused(&rt), "popup");
+         hold(&mut rt, Key::Down);
+         assert_eq!(rt.state.opens, 1, "arrows open a popup button once");
 diff --git a/crates/rune/src/tooling.rs b/crates/rune/src/tooling.rs
-index c1b7461..2788cf8 100644
+index 2cb2f295..4021b416 100644
 --- a/crates/rune/src/tooling.rs
 +++ b/crates/rune/src/tooling.rs
 @@ -29,6 +29,7 @@ pub struct AppSpec<S: 'static> {
@@ -1250,7 +1197,7 @@ index c1b7461..2788cf8 100644
          crate::marks::mark("app.setup.done");
      }
      rt
-@@ -547,3 +548,7 @@ mod window_tests;
+@@ -599,3 +600,7 @@ mod window_tests;
  #[cfg(test)]
  #[path = "tooling/tests.rs"]
  mod tests;
@@ -1260,7 +1207,7 @@ index c1b7461..2788cf8 100644
 +mod text_setup_tests;
 diff --git a/crates/rune/src/tooling/text_setup_tests.rs b/crates/rune/src/tooling/text_setup_tests.rs
 new file mode 100644
-index 0000000..58f03b5
+index 00000000..58f03b57
 --- /dev/null
 +++ b/crates/rune/src/tooling/text_setup_tests.rs
 @@ -0,0 +1,50 @@
@@ -1315,154 +1262,135 @@ index 0000000..58f03b5
 +    assert!(size.0 > 0.0 && size.1 > 0.0);
 +}
 diff --git a/crates/rune/src/window.rs b/crates/rune/src/window.rs
-index 6324374..466a97a 100644
+index 3da3defd..670597fe 100644
 --- a/crates/rune/src/window.rs
 +++ b/crates/rune/src/window.rs
-@@ -47,6 +47,8 @@ use wake::{WakeFacts, WakeWork};
- mod win;
- use win::{SurfaceRetries, SurfaceStep, SURFACE_TRIES, Win};
- mod first_frame;
-+mod frame_latency;
-+mod immediate_input;
- use first_frame::FirstFrame;
- mod draw;
- mod redraw;
-@@ -58,8 +60,7 @@ use covered_draw::{CoveredDraw, CoveredDrawEvent};
- mod look;
- #[cfg(target_os = "windows")]
- pub(crate) mod slot;
--#[cfg(target_os = "windows")]
--mod damage;
-+pub(crate) mod damage;
- use redraw::{Redraw, RedrawEffect, RedrawEvent};
- mod presented;
- pub(crate) use presented::Presented;
-@@ -554,7 +555,7 @@ impl<S: 'static> Host<S> {
-         let mut args = app.resolve_args(args);
-         let on_window = app.on_window.take();
-         let on_ready = app.on_ready.take();
--        let frame_reports = crate::frame::encoded::FrameReports::new(app.on_frame_encoded.take(), Some(native_handle.key())).inspecting(app.on_frame_drawn.take());
-+        let frame_reports = crate::frame::encoded::FrameReports::new(app.on_frame_encoded.take(), Some(native_handle.key())).inspecting(app.on_frame_drawn.take()).staging(app.on_frame_stage.take());
-         let macos_window = std::mem::take(&mut app.macos_window);
-         // Before the menu guard, so custom items in Edit or Window join these menus.
-         #[cfg(target_os = "macos")]
-@@ -749,7 +750,10 @@ pub(crate) fn surface_config(surface: &wgpu::Surface, adapter: &wgpu::Adapter, (
-     // (`render::damaged`).
-     config.usage |= caps.usages & wgpu::TextureUsages::COPY_DST;
-     config.present_mode = wgpu::PresentMode::AutoVsync;
--    config.desired_maximum_frame_latency = FRAME_LATENCY;
-+    config.desired_maximum_frame_latency = frame_latency::desired();
-+    if std::env::var_os("RUNE_SURFACE_LOG").is_some() {
-+        eprintln!("rune surface: supported={:?} selected={:?} desired_maximum_frame_latency={}", caps.present_modes, config.present_mode, config.desired_maximum_frame_latency);
-+    }
-     Some((config, crate::render::translucency::mode(surface, adapter)))
- }
+@@ -28,10 +28,13 @@ use crate::tooling::Chrome;
  
-diff --git a/crates/rune/src/window/create.rs b/crates/rune/src/window/create.rs
-index d1fd541..0ba6d77 100644
---- a/crates/rune/src/window/create.rs
-+++ b/crates/rune/src/window/create.rs
-@@ -14,6 +14,10 @@ impl<S: 'static> Host<S> {
-         let visible = !launcher && (self.started || self.options.visible);
-         #[allow(unused_mut)]
-         let mut attrs = self.options.attributes(self.rt.window_title.current().unwrap_or(self.spec.title), size, self.spec.min_size, visible).with_active(focus);
+ mod app_events;
+ mod chrome;
++pub(crate) mod damage;
+ mod event_loop;
+ mod file_drop;
++mod frame_latency;
+ mod handle;
+ mod host;
++mod immediate_input;
+ mod keys;
+ pub mod spec;
+ mod state;
+diff --git a/crates/rune/src/window/chrome/platform_sync.rs b/crates/rune/src/window/chrome/platform_sync.rs
+index 11141ff4..be6493d4 100644
+--- a/crates/rune/src/window/chrome/platform_sync.rs
++++ b/crates/rune/src/window/chrome/platform_sync.rs
+@@ -28,7 +28,44 @@ impl Win {
+     /// The runtime's cursor while the pointer is in the window, the arrow once it leaves.
+     /// `Hidden` needs focus, so it can't outlive the window being active.
+     pub(in crate::window) fn apply_cursor_core(&mut self, rt: &RuntimeCore, focused: bool) {
 +        #[cfg(target_os = "linux")]
-+        if self.titlebar.is_some_and(|titlebar| titlebar.has_linux_client_controls()) {
-+            attrs = attrs.with_decorations(false);
++        {
++            if let Some(edge) = rt.pointer().and_then(|point| self.linux_resize_edge(rt, point)) {
++                self.window.set_cursor_visible(true);
++                self.window.set_cursor(winit::window::CursorIcon::from(edge));
++                self.resize_cursor = true;
++                return;
++            }
++            if std::mem::take(&mut self.resize_cursor) {
++                self.window.set_cursor(winit::window::CursorIcon::Default);
++                self.cursor = crate::cursor::os::OsCursor::new();
++            }
 +        }
-         #[cfg(target_os = "macos")]
-         if self.macos_window.nonactivating_panel { attrs = attrs.with_visible(false).with_active(false); }
-         #[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
-@@ -218,6 +222,7 @@ impl<S: 'static> Host<S> {
-         let prime = if visible && panel.is_none() { native::Prime::launching() } else { native::Prime::Steady };
-         #[cfg(target_os = "macos")]
-         let native = Native {
-+            damage: Default::default(),
-             pacing: crate::platform::display_link::DisplayLink::new(&window, self.frame_wake.clone()),
-             present,
-             present_log: hook_log,
-@@ -252,6 +257,10 @@ impl<S: 'static> Host<S> {
-             backoff: Backoff::default(),
-             hidden_pace: HiddenPace::default(),
-             cursor: crate::cursor::os::OsCursor::new(),
-+            #[cfg(target_os = "linux")]
-+            client_resize: self.options.resizable && self.titlebar.is_some_and(|t| t.has_linux_client_controls()),
-+            #[cfg(target_os = "linux")]
-+            resize_cursor: false,
-             alpha,
-             timer_frame: TimerFrame::default(),
-             presented: None,
-@@ -391,7 +400,8 @@ impl<S: 'static> Host<S> {
-         w.surface_ok = true;
-         w.alpha = alpha;
-         #[cfg(target_os = "windows")]
--        { w.native.slot.reset(); w.native.damage.reset(); }
-+        w.native.slot.reset();
-+        w.native.damage.reset();
-         #[cfg(target_os = "windows")]
-         w.native.mode.rebind();
-         #[cfg(target_os = "macos")]
-diff --git a/crates/rune/src/window/damage.rs b/crates/rune/src/window/damage.rs
-index e31747b..0c5c753 100644
---- a/crates/rune/src/window/damage.rs
+         let want = match rt.cursor() { crate::el::Cursor::Hidden if !focused => crate::el::Cursor::Default, c => c };
+         self.cursor.apply(&self.window, want, rt.pointer().is_some());
+     }
++
++    #[cfg(target_os = "linux")]
++    pub(in crate::window) fn linux_resize_edge(&self, rt: &RuntimeCore, (x, y): (f32, f32)) -> Option<winit::window::ResizeDirection> {
++        use winit::window::ResizeDirection::*;
++        if !self.client_resize || self.window.is_maximized() || self.window.fullscreen().is_some() {
++            return None;
++        }
++        let (width, height) = rt.window_viewport();
++        let (x, y) = (x * rt.zoom(), y * rt.zoom());
++        let margin = 5.0;
++        let horizontal = if x < margin { -1 } else if x >= width - margin { 1 } else { 0 };
++        let vertical = if y < margin { -1 } else if y >= height - margin { 1 } else { 0 };
++        Some(match (horizontal, vertical) {
++            (-1, -1) => NorthWest,
++            (-1, 0) => West,
++            (-1, 1) => SouthWest,
++            (0, -1) => North,
++            (0, 1) => South,
++            (1, -1) => NorthEast,
++            (1, 0) => East,
++            (1, 1) => SouthEast,
++            _ => return None,
++        })
++    }
+ }
+diff --git a/crates/rune/src/window/win32/damage.rs b/crates/rune/src/window/damage.rs
+similarity index 98%
+rename from crates/rune/src/window/win32/damage.rs
+rename to crates/rune/src/window/damage.rs
+index 660fe5ad..02a029b6 100644
+--- a/crates/rune/src/window/win32/damage.rs
 +++ b/crates/rune/src/window/damage.rs
-@@ -1,6 +1,6 @@
+@@ -1,4 +1,4 @@
 -//! Windows: what part of a window a frame redraws and presents. The renderer redraws only what
--//! changed into the frame it keeps (`render::damaged`), and the window presents only that
--//! (`Present1` dirty rectangles), which is all DWM composes again.
-+//! What part of a window a frame redraws. The renderer redraws only what changed into the
-+//! frame it keeps (`render::damaged`), then copies it to the drawable. Windows also presents
-+//! only that part (`Present1` dirty rectangles), which is all DWM composes again.
++//! What part of a frame redraws and presents. The renderer redraws only what
+ //! changed into the frame it keeps (`render::damaged`), and the window presents only that
+ //! (`Present1` dirty rectangles), which is all DWM composes again.
  //!
- //! What changed is the instances that differ from the last frame's. The lists' common start and
- //! end are skipped; in what's left, an instance whose bytes are in both lists didn't change (its
 @@ -30,7 +30,7 @@ pub(super) const RECTS: usize = crate::render::MAX_RECTS;
  
  /// The last frames' changes.
  #[derive(Default)]
--pub(super) struct Damage {
+-pub(in crate::window) struct Damage {
 +pub(crate) struct Damage {
-     /// The last frame's instances, size and clear colour.
+     /// The last frame's instances, and its size, clear colour and swap chain (the surface's
+     /// configuration, `configure::generation`).
      last: Vec<Instance>,
-     shape: Option<((u32, u32), [f32; 4])>,
-@@ -52,7 +52,7 @@ pub(super) enum Area {
+@@ -54,7 +54,7 @@ pub(super) enum Area {
  
  /// What a frame draws.
  #[derive(Clone, Debug, PartialEq, Eq)]
--pub(super) enum Plan {
+-pub(in crate::window) enum Plan {
 +pub(crate) enum Plan {
      /// Everything, and why.
      All(&'static str),
      /// Redraw `draw` (`[x, y, width, height]` each), present `present` (`[x0, y0, x1, y1]` each).
-@@ -62,7 +62,7 @@ pub(super) enum Plan {
+@@ -64,7 +64,7 @@ pub(in crate::window) enum Plan {
  impl Damage {
-     /// The frame about to draw `instances` into a `size` target cleared to `clear`; `in_place`
-     /// when nothing but its instances draws there.
--    pub(super) fn plan(&mut self, instances: &[Instance], size: (u32, u32), clear: [f32; 4], in_place: bool) -> Plan {
-+    pub(crate) fn plan(&mut self, instances: &[Instance], size: (u32, u32), clear: [f32; 4], in_place: bool) -> Plan {
-         let (now, why) = match (in_place && !whole_frames(), self.shape == Some((size, clear))) {
+     /// The frame about to draw `instances` into a `size` target cleared to `clear`, on swap chain
+     /// `swap`; `in_place` when nothing but its instances draws there.
+-    pub(in crate::window) fn plan(&mut self, instances: &[Instance], size: (u32, u32), clear: [f32; 4], swap: u64, in_place: bool) -> Plan {
++    pub(crate) fn plan(&mut self, instances: &[Instance], size: (u32, u32), clear: [f32; 4], swap: u64, in_place: bool) -> Plan {
+         let (now, why) = match (in_place && !whole_frames(), self.shape == Some((size, clear, swap))) {
              (false, _) => (Area::All, "not in place"),
-             (_, false) => (Area::All, "new size or colour"),
-@@ -92,7 +92,7 @@ impl Damage {
+             (_, false) => (Area::All, "new size, colour or swap chain"),
+@@ -94,7 +94,7 @@ impl Damage {
      }
  
      /// A new swap chain: the next frame draws whole.
--    pub(super) fn reset(&mut self) { self.shape = None; }
+-    pub(in crate::window) fn reset(&mut self) { self.shape = None; }
 +    pub(crate) fn reset(&mut self) { self.shape = None; }
- }
- /// `RUNE_WHOLE_FRAMES=1`: every frame draws whole, to check partial frames against.
- fn whole_frames() -> bool {
-@@ -219,3 +219,7 @@ fn bounds(i: &Instance, size: (u32, u32)) -> Option<[u32; 4]> {
- }
+ 
+     /// The last frame drew into swap chain `swap` at this size and clear colour: a frame may draw
+     /// and present only part of it. False after `reset` or a configure (a new swap chain), so its
+@@ -228,6 +228,10 @@ fn bounds(i: &Instance, size: (u32, u32)) -> Option<[u32; 4]> {
  
  fn area(r: [u32; 4]) -> u32 { (r[2] - r[0]) * (r[3] - r[1]) }
-+
+ 
 +#[cfg(test)]
 +#[path = "damage_tests.rs"]
-+mod tests;
++mod retained_tests;
++
+ #[cfg(test)]
+ mod tests {
+     use bytemuck::Zeroable;
 diff --git a/crates/rune/src/window/damage_tests.rs b/crates/rune/src/window/damage_tests.rs
 new file mode 100644
-index 0000000..e17145f
+index 00000000..a313649a
 --- /dev/null
 +++ b/crates/rune/src/window/damage_tests.rs
 @@ -0,0 +1,124 @@
@@ -1477,9 +1405,9 @@ index 0000000..e17145f
 +    let mut damage = Damage::default();
 +    let clear = [0.0, 0.0, 0.0, 1.0];
 +    let a = quad(20.0);
-+    assert!(matches!(damage.plan(&[a], (200, 200), clear, true), Plan::All(_)));
++    assert!(matches!(damage.plan(&[a], (200, 200), clear, 0, true), Plan::All(_)));
 +    for next in [vec![a, quad(60.0)], vec![a], vec![a]] {
-+        assert!(matches!(damage.plan(&next, (200, 200), clear, true), Plan::Part { .. }));
++        assert!(matches!(damage.plan(&next, (200, 200), clear, 0, true), Plan::Part { .. }));
 +    }
 +}
 +
@@ -1487,20 +1415,20 @@ index 0000000..e17145f
 +fn reset_resize_colour_and_external_paint_require_whole_frames() {
 +    let mut damage = Damage::default();
 +    let clear = [0.0, 0.0, 0.0, 1.0];
-+    damage.plan(&[], (200, 200), clear, true);
-+    assert!(matches!(damage.plan(&[], (300, 200), clear, true), Plan::All(_)));
-+    assert!(matches!(damage.plan(&[], (300, 200), [1.0; 4], true), Plan::All(_)));
-+    assert!(matches!(damage.plan(&[], (300, 200), [1.0; 4], false), Plan::All(_)));
++    damage.plan(&[], (200, 200), clear, 0, true);
++    assert!(matches!(damage.plan(&[], (300, 200), clear, 0, true), Plan::All(_)));
++    assert!(matches!(damage.plan(&[], (300, 200), [1.0; 4], 0, true), Plan::All(_)));
++    assert!(matches!(damage.plan(&[], (300, 200), [1.0; 4], 0, false), Plan::All(_)));
 +    damage.reset();
-+    assert!(matches!(damage.plan(&[], (300, 200), [1.0; 4], true), Plan::All(_)));
++    assert!(matches!(damage.plan(&[], (300, 200), [1.0; 4], 0, true), Plan::All(_)));
 +}
 +
 +#[test]
 +fn reordering_shared_instances_requires_a_whole_frame() {
 +    let mut damage = Damage::default();
 +    let clear = [0.0, 0.0, 0.0, 1.0];
-+    damage.plan(&[quad(20.0), quad(60.0)], (200, 200), clear, true);
-+    assert_eq!(damage.plan(&[quad(60.0), quad(20.0)], (200, 200), clear, true), Plan::All("reordered"));
++    damage.plan(&[quad(20.0), quad(60.0)], (200, 200), clear, 0, true);
++    assert_eq!(damage.plan(&[quad(60.0), quad(20.0)], (200, 200), clear, 0, true), Plan::All("reordered"));
 +}
 +
 +#[test]
@@ -1565,7 +1493,7 @@ index 0000000..e17145f
 +        }).collect();
 +        frames.extend([ramp.clone(), ramp]);
 +        for instances in frames {
-+            let plan = damage.plan(&instances, (128, 128), clear, true);
++            let plan = damage.plan(&instances, (128, 128), clear, 0, true);
 +            if let Plan::Part { draw, .. } = &plan {
 +                partial.arm_damage(&gpu.device, &gpu.queue, draw, clear, (128, 128), surface_format);
 +            }
@@ -1590,27 +1518,173 @@ index 0000000..e17145f
 +        }
 +    }
 +}
-diff --git a/crates/rune/src/window/draw.rs b/crates/rune/src/window/draw.rs
-index b1ef8b0..ac0656d 100644
---- a/crates/rune/src/window/draw.rs
-+++ b/crates/rune/src/window/draw.rs
-@@ -47,6 +47,7 @@ impl<S: 'static> Host<S> {
+diff --git a/crates/rune/src/window/frame_latency.rs b/crates/rune/src/window/frame_latency.rs
+new file mode 100644
+index 00000000..80f0c655
+--- /dev/null
++++ b/crates/rune/src/window/frame_latency.rs
+@@ -0,0 +1,11 @@
++pub(super) fn desired() -> u32 {
++    parse(std::env::var("APOLLOON_FRAME_LATENCY").ok().as_deref())
++}
++
++fn parse(value: Option<&str>) -> u32 {
++    value.and_then(|value| value.parse::<u32>().ok()).filter(|value| *value > 0)
++        .unwrap_or(super::surface::FRAME_LATENCY)
++}
++
++#[cfg(test)]
++mod tests;
+diff --git a/crates/rune/src/window/frame_latency/tests.rs b/crates/rune/src/window/frame_latency/tests.rs
+new file mode 100644
+index 00000000..f24db4ac
+--- /dev/null
++++ b/crates/rune/src/window/frame_latency/tests.rs
+@@ -0,0 +1,14 @@
++use super::parse;
++
++#[test]
++fn positive_override_selects_the_requested_latency() {
++    assert_eq!(parse(Some("1")), 1);
++    assert_eq!(parse(Some("2")), 2);
++}
++
++#[test]
++fn absent_empty_or_invalid_override_preserves_the_platform_default() {
++    for value in [None, Some(""), Some("0"), Some("-1"), Some("invalid"), Some("4294967296")] {
++        assert_eq!(parse(value), super::super::surface::FRAME_LATENCY);
++    }
++}
+diff --git a/crates/rune/src/window/host.rs b/crates/rune/src/window/host.rs
+index 5274c825..ee28a6d9 100644
+--- a/crates/rune/src/window/host.rs
++++ b/crates/rune/src/window/host.rs
+@@ -184,6 +184,7 @@ struct HostInit {
+     on_window: Option<crate::app::OnWindow>,
+     on_ready: Option<crate::app::OnWindow>,
+     on_frame_encoded: Option<crate::frame::encoded::OnFrameEncoded>,
++    on_frame_stage: Option<Box<dyn FnMut(&'static str)>>,
+     geometry: WindowGeometry,
+     args: Args,
+     keep_running: bool,
+@@ -229,6 +230,7 @@ impl Host {
+         let (on_close, on_rest, on_reopen, on_quit, turn_scope) = (app.on_close, app.on_rest, app.on_reopen, app.on_quit, app.turn_scope);
+         let comp = app.compositor.take();
+         let (playground, attach_playground) = (app.playground.take(), app.attach_playground);
++        let on_frame_stage = app.on_frame_stage.take();
+         let (spec, state, shared, runtime) = app.into_parts(args.scene.as_deref());
+         let size = args.size.unwrap_or(spec.size);
+         // The window reports the system appearance and scale when it opens.
+@@ -256,6 +258,7 @@ impl Host {
+             on_window,
+             on_ready,
+             on_frame_encoded,
++            on_frame_stage,
+             geometry,
+             args,
+             keep_running,
+@@ -294,6 +297,7 @@ impl Host {
+             on_window,
+             on_ready,
+             on_frame_encoded,
++            on_frame_stage,
+             mut geometry,
+             mut args,
+             keep_running,
+@@ -315,7 +319,7 @@ impl Host {
+         // `RUNE_OPEN_INACTIVE`: a tool's launch (an accessibility probe, a capture) leaves the user's
+         // focus and keyboard where they are, as `App::open_inactive` does.
+         let open_inactive = open_inactive || std::env::var_os("RUNE_OPEN_INACTIVE").is_some();
+-        let frame_reports = crate::frame::encoded::FrameReports::new(on_frame_encoded, Some(native_handle.key()));
++        let frame_reports = crate::frame::encoded::FrameReports::new(on_frame_encoded, Some(native_handle.key())).staging(on_frame_stage);
+         if fit_height {
+             let size = args.size.unwrap_or(geometry.size);
+             geometry.min_size = options.fit_min_size(geometry.min_size);
+diff --git a/crates/rune/src/window/host/create.rs b/crates/rune/src/window/host/create.rs
+index c2ff6d80..94fe95ba 100644
+--- a/crates/rune/src/window/host/create.rs
++++ b/crates/rune/src/window/host/create.rs
+@@ -43,6 +43,10 @@ impl Host {
+         let visible = !launcher && (self.started || self.options.visible);
+         #[allow(unused_mut)]
+         let mut attrs = self.options.attributes(self.app.rt().host.window_title.current().unwrap_or(self.geometry.title), size, self.geometry.min_size, visible).with_active(focus);
++        #[cfg(target_os = "linux")]
++        let client_resize = self.titlebar.is_some_and(|bar| bar.has_linux_client_controls());
++        #[cfg(target_os = "linux")]
++        if client_resize { attrs = attrs.with_decorations(false); }
+         #[cfg(target_os = "macos")]
+         if self.macos_window.nonactivating_panel { attrs = attrs.with_visible(false).with_active(false); }
+         #[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
+@@ -258,6 +262,7 @@ impl Host {
+         let prime = if visible && panel.is_none() { native::Prime::launching() } else { native::Prime::Steady };
+         #[cfg(target_os = "macos")]
+         let native = Native {
++            damage: Default::default(),
+             pacing: crate::platform::display_link::DisplayLink::new(&window, self.frame_wake.clone()),
+             present,
+             present_log: hook_log,
+@@ -281,6 +286,10 @@ impl Host {
+         #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+         let native = Native::default();
+         self.win = Some(Win {
++            #[cfg(target_os = "linux")]
++            client_resize,
++            #[cfg(target_os = "linux")]
++            resize_cursor: false,
+             a11y,
+             native,
+             first_frame: FirstFrame::opened(Instant::now()),
+@@ -389,7 +398,8 @@ impl Host {
+         w.presented = None;
+         // Unregister any swap-chain wait before dropping the surface, even if replacement fails.
+         #[cfg(target_os = "windows")]
+-        { w.native.slot.reset(); w.native.damage.reset(); }
++        w.native.slot.reset();
++        w.native.damage.reset();
+         drop(w.surface.take());
+         self.gpu = None;
+         {
+@@ -445,7 +455,8 @@ impl Host {
+         w.surface_ok = true;
+         w.alpha = alpha;
+         #[cfg(target_os = "windows")]
+-        { w.native.slot.reset(); w.native.damage.reset(); }
++        w.native.slot.reset();
++        w.native.damage.reset();
+         #[cfg(target_os = "windows")]
+         w.native.mode.rebind();
+         #[cfg(target_os = "macos")]
+diff --git a/crates/rune/src/window/host/draw.rs b/crates/rune/src/window/host/draw.rs
+index 1cd2d676..b518369a 100644
+--- a/crates/rune/src/window/host/draw.rs
++++ b/crates/rune/src/window/host/draw.rs
+@@ -17,7 +17,8 @@ use crate::window::surface::{
+ #[cfg(target_os = "macos")]
+ use crate::window::surface::{TIMER_FRAME, configure};
+ #[cfg(target_os = "windows")]
+-use crate::window::win32::{covered_draw::CoveredDrawEvent, damage, handover, slot};
++use crate::window::win32::{covered_draw::CoveredDrawEvent, handover, slot};
++use crate::window::damage;
+ #[cfg(target_os = "windows")]
+ use crate::window::WakeEvent;
+ 
+@@ -67,6 +68,7 @@ impl Host {
      /// would have run runs without drawing (`covered_step`). It isn't live: a minimize X11
      /// reports with no event lands here first, and the frame that next draws settles.
-     pub(super) fn covered_frame(&mut self) {
+     pub(in crate::window) fn covered_frame(&mut self) {
 +        self.shared.urgent_state.clear();
          let Some(l) = self.win.as_mut() else { return };
          l.timer_frame.drawn();
          l.presented = None;
-@@ -70,6 +71,7 @@ impl<S: 'static> Host<S> {
+@@ -90,6 +92,7 @@ impl Host {
      /// Draws a frame. `resizing` draws one for a size the user just dragged the window to, at
      /// once: AppKit shows the new size when the event returns, with or without it.
-     pub(super) fn draw(&mut self, resizing: bool) {
+     pub(in crate::window) fn draw(&mut self, resizing: bool) {
 +        self.frame_reports.stage("redraw_begin");
          // Windows: a window still on the CPU renderer draws there (`cpu_frame`).
          #[cfg(target_os = "windows")]
          {
-@@ -152,7 +154,11 @@ impl<S: 'static> Host<S> {
+@@ -175,7 +178,11 @@ impl Host {
              if l.native.prime.presumes() && !pacing.running() {
                  None
              } else {
@@ -1623,7 +1697,7 @@ index b1ef8b0..ac0656d 100644
                  target
              }
          } else { None };
-@@ -182,6 +188,8 @@ impl<S: 'static> Host<S> {
+@@ -205,6 +212,8 @@ impl Host {
          let live_resize = resizing;
          // The frame moves before the drawable is acquired, so it has the new size; never while
          // the user holds the window's edge in a live resize.
@@ -1632,17 +1706,23 @@ index b1ef8b0..ac0656d 100644
          if !hidden && !live_resize { self.step_frame(target.unwrap_or_else(Instant::now)); }
          let (Some(l), Some((gpu, renderer))) = (self.win.as_mut(), self.gpu.as_mut()) else { return };
          #[cfg(target_os = "macos")]
-@@ -211,7 +219,9 @@ impl<S: 'static> Host<S> {
-         let built = if quiet {
-             let now = Instant::now();
-             self.rt.window_resting = true;
+@@ -254,6 +263,7 @@ impl Host {
+             self.app.rt_mut().host.window_resting = true;
+             let at = target.unwrap_or(now);
+             let step = if only_loops { loop_step(&mut self.clock, self.app.rt_mut(), at) } else { Err("") };
 +            self.frame_reports.stage("runtime_begin");
-             let (animating, dt) = self.clock.advance(&mut self.rt, target.unwrap_or(now), false);
+             let (animating, dt) = match step {
+                 Ok((patched, dt)) => {
+                     looped = Some(patched);
+@@ -264,6 +274,7 @@ impl Host {
+                     self.app.clock_advance(&mut self.clock, at, false)
+                 }
+             };
 +            self.frame_reports.stage("runtime_end");
-             let rt = &mut self.rt;
              #[cfg(target_os = "macos")]
              let next_tick = if deferred { l.native.pacing.as_ref().map(|p| p.tick_after(now)) } else { l.next_tick(now) };
-@@ -231,11 +241,18 @@ impl<S: 'static> Host<S> {
+             #[cfg(not(target_os = "macos"))]
+@@ -282,11 +293,18 @@ impl Host {
          };
          // It draws: the link starts, and still says draw at once.
          #[cfg(target_os = "macos")]
@@ -1663,29 +1743,34 @@ index b1ef8b0..ac0656d 100644
              Ok(frame) => frame,
              // A surface with no presentation (a refused configuration, or a device that is gone)
              // is replaced before the next frame rather than asked for a drawable.
-@@ -286,18 +303,29 @@ impl<S: 'static> Host<S> {
+@@ -339,13 +357,19 @@ impl Host {
              (animating, dt)
          } else if hidden {
              self.clock.hold(frame_time);
--            (rt.frame(0.0), 0.0)
+-            (self.app.frame(0.0), 0.0)
 +            self.frame_reports.stage("runtime_begin");
-+            let animating = rt.frame(0.0);
++            let animating = self.app.frame(0.0);
 +            self.frame_reports.stage("runtime_end");
 +            (animating, 0.0)
+         } else if let Ok((patched, dt)) = stepped {
+             looped = Some(patched);
+             (self.app.rt().animating, dt)
          } else {
--            self.clock.advance(rt, frame_time, composing(self.comp.as_deref()))
+             let compositing = self.app.compositor_animating();
+-            self.app.clock_advance(&mut self.clock, frame_time, compositing)
 +            self.frame_reports.stage("runtime_begin");
-+            let built = self.clock.advance(rt, frame_time, composing(self.comp.as_deref()));
++            let built = self.app.clock_advance(&mut self.clock, frame_time, compositing);
 +            self.frame_reports.stage("runtime_end");
 +            built
          };
-         #[cfg(target_os = "macos")]
-         let frame = if l.surface.as_ref().is_some_and(|surface| l.native.materials.update(rt.transparent, !rt.materials.is_empty(), &l.window, surface)) {
+         // `RUNE_LOOP_CHECK=1`: how the loop-only step this frame stood in for compares with it.
+         #[allow(unused_variables)]
+@@ -363,9 +387,14 @@ impl Host {
              // This drawable presents without the views: build again natively into a new one.
              drop(frame);
-             rt.native_materials = true;
+             self.app.rt_mut().paint.native_materials = true;
 +            self.frame_reports.stage("runtime_begin");
-             animating |= rt.frame(0.0);
+             animating |= self.app.frame(0.0);
 +            self.frame_reports.stage("runtime_end");
              let Some(surface) = l.surface.as_ref() else { return };
 -            let frame = match acquire(surface, gpu, &l.config, l.surface_ok, 1, &mut self.meter) {
@@ -1696,7 +1781,7 @@ index b1ef8b0..ac0656d 100644
                  Ok(frame) => frame,
                  Err(Missed::Unconfigured) => {
                      l.surface_ok = false;
-@@ -318,7 +346,10 @@ impl<S: 'static> Host<S> {
+@@ -388,7 +417,10 @@ impl Host {
                  l.surface_ok = false;
                  return;
              }
@@ -1708,26 +1793,27 @@ index b1ef8b0..ac0656d 100644
                  Ok(frame) => frame,
                  Err(Missed::Unconfigured) => {
                      l.surface_ok = false;
-@@ -336,6 +367,7 @@ impl<S: 'static> Host<S> {
+@@ -406,6 +438,7 @@ impl Host {
          l.backoff_step(BackoffEvent::Presented);
          if hidden { l.hidden_pace.rendered(now); }
          let update_ms = now.elapsed().as_secs_f64() * 1000.0;
 +        self.frame_reports.stage("build_end");
          #[cfg(feature = "frame-profile")]
          let fp_built = fp_start.map(|_| crate::frame::live_log::Stamp::now());
-         sync_platform(l, rt, &mut self.secure_input, &mut self.ime_allowed, &self.clipboard);
-@@ -345,8 +377,8 @@ impl<S: 'static> Host<S> {
-             ..Default::default()
-         });
+         sync_platform_core(l, self.app.rt_mut(), &mut self.secure_input, &mut self.ime_allowed, &self.clipboard);
+@@ -420,8 +453,9 @@ impl Host {
+             crate::window::surface::corners::prepare(&mut l.corners, &gpu.device, &gpu.queue, (l.config.width, l.config.height), target_format, corners);
+         }
          // An image's pixels changed where its instances didn't: the whole frame draws (`damage`).
 -        #[cfg(target_os = "windows")]
--        let images_changed = rt.images.pages.iter().any(|p| p.dirty.is_some());
+-        let images_changed = self.app.rt().images.pages.iter().any(|p| p.dirty.is_some());
++        let rt = self.app.rt();
 +        let images_changed = rt.images.pages.iter().any(|p| p.dirty.is_some())
 +            || rt.text.atlas.dirty.is_some() || rt.text.atlas.pages.iter().any(|p| p.dirty.is_some());
-         renderer.upload_images(&gpu.device, &gpu.queue, &mut rt.images);
-         renderer.build_surfaces(&gpu.device, &rt.surfaces, rt.live_notifier());
-         // Playing clips on their own layer (`video_layer`): the surfaces this frame punches out.
-@@ -363,7 +395,6 @@ impl<S: 'static> Host<S> {
+         {
+             let rt = self.app.rt_mut();
+             renderer.upload_images(&gpu.device, &gpu.queue, &mut rt.images);
+@@ -441,7 +475,6 @@ impl Host {
          #[cfg(feature = "frame-profile")]
          let fp_uploaded = fp_start.map(|_| crate::frame::live_log::Stamp::now());
          let mut enc = gpu.device.create_command_encoder(&Default::default());
@@ -1735,19 +1821,28 @@ index b1ef8b0..ac0656d 100644
          let mut present_rect = None;
          // Why the frame drew all of the window (frame-profile).
          #[allow(unused_mut)]
-@@ -374,10 +405,8 @@ impl<S: 'static> Host<S> {
+@@ -457,15 +490,17 @@ impl Host {
          // Only what changed is redrawn and presented (`damage`): the renderer's `draw` takes the
          // armed rectangles when nothing but the instances draws there, a compositor's
-         // `Frame::draw_ui` included.
+         // `Frame::draw_ui` included. A loop-only frame knows what changed.
 -        #[cfg(target_os = "windows")]
          let part = {
+             let rt = self.app.rt();
 -            let whole = if l.alpha.is_some() { Some("alpha") } else if images_changed { Some("image") }
 -                else if !l.config.usage.contains(wgpu::TextureUsages::COPY_DST) { Some("no copies") } else { None };
-+            let whole = if l.alpha.is_some() || rt.clear_color()[3] != 1.0 { Some("alpha") } else if images_changed { Some("image") } else { None };
-             match l.native.damage.plan(&rt.instances, size, rt.clear_color(), whole.is_none()) {
-                 super::damage::Plan::All(why) => { whole_why = Some(whole.unwrap_or(why)); None }
-                 super::damage::Plan::Part { draw, present } => {
-@@ -406,23 +435,25 @@ impl<S: 'static> Host<S> {
++            let whole = if l.alpha.is_some() || rt.clear_color()[3] != 1.0 { Some("alpha") }
++                else if images_changed { Some("image") } else { None };
+             // A new swap chain (`rebind_alpha`, a replaced surface, any configure: a resize, a blend
+             // switch, `acquire` retrying an outdated surface) draws its first frame whole, through
+             // `plan`, even when only a loop asked for it (the step has run; the frame draws it whole).
++            #[cfg(not(target_arch = "wasm32"))]
+             let swap = l.surface.as_ref().map_or(0, crate::window::surface::configure::generation);
++            #[cfg(target_arch = "wasm32")]
++            let swap = 0;
+             let fresh = !l.native.damage.current(size, rt.clear_color(), swap);
+             if fresh && looped.is_some() { loop_why = Some("a new swap chain"); }
+             let armed = looped.as_deref().filter(|_| whole.is_none() && !fresh).and_then(|p| {
+@@ -503,26 +538,28 @@ impl Host {
              renderer.draw(&mut enc, target, rt.clear_color());
          }
          // Every frame, so a frame drawn whole leaves the renderer's kept frame behind.
@@ -1760,6 +1855,9 @@ index b1ef8b0..ac0656d 100644
          #[cfg(not(feature = "frame-profile"))]
 -        let _ = whole_why;
 +        let _ = (whole_why, &present_rect);
+         // A client-side frame's rounded bottom corners: faded off the premultiplied composition,
+         // before a surface that takes straight alpha converts it.
+         crate::window::surface::corners::draw(l.corners.as_ref(), &mut enc, target, corners);
          if let Some(alpha) = &l.alpha { alpha.draw(&mut enc, &view); }
          #[cfg(feature = "frame-profile")]
          let fp_encoded = fp_start.map(|_| crate::frame::live_log::Stamp::now());
@@ -1773,37 +1871,37 @@ index b1ef8b0..ac0656d 100644
          l.window.pre_present_notify();
 +        self.frame_reports.stage("present_begin");
          #[cfg(target_os = "macos")]
-         l.native.materials.present(&rt.materials, rt.env.scale, || gpu.queue.present(frame));
-         #[cfg(target_os = "windows")]
-@@ -434,6 +465,7 @@ impl<S: 'static> Host<S> {
+         {
+             let rt = self.app.rt();
+@@ -537,6 +574,7 @@ impl Host {
          }
          #[cfg(not(target_os = "macos"))]
          gpu.queue.present(frame);
 +        self.frame_reports.stage("present_end");
          #[cfg(target_os = "windows")]
-         l.native.slot.presented();
-         // A swap chain made again on a handed-over window's visual takes over now (`cpu_frame`).
-@@ -455,15 +487,9 @@ impl<S: 'static> Host<S> {
-                 entry: fp_entry.unwrap_or(start), start, acquired, built, uploaded, encoded, submitted, presented: crate::frame::live_log::Stamp::now(),
-                 phases: crate::frame::profile::take(), nodes: rt.nodes.len(), shaped: rt.stats.shaped, instances: rt.instances.len(),
-                 animating, why: std::mem::take(&mut rt.commit_why), next: 0, poll_due: None, loop_due: None, loops: Vec::new(),
--                #[cfg(target_os = "windows")]
-                 damage: present_rect,
--                #[cfg(not(target_os = "windows"))]
--                damage: None,
-                 whole: whole_why,
--                #[cfg(target_os = "windows")]
-                 change: l.native.damage.seen,
--                #[cfg(not(target_os = "windows"))]
--                change: None,
-             }),
-             _ => None,
-         };
-diff --git a/crates/rune/src/window/events.rs b/crates/rune/src/window/events.rs
-index acb321e..2b65b38 100644
---- a/crates/rune/src/window/events.rs
-+++ b/crates/rune/src/window/events.rs
-@@ -221,6 +221,7 @@ impl<S: 'static> Host<S> {
+         if let Some(surface) = l.surface.as_ref() {
+             l.native.slot.presented_surface(surface);
+@@ -562,15 +600,9 @@ impl Host {
+                     entry: fp_entry.unwrap_or(start), start, acquired, built, uploaded, encoded, submitted, presented: crate::frame::live_log::Stamp::now(),
+                     phases: crate::frame::profile::take(), nodes: rt.tree.nodes.len(), shaped: rt.stats.shaped, instances: rt.instances.len(),
+                     animating, why: std::mem::take(&mut rt.commit.commit_why), next: 0, poll_due: None, loop_due: None, loops: Vec::new(),
+-                    #[cfg(target_os = "windows")]
+                     damage: present_rect,
+-                    #[cfg(not(target_os = "windows"))]
+-                    damage: None,
+                     whole: whole_why,
+-                    #[cfg(target_os = "windows")]
+                     change: l.native.damage.seen,
+-                    #[cfg(not(target_os = "windows"))]
+-                    change: None,
+                     looped: looped.as_ref().map(Vec::len),
+                     loop_why,
+                     loop_check,
+diff --git a/crates/rune/src/window/host/events.rs b/crates/rune/src/window/host/events.rs
+index ceaad3b8..f526ff43 100644
+--- a/crates/rune/src/window/host/events.rs
++++ b/crates/rune/src/window/host/events.rs
+@@ -235,6 +235,7 @@ impl Host {
          if matches!(&event, WindowEvent::ScaleFactorChanged { .. }) { self.apply_placement(event_loop); }
          match event {
              WindowEvent::Focused(focused) => {
@@ -1811,83 +1909,46 @@ index acb321e..2b65b38 100644
                  // winit queues an initial false from its hidden source window before
                  // adoption. It must not dismiss an already-key panel on first open.
                  #[cfg(target_os = "macos")]
-@@ -412,6 +413,7 @@ impl<S: 'static> Host<S> {
-                 if pressed { crate::marks::input_arrived(true); }
-                 // A release's logical key only matters to `on_key_up` handlers.
-                 let logical = (pressed || rt.wants_key_up()).then(|| map_key_event(&event, self.mods)).flatten();
-+                if pressed && let Some(ev) = &logical { crate::marks::window_key(ev, event.repeat, rt.has_focus()); }
-                 let mut redraw = false;
+@@ -426,6 +427,7 @@ impl Host {
                  // A menu item handing Rune its key: it acts after, if no handler takes it. So does
                  // the window menu's Alt+Space, posted rather than run inside the key's message.
-@@ -431,6 +433,10 @@ impl<S: 'static> Host<S> {
-                     redraw |= pressed;
+                 let logical = pressed.then(|| map_key_event(&event, self.mods)).flatten();
++                if let Some(ev) = &logical { crate::marks::window_key(ev, event.repeat, app.rt().has_focus()); }
+                 let unhandled = crate::native_menu::take_unhandled(logical.as_ref()).or_else(|| {
+                     logical.as_ref().filter(|ev| ev.is_window_menu_chord() && chrome::has_window_menu(&l.window))
+                         .map(|_| crate::runtime::Unhandled::WindowMenu)
+@@ -433,6 +435,12 @@ impl Host {
+                 if app.keyboard(&self.clipboard, &event, self.mods, unhandled) {
+                     l.request_redraw();
                  }
-                 if redraw { l.request_redraw(); }
-+                if immediate_input::dispatch(rt, immediate_input::enabled()) {
-+                    self.clipboard.flush(rt);
++                let enabled = crate::window::immediate_input::enabled();
++                let queued = enabled && app.rt().keys_queued();
++                if crate::window::immediate_input::dispatch(enabled, || queued, || app.hidden_timer_frame()) {
++                    self.clipboard.flush_core(app.rt_mut());
 +                    self.shell(event_loop);
 +                }
              }
              WindowEvent::Ime(ime) => {
-                 // A reconversion the input method confirmed comes first: the composition it
-@@ -521,6 +527,12 @@ impl<S: 'static> Host<S> {
-                         (ElementState::Pressed, true) => rt.secondary_down(x, y),
-                         (ElementState::Released, true) => rt.secondary_up(x, y),
+                 host_events::ime(app.rt_mut(), &l.window, ime);
+@@ -493,6 +501,12 @@ impl Host {
+                         (ElementState::Pressed, true) => app.rt_mut().secondary_down(x, y),
+                         (ElementState::Released, true) => app.secondary_up(x, y),
                          (ElementState::Pressed, false) => {
 +                            #[cfg(target_os = "linux")]
-+                            if let Some(edge) = l.linux_resize_edge(rt, (x, y))
++                            if let Some(edge) = l.linux_resize_edge(app.rt(), (x, y))
 +                                && l.window.drag_resize_window(edge).is_ok()
 +                            {
 +                                return;
 +                            }
                              #[cfg(target_os = "macos")]
-                             rt.set_native_titlebar_band(mac::native_titlebar_band(&l.window));
-                             rt.pointer_down(x, y);
-diff --git a/crates/rune/src/window/frame_latency.rs b/crates/rune/src/window/frame_latency.rs
-new file mode 100644
-index 0000000..b5b9531
---- /dev/null
-+++ b/crates/rune/src/window/frame_latency.rs
-@@ -0,0 +1,11 @@
-+pub(super) fn desired() -> u32 {
-+    parse(std::env::var("APOLLOON_FRAME_LATENCY").ok().as_deref())
-+}
-+
-+fn parse(value: Option<&str>) -> u32 {
-+    value.and_then(|value| value.parse::<u32>().ok()).filter(|value| *value > 0)
-+        .unwrap_or(super::FRAME_LATENCY)
-+}
-+
-+#[cfg(test)]
-+mod tests;
-diff --git a/crates/rune/src/window/frame_latency/tests.rs b/crates/rune/src/window/frame_latency/tests.rs
-new file mode 100644
-index 0000000..0205605
---- /dev/null
-+++ b/crates/rune/src/window/frame_latency/tests.rs
-@@ -0,0 +1,14 @@
-+use super::parse;
-+
-+#[test]
-+fn positive_override_selects_the_requested_latency() {
-+    assert_eq!(parse(Some("1")), 1);
-+    assert_eq!(parse(Some("2")), 2);
-+}
-+
-+#[test]
-+fn absent_empty_or_invalid_override_preserves_the_platform_default() {
-+    for value in [None, Some(""), Some("0"), Some("-1"), Some("invalid"), Some("4294967296")] {
-+        assert_eq!(parse(value), super::super::FRAME_LATENCY);
-+    }
-+}
+                             app.rt_mut().set_native_titlebar_band(mac::native_titlebar_band(&l.window));
+                             app.pointer_down(x, y);
 diff --git a/crates/rune/src/window/immediate_input.rs b/crates/rune/src/window/immediate_input.rs
 new file mode 100644
-index 0000000..5d3c237
+index 00000000..dce872cd
 --- /dev/null
 +++ b/crates/rune/src/window/immediate_input.rs
-@@ -0,0 +1,18 @@
-+use crate::Runtime;
-+
+@@ -0,0 +1,16 @@
 +pub(super) fn enabled() -> bool {
 +    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
 +    *ENABLED.get_or_init(|| parse(std::env::var("APOLLOON_IMMEDIATE_INPUT").ok().as_deref()))
@@ -1895,9 +1956,9 @@ index 0000000..5d3c237
 +
 +fn parse(value: Option<&str>) -> bool { value != Some("0") }
 +
-+pub(super) fn dispatch<S: 'static>(rt: &mut Runtime<S>, enabled: bool) -> bool {
-+    if !enabled || !rt.keys_queued() { return false; }
-+    rt.hidden_timer_frame();
++pub(super) fn dispatch(enabled: bool, queued: impl FnOnce() -> bool, drain: impl FnOnce()) -> bool {
++    if !enabled || !queued() { return false; }
++    drain();
 +    true
 +}
 +
@@ -1906,12 +1967,17 @@ index 0000000..5d3c237
 +mod tests;
 diff --git a/crates/rune/src/window/immediate_input_tests.rs b/crates/rune/src/window/immediate_input_tests.rs
 new file mode 100644
-index 0000000..0f34f3b
+index 00000000..4139a7f2
 --- /dev/null
 +++ b/crates/rune/src/window/immediate_input_tests.rs
-@@ -0,0 +1,98 @@
+@@ -0,0 +1,103 @@
 +use super::*;
-+use crate::{Cx, El, Env, Ime, Key, KeyEvent, Mods, PhysicalInput, PhysicalKeyCode, TextEdit, TextStyle, el, text_input};
++use crate::{Cx, El, Env, Ime, Key, KeyEvent, Mods, PhysicalInput, PhysicalKeyCode, Runtime, TextEdit, TextStyle, el, text_input};
++
++fn dispatch<S: 'static>(rt: &mut Runtime<S>, enabled: bool) -> bool {
++    let queued = enabled && rt.core().keys_queued();
++    super::dispatch(enabled, || queued, || rt.hidden_timer_frame())
++}
 +
 +#[derive(Default)]
 +struct State { keys: usize, releases: usize, edit: TextEdit }
@@ -2008,95 +2074,84 @@ index 0000000..0f34f3b
 +    rt.frame(0.0);
 +    assert_eq!(rt.state.edit.text, "字 ");
 +}
-diff --git a/crates/rune/src/window/native.rs b/crates/rune/src/window/native.rs
-index 5550891..5468665 100644
---- a/crates/rune/src/window/native.rs
-+++ b/crates/rune/src/window/native.rs
+diff --git a/crates/rune/src/window/surface.rs b/crates/rune/src/window/surface.rs
+index 2c3fc0ba..d93b2414 100644
+--- a/crates/rune/src/window/surface.rs
++++ b/crates/rune/src/window/surface.rs
+@@ -74,7 +74,10 @@ pub(crate) fn surface_config(surface: &wgpu::Surface, adapter: &wgpu::Adapter, (
+     // (`render::damaged`).
+     config.usage |= caps.usages & wgpu::TextureUsages::COPY_DST;
+     config.present_mode = wgpu::PresentMode::AutoVsync;
+-    config.desired_maximum_frame_latency = FRAME_LATENCY;
++    config.desired_maximum_frame_latency = super::frame_latency::desired();
++    if std::env::var_os("RUNE_SURFACE_LOG").is_some() {
++        eprintln!("rune surface: supported={:?} selected={:?} desired_maximum_frame_latency={}", caps.present_modes, config.present_mode, config.desired_maximum_frame_latency);
++    }
+     Some((config, crate::render::translucency::mode(surface, adapter)))
+ }
+ 
+diff --git a/crates/rune/src/window/surface/native.rs b/crates/rune/src/window/surface/native.rs
+index f10232f5..51e5c4f4 100644
+--- a/crates/rune/src/window/surface/native.rs
++++ b/crates/rune/src/window/surface/native.rs
 @@ -9,6 +9,7 @@ use std::sync::Arc;
  /// still exist.
  #[cfg(target_os = "macos")]
- pub(super) struct Native {
-+    pub(super) damage: super::damage::Damage,
-     pub(super) pacing: Option<crate::platform::display_link::DisplayLink>,
+ pub(in crate::window) struct Native {
++    pub(in crate::window) damage: crate::window::damage::Damage,
+     pub(in crate::window) pacing: Option<crate::platform::display_link::DisplayLink>,
      /// Reports when each drawable reached the screen, while tracing or for `shadow`.
-     pub(super) present: Option<crate::frame::present_time::metal::LayerHook>,
+     pub(in crate::window) present: Option<crate::frame::present_time::metal::LayerHook>,
 @@ -67,6 +68,7 @@ mod tests;
  #[derive(Default)]
- pub(super) struct Native {
-     pub(super) activator: Option<crate::platform::activation::Activator>,
-+    pub(super) damage: super::damage::Damage,
+ pub(in crate::window) struct Native {
+     pub(in crate::window) activator: Option<crate::platform::activation::Activator>,
++    pub(in crate::window) damage: crate::window::damage::Damage,
  }
  
  #[cfg(target_os = "windows")]
-@@ -102,4 +104,6 @@ pub(super) enum A11yStart {
+@@ -81,7 +83,7 @@ pub(in crate::window) struct Native {
+     /// Whether its swap chain can take the next frame (`slot`).
+     pub(in crate::window) slot: crate::window::win32::slot::Slot,
+     /// What its last frames changed, so the next redraws only that (`damage`).
+-    pub(in crate::window) damage: crate::window::win32::damage::Damage,
++    pub(in crate::window) damage: crate::window::damage::Damage,
+     /// Whether the CPU renderer or the GPU draws its frames (`cpu_frame`).
+     pub(in crate::window) mode: crate::window::win32::handover::SurfaceMode,
+     /// Whether its accessibility adapter waits for the first frame (`Host::a11y_after_frame`).
+@@ -102,4 +104,6 @@ pub(in crate::window) enum A11yStart {
  
  #[cfg(not(any(target_os = "macos", target_os = "windows", all(unix, not(target_os = "ios"), not(target_os = "android")))))]
  #[derive(Default)]
--pub(super) struct Native;
-+pub(super) struct Native {
-+    pub(super) damage: super::damage::Damage,
+-pub(in crate::window) struct Native;
++pub(in crate::window) struct Native {
++    pub(in crate::window) damage: crate::window::damage::Damage,
 +}
-diff --git a/crates/rune/src/window/platform_sync.rs b/crates/rune/src/window/platform_sync.rs
-index 20ad389..de1b6cc 100644
---- a/crates/rune/src/window/platform_sync.rs
-+++ b/crates/rune/src/window/platform_sync.rs
-@@ -56,7 +56,54 @@ impl Win {
-     /// The runtime's cursor while the pointer is in the window, the arrow once it leaves.
-     /// `Hidden` needs focus, so it can't outlive the window being active.
-     pub(super) fn apply_cursor<S>(&mut self, rt: &Runtime<S>, focused: bool) {
-+        #[cfg(target_os = "linux")]
-+        {
-+            if let Some(edge) = rt.pointer().and_then(|point| self.linux_resize_edge(rt, point)) {
-+                self.window.set_cursor_visible(true);
-+                self.window.set_cursor(winit::window::CursorIcon::from(edge));
-+                self.resize_cursor = true;
-+                return;
-+            }
-+            if std::mem::take(&mut self.resize_cursor) {
-+                self.window.set_cursor(winit::window::CursorIcon::Default);
-+                self.cursor = crate::cursor::os::OsCursor::new();
-+            }
-+        }
-         let want = match rt.cursor() { crate::el::Cursor::Hidden if !focused => crate::el::Cursor::Default, c => c };
-         self.cursor.apply(&self.window, want, rt.pointer().is_some());
-     }
- }
-+
-+#[cfg(target_os = "linux")]
-+impl Win {
-+    pub(super) fn linux_resize_edge<S>(&self, rt: &Runtime<S>, point: (f32, f32)) -> Option<winit::window::ResizeDirection> {
-+        if !self.client_resize || self.window.is_maximized() || self.window.fullscreen().is_some() {
-+            return None;
-+        }
-+        linux_resize_edge(point, rt.window_viewport(), rt.zoom())
-+    }
-+}
-+
-+#[cfg(target_os = "linux")]
-+fn linux_resize_edge(
-+    (x, y): (f32, f32),
-+    (width, height): (f32, f32),
-+    zoom: f32,
-+) -> Option<winit::window::ResizeDirection> {
-+    use winit::window::ResizeDirection::*;
-+    let (x, y) = (x * zoom, y * zoom);
-+    let margin = 5.0;
-+    let horizontal = if x < margin { -1 } else if x >= width - margin { 1 } else { 0 };
-+    let vertical = if y < margin { -1 } else if y >= height - margin { 1 } else { 0 };
-+    Some(match (horizontal, vertical) {
-+        (-1, -1) => NorthWest,
-+        (0, -1) => North,
-+        (1, -1) => NorthEast,
-+        (-1, 0) => West,
-+        (1, 0) => East,
-+        (-1, 1) => SouthWest,
-+        (0, 1) => South,
-+        (1, 1) => SouthEast,
-+        _ => return None,
-+    })
-+}
+diff --git a/crates/rune/src/window/surface/win.rs b/crates/rune/src/window/surface/win.rs
+index d4a036aa..f2f5f0bf 100644
+--- a/crates/rune/src/window/surface/win.rs
++++ b/crates/rune/src/window/surface/win.rs
+@@ -90,6 +90,10 @@ pub(in crate::window) struct Win {
+     /// When a hidden launcher renders the changes it hasn't yet.
+     pub(in crate::window) hidden_pace: HiddenPace,
+     pub(in crate::window) cursor: crate::cursor::os::OsCursor,
++    #[cfg(target_os = "linux")]
++    pub(in crate::window) client_resize: bool,
++    #[cfg(target_os = "linux")]
++    pub(in crate::window) resize_cursor: bool,
+     pub(in crate::window) alpha: Option<crate::render::surface_alpha::AlphaSurface>,
+     /// The pass that fades the content outside the arcs a Wayland client-side frame leaves its
+     /// bottom corners (`surface::corners`), once a surface here composites alpha.
+@@ -138,6 +142,7 @@ impl Win {
+         if (self.config.width, self.config.height) == (width, height) { return false; }
+         self.config.width = width;
+         self.config.height = height;
++        self.native.damage.reset();
+         // No surface: `Host::reattach` is between the old one and the new, and takes this size
+         // from the window itself; or the CPU renderer draws it, whose buffer follows this size.
+         let (Some(surface), Some(gpu)) = (&self.surface, gpu) else { return true };
 diff --git a/crates/rune/src/window/titlebar.rs b/crates/rune/src/window/titlebar.rs
-index cb8368f..6132d21 100644
+index cb8368f3..6132d21f 100644
 --- a/crates/rune/src/window/titlebar.rs
 +++ b/crates/rune/src/window/titlebar.rs
 @@ -32,6 +32,7 @@ pub(crate) use caption::{BUTTONS_KEY, FRAME_KEY, frame};
@@ -2136,7 +2191,7 @@ index cb8368f..6132d21 100644
          self.height
      }
 diff --git a/crates/rune/src/window/titlebar/caption.rs b/crates/rune/src/window/titlebar/caption.rs
-index 4820ba1..bf73f35 100644
+index 4820ba16..bf73f354 100644
 --- a/crates/rune/src/window/titlebar/caption.rs
 +++ b/crates/rune/src/window/titlebar/caption.rs
 @@ -72,13 +72,14 @@ fn caption_button(caption: &Caption, button: CaptionButton, symbol: Color, (w, h
@@ -2159,26 +2214,15 @@ index 4820ba1..bf73f35 100644
          .child(symbol_el(button, caption.maximized, ink, (w, h), scales));
      // The mouse presses them through the window procedure; assistive technology invokes these.
      // A dimmed button has nothing to invoke.
-diff --git a/crates/rune/src/window/win.rs b/crates/rune/src/window/win.rs
-index 40208c2..bdf4451 100644
---- a/crates/rune/src/window/win.rs
-+++ b/crates/rune/src/window/win.rs
-@@ -79,6 +79,10 @@ pub(super) struct Win {
-     /// When a hidden launcher renders the changes it hasn't yet.
-     pub(super) hidden_pace: HiddenPace,
-     pub(super) cursor: crate::cursor::os::OsCursor,
-+    #[cfg(target_os = "linux")]
-+    pub(super) client_resize: bool,
-+    #[cfg(target_os = "linux")]
-+    pub(super) resize_cursor: bool,
-     pub(super) alpha: Option<crate::render::surface_alpha::AlphaSurface>,
-     /// The frame a due timer asked for, until the window draws it, and whether only it asked
-     /// (`TimerFrame`).
-@@ -122,6 +126,7 @@ impl Win {
-         if (self.config.width, self.config.height) == (width, height) { return false; }
-         self.config.width = width;
-         self.config.height = height;
-+        self.native.damage.reset();
-         // No surface: `Host::reattach` is between the old one and the new, and takes this size
-         // from the window itself; or the CPU renderer draws it, whose buffer follows this size.
-         let (Some(surface), Some(gpu)) = (&self.surface, gpu) else { return true };
+diff --git a/crates/rune/src/window/win32.rs b/crates/rune/src/window/win32.rs
+index 83c1aa80..f3c2218c 100644
+--- a/crates/rune/src/window/win32.rs
++++ b/crates/rune/src/window/win32.rs
+@@ -4,7 +4,6 @@
+ 
+ pub(in crate::window) mod covered_draw;
+ pub(in crate::window) mod cpu_frame;
+-pub(in crate::window) mod damage;
+ pub(in crate::window) mod handover;
+ pub(in crate::window) mod look;
+ pub(in crate::window) mod post_frame;
