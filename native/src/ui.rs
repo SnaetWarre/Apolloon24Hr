@@ -1093,7 +1093,7 @@ fn view(s: &State, _cx: &mut Cx<State>) -> El {
     #[cfg(not(target_arch = "wasm32"))]
     _cx.zoom(s.public_screens.settings.operator_zoom());
     let t = tok::theme(s.dark);
-    let nav = shell::sidebar(s);
+    let nav = shell::sidebar(s, cfg!(target_os = "macos") && _cx.titlebar_inset() > 0.0);
     let body = match s.page {
         0 => overview(s),
         1 => queue_page::page(s),

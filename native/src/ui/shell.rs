@@ -263,7 +263,8 @@ const GROUPS: [(Option<&str>, &[usize]); 5] = [
     (Some("Systeem"), &[8]),
 ];
 
-pub(super) fn sidebar(s: &State) -> El {
+/// `traffic_lights`: macOS draws its window buttons over the sidebar's top edge.
+pub(super) fn sidebar(s: &State, traffic_lights: bool) -> El {
     let c = tok::tones(s.dark);
     let collapsed = s.collapsed;
     let toggle_label = if collapsed {
@@ -336,7 +337,7 @@ pub(super) fn sidebar(s: &State) -> El {
     let mut side = col()
         .w(if collapsed { 60.0 } else { 224.0 })
         .h_full()
-        .pt(18.0)
+        .pt(if traffic_lights { 44.0 } else { 18.0 })
         .pb(14.0)
         .px(if collapsed { 8.0 } else { 12.0 })
         .gap(18.0)
