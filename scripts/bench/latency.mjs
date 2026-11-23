@@ -327,6 +327,7 @@ export function stageMetrics(events, writes, results, leader, refresh = []) {
       (w) => first(w.lapId, 'local_commit', origin),
       (w) => first(w.lapId, 'replica_apply', source)
     );
+    if (source === origin) continue;
     add(
       'first replica send → append received ' + source,
       (w) => first(w.lapId, 'replica_send', origin),
