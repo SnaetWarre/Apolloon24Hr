@@ -1,8 +1,17 @@
 use super::ReadVersion;
 use crate::db::{Db, Result, history_changes::Changes};
 use axum::body::Bytes;
+use serde::{Serializer, ser::SerializeMap};
 use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
+
+#[path = "history_rows.rs"]
+mod rows;
+use rows::{List, Rows};
+
+#[cfg(test)]
+#[path = "history_bench.rs"]
+mod bench;
 
 /// Every full history this server built, as numbered versions, so a client that holds one can
 /// fetch only the laps and events that changed since (`/api/history?since=<cursor>`).
@@ -19,14 +28,33 @@ pub(super) struct HistoryLog {
     incremental_refreshes: usize,
 }
 struct CurrentHistory {
-    value: Arc<Value>,
+    value: Arc<HistoryValue>,
     body: Arc<Mutex<Option<Bytes>>>,
     encoded: EncodedHistory,
     laps: Rows,
     events: Rows,
-    lap_order: std::collections::HashMap<String, i64>,
-    event_order: std::collections::HashMap<String, i64>,
     runners: std::collections::HashMap<i64, Value>,
+}
+
+#[derive(Clone)]
+pub(super) struct HistoryValue {
+    header: Value,
+    laps: List,
+    events: List,
+}
+impl serde::Serialize for HistoryValue {
+    fn serialize<S: Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
+        let header = self.header.as_object().unwrap();
+        let mut map = serializer.serialize_map(Some(header.len()))?;
+        for (key, value) in header {
+            match key.as_str() {
+                "laps" => map.serialize_entry(key, &self.laps)?,
+                "events" => map.serialize_entry(key, &self.events)?,
+                _ => map.serialize_entry(key, value)?,
+            }
+        }
+        map.end()
+    }
 }
 
 #[derive(Clone, Default)]
@@ -35,7 +63,7 @@ pub(super) struct EncodedHistory(pub(super) Arc<tokio::sync::Mutex<[Option<Bytes
 pub(super) enum HistoryBody {
     Cached(Bytes),
     Full {
-        value: Arc<Value>,
+        value: Arc<HistoryValue>,
         body: Arc<Mutex<Option<Bytes>>>,
         encoded: EncodedHistory,
     },
@@ -64,36 +92,14 @@ impl HistoryBody {
         }
     }
 }
-/// Row id to its position in the list and a fingerprint of its content.
-type Rows = std::collections::HashMap<String, (usize, u64)>;
 /// Older versions are dropped first; a client further behind gets the full history again.
 const HISTORY_STEPS: usize = 1024;
 const HISTORY_STEP_IDS: usize = 20_000;
 
-fn index_rows(rows: &Value) -> Rows {
-    use std::hash::{Hash, Hasher};
-    rows.as_array()
-        .into_iter()
-        .flatten()
-        .enumerate()
-        .filter_map(|(index, row)| {
-            let mut hasher = std::collections::hash_map::DefaultHasher::new();
-            row.to_string().hash(&mut hasher);
-            Some((row["id"].as_str()?.to_owned(), (index, hasher.finish())))
-        })
-        .collect()
-}
-fn touched(old: &Rows, new: &Rows) -> Vec<String> {
-    let changed = new
-        .iter()
-        .filter(|(id, (_, hash))| old.get(*id).is_none_or(|(_, before)| before != hash))
-        .map(|(id, _)| id.clone());
-    let removed = old.keys().filter(|id| !new.contains_key(*id)).cloned();
-    changed.chain(removed).collect()
-}
-
 impl HistoryLog {
-    pub(super) fn epoch(&self) -> &str { &self.epoch }
+    pub(super) fn epoch(&self) -> &str {
+        &self.epoch
+    }
     pub(super) fn new() -> Self {
         Self {
             epoch: uuid::Uuid::new_v4().simple().to_string()[..12].to_owned(),
@@ -130,16 +136,24 @@ impl HistoryLog {
             if !changes.full && current.runners_match(db, &changes)? {
                 let lap_rows = db.history_rows("laps", &changes.laps)?;
                 let event_rows = db.history_rows("race_events", &changes.events)?;
-                let laps = current.patch("laps", &changes.laps, lap_rows);
-                let events = current.patch("race_events", &changes.events, event_rows);
+                let value = Arc::make_mut(&mut current.value);
+                let laps =
+                    current
+                        .laps
+                        .patch(&mut value.laps, &changes.laps, lap_rows, "finishedAt");
+                let events = current.events.patch(
+                    &mut value.events,
+                    &changes.events,
+                    event_rows,
+                    "occurredAt",
+                );
                 #[cfg(test)]
                 {
                     self.incremental_refreshes += 1;
                 }
                 self.seq += 1;
-                let value = Arc::make_mut(&mut current.value);
-                value["revision"] = json!(db.revision);
-                value["cursor"] = json!(format!("{}.{}", self.epoch, self.seq));
+                value.header["revision"] = json!(db.revision);
+                value.header["cursor"] = json!(format!("{}.{}", self.epoch, self.seq));
                 current.body = Default::default();
                 current.encoded = Default::default();
                 self.steps.push_back((self.seq, laps, events));
@@ -149,7 +163,6 @@ impl HistoryLog {
             }
         }
         let mut value = db.history()?;
-        let (laps, events) = (index_rows(&value["laps"]), index_rows(&value["events"]));
         let order = |table: &str| -> Result<std::collections::HashMap<String, i64>> {
             Ok(db
                 .rows(&format!("SELECT rowid,id FROM {table}"), &[])?
@@ -170,25 +183,28 @@ impl HistoryLog {
             .into_iter()
             .map(|row| (row["_rowid"].as_i64().unwrap(), row))
             .collect();
-        let lap_order = order("laps")?;
-        let event_order = order("race_events")?;
+        let (laps, lap_list) = Rows::new(&mut value["laps"], order("laps")?, "finishedAt");
+        let (events, event_list) =
+            Rows::new(&mut value["events"], order("race_events")?, "occurredAt");
         self.seq += 1;
         if let Some(old) = &self.current {
             self.steps.push_back((
                 self.seq,
-                touched(&old.laps, &laps),
-                touched(&old.events, &events),
+                old.laps.touched(&laps),
+                old.events.touched(&events),
             ));
         }
         value["cursor"] = json!(self.cursor());
         self.current = Some(CurrentHistory {
-            value: Arc::new(value),
+            value: Arc::new(HistoryValue {
+                header: value,
+                laps: lap_list,
+                events: event_list,
+            }),
             body: Default::default(),
             encoded: Default::default(),
             laps,
             events,
-            lap_order,
-            event_order,
             runners,
         });
         self.version = Some(version);
@@ -233,23 +249,14 @@ impl HistoryLog {
         let current = self.current.as_ref()?;
         let changes = |pick: fn(&(u64, Vec<String>, Vec<String>)) -> &Vec<String>,
                        rows: &Rows,
-                       list: &Value| {
+                       list: &List| {
             let ids: std::collections::BTreeSet<&String> = self
                 .steps
                 .iter()
                 .filter(|step| step.0 > since)
                 .flat_map(|step| pick(step))
                 .collect();
-            let mut changed: Vec<(usize, &Value)> = Vec::new();
-            let mut removed = Vec::new();
-            for id in ids {
-                match rows.get(id) {
-                    Some(&(index, _)) => changed.push((index, &list[index])),
-                    None => removed.push(id),
-                }
-            }
-            changed.sort_by_key(|(index, _)| *index);
-            json!({"changed":changed,"removed":removed,"count":rows.len()})
+            rows.changes(list, ids)
         };
         let value = &current.value;
         let delta = json!({
@@ -257,10 +264,10 @@ impl HistoryLog {
             "delta": true,
             "since": cursor,
             "cursor": self.cursor(),
-            "revision": value["revision"],
+            "revision": value.header["revision"],
             "changes": {
-                "laps": changes(|step| &step.1, &current.laps, &value["laps"]),
-                "events": changes(|step| &step.2, &current.events, &value["events"]),
+                "laps": changes(|step| &step.1, &current.laps, &value.laps),
+                "events": changes(|step| &step.2, &current.events, &value.events),
             },
         });
         let body = Bytes::from(serde_json::to_vec(&delta).ok()?);
@@ -276,76 +283,6 @@ impl CurrentHistory {
             && rows
                 .iter()
                 .all(|row| self.runners.get(&row["_rowid"].as_i64().unwrap()) == Some(row)))
-    }
-    fn patch(
-        &mut self,
-        table: &str,
-        rowids: &std::collections::BTreeSet<i64>,
-        mut rows: Vec<Value>,
-    ) -> Vec<String> {
-        if rowids.is_empty() {
-            return Vec::new();
-        }
-        let (key, time, order, index) = if table == "laps" {
-            ("laps", "finishedAt", &mut self.lap_order, &mut self.laps)
-        } else {
-            (
-                "events",
-                "occurredAt",
-                &mut self.event_order,
-                &mut self.events,
-            )
-        };
-        let mut ids: std::collections::BTreeSet<String> = order
-            .iter()
-            .filter(|(_, rowid)| rowids.contains(rowid))
-            .map(|(id, _)| id.clone())
-            .collect();
-        for row in &rows {
-            ids.insert(row["id"].as_str().unwrap().to_owned());
-        }
-        let list = Arc::make_mut(&mut self.value)[key].as_array_mut().unwrap();
-        let mut touched = Vec::new();
-        for id in &ids {
-            let before = index.get(id).map(|(position, _)| &list[*position]);
-            let after = rows.iter().find(|row| row["id"] == *id).map(|row| {
-                let mut row = row.clone();
-                row.as_object_mut().unwrap().shift_remove("_rowid");
-                row
-            });
-            if before != after.as_ref() {
-                touched.push(id.clone());
-            }
-        }
-        list.retain(|row| !ids.contains(row["id"].as_str().unwrap()));
-        order.retain(|id, _| !ids.contains(id));
-        for row in &mut rows {
-            let rowid = row
-                .as_object_mut()
-                .unwrap()
-                .shift_remove("_rowid")
-                .unwrap()
-                .as_i64()
-                .unwrap();
-            order.insert(row["id"].as_str().unwrap().to_owned(), rowid);
-        }
-        list.extend(rows);
-        list.sort_by(|a, b| {
-            b[time].as_i64().cmp(&a[time].as_i64()).then_with(|| {
-                order[b["id"].as_str().unwrap()].cmp(&order[a["id"].as_str().unwrap()])
-            })
-        });
-        let mut previous = std::mem::take(index);
-        for (position, row) in list.iter().enumerate() {
-            let id = row["id"].as_str().unwrap();
-            let hash = if ids.contains(id) {
-                index_rows(&json!([row])).remove(id).unwrap().1
-            } else {
-                previous.remove(id).unwrap().1
-            };
-            index.insert(id.to_owned(), (position, hash));
-        }
-        touched
     }
 }
 
@@ -374,7 +311,10 @@ mod tests {
         let refreshed = log.response(None).unwrap().encoded().unwrap();
         assert!(!Arc::ptr_eq(&encoded.0, &refreshed.0));
         assert!(refreshed.0.try_lock().unwrap().iter().all(Option::is_none));
-        assert_eq!(encoded.0.try_lock().unwrap()[0].as_deref(), Some(b"old gzip".as_slice()));
+        assert_eq!(
+            encoded.0.try_lock().unwrap()[0].as_deref(),
+            Some(b"old gzip".as_slice())
+        );
         let current = log.response(None).unwrap().bytes().unwrap();
         let old = old.bytes().unwrap();
         let same = same.bytes().unwrap();
@@ -430,7 +370,7 @@ mod tests {
         let mut cursors = Vec::new();
         check(&db, &mut incremental, &mut full, &mut cursors);
         assert_eq!(
-            incremental.current.as_ref().unwrap().value["laps"],
+            serde_json::from_slice::<Value>(&incremental.full_body().unwrap()).unwrap()["laps"],
             json!([])
         );
         assert!(incremental.since("foreign.1").is_none());
@@ -528,7 +468,38 @@ mod tests {
             .execute_batch("ALTER TABLE hidden_events RENAME TO race_events")
             .unwrap();
         log.refresh(&db, read_version(&db).unwrap(), None).unwrap();
-        assert_eq!(log.current.as_ref().unwrap().value["events"], json!([]));
+        assert_eq!(
+            serde_json::from_slice::<Value>(&log.full_body().unwrap()).unwrap()["events"],
+            json!([])
+        );
+    }
+
+    #[test]
+    fn chunk_boundaries_ties_reordering_and_removal_match_full_history() {
+        let db = Db::open(std::path::Path::new(":memory:")).unwrap();
+        for i in 0..260 {
+            db.exec("INSERT INTO race_events(id,type,message,occurred_at,created_at) VALUES(?,'burgie_gepakt','seed',?,0)", &[json!(format!("event-{i}")), json!(i/4)]).unwrap();
+        }
+        let (mut incremental, mut full) = (HistoryLog::new(), HistoryLog::new());
+        full.epoch = incremental.epoch.clone();
+        let mut cursors = Vec::new();
+        check(&db, &mut incremental, &mut full, &mut cursors);
+        let old = incremental.response(None).unwrap();
+        let old_body = incremental.full_body().unwrap();
+        for sql in [
+            "UPDATE race_events SET occurred_at=1000 WHERE rowid%7=0",
+            "UPDATE race_events SET occurred_at=-1,message='edited' WHERE rowid%5=0",
+            "DELETE FROM race_events WHERE rowid%3=0",
+            "UPDATE race_events SET id='renamed-'||id WHERE rowid%4=0",
+            "INSERT INTO race_events(id,type,message,occurred_at,created_at) VALUES('last','burgie_gepakt','new',1000,0)",
+            "DELETE FROM race_events",
+            "INSERT INTO race_events(id,type,message,occurred_at,created_at) VALUES('restart','burgie_gepakt','empty to nonempty',0,0)",
+        ] {
+            db.conn.execute_batch(sql).unwrap();
+            check(&db, &mut incremental, &mut full, &mut cursors);
+        }
+        assert_eq!(old.bytes().unwrap(), old_body);
+        assert_eq!(incremental.incremental_refreshes, 7);
     }
 
     #[test]
