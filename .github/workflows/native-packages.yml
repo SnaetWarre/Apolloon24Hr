@@ -118,7 +118,7 @@ jobs:
         run: tar -czf apolloon-native-${{ matrix.platform }}.tar.gz -C package .
       - name: Start the packaged server and open the browser entry point
         run: python native/scripts/check-package.py package/${{ matrix.binary }}
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         with:
           name: apolloon-native-${{ matrix.platform }}
           path: |
@@ -135,7 +135,7 @@ jobs:
           pattern: apolloon-native-*
           merge-multiple: true
       - run: sha256sum apolloon-native-* > SHA256SUMS.txt
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         with:
           name: native-sha256sums
           path: SHA256SUMS.txt
