@@ -755,12 +755,10 @@ fn a_slow_disk_on_the_timing_laptop_does_not_hold_up_its_press() {
     let dir = Dir::new();
     let (a, b, c, took) = press_while_the_timing_laptop_disk_stalls(&dir);
     assert!(took < Duration::from_millis(1_500), "the press took {took:?}");
-    wait_until("the lap on the Timing laptop", Duration::from_secs(5), || {
-        a.count("SELECT COUNT(*) AS n FROM laps") == 1
-    });
-    *a.node.slow_disk.lock().unwrap() = Duration::ZERO;
+    // The next press, made while the first is still on its way to this disk, gets its own place.
     press(&a, "race.handoff").unwrap();
-    wait_until("two laps on every laptop", Duration::from_secs(5), || {
+    *a.node.slow_disk.lock().unwrap() = Duration::ZERO;
+    wait_until("two laps on every laptop", Duration::from_secs(15), || {
         same_heads(&[&a, &b, &c]) && [&a, &b, &c].iter().all(|s| s.count("SELECT COUNT(*) AS n FROM laps") == 2)
     });
 }

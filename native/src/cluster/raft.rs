@@ -565,7 +565,7 @@ impl Node {
                 if let (false, Some(entries), Some(pending)) =
                     (resync, entries.as_mut(), &st.pending)
                 {
-                    if prev_seq + entries.len() as i64 == head {
+                    if prev_seq + entries.len() as i64 == head && pending.entry.seq == head + 1 {
                         entries.push(pending.entry.clone());
                     }
                 }
@@ -769,6 +769,8 @@ impl Node {
         let seq = prepared.entry.seq;
         let deadline = Instant::now() + self.cfg.commit_timeout;
         let needed = prepared.voters.len() / 2 + 1;
+        // Each laptop's answer, this one included, comes straight here: counting it does not
+        // wait for locks that this laptop's own copy may hold up.
         let (answers, holders) = mpsc::channel::<(String, bool)>();
         {
             let mut st = self.raft.lock().unwrap();
@@ -779,17 +781,9 @@ impl Node {
             if st.role != Role::Leader || term != prepared.entry.epoch || head.seq + 1 != seq {
                 return false;
             }
-            // Each laptop that holds everything before the press gets it at once, built before
-            // this laptop's own copy takes the database. The raft lock keeps the log as it is.
+            // Each laptop that holds everything before the press, with nothing else on its way
+            // to it, gets it at once; the usual rounds bring it to the others.
             for member in self.others() {
-                let in_step = prepared.voters.contains(&member.host_id)
-                    && st
-                        .progress
-                        .get(&member.host_id)
-                        .is_some_and(|p| p.match_seq == Some(head.seq));
-                if !in_step {
-                    continue;
-                }
                 let request = self.append_request(
                     &st,
                     group.clone(),
@@ -799,28 +793,36 @@ impl Node {
                     vec![prepared.entry.clone()],
                     false,
                 );
+                let Some(p) = st.progress.get_mut(&member.host_id).filter(|p| {
+                    prepared.voters.contains(&member.host_id)
+                        && !p.in_flight
+                        && p.match_seq == Some(head.seq)
+                }) else {
+                    continue;
+                };
+                p.in_flight = true;
                 let (node, answers) = (self.arc(), answers.clone());
-                std::thread::spawn(move || {
-                    node.send_kept(&member, term, seq, &request, &answers)
-                });
+                std::thread::spawn(move || node.send_kept(&member, term, seq, &request, &answers));
             }
             st.pending = Some(prepared.clone());
         }
-        let node = self.arc();
-        let own = answers;
+        // The own copy takes the database before this returns, so no later write can take its
+        // place in the log.
+        let (held, holding) = mpsc::channel::<()>();
+        let (node, own) = (self.arc(), answers);
         let entry = prepared.entry;
         std::thread::spawn(move || {
-            let mut st = node.raft.lock().unwrap();
-            let ours = st.pending.as_ref().is_some_and(|p| p.entry.id == entry.id);
-            let kept = ours && {
+            let stored_here = {
                 let mut db = node.db.lock().unwrap();
+                let _ = held.send(());
                 #[cfg(test)]
                 std::thread::sleep(*node.slow_disk.lock().unwrap());
                 log::apply_own(&mut db, &entry).is_ok()
             };
-            if ours {
+            let mut st = node.raft.lock().unwrap();
+            if st.pending.as_ref().is_some_and(|p| p.entry.id == entry.id) {
                 st.pending = None;
-                if kept {
+                if stored_here {
                     node.advance_commit(&mut st);
                 } else {
                     // As in `confirm`: another laptop may hold it, and a later election decides.
@@ -829,21 +831,22 @@ impl Node {
                 }
             }
             drop(st);
-            if kept {
+            if stored_here {
                 stored();
             }
-            let _ = own.send((node.host_id.clone(), kept));
+            let _ = own.send((node.host_id.clone(), stored_here));
             node.raft_changed.notify_all();
         });
+        let _ = holding.recv();
         let mut holding = std::collections::HashSet::new();
-        let mut own = None;
-        while holding.len() < needed && own.is_none() {
+        let mut here = None;
+        while holding.len() < needed && here.is_none() {
             match holders.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
-                Ok((host, kept)) => {
+                Ok((host, stored)) => {
                     if host == self.host_id {
-                        own = Some(kept);
+                        here = Some(stored);
                     }
-                    if kept {
+                    if stored {
                         holding.insert(host);
                     }
                 }
@@ -856,13 +859,13 @@ impl Node {
         // Once this laptop holds it the usual rounds take over, also reaching a laptop that was
         // behind. Not confirmed in time: before the press is tried again it is in this laptop's
         // data.
-        let own = own.or_else(|| {
+        let here = here.or_else(|| {
             holders
                 .iter()
                 .find(|(host, _)| *host == self.host_id)
-                .map(|(_, kept)| kept)
+                .map(|(_, stored)| stored)
         });
-        own == Some(true) && self.wait_for_commit_until(seq, deadline)
+        here == Some(true) && self.wait_for_commit_until(seq, deadline)
     }
 
     /// Sends a kept press to a laptop that holds everything before it, and answers whether that
@@ -887,15 +890,15 @@ impl Node {
             .and_then(|a| a.body["head"]["seq"].as_i64());
         let _ = answers.send((member.host_id.clone(), head.is_some_and(|h| h >= seq)));
         let mut st = self.raft.lock().unwrap();
-        if let Some(head) = head
-            && st.role == Role::Leader
-            && self.term() == term
-        {
-            if let Some(p) = st.progress.get_mut(&member.host_id) {
-                // A laptop never drops what the leader of its term sent it.
+        let leading = st.role == Role::Leader && self.term() == term;
+        if let Some(p) = st.progress.get_mut(&member.host_id) {
+            p.in_flight = false;
+            if let Some(head) = head.filter(|_| leading) {
                 p.match_seq = p.match_seq.max(Some(head));
                 p.last_ack = Some(Instant::now());
             }
+        }
+        if leading && head.is_some() {
             self.advance_commit(&mut st);
         }
         drop(st);
