@@ -105,8 +105,10 @@ function stats(values) {
 
 export function nativeFrameMetrics(events, writes) {
   const ids = new Map(events.filter((e) => e.stage === 'local_commit' && e.lapId).map((e) => [e.id, e.lapId]));
-  const native = events.filter((e) => e.source === 'native')
-    .map((e) => ({ ...e, lapId: e.lapId ?? ids.get(e.id) })).sort((a, b) => a.us - b.us);
+  const native = events
+    .filter((e) => e.source === 'native')
+    .map((e) => ({ ...e, lapId: e.lapId ?? ids.get(e.id) }))
+    .sort((a, b) => a.us - b.us);
   const first = (stage, lap, after = 0) =>
     native.find((e) => e.stage === stage && e.lapId === lap && e.us >= after)?.us;
   const previous = (stage, at) => native.findLast((e) => e.stage === stage && e.us <= at)?.us;
@@ -126,8 +128,14 @@ export function nativeFrameMetrics(events, writes) {
     const input = { lapId: w.lapId };
     const injected = w.sentAt * 1000;
     const key = first('key', w.lapId, injected);
-    const receipt = native.findLast((e) => e.stage === 'window_key' && !e.repeat &&
-      (e.key === 'Space' || e.key === 'Enter') && e.us >= injected && e.us <= key)?.us;
+    const receipt = native.findLast(
+      (e) =>
+        e.stage === 'window_key' &&
+        !e.repeat &&
+        (e.key === 'Space' || e.key === 'Enter') &&
+        e.us >= injected &&
+        e.us <= key
+    )?.us;
     if ([injected, receipt, key].every(Number.isFinite)) {
       input.injectionReceiptUs = receipt - injected;
       input.receiptKeyUs = key - receipt;

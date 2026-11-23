@@ -1,3 +1,458 @@
+diff --git a/crates/rune/src/app.rs b/crates/rune/src/app.rs
+index fe03f60..29a51d5 100644
+--- a/crates/rune/src/app.rs
++++ b/crates/rune/src/app.rs
+@@ -81,6 +81,7 @@ pub struct App<S: 'static> {
+     pub(crate) on_ready: Option<OnWindow>,
+     pub(crate) on_frame_encoded: Option<crate::frame::encoded::OnFrameEncoded>,
+     pub(crate) on_frame_drawn: Option<crate::frame::encoded::OnFrameDrawn<S>>,
++    pub(crate) on_frame_stage: Option<Box<dyn FnMut(&'static str)>>,
+     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+     pub(crate) same_tab_router: Option<Box<dyn Fn(&str) -> bool>>,
+     pub(crate) macos_window: crate::MacWindowOptions,
+@@ -144,6 +145,7 @@ impl<S: 'static> App<S> {
+             on_ready: None,
+             on_frame_encoded: None,
+             on_frame_drawn: None,
++            on_frame_stage: None,
+             same_tab_router: None,
+             macos_window: crate::MacWindowOptions::default(),
+             compositor: None,
+@@ -563,6 +565,12 @@ impl<S: 'static> App<S> {
+         self
+     }
+ 
++    /// Observes CPU wall-time boundaries of GPU frames without scheduling frames.
++    pub fn on_frame_stage(mut self, f: impl FnMut(&'static str) + 'static) -> Self {
++        self.on_frame_stage = Some(Box::new(f));
++        self
++    }
++
+     /// Draw every frame of the app's window (and headless renders) through `compositor`
+     /// instead of Rune's default pass (see `compose`).
+     pub fn compositor(mut self, compositor: impl crate::compose::Compositor<S>) -> Self {
+@@ -679,12 +687,6 @@ impl<S> Clone for AppHandle<S> {
+ }
+ 
+ impl<S: 'static> AppHandle<S> {
+-    /// Wake the event loop so `AppSpec::poll` runs, also while the window is hidden; for a
+-    /// background thread that queued work for `poll` to drain.
+-    pub fn wake(&self) {
+-        self.request(|q| q.woken = true);
+-    }
+-
+     /// Show the window (creating it if needed), restore it if minimized, and activate the app
+     /// with it in front, including the first open of a window that doesn't exist yet. A
+     /// nonactivating panel takes keys without activating. The window open at launch doesn't
+@@ -809,6 +811,7 @@ impl<S: 'static> AppHandle<S> {
+ }
+ 
+ mod requests;
++pub(crate) mod urgent_state;
+ pub(crate) use requests::{window_request_order, Activation, Requests, Shared, WindowRequest};
+ 
+ #[cfg(test)]
+diff --git a/crates/rune/src/app/requests.rs b/crates/rune/src/app/requests.rs
+index fd39061..20cfb26 100644
+--- a/crates/rune/src/app/requests.rs
++++ b/crates/rune/src/app/requests.rs
+@@ -81,6 +81,7 @@ impl<S> Default for Requests<S> {
+ }
+ 
+ pub(crate) struct Shared<S> {
++    pub(crate) urgent_state: super::urgent_state::Pending,
+     pub(crate) menus: crate::native_menu::Hub<S>,
+     pub(crate) shortcuts: crate::shortcuts::Hub<S>,
+     pub(super) requests: Mutex<Requests<S>>,
+@@ -95,6 +96,7 @@ pub(crate) struct Shared<S> {
+ impl<S> Default for Shared<S> {
+     fn default() -> Self {
+         Shared {
++            urgent_state: super::urgent_state::Pending::default(),
+             menus: crate::native_menu::Hub::default(),
+             shortcuts: crate::shortcuts::Hub::default(),
+             requests: Mutex::default(),
+diff --git a/crates/rune/src/app/urgent_state.rs b/crates/rune/src/app/urgent_state.rs
+new file mode 100644
+index 0000000..6fad851
+--- /dev/null
++++ b/crates/rune/src/app/urgent_state.rs
+@@ -0,0 +1,60 @@
++use super::AppHandle;
++use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
++use std::time::Instant;
++
++pub(crate) struct Pending(Option<AtomicBool>);
++
++impl Default for Pending {
++    fn default() -> Self {
++        Self::new(parse(std::env::var("APOLLOON_URGENT_STATE_FRAME").ok().as_deref()))
++    }
++}
++
++impl Pending {
++    fn new(enabled: bool) -> Self { Self(enabled.then(|| AtomicBool::new(false))) }
++
++    fn request(&self) {
++        if let Some(pending) = &self.0 { pending.store(true, Ordering::Release); }
++    }
++
++    pub(crate) fn clear(&self) {
++        if let Some(pending) = &self.0 { pending.store(false, Ordering::Release); }
++    }
++
++    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
++    pub(crate) fn admit(&self, waiting: bool, last_target: &mut Option<Instant>, now: Instant) -> bool {
++        let pending = self.0.as_ref().is_some_and(|pending| pending.swap(false, Ordering::AcqRel));
++        if waiting && pending {
++            *last_target = Some(now);
++            true
++        } else { false }
++    }
++}
++
++fn parse(value: Option<&str>) -> bool {
++    value.and_then(|value| value.parse::<u32>().ok()) == Some(1)
++}
++
++impl<S: 'static> AppHandle<S> {
++    /// Wake the event loop so `AppSpec::poll` runs, also while the window is hidden; for a
++    /// background thread that queued work for `poll` to drain.
++    pub fn wake(&self) {
++        self.request(|q| q.woken = true);
++    }
++
++    /// A wake for queued authoritative state, with one-shot immediate Metal admission when
++    /// `APOLLOON_URGENT_STATE_FRAME=1`. Other wakes and subsequent animation frames stay paced.
++    /// Returns `None` when the experiment is disabled. Create before running the app.
++    pub fn urgent_state_waker(&self) -> Option<crate::runtime::Waker> {
++        self.shared.urgent_state.0.as_ref()?;
++        let handle = self.clone();
++        Some(Arc::new(move || {
++            handle.shared.urgent_state.request();
++            handle.wake();
++        }))
++    }
++}
++
++#[cfg(test)]
++#[path = "urgent_state_tests.rs"]
++mod tests;
+diff --git a/crates/rune/src/app/urgent_state_tests.rs b/crates/rune/src/app/urgent_state_tests.rs
+new file mode 100644
+index 0000000..58eaa44
+--- /dev/null
++++ b/crates/rune/src/app/urgent_state_tests.rs
+@@ -0,0 +1,111 @@
++use super::*;
++
++#[test]
++fn parser_requires_one_and_rejects_absent_empty_zero_or_invalid() {
++    for value in [None, Some(""), Some("0"), Some("2"), Some("-1"), Some("true"), Some(" 1"), Some("4294967296")] {
++        assert!(!parse(value), "{value:?}");
++    }
++    assert!(parse(Some("1")));
++}
++
++#[test]
++fn disabled_requests_and_unrequested_frames_never_override_wait() {
++    let now = Instant::now();
++    for enabled in [false, true] {
++        let pending = Pending::new(enabled);
++        let mut last = None;
++        assert!(!pending.admit(true, &mut last, now));
++        assert_eq!(last, None);
++        if !enabled {
++            pending.request();
++            assert!(!pending.admit(true, &mut last, now));
++            assert_eq!(last, None);
++        }
++    }
++}
++
++#[test]
++fn repeated_sends_coalesce_and_only_the_next_wait_is_overridden() {
++    let pending = Pending::new(true);
++    let now = Instant::now();
++    let mut last = None;
++    for _ in 0..10 { pending.request(); }
++    assert!(pending.admit(true, &mut last, now));
++    assert_eq!(last, Some(now));
++    assert!(!pending.admit(true, &mut last, now));
++    pending.request();
++    assert!(pending.admit(true, &mut last, now));
++}
++
++#[test]
++fn naturally_admitted_frame_consumes_urgency_without_changing_target() {
++    let pending = Pending::new(true);
++    let now = Instant::now();
++    let target = now + std::time::Duration::from_millis(16);
++    let mut last = Some(target);
++    pending.request();
++    assert!(!pending.admit(false, &mut last, now));
++    assert_eq!(last, Some(target));
++    assert!(!pending.admit(true, &mut last, now));
++}
++
++#[test]
++fn covered_or_unpaced_poll_clears_urgency_but_later_sends_still_qualify() {
++    let pending = Pending::new(true);
++    let now = Instant::now();
++    let mut last = None;
++    pending.request();
++    pending.clear();
++    assert!(!pending.admit(true, &mut last, now));
++    pending.request();
++    assert!(pending.admit(true, &mut last, now));
++}
++
++#[test]
++fn ordinary_wakes_do_not_mark_state_urgent() {
++    let spec = crate::AppSpec::new("test", (100.0, 100.0), || (), |_, _| crate::text("test"));
++    let app = crate::App::new(spec);
++    let handle = app.handle();
++    let pending = &handle.shared.urgent_state;
++    let mut last = None;
++    handle.wake();
++    assert!(!pending.admit(true, &mut last, Instant::now()));
++}
++
++#[test]
++fn only_qualified_waker_requests_urgent_admission() {
++    for enabled in [false, true] {
++        let mut shared = super::super::Shared::<()>::default();
++        shared.urgent_state = Pending::new(enabled);
++        let handle = AppHandle { shared: Arc::new(shared) };
++        let wake = handle.urgent_state_waker();
++        assert_eq!(wake.is_some(), enabled);
++        if let Some(wake) = wake {
++            for _ in 0..10 { wake(); }
++            assert!(handle.shared.take().woken);
++            let mut last = None;
++            assert!(handle.shared.urgent_state.admit(true, &mut last, Instant::now()));
++            handle.wake();
++            assert!(!handle.shared.urgent_state.admit(true, &mut last, Instant::now()));
++        }
++    }
++}
++
++#[test]
++fn b4_4_ordinary_duplicate_and_recovery_wakes_admit_exactly_one_urgent_frame() {
++    let mut shared = super::super::Shared::<()>::default();
++    shared.urgent_state = Pending::new(true);
++    let handle = AppHandle { shared: Arc::new(shared) };
++    let request = handle.urgent_state_waker().unwrap();
++    let now = Instant::now();
++    let mut last = None;
++    request();
++    let mut admissions = 0;
++    for delivery in 0..3 {
++        if delivery > 0 { handle.wake(); }
++        admissions += usize::from(handle.shared.urgent_state.admit(true, &mut last, now));
++    }
++    assert_eq!(admissions, 1);
++    assert_eq!(last, Some(now));
++    assert!(!handle.shared.urgent_state.admit(true, &mut last, now));
++}
+diff --git a/crates/rune/src/frame/encoded.rs b/crates/rune/src/frame/encoded.rs
+index 22ed634..a180cd8 100644
+--- a/crates/rune/src/frame/encoded.rs
++++ b/crates/rune/src/frame/encoded.rs
+@@ -81,10 +81,10 @@ impl FrameEncoded {
+ 
+ /// A window's hooks and the count it numbers reports with. Without a hook every call is one
+ /// `Option` check and nothing else, so reporting never changes how the window draws.
+-pub(crate) struct FrameReports<S: 'static>(Option<Reporter>, Option<OnFrameDrawn<S>>);
++pub(crate) struct FrameReports<S: 'static>(Option<Reporter>, Option<OnFrameDrawn<S>>, Option<super::profile::StageHook>);
+ 
+ impl<S: 'static> Default for FrameReports<S> {
+-    fn default() -> Self { Self(None, None) }
++    fn default() -> Self { Self(None, None, None) }
+ }
+ 
+ struct Reporter {
+@@ -96,7 +96,7 @@ struct Reporter {
+ 
+ impl<S: 'static> FrameReports<S> {
+     pub(crate) fn new(hook: Option<OnFrameEncoded>, window: Option<&str>) -> Self {
+-        Self(hook.map(|hook| Reporter { hook, window: window.map(Rc::from), seq: 0, refresh_hz: None }), None)
++        Self(hook.map(|hook| Reporter { hook, window: window.map(Rc::from), seq: 0, refresh_hz: None }), None, None)
+     }
+ 
+     pub(crate) fn inspecting(mut self, drawn: Option<OnFrameDrawn<S>>) -> Self {
+@@ -104,6 +104,22 @@ impl<S: 'static> FrameReports<S> {
+         self
+     }
+ 
++    pub(crate) fn staging(mut self, hook: Option<Box<dyn FnMut(&'static str)>>) -> Self {
++        self.2 = hook.map(|hook| Rc::new(std::cell::RefCell::new(hook)));
++        self
++    }
++
++    pub(crate) fn stage(&mut self, name: &'static str) {
++        if let Some(hook) = &self.2 {
++            match name {
++                "runtime_begin" => super::profile::stage_hook(Some(hook.clone())),
++                "runtime_end" => super::profile::stage_hook(None),
++                _ => {},
++            }
++            (hook.borrow_mut())(name);
++        }
++    }
++
+     /// The time to report a `Drawn` frame at, taken only when there's a hook.
+     pub(crate) fn stamp(&self) -> Option<Instant> { self.0.as_ref().map(|_| Instant::now()) }
+ 
+diff --git a/crates/rune/src/frame/encoded_tests.rs b/crates/rune/src/frame/encoded_tests.rs
+index d0f04bf..95e8032 100644
+--- a/crates/rune/src/frame/encoded_tests.rs
++++ b/crates/rune/src/frame/encoded_tests.rs
+@@ -7,6 +7,18 @@ use crate::{App, AppSpec, WindowSpec};
+ 
+ type Log = Rc<RefCell<Vec<FrameEncoded>>>;
+ 
++#[test]
++fn stage_hook_is_optional_and_reports_only_called_boundaries() {
++    let log = Rc::new(RefCell::new(Vec::new()));
++    let sink = log.clone();
++    let mut reports = FrameReports::<()>::default().staging(Some(Box::new(move |stage| sink.borrow_mut().push(stage))));
++    reports.stage("submit_begin");
++    reports.stage("submit_end");
++    assert_eq!(*log.borrow(), ["submit_begin", "submit_end"]);
++    assert!(!reports.wanted());
++    FrameReports::<()>::default().stage("present_begin");
++}
++
+ fn logging() -> (Log, OnFrameEncoded) {
+     let log = Log::default();
+     let sink = log.clone();
+diff --git a/crates/rune/src/frame/profile.rs b/crates/rune/src/frame/profile.rs
+index 18ef665..634af93 100644
+--- a/crates/rune/src/frame/profile.rs
++++ b/crates/rune/src/frame/profile.rs
+@@ -3,6 +3,44 @@
+ #[derive(Clone, Copy)]
+ pub(crate) enum Phase { View, Commit, Layout, Text, Paint, Apply }
+ 
++pub(crate) type StageHook = std::rc::Rc<std::cell::RefCell<Box<dyn FnMut(&'static str)>>>;
++
++thread_local! {
++    static STAGE_HOOK: std::cell::RefCell<Option<StageHook>> = const { std::cell::RefCell::new(None) };
++}
++
++pub(crate) fn stage_hook(hook: Option<StageHook>) {
++    STAGE_HOOK.with(|current| *current.borrow_mut() = hook);
++}
++
++pub(crate) struct TraceScope(Option<(StageHook, &'static str)>);
++
++impl TraceScope {
++    pub(crate) fn new(begin: &'static str, end: &'static str) -> Self {
++        let hook = STAGE_HOOK.with(|current| current.borrow().clone());
++        if let Some(hook) = &hook { (hook.borrow_mut())(begin); }
++        Self(hook.map(|hook| (hook, end)))
++    }
++
++    fn phase(phase: Phase) -> Self {
++        let (begin, end) = match phase {
++            Phase::View => ("view_begin", "view_end"),
++            Phase::Commit => ("commit_begin", "commit_end"),
++            Phase::Layout => ("layout_begin", "layout_end"),
++            Phase::Text => ("text_begin", "text_end"),
++            Phase::Paint => ("paint_begin", "paint_end"),
++            Phase::Apply => ("runtime_apply_begin", "runtime_apply_end"),
++        };
++        Self::new(begin, end)
++    }
++}
++
++impl Drop for TraceScope {
++    fn drop(&mut self) {
++        if let Some((hook, end)) = &self.0 { (hook.borrow_mut())(end); }
++    }
++}
++
+ /// Phases timed, each with a wall and a CPU column.
+ #[cfg_attr(not(feature = "frame-profile"), allow(dead_code))]
+ pub const PHASES: usize = 6;
+@@ -27,9 +65,9 @@ mod enabled {
+         static TIMES: Cell<[f64; 2 * PHASES]> = const { Cell::new([0.0; 2 * PHASES]) };
+     }
+ 
+-    pub(crate) struct Scope(Phase, Instant, Option<f64>);
++    pub(crate) struct Scope(Phase, Instant, Option<f64>, #[allow(dead_code)] super::TraceScope);
+     impl Scope {
+-        pub(crate) fn new(phase: Phase) -> Self { Self(phase, Instant::now(), cpu_ms()) }
++        pub(crate) fn new(phase: Phase) -> Self { Self(phase, Instant::now(), cpu_ms(), super::TraceScope::phase(phase)) }
+     }
+     impl Drop for Scope {
+         fn drop(&mut self) {
+@@ -146,12 +184,12 @@ pub fn thread_cpu_ms() -> f64 { cpu_ms().unwrap_or(0.0) }
+ /// (`perf_warn::budget`) and in a frame interaction timing follows (`tooling::interaction`),
+ /// and otherwise costs a cached flag and a thread-local one.
+ #[cfg(not(feature = "frame-profile"))]
+-pub(crate) struct Scope(Option<(Phase, crate::time::Instant)>);
++pub(crate) struct Scope(Option<(Phase, crate::time::Instant)>, #[allow(dead_code)] TraceScope);
+ #[cfg(not(feature = "frame-profile"))]
+ impl Scope {
+     #[inline(always)]
+     pub(crate) fn new(phase: Phase) -> Self {
+-        Self((crate::tooling::perf_warn::budget::on() || crate::tooling::interaction::active()).then(|| (phase, crate::time::Instant::now())))
++        Self((crate::tooling::perf_warn::budget::on() || crate::tooling::interaction::active()).then(|| (phase, crate::time::Instant::now())), TraceScope::phase(phase))
+     }
+ }
+ #[cfg(not(feature = "frame-profile"))]
+@@ -164,3 +202,7 @@ impl Drop for Scope {
+         if crate::tooling::interaction::active() { crate::tooling::interaction::add(phase, ms); }
+     }
+ }
++
++#[cfg(test)]
++#[path = "profile_tests.rs"]
++mod tests;
+diff --git a/crates/rune/src/frame/profile_tests.rs b/crates/rune/src/frame/profile_tests.rs
+new file mode 100644
+index 0000000..dbbee6e
+--- /dev/null
++++ b/crates/rune/src/frame/profile_tests.rs
+@@ -0,0 +1,36 @@
++use super::*;
++use std::{cell::RefCell, rc::Rc};
++
++#[test]
++fn runtime_scopes_use_only_the_current_windows_hook() {
++    let seen = Rc::new(RefCell::new(Vec::new()));
++    let events = seen.clone();
++    let mut reports = crate::frame::encoded::FrameReports::<()>::default()
++        .staging(Some(Box::new(move |stage| events.borrow_mut().push(stage))));
++    reports.stage("runtime_begin");
++    {
++        let _view = Scope::new(Phase::View);
++        let _text = Scope::new(Phase::Text);
++    }
++    reports.stage("runtime_end");
++    drop(Scope::new(Phase::Paint));
++    assert_eq!(*seen.borrow(), ["runtime_begin", "view_begin", "text_begin", "text_end", "view_end", "runtime_end"]);
++}
++
++#[test]
++fn untraced_runtime_scopes_have_no_hook() {
++    stage_hook(None);
++    assert!(TraceScope::new("glyph_begin", "glyph_end").0.is_none());
++}
++
++#[test]
++fn an_empty_runtime_clears_its_hook() {
++    let seen = Rc::new(RefCell::new(Vec::new()));
++    let events = seen.clone();
++    let mut reports = crate::frame::encoded::FrameReports::<()>::default()
++        .staging(Some(Box::new(move |stage| events.borrow_mut().push(stage))));
++    reports.stage("runtime_begin");
++    reports.stage("runtime_end");
++    assert!(TraceScope::new("atlas_begin", "atlas_end").0.is_none());
++    assert_eq!(*seen.borrow(), ["runtime_begin", "runtime_end"]);
++}
 diff --git a/crates/rune/src/labels.rs b/crates/rune/src/labels.rs
 index 9aeceb2..494fecc 100644
 --- a/crates/rune/src/labels.rs
@@ -21,6 +476,44 @@ index 9aeceb2..494fecc 100644
          Label::About(app) => format!("About {app}"),
          Label::Services => "Services".into(),
          Label::Hide(app) => format!("Hide {app}"),
+diff --git a/crates/rune/src/marks.rs b/crates/rune/src/marks.rs
+index 4f458fb..c0a7f3f 100644
+--- a/crates/rune/src/marks.rs
++++ b/crates/rune/src/marks.rs
+@@ -160,6 +160,33 @@ pub(crate) fn input_handled(key: bool) {
+     if key { mark_once(&KEY_HANDLED, "input.key.handled") } else { mark_once(&PRESS_HANDLED, "input.press.handled") }
+ }
+ 
++static WINDOW_KEY: std::sync::OnceLock<fn(&crate::KeyEvent, bool, bool)> = std::sync::OnceLock::new();
++static WINDOW_FOCUS: std::sync::OnceLock<fn(bool)> = std::sync::OnceLock::new();
++
++/// For an app's input trace: `hook` hears each key press the window gets from the system,
++/// before Rune routes it, with whether it repeats and whether a control holds keyboard focus.
++/// A press it hears that never reaches the app's `on_key` went to a control; one it never hears
++/// never reached the window. Set once; later calls change nothing.
++pub fn on_window_key(hook: fn(&crate::KeyEvent, bool, bool)) {
++    let _ = WINDOW_KEY.set(hook);
++}
++
++/// For an app's input trace: `hook` hears each time the window gains or loses key focus, as the
++/// system reports it. Set once; later calls change nothing.
++pub fn on_window_focus(hook: fn(bool)) {
++    let _ = WINDOW_FOCUS.set(hook);
++}
++
++/// See [`on_window_key`].
++pub(crate) fn window_key(event: &crate::KeyEvent, repeat: bool, control_focused: bool) {
++    if let Some(hook) = WINDOW_KEY.get() { hook(event, repeat, control_focused) }
++}
++
++/// See [`on_window_focus`].
++pub(crate) fn window_focus(focused: bool) {
++    if let Some(hook) = WINDOW_FOCUS.get() { hook(focused) }
++}
++
+ /// The event loop is about to wait for input: after the first present, `input.ready`.
+ pub(crate) fn loop_waits() {
+     if !counting() {
 diff --git a/crates/rune/src/native_surface/pipeline.rs b/crates/rune/src/native_surface/pipeline.rs
 index 0fc3443..da3d6c3 100644
 --- a/crates/rune/src/native_surface/pipeline.rs
@@ -33,6 +526,23 @@ index 0fc3443..da3d6c3 100644
      pub(crate) fn draws_nothing(&self) -> bool {
          self.draws.is_empty()
      }
+diff --git a/crates/rune/src/platform/display_link.rs b/crates/rune/src/platform/display_link.rs
+index ccdd682..544757c 100644
+--- a/crates/rune/src/platform/display_link.rs
++++ b/crates/rune/src/platform/display_link.rs
+@@ -173,6 +173,12 @@ impl DisplayLink {
+         next
+     }
+ 
++    pub(crate) fn next_state_frame(&mut self, pending: &crate::app::urgent_state::Pending) -> (Opportunity, bool) {
++        let next = self.next_frame();
++        let urgent = pending.admit(next == Opportunity::Wait, &mut self.last_target, Instant::now());
++        (if urgent { Opportunity::Now } else { next }, urgent)
++    }
++
+     /// Whether a frame that may draw nothing (a timer's, on a resting surface) can decide that
+     /// before starting the link: it's stopped, and `next_frame` would answer `Now` whenever
+     /// asked from here on, so starting it once the frame turns out to draw paces it the same.
 diff --git a/crates/rune/src/platform/web.rs b/crates/rune/src/platform/web.rs
 index 4c797a0..df28fc7 100644
 --- a/crates/rune/src/platform/web.rs
@@ -626,6 +1136,18 @@ index c82eaf3..68c7815 100644
          self.lcd = variant::Lcd::Unbuilt;
          self.srgb_blend = !format.is_srgb();
          if self.layer_stats().targets > 0 { self.add_layer_format(device, format); }
+diff --git a/crates/rune/src/runtime/commit/text_layout.rs b/crates/rune/src/runtime/commit/text_layout.rs
+index 091d355..ce94258 100644
+--- a/crates/rune/src/runtime/commit/text_layout.rs
++++ b/crates/rune/src/runtime/commit/text_layout.rs
+@@ -346,6 +346,7 @@ pub(super) fn edited(was: &str, now: &str) -> bool {
+ /// Lays out the flattened tree in `room`, measuring text leaves. Not generic over the app state,
+ /// so Taffy's layout code is instantiated once, not once per `Runtime<S>`.
+ pub(super) fn compute_layout(taffy: &mut LayoutEngine, root: SlotId, room: Size<AvailableSpace>, nodes: &[Node], text: &mut TextSystem, scale: f32) {
++    let _trace = crate::frame::profile::TraceScope::new("layout_begin", "layout_end");
+     text.forget_diff();
+     taffy.compute_layout(root, room, |inputs, ctx, style| {
+         taffy::compute_leaf_layout(inputs, style, |_, _| 0.0, |known, avail| {
 diff --git a/crates/rune/src/runtime/input/focus.rs b/crates/rune/src/runtime/input/focus.rs
 index 9e5edb8..1271b4b 100644
 --- a/crates/rune/src/runtime/input/focus.rs
@@ -659,11 +1181,153 @@ index 5d67ada..9272000 100644
              "Insert" => crate::Key::Insert, "PrintScreen" => crate::Key::PrintScreen,
              "ScrollLock" => crate::Key::ScrollLock, "Pause" => crate::Key::Pause,
              name if name.chars().count() == 1 && mods.cmd => crate::Key::Command(name.chars().next().unwrap().to_ascii_lowercase()),
+diff --git a/crates/rune/src/text/atlas.rs b/crates/rune/src/text/atlas.rs
+index 782c1e2..a83cb54 100644
+--- a/crates/rune/src/text/atlas.rs
++++ b/crates/rune/src/text/atlas.rs
+@@ -371,6 +371,7 @@ impl Atlas {
+     /// first mask, so a text system that only measures (`measure`'s, on each thread that calls it)
+     /// never holds its 4 MiB.
+     pub(super) fn alloc(&mut self, w: u32, h: u32) -> Option<(usize, u32, u32)> {
++        let _trace = crate::frame::profile::TraceScope::new("atlas_begin", "atlas_end");
+         let placed = self.place(w, h);
+         if placed.is_some_and(|(page, ..)| page == 0) && self.data.is_empty() {
+             self.data = vec![0; (ATLAS_SIZE * ATLAS_SIZE) as usize];
+diff --git a/crates/rune/src/text/glyph_cache.rs b/crates/rune/src/text/glyph_cache.rs
+index 326b7ee..8c16a60 100644
+--- a/crates/rune/src/text/glyph_cache.rs
++++ b/crates/rune/src/text/glyph_cache.rs
+@@ -217,6 +217,7 @@ impl TextSystem {
+         band: std::ops::Range<f32>,
+         out: &mut Vec<GlyphQuad>,
+     ) {
++        let _trace = crate::frame::profile::TraceScope::new("glyph_begin", "glyph_end");
+         let mut cache = std::mem::take(&mut self.glyph_cache);
+         let skia = self.direct_write();
+         let tag = self.smoothing.outline_key().unwrap_or_else(|| self.apple.key());
+diff --git a/crates/rune/src/text/glyph_emit.rs b/crates/rune/src/text/glyph_emit.rs
+index fd0ac8c..f5f0654 100644
+--- a/crates/rune/src/text/glyph_emit.rs
++++ b/crates/rune/src/text/glyph_emit.rs
+@@ -53,6 +53,7 @@ impl TextSystem {
+         band: std::ops::Range<f32>,
+         out: &mut Vec<GlyphQuad>,
+     ) {
++        let _trace = crate::frame::profile::TraceScope::new("glyph_begin", "glyph_end");
+         let mut table = std::mem::take(&mut self.cluster_scratch);
+         let mut coords = std::mem::take(&mut self.coords_scratch);
+         let mut lo = 0;
+diff --git a/crates/rune/src/text/system_fonts.rs b/crates/rune/src/text/system_fonts.rs
+index 3dd6391..fe1d710 100644
+--- a/crates/rune/src/text/system_fonts.rs
++++ b/crates/rune/src/text/system_fonts.rs
+@@ -276,6 +276,7 @@ impl TextSystem {
+             return;
+         }
+         // The first system font a launch loads, for its trace (`marks`).
++        let _trace = crate::frame::profile::TraceScope::new("font_fallback_begin", "font_fallback_end");
+         crate::marks::mark("text.fallback.begin");
+         for (i, ch) in scripts {
+             register_script_fallbacks(&mut self.font_cx.collection, &mut self.font_files, &fallback::SCRIPT_FONTS[i], ch, locale.as_deref());
+diff --git a/crates/rune/src/tooling.rs b/crates/rune/src/tooling.rs
+index c1b7461..2788cf8 100644
+--- a/crates/rune/src/tooling.rs
++++ b/crates/rune/src/tooling.rs
+@@ -29,6 +29,7 @@ pub struct AppSpec<S: 'static> {
+     pub fonts: &'static [&'static [u8]],
+     pub families: (&'static str, &'static str),
+     /// Called once with a waker other threads use when new data arrives.
++    /// Text measurements here use the window's own cache, before its first frame.
+     pub setup: Option<fn(&mut S, Waker)>,
+     /// Called at the start of every frame with seconds since start (virtual when headless);
+     /// true when state changed.
+@@ -152,7 +153,7 @@ pub(crate) fn runtime_for<S: 'static>(spec: &AppSpec<S>, state: S, size: (f32, f
+     }
+     if let Some(f) = spec.setup {
+         crate::marks::mark("app.setup");
+-        f(&mut rt.state, waker);
++        crate::text::lend(&mut rt.text, || f(&mut rt.state, waker));
+         crate::marks::mark("app.setup.done");
+     }
+     rt
+@@ -547,3 +548,7 @@ mod window_tests;
+ #[cfg(test)]
+ #[path = "tooling/tests.rs"]
+ mod tests;
++
++#[cfg(test)]
++#[path = "tooling/text_setup_tests.rs"]
++mod text_setup_tests;
+diff --git a/crates/rune/src/tooling/text_setup_tests.rs b/crates/rune/src/tooling/text_setup_tests.rs
+new file mode 100644
+index 0000000..58f03b5
+--- /dev/null
++++ b/crates/rune/src/tooling/text_setup_tests.rs
+@@ -0,0 +1,50 @@
++use super::*;
++
++const SAMPLE: &str = "✓";
++
++fn spec() -> AppSpec<()> {
++    AppSpec::new("text setup", (100.0, 100.0), || (), |_, _| crate::el())
++}
++
++fn runtime(spec: &AppSpec<()>) -> Runtime<()> {
++    runtime_for(spec, (), spec.size, Env::default(), std::sync::Arc::new(|| {}))
++}
++
++#[test]
++fn setup_measurements_warm_the_windows_text_cache() {
++    let mut spec = spec();
++    spec.setup = Some(|_, _| { crate::text::measure(SAMPLE, &[], crate::TextStyle::new(13.5, 700.0), None); });
++    let mut warmed = runtime(&spec);
++    assert_eq!(warmed.text.shaped, 1);
++    let style = crate::TextStyle::new(13.5, 700.0);
++    warmed.text.layout_rich(SAMPLE, &[], style, 1.0, None);
++    assert_eq!(warmed.text.shaped, 1, "the setup layout belongs to this window");
++    let mut cold = runtime(&self::spec());
++    let (mut a, mut b) = (Vec::new(), Vec::new());
++    warmed.text.glyphs(SAMPLE, style, 1.0, [0.0; 2], &mut a);
++    cold.text.glyphs(SAMPLE, style, 1.0, [0.0; 2], &mut b);
++    assert_eq!(a.len(), b.len());
++    assert!(!a.is_empty());
++    for (a, b) in a.iter().zip(&b) {
++        assert_eq!(a.rect, b.rect);
++        assert_eq!(a.uv, b.uv);
++    }
++    assert_eq!(warmed.text.atlas.data, cold.text.atlas.data);
++}
++
++#[test]
++fn absent_and_empty_setup_do_not_shape_text() {
++    let mut spec = spec();
++    assert_eq!(runtime(&spec).text.shaped, 0);
++    spec.setup = Some(|_, _| {});
++    assert_eq!(runtime(&spec).text.shaped, 0);
++}
++
++#[test]
++fn panicking_setup_restores_the_measurement_context() {
++    let mut spec = spec();
++    spec.setup = Some(|_, _| panic!("setup failed"));
++    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| runtime(&spec))).is_err());
++    let size = crate::text::measure("after setup", &[], crate::TextStyle::new(14.0, 400.0), None);
++    assert!(size.0 > 0.0 && size.1 > 0.0);
++}
 diff --git a/crates/rune/src/window.rs b/crates/rune/src/window.rs
-index 6324374..9b5c690 100644
+index 6324374..466a97a 100644
 --- a/crates/rune/src/window.rs
 +++ b/crates/rune/src/window.rs
-@@ -58,8 +58,7 @@ use covered_draw::{CoveredDraw, CoveredDrawEvent};
+@@ -47,6 +47,8 @@ use wake::{WakeFacts, WakeWork};
+ mod win;
+ use win::{SurfaceRetries, SurfaceStep, SURFACE_TRIES, Win};
+ mod first_frame;
++mod frame_latency;
++mod immediate_input;
+ use first_frame::FirstFrame;
+ mod draw;
+ mod redraw;
+@@ -58,8 +60,7 @@ use covered_draw::{CoveredDraw, CoveredDrawEvent};
  mod look;
  #[cfg(target_os = "windows")]
  pub(crate) mod slot;
@@ -673,6 +1337,27 @@ index 6324374..9b5c690 100644
  use redraw::{Redraw, RedrawEffect, RedrawEvent};
  mod presented;
  pub(crate) use presented::Presented;
+@@ -554,7 +555,7 @@ impl<S: 'static> Host<S> {
+         let mut args = app.resolve_args(args);
+         let on_window = app.on_window.take();
+         let on_ready = app.on_ready.take();
+-        let frame_reports = crate::frame::encoded::FrameReports::new(app.on_frame_encoded.take(), Some(native_handle.key())).inspecting(app.on_frame_drawn.take());
++        let frame_reports = crate::frame::encoded::FrameReports::new(app.on_frame_encoded.take(), Some(native_handle.key())).inspecting(app.on_frame_drawn.take()).staging(app.on_frame_stage.take());
+         let macos_window = std::mem::take(&mut app.macos_window);
+         // Before the menu guard, so custom items in Edit or Window join these menus.
+         #[cfg(target_os = "macos")]
+@@ -749,7 +750,10 @@ pub(crate) fn surface_config(surface: &wgpu::Surface, adapter: &wgpu::Adapter, (
+     // (`render::damaged`).
+     config.usage |= caps.usages & wgpu::TextureUsages::COPY_DST;
+     config.present_mode = wgpu::PresentMode::AutoVsync;
+-    config.desired_maximum_frame_latency = FRAME_LATENCY;
++    config.desired_maximum_frame_latency = frame_latency::desired();
++    if std::env::var_os("RUNE_SURFACE_LOG").is_some() {
++        eprintln!("rune surface: supported={:?} selected={:?} desired_maximum_frame_latency={}", caps.present_modes, config.present_mode, config.desired_maximum_frame_latency);
++    }
+     Some((config, crate::render::translucency::mode(surface, adapter)))
+ }
+ 
 diff --git a/crates/rune/src/window/create.rs b/crates/rune/src/window/create.rs
 index d1fd541..0ba6d77 100644
 --- a/crates/rune/src/window/create.rs
@@ -906,10 +1591,132 @@ index 0000000..e17145f
 +    }
 +}
 diff --git a/crates/rune/src/window/draw.rs b/crates/rune/src/window/draw.rs
-index b1ef8b0..e0d2349 100644
+index b1ef8b0..ac0656d 100644
 --- a/crates/rune/src/window/draw.rs
 +++ b/crates/rune/src/window/draw.rs
-@@ -345,8 +345,8 @@ impl<S: 'static> Host<S> {
+@@ -47,6 +47,7 @@ impl<S: 'static> Host<S> {
+     /// would have run runs without drawing (`covered_step`). It isn't live: a minimize X11
+     /// reports with no event lands here first, and the frame that next draws settles.
+     pub(super) fn covered_frame(&mut self) {
++        self.shared.urgent_state.clear();
+         let Some(l) = self.win.as_mut() else { return };
+         l.timer_frame.drawn();
+         l.presented = None;
+@@ -70,6 +71,7 @@ impl<S: 'static> Host<S> {
+     /// Draws a frame. `resizing` draws one for a size the user just dragged the window to, at
+     /// once: AppKit shows the new size when the event returns, with or without it.
+     pub(super) fn draw(&mut self, resizing: bool) {
++        self.frame_reports.stage("redraw_begin");
+         // Windows: a window still on the CPU renderer draws there (`cpu_frame`).
+         #[cfg(target_os = "windows")]
+         {
+@@ -152,7 +154,11 @@ impl<S: 'static> Host<S> {
+             if l.native.prime.presumes() && !pacing.running() {
+                 None
+             } else {
+-                let Some(target) = pacing.next_frame().target() else { return };
++                self.frame_reports.stage("pacing_begin");
++                let (next, urgent) = pacing.next_state_frame(&self.shared.urgent_state);
++                if urgent { self.frame_reports.stage("urgent_state_admission"); }
++                self.frame_reports.stage("pacing_end");
++                let Some(target) = next.target() else { return };
+                 target
+             }
+         } else { None };
+@@ -182,6 +188,8 @@ impl<S: 'static> Host<S> {
+         let live_resize = resizing;
+         // The frame moves before the drawable is acquired, so it has the new size; never while
+         // the user holds the window's edge in a live resize.
++        self.frame_reports.stage("build_begin");
++        self.shared.urgent_state.clear();
+         if !hidden && !live_resize { self.step_frame(target.unwrap_or_else(Instant::now)); }
+         let (Some(l), Some((gpu, renderer))) = (self.win.as_mut(), self.gpu.as_mut()) else { return };
+         #[cfg(target_os = "macos")]
+@@ -211,7 +219,9 @@ impl<S: 'static> Host<S> {
+         let built = if quiet {
+             let now = Instant::now();
+             self.rt.window_resting = true;
++            self.frame_reports.stage("runtime_begin");
+             let (animating, dt) = self.clock.advance(&mut self.rt, target.unwrap_or(now), false);
++            self.frame_reports.stage("runtime_end");
+             let rt = &mut self.rt;
+             #[cfg(target_os = "macos")]
+             let next_tick = if deferred { l.native.pacing.as_ref().map(|p| p.tick_after(now)) } else { l.next_tick(now) };
+@@ -231,11 +241,18 @@ impl<S: 'static> Host<S> {
+         };
+         // It draws: the link starts, and still says draw at once.
+         #[cfg(target_os = "macos")]
+-        if deferred && let Some(pacing) = &mut l.native.pacing { let _ = pacing.next_frame(); }
++        if deferred && let Some(pacing) = &mut l.native.pacing {
++            self.frame_reports.stage("pacing_begin");
++            let _ = pacing.next_frame();
++            self.frame_reports.stage("pacing_end");
++        }
+         #[cfg(feature = "frame-profile")]
+         let fp_start = crate::frame::live_log::on().then(crate::frame::live_log::Stamp::now);
+         let Some(surface) = l.surface.as_ref() else { return };
+-        let frame = match acquire(surface, gpu, &l.config, l.surface_ok, 1, &mut self.meter) {
++        self.frame_reports.stage("acquire_begin");
++        let acquired = acquire(surface, gpu, &l.config, l.surface_ok, 1, &mut self.meter);
++        self.frame_reports.stage("acquire_end");
++        let frame = match acquired {
+             Ok(frame) => frame,
+             // A surface with no presentation (a refused configuration, or a device that is gone)
+             // is replaced before the next frame rather than asked for a drawable.
+@@ -286,18 +303,29 @@ impl<S: 'static> Host<S> {
+             (animating, dt)
+         } else if hidden {
+             self.clock.hold(frame_time);
+-            (rt.frame(0.0), 0.0)
++            self.frame_reports.stage("runtime_begin");
++            let animating = rt.frame(0.0);
++            self.frame_reports.stage("runtime_end");
++            (animating, 0.0)
+         } else {
+-            self.clock.advance(rt, frame_time, composing(self.comp.as_deref()))
++            self.frame_reports.stage("runtime_begin");
++            let built = self.clock.advance(rt, frame_time, composing(self.comp.as_deref()));
++            self.frame_reports.stage("runtime_end");
++            built
+         };
+         #[cfg(target_os = "macos")]
+         let frame = if l.surface.as_ref().is_some_and(|surface| l.native.materials.update(rt.transparent, !rt.materials.is_empty(), &l.window, surface)) {
+             // This drawable presents without the views: build again natively into a new one.
+             drop(frame);
+             rt.native_materials = true;
++            self.frame_reports.stage("runtime_begin");
+             animating |= rt.frame(0.0);
++            self.frame_reports.stage("runtime_end");
+             let Some(surface) = l.surface.as_ref() else { return };
+-            let frame = match acquire(surface, gpu, &l.config, l.surface_ok, 1, &mut self.meter) {
++            self.frame_reports.stage("acquire_begin");
++            let acquired = acquire(surface, gpu, &l.config, l.surface_ok, 1, &mut self.meter);
++            self.frame_reports.stage("acquire_end");
++            let frame = match acquired {
+                 Ok(frame) => frame,
+                 Err(Missed::Unconfigured) => {
+                     l.surface_ok = false;
+@@ -318,7 +346,10 @@ impl<S: 'static> Host<S> {
+                 l.surface_ok = false;
+                 return;
+             }
+-            let frame = match acquire(surface, gpu, &l.config, l.surface_ok, 1, &mut self.meter) {
++            self.frame_reports.stage("acquire_begin");
++            let acquired = acquire(surface, gpu, &l.config, l.surface_ok, 1, &mut self.meter);
++            self.frame_reports.stage("acquire_end");
++            let frame = match acquired {
+                 Ok(frame) => frame,
+                 Err(Missed::Unconfigured) => {
+                     l.surface_ok = false;
+@@ -336,6 +367,7 @@ impl<S: 'static> Host<S> {
+         l.backoff_step(BackoffEvent::Presented);
+         if hidden { l.hidden_pace.rendered(now); }
+         let update_ms = now.elapsed().as_secs_f64() * 1000.0;
++        self.frame_reports.stage("build_end");
+         #[cfg(feature = "frame-profile")]
+         let fp_built = fp_start.map(|_| crate::frame::live_log::Stamp::now());
+         sync_platform(l, rt, &mut self.secure_input, &mut self.ime_allowed, &self.clipboard);
+@@ -345,8 +377,8 @@ impl<S: 'static> Host<S> {
              ..Default::default()
          });
          // An image's pixels changed where its instances didn't: the whole frame draws (`damage`).
@@ -920,7 +1727,7 @@ index b1ef8b0..e0d2349 100644
          renderer.upload_images(&gpu.device, &gpu.queue, &mut rt.images);
          renderer.build_surfaces(&gpu.device, &rt.surfaces, rt.live_notifier());
          // Playing clips on their own layer (`video_layer`): the surfaces this frame punches out.
-@@ -363,7 +363,6 @@ impl<S: 'static> Host<S> {
+@@ -363,7 +395,6 @@ impl<S: 'static> Host<S> {
          #[cfg(feature = "frame-profile")]
          let fp_uploaded = fp_start.map(|_| crate::frame::live_log::Stamp::now());
          let mut enc = gpu.device.create_command_encoder(&Default::default());
@@ -928,7 +1735,7 @@ index b1ef8b0..e0d2349 100644
          let mut present_rect = None;
          // Why the frame drew all of the window (frame-profile).
          #[allow(unused_mut)]
-@@ -374,10 +373,8 @@ impl<S: 'static> Host<S> {
+@@ -374,10 +405,8 @@ impl<S: 'static> Host<S> {
          // Only what changed is redrawn and presented (`damage`): the renderer's `draw` takes the
          // armed rectangles when nothing but the instances draws there, a compositor's
          // `Frame::draw_ui` included.
@@ -940,7 +1747,7 @@ index b1ef8b0..e0d2349 100644
              match l.native.damage.plan(&rt.instances, size, rt.clear_color(), whole.is_none()) {
                  super::damage::Plan::All(why) => { whole_why = Some(whole.unwrap_or(why)); None }
                  super::damage::Plan::Part { draw, present } => {
-@@ -406,14 +403,13 @@ impl<S: 'static> Host<S> {
+@@ -406,23 +435,25 @@ impl<S: 'static> Host<S> {
              renderer.draw(&mut enc, target, rt.clear_color());
          }
          // Every frame, so a frame drawn whole leaves the renderer's kept frame behind.
@@ -956,7 +1763,27 @@ index b1ef8b0..e0d2349 100644
          if let Some(alpha) = &l.alpha { alpha.draw(&mut enc, &view); }
          #[cfg(feature = "frame-profile")]
          let fp_encoded = fp_start.map(|_| crate::frame::live_log::Stamp::now());
-@@ -455,15 +451,9 @@ impl<S: 'static> Host<S> {
++        self.frame_reports.stage("submit_begin");
+         renderer.submit(&gpu.queue, enc);
++        self.frame_reports.stage("submit_end");
+         #[cfg(feature = "frame-profile")]
+         let fp_submitted = fp_start.map(|_| crate::frame::live_log::Stamp::now());
+         crate::marks::mark_once(&FIRST_ENCODED, "frame.first.encoded");
+         let encoded = self.frame_reports.stamp();
+         l.window.pre_present_notify();
++        self.frame_reports.stage("present_begin");
+         #[cfg(target_os = "macos")]
+         l.native.materials.present(&rt.materials, rt.env.scale, || gpu.queue.present(frame));
+         #[cfg(target_os = "windows")]
+@@ -434,6 +465,7 @@ impl<S: 'static> Host<S> {
+         }
+         #[cfg(not(target_os = "macos"))]
+         gpu.queue.present(frame);
++        self.frame_reports.stage("present_end");
+         #[cfg(target_os = "windows")]
+         l.native.slot.presented();
+         // A swap chain made again on a handed-over window's visual takes over now (`cpu_frame`).
+@@ -455,15 +487,9 @@ impl<S: 'static> Host<S> {
                  entry: fp_entry.unwrap_or(start), start, acquired, built, uploaded, encoded, submitted, presented: crate::frame::live_log::Stamp::now(),
                  phases: crate::frame::profile::take(), nodes: rt.nodes.len(), shaped: rt.stats.shaped, instances: rt.instances.len(),
                  animating, why: std::mem::take(&mut rt.commit_why), next: 0, poll_due: None, loop_due: None, loops: Vec::new(),
@@ -973,10 +1800,37 @@ index b1ef8b0..e0d2349 100644
              _ => None,
          };
 diff --git a/crates/rune/src/window/events.rs b/crates/rune/src/window/events.rs
-index acb321e..b6dde14 100644
+index acb321e..2b65b38 100644
 --- a/crates/rune/src/window/events.rs
 +++ b/crates/rune/src/window/events.rs
-@@ -521,6 +521,12 @@ impl<S: 'static> Host<S> {
+@@ -221,6 +221,7 @@ impl<S: 'static> Host<S> {
+         if matches!(&event, WindowEvent::ScaleFactorChanged { .. }) { self.apply_placement(event_loop); }
+         match event {
+             WindowEvent::Focused(focused) => {
++                crate::marks::window_focus(focused);
+                 // winit queues an initial false from its hidden source window before
+                 // adoption. It must not dismiss an already-key panel on first open.
+                 #[cfg(target_os = "macos")]
+@@ -412,6 +413,7 @@ impl<S: 'static> Host<S> {
+                 if pressed { crate::marks::input_arrived(true); }
+                 // A release's logical key only matters to `on_key_up` handlers.
+                 let logical = (pressed || rt.wants_key_up()).then(|| map_key_event(&event, self.mods)).flatten();
++                if pressed && let Some(ev) = &logical { crate::marks::window_key(ev, event.repeat, rt.has_focus()); }
+                 let mut redraw = false;
+                 // A menu item handing Rune its key: it acts after, if no handler takes it. So does
+                 // the window menu's Alt+Space, posted rather than run inside the key's message.
+@@ -431,6 +433,10 @@ impl<S: 'static> Host<S> {
+                     redraw |= pressed;
+                 }
+                 if redraw { l.request_redraw(); }
++                if immediate_input::dispatch(rt, immediate_input::enabled()) {
++                    self.clipboard.flush(rt);
++                    self.shell(event_loop);
++                }
+             }
+             WindowEvent::Ime(ime) => {
+                 // A reconversion the input method confirmed comes first: the composition it
+@@ -521,6 +527,12 @@ impl<S: 'static> Host<S> {
                          (ElementState::Pressed, true) => rt.secondary_down(x, y),
                          (ElementState::Released, true) => rt.secondary_up(x, y),
                          (ElementState::Pressed, false) => {
@@ -989,6 +1843,171 @@ index acb321e..b6dde14 100644
                              #[cfg(target_os = "macos")]
                              rt.set_native_titlebar_band(mac::native_titlebar_band(&l.window));
                              rt.pointer_down(x, y);
+diff --git a/crates/rune/src/window/frame_latency.rs b/crates/rune/src/window/frame_latency.rs
+new file mode 100644
+index 0000000..b5b9531
+--- /dev/null
++++ b/crates/rune/src/window/frame_latency.rs
+@@ -0,0 +1,11 @@
++pub(super) fn desired() -> u32 {
++    parse(std::env::var("APOLLOON_FRAME_LATENCY").ok().as_deref())
++}
++
++fn parse(value: Option<&str>) -> u32 {
++    value.and_then(|value| value.parse::<u32>().ok()).filter(|value| *value > 0)
++        .unwrap_or(super::FRAME_LATENCY)
++}
++
++#[cfg(test)]
++mod tests;
+diff --git a/crates/rune/src/window/frame_latency/tests.rs b/crates/rune/src/window/frame_latency/tests.rs
+new file mode 100644
+index 0000000..0205605
+--- /dev/null
++++ b/crates/rune/src/window/frame_latency/tests.rs
+@@ -0,0 +1,14 @@
++use super::parse;
++
++#[test]
++fn positive_override_selects_the_requested_latency() {
++    assert_eq!(parse(Some("1")), 1);
++    assert_eq!(parse(Some("2")), 2);
++}
++
++#[test]
++fn absent_empty_or_invalid_override_preserves_the_platform_default() {
++    for value in [None, Some(""), Some("0"), Some("-1"), Some("invalid"), Some("4294967296")] {
++        assert_eq!(parse(value), super::super::FRAME_LATENCY);
++    }
++}
+diff --git a/crates/rune/src/window/immediate_input.rs b/crates/rune/src/window/immediate_input.rs
+new file mode 100644
+index 0000000..5d3c237
+--- /dev/null
++++ b/crates/rune/src/window/immediate_input.rs
+@@ -0,0 +1,18 @@
++use crate::Runtime;
++
++pub(super) fn enabled() -> bool {
++    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
++    *ENABLED.get_or_init(|| parse(std::env::var("APOLLOON_IMMEDIATE_INPUT").ok().as_deref()))
++}
++
++fn parse(value: Option<&str>) -> bool { value != Some("0") }
++
++pub(super) fn dispatch<S: 'static>(rt: &mut Runtime<S>, enabled: bool) -> bool {
++    if !enabled || !rt.keys_queued() { return false; }
++    rt.hidden_timer_frame();
++    true
++}
++
++#[cfg(test)]
++#[path = "immediate_input_tests.rs"]
++mod tests;
+diff --git a/crates/rune/src/window/immediate_input_tests.rs b/crates/rune/src/window/immediate_input_tests.rs
+new file mode 100644
+index 0000000..0f34f3b
+--- /dev/null
++++ b/crates/rune/src/window/immediate_input_tests.rs
+@@ -0,0 +1,98 @@
++use super::*;
++use crate::{Cx, El, Env, Ime, Key, KeyEvent, Mods, PhysicalInput, PhysicalKeyCode, TextEdit, TextStyle, el, text_input};
++
++#[derive(Default)]
++struct State { keys: usize, releases: usize, edit: TextEdit }
++
++fn view(_: &State, _: &mut Cx<State>) -> El {
++    el().on_key_up(|s: &mut State, _, _| { s.releases += 1; true })
++}
++
++fn runtime() -> Runtime<State> {
++    let mut rt = Runtime::new(State::default(), view, (300.0, 100.0), Env::new(true, 1.0));
++    rt.on_key = Some(|s, _, _| { s.keys += 1; true });
++    rt.frame(0.0);
++    rt
++}
++
++fn space(rt: &mut Runtime<State>, pressed: bool, repeat: bool) {
++    rt.physical_with_fallback(PhysicalInput::Key {
++        key: PhysicalKeyCode::Space, mods: Mods::default(), pressed, repeat,
++    }, Some(KeyEvent { key: Key::Text(" ".into()), mods: Mods::default() }));
++}
++
++#[test]
++fn immediate_input_is_on_by_default_and_only_exactly_zero_disables_it() {
++    assert!(!parse(Some("0")));
++    for value in [None, Some(""), Some("1"), Some("2"), Some("01"), Some("true"), Some(" 0"), Some("00")] {
++        assert!(parse(value));
++    }
++}
++
++#[test]
++fn early_dispatched_key_is_handled_once_across_the_frame_drain() {
++    let mut rt = runtime();
++    space(&mut rt, true, false);
++    assert_eq!(rt.state.keys, 0);
++    assert!(dispatch(&mut rt, parse(None)));
++    assert_eq!(rt.state.keys, 1);
++    assert!(!rt.keys_queued());
++    assert!(!dispatch(&mut rt, true));
++    rt.frame(1.0 / 60.0);
++    assert_eq!(rt.state.keys, 1);
++}
++
++#[test]
++fn disabled_dispatch_leaves_input_for_the_frame() {
++    let mut rt = runtime();
++    space(&mut rt, true, false);
++    assert!(!dispatch(&mut rt, parse(Some("0"))));
++    assert_eq!(rt.state.keys, 0);
++    assert!(rt.keys_queued());
++    rt.frame(0.0);
++    assert_eq!(rt.state.keys, 1);
++}
++
++#[test]
++fn empty_dispatch_does_not_poll_or_run_a_frame() {
++    let mut rt = runtime();
++    rt.poll = Some(|_, _, _| panic!("empty input must not poll"));
++    assert!(!dispatch(&mut rt, true));
++}
++
++#[test]
++fn repeats_and_releases_keep_the_normal_routing_once_each() {
++    let mut early = runtime();
++    let mut paced = runtime();
++    for (pressed, repeat) in [(true, false), (true, true), (false, false)] {
++        for rt in [&mut early, &mut paced] { space(rt, pressed, repeat); }
++        assert!(dispatch(&mut early, true));
++        paced.frame(0.0);
++        assert_eq!((early.state.keys, early.state.releases), (paced.state.keys, paced.state.releases));
++    }
++    assert_eq!((early.state.keys, early.state.releases), (2, 1));
++    early.frame(0.0);
++    assert_eq!((early.state.keys, early.state.releases), (2, 1));
++}
++
++fn field(s: &State, _: &mut Cx<State>) -> El {
++    text_input(&s.edit, TextStyle::new(14.0, 400.0)).key("edit").size(200.0, 40.0)
++        .on_edit(|s: &mut State| &mut s.edit)
++}
++
++#[test]
++fn queued_focus_and_ime_stay_ahead_of_the_early_key() {
++    let mut rt = Runtime::new(State::default(), field, (300.0, 100.0), Env::new(true, 1.0));
++    rt.on_key = Some(|s, _, _| { s.keys += 1; true });
++    rt.frame(0.0);
++    let (x, y) = rt.find("edit").unwrap();
++    rt.pointer_down(x, y);
++    rt.pointer_up(x, y);
++    rt.ime(Ime::Commit("字".into()));
++    space(&mut rt, true, false);
++    assert!(dispatch(&mut rt, true));
++    assert_eq!(rt.state.edit.text, "字 ");
++    assert_eq!(rt.state.keys, 0, "the focused field takes the key, not the app");
++    rt.frame(0.0);
++    assert_eq!(rt.state.edit.text, "字 ");
++}
 diff --git a/crates/rune/src/window/native.rs b/crates/rune/src/window/native.rs
 index 5550891..5468665 100644
 --- a/crates/rune/src/window/native.rs
@@ -1163,1100 +2182,3 @@ index 40208c2..bdf4451 100644
          // No surface: `Host::reattach` is between the old one and the new, and takes this size
          // from the window itself; or the CPU renderer draws it, whose buffer follows this size.
          let (Some(surface), Some(gpu)) = (&self.surface, gpu) else { return true };
-diff --git a/crates/rune/src/app.rs b/crates/rune/src/app.rs
---- a/crates/rune/src/app.rs
-+++ b/crates/rune/src/app.rs
-@@ -81,6 +81,7 @@
-     pub(crate) on_ready: Option<OnWindow>,
-     pub(crate) on_frame_encoded: Option<crate::frame::encoded::OnFrameEncoded>,
-     pub(crate) on_frame_drawn: Option<crate::frame::encoded::OnFrameDrawn<S>>,
-+    pub(crate) on_frame_stage: Option<Box<dyn FnMut(&'static str)>>,
-     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-     pub(crate) same_tab_router: Option<Box<dyn Fn(&str) -> bool>>,
-     pub(crate) macos_window: crate::MacWindowOptions,
-@@ -144,6 +145,7 @@
-             on_ready: None,
-             on_frame_encoded: None,
-             on_frame_drawn: None,
-+            on_frame_stage: None,
-             same_tab_router: None,
-             macos_window: crate::MacWindowOptions::default(),
-             compositor: None,
-@@ -560,6 +562,12 @@
-     /// or what the window draws, and only desktop windows call it.
-     pub fn on_frame_drawn(mut self, f: impl FnMut(&crate::Runtime<S>) + 'static) -> Self {
-         self.on_frame_drawn = Some(Box::new(f));
-+        self
-+    }
-+
-+    /// Observes CPU wall-time boundaries of GPU frames without scheduling frames.
-+    pub fn on_frame_stage(mut self, f: impl FnMut(&'static str) + 'static) -> Self {
-+        self.on_frame_stage = Some(Box::new(f));
-         self
-     }
- 
-diff --git a/crates/rune/src/frame/encoded.rs b/crates/rune/src/frame/encoded.rs
---- a/crates/rune/src/frame/encoded.rs
-+++ b/crates/rune/src/frame/encoded.rs
-@@ -81,10 +81,10 @@
- 
- /// A window's hooks and the count it numbers reports with. Without a hook every call is one
- /// `Option` check and nothing else, so reporting never changes how the window draws.
--pub(crate) struct FrameReports<S: 'static>(Option<Reporter>, Option<OnFrameDrawn<S>>);
-+pub(crate) struct FrameReports<S: 'static>(Option<Reporter>, Option<OnFrameDrawn<S>>, Option<Box<dyn FnMut(&'static str)>>);
- 
- impl<S: 'static> Default for FrameReports<S> {
--    fn default() -> Self { Self(None, None) }
-+    fn default() -> Self { Self(None, None, None) }
- }
- 
- struct Reporter {
-@@ -96,12 +96,21 @@
- 
- impl<S: 'static> FrameReports<S> {
-     pub(crate) fn new(hook: Option<OnFrameEncoded>, window: Option<&str>) -> Self {
--        Self(hook.map(|hook| Reporter { hook, window: window.map(Rc::from), seq: 0, refresh_hz: None }), None)
-+        Self(hook.map(|hook| Reporter { hook, window: window.map(Rc::from), seq: 0, refresh_hz: None }), None, None)
-     }
- 
-     pub(crate) fn inspecting(mut self, drawn: Option<OnFrameDrawn<S>>) -> Self {
-         self.1 = drawn;
-         self
-+    }
-+
-+    pub(crate) fn staging(mut self, hook: Option<Box<dyn FnMut(&'static str)>>) -> Self {
-+        self.2 = hook;
-+        self
-+    }
-+
-+    pub(crate) fn stage(&mut self, name: &'static str) {
-+        if let Some(hook) = &mut self.2 { hook(name); }
-     }
- 
-     /// The time to report a `Drawn` frame at, taken only when there's a hook.
-diff --git a/crates/rune/src/window/draw.rs b/crates/rune/src/window/draw.rs
---- a/crates/rune/src/window/draw.rs
-+++ b/crates/rune/src/window/draw.rs
-@@ -70,6 +70,7 @@
-     /// Draws a frame. `resizing` draws one for a size the user just dragged the window to, at
-     /// once: AppKit shows the new size when the event returns, with or without it.
-     pub(super) fn draw(&mut self, resizing: bool) {
-+        self.frame_reports.stage("redraw_begin");
-         // Windows: a window still on the CPU renderer draws there (`cpu_frame`).
-         #[cfg(target_os = "windows")]
-         {
-@@ -152,7 +153,10 @@
-             if l.native.prime.presumes() && !pacing.running() {
-                 None
-             } else {
--                let Some(target) = pacing.next_frame().target() else { return };
-+                self.frame_reports.stage("pacing_begin");
-+                let next = pacing.next_frame();
-+                self.frame_reports.stage("pacing_end");
-+                let Some(target) = next.target() else { return };
-                 target
-             }
-         } else { None };
-@@ -182,6 +186,7 @@
-         let live_resize = resizing;
-         // The frame moves before the drawable is acquired, so it has the new size; never while
-         // the user holds the window's edge in a live resize.
-+        self.frame_reports.stage("build_begin");
-         if !hidden && !live_resize { self.step_frame(target.unwrap_or_else(Instant::now)); }
-         let (Some(l), Some((gpu, renderer))) = (self.win.as_mut(), self.gpu.as_mut()) else { return };
-         #[cfg(target_os = "macos")]
-@@ -211,7 +216,9 @@
-         let built = if quiet {
-             let now = Instant::now();
-             self.rt.window_resting = true;
-+            self.frame_reports.stage("runtime_begin");
-             let (animating, dt) = self.clock.advance(&mut self.rt, target.unwrap_or(now), false);
-+            self.frame_reports.stage("runtime_end");
-             let rt = &mut self.rt;
-             #[cfg(target_os = "macos")]
-             let next_tick = if deferred { l.native.pacing.as_ref().map(|p| p.tick_after(now)) } else { l.next_tick(now) };
-@@ -231,11 +238,18 @@
-         };
-         // It draws: the link starts, and still says draw at once.
-         #[cfg(target_os = "macos")]
--        if deferred && let Some(pacing) = &mut l.native.pacing { let _ = pacing.next_frame(); }
-+        if deferred && let Some(pacing) = &mut l.native.pacing {
-+            self.frame_reports.stage("pacing_begin");
-+            let _ = pacing.next_frame();
-+            self.frame_reports.stage("pacing_end");
-+        }
-         #[cfg(feature = "frame-profile")]
-         let fp_start = crate::frame::live_log::on().then(crate::frame::live_log::Stamp::now);
-         let Some(surface) = l.surface.as_ref() else { return };
--        let frame = match acquire(surface, gpu, &l.config, l.surface_ok, 1, &mut self.meter) {
-+        self.frame_reports.stage("acquire_begin");
-+        let acquired = acquire(surface, gpu, &l.config, l.surface_ok, 1, &mut self.meter);
-+        self.frame_reports.stage("acquire_end");
-+        let frame = match acquired {
-             Ok(frame) => frame,
-             // A surface with no presentation (a refused configuration, or a device that is gone)
-             // is replaced before the next frame rather than asked for a drawable.
-@@ -286,18 +300,29 @@
-             (animating, dt)
-         } else if hidden {
-             self.clock.hold(frame_time);
--            (rt.frame(0.0), 0.0)
-+            self.frame_reports.stage("runtime_begin");
-+            let animating = rt.frame(0.0);
-+            self.frame_reports.stage("runtime_end");
-+            (animating, 0.0)
-         } else {
--            self.clock.advance(rt, frame_time, composing(self.comp.as_deref()))
-+            self.frame_reports.stage("runtime_begin");
-+            let built = self.clock.advance(rt, frame_time, composing(self.comp.as_deref()));
-+            self.frame_reports.stage("runtime_end");
-+            built
-         };
-         #[cfg(target_os = "macos")]
-         let frame = if l.surface.as_ref().is_some_and(|surface| l.native.materials.update(rt.transparent, !rt.materials.is_empty(), &l.window, surface)) {
-             // This drawable presents without the views: build again natively into a new one.
-             drop(frame);
-             rt.native_materials = true;
-+            self.frame_reports.stage("runtime_begin");
-             animating |= rt.frame(0.0);
-+            self.frame_reports.stage("runtime_end");
-             let Some(surface) = l.surface.as_ref() else { return };
--            let frame = match acquire(surface, gpu, &l.config, l.surface_ok, 1, &mut self.meter) {
-+            self.frame_reports.stage("acquire_begin");
-+            let acquired = acquire(surface, gpu, &l.config, l.surface_ok, 1, &mut self.meter);
-+            self.frame_reports.stage("acquire_end");
-+            let frame = match acquired {
-                 Ok(frame) => frame,
-                 Err(Missed::Unconfigured) => {
-                     l.surface_ok = false;
-@@ -318,7 +343,10 @@
-                 l.surface_ok = false;
-                 return;
-             }
--            let frame = match acquire(surface, gpu, &l.config, l.surface_ok, 1, &mut self.meter) {
-+            self.frame_reports.stage("acquire_begin");
-+            let acquired = acquire(surface, gpu, &l.config, l.surface_ok, 1, &mut self.meter);
-+            self.frame_reports.stage("acquire_end");
-+            let frame = match acquired {
-                 Ok(frame) => frame,
-                 Err(Missed::Unconfigured) => {
-                     l.surface_ok = false;
-@@ -336,6 +364,7 @@
-         l.backoff_step(BackoffEvent::Presented);
-         if hidden { l.hidden_pace.rendered(now); }
-         let update_ms = now.elapsed().as_secs_f64() * 1000.0;
-+        self.frame_reports.stage("build_end");
-         #[cfg(feature = "frame-profile")]
-         let fp_built = fp_start.map(|_| crate::frame::live_log::Stamp::now());
-         sync_platform(l, rt, &mut self.secure_input, &mut self.ime_allowed, &self.clipboard);
-@@ -413,12 +442,15 @@
-         if let Some(alpha) = &l.alpha { alpha.draw(&mut enc, &view); }
-         #[cfg(feature = "frame-profile")]
-         let fp_encoded = fp_start.map(|_| crate::frame::live_log::Stamp::now());
-+        self.frame_reports.stage("submit_begin");
-         renderer.submit(&gpu.queue, enc);
-+        self.frame_reports.stage("submit_end");
-         #[cfg(feature = "frame-profile")]
-         let fp_submitted = fp_start.map(|_| crate::frame::live_log::Stamp::now());
-         crate::marks::mark_once(&FIRST_ENCODED, "frame.first.encoded");
-         let encoded = self.frame_reports.stamp();
-         l.window.pre_present_notify();
-+        self.frame_reports.stage("present_begin");
-         #[cfg(target_os = "macos")]
-         l.native.materials.present(&rt.materials, rt.env.scale, || gpu.queue.present(frame));
-         #[cfg(target_os = "windows")]
-@@ -430,6 +462,7 @@
-         }
-         #[cfg(not(target_os = "macos"))]
-         gpu.queue.present(frame);
-+        self.frame_reports.stage("present_end");
-         #[cfg(target_os = "windows")]
-         l.native.slot.presented();
-         // A swap chain made again on a handed-over window's visual takes over now (`cpu_frame`).
-diff --git a/crates/rune/src/window.rs b/crates/rune/src/window.rs
---- a/crates/rune/src/window.rs
-+++ b/crates/rune/src/window.rs
-@@ -553,7 +553,7 @@
-         let mut args = app.resolve_args(args);
-         let on_window = app.on_window.take();
-         let on_ready = app.on_ready.take();
--        let frame_reports = crate::frame::encoded::FrameReports::new(app.on_frame_encoded.take(), Some(native_handle.key())).inspecting(app.on_frame_drawn.take());
-+        let frame_reports = crate::frame::encoded::FrameReports::new(app.on_frame_encoded.take(), Some(native_handle.key())).inspecting(app.on_frame_drawn.take()).staging(app.on_frame_stage.take());
-         let macos_window = std::mem::take(&mut app.macos_window);
-         // Before the menu guard, so custom items in Edit or Window join these menus.
-         #[cfg(target_os = "macos")]
-diff --git a/crates/rune/src/frame/encoded_tests.rs b/crates/rune/src/frame/encoded_tests.rs
---- a/crates/rune/src/frame/encoded_tests.rs
-+++ b/crates/rune/src/frame/encoded_tests.rs
-@@ -6,6 +6,18 @@
- use crate::{App, AppSpec, WindowSpec};
- 
- type Log = Rc<RefCell<Vec<FrameEncoded>>>;
-+
-+#[test]
-+fn stage_hook_is_optional_and_reports_only_called_boundaries() {
-+    let log = Rc::new(RefCell::new(Vec::new()));
-+    let sink = log.clone();
-+    let mut reports = FrameReports::<()>::default().staging(Some(Box::new(move |stage| sink.borrow_mut().push(stage))));
-+    reports.stage("submit_begin");
-+    reports.stage("submit_end");
-+    assert_eq!(*log.borrow(), ["submit_begin", "submit_end"]);
-+    assert!(!reports.wanted());
-+    FrameReports::<()>::default().stage("present_begin");
-+}
- 
- fn logging() -> (Log, OnFrameEncoded) {
-     let log = Log::default();
-diff --git a/crates/rune/src/window.rs b/crates/rune/src/window.rs
---- a/crates/rune/src/window.rs
-+++ b/crates/rune/src/window.rs
-@@ -747,7 +747,10 @@
-     // A frame that redrew part of itself is copied in whole from the one the renderer keeps
-     // (`render::damaged`).
-     config.usage |= caps.usages & wgpu::TextureUsages::COPY_DST;
-     config.present_mode = wgpu::PresentMode::AutoVsync;
-     config.desired_maximum_frame_latency = FRAME_LATENCY;
-+    if std::env::var_os("RUNE_SURFACE_LOG").is_some() {
-+        eprintln!("rune surface: supported={:?} selected={:?} desired_maximum_frame_latency={}", caps.present_modes, config.present_mode, config.desired_maximum_frame_latency);
-+    }
-     Some((config, crate::render::translucency::mode(surface, adapter)))
- }
-diff --git a/crates/rune/src/frame/encoded.rs b/crates/rune/src/frame/encoded.rs
---- a/crates/rune/src/frame/encoded.rs
-+++ b/crates/rune/src/frame/encoded.rs
-@@ -81,7 +81,7 @@
- 
- /// A window's hooks and the count it numbers reports with. Without a hook every call is one
- /// `Option` check and nothing else, so reporting never changes how the window draws.
--pub(crate) struct FrameReports<S: 'static>(Option<Reporter>, Option<OnFrameDrawn<S>>, Option<Box<dyn FnMut(&'static str)>>);
-+pub(crate) struct FrameReports<S: 'static>(Option<Reporter>, Option<OnFrameDrawn<S>>, Option<super::profile::StageHook>);
- 
- impl<S: 'static> Default for FrameReports<S> {
-     fn default() -> Self { Self(None, None, None) }
-@@ -105,12 +105,19 @@
-     }
- 
-     pub(crate) fn staging(mut self, hook: Option<Box<dyn FnMut(&'static str)>>) -> Self {
--        self.2 = hook;
-+        self.2 = hook.map(|hook| Rc::new(std::cell::RefCell::new(hook)));
-         self
-     }
- 
-     pub(crate) fn stage(&mut self, name: &'static str) {
--        if let Some(hook) = &mut self.2 { hook(name); }
-+        if let Some(hook) = &self.2 {
-+            match name {
-+                "runtime_begin" => super::profile::stage_hook(Some(hook.clone())),
-+                "runtime_end" => super::profile::stage_hook(None),
-+                _ => {},
-+            }
-+            (hook.borrow_mut())(name);
-+        }
-     }
- 
-     /// The time to report a `Drawn` frame at, taken only when there's a hook.
-diff --git a/crates/rune/src/frame/profile.rs b/crates/rune/src/frame/profile.rs
---- a/crates/rune/src/frame/profile.rs
-+++ b/crates/rune/src/frame/profile.rs
-@@ -3,6 +3,44 @@
- #[derive(Clone, Copy)]
- pub(crate) enum Phase { View, Commit, Layout, Text, Paint, Apply }
- 
-+pub(crate) type StageHook = std::rc::Rc<std::cell::RefCell<Box<dyn FnMut(&'static str)>>>;
-+
-+thread_local! {
-+    static STAGE_HOOK: std::cell::RefCell<Option<StageHook>> = const { std::cell::RefCell::new(None) };
-+}
-+
-+pub(crate) fn stage_hook(hook: Option<StageHook>) {
-+    STAGE_HOOK.with(|current| *current.borrow_mut() = hook);
-+}
-+
-+pub(crate) struct TraceScope(Option<(StageHook, &'static str)>);
-+
-+impl TraceScope {
-+    pub(crate) fn new(begin: &'static str, end: &'static str) -> Self {
-+        let hook = STAGE_HOOK.with(|current| current.borrow().clone());
-+        if let Some(hook) = &hook { (hook.borrow_mut())(begin); }
-+        Self(hook.map(|hook| (hook, end)))
-+    }
-+
-+    fn phase(phase: Phase) -> Self {
-+        let (begin, end) = match phase {
-+            Phase::View => ("view_begin", "view_end"),
-+            Phase::Commit => ("commit_begin", "commit_end"),
-+            Phase::Layout => ("layout_begin", "layout_end"),
-+            Phase::Text => ("text_begin", "text_end"),
-+            Phase::Paint => ("paint_begin", "paint_end"),
-+            Phase::Apply => ("runtime_apply_begin", "runtime_apply_end"),
-+        };
-+        Self::new(begin, end)
-+    }
-+}
-+
-+impl Drop for TraceScope {
-+    fn drop(&mut self) {
-+        if let Some((hook, end)) = &self.0 { (hook.borrow_mut())(end); }
-+    }
-+}
-+
- /// Phases timed, each with a wall and a CPU column.
- #[cfg_attr(not(feature = "frame-profile"), allow(dead_code))]
- pub const PHASES: usize = 6;
-@@ -27,9 +65,9 @@
-         static TIMES: Cell<[f64; 2 * PHASES]> = const { Cell::new([0.0; 2 * PHASES]) };
-     }
- 
--    pub(crate) struct Scope(Phase, Instant, Option<f64>);
-+    pub(crate) struct Scope(Phase, Instant, Option<f64>, #[allow(dead_code)] super::TraceScope);
-     impl Scope {
--        pub(crate) fn new(phase: Phase) -> Self { Self(phase, Instant::now(), cpu_ms()) }
-+        pub(crate) fn new(phase: Phase) -> Self { Self(phase, Instant::now(), cpu_ms(), super::TraceScope::phase(phase)) }
-     }
-     impl Drop for Scope {
-         fn drop(&mut self) {
-@@ -146,12 +184,12 @@
- /// (`perf_warn::budget`) and in a frame interaction timing follows (`tooling::interaction`),
- /// and otherwise costs a cached flag and a thread-local one.
- #[cfg(not(feature = "frame-profile"))]
--pub(crate) struct Scope(Option<(Phase, crate::time::Instant)>);
-+pub(crate) struct Scope(Option<(Phase, crate::time::Instant)>, #[allow(dead_code)] TraceScope);
- #[cfg(not(feature = "frame-profile"))]
- impl Scope {
-     #[inline(always)]
-     pub(crate) fn new(phase: Phase) -> Self {
--        Self((crate::tooling::perf_warn::budget::on() || crate::tooling::interaction::active()).then(|| (phase, crate::time::Instant::now())))
-+        Self((crate::tooling::perf_warn::budget::on() || crate::tooling::interaction::active()).then(|| (phase, crate::time::Instant::now())), TraceScope::phase(phase))
-     }
- }
- #[cfg(not(feature = "frame-profile"))]
-@@ -164,3 +202,7 @@
-         if crate::tooling::interaction::active() { crate::tooling::interaction::add(phase, ms); }
-     }
- }
-+
-+#[cfg(test)]
-+#[path = "profile_tests.rs"]
-+mod tests;
-diff --git a/crates/rune/src/frame/profile_tests.rs b/crates/rune/src/frame/profile_tests.rs
-new file mode 100644
---- /dev/null
-+++ b/crates/rune/src/frame/profile_tests.rs
-@@ -0,0 +1,36 @@
-+use super::*;
-+use std::{cell::RefCell, rc::Rc};
-+
-+#[test]
-+fn runtime_scopes_use_only_the_current_windows_hook() {
-+    let seen = Rc::new(RefCell::new(Vec::new()));
-+    let events = seen.clone();
-+    let mut reports = crate::frame::encoded::FrameReports::<()>::default()
-+        .staging(Some(Box::new(move |stage| events.borrow_mut().push(stage))));
-+    reports.stage("runtime_begin");
-+    {
-+        let _view = Scope::new(Phase::View);
-+        let _text = Scope::new(Phase::Text);
-+    }
-+    reports.stage("runtime_end");
-+    drop(Scope::new(Phase::Paint));
-+    assert_eq!(*seen.borrow(), ["runtime_begin", "view_begin", "text_begin", "text_end", "view_end", "runtime_end"]);
-+}
-+
-+#[test]
-+fn untraced_runtime_scopes_have_no_hook() {
-+    stage_hook(None);
-+    assert!(TraceScope::new("glyph_begin", "glyph_end").0.is_none());
-+}
-+
-+#[test]
-+fn an_empty_runtime_clears_its_hook() {
-+    let seen = Rc::new(RefCell::new(Vec::new()));
-+    let events = seen.clone();
-+    let mut reports = crate::frame::encoded::FrameReports::<()>::default()
-+        .staging(Some(Box::new(move |stage| events.borrow_mut().push(stage))));
-+    reports.stage("runtime_begin");
-+    reports.stage("runtime_end");
-+    assert!(TraceScope::new("atlas_begin", "atlas_end").0.is_none());
-+    assert_eq!(*seen.borrow(), ["runtime_begin", "runtime_end"]);
-+}
-diff --git a/crates/rune/src/runtime/commit/text_layout.rs b/crates/rune/src/runtime/commit/text_layout.rs
---- a/crates/rune/src/runtime/commit/text_layout.rs
-+++ b/crates/rune/src/runtime/commit/text_layout.rs
-@@ -346,6 +346,7 @@
- /// Lays out the flattened tree in `room`, measuring text leaves. Not generic over the app state,
- /// so Taffy's layout code is instantiated once, not once per `Runtime<S>`.
- pub(super) fn compute_layout(taffy: &mut LayoutEngine, root: SlotId, room: Size<AvailableSpace>, nodes: &[Node], text: &mut TextSystem, scale: f32) {
-+    let _trace = crate::frame::profile::TraceScope::new("layout_begin", "layout_end");
-     text.forget_diff();
-     taffy.compute_layout(root, room, |inputs, ctx, style| {
-         taffy::compute_leaf_layout(inputs, style, |_, _| 0.0, |known, avail| {
-diff --git a/crates/rune/src/text/atlas.rs b/crates/rune/src/text/atlas.rs
---- a/crates/rune/src/text/atlas.rs
-+++ b/crates/rune/src/text/atlas.rs
-@@ -371,6 +371,7 @@
-     /// first mask, so a text system that only measures (`measure`'s, on each thread that calls it)
-     /// never holds its 4 MiB.
-     pub(super) fn alloc(&mut self, w: u32, h: u32) -> Option<(usize, u32, u32)> {
-+        let _trace = crate::frame::profile::TraceScope::new("atlas_begin", "atlas_end");
-         let placed = self.place(w, h);
-         if placed.is_some_and(|(page, ..)| page == 0) && self.data.is_empty() {
-             self.data = vec![0; (ATLAS_SIZE * ATLAS_SIZE) as usize];
-diff --git a/crates/rune/src/text/glyph_cache.rs b/crates/rune/src/text/glyph_cache.rs
---- a/crates/rune/src/text/glyph_cache.rs
-+++ b/crates/rune/src/text/glyph_cache.rs
-@@ -217,6 +217,7 @@
-         band: std::ops::Range<f32>,
-         out: &mut Vec<GlyphQuad>,
-     ) {
-+        let _trace = crate::frame::profile::TraceScope::new("glyph_begin", "glyph_end");
-         let mut cache = std::mem::take(&mut self.glyph_cache);
-         let skia = self.direct_write();
-         let tag = self.smoothing.outline_key().unwrap_or_else(|| self.apple.key());
-diff --git a/crates/rune/src/text/glyph_emit.rs b/crates/rune/src/text/glyph_emit.rs
---- a/crates/rune/src/text/glyph_emit.rs
-+++ b/crates/rune/src/text/glyph_emit.rs
-@@ -53,6 +53,7 @@
-         band: std::ops::Range<f32>,
-         out: &mut Vec<GlyphQuad>,
-     ) {
-+        let _trace = crate::frame::profile::TraceScope::new("glyph_begin", "glyph_end");
-         let mut table = std::mem::take(&mut self.cluster_scratch);
-         let mut coords = std::mem::take(&mut self.coords_scratch);
-         let mut lo = 0;
-diff --git a/crates/rune/src/text/system_fonts.rs b/crates/rune/src/text/system_fonts.rs
---- a/crates/rune/src/text/system_fonts.rs
-+++ b/crates/rune/src/text/system_fonts.rs
-@@ -276,6 +276,7 @@
-             return;
-         }
-         // The first system font a launch loads, for its trace (`marks`).
-+        let _trace = crate::frame::profile::TraceScope::new("font_fallback_begin", "font_fallback_end");
-         crate::marks::mark("text.fallback.begin");
-         for (i, ch) in scripts {
-             register_script_fallbacks(&mut self.font_cx.collection, &mut self.font_files, &fallback::SCRIPT_FONTS[i], ch, locale.as_deref());
-diff --git a/crates/rune/src/tooling.rs b/crates/rune/src/tooling.rs
---- a/crates/rune/src/tooling.rs
-+++ b/crates/rune/src/tooling.rs
-@@ -29,6 +29,7 @@
-     pub fonts: &'static [&'static [u8]],
-     pub families: (&'static str, &'static str),
-     /// Called once with a waker other threads use when new data arrives.
-+    /// Text measurements here use the window's own cache, before its first frame.
-     pub setup: Option<fn(&mut S, Waker)>,
-     /// Called at the start of every frame with seconds since start (virtual when headless);
-     /// true when state changed.
-@@ -152,7 +153,7 @@
-     }
-     if let Some(f) = spec.setup {
-         crate::marks::mark("app.setup");
--        f(&mut rt.state, waker);
-+        crate::text::lend(&mut rt.text, || f(&mut rt.state, waker));
-         crate::marks::mark("app.setup.done");
-     }
-     rt
-@@ -547,3 +548,7 @@
- #[cfg(test)]
- #[path = "tooling/tests.rs"]
- mod tests;
-+
-+#[cfg(test)]
-+#[path = "tooling/text_setup_tests.rs"]
-+mod text_setup_tests;
-diff --git a/crates/rune/src/tooling/text_setup_tests.rs b/crates/rune/src/tooling/text_setup_tests.rs
-new file mode 100644
---- /dev/null
-+++ b/crates/rune/src/tooling/text_setup_tests.rs
-@@ -0,0 +1,50 @@
-+use super::*;
-+
-+const SAMPLE: &str = "✓";
-+
-+fn spec() -> AppSpec<()> {
-+    AppSpec::new("text setup", (100.0, 100.0), || (), |_, _| crate::el())
-+}
-+
-+fn runtime(spec: &AppSpec<()>) -> Runtime<()> {
-+    runtime_for(spec, (), spec.size, Env::default(), std::sync::Arc::new(|| {}))
-+}
-+
-+#[test]
-+fn setup_measurements_warm_the_windows_text_cache() {
-+    let mut spec = spec();
-+    spec.setup = Some(|_, _| { crate::text::measure(SAMPLE, &[], crate::TextStyle::new(13.5, 700.0), None); });
-+    let mut warmed = runtime(&spec);
-+    assert_eq!(warmed.text.shaped, 1);
-+    let style = crate::TextStyle::new(13.5, 700.0);
-+    warmed.text.layout_rich(SAMPLE, &[], style, 1.0, None);
-+    assert_eq!(warmed.text.shaped, 1, "the setup layout belongs to this window");
-+    let mut cold = runtime(&self::spec());
-+    let (mut a, mut b) = (Vec::new(), Vec::new());
-+    warmed.text.glyphs(SAMPLE, style, 1.0, [0.0; 2], &mut a);
-+    cold.text.glyphs(SAMPLE, style, 1.0, [0.0; 2], &mut b);
-+    assert_eq!(a.len(), b.len());
-+    assert!(!a.is_empty());
-+    for (a, b) in a.iter().zip(&b) {
-+        assert_eq!(a.rect, b.rect);
-+        assert_eq!(a.uv, b.uv);
-+    }
-+    assert_eq!(warmed.text.atlas.data, cold.text.atlas.data);
-+}
-+
-+#[test]
-+fn absent_and_empty_setup_do_not_shape_text() {
-+    let mut spec = spec();
-+    assert_eq!(runtime(&spec).text.shaped, 0);
-+    spec.setup = Some(|_, _| {});
-+    assert_eq!(runtime(&spec).text.shaped, 0);
-+}
-+
-+#[test]
-+fn panicking_setup_restores_the_measurement_context() {
-+    let mut spec = spec();
-+    spec.setup = Some(|_, _| panic!("setup failed"));
-+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| runtime(&spec))).is_err());
-+    let size = crate::text::measure("after setup", &[], crate::TextStyle::new(14.0, 400.0), None);
-+    assert!(size.0 > 0.0 && size.1 > 0.0);
-+}
-diff --git a/crates/rune/src/window.rs b/crates/rune/src/window.rs
---- a/crates/rune/src/window.rs
-+++ b/crates/rune/src/window.rs
-@@ -47,6 +47,7 @@
- mod win;
- use win::{SurfaceRetries, SurfaceStep, SURFACE_TRIES, Win};
- mod first_frame;
-+mod frame_latency;
- use first_frame::FirstFrame;
- mod draw;
- mod redraw;
-@@ -748,7 +749,7 @@
-     // (`render::damaged`).
-     config.usage |= caps.usages & wgpu::TextureUsages::COPY_DST;
-     config.present_mode = wgpu::PresentMode::AutoVsync;
--    config.desired_maximum_frame_latency = FRAME_LATENCY;
-+    config.desired_maximum_frame_latency = frame_latency::desired();
-     if std::env::var_os("RUNE_SURFACE_LOG").is_some() {
-         eprintln!("rune surface: supported={:?} selected={:?} desired_maximum_frame_latency={}", caps.present_modes, config.present_mode, config.desired_maximum_frame_latency);
-     }
-diff --git a/crates/rune/src/window/frame_latency.rs b/crates/rune/src/window/frame_latency.rs
-new file mode 100644
---- /dev/null
-+++ b/crates/rune/src/window/frame_latency.rs
-@@ -0,0 +1,11 @@
-+pub(super) fn desired() -> u32 {
-+    parse(std::env::var("APOLLOON_FRAME_LATENCY").ok().as_deref())
-+}
-+
-+fn parse(value: Option<&str>) -> u32 {
-+    value.and_then(|value| value.parse::<u32>().ok()).filter(|value| *value > 0)
-+        .unwrap_or(super::FRAME_LATENCY)
-+}
-+
-+#[cfg(test)]
-+mod tests;
-diff --git a/crates/rune/src/window/frame_latency/tests.rs b/crates/rune/src/window/frame_latency/tests.rs
-new file mode 100644
---- /dev/null
-+++ b/crates/rune/src/window/frame_latency/tests.rs
-@@ -0,0 +1,14 @@
-+use super::parse;
-+
-+#[test]
-+fn positive_override_selects_the_requested_latency() {
-+    assert_eq!(parse(Some("1")), 1);
-+    assert_eq!(parse(Some("2")), 2);
-+}
-+
-+#[test]
-+fn absent_empty_or_invalid_override_preserves_the_platform_default() {
-+    for value in [None, Some(""), Some("0"), Some("-1"), Some("invalid"), Some("4294967296")] {
-+        assert_eq!(parse(value), super::super::FRAME_LATENCY);
-+    }
-+}
-diff --git a/crates/rune/src/app.rs b/crates/rune/src/app.rs
-index 50c671a..29a51d5 100644
---- a/crates/rune/src/app.rs
-+++ b/crates/rune/src/app.rs
-@@ -687,12 +687,6 @@ impl<S> Clone for AppHandle<S> {
- }
- 
- impl<S: 'static> AppHandle<S> {
--    /// Wake the event loop so `AppSpec::poll` runs, also while the window is hidden; for a
--    /// background thread that queued work for `poll` to drain.
--    pub fn wake(&self) {
--        self.request(|q| q.woken = true);
--    }
--
-     /// Show the window (creating it if needed), restore it if minimized, and activate the app
-     /// with it in front, including the first open of a window that doesn't exist yet. A
-     /// nonactivating panel takes keys without activating. The window open at launch doesn't
-@@ -817,6 +811,7 @@ impl<S: 'static> AppHandle<S> {
- }
- 
- mod requests;
-+pub(crate) mod urgent_state;
- pub(crate) use requests::{window_request_order, Activation, Requests, Shared, WindowRequest};
- 
- #[cfg(test)]
-diff --git a/crates/rune/src/app/requests.rs b/crates/rune/src/app/requests.rs
-index fd39061..20cfb26 100644
---- a/crates/rune/src/app/requests.rs
-+++ b/crates/rune/src/app/requests.rs
-@@ -81,6 +81,7 @@ impl<S> Default for Requests<S> {
- }
- 
- pub(crate) struct Shared<S> {
-+    pub(crate) urgent_state: super::urgent_state::Pending,
-     pub(crate) menus: crate::native_menu::Hub<S>,
-     pub(crate) shortcuts: crate::shortcuts::Hub<S>,
-     pub(super) requests: Mutex<Requests<S>>,
-@@ -95,6 +96,7 @@ pub(crate) struct Shared<S> {
- impl<S> Default for Shared<S> {
-     fn default() -> Self {
-         Shared {
-+            urgent_state: super::urgent_state::Pending::default(),
-             menus: crate::native_menu::Hub::default(),
-             shortcuts: crate::shortcuts::Hub::default(),
-             requests: Mutex::default(),
-diff --git a/crates/rune/src/app/urgent_state.rs b/crates/rune/src/app/urgent_state.rs
-new file mode 100644
-index 0000000..6fad851
---- /dev/null
-+++ b/crates/rune/src/app/urgent_state.rs
-@@ -0,0 +1,60 @@
-+use super::AppHandle;
-+use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
-+use std::time::Instant;
-+
-+pub(crate) struct Pending(Option<AtomicBool>);
-+
-+impl Default for Pending {
-+    fn default() -> Self {
-+        Self::new(parse(std::env::var("APOLLOON_URGENT_STATE_FRAME").ok().as_deref()))
-+    }
-+}
-+
-+impl Pending {
-+    fn new(enabled: bool) -> Self { Self(enabled.then(|| AtomicBool::new(false))) }
-+
-+    fn request(&self) {
-+        if let Some(pending) = &self.0 { pending.store(true, Ordering::Release); }
-+    }
-+
-+    pub(crate) fn clear(&self) {
-+        if let Some(pending) = &self.0 { pending.store(false, Ordering::Release); }
-+    }
-+
-+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-+    pub(crate) fn admit(&self, waiting: bool, last_target: &mut Option<Instant>, now: Instant) -> bool {
-+        let pending = self.0.as_ref().is_some_and(|pending| pending.swap(false, Ordering::AcqRel));
-+        if waiting && pending {
-+            *last_target = Some(now);
-+            true
-+        } else { false }
-+    }
-+}
-+
-+fn parse(value: Option<&str>) -> bool {
-+    value.and_then(|value| value.parse::<u32>().ok()) == Some(1)
-+}
-+
-+impl<S: 'static> AppHandle<S> {
-+    /// Wake the event loop so `AppSpec::poll` runs, also while the window is hidden; for a
-+    /// background thread that queued work for `poll` to drain.
-+    pub fn wake(&self) {
-+        self.request(|q| q.woken = true);
-+    }
-+
-+    /// A wake for queued authoritative state, with one-shot immediate Metal admission when
-+    /// `APOLLOON_URGENT_STATE_FRAME=1`. Other wakes and subsequent animation frames stay paced.
-+    /// Returns `None` when the experiment is disabled. Create before running the app.
-+    pub fn urgent_state_waker(&self) -> Option<crate::runtime::Waker> {
-+        self.shared.urgent_state.0.as_ref()?;
-+        let handle = self.clone();
-+        Some(Arc::new(move || {
-+            handle.shared.urgent_state.request();
-+            handle.wake();
-+        }))
-+    }
-+}
-+
-+#[cfg(test)]
-+#[path = "urgent_state_tests.rs"]
-+mod tests;
-diff --git a/crates/rune/src/app/urgent_state_tests.rs b/crates/rune/src/app/urgent_state_tests.rs
-new file mode 100644
-index 0000000..c0f1b7d
---- /dev/null
-+++ b/crates/rune/src/app/urgent_state_tests.rs
-@@ -0,0 +1,111 @@
-+use super::*;
-+
-+#[test]
-+fn parser_requires_one_and_rejects_absent_empty_zero_or_invalid() {
-+    for value in [None, Some(""), Some("0"), Some("2"), Some("-1"), Some("true"), Some(" 1"), Some("4294967296")] {
-+        assert!(!parse(value), "{value:?}");
-+    }
-+    assert!(parse(Some("1")));
-+}
-+
-+#[test]
-+fn disabled_requests_and_unrequested_frames_never_override_wait() {
-+    let now = Instant::now();
-+    for enabled in [false, true] {
-+        let pending = Pending::new(enabled);
-+        let mut last = None;
-+        assert!(!pending.admit(true, &mut last, now));
-+        assert_eq!(last, None);
-+        if !enabled {
-+            pending.request();
-+            assert!(!pending.admit(true, &mut last, now));
-+            assert_eq!(last, None);
-+        }
-+    }
-+}
-+
-+#[test]
-+fn repeated_sends_coalesce_and_only_the_next_wait_is_overridden() {
-+    let pending = Pending::new(true);
-+    let now = Instant::now();
-+    let mut last = None;
-+    for _ in 0..10 { pending.request(); }
-+    assert!(pending.admit(true, &mut last, now));
-+    assert_eq!(last, Some(now));
-+    assert!(!pending.admit(true, &mut last, now));
-+    pending.request();
-+    assert!(pending.admit(true, &mut last, now));
-+}
-+
-+#[test]
-+fn naturally_admitted_frame_consumes_urgency_without_changing_target() {
-+    let pending = Pending::new(true);
-+    let now = Instant::now();
-+    let target = now + std::time::Duration::from_millis(16);
-+    let mut last = Some(target);
-+    pending.request();
-+    assert!(!pending.admit(false, &mut last, now));
-+    assert_eq!(last, Some(target));
-+    assert!(!pending.admit(true, &mut last, now));
-+}
-+
-+#[test]
-+fn covered_or_unpaced_poll_clears_urgency_but_later_sends_still_qualify() {
-+    let pending = Pending::new(true);
-+    let now = Instant::now();
-+    let mut last = None;
-+    pending.request();
-+    pending.clear();
-+    assert!(!pending.admit(true, &mut last, now));
-+    pending.request();
-+    assert!(pending.admit(true, &mut last, now));
-+}
-+
-+#[test]
-+fn ordinary_wakes_do_not_mark_state_urgent() {
-+    let spec = crate::AppSpec::new("test", (100.0, 100.0), || (), |_, _| crate::text("test"));
-+    let app = crate::App::new(spec);
-+    let handle = app.handle();
-+    let pending = &handle.shared.urgent_state;
-+    let mut last = None;
-+    handle.wake();
-+    assert!(!pending.admit(true, &mut last, Instant::now()));
-+}
-+
-+#[test]
-+fn only_qualified_waker_requests_urgent_admission() {
-+    for enabled in [false, true] {
-+        let mut shared = super::super::Shared::<()>::default();
-+        shared.urgent_state = Pending::new(enabled);
-+        let handle = AppHandle { shared: Arc::new(shared) };
-+        let wake = handle.urgent_state_waker();
-+        assert_eq!(wake.is_some(), enabled);
-+        if let Some(wake) = wake {
-+            for _ in 0..10 { wake(); }
-+            assert!(handle.shared.take().woken);
-+            let mut last = None;
-+            assert!(handle.shared.urgent_state.admit(true, &mut last, Instant::now()));
-+            handle.wake();
-+            assert!(!handle.shared.urgent_state.admit(true, &mut last, Instant::now()));
-+        }
-+    }
-+}
-+
-+#[test]
-+fn b4_4_ordinary_duplicate_and_recovery_wakes_admit_exactly_one_urgent_frame() {
-+    let mut shared = super::super::Shared::<()>::default();
-+    shared.urgent_state = Pending::new(true);
-+    let handle = AppHandle { shared: Arc::new(shared) };
-+    let request = handle.urgent_state_waker().unwrap();
-+    let now = Instant::now();
-+    let mut last = None;
-+    request();
-+    let mut admissions = 0;
-+    for delivery in 0..3 {
-+        if delivery > 0 { handle.wake(); }
-+        admissions += usize::from(handle.shared.urgent_state.admit(true, &mut last, now));
-+    }
-+    assert_eq!(admissions, 1);
-+    assert_eq!(last, Some(now));
-+    assert!(!handle.shared.urgent_state.admit(true, &mut last, now));
-+}
-diff --git a/crates/rune/src/platform/display_link.rs b/crates/rune/src/platform/display_link.rs
-index ccdd682..544757c 100644
---- a/crates/rune/src/platform/display_link.rs
-+++ b/crates/rune/src/platform/display_link.rs
-@@ -173,6 +173,12 @@ impl DisplayLink {
-         next
-     }
- 
-+    pub(crate) fn next_state_frame(&mut self, pending: &crate::app::urgent_state::Pending) -> (Opportunity, bool) {
-+        let next = self.next_frame();
-+        let urgent = pending.admit(next == Opportunity::Wait, &mut self.last_target, Instant::now());
-+        (if urgent { Opportunity::Now } else { next }, urgent)
-+    }
-+
-     /// Whether a frame that may draw nothing (a timer's, on a resting surface) can decide that
-     /// before starting the link: it's stopped, and `next_frame` would answer `Now` whenever
-     /// asked from here on, so starting it once the frame turns out to draw paces it the same.
-diff --git a/crates/rune/src/window/draw.rs b/crates/rune/src/window/draw.rs
-index 514a994..ac0656d 100644
---- a/crates/rune/src/window/draw.rs
-+++ b/crates/rune/src/window/draw.rs
-@@ -47,6 +47,7 @@ impl<S: 'static> Host<S> {
-     /// would have run runs without drawing (`covered_step`). It isn't live: a minimize X11
-     /// reports with no event lands here first, and the frame that next draws settles.
-     pub(super) fn covered_frame(&mut self) {
-+        self.shared.urgent_state.clear();
-         let Some(l) = self.win.as_mut() else { return };
-         l.timer_frame.drawn();
-         l.presented = None;
-@@ -154,7 +155,8 @@ impl<S: 'static> Host<S> {
-                 None
-             } else {
-                 self.frame_reports.stage("pacing_begin");
--                let next = pacing.next_frame();
-+                let (next, urgent) = pacing.next_state_frame(&self.shared.urgent_state);
-+                if urgent { self.frame_reports.stage("urgent_state_admission"); }
-                 self.frame_reports.stage("pacing_end");
-                 let Some(target) = next.target() else { return };
-                 target
-@@ -187,6 +189,7 @@ impl<S: 'static> Host<S> {
-         // The frame moves before the drawable is acquired, so it has the new size; never while
-         // the user holds the window's edge in a live resize.
-         self.frame_reports.stage("build_begin");
-+        self.shared.urgent_state.clear();
-         if !hidden && !live_resize { self.step_frame(target.unwrap_or_else(Instant::now)); }
-         let (Some(l), Some((gpu, renderer))) = (self.win.as_mut(), self.gpu.as_mut()) else { return };
-         #[cfg(target_os = "macos")]
-diff --git a/crates/rune/src/marks.rs b/crates/rune/src/marks.rs
-index 4f458fb..c0a7f3f 100644
---- a/crates/rune/src/marks.rs
-+++ b/crates/rune/src/marks.rs
-@@ -160,6 +160,33 @@ pub(crate) fn input_handled(key: bool) {
-     if key { mark_once(&KEY_HANDLED, "input.key.handled") } else { mark_once(&PRESS_HANDLED, "input.press.handled") }
- }
- 
-+static WINDOW_KEY: std::sync::OnceLock<fn(&crate::KeyEvent, bool, bool)> = std::sync::OnceLock::new();
-+static WINDOW_FOCUS: std::sync::OnceLock<fn(bool)> = std::sync::OnceLock::new();
-+
-+/// For an app's input trace: `hook` hears each key press the window gets from the system,
-+/// before Rune routes it, with whether it repeats and whether a control holds keyboard focus.
-+/// A press it hears that never reaches the app's `on_key` went to a control; one it never hears
-+/// never reached the window. Set once; later calls change nothing.
-+pub fn on_window_key(hook: fn(&crate::KeyEvent, bool, bool)) {
-+    let _ = WINDOW_KEY.set(hook);
-+}
-+
-+/// For an app's input trace: `hook` hears each time the window gains or loses key focus, as the
-+/// system reports it. Set once; later calls change nothing.
-+pub fn on_window_focus(hook: fn(bool)) {
-+    let _ = WINDOW_FOCUS.set(hook);
-+}
-+
-+/// See [`on_window_key`].
-+pub(crate) fn window_key(event: &crate::KeyEvent, repeat: bool, control_focused: bool) {
-+    if let Some(hook) = WINDOW_KEY.get() { hook(event, repeat, control_focused) }
-+}
-+
-+/// See [`on_window_focus`].
-+pub(crate) fn window_focus(focused: bool) {
-+    if let Some(hook) = WINDOW_FOCUS.get() { hook(focused) }
-+}
-+
- /// The event loop is about to wait for input: after the first present, `input.ready`.
- pub(crate) fn loop_waits() {
-     if !counting() {
-diff --git a/crates/rune/src/window/events.rs b/crates/rune/src/window/events.rs
-index b6dde14..c55512d 100644
---- a/crates/rune/src/window/events.rs
-+++ b/crates/rune/src/window/events.rs
-@@ -221,6 +221,7 @@ impl<S: 'static> Host<S> {
-         if matches!(&event, WindowEvent::ScaleFactorChanged { .. }) { self.apply_placement(event_loop); }
-         match event {
-             WindowEvent::Focused(focused) => {
-+                crate::marks::window_focus(focused);
-                 // winit queues an initial false from its hidden source window before
-                 // adoption. It must not dismiss an already-key panel on first open.
-                 #[cfg(target_os = "macos")]
-@@ -412,6 +413,7 @@ impl<S: 'static> Host<S> {
-                 if pressed { crate::marks::input_arrived(true); }
-                 // A release's logical key only matters to `on_key_up` handlers.
-                 let logical = (pressed || rt.wants_key_up()).then(|| map_key_event(&event, self.mods)).flatten();
-+                if pressed && let Some(ev) = &logical { crate::marks::window_key(ev, event.repeat, rt.has_focus()); }
-                 let mut redraw = false;
-                 // A menu item handing Rune its key: it acts after, if no handler takes it. So does
-                 // the window menu's Alt+Space, posted rather than run inside the key's message.
-diff --git a/crates/rune/src/window.rs b/crates/rune/src/window.rs
-index 2641f05..466a97a 100644
---- a/crates/rune/src/window.rs
-+++ b/crates/rune/src/window.rs
-@@ -48,6 +48,7 @@ mod win;
- use win::{SurfaceRetries, SurfaceStep, SURFACE_TRIES, Win};
- mod first_frame;
- mod frame_latency;
-+mod immediate_input;
- use first_frame::FirstFrame;
- mod draw;
- mod redraw;
-diff --git a/crates/rune/src/window/events.rs b/crates/rune/src/window/events.rs
-index c55512d..2b65b38 100644
---- a/crates/rune/src/window/events.rs
-+++ b/crates/rune/src/window/events.rs
-@@ -433,6 +433,10 @@ impl<S: 'static> Host<S> {
-                     redraw |= pressed;
-                 }
-                 if redraw { l.request_redraw(); }
-+                if immediate_input::dispatch(rt, immediate_input::enabled()) {
-+                    self.clipboard.flush(rt);
-+                    self.shell(event_loop);
-+                }
-             }
-             WindowEvent::Ime(ime) => {
-                 // A reconversion the input method confirmed comes first: the composition it
-diff --git a/crates/rune/src/window/immediate_input.rs b/crates/rune/src/window/immediate_input.rs
-new file mode 100644
-index 0000000..4398c06
---- /dev/null
-+++ b/crates/rune/src/window/immediate_input.rs
-@@ -0,0 +1,18 @@
-+use crate::Runtime;
-+
-+pub(super) fn enabled() -> bool {
-+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-+    *ENABLED.get_or_init(|| parse(std::env::var("APOLLOON_IMMEDIATE_INPUT").ok().as_deref()))
-+}
-+
-+fn parse(value: Option<&str>) -> bool { value == Some("1") }
-+
-+pub(super) fn dispatch<S: 'static>(rt: &mut Runtime<S>, enabled: bool) -> bool {
-+    if !enabled || !rt.keys_queued() { return false; }
-+    rt.hidden_timer_frame();
-+    true
-+}
-+
-+#[cfg(test)]
-+#[path = "immediate_input_tests.rs"]
-+mod tests;
-diff --git a/crates/rune/src/window/immediate_input_tests.rs b/crates/rune/src/window/immediate_input_tests.rs
-new file mode 100644
-index 0000000..348b479
---- /dev/null
-+++ b/crates/rune/src/window/immediate_input_tests.rs
-@@ -0,0 +1,98 @@
-+use super::*;
-+use crate::{Cx, El, Env, Ime, Key, KeyEvent, Mods, PhysicalInput, PhysicalKeyCode, TextEdit, TextStyle, el, text_input};
-+
-+#[derive(Default)]
-+struct State { keys: usize, releases: usize, edit: TextEdit }
-+
-+fn view(_: &State, _: &mut Cx<State>) -> El {
-+    el().on_key_up(|s: &mut State, _, _| { s.releases += 1; true })
-+}
-+
-+fn runtime() -> Runtime<State> {
-+    let mut rt = Runtime::new(State::default(), view, (300.0, 100.0), Env::new(true, 1.0));
-+    rt.on_key = Some(|s, _, _| { s.keys += 1; true });
-+    rt.frame(0.0);
-+    rt
-+}
-+
-+fn space(rt: &mut Runtime<State>, pressed: bool, repeat: bool) {
-+    rt.physical_with_fallback(PhysicalInput::Key {
-+        key: PhysicalKeyCode::Space, mods: Mods::default(), pressed, repeat,
-+    }, Some(KeyEvent { key: Key::Text(" ".into()), mods: Mods::default() }));
-+}
-+
-+#[test]
-+fn only_exactly_one_enables_immediate_input() {
-+    assert!(parse(Some("1")));
-+    for value in [None, Some(""), Some("0"), Some("2"), Some("01"), Some("true"), Some(" 1")] {
-+        assert!(!parse(value));
-+    }
-+}
-+
-+#[test]
-+fn early_dispatched_key_is_handled_once_across_the_frame_drain() {
-+    let mut rt = runtime();
-+    space(&mut rt, true, false);
-+    assert_eq!(rt.state.keys, 0);
-+    assert!(dispatch(&mut rt, true));
-+    assert_eq!(rt.state.keys, 1);
-+    assert!(!rt.keys_queued());
-+    assert!(!dispatch(&mut rt, true));
-+    rt.frame(1.0 / 60.0);
-+    assert_eq!(rt.state.keys, 1);
-+}
-+
-+#[test]
-+fn disabled_dispatch_leaves_input_for_the_frame() {
-+    let mut rt = runtime();
-+    space(&mut rt, true, false);
-+    assert!(!dispatch(&mut rt, false));
-+    assert_eq!(rt.state.keys, 0);
-+    assert!(rt.keys_queued());
-+    rt.frame(0.0);
-+    assert_eq!(rt.state.keys, 1);
-+}
-+
-+#[test]
-+fn empty_dispatch_does_not_poll_or_run_a_frame() {
-+    let mut rt = runtime();
-+    rt.poll = Some(|_, _, _| panic!("empty input must not poll"));
-+    assert!(!dispatch(&mut rt, true));
-+}
-+
-+#[test]
-+fn repeats_and_releases_keep_the_normal_routing_once_each() {
-+    let mut early = runtime();
-+    let mut paced = runtime();
-+    for (pressed, repeat) in [(true, false), (true, true), (false, false)] {
-+        for rt in [&mut early, &mut paced] { space(rt, pressed, repeat); }
-+        assert!(dispatch(&mut early, true));
-+        paced.frame(0.0);
-+        assert_eq!((early.state.keys, early.state.releases), (paced.state.keys, paced.state.releases));
-+    }
-+    assert_eq!((early.state.keys, early.state.releases), (2, 1));
-+    early.frame(0.0);
-+    assert_eq!((early.state.keys, early.state.releases), (2, 1));
-+}
-+
-+fn field(s: &State, _: &mut Cx<State>) -> El {
-+    text_input(&s.edit, TextStyle::new(14.0, 400.0)).key("edit").size(200.0, 40.0)
-+        .on_edit(|s: &mut State| &mut s.edit)
-+}
-+
-+#[test]
-+fn queued_focus_and_ime_stay_ahead_of_the_early_key() {
-+    let mut rt = Runtime::new(State::default(), field, (300.0, 100.0), Env::new(true, 1.0));
-+    rt.on_key = Some(|s, _, _| { s.keys += 1; true });
-+    rt.frame(0.0);
-+    let (x, y) = rt.find("edit").unwrap();
-+    rt.pointer_down(x, y);
-+    rt.pointer_up(x, y);
-+    rt.ime(Ime::Commit("字".into()));
-+    space(&mut rt, true, false);
-+    assert!(dispatch(&mut rt, true));
-+    assert_eq!(rt.state.edit.text, "字 ");
-+    assert_eq!(rt.state.keys, 0, "the focused field takes the key, not the app");
-+    rt.frame(0.0);
-+    assert_eq!(rt.state.edit.text, "字 ");
-+}
