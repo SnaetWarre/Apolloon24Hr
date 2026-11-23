@@ -4,9 +4,11 @@ All notable changes to Apolloon Telsysteem will be documented in this file.
 
 ## [Unreleased]
 
-## [6.1.1]
+## [6.2.0]
 
-- Het Apolloon-pictogram in het macOS-Dock is kleiner en past beter bij de andere app-pictogrammen.
+- De publieksschermen en Wachtrij tonen een nieuwe ronde sneller na een druk op de spatiebalk.
+- De klokken op Timing, Wachtrij en Beheer verspringen niet meer terwijl ze lopen.
+- Het Apolloon-pictogram in het macOS-Dock is kleiner en past beter bij de andere app-pictogrammen. Op macOS staat het logo niet meer onder de vensterknoppen.
 
 ## [6.1.0]
 
