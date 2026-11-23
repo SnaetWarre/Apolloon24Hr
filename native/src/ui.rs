@@ -1258,8 +1258,24 @@ fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
     }
     false
 }
+fn traced_key(event: &KeyEvent) -> Option<&'static str> {
+    match &event.key {
+        Key::Enter => Some("Enter"),
+        Key::Text(v) if v == " " => Some("Space"),
+        _ => None,
+    }
+}
+fn trace_window_key(event: &KeyEvent, repeat: bool, control_focused: bool) {
+    if let Some(key) = traced_key(event) {
+        crate::latency::window_key(key, repeat, control_focused);
+    }
+}
 pub fn run() {
     crate::latency::init();
+    if crate::latency::enabled() {
+        rune::marks::on_window_key(trace_window_key);
+        rune::marks::on_window_focus(crate::latency::window_focus);
+    }
     let spec = AppSpec {
         fonts: &[
             include_bytes!("../assets/geist-latin-wght-normal.ttf"),
@@ -2007,6 +2023,12 @@ mod tests {
         let (at, _) = rt.state.last_press.unwrap();
         let since_press = rt.state.server_now() - pressed;
         assert!((at.elapsed().as_millis() as i64 - since_press).abs() < 100, "The next lap counts from the press");
+    }
+    #[test]
+    fn window_key_trace_covers_the_timing_keys_only() {
+        assert_eq!(traced_key(&rune::Key::Text(" ".into()).into()), Some("Space"));
+        assert_eq!(traced_key(&rune::Key::Enter.into()), Some("Enter"));
+        assert_eq!(traced_key(&rune::Key::Text("a".into()).into()), None);
     }
     #[test]
     fn space_after_clicking_a_control_still_clocks_the_handoff() {

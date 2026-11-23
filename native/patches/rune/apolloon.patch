@@ -1717,3 +1717,61 @@ new file mode 100644
 +    let size = crate::text::measure("after setup", &[], crate::TextStyle::new(14.0, 400.0), None);
 +    assert!(size.0 > 0.0 && size.1 > 0.0);
 +}
+diff --git a/crates/rune/src/marks.rs b/crates/rune/src/marks.rs
+index 4f458fb..c0a7f3f 100644
+--- a/crates/rune/src/marks.rs
++++ b/crates/rune/src/marks.rs
+@@ -160,6 +160,33 @@ pub(crate) fn input_handled(key: bool) {
+     if key { mark_once(&KEY_HANDLED, "input.key.handled") } else { mark_once(&PRESS_HANDLED, "input.press.handled") }
+ }
+ 
++static WINDOW_KEY: std::sync::OnceLock<fn(&crate::KeyEvent, bool, bool)> = std::sync::OnceLock::new();
++static WINDOW_FOCUS: std::sync::OnceLock<fn(bool)> = std::sync::OnceLock::new();
++
++/// For an app's input trace: `hook` hears each key press the window gets from the system,
++/// before Rune routes it, with whether it repeats and whether a control holds keyboard focus.
++/// A press it hears that never reaches the app's `on_key` went to a control; one it never hears
++/// never reached the window. Set once; later calls change nothing.
++pub fn on_window_key(hook: fn(&crate::KeyEvent, bool, bool)) {
++    let _ = WINDOW_KEY.set(hook);
++}
++
++/// For an app's input trace: `hook` hears each time the window gains or loses key focus, as the
++/// system reports it. Set once; later calls change nothing.
++pub fn on_window_focus(hook: fn(bool)) {
++    let _ = WINDOW_FOCUS.set(hook);
++}
++
++/// See [`on_window_key`].
++pub(crate) fn window_key(event: &crate::KeyEvent, repeat: bool, control_focused: bool) {
++    if let Some(hook) = WINDOW_KEY.get() { hook(event, repeat, control_focused) }
++}
++
++/// See [`on_window_focus`].
++pub(crate) fn window_focus(focused: bool) {
++    if let Some(hook) = WINDOW_FOCUS.get() { hook(focused) }
++}
++
+ /// The event loop is about to wait for input: after the first present, `input.ready`.
+ pub(crate) fn loop_waits() {
+     if !counting() {
+diff --git a/crates/rune/src/window/events.rs b/crates/rune/src/window/events.rs
+index b6dde14..c55512d 100644
+--- a/crates/rune/src/window/events.rs
++++ b/crates/rune/src/window/events.rs
+@@ -221,6 +221,7 @@ impl<S: 'static> Host<S> {
+         if matches!(&event, WindowEvent::ScaleFactorChanged { .. }) { self.apply_placement(event_loop); }
+         match event {
+             WindowEvent::Focused(focused) => {
++                crate::marks::window_focus(focused);
+                 // winit queues an initial false from its hidden source window before
+                 // adoption. It must not dismiss an already-key panel on first open.
+                 #[cfg(target_os = "macos")]
+@@ -412,6 +413,7 @@ impl<S: 'static> Host<S> {
+                 if pressed { crate::marks::input_arrived(true); }
+                 // A release's logical key only matters to `on_key_up` handlers.
+                 let logical = (pressed || rt.wants_key_up()).then(|| map_key_event(&event, self.mods)).flatten();
++                if pressed && let Some(ev) = &logical { crate::marks::window_key(ev, event.repeat, rt.has_focus()); }
+                 let mut redraw = false;
+                 // A menu item handing Rune its key: it acts after, if no handler takes it. So does
+                 // the window menu's Alt+Space, posted rather than run inside the key's message.
