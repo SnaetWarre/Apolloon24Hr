@@ -384,9 +384,9 @@ impl Node {
             st.electing = false;
             if could_run && pre.granted + pre.silent + 1 >= self.majority() {
                 // Only laptops that are off kept the pre-vote short. Asking again is harmless (a
-                // pre-vote changes no term and no vote), so ask at every heartbeat: a laptop
+                // pre-vote changes no term and no vote), so ask again at the next tick: a laptop
                 // restarted in the meantime is asked within one heartbeat of answering.
-                st.deadline = Instant::now() + self.cfg.heartbeat;
+                st.deadline = Instant::now();
             } else if st.role != Role::Leader {
                 st.reset_deadline();
             }
