@@ -484,7 +484,10 @@ fn btn(key: &str, value: &str, dark: bool, f: impl Fn(&mut State) + 'static) -> 
         .fill(t.card)
         .border(1.0, p.line2)
         .hover(p.surface2)
-        .on_press(f)
+        .on_press_tx(move |s: &mut State, tx: &mut Tx| {
+            f(s);
+            super::shell::leave_keys_to_timing(tx);
+        })
         .child(text(value.to_string()).font(ts(13.5, 500.0)).color(t.text))
 }
 fn off(button: El, disabled: bool, dark: bool) -> El {

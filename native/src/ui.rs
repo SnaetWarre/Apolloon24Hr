@@ -2009,6 +2009,48 @@ mod tests {
         assert!((at.elapsed().as_millis() as i64 - since_press).abs() < 100, "The next lap counts from the press");
     }
     #[test]
+    fn space_after_clicking_a_control_still_clocks_the_handoff() {
+        let mut initial = crate::db::Db::open(std::path::Path::new(":memory:")).unwrap();
+        for (number, name) in [("1", "Eerste"), ("2", "Tweede")] {
+            initial.mutation("runners.create", &json!({"runnerNumber":number,"name":name,"status":"waiting"})).unwrap();
+        }
+        initial
+            .mutation("race.handoff", &json!({"activeRunnerId":null,"activeStartedAt":null,"pressedAt":now()}))
+            .unwrap();
+        // The first runner has been out for a minute: the next press is a real lap.
+        let started = now() - 60_000;
+        initial.exec("UPDATE race_state SET active_started_at=?,race_started_at=? WHERE id=1", &[json!(started), json!(started)]).unwrap();
+        let db = Arc::new(Mutex::new(initial));
+        let socket = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = socket.local_addr().unwrap().port();
+        drop(socket);
+        let _host = crate::server::start(db.clone(), port).unwrap();
+        let mut state = init_with_url(format!("http://127.0.0.1:{port}"));
+        state.page = 0;
+        state.page_seen = 0;
+        let mut rt = Runtime::new(state, view, (1366.0, 1080.0), Env { system_dark: false, scale: 1.0 });
+        rt.on_key = Some(on_key);
+        rt.frame(0.0);
+        update(&mut rt, |s| s.connected && !s.snapshot["race"]["activeRunnerId"].is_null());
+        let laps = || db.lock().unwrap().rows("SELECT id FROM laps", &[]).unwrap().len();
+        // Opening Timing from the sidebar must not leave the link holding Space.
+        click(&mut rt, "nav-2");
+        assert_eq!(rt.state.page, 2);
+        rt.key(rune::Key::Text(" ".into()).into());
+        rt.frame(1.0 / 60.0);
+        assert!(rt.state.busy, "Space after a sidebar click sends the handoff");
+        update(&mut rt, |s| !s.busy && s.history["laps"].as_array().is_some_and(|l| l.len() == 1));
+        assert_eq!(laps(), 1);
+        // Neither does collapsing the sidebar.
+        click(&mut rt, "collapse");
+        rt.key(rune::Key::Text(" ".into()).into());
+        rt.frame(1.0 / 60.0);
+        assert!(rt.find("timing-dialog-overlay").is_some(), "Space after the toggle reaches the short-lap guard");
+        assert!(!rt.state.busy, "No second handoff is sent");
+        click(&mut rt, "timing-cancel");
+        assert_eq!(laps(), 1);
+    }
+    #[test]
     fn space_records_one_lap_and_guards_an_immediate_second_press() {
         let mut initial = crate::db::Db::open(std::path::Path::new(":memory:")).unwrap();
         for (number, name) in [("1", "Eerste"), ("2", "Tweede")] {
@@ -2591,6 +2633,7 @@ mod tests {
                 scale: 1.0,
             },
         );
+        rt.on_key = Some(on_key);
         rt.frame(0.0);
         update(&mut rt, |s| s.connected);
         click(&mut rt, "nav-2");
