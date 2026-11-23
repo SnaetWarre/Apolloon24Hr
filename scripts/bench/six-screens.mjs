@@ -4,7 +4,7 @@ import { promisify } from 'node:util';
 import { once } from 'node:events';
 import { createServer, request as httpRequest } from 'node:http';
 import { createServer as netServer } from 'node:net';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { chromium } from 'playwright';
@@ -16,6 +16,7 @@ import {
   validateReplicaLaps,
 } from './metrics.mjs';
 import { installBrowserTrace, stageMetrics, stageMarkdown } from './latency.mjs';
+import { ensureBenchmarkBuild } from './build.mjs';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
 const exec = promisify(execFile);
@@ -167,17 +168,14 @@ c.execute("INSERT OR REPLACE INTO settings VALUES('competitions_json',?)",(json.
 c.commit()
 `;
 benchmark: try {
-  try {
-    await readFile(binary);
-    await readFile('native/web-dist/index.html');
-  } catch {
+  await ensureBenchmarkBuild(() => {
     execFileSync('bash', ['native/scripts/build-web.sh'], { stdio: 'inherit' });
     execFileSync(
       'cargo',
       ['build', '--release', '--locked', '--manifest-path', 'native/Cargo.toml', '--bin', 'apolloon-native'],
       { stdio: 'inherit' }
     );
-  }
+  });
   const nodes = await Promise.all(
     ['A', 'B', 'C'].map(async (name) => {
       const p = await port();
