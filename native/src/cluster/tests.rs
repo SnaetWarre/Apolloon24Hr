@@ -1696,7 +1696,10 @@ fn two_down_and_back(
     // Long enough for C's election timer (2 to 4 s after the last heartbeat) to run out.
     std::thread::sleep(Duration::from_secs(5));
     let refused = c.act("runners.create", json!({"name":"Alleen op C"}));
-    assert!(refused.is_err(), "C alone saved without a majority: {refused:?}");
+    assert!(
+        refused.is_err(),
+        "C alone saved without a majority: {refused:?}"
+    );
     let restarted = Instant::now();
     let a = TestServer::start_with(&dir.db("a"), a_port, "Laptop A", two_down_tune);
     let b = TestServer::start_with(&dir.db("b"), b_port, "Laptop B", two_down_tune);
@@ -1747,9 +1750,11 @@ fn after_two_laptops_were_down_the_group_leads_as_soon_as_a_restarted_laptop_ans
     );
     whole_again(&a, &b, &c, &mut seen);
     press(&b, "race.handoff").unwrap();
-    wait_until("the new lap on every laptop", Duration::from_secs(5), || {
-        [&a, &b, &c].iter().all(|s| laps(s) == 2)
-    });
+    wait_until(
+        "the new lap on every laptop",
+        Duration::from_secs(5),
+        || [&a, &b, &c].iter().all(|s| laps(s) == 2),
+    );
 }
 
 #[test]
@@ -1761,9 +1766,11 @@ fn a_laptop_left_alone_without_the_last_confirmed_lap_does_not_lead_after_the_ot
         .unwrap();
     press(&a, "race.handoff").unwrap();
     press(&a, "race.handoff").unwrap();
-    wait_until("the first lap on every laptop", Duration::from_secs(5), || {
-        same_heads(&[&a, &b, &c]) && laps(&c) == 1
-    });
+    wait_until(
+        "the first lap on every laptop",
+        Duration::from_secs(5),
+        || same_heads(&[&a, &b, &c]) && laps(&c) == 1,
+    );
     // C's cable is out: A and B alone confirm the second lap.
     c.node
         .isolated
