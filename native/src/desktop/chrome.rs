@@ -361,9 +361,9 @@ pub fn frame<S: 'static>(cx: &mut Cx<S>, dark: bool, public: bool, content: El, 
     let Some((phase, ask_close, full_screen)) =
         super::with(|d| (d.phase.clone(), d.ask_close, d.full_screen))
     else {
-        // No desktop around the view (a remote server, the benchmarks): still keep the traffic
-        // lights off the sidebar. Headless and test runtimes report no inset and stay bare.
-        if cx.titlebar_inset() > 0.0 {
+        // No desktop around the view (a remote server, the benchmarks): operator pages leave the
+        // traffic lights to the sidebar; public screens have no sidebar and keep the band.
+        if public && cx.titlebar_inset() > 0.0 {
             return col().w_full().h_full().fill(tok::theme(dark).bg)
                 .child(title_bar(cx, dark || public, public, home))
                 .child(col().grow(1.0).min_h(0.0).w_full().child(content));
@@ -383,7 +383,8 @@ pub fn frame<S: 'static>(cx: &mut Cx<S>, dark: bool, public: bool, content: El, 
         .w_full()
         .h_full()
         .fill(tok::theme(dark).bg);
-    if !full_screen {
+    // On macOS the traffic lights sit on the operator sidebar, which starts below them.
+    if !full_screen && (public || !cfg!(target_os = "macos")) {
         root = root.child(title_bar(cx, dark || public, public, home));
     }
     root = root.child(col().grow(1.0).min_h(0.0).w_full().child(body));
