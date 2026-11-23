@@ -41,7 +41,10 @@ are therefore not enough: then losing either one stops saving.
 - The leader sends a heartbeat every 150 ms. When a laptop hears nothing for
   1.5 to 3 seconds, it first asks the others whether an election could
   succeed, then asks for their votes. Only a laptop holding every confirmed
-  change can win, so a takeover never loses confirmed data.
+  change can win, so a takeover never loses confirmed data. When the only
+  laptops that did not answer are switched off (two of three down), it asks
+  again at every heartbeat instead of waiting another 1.5 to 3 seconds, so
+  the group leads again as soon as a restarted laptop answers.
 - A leader that cannot reach a majority for 1.5 seconds steps down, so a
   laptop on the wrong side of a broken cable stops saving instead of
   recording changes that the others never see.
