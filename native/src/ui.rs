@@ -14,6 +14,7 @@ use std::time::Instant;
 #[cfg(target_arch = "wasm32")]
 use web_time::Instant;
 
+mod ack_draw;
 mod activity_panel;
 mod admin_base;
 mod admin_preparation;
@@ -92,9 +93,10 @@ struct Updates {
 impl Updates {
     fn send(&self, update: Update) -> Result<(), mpsc::SendError<Update>> {
         crate::latency::snapshot("update_ready", &update.snapshot);
-        let wake = {
+        let (wake, ack) = {
             let mut wakes = self.wake.lock().unwrap();
-            let wake = if wakes.urgent.is_some() {
+            let ack = ack_draw::lap(&update).and_then(|lap| wakes.ack.clone().map(|wake| (wake, lap.to_owned())));
+            let wake = if ack.is_some() { None } else if wakes.urgent.is_some() {
                 let request = wakes.request(&update.snapshot, update.partial);
                 crate::latency::state_wake(&update.snapshot, match request {
                     state_wake::Request::Urgent => None,
@@ -106,8 +108,9 @@ impl Updates {
                 }
             } else { wakes.ordinary.clone() };
             self.sender.send(update)?;
-            wake
+            (wake, ack)
         };
+        if let Some((wake, lap)) = ack { wake(lap); }
         if let Some(wake) = wake { wake(); }
         Ok(())
     }
@@ -632,7 +635,11 @@ fn poll(s: &mut State, _: f64, tx: &mut Tx) -> bool {
                         );
                         s.last_press = None;
                     }
-                    "race.handoff" | "race.startNext" | "race.finish" | "race.undoLastHandoff" | "events.burgieGepakt" | "cluster.openTiming" | "cluster.continueAlone" => timing_page::succeeded(s, &method, &result),
+                    "race.handoff" => {
+                        timing_page::succeeded(s, &method, &result);
+                        if let Some(lap) = result["lapId"].as_str() { crate::latency::emit("save_ack_applied", "native-ack", Some(lap)); }
+                    }
+                    "race.startNext" | "race.finish" | "race.undoLastHandoff" | "events.burgieGepakt" | "cluster.openTiming" | "cluster.continueAlone" => timing_page::succeeded(s, &method, &result),
                     "laps.move" | "laps.split" | "laps.delete" | "laps.moveHandoff" => {
                         laps_panel::succeeded(s, &method)
                     }
@@ -1308,13 +1315,16 @@ pub fn run() {
     };
     #[cfg(not(target_arch = "wasm32"))]
     crate::desktop::chrome::run(spec, |app| {
-        let app = if let Some(wake) = app.handle().urgent_state_waker() {
-            app.init(move || {
-                let mut s = init();
-                s.urgent_state_wake = Some(wake);
-                s
-            })
-        } else { app };
+        let handle = app.handle();
+        let urgent = handle.urgent_state_waker();
+        let app = app.init(move || {
+            let mut s = init();
+            s.urgent_state_wake = urgent;
+            s.transport_wake.lock().unwrap().ack = Some(std::sync::Arc::new(move |lap| {
+                handle.ack_draw(move |stage| crate::latency::emit(stage, "native-ack", Some(&lap)));
+            }));
+            s
+        });
         if crate::latency::enabled() {
             app.on_frame_drawn(|rt| crate::latency::snapshot("frame", &rt.state.snapshot))
                 .on_frame_stage(crate::latency::frame_stage)

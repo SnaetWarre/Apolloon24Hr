@@ -1,5 +1,12 @@
+diff --git a/changelog/unreleased/2026-11-23-ack-draw.md b/changelog/unreleased/2026-11-23-ack-draw.md
+new file mode 100644
+index 0000000..21c7342
+--- /dev/null
++++ b/changelog/unreleased/2026-11-23-ack-draw.md
+@@ -0,0 +1 @@
++- Confirmed save answers can request one immediate draw admission, with per-request build and present-return reports. Ordinary state and animation wakes remain paced; exact `APOLLOON_ACK_DRAW=0` disables admission.
 diff --git a/crates/rune/src/app.rs b/crates/rune/src/app.rs
-index fe03f60..29a51d5 100644
+index fe03f60..7e50a4e 100644
 --- a/crates/rune/src/app.rs
 +++ b/crates/rune/src/app.rs
 @@ -81,6 +81,7 @@ pub struct App<S: 'static> {
@@ -44,30 +51,232 @@ index fe03f60..29a51d5 100644
      /// Show the window (creating it if needed), restore it if minimized, and activate the app
      /// with it in front, including the first open of a window that doesn't exist yet. A
      /// nonactivating panel takes keys without activating. The window open at launch doesn't
-@@ -809,6 +811,7 @@ impl<S: 'static> AppHandle<S> {
+@@ -808,7 +810,9 @@ impl<S: 'static> AppHandle<S> {
+     }
  }
  
++pub(crate) mod ack_draw;
  mod requests;
 +pub(crate) mod urgent_state;
  pub(crate) use requests::{window_request_order, Activation, Requests, Shared, WindowRequest};
  
  #[cfg(test)]
+diff --git a/crates/rune/src/app/ack_draw.rs b/crates/rune/src/app/ack_draw.rs
+new file mode 100644
+index 0000000..e5e941d
+--- /dev/null
++++ b/crates/rune/src/app/ack_draw.rs
+@@ -0,0 +1,68 @@
++use super::AppHandle;
++use std::sync::{Arc, Mutex};
++use std::time::Instant;
++
++type Report = Arc<dyn Fn(&'static str) + Send + Sync>;
++
++pub(crate) struct Pending {
++    enabled: bool,
++    reports: Mutex<Vec<Report>>,
++}
++
++impl Default for Pending {
++    fn default() -> Self {
++        Self::new(enabled(std::env::var("APOLLOON_ACK_DRAW").ok().as_deref()))
++    }
++}
++
++fn enabled(value: Option<&str>) -> bool { value != Some("0") }
++
++impl Pending {
++    fn new(enabled: bool) -> Self { Self { enabled, reports: Mutex::default() } }
++
++    fn request(&self, report: Report) {
++        if self.enabled {
++            self.reports.lock().unwrap().push(report);
++        }
++    }
++
++    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
++    pub(crate) fn admit(&self, waiting: bool, last_target: &mut Option<Instant>, now: Instant) -> bool {
++        if waiting && !self.reports.lock().unwrap().is_empty() {
++            *last_target = Some(now);
++            true
++        } else { false }
++    }
++
++    pub(crate) fn begin(&self) -> Frame {
++        let frame = Frame(std::mem::take(&mut *self.reports.lock().unwrap()));
++        for report in &frame.0 { report("ack_draw_build"); }
++        frame
++    }
++}
++
++pub(crate) struct Frame(Vec<Report>);
++
++impl Frame {
++    pub(crate) fn presented(self) {
++        for report in self.0 { report("ack_draw_present"); }
++    }
++}
++
++impl<S: 'static> AppHandle<S> {
++    /// Queues one draw admission for a confirmed save answer. Ordinary wakes stay paced.
++    /// The report follows this request from enqueue to build and successful present return.
++    /// Only exact `APOLLOON_ACK_DRAW=0` disables admission; wake delivery is unchanged.
++    pub fn ack_draw(&self, report: impl Fn(&'static str) + Send + Sync + 'static) {
++        let report: Report = Arc::new(report);
++        if self.shared.ack_draw.enabled { report("ack_draw_enqueue"); }
++        self.request(|requests| {
++            requests.woken = true;
++            self.shared.ack_draw.request(report);
++        });
++    }
++}
++
++#[cfg(test)]
++#[path = "ack_draw_tests.rs"]
++mod tests;
+diff --git a/crates/rune/src/app/ack_draw_tests.rs b/crates/rune/src/app/ack_draw_tests.rs
+new file mode 100644
+index 0000000..53c56c4
+--- /dev/null
++++ b/crates/rune/src/app/ack_draw_tests.rs
+@@ -0,0 +1,118 @@
++use super::*;
++
++fn reports() -> (Report, Arc<Mutex<Vec<&'static str>>>) {
++    let stages = Arc::new(Mutex::new(Vec::new()));
++    let recorded = stages.clone();
++    (Arc::new(move |stage| recorded.lock().unwrap().push(stage)), stages)
++}
++
++#[test]
++fn only_exact_zero_opts_out() {
++    assert!(!enabled(Some("0")));
++    for value in [None, Some(""), Some("1"), Some("false"), Some("00"), Some(" 0")] {
++        assert!(enabled(value), "{value:?}");
++    }
++}
++
++#[test]
++fn confirmed_request_is_consumed_by_one_frame_and_reports_its_boundaries() {
++    let pending = Pending::new(true);
++    let (report, stages) = reports();
++    let now = Instant::now();
++    let mut last = None;
++    assert!(!pending.admit(true, &mut last, now));
++    pending.request(report);
++    assert!(pending.admit(true, &mut last, now));
++    assert_eq!(last, Some(now));
++    let frame = pending.begin();
++    assert!(!pending.admit(true, &mut last, now));
++    frame.presented();
++    pending.begin().presented();
++    assert_eq!(*stages.lock().unwrap(), ["ack_draw_build", "ack_draw_present"]);
++}
++
++#[test]
++fn naturally_admitted_frame_consumes_all_coalesced_requests_without_an_extra_frame() {
++    let pending = Pending::new(true);
++    let (first, a) = reports();
++    let (second, b) = reports();
++    pending.request(first);
++    pending.request(second);
++    let now = Instant::now();
++    let mut last = Some(now);
++    assert!(!pending.admit(false, &mut last, now));
++    pending.begin().presented();
++    assert!(!pending.admit(true, &mut last, now));
++    assert_eq!(*a.lock().unwrap(), *b.lock().unwrap());
++    assert_eq!(a.lock().unwrap().len(), 2);
++}
++
++#[test]
++fn ordinary_state_wakes_do_not_request_ack_admission() {
++    let mut shared = super::super::Shared::<()>::default();
++    shared.ack_draw = Pending::new(true);
++    let handle = AppHandle { shared: Arc::new(shared) };
++    handle.wake();
++    assert!(!handle.shared.ack_draw.admit(true, &mut None, Instant::now()));
++}
++
++#[test]
++fn opt_out_preserves_wake_without_admission_or_reports() {
++    let mut shared = super::super::Shared::<()>::default();
++    shared.ack_draw = Pending::new(false);
++    let handle = AppHandle { shared: Arc::new(shared) };
++    let (report, stages) = reports();
++    handle.ack_draw(move |stage| report(stage));
++    assert!(handle.shared.take().woken);
++    assert!(!handle.shared.ack_draw.admit(true, &mut None, Instant::now()));
++    handle.shared.ack_draw.begin().presented();
++    assert!(stages.lock().unwrap().is_empty());
++}
++
++#[test]
++fn admission_publishes_poll_work_before_a_frame_can_drain_the_request() {
++    let mut shared = super::super::Shared::<()>::default();
++    shared.ack_draw = Pending::new(true);
++    let handle = AppHandle { shared: Arc::new(shared) };
++    let stages = Arc::new(Mutex::new(Vec::new()));
++    let recorded = stages.clone();
++    let (sender, receiver) = std::sync::mpsc::channel();
++    let requests = handle.shared.requests.lock().unwrap();
++    let worker_handle = handle.clone();
++    let worker = std::thread::spawn(move || {
++        worker_handle.ack_draw(move |stage| {
++            recorded.lock().unwrap().push(stage);
++            if stage == "ack_draw_enqueue" { sender.send(()).unwrap(); }
++        });
++    });
++    receiver.recv_timeout(std::time::Duration::from_secs(10)).unwrap();
++    assert!(handle.shared.ack_draw.begin().0.is_empty());
++    drop(requests);
++    worker.join().unwrap();
++    assert!(handle.shared.take().woken);
++    handle.shared.ack_draw.begin().presented();
++    assert_eq!(*stages.lock().unwrap(), ["ack_draw_enqueue", "ack_draw_build", "ack_draw_present"]);
++}
++
++#[test]
++fn ack_during_a_build_belongs_to_the_next_frame() {
++    let pending = Pending::new(true);
++    let (report, stages) = reports();
++    let previous = pending.begin();
++    pending.request(report);
++    previous.presented();
++    assert!(stages.lock().unwrap().is_empty());
++    assert!(pending.admit(true, &mut None, Instant::now()));
++    pending.begin().presented();
++    assert_eq!(*stages.lock().unwrap(), ["ack_draw_build", "ack_draw_present"]);
++}
++
++#[test]
++fn missed_frame_never_claims_a_present_or_rearms_admission() {
++    let pending = Pending::new(true);
++    let (report, stages) = reports();
++    pending.request(report);
++    drop(pending.begin());
++    assert_eq!(*stages.lock().unwrap(), ["ack_draw_build"]);
++    assert!(!pending.admit(true, &mut None, Instant::now()));
++}
 diff --git a/crates/rune/src/app/requests.rs b/crates/rune/src/app/requests.rs
-index fd39061..20cfb26 100644
+index fd39061..e27594f 100644
 --- a/crates/rune/src/app/requests.rs
 +++ b/crates/rune/src/app/requests.rs
-@@ -81,6 +81,7 @@ impl<S> Default for Requests<S> {
+@@ -81,6 +81,8 @@ impl<S> Default for Requests<S> {
  }
  
  pub(crate) struct Shared<S> {
++    pub(crate) ack_draw: super::ack_draw::Pending,
 +    pub(crate) urgent_state: super::urgent_state::Pending,
      pub(crate) menus: crate::native_menu::Hub<S>,
      pub(crate) shortcuts: crate::shortcuts::Hub<S>,
      pub(super) requests: Mutex<Requests<S>>,
-@@ -95,6 +96,7 @@ pub(crate) struct Shared<S> {
+@@ -95,6 +97,8 @@ pub(crate) struct Shared<S> {
  impl<S> Default for Shared<S> {
      fn default() -> Self {
          Shared {
++            ack_draw: super::ack_draw::Pending::default(),
 +            urgent_state: super::urgent_state::Pending::default(),
              menus: crate::native_menu::Hub::default(),
              shortcuts: crate::shortcuts::Hub::default(),
@@ -527,10 +736,10 @@ index 0fc3443..da3d6c3 100644
          self.draws.is_empty()
      }
 diff --git a/crates/rune/src/platform/display_link.rs b/crates/rune/src/platform/display_link.rs
-index ccdd682..544757c 100644
+index ccdd682..45c0087 100644
 --- a/crates/rune/src/platform/display_link.rs
 +++ b/crates/rune/src/platform/display_link.rs
-@@ -173,6 +173,12 @@ impl DisplayLink {
+@@ -173,6 +173,16 @@ impl DisplayLink {
          next
      }
  
@@ -538,6 +747,10 @@ index ccdd682..544757c 100644
 +        let next = self.next_frame();
 +        let urgent = pending.admit(next == Opportunity::Wait, &mut self.last_target, Instant::now());
 +        (if urgent { Opportunity::Now } else { next }, urgent)
++    }
++
++    pub(crate) fn ack_frame(&mut self, pending: &crate::app::ack_draw::Pending) -> bool {
++        pending.admit(true, &mut self.last_target, Instant::now())
 +    }
 +
      /// Whether a frame that may draw nothing (a timer's, on a resting surface) can decide that
@@ -1591,7 +1804,7 @@ index 0000000..e17145f
 +    }
 +}
 diff --git a/crates/rune/src/window/draw.rs b/crates/rune/src/window/draw.rs
-index b1ef8b0..ac0656d 100644
+index b1ef8b0..b16d779 100644
 --- a/crates/rune/src/window/draw.rs
 +++ b/crates/rune/src/window/draw.rs
 @@ -47,6 +47,7 @@ impl<S: 'static> Host<S> {
@@ -1610,7 +1823,7 @@ index b1ef8b0..ac0656d 100644
          // Windows: a window still on the CPU renderer draws there (`cpu_frame`).
          #[cfg(target_os = "windows")]
          {
-@@ -152,7 +154,11 @@ impl<S: 'static> Host<S> {
+@@ -152,7 +154,15 @@ impl<S: 'static> Host<S> {
              if l.native.prime.presumes() && !pacing.running() {
                  None
              } else {
@@ -1619,20 +1832,25 @@ index b1ef8b0..ac0656d 100644
 +                let (next, urgent) = pacing.next_state_frame(&self.shared.urgent_state);
 +                if urgent { self.frame_reports.stage("urgent_state_admission"); }
 +                self.frame_reports.stage("pacing_end");
-+                let Some(target) = next.target() else { return };
++                let target = match next.target() {
++                    Some(target) => target,
++                    None if pacing.ack_frame(&self.shared.ack_draw) => None,
++                    None => return,
++                };
                  target
              }
          } else { None };
-@@ -182,6 +188,8 @@ impl<S: 'static> Host<S> {
+@@ -182,6 +192,9 @@ impl<S: 'static> Host<S> {
          let live_resize = resizing;
          // The frame moves before the drawable is acquired, so it has the new size; never while
          // the user holds the window's edge in a live resize.
 +        self.frame_reports.stage("build_begin");
++        let ack_frame = self.shared.ack_draw.begin();
 +        self.shared.urgent_state.clear();
          if !hidden && !live_resize { self.step_frame(target.unwrap_or_else(Instant::now)); }
          let (Some(l), Some((gpu, renderer))) = (self.win.as_mut(), self.gpu.as_mut()) else { return };
          #[cfg(target_os = "macos")]
-@@ -211,7 +219,9 @@ impl<S: 'static> Host<S> {
+@@ -211,7 +224,9 @@ impl<S: 'static> Host<S> {
          let built = if quiet {
              let now = Instant::now();
              self.rt.window_resting = true;
@@ -1642,7 +1860,7 @@ index b1ef8b0..ac0656d 100644
              let rt = &mut self.rt;
              #[cfg(target_os = "macos")]
              let next_tick = if deferred { l.native.pacing.as_ref().map(|p| p.tick_after(now)) } else { l.next_tick(now) };
-@@ -231,11 +241,18 @@ impl<S: 'static> Host<S> {
+@@ -231,11 +246,18 @@ impl<S: 'static> Host<S> {
          };
          // It draws: the link starts, and still says draw at once.
          #[cfg(target_os = "macos")]
@@ -1663,7 +1881,7 @@ index b1ef8b0..ac0656d 100644
              Ok(frame) => frame,
              // A surface with no presentation (a refused configuration, or a device that is gone)
              // is replaced before the next frame rather than asked for a drawable.
-@@ -286,18 +303,29 @@ impl<S: 'static> Host<S> {
+@@ -286,18 +308,29 @@ impl<S: 'static> Host<S> {
              (animating, dt)
          } else if hidden {
              self.clock.hold(frame_time);
@@ -1696,7 +1914,7 @@ index b1ef8b0..ac0656d 100644
                  Ok(frame) => frame,
                  Err(Missed::Unconfigured) => {
                      l.surface_ok = false;
-@@ -318,7 +346,10 @@ impl<S: 'static> Host<S> {
+@@ -318,7 +351,10 @@ impl<S: 'static> Host<S> {
                  l.surface_ok = false;
                  return;
              }
@@ -1708,7 +1926,7 @@ index b1ef8b0..ac0656d 100644
                  Ok(frame) => frame,
                  Err(Missed::Unconfigured) => {
                      l.surface_ok = false;
-@@ -336,6 +367,7 @@ impl<S: 'static> Host<S> {
+@@ -336,6 +372,7 @@ impl<S: 'static> Host<S> {
          l.backoff_step(BackoffEvent::Presented);
          if hidden { l.hidden_pace.rendered(now); }
          let update_ms = now.elapsed().as_secs_f64() * 1000.0;
@@ -1716,7 +1934,7 @@ index b1ef8b0..ac0656d 100644
          #[cfg(feature = "frame-profile")]
          let fp_built = fp_start.map(|_| crate::frame::live_log::Stamp::now());
          sync_platform(l, rt, &mut self.secure_input, &mut self.ime_allowed, &self.clipboard);
-@@ -345,8 +377,8 @@ impl<S: 'static> Host<S> {
+@@ -345,8 +382,8 @@ impl<S: 'static> Host<S> {
              ..Default::default()
          });
          // An image's pixels changed where its instances didn't: the whole frame draws (`damage`).
@@ -1727,7 +1945,7 @@ index b1ef8b0..ac0656d 100644
          renderer.upload_images(&gpu.device, &gpu.queue, &mut rt.images);
          renderer.build_surfaces(&gpu.device, &rt.surfaces, rt.live_notifier());
          // Playing clips on their own layer (`video_layer`): the surfaces this frame punches out.
-@@ -363,7 +395,6 @@ impl<S: 'static> Host<S> {
+@@ -363,7 +400,6 @@ impl<S: 'static> Host<S> {
          #[cfg(feature = "frame-profile")]
          let fp_uploaded = fp_start.map(|_| crate::frame::live_log::Stamp::now());
          let mut enc = gpu.device.create_command_encoder(&Default::default());
@@ -1735,7 +1953,7 @@ index b1ef8b0..ac0656d 100644
          let mut present_rect = None;
          // Why the frame drew all of the window (frame-profile).
          #[allow(unused_mut)]
-@@ -374,10 +405,8 @@ impl<S: 'static> Host<S> {
+@@ -374,10 +410,8 @@ impl<S: 'static> Host<S> {
          // Only what changed is redrawn and presented (`damage`): the renderer's `draw` takes the
          // armed rectangles when nothing but the instances draws there, a compositor's
          // `Frame::draw_ui` included.
@@ -1747,7 +1965,7 @@ index b1ef8b0..ac0656d 100644
              match l.native.damage.plan(&rt.instances, size, rt.clear_color(), whole.is_none()) {
                  super::damage::Plan::All(why) => { whole_why = Some(whole.unwrap_or(why)); None }
                  super::damage::Plan::Part { draw, present } => {
-@@ -406,23 +435,25 @@ impl<S: 'static> Host<S> {
+@@ -406,23 +440,25 @@ impl<S: 'static> Host<S> {
              renderer.draw(&mut enc, target, rt.clear_color());
          }
          // Every frame, so a frame drawn whole leaves the renderer's kept frame behind.
@@ -1775,15 +1993,16 @@ index b1ef8b0..ac0656d 100644
          #[cfg(target_os = "macos")]
          l.native.materials.present(&rt.materials, rt.env.scale, || gpu.queue.present(frame));
          #[cfg(target_os = "windows")]
-@@ -434,6 +465,7 @@ impl<S: 'static> Host<S> {
+@@ -434,6 +470,8 @@ impl<S: 'static> Host<S> {
          }
          #[cfg(not(target_os = "macos"))]
          gpu.queue.present(frame);
 +        self.frame_reports.stage("present_end");
++        ack_frame.presented();
          #[cfg(target_os = "windows")]
          l.native.slot.presented();
          // A swap chain made again on a handed-over window's visual takes over now (`cpu_frame`).
-@@ -455,15 +487,9 @@ impl<S: 'static> Host<S> {
+@@ -455,15 +493,9 @@ impl<S: 'static> Host<S> {
                  entry: fp_entry.unwrap_or(start), start, acquired, built, uploaded, encoded, submitted, presented: crate::frame::live_log::Stamp::now(),
                  phases: crate::frame::profile::take(), nodes: rt.nodes.len(), shaped: rt.stats.shaped, instances: rt.instances.len(),
                  animating, why: std::mem::take(&mut rt.commit_why), next: 0, poll_due: None, loop_due: None, loops: Vec::new(),
