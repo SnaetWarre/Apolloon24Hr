@@ -4,6 +4,15 @@ All notable changes to Apolloon Telsysteem will be documented in this file.
 
 ## [Unreleased]
 
+## [6.1.0]
+
+- Timing verwerkt de spatiebalk meteen, toont bevestigde rondes sneller en houdt toetsaanslagen bij terwijl een vorige actie nog wordt opgeslagen.
+- Gekoppelde laptops nemen sneller over bij uitval, sluiten sneller opnieuw aan en bewaren bevestigde rondes bij het wisselen van de leider.
+- Excel- en CSV-imports krijgen een voorbeeld voordat je de lopers opslaat.
+- Op Wachtrij opent een klik op een loper het profiel. Tijdens de voorbereiding zie je welke publieksschermen openstaan en kan je hun links kopiëren.
+- Beheer is ingedeeld in open secties. Timing toont rondenummers en viert records en elke honderdste ronde.
+- De publieksschermen laden sneller. Analyse en Tactiek verwerken nieuwe rondes zonder de hele wedstrijd opnieuw te berekenen.
+
 ## [6.0.1]
 
 - De macOS-app krijgt een geldige bundelhandtekening en het schijfbestand toont een zwart installatievenster met een pijl naar Applications.
