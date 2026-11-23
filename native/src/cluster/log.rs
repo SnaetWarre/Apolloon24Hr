@@ -351,6 +351,16 @@ pub fn apply_own(db: &mut Db, entry: &Entry) -> Result<()> {
     apply(db, std::slice::from_ref(entry))
 }
 
+/// The laps the handoffs among `entries` add, for the latency trace; empty while it is off.
+pub(super) fn handoff_laps(entries: &[Entry]) -> Vec<String> {
+    if !crate::latency::enabled() {
+        return Vec::new();
+    }
+    entries.iter().filter(|e| e.kind == "race.handoff").flat_map(|e| e.statements.iter())
+        .filter(|s| s.sql.starts_with("INSERT INTO laps("))
+        .filter_map(|s| s.params.first().and_then(Value::as_str).map(str::to_owned)).collect()
+}
+
 pub(super) fn valid(statement: &Statement) -> bool {
     let sql = statement.sql.trim_start().to_ascii_lowercase();
     ["insert", "update", "delete", "replace"]
@@ -389,11 +399,7 @@ fn apply(db: &mut Db, entries: &[Entry]) -> Result<()> {
         insert(db, entry)?;
         expected += 1;
     }
-    let laps: Vec<String> = if crate::latency::enabled() {
-        entries.iter().filter(|e| e.kind == "race.handoff").flat_map(|e| e.statements.iter())
-            .filter(|s| s.sql.starts_with("INSERT INTO laps("))
-            .filter_map(|s| s.params.first().and_then(Value::as_str).map(str::to_owned)).collect()
-    } else { Vec::new() };
+    let laps = handoff_laps(entries);
     let _trace = if laps.is_empty() { None } else {
         Some(crate::latency::commit_context(laps.iter().map(|id| (id.clone(), id.clone())).collect()))
     };

@@ -601,6 +601,13 @@ impl Node {
                 );
                 (p.member.url.clone(), request)
             };
+            if crate::latency::enabled() {
+                let entries: Vec<log::Entry> =
+                    serde_json::from_value(request["entries"].clone()).unwrap_or_default();
+                for lap in log::handoff_laps(&entries) {
+                    crate::latency::emit("replica_send", &lap, Some(&lap));
+                }
+            }
             let answer = self.post(
                 &url,
                 "/api/cluster/peer",
@@ -800,6 +807,9 @@ impl Node {
             if st.role != Role::Leader || term != prepared.entry.epoch || head.seq + 1 != seq {
                 return false;
             }
+            for lap in log::handoff_laps(std::slice::from_ref(&prepared.entry)) {
+                crate::latency::emit("replica_send", &lap, Some(&lap));
+            }
             // Each laptop that holds everything before the press gets it at once; the usual
             // rounds bring it to the others.
             for member in self.others() {
@@ -983,6 +993,13 @@ impl Node {
 
     /// Stores a leader's append; answers with this log's head so the leader knows what to send next.
     pub(super) fn handle_append(&self, request: &Value, remote: Option<std::net::IpAddr>) -> Value {
+        if crate::latency::enabled() {
+            let entries: Vec<log::Entry> =
+                serde_json::from_value(request["entries"].clone()).unwrap_or_default();
+            for lap in log::handoff_laps(&entries) {
+                crate::latency::emit("append_received", &lap, Some(&lap));
+            }
+        }
         let leader_id = request["leaderId"].as_str().unwrap_or("");
         let leader_url = self.leader_address(
             leader_id,

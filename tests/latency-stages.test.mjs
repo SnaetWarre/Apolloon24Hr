@@ -7,6 +7,9 @@ test('latency stages join handoff tokens to lap ids and preserve microseconds', 
     { source: 'native', stage: 'key', id: 'runner@1', us: 100 },
     { source: 'native', stage: 'post_sent', id: 'runner@1', us: 125 },
     { source: 'A', stage: 'server_received', id: 'runner@1', us: 160 },
+    { source: 'A', stage: 'replica_send', id: 'lap', lapId: 'lap', us: 170 },
+    { source: 'B', stage: 'append_received', id: 'lap', lapId: 'lap', us: 180 },
+    { source: 'B', stage: 'replica_apply', id: 'lap', lapId: 'lap', us: 190 },
     { source: 'A', stage: 'local_commit', id: 'runner@1', lapId: 'lap', us: 200 },
     { source: 'A', stage: 'ack_response', id: 'runner@1', lapId: 'lap', us: 250 },
     { source: 'native', stage: 'client_response', id: 'runner@1', lapId: 'lap', us: 270 },
@@ -14,7 +17,7 @@ test('latency stages join handoff tokens to lap ids and preserve microseconds', 
   const { stages } = stageMetrics(events, [{ lapId: 'lap' }], [], 'A');
   assert.deepEqual(
     stages.filter((s) => s.n).map((s) => s.p50),
-    [25, 35, 40, 50, 20]
+    [25, 35, 40, 50, 20, 90, 10, -10, 10, 10]
   );
   assert(stages.every((s) => (s.n === 1 || s.n === 0) && s.p95 === s.max));
 });

@@ -310,13 +310,35 @@ export function stageMetrics(events, writes, results, leader, refresh = []) {
     (w) => first(w.lapId, 'ack_response', origin),
     (w) => first(w.lapId, 'client_response', 'native')
   );
+  add(
+    'server → majority-complete response boundary',
+    (w) => first(w.lapId, 'server_received', origin),
+    (w) => first(w.lapId, 'ack_response', origin)
+  );
+  add(
+    'server → first replica send',
+    (w) => first(w.lapId, 'server_received', origin),
+    (w) => first(w.lapId, 'replica_send', origin)
+  );
   const followers = [...new Set(rows.filter((e) => e.stage === 'replica_apply').map((e) => e.source))];
-  for (const source of followers)
+  for (const source of followers) {
     add(
       'commit → replica apply ' + source,
       (w) => first(w.lapId, 'local_commit', origin),
       (w) => first(w.lapId, 'replica_apply', source)
     );
+    if (source === origin) continue;
+    add(
+      'first replica send → append received ' + source,
+      (w) => first(w.lapId, 'replica_send', origin),
+      (w) => first(w.lapId, 'append_received', source)
+    );
+    add(
+      'append received → replica apply ' + source,
+      (w) => first(w.lapId, 'append_received', source),
+      (w) => first(w.lapId, 'replica_apply', source)
+    );
+  }
   for (const screen of results) {
     const source = screen.name === 'native Timing' ? 'native' : screen.name;
     const name = screen.name;
