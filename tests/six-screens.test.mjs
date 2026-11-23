@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { nativeFrameMetrics } from '../scripts/bench/latency.mjs';
+import { nativeFrameMetrics, stageMarkdown } from '../scripts/bench/latency.mjs';
 import {
   browserLatencies,
   displayedHandoff,
@@ -9,6 +9,42 @@ import {
   screenObservationsComplete,
   validateReplicaLaps,
 } from '../scripts/bench/metrics.mjs';
+
+test('native input metrics split injection, winit receipt and app dispatch in both arms', () => {
+  const event = (stage, us, fields = {}) => ({ stage, us, source: 'native', ...fields });
+  const prefix = [
+    event('window_key', 990, { key: 'Space' }),
+    event('window_key', 1010, { key: 'Space', repeat: false }),
+    event('window_key', 1011, { key: 'Space', repeat: true }),
+    event('window_key', 1012, { key: 'Other' }),
+    event('window_key', 1013, { key: 'Space', source: 'browser' }),
+  ];
+  const writes = [{ lapId: 'lap', sentAt: 1 }];
+  for (const keyUs of [1014, 17000]) {
+    const events = [
+      ...prefix,
+      event('key', keyUs, { id: 'handoff' }),
+      event('local_commit', keyUs + 10, { source: 'server', id: 'handoff', lapId: 'lap' }),
+      event('window_key', keyUs + 1, { key: 'Space' }),
+    ];
+    const frames = nativeFrameMetrics(events, writes);
+    assert.deepEqual(frames, [{ lapId: 'lap', injectionReceiptUs: 10, receiptKeyUs: keyUs - 1010 }]);
+    const markdown = stageMarkdown({ stages: [], nativeFrames: frames, httpRequests: [], browserFrameBackends: [] });
+    assert.match(markdown, /Injection→winit receipt \| Receipt→key/);
+    assert.ok(markdown.includes(`| lap | 10 | ${keyUs - 1010} |`));
+  }
+  for (const events of [
+    [],
+    prefix,
+    [event('key', 1014, { lapId: 'lap' })],
+    [...prefix, event('key', 1009, { lapId: 'lap' })],
+  ]) {
+    assert.deepEqual(nativeFrameMetrics(events, writes), [{ lapId: 'lap' }]);
+  }
+  assert.deepEqual(nativeFrameMetrics([...prefix, event('key', 1014, { lapId: 'lap' })], [{ lapId: 'lap' }]), [
+    { lapId: 'lap' },
+  ]);
+});
 
 test('native frame stages separate prior presentation, apply and redraw work', () => {
   const event = (stage, us, lapId) => ({ stage, us, lapId, source: 'native' });
@@ -36,6 +72,8 @@ test('native frame stages separate prior presentation, apply and redraw work', (
   assert.deepEqual(nativeFrameMetrics(events, [{ lapId: 'lap' }]), [
     {
       lapId: 'lap',
+      urgentStateRequests: 0,
+      urgentStateAdmission: 0,
       pushAppliedUs: 20,
       transportReadyUs: 1,
       previousSubmitUs: 4,
@@ -51,6 +89,25 @@ test('native frame stages separate prior presentation, apply and redraw work', (
     },
   ]);
   assert.deepEqual(nativeFrameMetrics([], []), []);
+  const withUrgent = [...events, event('redraw_begin', 20.5), event('urgent_state_admission', 20.75)];
+  assert.equal(
+    nativeFrameMetrics(
+      [
+        ...withUrgent,
+        event('urgent_state_request', 6.5, 'lap'),
+        { ...event('urgent_state_downgraded', 27, 'lap'), reason: 'duplicate_revision' },
+        event('urgent_state_request', 53, 'other-lap'),
+      ],
+      [{ lapId: 'lap' }]
+    )[0].urgentStateRequests,
+    1
+  );
+  assert.equal(nativeFrameMetrics(withUrgent, [{ lapId: 'lap' }])[0].urgentStateAdmission, 1);
+  assert.equal(
+    nativeFrameMetrics([...withUrgent, event('redraw_begin', 20.9)], [{ lapId: 'lap' }])[0].urgentStateAdmission,
+    0,
+    'an override for an earlier redraw is not attributed to this lap frame'
+  );
   const detail = [
     event('view_begin', 25),
     event('view_end', 25.5),

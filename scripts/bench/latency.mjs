@@ -104,7 +104,11 @@ function stats(values) {
 }
 
 export function nativeFrameMetrics(events, writes) {
-  const native = events.filter((e) => e.source === 'native').sort((a, b) => a.us - b.us);
+  const ids = new Map(events.filter((e) => e.stage === 'local_commit' && e.lapId).map((e) => [e.id, e.lapId]));
+  const native = events
+    .filter((e) => e.source === 'native')
+    .map((e) => ({ ...e, lapId: e.lapId ?? ids.get(e.id) }))
+    .sort((a, b) => a.us - b.us);
   const first = (stage, lap, after = 0) =>
     native.find((e) => e.stage === stage && e.lapId === lap && e.us >= after)?.us;
   const previous = (stage, at) => native.findLast((e) => e.stage === stage && e.us <= at)?.us;
@@ -121,6 +125,21 @@ export function nativeFrameMetrics(events, writes) {
     return total;
   };
   return writes.map((w) => {
+    const input = { lapId: w.lapId };
+    const injected = w.sentAt * 1000;
+    const key = first('key', w.lapId, injected);
+    const receipt = native.findLast(
+      (e) =>
+        e.stage === 'window_key' &&
+        !e.repeat &&
+        (e.key === 'Space' || e.key === 'Enter') &&
+        e.us >= injected &&
+        e.us <= key
+    )?.us;
+    if ([injected, receipt, key].every(Number.isFinite)) {
+      input.injectionReceiptUs = receipt - injected;
+      input.receiptKeyUs = key - receipt;
+    }
     const push = first('push_received', w.lapId);
     const ready = first('update_ready', w.lapId, push);
     const apply = first('apply_begin', w.lapId, push);
@@ -144,7 +163,7 @@ export function nativeFrameMetrics(events, writes) {
       submitted <= present &&
       present <= end &&
       end <= frame;
-    if (!valid) return { lapId: w.lapId };
+    if (!valid) return input;
     const previousSubmitUs = overlap('submit', ready, apply);
     const previousPresentUs = overlap('present', ready, apply);
     const applyUs = applied - apply;
@@ -192,7 +211,14 @@ export function nativeFrameMetrics(events, writes) {
     }
     const runtimeCpuUs = phaseWork('runtime', false, true);
     return {
-      lapId: w.lapId,
+      ...input,
+      urgentStateRequests: native.filter((e) => e.stage === 'urgent_state_request' && e.lapId === w.lapId).length,
+      urgentStateAdmission: Number(
+        native.some(
+          (e) =>
+            e.stage === 'urgent_state_admission' && e.us >= (previous('redraw_begin', build) ?? build) && e.us <= build
+        )
+      ),
       pushAppliedUs: applied - push,
       transportReadyUs: ready - push,
       previousSubmitUs,
@@ -445,7 +471,7 @@ export function stageMarkdown(metrics) {
     metrics.stages
       .map((s) => `| ${s.name} | ${s.n} | ${s.p50 ?? 'N/A'} | ${s.p95 ?? 'N/A'} | ${s.max ?? 'N/A'} |`)
       .join('\n') +
-    '\n\n## Native per press (µs)\n\n| Lap | Push→apply | Transport ready | Prior submit | Prior present | Own apply | Other before apply | Build/acquire excl. apply | Upload/encode | Submit | Present | Frame→pixels |\n|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n' +
+    '\n\n## Native per press (µs)\n\n| Lap | Injection→winit receipt | Receipt→key | Urgent requests | Urgent (0/1) | Push→apply | Transport ready | Prior submit | Prior present | Own apply | Other before apply | Build/acquire excl. apply | Upload/encode | Submit | Present | Frame→pixels |\n|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n' +
     metrics.nativeFrames
       .map(
         (f) =>
@@ -453,6 +479,10 @@ export function stageMarkdown(metrics) {
           [
             f.lapId,
             ...[
+              'injectionReceiptUs',
+              'receiptKeyUs',
+              'urgentStateRequests',
+              'urgentStateAdmission',
               'pushAppliedUs',
               'transportReadyUs',
               'previousSubmitUs',

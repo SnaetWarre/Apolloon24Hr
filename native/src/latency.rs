@@ -154,6 +154,15 @@ pub fn handoff(stage: &str, input: &Value, lap: Option<&str>) {
         emit(stage, &handoff_id(input), lap);
     }
 }
+pub fn state_wake(snapshot: &Value, reason: Option<&str>) {
+    if !enabled() { return; }
+    send_event(json!({
+        "stage": if reason.is_some() { "urgent_state_downgraded" } else { "urgent_state_request" },
+        "us": realtime_us(), "lapId": snapshot["latencyLap"],
+        "revision": snapshot["revision"], "changeToken": snapshot["changeToken"], "reason": reason,
+    }));
+}
+
 pub fn snapshot(stage: &str, snapshot: &Value) {
     if enabled()
         && let Some(lap) = snapshot["latencyLap"].as_str()
