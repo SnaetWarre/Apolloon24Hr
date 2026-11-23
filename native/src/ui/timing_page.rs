@@ -1127,7 +1127,7 @@ pub(super) fn modal(s: &State) -> Option<El> {
 
 /// The reference sets tabular numbers on the whole body.
 fn ts(size: f32, weight: f32) -> rune::TextStyle {
-    rune::TextStyle::new(size, weight).features("tnum")
+    rune::TextStyle::new(size, weight).features("'tnum' 1")
 }
 
 #[cfg(test)]

@@ -469,7 +469,7 @@ fn runner_name(s: &State, r: &Value, size: f32, weight: f32) -> El {
     if !number.is_empty() {
         line = line.child(
             text(number.to_string())
-                .font(rune::TextStyle::new(size, 500.0).features("tnum"))
+                .font(rune::TextStyle::new(size, 500.0).features("'tnum' 1"))
                 .color(p.t.ink3)
                 .min_w(size * BIB_WIDTH_EM),
         );
@@ -735,7 +735,7 @@ fn available_now(s: &State) -> El {
                 .child(col().grow(1.0))
                 .child(
                     text(moment)
-                        .font(rune::TextStyle::new(12.5, 400.0).features("tnum"))
+                        .font(rune::TextStyle::new(12.5, 400.0).features("'tnum' 1"))
                         .color(p.t.ink3),
                 ),
         );
@@ -1516,7 +1516,7 @@ fn runner_row_uncached(s: &State, r: &Value, b: &Board, drop: Option<&(String, D
                 ))
                 .child(
                     text(duration(elapsed))
-                        .font(rune::TextStyle::new(13.0, 500.0).features("tnum"))
+                        .font(rune::TextStyle::new(13.0, 500.0).features("'tnum' 1"))
                         .color(ink),
                 );
         }
@@ -1989,7 +1989,7 @@ fn call_dialog(s: &State, name: &str, phone: &str) -> El {
             text(phone.to_string())
                 .font(
                     rune::TextStyle::new(32.0, 700.0)
-                        .features("tnum")
+                        .features("'tnum' 1")
                         .tracking(0.32),
                 )
                 .color(p.ink)

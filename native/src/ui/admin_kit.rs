@@ -47,7 +47,7 @@ pub(super) fn pal(dark: bool) -> Pal {
 
 /// The body sets tabular numbers everywhere.
 pub(super) fn ts(size: f32, weight: f32) -> TextStyle {
-    TextStyle::new(size, weight).features("tnum")
+    TextStyle::new(size, weight).features("'tnum' 1")
 }
 // `max-width: 76ch` of Geist 13.5px.
 pub(super) const COPY_MAX: f32 = 684.0;

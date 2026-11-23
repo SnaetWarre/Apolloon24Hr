@@ -59,7 +59,11 @@ pub fn run<S: 'static>(mut spec: AppSpec<S>, configure: impl FnOnce(rune::App<S>
         }.into())
     });
     if super::DESKTOP.get().is_none() {
-        configure(rune::App::new(spec)).run();
+        let app = rune::App::new(spec);
+        // macOS draws the traffic lights over the content; give them the same band as the app.
+        #[cfg(target_os = "macos")]
+        let app = app.titlebar(rune::Titlebar::new(TITLEBAR_HEIGHT));
+        configure(app).run();
         return;
     }
     #[cfg(any(windows, target_os = "macos"))]
@@ -357,6 +361,13 @@ pub fn frame<S: 'static>(cx: &mut Cx<S>, dark: bool, public: bool, content: El, 
     let Some((phase, ask_close, full_screen)) =
         super::with(|d| (d.phase.clone(), d.ask_close, d.full_screen))
     else {
+        // No desktop around the view (a remote server, the benchmarks): still keep the traffic
+        // lights off the sidebar. Headless and test runtimes report no inset and stay bare.
+        if cx.titlebar_inset() > 0.0 {
+            return col().w_full().h_full().fill(tok::theme(dark).bg)
+                .child(title_bar(cx, dark || public, public, home))
+                .child(col().grow(1.0).min_h(0.0).w_full().child(content));
+        }
         return content;
     };
     cx.caption_color(if public { rune::oklch(0.686, 0.0, 0.0) } else if dark { Color::WHITE } else { Color::BLACK });
