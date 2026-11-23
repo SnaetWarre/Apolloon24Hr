@@ -28,7 +28,7 @@ jobs:
           RELEASE_TAG="$GITHUB_REF_NAME" node scripts/verify-release-tag.mjs "$version"
           node scripts/release-notes.mjs "$version" > notes.md
           echo "number=$version" >> "$GITHUB_OUTPUT"
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         with:
           name: release-notes
           path: notes.md
