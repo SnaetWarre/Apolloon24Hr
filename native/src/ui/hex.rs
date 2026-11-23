@@ -3,7 +3,7 @@
 use super::*;
 
 pub(super) fn ts(size: f32, weight: f32) -> rune::TextStyle {
-    rune::TextStyle::new(size, weight).features("tnum")
+    rune::TextStyle::new(size, weight).features("'tnum' 1")
 }
 
 /// A group of rows: one rounded block, rows split by a line.
@@ -239,4 +239,20 @@ pub(super) fn lap_praise(s: &State, lap: &Value) -> Option<El> {
     let runner = all.iter().find(|r| r["id"] == lap["runnerId"])?;
     (runner["lapCount"].as_i64().unwrap_or(0) > 1 && runner["bestLapMs"].as_i64() == Some(ms))
         .then(|| flag(s, "Eigen record", true))
+}
+
+#[cfg(test)]
+mod tests {
+    /// Rune drops an unquoted feature tag, so the running clock's digits stay one width
+    /// only if `ts` spells it `'tnum'`.
+    #[test]
+    fn clock_digits_share_one_width() {
+        let mut text = rune::text::TextSystem::new(
+            &[include_bytes!("../../assets/geist-latin-wght-normal.ttf")],
+            ("Geist", "Geist"),
+        );
+        let mut width = |digits: &str| text.measure(digits, super::ts(40.0, 550.0), 1.0).0;
+        let (ones, zeros) = (width("1:11"), width("0:00"));
+        assert_eq!(ones, zeros);
+    }
 }

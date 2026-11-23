@@ -140,7 +140,7 @@ pub(super) fn pal(dark: bool) -> Pal {
 }
 /// The body sets tabular numbers everywhere.
 pub(super) fn ts(size: f32, weight: f32) -> rune::TextStyle {
-    rune::TextStyle::new(size, weight).features("tnum")
+    rune::TextStyle::new(size, weight).features("'tnum' 1")
 }
 pub(super) fn st<'a>(v: &'a Value, key: &str) -> &'a str {
     v[key].as_str().unwrap_or("")
