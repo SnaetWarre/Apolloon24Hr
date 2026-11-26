@@ -168,6 +168,8 @@ mod tests {
         s.snapshot = json!({"revision":2,"runners":[runner]});
         s.history = json!({"scope":"runner","runnerId":"a","laps":[],"events":[]});
         s.admin.registrations = json!({"other":{"email":"kept@example.be"}});
+        s.pending_profile = Some("a".into());
+        *s.history_request.lock().unwrap() = Need::Runner("a".into(), 10);
         let (sender, receiver) = std::sync::mpsc::channel();
         s.rx = receiver;
         sender.send(Update { snapshot:s.snapshot.clone(), outcome:Some(("runners.profile".into(),Ok(json!({"runner":runner,"registration":{"email":"new@example.be"}})))), ..Default::default() }).unwrap();

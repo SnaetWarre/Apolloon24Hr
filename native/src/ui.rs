@@ -278,8 +278,12 @@ fn init_with_url(url: String) -> State {
     let command_wake = CommandWake::default();
     #[cfg(target_arch = "wasm32")]
     let need = history_need::Need::route(&browser_route());
-    #[cfg(not(target_arch = "wasm32"))]
-    let need = history_need::Need::Full;
+    #[cfg(all(not(target_arch = "wasm32"), feature = "desktop"))]
+    let need = crate::desktop::recovered_route()
+        .map(|route| history_need::Need::route(&route))
+        .unwrap_or_else(|| history_need::Need::route("/"));
+    #[cfg(all(not(target_arch = "wasm32"), not(feature = "desktop")))]
+    let need = history_need::Need::route("/");
     let history_request = std::sync::Arc::new(std::sync::Mutex::new(need));
     start_transport(url, commands, Updates { sender: updates, wake: transport_wake.clone() }, command_wake.clone(), history_request.clone());
     let (file_tx, file_rx) = mpsc::channel();
@@ -376,7 +380,6 @@ impl State {
         self.error.clear();
         self.notice.clear();
         self.busy = true;
-        #[cfg(target_arch = "wasm32")]
         if method == "runners.profile" {
             self.pending_profile = input["id"].as_str().map(str::to_owned);
             history_need::publish(self);
@@ -435,7 +438,6 @@ fn poll(s: &mut State, _: f64, tx: &mut Tx) -> bool {
     if !s.fixture && sync_route(s) {
         changed = true;
     }
-    #[cfg(target_arch = "wasm32")]
     if !s.fixture { history_need::publish(s); }
     if s.page != s.page_seen {
         s.page_seen = s.page;
@@ -1663,7 +1665,7 @@ mod tests {
                     states += 1;
                     if states == 1 {
                         assert!(!request.contains("after="));
-                        json!({"changeToken":"db.1","revision":1,"stateHistory":{"scope":"full","cursor":"history.1","laps":[],"events":[]}})
+                        json!({"changeToken":"db.1","revision":1,"stateHistory":{"scope":"full","cursor":"history.1","revision":1,"laps":[],"events":[]}})
                     } else {
                         assert!(request.contains("after=db.1"), "{request}");
                         assert!(request.contains("since=history.1"), "{request}");
@@ -3202,23 +3204,22 @@ fn start_transport(url: String, commands: Receiver<Command>, updates: Updates, _
         if snapshot["unchanged"] == true {
             return Update { snapshot, ..Default::default() };
         }
-        let bundled = snapshot.as_object_mut().and_then(|s| s.remove("stateHistory"));
+        let need = synced.lock().unwrap().need();
+        let bundled = need.reply(&mut snapshot);
         let revision = snapshot["revision"].as_i64();
         let changed = full || (revision.is_some() && synced.lock().unwrap().history_revision != revision);
-        let history = if let Some(reply) = bundled {
-            let history = synced.lock().unwrap().take_history(reply);
-            history.unwrap_or_else(|| {
-                let full = get(client, url, "/api/history?scope=full");
-                synced.lock().unwrap().take_history(full).unwrap_or_default()
-            })
-        } else if changed {
+        let recover = |synced: &Mutex<Synced>| {
+            let full = get(client, url, "/api/history?scope=full");
+            synced.lock().unwrap().take_history(full).unwrap_or_default()
+        };
+        let history = if !bundled.is_null() {
+            let scoped = { synced.lock().unwrap().take_scoped(bundled, &need) };
+            scoped.unwrap_or_else(|| recover(synced))
+        } else if changed || synced.lock().unwrap().loaded_need.as_ref() != Some(&need) {
             let path = synced.lock().unwrap().history_path();
             let reply = get(client, url, &path);
-            let history = synced.lock().unwrap().take_history(reply);
-            history.unwrap_or_else(|| {
-                let full = get(client, url, "/api/history?scope=full");
-                synced.lock().unwrap().take_history(full).unwrap_or_default()
-            })
+            let scoped = { synced.lock().unwrap().take_scoped(reply, &need) };
+            scoped.unwrap_or_else(|| recover(synced))
         } else {
             Default::default()
         };

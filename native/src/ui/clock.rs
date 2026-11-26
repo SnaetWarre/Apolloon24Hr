@@ -22,6 +22,12 @@ impl Sample {
     pub(super) fn bucket(&mut self, start: i64, width: i64) {
         let bucket = (self.now - start).max(0) / width;
         self.value(bucket);
+        self.live_bucket(start, width);
+    }
+
+    /// A live-bound display updates itself; the frame only has to wake often enough to publish it.
+    pub(super) fn live_bucket(&mut self, start: i64, width: i64) {
+        let bucket = (self.now - start).max(0) / width;
         self.due = self.due.min(start + (bucket + 1) * width);
     }
 
@@ -70,6 +76,7 @@ pub(super) fn advance(s: &mut State, tx: &mut Tx) -> bool {
 fn advance_at(s: &mut State, now: i64, tx: &mut Tx) -> bool {
     let before = sample(s);
     s.clock = now;
+    timing_page::update_live_clock(s);
     let after = sample(s);
     // The transport's mpsc receiver also needs servicing when no display clock is running.
     let due = after.due.min(s.clock + 200);
@@ -104,7 +111,7 @@ mod tests {
             s.clock = 100;
             let initial = sample(&s).values;
             s.clock = 137;
-            assert_eq!(initial == sample(&s).values, matches!(page, 1 | 5 | 6));
+            assert_eq!(initial == sample(&s).values, matches!(page, 1 | 2 | 5 | 6));
             s.clock = 1037;
             assert_ne!(initial, sample(&s).values, "page {page}");
         }
@@ -187,7 +194,7 @@ mod tests {
     }
 
     #[test]
-    fn personal_averages_do_not_schedule_an_extra_timing_update() {
+    fn personal_averages_do_not_commit_for_a_live_clock_tick() {
         let mut s = init_with_url("http://127.0.0.1:0".into());
         s.page = 2;
         s.connected = true;
@@ -199,7 +206,7 @@ mod tests {
         s.clock = 131001;
         assert_eq!(before.values, sample(&s).values);
         s.clock = 131100;
-        assert_ne!(before.values, sample(&s).values);
+        assert_eq!(before.values, sample(&s).values);
     }
 
     #[test]

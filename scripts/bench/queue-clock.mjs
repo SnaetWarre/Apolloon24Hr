@@ -45,7 +45,7 @@ assert(Number.isFinite(clockStepMs) && clockStepMs >= 0);
 const cases = args.cases.split(',').map((entry) => {
   const [n, route] = entry.split(':');
   assert(Number.isInteger(Number(n)) && Number(n) > 0);
-  assert(['queue', 'display/inside', 'display/competitions', 'display/outside'].includes(route));
+  assert(['queue', 'timing', 'display/inside', 'display/competitions', 'display/outside'].includes(route));
   return { n: Number(n), route };
 });
 await mkdir(out, { recursive: true });
