@@ -18,7 +18,8 @@ pub(super) fn clocks(s: &State, clock: &mut clock::Sample) {
         None if runners(s).iter().any(|r| !race["activeRunnerId"].is_null() && r["id"] == race["activeRunnerId"]) => race["activeStartedAt"].as_i64(),
         None => None,
     };
-    if let Some(start) = start { clock.bucket(start, 100); }
+    clock.value(s.timing_page.clock_main.get().len());
+    if let Some(start) = start { clock.live_bucket(start, 100); }
 }
 
 const MIN_LAP_MS: i64 = 20_000;
@@ -32,9 +33,10 @@ pub(super) enum Dialog {
     Finish(u8),
     TakeOver,
 }
-#[derive(Default)]
 pub(super) struct Page {
     pub(super) dialog: Option<Dialog>,
+    clock_main: rune::LiveText,
+    clock_fraction: rune::LiveText,
     /// The press a question holds: its input, so the lap still ends at the press.
     held: Option<Value>,
     /// "Race beëindigen" stops the clock: the press and the lap it belongs to.
@@ -49,6 +51,24 @@ pub(super) struct Page {
     reopen: bool,
     pub(super) last_action: String,
     pub(super) error: String,
+}
+impl Default for Page {
+    fn default() -> Self {
+        Self {
+            dialog: None,
+            clock_main: rune::LiveText::new("0:00"),
+            clock_fraction: rune::LiveText::new(".0"),
+            held: None,
+            finish_stop: None,
+            finish_step_at: None,
+            pending: None,
+            saved: None,
+            waiting_press: None,
+            reopen: false,
+            last_action: String::new(),
+            error: String::new(),
+        }
+    }
 }
 
 /// A confirmed handoff, shown until this laptop's own data has it: its press, the lap it saved
@@ -599,6 +619,44 @@ fn body_text(value: impl Into<String>, color: rune::Color) -> El {
         .min_w(0.0)
 }
 
+fn clock_parts(s: &State) -> (String, String, bool) {
+    let race = &s.snapshot["race"];
+    let page = &s.timing_page;
+    let pending = shown_press(s);
+    let active = active_runner(s);
+    let queue = waiting(s);
+    let shown = match pending {
+        Some((_, Some(id), _)) => queue.iter().any(|r| st(r, "id") == id),
+        Some((_, None, _)) => false,
+        None => active.is_some(),
+    };
+    let shown_started = match pending {
+        Some((_, id, at)) => id.as_ref().map(|_| *at),
+        None => race["activeStartedAt"].as_i64(),
+    };
+    let finish_press = page
+        .finish_stop
+        .as_ref()
+        .filter(|(_, started)| started == &race["activeStartedAt"])
+        .map(|(at, _)| *at);
+    match (shown, shown_started) {
+        (true, Some(start)) => {
+            let ms = (finish_press.unwrap_or(s.clock) - start).max(0);
+            (duration(ms), format!(".{}", (ms % 1000) / 100), false)
+        }
+        _ => ("0:00".to_string(), ".0".to_string(), true),
+    }
+}
+
+/// Publish the live clock outside a view commit. The box is fixed by tabular digits, so only
+/// the glyphs change at each tenth.
+pub(super) fn update_live_clock(s: &State) {
+    if s.page != 2 { return; }
+    let (main, fraction, _) = clock_parts(s);
+    s.timing_page.clock_main.set(main);
+    s.timing_page.clock_fraction.set(fraction);
+}
+
 pub(super) fn race_lap_total(s: &State) -> i64 {
     runners(s).iter().filter_map(|r| r["lapCount"].as_i64()).sum()
 }
@@ -618,21 +676,12 @@ pub(super) fn page(s: &State) -> El {
         Some((_, None, _)) => None,
         None => active,
     };
-    let shown_started = match pending {
-        Some((_, id, at)) => id.as_ref().map(|_| *at),
-        None => race["activeStartedAt"].as_i64(),
-    };
     let shown_queue: Vec<&Value> = match pending {
         Some((_, Some(id), _)) => queue.iter().copied().filter(|r| st(r, "id") != id).collect(),
         _ => queue.clone(),
     };
     let shown_next = shown_queue.first().copied();
     let finished = phase(race) == "finished" && pending.is_none();
-    let finish_press = page
-        .finish_stop
-        .as_ref()
-        .filter(|(_, started)| started == &race["activeStartedAt"])
-        .map(|(at, _)| *at);
     let handoff_disabled = c.blocked || (active.is_none() && queue.is_empty());
 
     // Station: label, runner, clock, the key, feedback and the footer.
@@ -688,13 +737,7 @@ pub(super) fn page(s: &State) -> El {
             .color(p.ink3),
         ),
     };
-    let (main, fraction, idle) = match (shown, shown_started) {
-        (Some(_), Some(start)) => {
-            let ms = (finish_press.unwrap_or(s.clock) - start).max(0);
-            (duration(ms), format!(".{}", (ms % 1000) / 100), false)
-        }
-        _ => ("0:00".to_string(), ".0".to_string(), true),
-    };
+    let (main, fraction, idle) = clock_parts(s);
     let clock = row()
         .key("timing-clock")
         .role("timer")
@@ -703,11 +746,13 @@ pub(super) fn page(s: &State) -> El {
         .child(
             text(main)
                 .font(ts(96.0, 550.0).lh(92.0).tracking(-3.6))
+                .live_text(&s.timing_page.clock_main)
                 .color(if idle { p.surface3 } else { t.text }),
         )
         .child(
             text(fraction)
                 .font(ts(42.0, 550.0).lh(44.0).tracking(-0.8))
+                .live_text(&s.timing_page.clock_fraction)
                 .color(if idle { p.surface3 } else { p.ink3 })
                 .mb(-2.0),
         );
