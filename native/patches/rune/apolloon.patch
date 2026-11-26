@@ -63,10 +63,10 @@ index fe03f60..7e50a4e 100644
  #[cfg(test)]
 diff --git a/crates/rune/src/app/ack_draw.rs b/crates/rune/src/app/ack_draw.rs
 new file mode 100644
-index 0000000..e5e941d
+index 0000000..4ad70b5
 --- /dev/null
 +++ b/crates/rune/src/app/ack_draw.rs
-@@ -0,0 +1,68 @@
+@@ -0,0 +1,70 @@
 +use super::AppHandle;
 +use std::sync::{Arc, Mutex};
 +use std::time::Instant;
@@ -94,6 +94,8 @@ index 0000000..e5e941d
 +            self.reports.lock().unwrap().push(report);
 +        }
 +    }
++
++    pub(crate) fn waiting(&self) -> bool { !self.reports.lock().unwrap().is_empty() }
 +
 +    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 +    pub(crate) fn admit(&self, waiting: bool, last_target: &mut Option<Instant>, now: Instant) -> bool {
@@ -137,10 +139,10 @@ index 0000000..e5e941d
 +mod tests;
 diff --git a/crates/rune/src/app/ack_draw_tests.rs b/crates/rune/src/app/ack_draw_tests.rs
 new file mode 100644
-index 0000000..53c56c4
+index 0000000..5ec6a3d
 --- /dev/null
 +++ b/crates/rune/src/app/ack_draw_tests.rs
-@@ -0,0 +1,118 @@
+@@ -0,0 +1,129 @@
 +use super::*;
 +
 +fn reports() -> (Report, Arc<Mutex<Vec<&'static str>>>) {
@@ -258,6 +260,17 @@ index 0000000..53c56c4
 +    drop(pending.begin());
 +    assert_eq!(*stages.lock().unwrap(), ["ack_draw_build"]);
 +    assert!(!pending.admit(true, &mut None, Instant::now()));
++}
++
++#[test]
++fn waiting_is_visible_until_a_frame_takes_the_request() {
++    let pending = Pending::new(true);
++    assert!(!pending.waiting());
++    let (report, _) = reports();
++    pending.request(report);
++    assert!(pending.waiting());
++    drop(pending.begin());
++    assert!(!pending.waiting());
 +}
 diff --git a/crates/rune/src/app/requests.rs b/crates/rune/src/app/requests.rs
 index fd39061..e27594f 100644
@@ -1804,7 +1817,7 @@ index 0000000..e17145f
 +    }
 +}
 diff --git a/crates/rune/src/window/draw.rs b/crates/rune/src/window/draw.rs
-index b1ef8b0..b16d779 100644
+index b1ef8b0..830bb06 100644
 --- a/crates/rune/src/window/draw.rs
 +++ b/crates/rune/src/window/draw.rs
 @@ -47,6 +47,7 @@ impl<S: 'static> Host<S> {
@@ -1815,15 +1828,18 @@ index b1ef8b0..b16d779 100644
          let Some(l) = self.win.as_mut() else { return };
          l.timer_frame.drawn();
          l.presented = None;
-@@ -70,6 +71,7 @@ impl<S: 'static> Host<S> {
+@@ -70,6 +71,10 @@ impl<S: 'static> Host<S> {
      /// Draws a frame. `resizing` draws one for a size the user just dragged the window to, at
      /// once: AppKit shows the new size when the event returns, with or without it.
      pub(super) fn draw(&mut self, resizing: bool) {
 +        self.frame_reports.stage("redraw_begin");
++        // A confirmed-save wake must make this frame poll, even when a resting timer already
++        // polled for it. The transport queued its update before publishing the admission.
++        if self.shared.ack_draw.waiting() { self.rt.cancel_timer_frame(); }
          // Windows: a window still on the CPU renderer draws there (`cpu_frame`).
          #[cfg(target_os = "windows")]
          {
-@@ -152,7 +154,15 @@ impl<S: 'static> Host<S> {
+@@ -152,7 +157,15 @@ impl<S: 'static> Host<S> {
              if l.native.prime.presumes() && !pacing.running() {
                  None
              } else {
@@ -1840,7 +1856,7 @@ index b1ef8b0..b16d779 100644
                  target
              }
          } else { None };
-@@ -182,6 +192,9 @@ impl<S: 'static> Host<S> {
+@@ -182,6 +195,9 @@ impl<S: 'static> Host<S> {
          let live_resize = resizing;
          // The frame moves before the drawable is acquired, so it has the new size; never while
          // the user holds the window's edge in a live resize.
@@ -1850,7 +1866,7 @@ index b1ef8b0..b16d779 100644
          if !hidden && !live_resize { self.step_frame(target.unwrap_or_else(Instant::now)); }
          let (Some(l), Some((gpu, renderer))) = (self.win.as_mut(), self.gpu.as_mut()) else { return };
          #[cfg(target_os = "macos")]
-@@ -211,7 +224,9 @@ impl<S: 'static> Host<S> {
+@@ -211,7 +227,9 @@ impl<S: 'static> Host<S> {
          let built = if quiet {
              let now = Instant::now();
              self.rt.window_resting = true;
@@ -1860,7 +1876,7 @@ index b1ef8b0..b16d779 100644
              let rt = &mut self.rt;
              #[cfg(target_os = "macos")]
              let next_tick = if deferred { l.native.pacing.as_ref().map(|p| p.tick_after(now)) } else { l.next_tick(now) };
-@@ -231,11 +246,18 @@ impl<S: 'static> Host<S> {
+@@ -231,11 +249,18 @@ impl<S: 'static> Host<S> {
          };
          // It draws: the link starts, and still says draw at once.
          #[cfg(target_os = "macos")]
@@ -1881,7 +1897,7 @@ index b1ef8b0..b16d779 100644
              Ok(frame) => frame,
              // A surface with no presentation (a refused configuration, or a device that is gone)
              // is replaced before the next frame rather than asked for a drawable.
-@@ -286,18 +308,29 @@ impl<S: 'static> Host<S> {
+@@ -286,18 +311,29 @@ impl<S: 'static> Host<S> {
              (animating, dt)
          } else if hidden {
              self.clock.hold(frame_time);
@@ -1914,7 +1930,7 @@ index b1ef8b0..b16d779 100644
                  Ok(frame) => frame,
                  Err(Missed::Unconfigured) => {
                      l.surface_ok = false;
-@@ -318,7 +351,10 @@ impl<S: 'static> Host<S> {
+@@ -318,7 +354,10 @@ impl<S: 'static> Host<S> {
                  l.surface_ok = false;
                  return;
              }
@@ -1926,7 +1942,7 @@ index b1ef8b0..b16d779 100644
                  Ok(frame) => frame,
                  Err(Missed::Unconfigured) => {
                      l.surface_ok = false;
-@@ -336,6 +372,7 @@ impl<S: 'static> Host<S> {
+@@ -336,6 +375,7 @@ impl<S: 'static> Host<S> {
          l.backoff_step(BackoffEvent::Presented);
          if hidden { l.hidden_pace.rendered(now); }
          let update_ms = now.elapsed().as_secs_f64() * 1000.0;
@@ -1934,7 +1950,7 @@ index b1ef8b0..b16d779 100644
          #[cfg(feature = "frame-profile")]
          let fp_built = fp_start.map(|_| crate::frame::live_log::Stamp::now());
          sync_platform(l, rt, &mut self.secure_input, &mut self.ime_allowed, &self.clipboard);
-@@ -345,8 +382,8 @@ impl<S: 'static> Host<S> {
+@@ -345,8 +385,8 @@ impl<S: 'static> Host<S> {
              ..Default::default()
          });
          // An image's pixels changed where its instances didn't: the whole frame draws (`damage`).
@@ -1945,7 +1961,7 @@ index b1ef8b0..b16d779 100644
          renderer.upload_images(&gpu.device, &gpu.queue, &mut rt.images);
          renderer.build_surfaces(&gpu.device, &rt.surfaces, rt.live_notifier());
          // Playing clips on their own layer (`video_layer`): the surfaces this frame punches out.
-@@ -363,7 +400,6 @@ impl<S: 'static> Host<S> {
+@@ -363,7 +403,6 @@ impl<S: 'static> Host<S> {
          #[cfg(feature = "frame-profile")]
          let fp_uploaded = fp_start.map(|_| crate::frame::live_log::Stamp::now());
          let mut enc = gpu.device.create_command_encoder(&Default::default());
@@ -1953,7 +1969,7 @@ index b1ef8b0..b16d779 100644
          let mut present_rect = None;
          // Why the frame drew all of the window (frame-profile).
          #[allow(unused_mut)]
-@@ -374,10 +410,8 @@ impl<S: 'static> Host<S> {
+@@ -374,10 +413,8 @@ impl<S: 'static> Host<S> {
          // Only what changed is redrawn and presented (`damage`): the renderer's `draw` takes the
          // armed rectangles when nothing but the instances draws there, a compositor's
          // `Frame::draw_ui` included.
@@ -1965,7 +1981,7 @@ index b1ef8b0..b16d779 100644
              match l.native.damage.plan(&rt.instances, size, rt.clear_color(), whole.is_none()) {
                  super::damage::Plan::All(why) => { whole_why = Some(whole.unwrap_or(why)); None }
                  super::damage::Plan::Part { draw, present } => {
-@@ -406,23 +440,25 @@ impl<S: 'static> Host<S> {
+@@ -406,23 +443,25 @@ impl<S: 'static> Host<S> {
              renderer.draw(&mut enc, target, rt.clear_color());
          }
          // Every frame, so a frame drawn whole leaves the renderer's kept frame behind.
@@ -1993,7 +2009,7 @@ index b1ef8b0..b16d779 100644
          #[cfg(target_os = "macos")]
          l.native.materials.present(&rt.materials, rt.env.scale, || gpu.queue.present(frame));
          #[cfg(target_os = "windows")]
-@@ -434,6 +470,8 @@ impl<S: 'static> Host<S> {
+@@ -434,6 +473,8 @@ impl<S: 'static> Host<S> {
          }
          #[cfg(not(target_os = "macos"))]
          gpu.queue.present(frame);
@@ -2002,7 +2018,7 @@ index b1ef8b0..b16d779 100644
          #[cfg(target_os = "windows")]
          l.native.slot.presented();
          // A swap chain made again on a handed-over window's visual takes over now (`cpu_frame`).
-@@ -455,15 +493,9 @@ impl<S: 'static> Host<S> {
+@@ -455,15 +496,9 @@ impl<S: 'static> Host<S> {
                  entry: fp_entry.unwrap_or(start), start, acquired, built, uploaded, encoded, submitted, presented: crate::frame::live_log::Stamp::now(),
                  phases: crate::frame::profile::take(), nodes: rt.nodes.len(), shaped: rt.stats.shaped, instances: rt.instances.len(),
                  animating, why: std::mem::take(&mut rt.commit_why), next: 0, poll_due: None, loop_due: None, loops: Vec::new(),
