@@ -9,6 +9,8 @@ mod join;
 mod key;
 pub(crate) use key::beacon_proof;
 pub mod log;
+mod maintenance;
+mod membership;
 mod probe;
 mod raft;
 pub mod routes;
@@ -629,7 +631,6 @@ impl Node {
             .map(|d| d.nearby())
             .unwrap_or_default()
     }
-
 }
 
 pub(crate) fn short_url(url: &str) -> &str {
