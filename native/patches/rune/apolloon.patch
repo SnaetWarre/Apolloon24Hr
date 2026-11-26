@@ -608,7 +608,7 @@ index 000000000..977bf273d
 +}
 +
 +fn parse(value: Option<&str>) -> bool {
-+    value.and_then(|value| value.parse::<u32>().ok()) == Some(1)
++    value == Some("1")
 +}
 +
 +impl<S: 'static> AppHandle<S> {
@@ -638,7 +638,7 @@ index 000000000..621d59387
 +
 +#[test]
 +fn parser_requires_one_and_rejects_absent_empty_zero_or_invalid() {
-+    for value in [None, Some(""), Some("0"), Some("2"), Some("-1"), Some("true"), Some(" 1"), Some("4294967296")] {
++    for value in [None, Some(""), Some("0"), Some("2"), Some("-1"), Some("true"), Some(" 1"), Some("01"), Some("+1"), Some("4294967296")] {
 +        assert!(!parse(value), "{value:?}");
 +    }
 +    assert!(parse(Some("1")));

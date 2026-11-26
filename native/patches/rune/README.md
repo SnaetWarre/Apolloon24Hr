@@ -32,6 +32,6 @@ Damage planning and retained/whole pixel equivalence tests run with `cargo test 
 
 1. Check out the new Rune commit in a separate clone. Reapply the patch there, drop fixes that landed upstream, and save the remaining diff with `git diff --binary HEAD -- crates/rune crates/rune-text > /path/to/Apolloon24Hr/native/patches/rune/apolloon.patch` after marking new patch files with `git add -N`.
 2. Put the new full commit SHA in `revision` and run `bash native/scripts/prepare-rune.sh` from Apolloon's root.
-3. Run `cargo update --workspace --manifest-path native/Cargo.toml` to refresh the lockfile. Run `npm run build`, `npm run test:native`, and `npm run test:browser`.
+3. Refresh the lockfile. Compare its wgpu and naga package versions with `.rune/Cargo.lock`; when a blanket update moves them ahead of the vendored patch versions, pin those packages back with `cargo update --manifest-path native/Cargo.toml -p <package> --precise <upstream version>`. `native/Cargo.lock` must not list any of Rune's vendored crates under `[[patch.unused]]`. Run `npm run build`, `npm run test:native`, and `npm run test:browser`.
 
 GitHub downloads are pinned to a commit. Cargo's lockfile records the resolved crate versions.
