@@ -5,6 +5,7 @@ use std::collections::VecDeque;
 pub(super) struct Wakes {
     pub ordinary: Option<rune::Waker>,
     pub urgent: Option<rune::Waker>,
+    pub ack: Option<super::ack_draw::Wake>,
     revisions: VecDeque<Revision>,
 }
 
