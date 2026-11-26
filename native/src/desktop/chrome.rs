@@ -46,6 +46,17 @@ fn save_window_state() {
     }
 }
 
+/// `APOLLOON_FRAME_LATENCY`: a positive frame count sets Rune's frame-latency cap.
+fn with_frame_latency<S>(app: rune::App<S>) -> rune::App<S> {
+    let Ok(value) = std::env::var("APOLLOON_FRAME_LATENCY") else {
+        return app;
+    };
+    match value.parse::<u32>() {
+        Ok(frames) if frames > 0 => app.frame_latency(frames),
+        _ => app,
+    }
+}
+
 /// Runs the operator UI in the desktop window. Without `boot` (headless, tests, a remote
 /// server through APOLLOON_NATIVE_URL), it is the plain Rune app.
 pub fn run<S: 'static>(mut spec: AppSpec<S>, configure: impl FnOnce(rune::App<S>) -> rune::App<S>) {
@@ -63,7 +74,7 @@ pub fn run<S: 'static>(mut spec: AppSpec<S>, configure: impl FnOnce(rune::App<S>
         // macOS draws the traffic lights over the content; give them the same band as the app.
         #[cfg(target_os = "macos")]
         let app = app.titlebar(rune::Titlebar::new(TITLEBAR_HEIGHT));
-        configure(app).run();
+        with_frame_latency(configure(app)).run();
         return;
     }
     #[cfg(any(windows, target_os = "macos"))]
@@ -92,8 +103,9 @@ pub fn run<S: 'static>(mut spec: AppSpec<S>, configure: impl FnOnce(rune::App<S>
     let app = rune::App::new(spec)
         .window_options(options)
         .maximized(saved.is_some_and(|s| s.maximized))
-        .titlebar(rune::Titlebar::new(TITLEBAR_HEIGHT).linux_client_controls())
+        .titlebar(rune::Titlebar::new(TITLEBAR_HEIGHT))
         .keep_running()
+        .on_close_request(close_request::<S>)
         .on_close(on_close::<S>)
         .on_quit(|_: &mut S, _| {
             save_window_state();
@@ -124,7 +136,7 @@ pub fn run<S: 'static>(mut spec: AppSpec<S>, configure: impl FnOnce(rune::App<S>
                 }
             }
         });
-    let app = configure(app);
+    let app = with_frame_latency(configure(app));
     let handle = app.handle();
     super::set_hook(Box::new(move |r| match r {
         Request::Wake => handle.wake(),
@@ -134,16 +146,21 @@ pub fn run<S: 'static>(mut spec: AppSpec<S>, configure: impl FnOnce(rune::App<S>
     app.run();
 }
 
-/// The window's close button: while the race runs, ask first (electron guardClose).
-fn on_close<S>(_: &mut S, tx: &mut Tx) {
+/// The window's close button: while the race runs, ask first without hiding the window.
+fn close_request<S>(_: &mut S, _: &mut Tx) -> rune::CloseResponse {
     let race = race_guard::is_race_active();
     let confirmed = super::with(|d| d.quit_confirmed).unwrap_or(true);
     let failed = super::with(|d| matches!(d.phase, Phase::Failed(_))).unwrap_or(false);
     if !failed && race_guard::on_close(race, confirmed) == race_guard::Close::Ask {
         super::with(|d| d.ask_close = true);
-        super::request(Request::Show);
-        return;
+        rune::CloseResponse::Defer
+    } else {
+        rune::CloseResponse::Close
     }
+}
+
+/// An approved close flushes state and quits.
+fn on_close<S>(_: &mut S, tx: &mut Tx) {
     save_window_state();
     super::shut_down();
     tx.quit();
@@ -187,6 +204,7 @@ fn button<S: 'static>(
         .role("button")
         .label(label.to_string())
         .focusable(true)
+        .press_on_return()
         .h(32.0)
         .px(14.0)
         .center_y()
@@ -293,6 +311,7 @@ fn title_bar<S: 'static>(cx: &Cx<S>, dark: bool, public: bool, home: fn(&mut S))
                 .role("button")
                 .label("Apolloon, naar het overzicht")
                 .focusable(true)
+                .press_on_return()
                 .h(24.0)
                 .px(8.0)
                 .center_y()
@@ -316,44 +335,7 @@ fn title_bar<S: 'static>(cx: &Cx<S>, dark: bool, public: bool, home: fn(&mut S))
                     home(s)
                 }),
         );
-    #[cfg(target_os = "linux")]
-    return bar.child(rune::el().grow(1.0)).child(caption_buttons::<S>(dark, focused));
-    #[cfg(not(target_os = "linux"))]
     bar
-}
-
-#[cfg(target_os = "linux")]
-fn caption_buttons<S: 'static>(dark: bool, focused: bool) -> El {
-    let maximized = WINDOW.with(|window| {
-        window.borrow().as_ref().and_then(|window| window.placement())
-            .is_some_and(|placement| placement.maximized)
-    });
-    let tones = tok::tones(dark);
-    let ink = if focused { tones.ink2 } else { tones.ink3 };
-    let minimize = rune::Shape::new().line([0.5, 5.0], [9.5, 5.0], 1.0, rune::LineCap::Round, ink);
-    let maximize = if maximized {
-        rune::Shape::new()
-            .stroke([[2.5, 2.5], [2.5, 0.5], [9.5, 0.5], [9.5, 7.5], [7.5, 7.5]], 1.0, ink)
-            .stroke_with([[0.5, 2.5], [7.5, 2.5], [7.5, 9.5], [0.5, 9.5]], true, 1.0, rune::LineCap::Round, ink)
-    } else {
-        rune::Shape::new().stroke_with([[0.5, 0.5], [9.5, 0.5], [9.5, 9.5], [0.5, 9.5]], true, 1.0, rune::LineCap::Round, ink)
-    };
-    let close = rune::Shape::new()
-        .line([0.5, 0.5], [9.5, 9.5], 1.0, rune::LineCap::Round, ink)
-        .line([9.5, 0.5], [0.5, 9.5], 1.0, rune::LineCap::Round, ink);
-    let button = |key, label, shape, hover| {
-        row().key(key).role("button").label(label).help(label)
-            .no_window_drag().focusable(true).size(46.0, TITLEBAR_HEIGHT).center().hover(hover)
-            .child(rune::canvas(shape).size(10.0, 10.0))
-    };
-    row().role("group").label("Venster")
-        .child(button("titlebar-minimize", "Minimaliseren", minimize, tones.surface3)
-            .on_press_tx(|_: &mut S, tx: &mut Tx| tx.minimize()))
-        .child(button("titlebar-maximize", if maximized { "Herstellen" } else { "Maximaliseren" }, maximize, tones.surface3)
-            .on_press_tx(|_: &mut S, tx: &mut Tx| tx.toggle_maximized()))
-        .child(button("titlebar-close", "Sluiten", close, rune::oklch(0.536, 0.191, 30.1))
-            .press(rune::oklch(0.499, 0.175, 30.1))
-            .on_press_tx(|_: &mut S, tx: &mut Tx| tx.close_window()))
 }
 
 /// The operator view inside the desktop window.

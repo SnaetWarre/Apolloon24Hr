@@ -96,9 +96,12 @@ opt-level = 2
 # Rune's upstream patches are required by its text and platform backends.
 [patch.crates-io]
 wgpu-hal = { path = "../.rune/vendor/wgpu-hal" }
+naga = { path = "../.rune/vendor/naga" }
 winit = { path = "../.rune/vendor/winit" }
+sctk-adwaita = { path = "../.rune/vendor/sctk-adwaita" }
 parley_engine = { path = "../.rune/vendor/parley_engine" }
 accesskit_windows = { path = "../.rune/vendor/accesskit_windows" }
+accesskit_atspi_common = { path = "../.rune/vendor/accesskit_atspi_common" }
 accesskit_macos = { path = "../.rune/vendor/accesskit_macos" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]

@@ -521,6 +521,7 @@ pub(super) fn section(s: &State) -> El {
                     .role("button")
                     .label(st(r, "name").to_string())
                     .focusable(true)
+                    .press_on_return()
                     .font(ts(13.0, 500.0).lh(19.5))
                     .color(p.ink)
                     .wrap()

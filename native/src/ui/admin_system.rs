@@ -701,6 +701,7 @@ pub(super) fn disclosure(
         .label(title.to_string())
         .checked(open)
         .focusable(true)
+        .press_on_return()
         .gap(8.0)
         .center_y()
         .on_press(f)

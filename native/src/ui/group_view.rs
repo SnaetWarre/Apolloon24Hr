@@ -190,6 +190,7 @@ pub(super) fn toast(s: &State) -> Option<El> {
                     .role("button")
                     .label("Melding sluiten")
                     .focusable(true)
+                    .press_on_return()
                     .size(22.0, 22.0)
                     .center()
                     .radius(5.0)
