@@ -975,6 +975,7 @@ fn header(s: &State, p: &Pal, middle: El) -> El {
                 .role("button")
                 .label("Apolloon, terug naar start")
                 .focusable(true)
+                .press_on_return()
                 .on_press_tx(|s: &mut State, tx: &mut Tx| {
                     tx.instant();
                     s.page = 0;
@@ -1123,6 +1124,7 @@ fn control_button(key: String, label: &str, on: bool, p: &Pal) -> El {
         .label(label.to_string())
         .checked(on)
         .focusable(true)
+        .press_on_return()
         .h(28.0)
         .px(8.0)
         .center()
@@ -1195,6 +1197,7 @@ fn display_controls(s: &State) -> El {
                         .label(name.clone())
                         .checked(on)
                         .focusable(true)
+                        .press_on_return()
                         .h(28.0)
                         .px(8.0)
                         .center_y()
@@ -1677,6 +1680,7 @@ fn competition_board(s: &State) -> El {
                     .role("button")
                     .label("Competitie toevoegen")
                     .focusable(can_add)
+                    .press_on_return()
                     .center_y()
                     .gap(0.5 * size)
                     .py(0.6 * size)
@@ -1986,6 +1990,7 @@ fn competition(
                         .role("button")
                         .label(format!("{title} verwijderen"))
                         .focusable(true)
+                        .press_on_return()
                         .size(28.0, 28.0)
                         .center()
                         .radius(6.0)
@@ -2037,6 +2042,7 @@ fn picker(s: &State) -> Option<El> {
             .role("button")
             .label(str_of(&label["name"]))
             .focusable(true)
+            .press_on_return()
             .h(44.0)
             .pl(14.0)
             .pr(12.0)
@@ -2096,6 +2102,7 @@ fn picker(s: &State) -> Option<El> {
             .role("button")
             .label(label.clone())
             .focusable(true)
+            .press_on_return()
             .h(38.0)
             .px(16.0)
             .center_y()
@@ -2256,6 +2263,7 @@ fn outside(s: &State) -> El {
                 .role("button")
                 .label("Apolloon, terug naar start")
                 .focusable(true)
+                .press_on_return()
                 .on_press_tx(|s: &mut State, tx: &mut Tx| {
                     tx.instant();
                     s.page = 0;

@@ -266,6 +266,7 @@ pub(super) fn overview(s: &State) -> El {
             .role("link")
             .label(format!("{title}: {value}"))
             .focusable(true)
+            .press_on_return()
             .hover(c.surface2)
             .on_press_tx(move |s: &mut State, tx: &mut Tx| {
                 tx.instant();
@@ -329,6 +330,7 @@ pub(super) fn overview(s: &State) -> El {
                 .label(format!("{}: {}. Open Beheer › Systeem & herstel.", st.title, st.detail))
                 .role(if st.tone == shell::Tone::Error { "alert" } else { "link" })
                 .focusable(true)
+                .press_on_return()
                 .hover(c.surface2)
                 .on_press_tx(open_admin(6))
                 .child(shell::dot(dot).size(8.0, 8.0).radius(4.0))
@@ -361,6 +363,7 @@ pub(super) fn overview(s: &State) -> El {
                 .label("Laptops in de groep. Open Beheer › Systeem & herstel.")
                 .role("link")
                 .focusable(true)
+                .press_on_return()
                 .hover(c.surface2)
                 .on_press_tx(open_admin(6))
                 .child(shell::dot(dot).size(8.0, 8.0).radius(4.0))
