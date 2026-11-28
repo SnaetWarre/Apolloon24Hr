@@ -76,7 +76,7 @@ pub(super) fn flag(s: &State, value: &str, good: bool) -> El {
 }
 
 /// A row of numbers in one group, each with its name above.
-pub(super) fn stats(s: &State, facts: Vec<(&str, String)>) -> El {
+pub(super) fn stats(s: &State, facts: Vec<(&str, El)>) -> El {
     let t = tok::theme(s.dark);
     let c = tok::tones(s.dark);
     // Four numbers share a half-width panel: smaller figures keep "1:03.000" whole.
@@ -92,7 +92,7 @@ pub(super) fn stats(s: &State, facts: Vec<(&str, String)>) -> El {
             .gap(2.0)
             .child(text(name.to_string()).font(ts(13.5, 400.0)).color(c.ink3))
             .child(
-                text(value)
+                value
                     .font(ts(size, 550.0).tracking(-0.5))
                     .color(t.text)
                     .truncate(),
@@ -106,10 +106,20 @@ pub(super) fn stats(s: &State, facts: Vec<(&str, String)>) -> El {
 }
 
 /// A clock split in its whole seconds and its tenth: "1:12" and ".4".
-fn split_clock(ms: i64) -> (String, String) {
+pub(super) fn split_clock(ms: i64) -> (String, String) {
     let ms = ms.max(0);
     let whole = duration(ms - ms % 1000);
     (whole, format!(".{}", (ms % 1000) / 100))
+}
+
+/// How long the runner on the track has been running, when Overzicht shows one.
+pub(super) fn running_ms(s: &State) -> Option<i64> {
+    let race = &s.snapshot["race"];
+    let start = race["activeStartedAt"].as_i64()?;
+    runners(s)
+        .iter()
+        .any(|r| !race["activeRunnerId"].is_null() && r["id"] == race["activeRunnerId"])
+        .then_some(s.clock - start)
 }
 
 /// Who is on the track: number, name and the lap clock, with who runs after them.
@@ -149,6 +159,7 @@ pub(super) fn now_block(s: &State) -> El {
                 .to_string()
         });
     let (whole, tenth) = split_clock(running);
+    let (whole, tenth) = super::live_clock::lap(s, whole, tenth);
     let (name_size, clock_size, tenth_size) = (24.0, 40.0, 22.0);
     block = block
         .child(
@@ -195,12 +206,12 @@ pub(super) fn now_block(s: &State) -> El {
                         .key("now-clock")
                         .items_end()
                         .child(
-                            text(whole)
+                            whole
                                 .font(ts(clock_size, 550.0).tracking(-clock_size * 0.03))
                                 .color(t.text),
                         )
                         .child(
-                            text(tenth)
+                            tenth
                                 .font(ts(tenth_size, 550.0))
                                 .color(c.ink3)
                                 .pb(clock_size * 0.06),

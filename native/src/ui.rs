@@ -31,6 +31,7 @@ mod history_delivery;
 mod history_need;
 mod label_editor;
 mod laps_panel;
+mod live_clock;
 mod profile;
 mod public_settings;
 mod queue_page;
@@ -173,6 +174,7 @@ pub struct State {
     clock: i64,
     clock_offset: i64,
     public_screens: public_screens::Screen,
+    live_clocks: live_clock::Clocks,
     fixture: bool,
     route_seen: String,
 }
@@ -348,6 +350,7 @@ fn init_with_url(url: String) -> State {
         clock: now(),
         clock_offset: 0,
         public_screens: Default::default(),
+        live_clocks: Default::default(),
         fixture: false,
         route_seen: String::new(),
         group: Default::default(),
@@ -532,8 +535,9 @@ fn poll(s: &mut State, _: f64, tx: &mut Tx) -> bool {
             }
         }
         if !update.recovery.is_null() && s.recovery != update.recovery {
+            let shown = recovery_shown(s, &s.recovery) != recovery_shown(s, &update.recovery);
             s.recovery = update.recovery;
-            changed |= !public;
+            changed |= !public && shown;
         }
         if let Some(cache) = &s.image_cache {
             for (url, bytes) in update.images {
@@ -747,6 +751,19 @@ fn laps(s: &State) -> Vec<&Value> {
         .as_array()
         .map(|a| a.iter().collect())
         .unwrap_or_default()
+}
+/// The recovery status as the open screen shows it. Free disk space and the database size move
+/// with every write; only Beheer › Systeem & herstel prints them, other screens only ask whether
+/// the free space is known.
+fn recovery_shown(s: &State, recovery: &Value) -> Value {
+    if s.page == 8 && s.admin_section == 6 { return recovery.clone(); }
+    let mut shown = recovery.clone();
+    if let Some(status) = shown.get_mut("status").and_then(Value::as_object_mut) {
+        for key in ["diskFreeBytes", "databaseBytes"] {
+            if let Some(v) = status.get_mut(key) { *v = json!(!v.is_null()); }
+        }
+    }
+    shown
 }
 fn race_time(s: &State) -> String {
     s.snapshot["race"]["raceStartedAt"]
@@ -1975,6 +1992,17 @@ mod tests {
         rt.update(|s, _| s.confirm = None);
         click(&mut rt, "welcome-import");
         assert_eq!((rt.state.page, rt.state.admin_section), (8, 0));
+    }
+    #[test]
+    fn disk_and_database_sizes_redraw_only_the_screen_that_prints_them() {
+        let mut state = init_with_url("http://127.0.0.1:1".into());
+        let status = |free: i64, db: i64| json!({"status":{"enabled":true,"diskFreeBytes":free,"databaseBytes":db}});
+        state.page = 0;
+        assert_eq!(recovery_shown(&state, &status(1000, 10)), recovery_shown(&state, &status(2000, 20)));
+        assert_ne!(recovery_shown(&state, &status(1000, 10)), recovery_shown(&state, &json!({"status":{"enabled":true,"diskFreeBytes":null,"databaseBytes":10}})));
+        state.page = 8;
+        state.admin_section = 6;
+        assert_ne!(recovery_shown(&state, &status(1000, 10)), recovery_shown(&state, &status(2000, 10)));
     }
     #[test]
     fn readiness_counts_registrations_and_local_screens() {

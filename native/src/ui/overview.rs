@@ -292,10 +292,10 @@ pub(super) fn overview(s: &State) -> El {
         .child(hex::stats(
             s,
             vec![
-                ("Racetijd", race_time(s)),
-                ("Rondes", total.to_string()),
-                ("Per uur", pace),
-                ("Snelste ronde", best.map(lap_duration).unwrap_or_else(|| "—".into())),
+                ("Racetijd", super::live_clock::race(s, race_time(s))),
+                ("Rondes", text(total.to_string())),
+                ("Per uur", text(pace)),
+                ("Snelste ronde", text(best.map(lap_duration).unwrap_or_else(|| "—".into()))),
             ],
         ))
         .child(hex::label(s, "Wisselzone", None).mt(22.0))

@@ -54,14 +54,17 @@ fn sample(s: &State) -> Sample {
             let race = &s.snapshot["race"];
             if runners(s).iter().any(|r| !race["activeRunnerId"].is_null() && r["id"] == race["activeRunnerId"]) {
                 if let Some(start) = race["activeStartedAt"].as_i64() {
-                    out.bucket(start, 100);
+                    out.value(hex::split_clock(s.clock - start).0.len());
+                    out.live_bucket(start, 100);
                 }
             }
         }
         1 => queue_page::clocks(s, &mut out),
         2 => timing_page::clocks(s, &mut out),
-        4 if s.snapshot["race"]["raceStartedAt"].is_number()
-            && s.snapshot["race"]["raceFinishedAt"].is_null() => out.bucket(0, 1000),
+        // Tactiek's numbers and chart move far slower than a second: refresh them every five.
+        4 if s.snapshot["race"]["raceFinishedAt"].is_null() => {
+            if let Some(start) = s.snapshot["race"]["raceStartedAt"].as_i64() { out.bucket(start, 5000) }
+        }
         8 if s.admin_section == 6 => admin_system::clocks(s, &mut out),
         _ => {}
     }
@@ -77,6 +80,7 @@ fn advance_at(s: &mut State, now: i64, tx: &mut Tx) -> bool {
     let before = sample(s);
     s.clock = now;
     timing_page::update_live_clock(s);
+    live_clock::publish(s);
     let after = sample(s);
     // The transport's mpsc receiver also needs servicing when no display clock is running.
     let due = after.due.min(s.clock + 200);
@@ -103,18 +107,35 @@ mod tests {
     }
 
     #[test]
-    fn running_clocks_keep_tenths_and_public_race_seconds_live() {
+    fn running_clocks_tick_through_live_text_without_a_rebuild() {
         let mut s = init_with_url("http://127.0.0.1:0".into());
         s.snapshot = json!({"race":{"activeRunnerId":"runner","activeStartedAt":37,"raceStartedAt":37},"runners":[{"id":"runner","status":"running"}]});
         for page in [0, 1, 2, 5, 6] {
             s.page = page;
             s.clock = 100;
-            let initial = sample(&s).values;
-            s.clock = 137;
-            assert_eq!(initial == sample(&s).values, matches!(page, 1 | 2 | 5 | 6));
-            s.clock = 1037;
-            assert_ne!(initial, sample(&s).values, "page {page}");
+            let initial = sample(&s);
+            assert_eq!(initial.due, if matches!(page, 0 | 2) { 137 } else { 1037 }, "page {page}");
+            for now in [137, 1037, 9037] {
+                s.clock = now;
+                assert_eq!(initial.values, sample(&s).values, "page {page} at {now}");
+            }
+            // "9:59" becomes "10:00": the wider text needs a new layout.
+            s.clock = 600_037;
+            assert_ne!(initial.values, sample(&s).values, "page {page}");
         }
+    }
+
+    #[test]
+    fn advancing_the_clock_puts_the_new_time_in_the_live_texts() {
+        let mut s = init_with_url("http://127.0.0.1:0".into());
+        s.snapshot = json!({"race":{"activeRunnerId":"runner","activeStartedAt":1000,"raceStartedAt":0},"runners":[{"id":"runner","status":"running"}]});
+        s.page = 0;
+        let mut tx = Tx::default();
+        advance_at(&mut s, 62_500, &mut tx);
+        assert_eq!(&*s.live_clocks.race_text(), "1:02");
+        assert_eq!(s.live_clocks.lap_text(), ("1:01".into(), ".5".into()));
+        assert!(!advance_at(&mut s, 63_000, &mut tx));
+        assert_eq!(&*s.live_clocks.race_text(), "1:03");
     }
 
     #[test]
@@ -133,13 +154,29 @@ mod tests {
     }
 
     #[test]
-    fn queue_seconds_change_without_network_changes() {
+    fn lane_timers_tick_together_on_the_race_second_without_a_rebuild() {
         let mut s = init_with_url("http://127.0.0.1:0".into());
         s.page = 1;
-        s.snapshot = json!({"runners":[{"status":"waiting","statusSince":37}]});
+        s.snapshot = json!({"race":{"raceStartedAt":500},"runners":[
+            {"id":"a","status":"waiting","statusSince":37},{"id":"b","status":"warming_up","statusSince":810}]});
         s.clock = 4036;
+        let before = sample(&s);
+        assert_eq!(before.due, 4500);
+        s.clock = 4500;
+        assert_eq!(before.values, sample(&s).values);
+        // At the shared second each lane shows the whole seconds it has had by then.
+        assert_eq!(queue_page::lane_time(&s, &s.snapshot["runners"][0]).as_deref(), Some("0:04"));
+        assert_eq!(queue_page::lane_time(&s, &s.snapshot["runners"][1]).as_deref(), Some("0:03"));
+    }
+
+    #[test]
+    fn a_long_warm_up_rebuilds_once_for_its_colour() {
+        let mut s = init_with_url("http://127.0.0.1:0".into());
+        s.page = 1;
+        s.snapshot = json!({"runners":[{"status":"warming_up","statusSince":0}]});
+        s.clock = 599_999;
         let before = sample(&s).values;
-        s.clock = 4037;
+        s.clock = 600_000;
         assert_ne!(before, sample(&s).values);
     }
 
@@ -156,7 +193,7 @@ mod tests {
             if advance_at(&mut s, now, &mut tx) { changed.push(now); }
             assert!(!advance_at(&mut s, now, &mut tx), "duplicate wake at {now}");
         }
-        assert_eq!(changed, [10_037, 11_037, 12_037]);
+        assert_eq!(changed, Vec::<i64>::new());
         for snapshot in [Value::Null, json!({"error":"unavailable"})] {
             s.snapshot = snapshot;
             for now in 14_000..15_000 {
@@ -172,9 +209,10 @@ mod tests {
         for page in [0, 1, 2, 3, 4, 8] {
             s.page = page;
             s.clock = 1036;
-            let before = sample(&s).values;
-            s.clock = 1037;
-            assert_ne!(before, sample(&s).values, "page {page}");
+            assert_eq!(sample(&s).due, 1037, "page {page}");
+            let mut tx = Tx::default();
+            advance_at(&mut s, 1037, &mut tx);
+            assert_eq!(&*s.live_clocks.race_text(), "0:01", "page {page}");
         }
     }
 
