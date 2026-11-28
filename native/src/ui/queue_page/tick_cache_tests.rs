@@ -55,7 +55,7 @@ fn ticks_cards_orders_and_boundaries_match_full_rebuild_byte_for_byte() {
     let mut cached = runtime(state(), |s, _| page(s));
     assert_eq!(output(&mut cached), output(&mut runtime(state(), full)));
     for (at, edit) in edits.iter().enumerate() {
-        cached.update(|s, _| edit(s));
+        cached.update(|s, _| { edit(s); crate::ui::live_clock::publish(s); });
         let mut fresh = state();
         for edit in &edits[..=at] { edit(&mut fresh); }
         let actual: Vec<Value> = serde_json::from_slice(&output(&mut cached)).unwrap();

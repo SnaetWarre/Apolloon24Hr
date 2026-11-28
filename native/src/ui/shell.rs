@@ -144,7 +144,8 @@ fn copied(which: u8, s: &State) -> bool {
 pub(super) fn clocks(s: &State, clock: &mut clock::Sample) {
     if s.snapshot["race"]["raceFinishedAt"].is_null() {
         if let Some(start) = s.snapshot["race"]["raceStartedAt"].as_i64() {
-            clock.bucket(start, 1000);
+            clock.value(race_time(s).len());
+            clock.live_bucket(start, 1000);
         }
     }
     let (_, at) = COPIED.with(Cell::get);
@@ -516,14 +517,21 @@ fn footer(s: &State) -> El {
         };
         footer = footer.child(
             sidebar_row("race-clock")
-                .label(format!("Race {value}"))
                 .child(
                     text("Race")
                         .font(type_::LABEL_REGULAR)
                         .color(c.ink3)
                         .grow(1.0),
                 )
-                .child(text(value).font(type_::LABEL_REGULAR).color(c.ink2)),
+                .child(
+                    if race["raceStartedAt"].is_null() || !race["raceFinishedAt"].is_null() {
+                        text(value)
+                    } else {
+                        super::live_clock::race(s, value)
+                    }
+                    .font(type_::LABEL_REGULAR.features("'tnum' 1"))
+                    .color(c.ink2),
+                ),
         );
         if let Some(url) = s.snapshot["host"]["url"].as_str() {
             let shown = url

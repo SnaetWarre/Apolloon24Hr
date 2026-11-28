@@ -31,6 +31,7 @@ mod history_delivery;
 mod history_need;
 mod label_editor;
 mod laps_panel;
+mod live_clock;
 mod profile;
 mod public_settings;
 mod queue_page;
@@ -173,6 +174,7 @@ pub struct State {
     clock: i64,
     clock_offset: i64,
     public_screens: public_screens::Screen,
+    live_clocks: live_clock::Clocks,
     fixture: bool,
     route_seen: String,
 }
@@ -348,6 +350,7 @@ fn init_with_url(url: String) -> State {
         clock: now(),
         clock_offset: 0,
         public_screens: Default::default(),
+        live_clocks: Default::default(),
         fixture: false,
         route_seen: String::new(),
         group: Default::default(),

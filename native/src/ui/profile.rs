@@ -13,10 +13,20 @@ pub(super) fn clocks(s: &State, clock: &mut clock::Sample) {
     if let Some(form) = &s.profile {
         if let Some(r) = runner(s, &form.id) {
             if !matches!(st(r, "status"), "registered" | "ran") {
-                if let Some(at) = r["statusSince"].as_i64() { clock.bucket(at, 1000); }
+                if let Some(at) = r["statusSince"].as_i64() {
+                    clock.value(elapsed(s).map(|t| t.len()));
+                    clock.live_bucket(at, 1000);
+                }
             }
         }
     }
+}
+
+/// "voor m:ss": how long the open profile's runner has been in their lane.
+pub(super) fn elapsed(s: &State) -> Option<String> {
+    let r = runner(s, &s.profile.as_ref()?.id)?;
+    if matches!(st(r, "status"), "registered" | "ran") { return None; }
+    r["statusSince"].as_i64().map(|since| format!("voor {}", duration(s.clock - since)))
 }
 
 pub(super) struct Form {
@@ -398,7 +408,7 @@ macro_rules! profile_field {
         field($s, &$f.$field, $key, $title, "").on_edit(|s: &mut State| &mut form_mut(s).$field)
     };
 }
-fn stat(s: &State, title: &str, value: String, last: bool) -> El {
+fn stat(s: &State, title: &str, value: El, last: bool) -> El {
     let p = pal(s.dark);
     let mut c = col()
         .grow(1.0)
@@ -406,7 +416,7 @@ fn stat(s: &State, title: &str, value: String, last: bool) -> El {
         .py(10.0)
         .px(16.0)
         .child(text(title.to_string()).font(ts(12.5, 400.0)).color(p.t.ink3))
-        .child(text(value).font(ts(17.0, 550.0)).color(p.ink).mt(2.0));
+        .child(value.font(ts(17.0, 550.0)).color(p.ink).mt(2.0));
     if !last {
         c = c.border_sides([0.0, 1.0, 0.0, 0.0], p.line);
     }
@@ -454,10 +464,9 @@ pub(super) fn modal(s: &State) -> El {
                 .on_press(request_close)
                 .child(text("✕").font(ts(14.0, 400.0)).color(p.t.ink3)),
         );
-    let shows_elapsed = !matches!(status, "registered" | "ran");
-    let elapsed = match r["statusSince"].as_i64() {
-        Some(since) if shows_elapsed => format!("voor {}", duration(s.clock - since)),
-        _ => "—".into(),
+    let elapsed = match elapsed(s) {
+        Some(value) => super::live_clock::profile(s, value),
+        None => text("—"),
     };
     let mut body = col()
         .min_w(0.0)
@@ -476,17 +485,17 @@ pub(super) fn modal(s: &State) -> El {
                 .border(1.0, p.line)
                 .clip_rounded(8.0)
                 .child(stat(s, admin_runners::status_label(status), elapsed, false))
-                .child(stat(s, "Rondes", r["lapCount"].as_i64().unwrap_or(0).to_string(), false))
+                .child(stat(s, "Rondes", text(r["lapCount"].as_i64().unwrap_or(0).to_string()), false))
                 .child(stat(
                     s,
                     "Laatste ronde",
-                    laps.first().map(|l| lap_duration(l["durationMs"].as_i64().unwrap_or(0))).unwrap_or("—".into()),
+                    text(laps.first().map(|l| lap_duration(l["durationMs"].as_i64().unwrap_or(0))).unwrap_or("—".into())),
                     false,
                 ))
                 .child(stat(
                     s,
                     "Snelste ronde",
-                    r["bestLapMs"].as_i64().filter(|v| *v > 0).map(lap_duration).unwrap_or("—".into()),
+                    text(r["bestLapMs"].as_i64().filter(|v| *v > 0).map(lap_duration).unwrap_or("—".into())),
                     true,
                 )),
         );

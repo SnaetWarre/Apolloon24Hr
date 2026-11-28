@@ -141,20 +141,15 @@ pub(super) fn poll(s: &mut State, changed: bool, now: i64) -> bool {
     if refresh_display {
         refresh(s, now);
     }
-    let race = &s.snapshot["race"];
-    let clock_ticked = matches!(s.page, 5 | 6)
-        && race["raceFinishedAt"].is_null()
-        && race["raceStartedAt"].as_i64().is_some_and(|start| {
-            (now - start).max(0) / 1000 != (s.clock - start).max(0) / 1000
-        });
     s.clock = now;
-    changed || refresh_display || clock_ticked
+    changed || refresh_display
 }
 
 pub(super) fn clocks(s: &State, clock: &mut clock::Sample) {
     if matches!(s.page, 5 | 6) && s.snapshot["race"]["raceFinishedAt"].is_null() {
         if let Some(start) = s.snapshot["race"]["raceStartedAt"].as_i64() {
-            clock.bucket(start, 1000);
+            clock.value(race_elapsed(s).map(|t| t.len()));
+            clock.live_bucket(start, 1000);
         }
     }
     if s.page == 7 {
@@ -745,6 +740,12 @@ fn format_elapsed(ms: i64) -> String {
         format!("{m}:{s:02}")
     }
 }
+/// The running race time on Binnenscherm and Competitiescherm, while the race runs.
+pub(super) fn race_elapsed(s: &State) -> Option<String> {
+    let race = &s.snapshot["race"];
+    let start = race["raceStartedAt"].as_i64()?;
+    race["raceFinishedAt"].is_null().then(|| format_elapsed(s.clock - start))
+}
 /// Brussels clock time without milliseconds.
 fn format_clock(ms: i64) -> String {
     use chrono::TimeZone;
@@ -1018,14 +1019,18 @@ fn totals(s: &State, p: &Pal) -> El {
     let per_hour = laps_per_hour(laps, race)
         .map(format_points)
         .unwrap_or_else(|| "—".into());
-    let item = |name: &str, value: String| {
+    let item = |name: &str, value: El| {
         baseline_pair(
             t(name, font(dt, 400.0, 1.2, -0.01), p.ink3),
             dt,
-            t(value, font(dd, 600.0, 1.2, -0.02), p.ink),
+            value.font(font(dd, 600.0, 1.2, -0.02)).color(p.ink),
             dd,
             0.6 * vw_unit(),
         )
+    };
+    let elapsed = match race_elapsed(s) {
+        Some(value) => super::live_clock::public_race(s, value),
+        None => text(elapsed),
     };
     row()
         .gap(2.4 * vw_unit())
@@ -1045,7 +1050,7 @@ fn totals(s: &State, p: &Pal) -> El {
                 0.6 * vw_unit(),
             )
         })
-        .child(item("Per uur", per_hour))
+        .child(item("Per uur", text(per_hour)))
 }
 fn panel(p: &Pal) -> El {
     col()
@@ -2602,7 +2607,8 @@ mod tests {
         s.snapshot = json!({"race": {"raceStartedAt": 1000}});
         assert!(poll(&mut s, false, 1000));
         assert!(!poll(&mut s, false, 1900));
-        assert!(poll(&mut s, false, 2000));
+        // The race time ticks through a live text.
+        assert!(!poll(&mut s, false, 2000));
         s.snapshot["race"]["raceFinishedAt"] = json!(2050);
         assert!(poll(&mut s, true, 2100));
         assert!(!poll(&mut s, false, 3000));

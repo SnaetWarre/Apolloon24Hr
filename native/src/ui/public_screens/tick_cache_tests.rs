@@ -55,7 +55,7 @@ fn clock_ticks_keep_arrivals_but_new_laps_still_arrive() {
     let mut s = state(5);
     assert!(poll(&mut s, true, 59_999));
     assert!(s.public_screens.new_laps.is_empty());
-    assert!(poll(&mut s, false, 60_000));
+    assert!(!poll(&mut s, false, 60_000));
     assert!(s.public_screens.new_laps.is_empty());
     s.history["laps"].as_array_mut().unwrap().push(json!({"id":"new","runnerId":"a","durationMs":70_000,"finishedAt":60_000}));
     s.history_version += 1;
