@@ -22,7 +22,8 @@ pub(super) fn clocks(s: &State, clock: &mut clock::Sample) {
             && let Some(at) = r["statusSince"].as_i64()
         {
             clock.value(lane_time(s, r).map(|t| t.len()));
-            clock.live_bucket(at, 1000);
+            // Every lane timer ticks on the race clock's second, so they all repaint in one frame.
+            clock.live_bucket(live_clock::phase(s), 1000);
             if st(r, "status") == "warming_up" { clock.until(at + LONG_WARM_UP_MS); }
         }
     }

@@ -30,6 +30,12 @@ impl Default for Clocks {
     }
 }
 
+/// The moment in each second that clocks counting from different starts repaint together: the
+/// race clock's own second, so one frame a second draws them all.
+pub(super) fn phase(s: &State) -> i64 {
+    s.snapshot["race"]["raceStartedAt"].as_i64().unwrap_or(0)
+}
+
 /// A text showing `value` now and every later value `live` is given.
 pub(super) fn bound(live: &LiveText, value: String) -> El {
     live.set(value.as_str());

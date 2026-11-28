@@ -13,9 +13,9 @@ pub(super) fn clocks(s: &State, clock: &mut clock::Sample) {
     if let Some(form) = &s.profile {
         if let Some(r) = runner(s, &form.id) {
             if !matches!(st(r, "status"), "registered" | "ran") {
-                if let Some(at) = r["statusSince"].as_i64() {
+                if r["statusSince"].is_i64() {
                     clock.value(elapsed(s).map(|t| t.len()));
-                    clock.live_bucket(at, 1000);
+                    clock.live_bucket(super::live_clock::phase(s), 1000);
                 }
             }
         }
