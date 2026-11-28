@@ -901,7 +901,7 @@ fn ink(dark: bool) -> Ink {
         live: h(if dark { "#3D9BF0" } else { "#0D78D3" }),
         target: h(if dark { "#7A7A7A" } else { "#A1A1AA" }),
         own: h(if dark { "#A78BFA" } else { "#7C3AED" }),
-        rival: h(if dark { "#E3B341" } else { "#C2680B" }),
+        rival: h(if dark { "#F2766B" } else { "#D4483B" }),
         strong: h(if dark { "#ECECEC" } else { "#18181B" }),
         neutral: h(if dark { "#6F6F6F" } else { "#A1A1AA" }),
         dark,
