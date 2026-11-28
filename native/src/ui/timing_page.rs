@@ -11,6 +11,12 @@ pub(super) fn clocks(s: &State, clock: &mut clock::Sample) {
         }
     }
     let page = &s.timing_page;
+    // A confirmed handoff is shown ahead of this laptop's own data for a few seconds at most.
+    if let Some(saved) = &page.saved {
+        let left = CATCH_UP.saturating_sub(saved.at.elapsed()).as_millis() as i64;
+        clock.value(left > 0);
+        if left > 0 { clock.until(s.clock + left); }
+    }
     let race = &s.snapshot["race"];
     if page.finish_stop.as_ref().is_some_and(|(_, started)| started == &race["activeStartedAt"]) { return; }
     let start = match shown_press(s) {

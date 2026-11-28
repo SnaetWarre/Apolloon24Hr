@@ -174,12 +174,9 @@ impl Service {
             .as_ref()
             .and_then(|path| path.parent())
             .and_then(|path| fs2::available_space(path).ok());
-        // Whole MiB: screens show megabytes, and a free-space count that moves on every read
-        // would redraw every operator screen on each status fetch.
-        const MIB: u64 = 1024 * 1024;
         let minimum = millis("BACKUP_MIN_FREE_BYTES", 2147483648);
         Ok(
-            json!({"enabled":self.enabled,"inProgress":state.pending>0,"intervalMs":self.interval.as_millis() as u64,"nextScheduledAt":state.next,"retainedCount":records.len(),"latest":records.first(),"lastError":state.failure.as_ref().map(|v|&v.1),"lastFailureAt":state.failure.as_ref().map(|v|v.0),"diskFreeBytes":free.map(|bytes| bytes / MIB * MIB),"minimumFreeBytes":minimum,"diskLow":free.is_some_and(|bytes|bytes<minimum),"databaseBytes":bytes,"damagedDatabase":state.damaged}),
+            json!({"enabled":self.enabled,"inProgress":state.pending>0,"intervalMs":self.interval.as_millis() as u64,"nextScheduledAt":state.next,"retainedCount":records.len(),"latest":records.first(),"lastError":state.failure.as_ref().map(|v|&v.1),"lastFailureAt":state.failure.as_ref().map(|v|v.0),"diskFreeBytes":free,"minimumFreeBytes":minimum,"diskLow":free.is_some_and(|bytes|bytes<minimum),"databaseBytes":bytes,"damagedDatabase":state.damaged}),
         )
     }
 }

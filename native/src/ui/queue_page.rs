@@ -1361,7 +1361,7 @@ fn runner_row(s: &State, r: &Value, b: &Board, drop: Option<&(String, Drop)>) ->
 /// The time a runner has been in their lane, while they wait or warm up.
 pub(super) fn lane_time(s: &State, r: &Value) -> Option<String> {
     let at = r["statusSince"].as_i64()?;
-    matches!(st(r, "status"), "waiting" | "warming_up").then(|| duration((s.clock - at).max(0)))
+    matches!(st(r, "status"), "waiting" | "warming_up").then(|| duration((live_clock::tick(s) - at).max(0)))
 }
 /// What of the lane timer needs a rebuild: its width and the long warm-up colour. The digits tick
 /// through a live text.

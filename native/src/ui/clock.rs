@@ -154,15 +154,19 @@ mod tests {
     }
 
     #[test]
-    fn queue_seconds_wake_at_each_lane_second_without_a_rebuild() {
+    fn lane_timers_tick_together_on_the_race_second_without_a_rebuild() {
         let mut s = init_with_url("http://127.0.0.1:0".into());
         s.page = 1;
-        s.snapshot = json!({"runners":[{"status":"waiting","statusSince":37}]});
+        s.snapshot = json!({"race":{"raceStartedAt":500},"runners":[
+            {"id":"a","status":"waiting","statusSince":37},{"id":"b","status":"warming_up","statusSince":810}]});
         s.clock = 4036;
         let before = sample(&s);
-        assert_eq!(before.due, 4037);
-        s.clock = 4037;
+        assert_eq!(before.due, 4500);
+        s.clock = 4500;
         assert_eq!(before.values, sample(&s).values);
+        // At the shared second each lane shows the whole seconds it has had by then.
+        assert_eq!(queue_page::lane_time(&s, &s.snapshot["runners"][0]).as_deref(), Some("0:04"));
+        assert_eq!(queue_page::lane_time(&s, &s.snapshot["runners"][1]).as_deref(), Some("0:03"));
     }
 
     #[test]

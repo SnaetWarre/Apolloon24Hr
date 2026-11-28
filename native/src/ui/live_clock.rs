@@ -36,6 +36,12 @@ pub(super) fn phase(s: &State) -> i64 {
     s.snapshot["race"]["raceStartedAt"].as_i64().unwrap_or(0)
 }
 
+/// The last of those shared seconds: lane and profile times count to it, so they change together.
+pub(super) fn tick(s: &State) -> i64 {
+    let phase = phase(s);
+    phase + (s.clock - phase).div_euclid(1000) * 1000
+}
+
 /// A text showing `value` now and every later value `live` is given.
 pub(super) fn bound(live: &LiveText, value: String) -> El {
     live.set(value.as_str());

@@ -26,7 +26,7 @@ pub(super) fn clocks(s: &State, clock: &mut clock::Sample) {
 pub(super) fn elapsed(s: &State) -> Option<String> {
     let r = runner(s, &s.profile.as_ref()?.id)?;
     if matches!(st(r, "status"), "registered" | "ran") { return None; }
-    r["statusSince"].as_i64().map(|since| format!("voor {}", duration(s.clock - since)))
+    r["statusSince"].as_i64().map(|since| format!("voor {}", duration((super::live_clock::tick(s) - since).max(0))))
 }
 
 pub(super) struct Form {
